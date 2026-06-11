@@ -66,12 +66,12 @@ These are the highest-priority items distilled from the specs' own "open items"
 sections; they are tracked here so the corpus has one place to look:
 
 - **No single typed core IR.** Each pass defines its own pattern/expression
-  shape, which has already produced drift between the emitter and the
-  linearity checker (`Rian.Capability.count_uses/1` predates the ADR-0029
-  `{:dot, …}` node and the self-hosting feature nodes). A shared IR is the
+  shape. This produced drift between the emitter and the linearity checker —
+  now fixed: `Rian.Capability.count_uses/1` is total over the current parser
+  AST — but the structural risk remains (the emitter still consumes surface
+  patterns while the checker consumes lowered ones). A shared IR is the
   highest-leverage refactor.
 - **Declaration parser** (ADR-0031 Stage 0.1) — the gate to compiling real files.
-- **Branch-aware linearity** — `iso`/`ref` use-counting is straight-line only.
 - **Symbol resolution** for ADR-0029 — Rian module vs Elixir-stdlib vs field.
 - **Backend swap** to Erlang abstract forms / `:compile.forms` (ADR-0026), still
   unexercised — the "invisible swap" assumption has no test coverage.

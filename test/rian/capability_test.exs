@@ -70,6 +70,47 @@ defmodule Rian.CapabilityTest do
     end
   end
 
+  # Regression: count_uses must be total over every node the parser emits.
+  # Before this, dot/lambda/if/list/map nodes raised FunctionClauseError, so the
+  # linearity check crashed on exactly the self-hosting expressions (ADR-0028/0029).
+  describe "BEAM linearity over self-hosting expressions" do
+    test "dot access counts the head, not the field name" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("f.x")) == :ok
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("g(f.x, f.y)")) == {:error, [{"f", 2}]}
+    end
+
+    test "if is branch-aware: an iso moved once per arm is consumed once" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("if c do use(f) else drop(f) end")) == :ok
+    end
+
+    test "if still flags an iso used twice within a single arm" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("if c do pair(f, f) else 0 end")) ==
+               {:error, [{"f", 2}]}
+    end
+
+    test "lambda parameters shadow the linear environment" do
+      assert C.lin_check(%{"x" => :iso}, Pratt.parse("(x) -> pair(x, x)")) == :ok
+    end
+
+    test "a lambda still counts an outer iso captured in its body" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("(x) -> pair(f, f)")) ==
+               {:error, [{"f", 2}]}
+    end
+
+    test "block bindings shadow the name for later statements" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("if true do f := 0; pair(f, f) else 0 end")) ==
+               :ok
+    end
+
+    test "list literals count their elements" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("[f, f]")) == {:error, [{"f", 2}]}
+    end
+
+    test "map literals count their values" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("%{a: f, b: f}")) == {:error, [{"f", 2}]}
+    end
+  end
+
   describe "BEAM legality" do
     test "ref is rejected on the BEAM target" do
       assert_raise RuntimeError, ~r/`ref` is not permitted on the BEAM/, fn ->

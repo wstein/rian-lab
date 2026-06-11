@@ -70,16 +70,62 @@ defmodule Rian.Capability do
     if bad == [], do: :ok, else: {:error, bad}
   end
 
-  # variable occurrence counts in a Pratt AST
-  def count_uses({:id, x}), do: %{x => 1}
-  def count_uses({:num, _}), do: %{}
-  def count_uses({:bin, _, l, r}), do: merge(count_uses(l), count_uses(r))
-  def count_uses({:unary, _, x}), do: count_uses(x)
-  def count_uses({:field, o, _}), do: count_uses(o)
-  def count_uses({:path, o, _}), do: count_uses(o)
+  @doc """
+  Free-variable occurrence counts in a Pratt expression AST.
 
-  def count_uses({:call, f, args}),
-    do: Enum.reduce([f | args], %{}, fn n, acc -> merge(acc, count_uses(n)) end)
+  Total over every node the parser produces. Binders shadow the linear
+  environment (lambda parameters and block bindings do not count as uses of an
+  outer variable), and `if` is **branch-aware**: a variable consumed in both
+  arms is consumed once (`max` over arms), so a value moved once per branch is
+  legal. Counting is otherwise additive along a path.
+  """
+  def count_uses(ast), do: count_uses(ast, MapSet.new())
+
+  # `bound` holds names bound locally; they shadow the outer linear environment.
+  defp count_uses({:id, x}, bound), do: if(MapSet.member?(bound, x), do: %{}, else: %{x => 1})
+  defp count_uses({:num, _}, _bound), do: %{}
+  defp count_uses({:atom, _}, _bound), do: %{}
+  defp count_uses({:dot, head, _name}, bound), do: count_uses(head, bound)
+  defp count_uses({:unary, _, x}, bound), do: count_uses(x, bound)
+  defp count_uses({:bin, _, l, r}, bound), do: merge(count_uses(l, bound), count_uses(r, bound))
+
+  defp count_uses({:call, f, args}, bound),
+    do: Enum.reduce([f | args], %{}, fn n, acc -> merge(acc, count_uses(n, bound)) end)
+
+  defp count_uses({:list_lit, elems, tail}, bound) do
+    base = Enum.reduce(elems, %{}, fn e, acc -> merge(acc, count_uses(e, bound)) end)
+
+    case tail do
+      {:tail, tl} -> merge(base, count_uses(tl, bound))
+      nil -> base
+    end
+  end
+
+  defp count_uses({:map_lit, pairs}, bound),
+    do: Enum.reduce(pairs, %{}, fn {_k, v}, acc -> merge(acc, count_uses(v, bound)) end)
+
+  defp count_uses({:lambda, params, body}, bound) do
+    inner = Enum.reduce(params, bound, fn {n, _}, acc -> MapSet.put(acc, n) end)
+    count_uses(body, inner)
+  end
+
+  defp count_uses({:if, cond, then_arm, else_arm}, bound) do
+    merge(
+      count_uses(cond, bound),
+      max_merge(count_uses(then_arm, bound), count_uses(else_arm, bound))
+    )
+  end
+
+  defp count_uses({:block, stmts}, bound), do: count_block(stmts, bound, %{})
+
+  defp count_block([], _bound, acc), do: acc
+
+  defp count_block([{:bind, n, e} | rest], bound, acc),
+    do: count_block(rest, MapSet.put(bound, n), merge(acc, count_uses(e, bound)))
+
+  defp count_block([{:expr, e} | rest], bound, acc),
+    do: count_block(rest, bound, merge(acc, count_uses(e, bound)))
 
   defp merge(a, b), do: Map.merge(a, b, fn _, x, y -> x + y end)
+  defp max_merge(a, b), do: Map.merge(a, b, fn _, x, y -> max(x, y) end)
 end

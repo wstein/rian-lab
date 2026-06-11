@@ -2,7 +2,7 @@
 
 **Status:** Verified — Rust matrix compiled, linearity tested · **Refs:** ADR-0025
 **Owner:** Elena Rostova (Rust) · Marcus Chen (BEAM typestate) · Samir Patel (tests)
-**Implementation:** `rian_capability.ex` · **Tests:** `rian_capability_test.exs` (15/15)
+**Implementation:** `lib/rian/capability.ex` · **Tests:** `test/rian/capability_test.exs` (23/23)
 **Realizes:** the "reference capabilities, not lifetimes" decision (ADR-0001)
 
 This is where the language's central idea touches codegen. A parameter's **reference
@@ -70,8 +70,12 @@ Verified behavior:
   `` `ref` is not permitted on the BEAM target (no process-local proof in PoC) ``.
 
 The checker counts variable occurrences in the expression AST and flags any `iso`/`ref`
-binding used more than once. For straight-line bodies the occurrence count is the path count;
-branch-aware counting (max over `if`/`match` arms) is the extension when those bodies land (§5).
+binding used more than once. The count is **total** over every node the parser emits (dot
+access, lambdas, `if`, blocks, list/map literals). It is **branch-aware**: for an `if`
+expression a variable's count is `uses(cond) + max(uses(then), uses(else))`, so a value moved
+once in each arm is consumed once — not twice. It is **binder-aware**: lambda parameters and
+block bindings shadow the linear environment, so they do not count as uses of an outer
+binding. Counting is otherwise additive along a path.
 
 ---
 
@@ -85,9 +89,13 @@ BEAM — the same source-level discipline catching the "use a handle after it's 
 ---
 
 ## 5. Open items / next
-- Branch-aware linearity (max uses over `if`/`match` arms; consumed-in-all-branches = consumed once).
+
+- Branch-aware linearity over `if` — **done** (max over arms). The same `max` rule will apply to
+  `match`-expression bodies once they lower through this checker (today `match` is handled at the
+  clause level, not as a counted expression node).
 - Capability on **fields** flowing to ownership of bound sub-patterns (e.g. `iso` field → owned `Box`).
-- Closure-capture capability → `Fn` / `FnMut` / `FnOnce` (specified in the expressions/types
-  specs; not yet lowered).
+- Closure-capture **capability** → `Fn` / `FnMut` / `FnOnce`. The occurrence counter already
+  descends into lambda bodies (a captured `iso` counts as a use), but it cannot see how many
+  times a closure is *applied*; bounding consumption by application count is the remaining piece.
 - `ref` process-local escape analysis to admit safe local mutation on the BEAM.
 - Lifetime elision edge cases when a `val` borrow must outlive the call (returning a borrow).
