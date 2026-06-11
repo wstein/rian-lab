@@ -42,7 +42,7 @@ a <> b |> f            => (|> (<> a b) f)
 a in b or c            => (or (in a b) c)
 a < b == c             => (== (< a b) c)
 -a.b                   => (- (. a b))
-Geometry::area(x)      => (call (:: Geometry area) x)
+Geometry.area(x)       => (call (. Geometry area) x)
 ```
 
 Each line confirms a table decision: pipe looser than arithmetic and concat; pipe tighter than

@@ -108,4 +108,14 @@ defmodule Rian.PrattTest do
       assert_raise NonAssocError, fn -> p("a <= b > c") end
     end
   end
+
+  describe "`.` is the sole qualifier (ADR-0029; no `::` alias)" do
+    test "dot lowers to a single {:dot} node" do
+      assert p("Geometry.area(x)") == "(call (. Geometry area) x)"
+    end
+
+    test "`::` is not Rian syntax — it is a parse error" do
+      assert_raise ArgumentError, fn -> Pratt.parse("Geometry::area(x)") end
+    end
+  end
 end

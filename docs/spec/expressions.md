@@ -43,7 +43,7 @@ grade :=
 
 | Lvl | Operators | Assoc | Notes |
 |---|---|---|---|
-| 1 | `f(…)` · `.field` · `::path` | left | call, field access, namespace path |
+| 1 | `f(…)` · `.field` / `.path` | left | call, then `.` — the universal qualifier (field, module path, variant) |
 | 2 | unary `-`, `not` | — | |
 | 3 | `*` `/` `rem` `div` | left | `/` = float div; `div` = integer div |
 | 4 | `+` `-` | left | |

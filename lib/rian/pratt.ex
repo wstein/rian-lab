@@ -10,7 +10,7 @@ defmodule Rian.Pratt do
     defexception [:message]
   end
 
-  @multi ["::", "->", ":=", "|>", "<>", "<-", "<=", ">=", "==", "!="]
+  @multi ["->", ":=", "|>", "<>", "<-", "<=", ">=", "==", "!="]
   @single ["+", "-", "*", "/", "<", ">", ".", "|", ":"]
   @words ~w(and or not in rem div)
   @ctrl ~w(if do else end)
@@ -177,7 +177,7 @@ defmodule Rian.Pratt do
   defp parse_primary([{:id, x} | rest]), do: parse_postfix({:id, x}, rest)
   defp parse_primary(other), do: raise(ArgumentError, "unexpected token: #{inspect(other)}")
 
-  defp parse_postfix(node, [{:op, op}, {:id, name} | rest]) when op in [".", "::"],
+  defp parse_postfix(node, [{:op, "."}, {:id, name} | rest]),
     do: parse_postfix({:dot, node, name}, rest)
 
   defp parse_postfix(node, [{:lparen} | rest]) do

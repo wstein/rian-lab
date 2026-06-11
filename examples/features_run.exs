@@ -3,7 +3,7 @@ alias Rian.Lower
 IO.puts("===== LOWERING (Rian expr -> Elixir | Rust) =====")
 gallery = [
   "(x) -> x * 2",
-  "lists::foldl((x, acc) -> x + acc, 0, xs)",
+  ":lists.foldl((x, acc) -> x + acc, 0, xs)",
   "if n >= 0 do 1 else 0 - 1 end",
   "if n > 0 do a := n * 2; a + 1 else 0 end",
   "[1, 2, 3]",
@@ -19,9 +19,9 @@ end)
 IO.puts("\n===== EXECUTE ON THE BEAM =====")
 funcs = [
   {%{name: "dbl_all", param_name: "xs", param_type: "Vec(i64)", param_cap: :val, ret: "Vec(i64)",
-     clauses: [%{pats: [{:var, "xs"}], body: "Enum::map(xs, (x) -> x * 2)"}]}, [[1,2,3]], [2,4,6]},
+     clauses: [%{pats: [{:var, "xs"}], body: "Enum.map(xs, (x) -> x * 2)"}]}, [[1,2,3]], [2,4,6]},
   {%{name: "sum", param_name: "xs", param_type: "Vec(i64)", param_cap: :val, ret: "i64",
-     clauses: [%{pats: [{:var, "xs"}], body: "lists::foldl((x, acc) -> x + acc, 0, xs)"}]}, [[1,2,3,4]], 10},
+     clauses: [%{pats: [{:var, "xs"}], body: ":lists.foldl((x, acc) -> x + acc, 0, xs)"}]}, [[1,2,3,4]], 10},
   {%{name: "sign", param_name: "n", param_type: "i64", param_cap: :val, ret: "i64",
      clauses: [%{pats: [{:var, "n"}], body: "if n >= 0 do 1 else 0 - 1 end"}]}, [-5], -1},
   {%{name: "step", param_name: "n", param_type: "i64", param_cap: :val, ret: "i64",

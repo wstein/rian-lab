@@ -15,7 +15,8 @@ syntactically distinct. Preference now: use `.` for both. The example given was
 **`.` is the single, universal qualification/access operator in Rian source**, disambiguated
 the way Elixir already does it — by the *case* of the operands — with Erlang modules written as
 **atoms**. The parser produces one `{:dot, head, name}` node (replacing the former
-`{:field}`/`{:path}` split). The Rust backend still emits `::` (mandatory in Rust); only the
+`{:field}`/`{:path}` split). `::` is **not** Rian-source syntax: the tokenizer does not accept
+it and `a::b` is a parse error. The Rust backend still emits `::` (mandatory in Rust); only the
 **Rian source** operator changed.
 
 Disambiguation (resolved at emit time):
@@ -54,12 +55,12 @@ distinction it needs by the same case rules at emit time.
 
 ## Consequences
 
-- Specs/ADRs that wrote `::` (modules, FFI) now read `.` in source; `::` remains accepted as a
-  transitional alias (both lower to `{:dot}`).
+- Specs/ADRs that wrote `::` (modules, FFI) now read `.` in source. `::` is **removed** from the
+  surface entirely — there is no transitional alias; it lexes only as the Rust *output*
+  separator, never as Rian input.
 - Symbol resolution (which Pascal names are Rian modules vs Elixir-stdlib) becomes a real
   open item for correct Rust emission of module calls.
 
 ## Open items
 - Symbol-table resolution to distinguish Rian modules from Elixir-stdlib modules for Rust.
 - Field-access chains `a.b.c` to the Rust target (currently the nested fallback assumes a path).
-- Decide whether to drop the `::` alias entirely once specs are updated.
