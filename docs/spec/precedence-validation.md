@@ -3,7 +3,7 @@
 **Status:** Validated by reference parser · **Refs:** ADR-0023
 **Owner:** Chloe Bennett (parser) · Samir Patel (tests)
 **Validates:** `rian-spec-expressions.md` §2 (operator precedence)
-**Implementation:** `rian_pratt.ex` · **Tests:** `rian_pratt_test.exs` (22/22 pass)
+**Implementation:** `lib/rian/pratt.ex` · **Tests:** `test/rian/pratt_test.exs` (22/22 pass)
 
 The operator table was *asserted* in the expressions spec. This makes it *executable*: a
 precedence-climbing (Pratt) parser parses expressions and renders them as fully-parenthesized

@@ -2,7 +2,7 @@
 
 **Status:** Accepted; implemented & verified · **Supersedes:** ADR-0003 (`::` for paths)
 **Owners:** Chloe Bennett (parser) · Maya Lin (emitters) · Arthur Pendelton (disambiguation)
-**Tests:** `rian_dot_test.exs` (8/8); full suite 106/0
+**Tests:** `test/rian/dot_test.exs` (8/8); full suite 106/0
 
 ## Context
 

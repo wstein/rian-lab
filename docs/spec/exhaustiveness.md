@@ -3,7 +3,7 @@
 **Status:** Locked + reference implementation verified · **Refs:** ADR-0015
 **Owner:** Arthur Pendelton (algorithm) · Samir Patel (tests)
 **Companion to:** `rian-spec-clauses-guards.md`, `rian-spec-types-match.md`
-**Implementation:** `rian_exhaustiveness.ex` · **Tests:** `rian_exhaustiveness_test.exs` (18/18 pass)
+**Implementation:** `lib/rian/exhaustiveness.ex` · **Tests:** `test/rian/exhaustiveness_test.exs` (18/18 pass)
 
 This mechanizes the exhaustiveness/reachability *rules* stated in the clause and `match`
 specs. It is Maranget's usefulness algorithm (*Warnings for pattern matching*, JFP 2007) —

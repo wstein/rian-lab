@@ -2,7 +2,7 @@
 
 **Status:** Locked + reference implementation verified · **Refs:** ADR-0022
 **Owner:** Samir Patel · **Closes:** integration open-item in `rian-spec-exhaustiveness.md` §7
-**Implementation:** `rian_pattern_lower.ex` · **Tests:** `rian_pattern_lower_test.exs` (17/17 pass)
+**Implementation:** `lib/rian/pattern_lower.ex` · **Tests:** `test/rian/pattern_lower_test.exs` (17/17 pass)
 
 This pass runs on the typed core IR **before** exhaustiveness analysis. It desugars surface
 patterns into the checker's representation and converts refutable refinements (pins, key-bearing

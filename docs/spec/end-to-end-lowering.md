@@ -2,7 +2,7 @@
 
 **Status:** Verified — Elixir executed, Rust compiled & run · **Refs:** ADR-0024
 **Owner:** Maya Lin (pipeline) · Kira Neri (toolchain) · Samir Patel (tests)
-**Implementation:** `rian_lower.ex` · **Tests:** `rian_lower_test.exs` (10/10) · **Runner:** `lower_run.exs`
+**Implementation:** `lib/rian/lower.ex` · **Tests:** `test/rian/lower_test.exs` (10/10) · **Runner:** `examples/lower_run.exs`
 
 The first run of the *whole* pipeline as one unit: a Rian function from source to emitted
 idiomatic Elixir **and** Rust, gated by exhaustiveness. Both outputs were verified by running

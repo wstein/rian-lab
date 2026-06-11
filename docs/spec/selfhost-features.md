@@ -3,7 +3,7 @@
 **Status:** Verified — BEAM executed, Rust compiled · **Refs:** ADR-0028
 **Owner:** Chloe Bennett (parser) · Maya Lin (emitters) · Samir Patel (tests)
 **Closes:** the three critical-path items from ADR-0027 (fast track to self-hosting)
-**Implementation:** `rian_pratt.ex`, `rian_lower.ex` · **Tests:** `rian_features_test.exs` (10/10)
+**Implementation:** `lib/rian/pratt.ex`, `lib/rian/lower.ex` · **Tests:** `test/rian/features_test.exs` (10/10)
 
 ADR-0027 identified exactly three language features standing between us and a self-hostable
 subset. All three are now built into the parser and both emitters, executed on the BEAM, and

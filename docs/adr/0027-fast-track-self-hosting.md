@@ -2,7 +2,7 @@
 
 **Status:** Accepted; FFI implemented & verified · **Refs:** ADR-0026 (ecosystem)
 **Owners:** Chloe Bennett (FFI/host) · Arthur Pendelton (bootstrap) · Maya Lin (subset)
-**Implementation:** FFI in `rian_lower.ex` · **Tests:** `rian_ffi_test.exs` (6/6)
+**Implementation:** FFI in `lib/rian/lower.ex` · **Tests:** `test/rian/ffi_test.exs` (6/6)
 
 ## Context
 

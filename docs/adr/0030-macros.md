@@ -2,7 +2,7 @@
 
 **Status:** Accepted; implemented & verified · **Implements:** ADR-0008 (hygienic macros), ADR-0009 (pure comptime)
 **Owners:** Arthur Pendelton (expansion) · Marcus Webb (sandbox) · Chloe Bennett (ergonomics)
-**Code:** `rian_macro.ex`, `rian_comptime.ex` · **Tests:** `rian_macro_test.exs` (10/10); full suite 116/0
+**Code:** `lib/rian/macro.ex`, `lib/rian/comptime.ex` · **Tests:** `test/rian/macro_test.exs` (10/10); full suite 116/0
 
 ## Context
 
