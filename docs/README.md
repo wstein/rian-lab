@@ -36,6 +36,7 @@ The component test suites pass; cross-pass integration is thin. Treat the
 | [0029](adr/0029-dot-syntax.md) | Dot syntax as the universal qualifier | Accepted; implemented |
 | [0030](adr/0030-macros.md) | Macros: declarative, hygienic, pattern→template (+ comptime) | Accepted; implemented |
 | [0031](adr/0031-bootstrap-strategy.md) | Bootstrap: reuse the Elixir *runtime*, not the *compiler* | Accepted |
+| [0032](adr/0032-surface-syntax-family.md) | Surface syntax belongs to the Elixir/Ruby/Crystal family | Accepted |
 
 ## Specifications
 
@@ -54,7 +55,8 @@ The component test suites pass; cross-pass integration is thin. Treat the
 
 ## Reading order
 
-1. **Direction** — ADR-0026, ADR-0027, ADR-0031 (ecosystem, self-hosting, bootstrap).
+1. **Direction** — ADR-0026, ADR-0027, ADR-0031, ADR-0032 (ecosystem, self-hosting,
+   bootstrap, and the surface-syntax family that governs every later syntax decision).
 2. **Surface language** — `expressions` → `types-match` → `clauses-guards` → `modules`.
 3. **Semantics & lowering** — `pattern-lowering` → `exhaustiveness` → `capability-lowering`
    → `end-to-end-lowering`.
