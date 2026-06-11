@@ -126,6 +126,33 @@ defmodule Rian.Lower do
   defp has_try?({:lambda, _, _}), do: false
   defp has_try?(_), do: false
 
+  # ── `&` capture support ────────────────────────────────────────────────
+  # Highest placeholder index in an anonymous-capture body → the closure arity
+  # the Rust target must spell out (`&(&1 + &2)` ⇒ 2 ⇒ `|a1, a2| …`).
+  defp cap_arity({:cap_arg, n}), do: n
+  defp cap_arity({:bin, _, l, r}), do: max(cap_arity(l), cap_arity(r))
+  defp cap_arity({:unary, _, x}), do: cap_arity(x)
+  defp cap_arity({:dot, o, _}), do: cap_arity(o)
+  defp cap_arity({:try, x}), do: cap_arity(x)
+  defp cap_arity({:if, c, t, e}), do: max(cap_arity(c), max(cap_arity(t), cap_arity(e)))
+
+  defp cap_arity({:call, f, args}),
+    do: Enum.reduce([f | args], 0, fn n, acc -> max(cap_arity(n), acc) end)
+
+  defp cap_arity({:list_lit, es, tail}) do
+    base = Enum.reduce(es, 0, fn e, acc -> max(cap_arity(e), acc) end)
+    if match?({:tail, _}, tail), do: max(base, cap_arity(elem(tail, 1))), else: base
+  end
+
+  defp cap_arity({:map_lit, ps}),
+    do: Enum.reduce(ps, 0, fn {_, v}, acc -> max(cap_arity(v), acc) end)
+
+  defp cap_arity(_), do: 0
+
+  # "aFrom, …, aTo" — empty when the range is empty (a nullary closure).
+  defp closure_params(from, to) when to < from, do: ""
+  defp closure_params(from, to), do: Enum.map_join(from..to, ", ", &"a#{&1}")
+
   defp ex_typespec(t) do
     body =
       Enum.map_join(t.variants, " | ", fn v ->
@@ -266,6 +293,26 @@ defmodule Rian.Lower do
   # enclosing function-or-closure on BOTH targets.
   defp emit({:try, x}, :rust), do: {p(x, 12, :rust) <> "?", 12}
   defp emit({:try, x}, :elixir), do: {"Rian.Q.unwrap(#{p(x, 0, :elixir)})", 12}
+
+  # `&` captures (B'). Placeholders: Elixir's native `&N`, Rust's closure args `aN`.
+  defp emit({:cap_arg, n}, :elixir), do: {"&#{n}", 12}
+  defp emit({:cap_arg, n}, :rust), do: {"a#{n}", 12}
+
+  # `&(&1 + &2)` — Elixir's native capture; Rust an explicit closure `|a1, a2| …`.
+  defp emit({:capture, body}, :elixir), do: {"&(#{p(body, 0, :elixir)})", 12}
+
+  defp emit({:capture, body}, :rust) do
+    {"|#{closure_params(1, cap_arity(body))}| #{p(body, 0, :rust)}", 12}
+  end
+
+  # `&name/arity` — Elixir's native capture; Rust a forwarding closure.
+  defp emit({:capture_named, path, arity}, :elixir),
+    do: {"&#{p(path, 12, :elixir)}/#{arity}", 12}
+
+  defp emit({:capture_named, path, arity}, :rust) do
+    ps = closure_params(0, arity - 1)
+    {"|#{ps}| #{p(path, 12, :rust)}(#{ps})", 12}
+  end
 
   defp emit({:unary, "-", x}, t), do: {"-" <> p(x, 11, t), 11}
   defp emit({:unary, "not", x}, :elixir), do: {"not " <> p(x, 11, :elixir), 11}

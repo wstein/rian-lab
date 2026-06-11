@@ -118,9 +118,27 @@ Because there is no type checker yet (ADR-0031), `?` does not *check* that its o
 `Result`/`Option`; on the BEAM a value that is neither `{:ok, _}` nor `{:some, _}` is propagated
 as-is. Static checking of `?` lands with the type checker.
 
+### `&` — function captures
+
+A prefix `&` builds a function value, in the BEAM-consonant style (not Haskell operator sections):
+
+| Rian | Elixir | Rust |
+|---|---|---|
+| `&(&1 + &2)` | `&(&1 + &2)` | `\|a1, a2\| a1 + a2` |
+| `&abs/1` | `&abs/1` | `\|a0\| abs(a0)` |
+| `&String.upcase/1` | `&String.upcase/1` | `\|a0\| string::upcase(a0)` |
+
+- **`&( … )`** is an anonymous capture whose `&N` placeholders are the parameters; the highest
+  index sets the arity. Elixir has this syntax natively; Rust gets an explicit closure `|a1, …|`.
+- **`&name/arity`** (bare, dotted, or atom-headed path) captures a named function. Elixir is
+  native; Rust forwards through a closure.
+
+Operator **sections** (`(+)`, `(+ 1)`) are deliberately **not** added — `&(&1 + &2)` covers the
+need without making `(` tri-ambiguous (group vs. lambda vs. section).
+
 ---
 
 ## 4. Open items
-- Operator-as-value / partial application (`(+)`, `&f/1`-style captures) — deferred.
+- Operator-as-value sections (`(+)`) — rejected in favour of `&`-captures (above); not planned.
 - `let else` for refutable bindings with an early-exit arm — deferred (use `match` for now).
 - Whether `<>` generalizes beyond `str` (e.g. list concat) or stays string-only.

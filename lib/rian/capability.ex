@@ -87,6 +87,9 @@ defmodule Rian.Capability do
   defp count_uses({:atom, _}, _bound), do: %{}
   defp count_uses({:dot, head, _name}, bound), do: count_uses(head, bound)
   defp count_uses({:try, x}, bound), do: count_uses(x, bound)
+  defp count_uses({:cap_arg, _}, _bound), do: %{}
+  defp count_uses({:capture, body}, bound), do: count_uses(body, bound)
+  defp count_uses({:capture_named, path, _}, bound), do: count_uses(path, bound)
   defp count_uses({:unary, _, x}, bound), do: count_uses(x, bound)
   defp count_uses({:bin, _, l, r}, bound), do: merge(count_uses(l, bound), count_uses(r, bound))
 

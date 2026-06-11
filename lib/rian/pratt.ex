@@ -11,7 +11,7 @@ defmodule Rian.Pratt do
   end
 
   @multi ["->", ":=", "|>", "<>", "<-", "<=", ">=", "==", "!="]
-  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "?"]
+  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "?", "&"]
   @words ~w(and or not in rem div)
   @ctrl ~w(if do else end)
   @infix ~w(+ - * / rem div <> in |> < <= > >= == != and or <-)
@@ -164,7 +164,39 @@ defmodule Rian.Pratt do
     {{:unary, op, operand}, rest}
   end
 
+  # `&` — function capture (B'): `&(&1 + &2)` anonymous, or `&name/arity` named.
+  defp parse_prefix([{:op, "&"} | rest]), do: parse_capture(rest)
+
   defp parse_prefix(tokens), do: parse_primary(tokens)
+
+  # `&N` placeholder
+  defp parse_capture([{:num, n} | rest]),
+    do: parse_postfix({:cap_arg, String.to_integer(n)}, rest)
+
+  # `&( expr )` — anonymous capture; placeholders inside set the arity
+  defp parse_capture([{:lparen} | rest]) do
+    {body, rest} = parse_expr(rest, 0)
+    rest = expect_rparen(rest)
+    {{:capture, body}, rest}
+  end
+
+  # `&name/arity` or `&Mod.fun/arity` or `&:erl.fun/arity`
+  defp parse_capture(tokens) do
+    {path, rest} = parse_path(tokens)
+    rest = expect_op(rest, "/")
+
+    case rest do
+      [{:num, n} | r] -> {{:capture_named, path, String.to_integer(n)}, r}
+      other -> raise ArgumentError, "expected an integer arity after `/`: #{inspect(other)}"
+    end
+  end
+
+  defp parse_path([{:op, ":"}, {:id, name} | rest]), do: collect_dots({:atom, name}, rest)
+  defp parse_path([{:id, name} | rest]), do: collect_dots({:id, name}, rest)
+  defp parse_path(other), do: raise(ArgumentError, "bad capture path: #{inspect(other)}")
+
+  defp collect_dots(node, [{:op, "."}, {:id, n} | rest]), do: collect_dots({:dot, node, n}, rest)
+  defp collect_dots(node, rest), do: {node, rest}
 
   defp parse_primary([{:kw, "if"} | rest]), do: parse_if(rest)
   defp parse_primary([{:lbracket} | rest]), do: parse_list(rest, [])
@@ -340,6 +372,8 @@ defmodule Rian.Pratt do
   defp expect_op(toks, o), do: raise(ArgumentError, "expected `#{o}`, got #{inspect(toks)}")
   defp expect_rbracket([{:rbracket} | rest]), do: rest
   defp expect_rbracket(toks), do: raise(ArgumentError, "expected `]`, got #{inspect(toks)}")
+  defp expect_rparen([{:rparen} | rest]), do: rest
+  defp expect_rparen(toks), do: raise(ArgumentError, "expected `)`, got #{inspect(toks)}")
 
   defp sexpr({:num, n}), do: n
   defp sexpr({:id, x}), do: x
@@ -348,6 +382,9 @@ defmodule Rian.Pratt do
   defp sexpr({:atom, a}), do: ":" <> a
   defp sexpr({:dot, o, n}), do: "(. #{sexpr(o)} #{n})"
   defp sexpr({:try, x}), do: "(? #{sexpr(x)})"
+  defp sexpr({:cap_arg, n}), do: "&#{n}"
+  defp sexpr({:capture, b}), do: "(& #{sexpr(b)})"
+  defp sexpr({:capture_named, p, a}), do: "(&/ #{sexpr(p)} #{a})"
 
   defp sexpr({:call, f, args}),
     do: "(call #{sexpr(f)}#{Enum.map_join(args, "", fn a -> " " <> sexpr(a) end)})"

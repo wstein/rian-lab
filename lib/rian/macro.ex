@@ -44,6 +44,8 @@ defmodule Rian.Macro do
   def map_node({:call, fun, args}, f), do: {:call, f.(fun), Enum.map(args, f)}
   def map_node({:dot, o, n}, f), do: {:dot, f.(o), n}
   def map_node({:try, x}, f), do: {:try, f.(x)}
+  def map_node({:capture, b}, f), do: {:capture, f.(b)}
+  def map_node({:capture_named, p, a}, f), do: {:capture_named, f.(p), a}
   def map_node({:lambda, ps, b}, f), do: {:lambda, ps, f.(b)}
   def map_node({:if, c, t, e}, f), do: {:if, f.(c), f.(t), f.(e)}
 
@@ -100,6 +102,8 @@ defmodule Rian.Macro do
 
   defp collect_binders({:dot, o, _}), do: collect_binders(o)
   defp collect_binders({:try, x}), do: collect_binders(x)
+  defp collect_binders({:capture, b}), do: collect_binders(b)
+  defp collect_binders({:capture_named, p, _}), do: collect_binders(p)
 
   defp collect_binders({:if, c, t, e}),
     do: collect_binders(c) ++ collect_binders(t) ++ collect_binders(e)
@@ -121,6 +125,8 @@ defmodule Rian.Macro do
   defp rename({:call, f, a}, ren), do: {:call, rename(f, ren), Enum.map(a, &rename(&1, ren))}
   defp rename({:dot, o, n}, ren), do: {:dot, rename(o, ren), n}
   defp rename({:try, x}, ren), do: {:try, rename(x, ren)}
+  defp rename({:capture, b}, ren), do: {:capture, rename(b, ren)}
+  defp rename({:capture_named, p, a}, ren), do: {:capture_named, rename(p, ren), a}
 
   defp rename({:lambda, ps, b}, ren),
     do: {:lambda, Enum.map(ps, fn {n, t} -> {Map.get(ren, n, n), t} end), rename(b, ren)}
