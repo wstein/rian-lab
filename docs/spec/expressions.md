@@ -43,7 +43,7 @@ grade :=
 
 | Lvl | Operators | Assoc | Notes |
 |---|---|---|---|
-| 1 | `f(…)` · `.field` / `.path` | left | call, then `.` — the universal qualifier (field, module path, variant) |
+| 1 | `f(…)` · `.field` / `.path` · `e?` | left | call · `.` (universal qualifier) · postfix `?` (propagation) |
 | 2 | unary `-`, `not` | — | |
 | 3 | `*` `/` `rem` `div` | left | `/` = float div; `div` = integer div |
 | 4 | `+` `-` | left | |
@@ -97,6 +97,26 @@ the "is `/` integer or float?" ambiguity; the Rust lowering makes the promotion 
 (`1e9`) is **not** valid Elixir, so the lexer normalizes it to `1.0e9` — valid on both targets —
 keeping the literal's value while staying idiomatic. Floats also flow through the `comptime`
 sandbox (`comptime(3.14 * 2)` ⇒ `6.28`); `div`/`rem` there remain integer-only.
+
+### `?` — error / Option propagation
+
+A **postfix `?`** propagates failure out of the nearest enclosing function or closure, binding as
+tightly as call and `.` (level 1). It is the same *intent* on both targets, lowered to each
+target's idiom:
+
+| Rian | Elixir | Rust |
+|---|---|---|
+| `parse(s)?` | `Rian.Q.unwrap(parse(s))` | `parse(s)?` |
+
+- **Rust:** the native `?` — the enclosing `fn`/closure must return `Result`/`Option`.
+- **BEAM:** `Rian.Q.unwrap/1` returns the payload of `{:ok, v}` / `{:some, v}`, or *throws* the
+  whole value; the function/closure body is wrapped in `try … catch {:__rian_q__, v} -> v end`,
+  so the throw short-circuits and returns the error/`:none`. A lambda is a propagation boundary —
+  it catches its own `?`, mirroring Rust closures.
+
+Because there is no type checker yet (ADR-0031), `?` does not *check* that its operand is a
+`Result`/`Option`; on the BEAM a value that is neither `{:ok, _}` nor `{:some, _}` is propagated
+as-is. Static checking of `?` lands with the type checker.
 
 ---
 

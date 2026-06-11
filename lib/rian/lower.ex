@@ -21,6 +21,11 @@ defmodule Rian.Lower do
   alias Rian.PatternLower, as: PL
   alias Rian.Pratt
 
+  # Tag thrown by the `?` propagation desugar on the BEAM, caught by the
+  # enclosing function/lambda wrapper. Unique — Rian expressions have no string
+  # literals, so this cannot collide with user data.
+  @propagate_tag "__rian_q__"
+
   # ── Pipeline ───────────────────────────────────────────────────────────
   def compile(types, func) do
     env = build_env(types)
@@ -83,11 +88,43 @@ defmodule Rian.Lower do
     clauses =
       Enum.map_join(func.clauses, "\n", fn c ->
         head = "def #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
-        "#{head} do #{emit(Pratt.parse(c.body), :elixir) |> elem(0)} end"
+        ast = Pratt.parse(c.body)
+        "#{head} do #{maybe_wrap(emit(ast, :elixir) |> elem(0), ast)} end"
       end)
 
     typespecs <> "\n" <> clauses
   end
+
+  # `?`-propagation wrapping (Elixir only): if a function/lambda body uses `?`,
+  # wrap its emitted body in a `try` that catches the propagation throw and
+  # returns the short-circuit value. `has_try?` treats a lambda as a scope
+  # boundary, so each function/closure catches its own `?` — mirroring Rust,
+  # where `?` propagates from the nearest enclosing `fn`/closure.
+  defp maybe_wrap(str, ast), do: if(has_try?(ast), do: wrap_propagate(str), else: str)
+
+  defp wrap_propagate(body), do: "try do #{body} catch {:#{@propagate_tag}, rian_v} -> rian_v end"
+
+  defp has_try?({:try, _}), do: true
+  defp has_try?({:bin, _, l, r}), do: has_try?(l) or has_try?(r)
+  defp has_try?({:unary, _, x}), do: has_try?(x)
+  defp has_try?({:call, f, args}), do: has_try?(f) or Enum.any?(args, &has_try?/1)
+  defp has_try?({:dot, o, _}), do: has_try?(o)
+  defp has_try?({:if, c, t, e}), do: has_try?(c) or has_try?(t) or has_try?(e)
+
+  defp has_try?({:block, stmts}) do
+    Enum.any?(stmts, fn
+      {:bind, _, e} -> has_try?(e)
+      {:expr, e} -> has_try?(e)
+    end)
+  end
+
+  defp has_try?({:list_lit, es, tail}),
+    do: Enum.any?(es, &has_try?/1) or (match?({:tail, _}, tail) and has_try?(elem(tail, 1)))
+
+  defp has_try?({:map_lit, ps}), do: Enum.any?(ps, fn {_, v} -> has_try?(v) end)
+  # a lambda is a propagation boundary — it wraps its own `?` when emitted
+  defp has_try?({:lambda, _, _}), do: false
+  defp has_try?(_), do: false
 
   defp ex_typespec(t) do
     body =
@@ -223,6 +260,13 @@ defmodule Rian.Lower do
   defp emit({:call, f, args}, t),
     do: {p(f, 12, t) <> "(" <> Enum.map_join(args, ", ", &p(&1, 0, t)) <> ")", 12}
 
+  # `?` — error/Option propagation. Rust: idiomatic postfix `e?`. Elixir:
+  # `Rian.Q.unwrap/1` (unwrap-or-throw), caught by the enclosing function/lambda
+  # `try` wrapper (added by `maybe_wrap/2`), so propagation targets the nearest
+  # enclosing function-or-closure on BOTH targets.
+  defp emit({:try, x}, :rust), do: {p(x, 12, :rust) <> "?", 12}
+  defp emit({:try, x}, :elixir), do: {"Rian.Q.unwrap(#{p(x, 0, :elixir)})", 12}
+
   defp emit({:unary, "-", x}, t), do: {"-" <> p(x, 11, t), 11}
   defp emit({:unary, "not", x}, :elixir), do: {"not " <> p(x, 11, :elixir), 11}
   defp emit({:unary, "not", x}, :rust), do: {"!" <> p(x, 11, :rust), 11}
@@ -230,7 +274,7 @@ defmodule Rian.Lower do
   # lambdas — Elixir anonymous fn, Rust closure
   defp emit({:lambda, params, body}, :elixir) do
     ps = Enum.map_join(params, ", ", fn {n, _} -> n end)
-    {"fn #{ps} -> #{p(body, 0, :elixir)} end", 12}
+    {"fn #{ps} -> #{maybe_wrap(p(body, 0, :elixir), body)} end", 12}
   end
 
   defp emit({:lambda, params, body}, :rust) do
