@@ -38,13 +38,20 @@ defmodule RianLab.MixProject do
     [
       main: "readme",
       source_ref: "v#{@version}",
+      # Explicit slugs/titles for the same-named READMEs so they do not collide
+      # (root README.md keeps the `readme` slug that `main: "readme"` resolves to).
       extras:
-        ["README.md", "docs/README.md"] ++
+        [
+          "README.md",
+          {"docs/README.md", filename: "design-corpus", title: "Design Corpus"},
+          {"examples/rian/README.md", filename: "rian-by-example", title: "Rian by Example"}
+        ] ++
           Path.wildcard("docs/adr/*.md") ++ Path.wildcard("docs/spec/*.md"),
       groups_for_extras: [
         Overview: ["README.md", "docs/README.md"],
         "Architecture Decisions": Path.wildcard("docs/adr/*.md"),
-        Specifications: Path.wildcard("docs/spec/*.md")
+        Specifications: Path.wildcard("docs/spec/*.md"),
+        Examples: ["examples/rian/README.md"]
       ],
       groups_for_modules: [
         "Front-end": [Rian.Pratt],
@@ -61,7 +68,9 @@ defmodule RianLab.MixProject do
 
   defp aliases do
     [
-      # `mix examples` runs every demonstration script through the compiled app.
+      # `mix examples` runs the end-to-end area/1 lowering demo through the
+      # compiled app. Each driver in examples/*.exs is independently runnable
+      # via `mix run`; the annotated source tour lives in examples/rian/.
       examples: ["run --no-start examples/lower_run.exs"]
     ]
   end

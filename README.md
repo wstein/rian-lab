@@ -36,7 +36,8 @@ backends share one core.
 | --- | --- |
 | [lib/rian/](lib/rian/) | Compiler modules (`Rian.*`) |
 | [test/rian/](test/rian/) | Component test suites |
-| [examples/](examples/) | Runnable demonstration scripts |
+| [examples/](examples/) | Runnable demonstration scripts (Elixir drivers) |
+| [examples/rian/](examples/rian/README.md) | Rian-by-example — an annotated `.rian` tour of the surface syntax |
 | [docs/adr/](docs/adr/) | Architecture Decision Records |
 | [docs/spec/](docs/spec/) | Language specifications |
 | [docs/README.md](docs/README.md) | Index + status of the whole corpus |
@@ -67,3 +68,10 @@ Some example scripts shell out to `rustc` to compile the emitted Rust and write
 ## Documentation
 
 Start with the corpus index: **[docs/README.md](docs/README.md)**.
+
+To read the language *by example*, see the annotated source tour in
+**[examples/rian/](examples/rian/README.md)** — it walks the surface syntax (expressions,
+types, capabilities, modules, macros, FFI) in faithful, spec-checked `.rian`
+files. These are illustrative source, not yet compilable: there is no
+declaration parser yet (ADR-0031), so the verified passes are driven by the
+Elixir scripts in [examples/](examples/) until that lands.

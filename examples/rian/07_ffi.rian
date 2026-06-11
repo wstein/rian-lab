@@ -1,0 +1,36 @@
+# ===========================================================================
+# 07 — FFI: interop is free on the BEAM
+# ===========================================================================
+# Character: a Rian module compiles to a BEAM module, so calling any
+# Erlang/Elixir function is just emitting `Module:function(..)` — no shim, no
+# binding layer. Rian therefore ships NO stdlib yet; it leans on the target
+# libraries and adds exactly one primitive: the FFI call. FFI is BEAM-only
+# (no Rust lowering) and is flagged by the subset linter.
+#
+# ADR: docs/adr/0027-fast-track-self-hosting.md
+# ---------------------------------------------------------------------------
+
+# Erlang-module FFI: an ATOM head (`:lists`, `:maps`) -> `:lists.fn(..)`.
+# This is exactly Elixir's own convention for calling Erlang.
+fn total(xs val Vec(i64)) i64     := :lists.sum(xs)
+fn rev(xs val Vec(i64)) Vec(i64)  := :lists.reverse(xs)
+
+# Elixir-module FFI: a PascalCase head (`String`, `Enum`, `Integer`) ->
+# `String.fn(..)`. Calls nest naturally.
+fn shout(s val str) str := String.upcase(s)
+fn clean(s val str) str := String.trim(String.downcase(s))
+
+# Higher-order FFI with a Rian lambda passed to an Erlang/Elixir function:
+fn doubled(xs val Vec(i64)) Vec(i64) := Enum.map(xs, (x) -> x * 2)
+fn sum_fold(xs val Vec(i64)) i64     := :lists.foldl((x, acc) -> x + acc, 0, xs)
+
+# Bare FFI calls are typed `dynamic`. An optional `extern` declaration gives a
+# precise type to a hot binding (these typed wrappers are the seed of the
+# eventual Rian stdlib). NOTE: `extern` surface syntax is still an open item —
+# shown here illustratively.
+extern :lists.sum(Vec(i64)) i64
+extern String.upcase(str) str
+
+# Because the emitted module is an ordinary BEAM module, the reverse direction
+# is free too: Erlang calls `rian_text:shout("hi")` and Elixir calls
+# `:rian_text.shout("hi")` with no wrapper.

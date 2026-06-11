@@ -1,0 +1,66 @@
+# ===========================================================================
+# 02 — Type declarations & the `match` expression
+# ===========================================================================
+# Character: three declaration keywords, each with a distinct, idiomatic
+# representation on BOTH targets — and `match` is an expression that the
+# exhaustiveness gate refuses to emit unless it is total.
+#
+#   type   -> sealed sum (ADT)  -> BEAM atom/tagged-tuple   | Rust `enum`
+#   struct -> product / record  -> BEAM `%Name{}` struct    | Rust `struct`
+#   alias  -> transparent synonym -> BEAM `@type` (transparent) | Rust `type X = ..`
+#
+# Spec: docs/spec/types-match.md
+# ---------------------------------------------------------------------------
+
+# Sum type with payload variants. Fields are written `label type` (a lowercase
+# name then the type, NO colon). Labels are compile-time ergonomics only and
+# are erased on the BEAM.
+type Shape := Circle(radius f64) | Square(side f64)
+
+# Simple enum (all nullary). Nullary variants lower to snake_case atoms on the
+# BEAM (`Red` -> `:red`) and to unit enum variants on Rust.
+type Color := Red | Green | Blue
+
+# Product / record type. Becomes `%Point{}` on the BEAM and a Rust `struct`.
+struct Point(x f64, y f64)
+
+# Transparent synonym. `Id` and `i64` are interchangeable; no runtime cost.
+alias Id := i64
+
+# --- `match` is an EXPRESSION (it yields a value) -------------------------
+# Arms use `->`; `fn` bodies use `:=`. Arm bodies are implicit blocks ending
+# at the next arm header or `end`. Exhaustiveness is STATIC and REQUIRED.
+
+fn area(Shape) f64
+fn area(s) :=
+  match s do
+    Circle(r) -> 3.14159265 * r * r
+    Square(s) -> s * s
+  end
+
+# A fuller worked example: a JSON shape. Note the recursive `JArr(Vec(Json))`
+# — recursion through `Vec` needs no extra Rust `Box` (Vec is already heap).
+# A guarded arm (`when ..`) does NOT count toward exhaustiveness, so the
+# unguarded `JNum(_)` arm backs the `JNum(n) when n == 0.0` arm.
+type Json :=
+    JNull
+  | JBool(bool)
+  | JNum(f64)
+  | JStr(str)
+  | JArr(Vec(Json))
+
+fn type_of(Json) str
+fn type_of(j) :=
+  match j do
+    JNull                 -> "null"
+    JBool(_)              -> "bool"
+    JNum(n) when n == 0.0 -> "zero"
+    JNum(_)               -> "number"
+    JStr(_)               -> "string"
+    JArr(_)               -> "array"
+  end
+
+# Construction uses positional or named args (named uses the `key: value`
+# association syntax shared with map literals):
+fn unit_circle() Shape := Circle(radius: 1.0)
+fn origin() Point      := Point(x: 0.0, y: 0.0)

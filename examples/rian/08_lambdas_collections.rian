@@ -1,0 +1,38 @@
+# ===========================================================================
+# 08 — Lambdas, blocks & collection literals
+# ===========================================================================
+# Character: the three features that complete the self-hosting subset —
+# lambdas, `if`/block bodies, and list/map literal construction. Each lowers to
+# an idiomatic form per target, and the Rust backend honestly REFUSES the
+# BEAM-only shapes rather than emitting non-idiomatic code.
+#
+# Spec: docs/spec/selfhost-features.md
+# ---------------------------------------------------------------------------
+
+# Lambdas: `(x) -> e`, `(x, y) -> e`. Disambiguated from grouping by scanning
+# for `->` after the matching `)`.
+#   (x) -> x * 2        Elixir: fn x -> x * 2 end      Rust: |x| x * 2
+#   (x, acc) -> x + acc Elixir: fn x, acc -> ...        Rust: |x, acc| x + acc
+fn map_double(xs val Vec(i64)) Vec(i64) := Enum.map(xs, (x) -> x * 2)
+fn fold_sum(xs val Vec(i64)) i64        := :lists.foldl((x, acc) -> x + acc, 0, xs)
+
+# `if`/block bodies as expressions. Blocks are `;`-separated bindings ending in
+# a value expression.
+fn sign(n i64) i64 := if n >= 0 do 1 else -1 end
+fn step(n i64) i64 := if n > 0 do a := n * 2; a + 1 else 0 end
+
+# List literals lower to `[..]` on Elixir and `vec![..]` on Rust.
+fn small_primes() Vec(i64) := [2, 3, 5, 7]
+
+# Cons CONSTRUCTION `[h | t]` lowers on Elixir (O(1) prepend), but is BEAM-ONLY
+# on Rust (there is no idiomatic `Vec` cons) — the Rust backend refuses it.
+fn prepend(p i64, rest val Vec(i64)) Vec(i64) := [p | rest]
+
+# Map literals are BEAM-only in the PoC (Rust lowering via HashMap/BTreeMap is
+# a future item). Used here on a default (Elixir-target) function.
+fn origin_record() Map := %{x: 0, y: 0}
+
+# These three features plus FFI make the existing front-end
+# (parse -> typecheck-shape -> exhaustiveness -> emit) expressible in Rian
+# itself — the language is now self-hostable in principle; what remains is
+# engineering (the lexer + declaration parser), not language design.

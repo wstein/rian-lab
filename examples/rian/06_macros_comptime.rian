@@ -1,0 +1,46 @@
+# ===========================================================================
+# 06 — Macros & comptime: metaprogramming without quote/unquote
+# ===========================================================================
+# Character: macros are DECLARATIVE pattern->template (the `macro_rules!` /
+# `syntax-rules` model), NOT Elixir-style `quote`/`unquote` AST construction.
+# Both macros and `comptime` are pure AST->AST passes that run BEFORE typecheck,
+# so they need no parser changes and work uniformly for the BEAM and Rust.
+#
+# ADR: docs/adr/0030-macros.md
+# ---------------------------------------------------------------------------
+
+# A declarative macro: parameters are substituted as AST (never as text). The
+# template is ordinary Rian code.
+macro unless(cond, body) => if not cond do body else 0 end
+macro square(x)          => x * x
+
+# Two guarantees fall out of substituting at the AST level:
+#
+# 1. NO PRECEDENCE BUGS. `square(a + b)` expands to `(a + b) * (a + b)`, never
+#    the C-preprocessor disaster `a + b * a + b`. The precedence-aware emitter
+#    parenthesizes automatically.
+#
+# 2. HYGIENE BY DEFAULT. A template's own binders are gensym-renamed, so they
+#    cannot capture the caller's variables. In the macro below, the template's
+#    `tmp` becomes `tmp__h<N>` and will NOT clobber a caller's `tmp`.
+macro add_tmp(x) => if true do tmp := 100; x + tmp else 0 end
+
+# Usage looks like an ordinary call:
+fn demo_unless(n i64) i64 := unless(n > 5, n * 10)   # n=3 -> 30 ; n=7 -> 0
+fn demo_square(a i64, b i64) i64 := square(a + b)    # (a+b)*(a+b)
+fn demo_hygiene(tmp i64) i64 := add_tmp(tmp)         # 5 -> 105 (NOT 200)
+
+# `comptime(expr)`: evaluate a constant expression at compile time and replace
+# it with its literal (the Zig model). The evaluator is a PURE SANDBOX:
+# literals, arithmetic, boolean and comparison operators only.
+fn table_size() i64 := comptime(2 + 3 * 4)           # becomes the literal 14
+fn scaled() i64     := comptime((1 + 2) * 5)          # becomes 15
+fn always() bool    := comptime(3 > 5)                # becomes false
+
+# The sandbox REFUSES effects at compile time (each of these is a compile error):
+#   comptime(foo(3))            # calls are not allowed in a pure comptime sandbox
+#   comptime(x + 1)             # `x` is not a compile-time constant
+#   comptime(:lists.sum(xs))    # FFI is not pure — refused
+#
+# There is no build-time effect without an explicit (and currently deferred)
+# build capability. Purity is the default and the guarantee.

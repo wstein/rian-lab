@@ -1,0 +1,46 @@
+# ===========================================================================
+# 05 — Modules, visibility & imports
+# ===========================================================================
+# Character: a Rian module is an ORDINARY BEAM module — MFA interop is free in
+# both directions with no shim (`rian_geometry:area(..)` from Erlang,
+# `:rian_geometry.area(..)` from Elixir). Items are private by default; `pub`
+# exports them.
+#
+# `.` is the single, universal qualifier (ADR-0029): module calls, variant
+# paths, and field access all use `.`, disambiguated by the CASE of operands —
+# exactly Elixir's own rule. (`::` is still accepted as a transitional alias.)
+#
+# Spec: docs/spec/modules.md · ADR: docs/adr/0029-dot-syntax.md
+# ---------------------------------------------------------------------------
+
+mod Geometry do
+  use Math                     # qualified import  -> Math.pi
+  use Std.(Vec, sqrt)          # unqualified import of selected names
+
+  # `pub const` is exported with an accessor on the BEAM and `pub const` on Rust.
+  pub const TAU f64 := 6.28318530
+
+  # `pub type` exports the type and its constructors.
+  pub type Shape := Circle(radius f64) | Square(side f64)
+
+  # Public, multi-clause. `Math.pi` is a cross-module call (Pascal head, lower
+  # name) — it lowers to `Math.pi` on Elixir and `math::pi()` on Rust.
+  pub fn area(Shape) f64
+  pub fn area(Circle(r)) := Math.pi * r * r
+  pub fn area(Square(s)) := s * s
+
+  pub fn perimeter(Shape) f64
+  pub fn perimeter(Circle(r)) := TAU * r
+  pub fn perimeter(Square(s)) := 4.0 * s
+
+  # Private helper (no `pub`): becomes `defp` on Elixir, a non-`pub fn` on Rust.
+  fn square(x f64) f64 := x * x
+end
+
+# Disambiguation summary (resolved at emit time, by operand case):
+#
+#   Geometry.area(x)   Rian module fn   -> Elixir Geometry.area(x) | Rust geometry::area(x)
+#   Value.Num(n)       type/variant     -> Elixir {:num, n}        | Rust Value::Num(n)
+#   point.x            field access     -> Elixir point.x          | Rust point.x
+#   :lists.sum(xs)     Erlang FFI       -> Elixir :lists.sum(xs)   | (BEAM-only)
+#   String.upcase(s)   Elixir-lib FFI   -> Elixir String.upcase(s) | (BEAM-only)

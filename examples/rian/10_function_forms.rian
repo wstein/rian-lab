@@ -1,0 +1,74 @@
+# ===========================================================================
+# 10 — Function forms: every way to write a function body
+# ===========================================================================
+# Character: a `fn` body is one of two things, and the choice is purely about
+# size — there is no semantic difference, both yield a value (implicit return):
+#
+#   1.  := expr                      single-expression body  (the one-liner)
+#   2.  <newline> stmts.. expr end   BLOCK body               (multiline)
+#
+# Lambdas `(x) -> e` are the third, anonymous form. Both single-clause and
+# multi-clause functions may use EITHER body form, and a multi-clause group
+# may MIX them clause by clause.
+#
+# Spec: docs/spec/clauses-guards.md §1-2 · docs/spec/expressions.md §1
+# ---------------------------------------------------------------------------
+
+# --- (1) single-expression body: `:= expr` --------------------------------
+# Best when the whole function is one expression. This is the form `show`
+# uses in the capstone.
+fn double(n i64) i64 := n * 2
+
+# --- (2) block body: multiline, implicit return ---------------------------
+# Opens after the return type, closes with `end`. Statements are `:=`
+# bindings (single-assignment); the LAST expression is the returned value.
+# There is no `return` keyword — the final expression is the value.
+fn norm(v val Vec(f64)) f64
+  total := v |> sum            # binding
+  n     := len(v)             # binding
+  total / n                   # final expression = the function's value
+end
+
+# A block body can contain `if`/`match` expressions, more bindings, and
+# (capability permitting) local mutation with `<-`. Here a running total is
+# threaded through bindings — shadowing, the immutable default.
+fn stats(xs val Vec(i64)) i64
+  s := :lists.sum(xs)
+  n := len(xs)
+  if n == 0 do 0 else s div n end   # the `if` expression is the value
+end
+
+# --- multi-clause group MIXING both body forms ----------------------------
+# A bodiless signature line, then contiguous pattern clauses. Some clauses are
+# one-liners; the recursive arm uses a block body to introduce a local binding.
+type Tree(T) := Leaf | Node(left Tree(T), value T, right Tree(T))
+
+fn depth(Tree(T)) i64
+fn depth(Leaf) := 0                 # (1) one-liner clause
+fn depth(Node(l, _, r))             # (2) block-body clause
+  dl := depth(l)
+  dr := depth(r)
+  1 + max2(dl, dr)
+end
+
+fn max2(i64, i64) i64
+fn max2(a, b) when a >= b := a
+fn max2(a, b)             := b
+
+# --- (3) lambdas / closures: `(x) -> e` -----------------------------------
+# Anonymous, single-expression. Passed to higher-order functions (usually via
+# FFI). For multi-step logic inside a lambda, the body can be a block
+# EXPRESSION (`if .. do a := ..; .. end`), or factor it into a named `fn`.
+fn map_double(xs val Vec(i64)) Vec(i64) := Enum.map(xs, (x) -> x * 2)
+fn clamp_each(xs val Vec(i64)) Vec(i64) :=
+  Enum.map(xs, (x) -> if x < 0 do 0 else x end)   # block-expression lambda body
+
+# --- the same `show`, written with block-body clauses ---------------------
+# Purely a style choice vs. the capstone's one-liners — identical meaning.
+fn show2(e val Expr) str
+fn show2(Lit(n)) := Integer.to_string(n)
+fn show2(Add(a, b))                  # block body: name the parts, then join
+  ls := show2(a)
+  rs := show2(b)
+  "(" <> ls <> " + " <> rs <> ")"
+end

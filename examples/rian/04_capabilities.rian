@@ -1,0 +1,63 @@
+# ===========================================================================
+# 04 — Reference capabilities: the heart of Rian
+# ===========================================================================
+# Character: THIS is what makes Rian Rian. A parameter's *reference capability*
+# — `val` / `iso` / `ref` / `tag` — drives its Rust signature (owned vs
+# borrowed vs `&mut`) AND its BEAM-side linearity (use-once) guarantee. The
+# programmer NEVER writes a Rust lifetime; the capability produces the right
+# ownership automatically. The same source-level discipline catches the
+# "use a handle after it's consumed" bug on BOTH targets.
+#
+# Capabilities are written between the (optional) param name and its type:
+#       fn f(name CAP Type) Ret
+# The default capability is `val` (read-only borrow — the common, safe case).
+#
+# Spec: docs/spec/capability-lowering.md
+# ---------------------------------------------------------------------------
+
+# Rust parameter-type matrix this drives (every cell compiled by rustc):
+#
+#   capability | Copy prim |  str   | Vec(T)        | nominal (Shape)
+#   -----------|-----------|--------|---------------|----------------
+#   val        | i64 byval | &str   | &[f64]        | &Shape
+#   iso        | i64 move  | String | Vec<f64>      | Shape
+#   ref        | &mut i64  | &mut.. | &mut Vec<f64> | &mut Shape
+#   tag        | &i64      | &Str.. | &Vec<f64>     | &Shape
+
+# `val` (default): a read-only borrow. On Rust this is `&Shape` and uses the
+# idiomatic borrowed forms (`&str` not `&String`, `&[T]` not `&Vec<T>`). On the
+# BEAM a `val` is freely shareable — usable any number of times. That is WHY
+# `r * r` below is legal: `r` flows from a `val` parameter.
+fn area(s val Shape) f64
+fn area(Circle(r)) := 3.14159265 * r * r       # r used twice — fine, it's val
+fn area(Square(s)) := s * s
+
+# `iso`: a unique, owned handle. On Rust this MOVES (`fn consume(s: Shape)`).
+# On the BEAM it is a USE-ONCE linear value: using it twice along a path is a
+# compile error. This catches "used after consumed" with no borrow checker.
+fn consume(s iso Shape) f64 := area(s)         # ok: `s` consumed exactly once
+
+# The linearity check would REJECT this (iso `s` used twice):
+#   fn bad(s iso Shape) f64 := area(s) + area(s)   # error: {"s", 2}
+
+# `ref`: mutable borrow. On Rust this is `&mut T`. On the BEAM target `ref` is
+# REJECTED in the PoC (no process-local aliasing proof) — emitting a
+# `ref`-parameter function to the BEAM raises at compile time. It is a
+# Rust-superset feature, honestly fenced off rather than faked.
+fn scale(s ref Vec(f64), k f64) Vec(f64) := mul_each(s, k)   # &mut Vec<f64> on Rust
+
+# `tag`: identity only (a pid/ref on the BEAM, a borrow on Rust). Shareable;
+# you can observe identity but the value's contents are not owned.
+fn same(a tag Shape, b tag Shape) bool := a == b
+
+# Field capabilities work too: a struct field marked `iso` makes the whole
+# type non-`Clone` on Rust (only `Debug`), because the field is unique.
+struct Buffer(data iso Vec(u8), len val i64)
+
+# NOTE on the BEAM linearity model (PoC scope): the checker is TOTAL over every
+# node the parser produces and is BRANCH-AWARE for `if` — a value consumed once
+# in each arm counts as consumed once (`max` over arms), so a move-per-branch is
+# legal, while a double-use within a single arm is still rejected. The same
+# `max` rule extends to `match`-expression bodies once they lower through this
+# checker (today `match` is handled at the clause level, not as a counted node).
+# See docs/spec/capability-lowering.md.

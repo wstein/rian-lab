@@ -1,0 +1,63 @@
+# ===========================================================================
+# 09 — Capstone: a tiny arithmetic evaluator
+# ===========================================================================
+# Character: one small program that exercises Rian's whole personality —
+# a sealed recursive sum type, exhaustive `match`, multi-clause functions with
+# guards, reference capabilities, modules with `pub`, and the
+# portable-core vs BEAM-only boundary. The `eval` core lowers to BOTH targets;
+# the `show` pretty-printer uses FFI and is therefore BEAM-only.
+# ---------------------------------------------------------------------------
+
+mod Calc do
+  use Math
+
+  # A sealed, RECURSIVE expression tree. On Rust the recursive fields are
+  # auto-boxed (`Box<Expr>`); on the BEAM these are tagged tuples. Because the
+  # sum is sealed, the exhaustiveness gate can prove `eval` is total.
+  pub type Expr :=
+      Lit(i64)
+    | Add(Expr, Expr)
+    | Mul(Expr, Expr)
+    | Neg(Expr)
+
+  # `iso` Expr: the evaluator consumes the tree it is given (owned `Expr` on
+  # Rust, a use-once handle on the BEAM). Each recursive sub-tree is itself
+  # consumed exactly once along every path — the linearity model is satisfied.
+  pub fn eval(e iso Expr) i64
+  pub fn eval(Lit(n))    := n
+  pub fn eval(Add(a, b)) := eval(a) + eval(b)
+  pub fn eval(Mul(a, b)) := eval(a) * eval(b)
+  pub fn eval(Neg(x))    := -eval(x)
+  # Drop any one clause above and the exhaustiveness gate REFUSES to emit:
+  # a non-total match is a compile error on both targets.
+
+  # `depth` reads the tree without consuming it -> `val` (borrow on Rust,
+  # freely shareable on the BEAM, so `a`/`b` may each be used more than once).
+  pub fn depth(e val Expr) i64
+  pub fn depth(Lit(_))    := 1
+  pub fn depth(Neg(x))    := 1 + depth(x)
+  pub fn depth(Add(a, b)) := 1 + max2(depth(a), depth(b))
+  pub fn depth(Mul(a, b)) := 1 + max2(depth(a), depth(b))
+
+  # Guarded clause backed by an unguarded fallback -> total on both targets.
+  fn max2(i64, i64) i64
+  fn max2(a, b) when a >= b := a
+  fn max2(a, b)             := b
+
+  # A pretty-printer. It calls `Integer.to_string` (Elixir-lib FFI) and uses
+  # `<>` concatenation, so it is part of the BEAM ring, not the portable core.
+  # The subset linter would flag it if this module were marked `@target :rust`.
+  pub fn show(e val Expr) str
+  pub fn show(Lit(n))    := Integer.to_string(n)
+  pub fn show(Neg(x))    := "-(" <> show(x) <> ")"
+  pub fn show(Add(a, b)) := "(" <> show(a) <> " + " <> show(b) <> ")"
+  pub fn show(Mul(a, b)) := "(" <> show(a) <> " * " <> show(b) <> ")"
+end
+
+# A worked term:  (2 + 3) * -4   ==>  eval = -20,  depth = 3
+#   Mul(Add(Lit(2), Lit(3)), Neg(Lit(4)))
+#
+# eval  lowers to idiomatic Elixir AND idiomatic, ownership-checked Rust.
+# show  lowers to Elixir only (FFI is BEAM-only) — the three-ring boundary in
+#       action: one source, two targets, with the non-portable part fenced off
+#       explicitly rather than silently mistranslated.

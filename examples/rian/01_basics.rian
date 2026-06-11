@@ -1,0 +1,64 @@
+# ===========================================================================
+# 01 — Basics: expressions, bindings, operators, if, blocks
+# ===========================================================================
+# Character: everything in Rian is an EXPRESSION that yields a value — `if`,
+# `match`, and blocks included. There are no statements that don't produce a
+# value. This maps cleanly onto both targets (Rust if/match are expressions;
+# Elixir evaluates everything to a value).
+#
+# Spec: docs/spec/expressions.md
+# ---------------------------------------------------------------------------
+
+# Single-clause function. The typed head IS the type boundary — no separate
+# signature line is needed when there is exactly one clause.
+fn add(x i64, y i64) i64 := x + y
+
+# Block body: a `;`/newline-separated sequence of bindings whose value is the
+# LAST expression (implicit return). Bodies open after the return type and
+# close with `end`.
+fn double_then_inc(n i64) i64
+  d := n * 2          # `:=` is a single-assignment binding, never mutation
+  d + 1               # the final expression is the function's value
+end
+
+# `:=` is single-assignment and irrefutable. Re-using a name SHADOWS the old
+# binding (a fresh value), it does not mutate it. Mutation is a different
+# operator, `<-`, and is capability-gated (see 04_capabilities.rian).
+fn shadow_demo(n i64) i64
+  x := n + 1
+  x := x * 10         # shadow: a NEW `x`, the old one is untouched
+  x
+end
+
+# A value-position `if` REQUIRES `else` (both arms must have the same type),
+# exactly like Rust. An `else`-less `if` would be a unit-typed effect.
+fn sign(n i64) i64 := if n >= 0 do 1 else -1 end
+
+# else-if chains read top to bottom.
+fn grade(s i64) str :=
+  if s >= 90 do "A"
+  else if s >= 80 do "B"
+  else "C" end
+
+# Operator character (precedence tightest -> loosest, see the spec table):
+#   *  /  rem  div        `/` is FLOAT division; `div` is INTEGER division.
+#   +  -                  No "is `/` int or float?" ambiguity — ever.
+#   <>                    string / binary concatenation (right-assoc)
+#   |>                    pipe: threads the value as the FIRST argument
+#   <  <=  >  >=          NON-ASSOCIATIVE: `a < b < c` is a SYNTAX ERROR
+#   ==  !=                also non-associative
+#   and  or  not          short-circuit boolean operators
+fn mean(total f64, count f64) f64 := total / count    # float div
+fn idiv(a i64, b i64) i64         := a div b           # integer div
+fn parity(n i64) i64              := n rem 2
+
+# Concatenation and the pipe. `x |> f(y)` is exactly `f(x, y)`.
+# There is NO method-call syntax (`x.f(y)`); `.` accesses fields only.
+fn greet(name str) str := "hello, " <> name
+fn loud_greeting(name str) str := name |> greet |> String.upcase
+
+# Precedence is resolved by a precedence-climbing (Pratt) parser, so the
+# emitter parenthesizes correctly on both targets:
+#   a + b |> f   parses as  (a + b) |> f
+#   not a and b  parses as  (not a) and b
+fn worked(a i64, b i64, c i64) i64 := a + b * c        # == a + (b * c)

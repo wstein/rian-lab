@@ -1,0 +1,51 @@
+# ===========================================================================
+# 03 — Multi-clause functions, guards, exhaustiveness, partiality
+# ===========================================================================
+# Character: a function is either a single typed clause, or a bodiless
+# SIGNATURE line followed by contiguous pattern-head clauses. Exhaustiveness
+# is checked statically and is STRICTER than Elixir — a non-total function is
+# a compile error, exactly as Rust requires.
+#
+# Spec: docs/spec/clauses-guards.md
+# ---------------------------------------------------------------------------
+
+# Multi-clause group: bodiless signature, then pattern clauses sharing the
+# name/arity. First match wins, top to bottom (Elixir `def` order / Rust
+# `match` arm order — identical on both targets).
+fn classify(i64) str
+fn classify(0)            := "zero"
+fn classify(n) when n > 0 := "positive"
+fn classify(_)            := "negative"
+
+# Guards are a RESTRICTED, pure, total sublanguage — the intersection of
+# Elixir guards and Rust match guards. Arbitrary calls are rejected; only a
+# fixed whitelist (comparisons, arithmetic, `in`, and `is_*`/`len`/`abs`)
+# is allowed, so guards stay portable to both targets.
+fn cmp(i64, i64) Order
+fn cmp(a, b) when a <  b := Less
+fn cmp(a, b) when a == b := Equal
+fn cmp(_, _)             := Greater
+
+# Union narrowing: a guard that narrows a union lowers to a GUARD on Elixir
+# but a PATTERN ARM on Rust (Rust narrows enums structurally). Same source,
+# two idiomatic shapes.
+fn show(i64 | str) str
+fn show(x) when is_int(x) := "int: " <> to_str(x)
+fn show(x) when is_str(x) := "str: " <> x
+
+# Exhaustiveness is enforced: GUARDED clauses do not count, so a guard-only
+# function needs an unguarded fallback. `max2`'s second clause is the
+# unguarded backstop that makes it total on both targets.
+fn max2(i64, i64) i64
+fn max2(a, b) when a >= b := a
+fn max2(a, b)             := b
+
+# Partiality is opt-in and never silent. Without `@partial`, omitting the
+# `None` case below is a COMPILE ERROR. With it, Rust emits a `panic!` arm and
+# Elixir relies on `FunctionClauseError`.
+@partial
+fn unwrap(Option(T)) T
+fn unwrap(Some(x)) := x
+
+# Reachability is checked too: a clause fully shadowed by earlier clauses is a
+# warning; two clauses with identical heads + guards is an error.

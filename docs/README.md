@@ -60,6 +60,11 @@ The component test suites pass; cross-pass integration is thin. Treat the
    → `end-to-end-lowering`.
 4. **Metaprogramming** — ADR-0030 + `selfhost-features`.
 
+For the surface syntax *by example*, read the annotated tour in
+[examples/rian/](../examples/rian/README.md) alongside the specs — each `.rian` file
+demonstrates one facet (expressions, types/`match`, capabilities, modules,
+macros/`comptime`, FFI) and cites the spec it follows.
+
 ## Known gaps & open threads
 
 These are the highest-priority items distilled from the specs' own "open items"
