@@ -63,6 +63,18 @@ defmodule Rian.MacroTest do
       assert el("comptime(3 > 5)") == "false"
       assert el("comptime(10 == 10)") == "true"
     end
+
+    test "folds float constants (`/` is float division)" do
+      assert el("comptime(3.14 * 2)") == "6.28"
+      assert el("comptime(1 / 2)") == "0.5"
+      assert rs("comptime(1 / 2)") == "0.5"
+    end
+
+    test "`div`/`rem` refuse float operands (integers only)" do
+      assert_raise RuntimeError, ~r/require integer operands/, fn ->
+        pipe("comptime(3.0 div 2)")
+      end
+    end
   end
 
   describe "comptime sandbox (ADR-0009)" do

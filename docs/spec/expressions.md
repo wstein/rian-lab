@@ -84,6 +84,20 @@ syntax** (`x.f(a)`); call via `f(x, a)` or `x |> f(a)`.
 `/` always producing float and `div` for integer division mirrors Elixir exactly and removes
 the "is `/` integer or float?" ambiguity; the Rust lowering makes the promotion explicit.
 
+### Numeric literals
+
+| Rian | Kind | Elixir | Rust |
+|---|---|---|---|
+| `42`, `1_000` | integer (`_` digit separators) | same | same |
+| `3.14`, `1_000.5` | float | same | same |
+| `2.5e-3` | float with exponent | same | same |
+| `1e9` | exponent, no point | `1.0e9` | `1.0e9` |
+
+`_` separators are accepted in integers and floats. An exponent written without a decimal point
+(`1e9`) is **not** valid Elixir, so the lexer normalizes it to `1.0e9` — valid on both targets —
+keeping the literal's value while staying idiomatic. Floats also flow through the `comptime`
+sandbox (`comptime(3.14 * 2)` ⇒ `6.28`); `div`/`rem` there remain integer-only.
+
 ---
 
 ## 4. Open items

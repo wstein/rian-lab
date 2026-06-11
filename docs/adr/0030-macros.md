@@ -86,4 +86,5 @@ unaffected (22/22). Full suite **116 tests, 0 failures**.
 - **Macro fragment kinds** (expr vs pattern vs type position), à la `macro_rules!`
   `$x:expr`/`$t:ty`, once the declaration parser exists.
 - **Build capability** to allow a vetted, effectful `comptime` (currently always pure).
-- Float constants in comptime (integers + booleans only today).
+- ~~Float constants in comptime~~ — **done**: comptime now folds float literals and `/`
+  (`comptime(3.14 * 2)` ⇒ `6.28`); `div`/`rem` stay integer-only.

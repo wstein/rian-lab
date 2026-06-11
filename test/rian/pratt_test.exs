@@ -109,6 +109,28 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "numeric literals (floats, `_` separators, exponents)" do
+    test "plain integers and floats lex verbatim" do
+      assert p("42") == "42"
+      assert p("3.14") == "3.14"
+    end
+
+    test "underscore digit separators are preserved" do
+      assert p("1_000") == "1_000"
+      assert p("1_000.5") == "1_000.5"
+    end
+
+    test "an exponent without a decimal point is normalized to valid-on-both-targets form" do
+      # `1e9` is invalid Elixir; normalize to `1.0e9` (also valid Rust f64)
+      assert p("1e9") == "1.0e9"
+      assert p("2.5e-3") == "2.5e-3"
+    end
+
+    test "a float participates in normal precedence" do
+      assert p("x + 3.14 * 2") == "(+ x (* 3.14 2))"
+    end
+  end
+
   describe "`.` is the sole qualifier (ADR-0029; no `::` alias)" do
     test "dot lowers to a single {:dot} node" do
       assert p("Geometry.area(x)") == "(call (. Geometry area) x)"

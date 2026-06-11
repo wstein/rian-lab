@@ -27,6 +27,18 @@ defmodule Rian.Pratt do
   defp advance(s, n), do: elem(String.split_at(s, n), 1)
   defp tokenize(str), do: do_tok(str, [])
 
+  # Normalize a numeric lexeme so it is a valid literal on BOTH targets: an
+  # exponent with no decimal point (`1e9`) is invalid Elixir, so inject `.0`
+  # before the exponent marker (`1.0e9`). Plain ints/floats and `_` separators
+  # pass through unchanged (already valid in Elixir and Rust alike).
+  defp norm_num(lexeme) do
+    if String.match?(lexeme, ~r/[eE]/) and not String.contains?(lexeme, ".") do
+      String.replace(lexeme, ~r/[eE]/, ".0e", global: false)
+    else
+      lexeme
+    end
+  end
+
   defp do_tok(str, acc) do
     s = String.trim_leading(str)
 
@@ -64,9 +76,9 @@ defmodule Rian.Pratt do
       op = Enum.find(@single, &String.starts_with?(s, &1)) ->
         do_tok(advance(s, 1), [{:op, op} | acc])
 
-      m = Regex.run(~r/^\d+/, s) ->
-        n = hd(m)
-        do_tok(advance(s, String.length(n)), [{:num, n} | acc])
+      m = Regex.run(~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/, s) ->
+        lexeme = hd(m)
+        do_tok(advance(s, String.length(lexeme)), [{:num, norm_num(lexeme)} | acc])
 
       m = Regex.run(~r/^[A-Za-z_]\w*/, s) ->
         w = hd(m)

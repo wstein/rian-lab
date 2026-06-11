@@ -50,7 +50,7 @@ type Json :=
   | JArr(Vec(Json))
 
 fn type_of(Json) str
-fn type_of(j) :=
+fn type_of(j)
   match j do
     JNull                 -> "null"
     JBool(_)              -> "bool"
@@ -59,6 +59,7 @@ fn type_of(j) :=
     JStr(_)               -> "string"
     JArr(_)               -> "array"
   end
+end
 
 # Construction uses positional or named args (named uses the `key: value`
 # association syntax shared with map literals):
