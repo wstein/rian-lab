@@ -113,8 +113,10 @@ The Rust target gets `?`-ergonomics **in the emitter** without `?` in the surfac
 
 ## Open items
 
-- **`with` guard clauses** — Elixir allows bare boolean expressions and `when` inside `with`; include
-  in v1 or defer?
+- ~~**`with` guard clauses** — include in v1 or defer?~~ **Resolved 2026-06-12:** v1 `with` supports
+  two clause kinds — `pattern <- expr` (failable bind) and `name := expr` (total intermediate bind) —
+  plus `do`/`else`. **`when` guards and bare-boolean clauses are deferred** (expressible today via a
+  `case` or a `<-` against a boolean-returning expr; adding them later is backward-compatible).
 - **Anonymous inline error sets** — relax §2's "must be named" once the checker can synthesize and
   name an anonymous union safely.
 - **`for`-comprehensions** — share the `<-` arrow (ADR-0039); their full syntax is a separate ADR.

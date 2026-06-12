@@ -105,5 +105,8 @@ Two rules follow:
 - **`<-` intra-family collision** — **resolved by ADR-0039**: `<-` goes to the family
   failable-bind/generator (`pattern <- source` in `with`/`for`); capability-gated mutation is
   re-spelled. This is the collision-test outcome — the family meaning of `<-` wins.
-- **Reserve trailing `?`** as a predicate-name affordance (`empty?`) once the lexer is taught to
-  treat `?` as a name character rather than an operator.
+- ~~**Reserve trailing `?`** as a predicate-name affordance.~~ **Resolved 2026-06-12:** a value
+  identifier may **end** in `?` (`empty?`, `nil?`, `valid?`) — `[a-z_][a-zA-Z0-9_]*\??`, `?` final
+  char only. `?` is free (propagation removed; no ternary). Trailing **`!` is deferred** — its family
+  meaning ("raises") clashes with errors-as-values (ADR-0035); ship no convention we'd retract. A
+  `foo?`-returns-`Bool` rule is **convention, not enforced** in v1 (candidate lint later).

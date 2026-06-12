@@ -58,6 +58,11 @@ Auto-inheriting the base's operations is **rejected**: it would let `user_id + o
 leak the representation, defeating the point. This is the matched pair with ADR-0042 — **`opaque` gives
 nominal distinctness, `impl` gives operations**:
 
+> **One principled exception: `range` (ADR-0036).** A `range` is a *numeric/ordinal* opaque type, so it
+> exposes its base's ordinal arithmetic — **widening to the base** (`Digit + Digit : Int64`), which
+> honestly escapes the bounded representation rather than leaking it, and auto-derives `Comparable`.
+> A *general* `opaque T := Base` still inherits nothing.
+
 ```elixir
 impl Comparable for UserId do
   def compare(a, b) Int64.compare(a.value, b.value)   # transparent inside the defining module

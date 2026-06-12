@@ -131,11 +131,19 @@ on the `@type` spec and first-match clauses; no shim needed.
 
 ## Open items
 
-- **`Char` literal vs Elixir charlist.** `'A'` is a charlist in Elixir; Rian follows Crystal
-  (`'A'` = `Char`), so this is a surface divergence to state explicitly in the lexer, not inherit.
-- **Range arithmetic & coercion.** Does `Digit + Digit` widen to `Int64`? Default: yes — ordinal
-  arithmetic escapes the subrange to its base, re-narrowed only by an explicit `Name.of`. Confirm
-  against ADR-0034 unification.
+- ~~**`Char` literal vs Elixir charlist.**~~ **Resolved 2026-06-12:** `'…'` delimits **exactly one
+  `Char`** (Crystal); a multi-codepoint single-quoted literal (`'AB'`) is a **lex error** (use a
+  `"…"` `String`) — Rian has **no charlists**. Escapes `'\n'`, `'\''`, `'\\'`, `'\u{1F600}'`. Lowers
+  to `?A` (BEAM integer codepoint) / `'A'` (Rust `char`) as the table above; a deliberate divergence
+  the lexer states, not inherits.
+- ~~**Range arithmetic & coercion.**~~ **Resolved 2026-06-12: arithmetic widens to base.**
+  `Digit + Digit : Int64` — *not* `Digit`, because `9 + 9 = 18 ∉ 0..9`; any in-bounds wrap or hidden
+  `RangeError` on `+` would be hidden control flow (ADR-0035). Re-narrow explicitly with `Digit.of(18)`
+  (fallible → `Digit | RangeError`). `range` auto-derives `Comparable` (ordinal comparison stays
+  in-type, returns `Bool`, no widening). This is the principled exception to ADR-0043 §3 ("opaque
+  types auto-inherit nothing"): a **general `opaque` gets no `+`** (adding `UserId`s is nonsense), but
+  a **`range` is a *numeric/ordinal* opaque**, so it exposes base arithmetic — widening to the base,
+  which honestly escapes the bounded representation rather than leaking it.
 - **Large-range completeness cap.** Fix the naive-enumeration threshold and the interval-coverage
   fallback in the exhaustiveness reference implementation.
 - **Non-zero / non-contiguous bases.** This ADR covers contiguous inclusive intervals only;
