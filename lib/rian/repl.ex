@@ -276,6 +276,7 @@ defmodule Rian.Repl do
   defp eval_stmt(s, input) do
     case safe_parse_body(input) do
       {:ok, {:block, [{:bind, name, rhs}]}} -> eval_bind(s, input, name, rhs)
+      {:ok, {:block, [{:typed_bind, name, ann, _rhs}]}} -> bind_with_type(s, input, name, ann)
       {:ok, _block} -> eval_expr(s, input)
       {:error, message} -> {{:error, message}, s}
     end
@@ -284,6 +285,12 @@ defmodule Rian.Repl do
   defp eval_bind(s, input, name, rhs) do
     ic = session_ic(s)
     type = safe_infer(rhs, bind_env(s.binds, ic), ic)
+    bind_with_type(s, input, name, type)
+  end
+
+  # A typed binding displays at its declared type (ADR-0034 §1); an untyped one
+  # at its inferred type. Both share the recompile-and-run path.
+  defp bind_with_type(s, input, name, type) do
     binds = Enum.reject(s.binds, fn {n, _} -> n == name end) ++ [{name, String.trim(input)}]
 
     case run(s, binds, s.units, name) do
@@ -369,6 +376,9 @@ defmodule Rian.Repl do
         {:ok, {:block, [{:bind, ^name, rhs}]}} ->
           Map.put(acc, name, infer_or_unknown(rhs, acc, ic))
 
+        {:ok, {:block, [{:typed_bind, ^name, ann, _rhs}]}} ->
+          Map.put(acc, name, ann)
+
         _ ->
           acc
       end
@@ -392,6 +402,7 @@ defmodule Rian.Repl do
     case safe_parse_body(input) do
       {:ok, {:block, [{:expr, e}]}} -> safe_infer(e, env, ic)
       {:ok, {:block, [{:bind, _name, e}]}} -> safe_infer(e, env, ic)
+      {:ok, {:block, [{:typed_bind, _name, ann, _e}]}} -> ann
       _ -> nil
     end
   end

@@ -76,6 +76,47 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "typed bindings (ADR-0034 §1)" do
+    test "a numeric literal adopts the declared width" do
+      assert Check.check("def f(n Int64) Int64 := x Int32 := 66 ; n") == :ok
+    end
+
+    test "a typed binding displays at its declared type, not the inferred one" do
+      # the final expression is `x`, so the block's type is `x`'s declared `Int32`
+      assert Check.infer(Pratt.parse_body("x Int32 := 66 ; x")) == "Int32"
+    end
+
+    test "an integer literal does not adopt a non-numeric annotation" do
+      assert {:error, msg} = Check.check("def f(n Int64) Int64 := b Bool := 66 ; n")
+      assert msg =~ "declared `Bool`"
+      assert msg =~ "type `Int64`"
+    end
+
+    test "an integer literal does not adopt a float annotation (write an explicit float)" do
+      assert {:error, _} = Check.check("def f(n Int64) Int64 := x Float64 := 66 ; n")
+    end
+
+    test "an already-typed value must unify exactly — no implicit narrow" do
+      # `n` is Int64; binding it at Int32 is a proven mismatch
+      assert {:error, msg} = Check.check("def f(n Int64) Int64 := x Int32 := n ; n")
+      assert msg =~ "declared `Int32`"
+    end
+
+    test "an already-typed value matching its annotation passes" do
+      assert Check.check("def f(n Int64) Int64 := x Int64 := n ; x") == :ok
+    end
+
+    test "a string value is checked against its annotation" do
+      assert Check.check(~s|def f(n Int64) String := s String := "hi" ; s|) == :ok
+      assert {:error, _} = Check.check(~s|def f(n Int64) Int64 := x Int32 := "hi" ; n|)
+    end
+
+    test "an arithmetic RHS stays conservative (no false mismatch)" do
+      # `x` is Int32, so `x + 1` is Int32-vs-Int64 — conservative `:unknown`, not an error
+      assert Check.check("def f(n Int64) Int64 := x Int32 := 5 ; y Int32 := x + 1 ; n") == :ok
+    end
+  end
+
   describe "flow narrowing (ADR-0034 pillar 4)" do
     @shape "type Shape := Circle(radius Float64) | Square(side Float64)\n"
 

@@ -60,6 +60,7 @@ defmodule Rian.Macro do
     {:block,
      Enum.map(stmts, fn
        {:bind, n, e} -> {:bind, n, f.(e)}
+       {:typed_bind, n, t, e} -> {:typed_bind, n, t, f.(e)}
        {:expr, e} -> {:expr, f.(e)}
      end)}
   end
@@ -104,6 +105,7 @@ defmodule Rian.Macro do
   defp collect_binders({:block, stmts}) do
     Enum.flat_map(stmts, fn
       {:bind, n, e} -> [n | collect_binders(e)]
+      {:typed_bind, n, _t, e} -> [n | collect_binders(e)]
       {:expr, e} -> collect_binders(e)
     end)
   end
@@ -164,6 +166,7 @@ defmodule Rian.Macro do
     {:block,
      Enum.map(stmts, fn
        {:bind, n, e} -> {:bind, Map.get(ren, n, n), rename(e, ren)}
+       {:typed_bind, n, t, e} -> {:typed_bind, Map.get(ren, n, n), t, rename(e, ren)}
        {:expr, e} -> {:expr, rename(e, ren)}
      end)}
   end

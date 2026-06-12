@@ -178,6 +178,9 @@ defmodule Rian.Beam do
   defp body_forms(src, scope), do: block_forms(Core.from_expr(Pratt.parse_body(src)), scope)
 
   defp stmt_form({:bind, n, e}, scope), do: {:match, @ln, var_form(n), expr_form(e, scope)}
+  # the declared type is erased at lowering — `Int*` is representation intent,
+  # not a portable overflow contract (ADR-0034 §1); the value lowers unchanged.
+  defp stmt_form({:typed_bind, n, _t, e}, scope), do: stmt_form({:bind, n, e}, scope)
   defp stmt_form({:expr, e}, scope), do: expr_form(e, scope)
 
   # ── expression forms (consume the typed core IR, Rian.Core) ────────────
@@ -390,6 +393,7 @@ defmodule Rian.Beam do
   end
 
   defp grow_scope(s, {:bind, n, _}), do: MapSet.put(s, n)
+  defp grow_scope(s, {:typed_bind, n, _, _}), do: MapSet.put(s, n)
   defp grow_scope(s, _), do: s
 
   # collect the variable names a core pattern binds (for scope tracking)

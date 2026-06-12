@@ -283,6 +283,13 @@ defmodule Rian.Check do
       {:bind, x, annotate(e, env, ic)} | ann_stmts(rest, Map.put(env, x, infer(e, env, ic)), ic)
     ]
 
+  # a typed binding displays at its *declared* type (ADR-0034 §1), not the
+  # inferred one — the annotation is the contract for `x` downstream.
+  defp ann_stmts([{:typed_bind, x, t, e} | rest], env, ic),
+    do: [
+      {:typed_bind, x, t, annotate(e, env, ic)} | ann_stmts(rest, Map.put(env, x, t), ic)
+    ]
+
   defp ann_stmts([{:expr, e} | rest], env, ic),
     do: [{:expr, annotate(e, env, ic)} | ann_stmts(rest, env, ic)]
 
@@ -410,6 +417,11 @@ defmodule Rian.Check do
     infer_block(rest, Map.put(env, n, t), ic, t)
   end
 
+  # a typed binding binds `n` at its *declared* type (ADR-0034 §1); enforcement
+  # that the value fits the annotation is the gate's job (`check_binds/2`).
+  defp infer_block([{:typed_bind, n, t, _e} | rest], env, ic, _value),
+    do: infer_block(rest, Map.put(env, n, t), ic, t)
+
   defp infer_block([{:expr, e} | rest], env, ic, _value),
     do: infer_block(rest, env, ic, infer(e, env, ic))
 
@@ -457,8 +469,73 @@ defmodule Rian.Check do
   def check_func(func, ic \\ %{}, eset \\ %{tsets: %{}, table: %{}})
 
   def check_func(%Func{} = f, ic, eset) do
-    with :ok <- check_return(f, ic), do: check_error_set(f, eset)
+    with :ok <- check_return(f, ic),
+         :ok <- check_binds(f, ic),
+         do: check_error_set(f, eset)
   end
+
+  # ADR-0034 §1 — typed bindings. `x T := e` checks `e` against the declared type
+  # `T`: a numeric *literal* adopts `T` (bidirectional checking — the literal takes
+  # the declared width), while any already-typed RHS must *unify exactly* with `T`,
+  # so `x Int32 := someInt64` is a proven mismatch (no implicit narrow/widen). An
+  # `:unknown` RHS is left unchecked — the gate only reports *provable* clashes.
+  defp check_binds(%Func{params: ps, clauses: clauses}, ic) do
+    Enum.find_value(clauses, :ok, fn c ->
+      {:block, stmts} = Pratt.parse_body(c.body)
+      check_bind_stmts(stmts, clause_env(c.pats, ps, ic), ic)
+    end)
+  end
+
+  defp check_bind_stmts([], _env, _ic), do: nil
+
+  defp check_bind_stmts([{:typed_bind, name, ann, e} | rest], env, ic) do
+    case bind_mismatch(name, ann, e, env, ic) do
+      nil -> check_bind_stmts(rest, Map.put(env, name, ann), ic)
+      err -> err
+    end
+  end
+
+  defp check_bind_stmts([{:bind, name, e} | rest], env, ic),
+    do: check_bind_stmts(rest, Map.put(env, name, infer(e, env, ic)), ic)
+
+  defp check_bind_stmts([{:expr, _e} | rest], env, ic),
+    do: check_bind_stmts(rest, env, ic)
+
+  # `nil` when the binding is well-typed (or unprovable); `{:error, msg}` on a
+  # proven clash between the value's type and the declared annotation.
+  defp bind_mismatch(name, ann, e, env, ic) do
+    ce = Core.from_expr(e)
+
+    cond do
+      literal_adopts?(ce, ann) ->
+        nil
+
+      true ->
+        t = infer(ce, env, ic)
+
+        case unify(t, ann) do
+          :mismatch ->
+            {:error, "`#{name}`: binding declared `#{ann}` but its value has type `#{t}`"}
+
+          _ ->
+            nil
+        end
+    end
+  end
+
+  # A bare numeric literal adopts a *same-kind* numeric annotation (ADR-0034 §1):
+  # an integer literal takes any `Int*`/`UInt*` width; a float literal takes any
+  # `Float*`. Cross-kind (an integer literal into a `Float`) is *not* adopted —
+  # write an explicit float literal — so it falls through to exact unification.
+  defp literal_adopts?(%ENum{text: n}, ann),
+    do: if(int_literal?(n), do: int_type?(ann), else: float_type?(ann))
+
+  defp literal_adopts?(%EUnary{op: "-", arg: arg}, ann), do: literal_adopts?(arg, ann)
+  defp literal_adopts?(_e, _ann), do: false
+
+  defp int_literal?(n), do: not (String.contains?(n, ".") or String.match?(n, ~r/[eE]/))
+  defp int_type?(t), do: String.match?(t, ~r/^U?Int\d*$/)
+  defp float_type?(t), do: String.match?(t, ~r/^Float\d*$/)
 
   defp check_return(%Func{name: name, params: ps, ret: ret, tvars: tvars, clauses: clauses}, ic) do
     # A return type mentioning a `forall` type variable is generic; we don't yet

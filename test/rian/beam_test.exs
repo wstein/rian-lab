@@ -11,6 +11,16 @@ defmodule Rian.BeamTest do
       assert {:file, _} = :code.is_loaded(:rian_beam_double)
     end
 
+    test "typed bindings (ADR-0034 §1) lower and run — the annotation is erased" do
+      {:ok, mod} =
+        Beam.load(
+          "def f(n Int64) Int64 := x Int64 := n * 2 ; y Int64 := x + 1 ; y",
+          :rian_beam_typed_bind
+        )
+
+      assert mod.f(10) == 21
+    end
+
     test "multi-clause with a `when` guard" do
       {:ok, mod} =
         Beam.load(

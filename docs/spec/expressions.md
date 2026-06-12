@@ -36,6 +36,10 @@ grade :=
 - `:=` bindings are **single-assignment** and **irrefutable** (tuple/struct destructuring is
   fine; `Some(x) := opt` is refutable → compile error, use `match`). Rebinding a name is
   shadowing, not mutation. Mutation is `<~` (capability-gated; BEAM-illegal unless local).
+- A binding may carry a **declared type** between the name and `:=` — `x Int32 := 66`. A numeric
+  literal *adopts* the annotation (`x : Int32`); an already-typed value must *unify exactly* with it
+  (`x Int32 := someInt64` is a type error — no implicit narrow/widen). The binding then carries its
+  declared type downstream. See ADR-0034 §1. (Parametric annotations like `Vec(Int64)` are future work.)
 
 ---
 
@@ -77,6 +81,7 @@ syntax** (`x.f(a)`); call via `f(x, a)` or `x |> f(a)`.
 | `==` `!=` `<` … | same | same (derived `PartialEq`/`PartialOrd`) |
 | `if c do a else b end` | `if c, do: a, else: b` | `if c { a } else { b }` |
 | `name := e` | `name = e` | `let name = e;` |
+| `name T := e` | `name = e` (type erased) | `let name: T = e;` |
 | `{a, b} := p` | `{a, b} = p` | `let (a, b) = p;` |
 | `total <~ e` | (local rewrite / error) | `total = e;` (on a `mut` binding) |
 | block (last expr is value) | `do … end` body | `{ …; final }` |

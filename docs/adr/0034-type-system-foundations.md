@@ -56,6 +56,25 @@ Rust panic-debug/wrap-release; JVM/Go wrap; JS `BigInt`); Rian does not simulate
 another. Subrange types (ADR-0036) are the promoted in-domain safety idiom; bit-identical
 cross-target arithmetic is an opt-in library. See the ADR-0035 scope clarification.
 
+**Typed bindings — implemented.** A block binding may carry the annotation between the name and
+`:=` (`x Int32 := 66`). Per the bidirectional strategy above, the declared type is the expected
+type *pushed down* into the value:
+
+- a **numeric literal adopts** the annotation — `x Int32 := 66` gives `x : Int32` (this is the
+  "other widths require an annotation" mechanism; a literal takes the declared width). Adoption is
+  *same-kind*: an integer literal takes any `Int*`/`UInt*`, a float literal any `Float*`; a
+  cross-kind annotation (an integer literal into a `Float`) is **not** adopted — write an explicit
+  float literal — and falls through to exact unification;
+- an **already-typed RHS must unify exactly** — `x Int32 := someInt64` is a *proven* mismatch and
+  is rejected (no implicit narrow/widen; blame is localized at the binding site). An `:unknown`
+  RHS is left unchecked (the gate reports only provable clashes).
+
+The binding then carries its **declared** type downstream (display, `-spec`, later checks), not the
+inferred one. Every backend **erases** the annotation when lowering — consistent with native-per-target
+representation (the value compiles unchanged). Parsed as `{:typed_bind, name, type, expr}`
+(`Rian.Pratt`); enforced by `Rian.Check.check_binds/2`. Parametric annotations (`Vec(Int64)`) are
+future work.
+
 ### 2. Errors are values, typed as error sets (Zig)
 
 There are **no exceptions** in the portable core (ADR-0035). A fallible function returns a

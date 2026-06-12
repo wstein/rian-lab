@@ -158,7 +158,7 @@ defmodule Rian.Core do
   end
 
   defmodule EBlock do
-    @moduledoc "A statement block; `stmts` are `{:bind, name, expr}` | `{:expr, expr}`."
+    @moduledoc "A statement block; `stmts` are `{:bind, name, expr}` | `{:typed_bind, name, type, expr}` | `{:expr, expr}`."
     defstruct stmts: [], type: nil
   end
 
@@ -283,6 +283,7 @@ defmodule Rian.Core do
   defp from_pairs(pairs), do: Enum.map(pairs, fn {label, v} -> {label, from_expr(v)} end)
 
   defp from_stmt({:bind, n, e}), do: {:bind, n, from_expr(e)}
+  defp from_stmt({:typed_bind, n, t, e}), do: {:typed_bind, n, t, from_expr(e)}
   defp from_stmt({:expr, e}), do: {:expr, from_expr(e)}
 
   defp from_arm({pat, guard, body}),

@@ -1080,6 +1080,7 @@ defmodule Rian.Lower do
   defp emit_block(%EBlock{stmts: stmts}, :elixir) do
     Enum.map_join(stmts, "; ", fn
       {:bind, n, e} -> "#{n} = #{p(e, 0, :elixir)}"
+      {:typed_bind, n, _t, e} -> "#{n} = #{p(e, 0, :elixir)}"
       {:expr, e} -> p(e, 0, :elixir)
     end)
   end
@@ -1087,6 +1088,7 @@ defmodule Rian.Lower do
   defp emit_block(%EBlock{stmts: stmts}, :rust) do
     Enum.map_join(stmts, " ", fn
       {:bind, n, e} -> "let #{n} = #{p(e, 0, :rust)};"
+      {:typed_bind, n, _t, e} -> "let #{n} = #{p(e, 0, :rust)};"
       {:expr, e} -> p(e, 0, :rust)
     end)
   end

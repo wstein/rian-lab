@@ -180,9 +180,12 @@ defmodule Rian.JS do
   end
 
   defp stmt_js({:bind, n, e}), do: "let #{n} = #{expr_js(e)};"
+  # the declared type is erased at lowering (ADR-0034 §1); the value is unchanged.
+  defp stmt_js({:typed_bind, n, _t, e}), do: stmt_js({:bind, n, e})
   defp stmt_js({:expr, e}), do: "#{expr_js(e)};"
   defp stmt_return({:expr, e}), do: "return #{expr_js(e)};"
   defp stmt_return({:bind, _, e}), do: "return #{expr_js(e)};"
+  defp stmt_return({:typed_bind, _, _, e}), do: "return #{expr_js(e)};"
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_js(%ENum{text: n}), do: num_js(n)

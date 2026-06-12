@@ -464,13 +464,16 @@ defmodule Rian.Pratt do
   end
 
   # typed binding `x Int32 := 66` — the declared type sits between the name and
-  # `:=`. It is parsed and currently elided downstream (a binding still takes its
-  # type from the value); keeping the form legal now lets the checker enforce it
-  # later. (`name type` is otherwise not a valid statement, so this only newly
-  # accepts the typed-binding form.) Parametric types (`Vec(Int64)`) are future.
-  defp parse_stmt([{:id, name}, {:id, _type}, {:op, ":="} | rest]) do
+  # `:=`. The annotation is carried as a `{:typed_bind, name, type, expr}` node so
+  # the checker can enforce it (ADR-0034 §1: a numeric literal *adopts* the
+  # declared width; an already-typed RHS must *unify exactly*) and display the
+  # binding at the declared type. Every backend erases the annotation — `Int*`
+  # is representation intent, not a portable overflow contract (ADR-0034 §1).
+  # (`name type` is otherwise not a valid statement, so this only newly accepts
+  # the typed-binding form.) Parametric types (`Vec(Int64)`) are future.
+  defp parse_stmt([{:id, name}, {:id, type}, {:op, ":="} | rest]) do
     {e, rest} = parse_expr(rest, 0)
-    {{:bind, name, e}, rest}
+    {{:typed_bind, name, type, e}, rest}
   end
 
   defp parse_stmt(tokens) do
@@ -586,6 +589,7 @@ defmodule Rian.Pratt do
     do: "%{#{Enum.map_join(pairs, " ", fn {k, v} -> "#{k}: #{sexpr(v)}" end)}}"
 
   defp sexpr_stmt({:bind, n, e}), do: "(:= #{n} #{sexpr(e)})"
+  defp sexpr_stmt({:typed_bind, n, t, e}), do: "(:= #{n} #{t} #{sexpr(e)})"
   defp sexpr_stmt({:expr, e}), do: sexpr(e)
 
   defp sexpr_pat(:wild), do: "_"

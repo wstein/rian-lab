@@ -158,6 +158,9 @@ defmodule Rian.Capability do
   defp count_block([{:bind, n, e} | rest], bound, acc),
     do: count_block(rest, MapSet.put(bound, n), merge(acc, count_uses(e, bound)))
 
+  defp count_block([{:typed_bind, n, _t, e} | rest], bound, acc),
+    do: count_block(rest, MapSet.put(bound, n), merge(acc, count_uses(e, bound)))
+
   defp count_block([{:expr, e} | rest], bound, acc),
     do: count_block(rest, bound, merge(acc, count_uses(e, bound)))
 
