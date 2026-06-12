@@ -233,6 +233,20 @@ optimizer is in-line: a constant program folds to a single instruction
 that the toolchain compiles a real, multi-pass compiler written in its own
 language.
 
+## Module system — a compiler is many modules
+
+A real compiler is split across files; [`examples/rian/selfhost_modules.rian`](examples/rian/selfhost_modules.rian)
+splits the calc into `mod CalcLex` / `CalcParse` / `CalcGen` / `Calc`.
+`Rian.Beam.load_program/1` compiles **each `mod` to its own BEAM module** named
+`Elixir.<Mod>` — the very atom a Pascal-qualified call lowers to — so a Rian
+cross-module call (`CalcLex.lex(…)`) resolves with no extra machinery. The driver
+`Calc.run("2 + 3 * 4")` runs across four separately-compiled modules and yields
+`14`. Two facts make this cheap: a qualified call already lowered to a
+`Elixir.<Mod>` remote call (free BEAM FFI, ADR-0041), and **variant tags are
+global** — a `Token`/`Expr` constructor lowers to the same atom in every module,
+so `CalcParse` pattern-matches `CalcLex`'s tokens without re-declaring `Token`.
+Only the functions cross module boundaries; the types are erased to shared tags.
+
 ## Multi-target (ADR-0049 / ADR-0050)
 
 The BEAM path drove these spikes, but the typed core IR is shared, so a

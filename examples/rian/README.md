@@ -76,6 +76,12 @@ compile + run on real BEAM bytecode:
   generator, stack VM) into a single self-contained program compiled to one
   `.beam`: `run("1 + 2 * (3 - 4)") → -1`. `String → Vec(Token) → Expr → Expr′ →
   Vec(Instr) → Int64`, end to end — the front-to-back pipeline as one artifact.
+- [selfhost_modules.rian](selfhost_modules.rian) — **the same calc split across
+  many modules.** `mod CalcLex` / `CalcParse` / `CalcGen` / `Calc` each compile
+  to their own BEAM module (`Elixir.CalcLex`, …); the driver `Calc.run` calls
+  across them by name (`CalcLex.lex(…)`), and variant tags are global so a module
+  pattern-matches another's data without re-declaring the type. Load with
+  `Rian.Beam.load_program/1`.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

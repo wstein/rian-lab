@@ -94,13 +94,44 @@ defmodule Rian.Beam do
 
   @doc "Compile `src`'s functions to `{:ok, module, beam_binary}` via `:compile.forms`."
   def compile(src, module) when is_atom(module) do
-    prog = Decl.parse(src)
-
     # `struct` declarations contribute no forms — a struct value is a tagged map
     # (built by named construction `Name(f: v)`, read by field access), so the
     # declaration itself is erased; only its constructions/accesses emit.
-    funcs = funcs_of(prog)
+    beam_for(module, src |> Decl.parse() |> funcs_of())
+  end
 
+  @doc """
+  Compile a **multi-module** program: every top-level `mod Name` in `src`
+  becomes its own BEAM module named `Elixir.Name`, so a Rian cross-module call
+  (`Name.fun(…)` — a Pascal-qualified call) resolves to it. Returns
+  `[{module_atom, beam_binary}]`, one per `mod`, in source order.
+  """
+  def compile_program(src) do
+    src
+    |> Decl.parse()
+    |> Map.get(:mods, [])
+    |> Enum.map(fn m ->
+      {:ok, atom, bin} = beam_for(:"Elixir.#{m.name}", m.funcs)
+      {atom, bin}
+    end)
+  end
+
+  @doc """
+  Compile **and load** every `mod` in `src` (see `compile_program/1`). Returns
+  the loaded module atoms; cross-`mod` calls between them resolve because each is
+  named `Elixir.<Mod>` — the same atom a Pascal-qualified call lowers to.
+  """
+  def load_program(src) do
+    src
+    |> compile_program()
+    |> Enum.map(fn {atom, bin} ->
+      {:module, ^atom} = :code.load_binary(atom, ~c"#{atom}.beam", bin)
+      atom
+    end)
+  end
+
+  # build one module's `.beam` from its function list
+  defp beam_for(module, funcs) do
     forms =
       [
         {:attribute, @ln, :module, module},

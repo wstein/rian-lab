@@ -209,6 +209,22 @@ defmodule Rian.BeamTest do
       assert opt.fold({:add, {:sub, {:num, 10}, {:num, 10}}, {:var, "y"}}) == {:var, "y"}
     end
 
+    test "a multi-module program: each `mod` is its own .beam, cross-module calls resolve" do
+      mods = Beam.load_program(File.read!("examples/rian/selfhost_modules.rian"))
+
+      # every `mod` became its own loaded module (named `Elixir.<Mod>`)
+      assert CalcLex in mods
+      assert Calc in mods
+
+      # the driver `Calc.run` calls across CalcLex / CalcParse / CalcGen
+      assert apply(Calc, :run, ["2 + 3 * 4"]) == 14
+      assert apply(Calc, :run, ["1 + 2 * (3 - 4)"]) == -1
+      assert apply(Calc, :run, ["(2 + 3) * 4"]) == 20
+
+      # a module can be called directly too (e.g. just the lexer)
+      assert apply(CalcLex, :lex, ["1+2"]) == [{:t_num, 1}, :t_plus, {:t_num, 2}]
+    end
+
     test "the whole calc compiler in ONE Rian module: source string -> value on bytecode" do
       {:ok, calc} = Beam.load(File.read!("examples/rian/selfhost_calc.rian"), :rian_beam_calc)
 

@@ -1,0 +1,132 @@
+# ===========================================================================
+# SELF-HOSTING — the calc compiler split across MANY Rian modules
+# ===========================================================================
+# Goal (ADR-0027/0031): a real compiler is many modules. This is the calc
+# pipeline split into separate `mod`s that call each other by name — the front
+# end (`CalcLex`), the parser (`CalcParse`), the back end (`CalcGen`), and a
+# driver (`Calc`). Each `mod` compiles to its own BEAM module (`Elixir.CalcLex`,
+# …), and a Pascal-qualified call (`CalcLex.lex(…)`) resolves across them.
+#
+#     Calc.run("2 + 3 * 4")  =  14
+#
+# Variant tags are global (a `Token`/`Expr` constructor lowers to the same atom
+# everywhere), so a module can pattern-match another's data without re-declaring
+# the type — only the functions are crossed.
+# ---------------------------------------------------------------------------
+
+# ── front end ─────────────────────────────────────────────────────────────
+mod CalcLex do
+  type Token := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
+
+  pub def lex(src String) Vec(Token) := scan(String.to_charlist(src))
+
+  def scan(cs Vec(Int64)) Vec(Token)
+  def scan([]) := []
+  def scan([c | rest]) when c == 32 := scan(rest)
+  def scan([43 | rest]) := [TPlus | scan(rest)]
+  def scan([45 | rest]) := [TMinus | scan(rest)]
+  def scan([42 | rest]) := [TStar | scan(rest)]
+  def scan([47 | rest]) := [TSlash | scan(rest)]
+  def scan([40 | rest]) := [TLParen | scan(rest)]
+  def scan([41 | rest]) := [TRParen | scan(rest)]
+  def scan([c | rest]) when c >= 48 and c <= 57 := scan_num([c | rest], 0)
+  def scan([_ | rest]) := scan(rest)
+
+  def scan_num(cs Vec(Int64), acc Int64) Vec(Token)
+  def scan_num([c | rest], acc) when c >= 48 and c <= 57 := scan_num(rest, acc * 10 + c - 48)
+  def scan_num(cs, acc) := [TNum(acc) | scan(cs)]
+end
+
+# ── parser ──────────────────────────────────────────────────────────────────
+mod CalcParse do
+  type Expr := Num(Int64) | Add(Expr, Expr) | Sub(Expr, Expr) | Mul(Expr, Expr) | Div(Expr, Expr)
+  type Parse := P(Expr, Vec(Token))
+
+  pub def parse(ts Vec(Token)) Expr
+  pub def parse(ts)
+    case parse_expr(ts) do
+      P(e, _) -> e
+    end
+  end
+
+  def parse_expr(ts Vec(Token)) Parse
+  def parse_expr(ts)
+    case parse_term(ts) do
+      P(left, rest) -> expr_tail(left, rest)
+    end
+  end
+
+  def expr_tail(left Expr, ts Vec(Token)) Parse
+  def expr_tail(left, [TPlus | rest])
+    case parse_term(rest) do
+      P(right, rest2) -> expr_tail(Add(left, right), rest2)
+    end
+  end
+  def expr_tail(left, [TMinus | rest])
+    case parse_term(rest) do
+      P(right, rest2) -> expr_tail(Sub(left, right), rest2)
+    end
+  end
+  def expr_tail(left, ts) := P(left, ts)
+
+  def parse_term(ts Vec(Token)) Parse
+  def parse_term(ts)
+    case parse_factor(ts) do
+      P(left, rest) -> term_tail(left, rest)
+    end
+  end
+
+  def term_tail(left Expr, ts Vec(Token)) Parse
+  def term_tail(left, [TStar | rest])
+    case parse_factor(rest) do
+      P(right, rest2) -> term_tail(Mul(left, right), rest2)
+    end
+  end
+  def term_tail(left, [TSlash | rest])
+    case parse_factor(rest) do
+      P(right, rest2) -> term_tail(Div(left, right), rest2)
+    end
+  end
+  def term_tail(left, ts) := P(left, ts)
+
+  def parse_factor(ts Vec(Token)) Parse
+  def parse_factor([TNum(n) | rest]) := P(Num(n), rest)
+  def parse_factor([TLParen | rest])
+    case parse_expr(rest) do
+      P(e, [TRParen | rest2]) -> P(e, rest2)
+    end
+  end
+end
+
+# ── back end ──────────────────────────────────────────────────────────────
+mod CalcGen do
+  type Instr := Push(Int64) | IAdd | ISub | IMul | IDiv
+
+  pub def compile(e Expr) Vec(Instr)
+  pub def compile(Num(n)) := [Push(n)]
+  pub def compile(Add(a, b)) := bin(a, b, IAdd)
+  pub def compile(Sub(a, b)) := bin(a, b, ISub)
+  pub def compile(Mul(a, b)) := bin(a, b, IMul)
+  pub def compile(Div(a, b)) := bin(a, b, IDiv)
+
+  def bin(a Expr, b Expr, op Instr) Vec(Instr) := cat(compile(a), cat(compile(b), [op]))
+
+  def cat(xs Vec(Instr), ys Vec(Instr)) Vec(Instr)
+  def cat([], ys) := ys
+  def cat([h | t], ys) := [h | cat(t, ys)]
+
+  pub def vm(prog Vec(Instr)) Int64 := exec(prog, [])
+
+  def exec(prog Vec(Instr), stack Vec(Int64)) Int64
+  def exec([], [top | _]) := top
+  def exec([Push(n) | r], st) := exec(r, [n | st])
+  def exec([IAdd | r], [b, a | st]) := exec(r, [a + b | st])
+  def exec([ISub | r], [b, a | st]) := exec(r, [a - b | st])
+  def exec([IMul | r], [b, a | st]) := exec(r, [a * b | st])
+  def exec([IDiv | r], [b, a | st]) := exec(r, [a div b | st])
+end
+
+# ── driver: cross-module calls tie the pipeline together ────────────────────
+mod Calc do
+  pub def run(src String) Int64 := CalcGen.vm(CalcGen.compile(CalcParse.parse(CalcLex.lex(src))))
+end
