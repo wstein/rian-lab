@@ -15,9 +15,18 @@ defmodule Mix.Tasks.Rian.Repl do
   (`def`/`type`/…) or an open `do …` block accumulates until a **blank line**,
   so multi-clause functions and multi-line blocks can be entered. Each result
   prints as `value : Type`; a `:=` prints `name := value : Type`; a definition
-  prints `defined name`. Unsupported constructs report a clear error rather than
-  miscompiling (the current `Rian.Beam` scope: functions, sum variants,
-  `case`/`if`, guards, arithmetic, tuples, cons lists, atoms, local calls).
+  prints `defined name`. Unsupported constructs report a clear error rather
+  than miscompiling — see `Rian.Repl` for the current `Rian.Beam` scope.
+
+  ## Security: `--eval` is trusted-input only
+
+  `--eval` runs whatever string it is given through the full compile pipeline
+  and then `apply/3` on the bytecode — equivalent to `python -c` or `ruby -e`.
+  Treat the argument as code, not data: never interpolate untrusted input into
+  `mix rian.repl --eval "..."` from a shell script, CI step, or web handler.
+  If you need to expose evaluation to untrusted input, wait for the
+  connected-REPL sandbox/fuel story (ADR-0053 §2) and gate through that
+  instead.
   """
 
   use Mix.Task
