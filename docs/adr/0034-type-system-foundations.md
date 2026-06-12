@@ -135,8 +135,11 @@ narrowing, exactly as Kotlin invalidates a smart-cast on `var` reassignment.
 
 **Still open:**
 
-- **Protocol/generics surface** (§3) — type-variable introduction site, `protocol` declaration form,
-  and the bound spelling (which collides with the `when` *guard* keyword). Its own ADR.
+- ~~**Protocol/generics surface** (§3) — type-variable introduction site, `protocol` declaration form,
+  and the bound spelling (which collides with the `when` *guard* keyword).~~ **Resolved by
+  [ADR-0042](0042-protocol-bounded-generics.md):** `forall T: Bound` binder (Crystal), `protocol`/`impl`
+  declarations, Rust orphan rule, static-by-default dispatch; the `when` collision dissolves. **All four
+  §-pillars are now design-complete.**
 - **Capabilities × types:** how `val`/`iso`/`ref`/`tag` interact with inference and protocol bounds
   (an `iso` returned from a protocol method, etc.).
 - ~~**Target model for `Symbol` / error-tag representation** on non-atom targets (JVM/Go/JS/WASM).~~
