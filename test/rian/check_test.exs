@@ -74,6 +74,51 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "flow narrowing (ADR-0034 pillar 4)" do
+    @shape "type Shape := Circle(radius Float64) | Square(side Float64)\n"
+
+    test "a clause head narrows a constructor's bound variable to its field type" do
+      # r is refined to Float64, so the first clause proves Float64 — contradicting Bool.
+      assert {:error, msg} =
+               Check.check("""
+               #{@shape}
+               def f(Shape) Bool
+               def f(Circle(r)) := r
+               def f(Square(s)) := true
+               """)
+
+      assert msg =~ "type `Float64`"
+      assert msg =~ "`Bool`"
+    end
+
+    test "a case arm narrows the scrutinee's variant fields" do
+      assert {:error, msg} =
+               Check.check("""
+               #{@shape}
+               def describe(s val Shape) Bool
+                 case s do
+                   Circle(r) -> r
+                   Square(x) -> x
+                 end
+               end
+               """)
+
+      assert msg =~ "type `Float64`"
+    end
+
+    test "narrowing lets a correct case/clause body pass (was :unknown before)" do
+      assert Check.check("""
+             #{@shape}
+             def area(s val Shape) Float64
+               case s do
+                 Circle(r) -> 3.14 * r * r
+                 Square(x) -> x * x
+               end
+             end
+             """) == :ok
+    end
+  end
+
   describe "the type gate fires at compile time" do
     test "Decl.compile refuses a proven return-type mismatch" do
       assert_raise Check.Error, ~r/declared return type is `Bool`/, fn ->
