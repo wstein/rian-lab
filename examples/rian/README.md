@@ -58,9 +58,11 @@ compile + run on real BEAM bytecode:
   increment (a struct value is a tagged map, read by field access).
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
-  them on a stack (`Vec(Int64)`). The full `lex → parse → codegen → run` pipeline
-  runs on `.beam`; it hits **no** backend wall (sum ASTs + list patterns, both
-  already supported).
+  them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
+  load/store **slots** — the generator threads a compile-time `name → slot`
+  environment and the VM threads a slot store (`Map(Int64, Int64)`) — so
+  `let x = 5 in x + 1` lowers to `[Push 5, Store 0, Load 0, Push 1, IAdd]`. The
+  full `lex → parse → codegen → run` pipeline runs on `.beam`; no backend wall.
 - [selfhost_opt.rian](selfhost_opt.rian) — an **optimizer** (constant folding +
   algebraic identities: `2 + 3 → 5`, `x * 1 → x`, `x * 0 → 0`). It matches IR
   nodes by shape with nested variant and literal-in-variant patterns

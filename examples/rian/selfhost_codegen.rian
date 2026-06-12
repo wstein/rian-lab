@@ -1,51 +1,70 @@
 # ===========================================================================
 # SELF-HOSTING SPIKE — a Rian code generator + stack VM, written in Rian
 # ===========================================================================
-# Goal (ADR-0027/0031): the layer after the type-checker. Compile the `Expr`
-# sum to a flat list of **stack-machine instructions** (post-order), then run
-# those instructions on a tiny stack VM — both written in Rian. This is the
-# "back end" of the self-hosting toolchain: `Expr -> Vec(Instr) -> Int64`.
-# Evidence for SELFHOST.md.
+# Goal (ADR-0027/0031): the "back end" of the self-hosting toolchain. Compile
+# the `Expr` sum to a flat list of **stack-machine instructions** (post-order),
+# then run them on a tiny VM — both written in Rian. `Expr -> Vec(Instr) -> Int64`.
 #
-#   gen(Add(Num(1), Num(2)))  =  [Push(1), Push(2), IAdd]
-#   run([Push(1), Push(2), IAdd])  =  3
+# This version handles **variables and `let`** via load/store **slots**: the
+# code generator threads a compile-time environment (name -> slot index) and the
+# VM threads a slot store (`Map(Int64, Int64)`) alongside the operand stack.
+#
+#   gen(Let("x", Num(5), Add(Var("x"), Num(1))))
+#     = [Push(5), Store(0), Load(0), Push(1), IAdd]
+#   run(that)  =  6
 # ---------------------------------------------------------------------------
 
 mod SelfhostCodegen do
   type Expr := Num(Int64)
+             | Var(String)
              | Add(Expr, Expr)
              | Sub(Expr, Expr)
              | Mul(Expr, Expr)
              | Div(Expr, Expr)
+             | Let(String, Expr, Expr)
 
-  # A stack-machine instruction set: push a literal, or pop two / push one.
-  type Instr := Push(Int64) | IAdd | ISub | IMul | IDiv
+  # Push a literal, load/store a slot, or pop two / push one.
+  type Instr := Push(Int64) | Load(Int64) | Store(Int64) | IAdd | ISub | IMul | IDiv
 
-  # Compile an expression to a post-order instruction list: emit the operands,
-  # then the operator (so the operator finds them on top of the stack).
-  pub def gen(e Expr) Vec(Instr)
-  pub def gen(Num(n)) := [Push(n)]
-  pub def gen(Add(a, b)) := bin(a, b, IAdd)
-  pub def gen(Sub(a, b)) := bin(a, b, ISub)
-  pub def gen(Mul(a, b)) := bin(a, b, IMul)
-  pub def gen(Div(a, b)) := bin(a, b, IDiv)
+  # Public entry: compile in an empty environment at slot depth 0.
+  pub def gen(e Expr) Vec(Instr) := g(e, %{}, 0)
 
-  def bin(a Expr, b Expr, op Instr) Vec(Instr) := concat(gen(a), concat(gen(b), [op]))
+  # `env` maps a bound name to its slot; `depth` is the next free slot (= the
+  # lexical `let`-nesting depth — sibling subtrees safely reuse a slot once it
+  # has been loaded, since scoping forbids a binding escaping its body).
+  def g(e Expr, env Map(String, Int64), depth Int64) Vec(Instr)
+  def g(Num(n), _, _) := [Push(n)]
+  def g(Var(name), env, _) := [Load(Map.get(env, name))]
+  def g(Add(a, b), env, d) := bin(a, b, env, d, IAdd)
+  def g(Sub(a, b), env, d) := bin(a, b, env, d, ISub)
+  def g(Mul(a, b), env, d) := bin(a, b, env, d, IMul)
+  def g(Div(a, b), env, d) := bin(a, b, env, d, IDiv)
+
+  def g(Let(name, rhs, body), env, d)
+    # evaluate `rhs`, store it into slot `d`, then compile `body` with `name`
+    # bound to slot `d` and the next free slot at `d + 1`
+    concat(g(rhs, env, d), concat([Store(d)], g(body, Map.put(env, name, d), d + 1)))
+  end
+
+  def bin(a Expr, b Expr, env Map(String, Int64), d Int64, op Instr) Vec(Instr)
+  def bin(a, b, env, d, op) := concat(g(a, env, d), concat(g(b, env, d), [op]))
 
   # List concatenation, written in Rian (there is no `++` operator).
   def concat(xs Vec(Instr), ys Vec(Instr)) Vec(Instr)
   def concat([], ys) := ys
   def concat([h | t], ys) := [h | concat(t, ys)]
 
-  # Execute an instruction list against a stack (a `Vec(Int64)`), returning the
-  # value left on top. Binary ops pop two operands (`[b, a | s]`) and push one.
-  pub def run(prog Vec(Instr)) Int64 := exec(prog, [])
+  # Execute against an operand stack (`Vec(Int64)`) and a slot store
+  # (`Map(Int64, Int64)`), returning the value left on top of the stack.
+  pub def run(prog Vec(Instr)) Int64 := exec(prog, [], %{})
 
-  def exec(prog Vec(Instr), stack Vec(Int64)) Int64
-  def exec([], [top | _]) := top
-  def exec([Push(n) | rest], stack) := exec(rest, [n | stack])
-  def exec([IAdd | rest], [b, a | s]) := exec(rest, [a + b | s])
-  def exec([ISub | rest], [b, a | s]) := exec(rest, [a - b | s])
-  def exec([IMul | rest], [b, a | s]) := exec(rest, [a * b | s])
-  def exec([IDiv | rest], [b, a | s]) := exec(rest, [a div b | s])
+  def exec(prog Vec(Instr), stack Vec(Int64), slots Map(Int64, Int64)) Int64
+  def exec([], [top | _], _) := top
+  def exec([Push(n) | r], st, sl) := exec(r, [n | st], sl)
+  def exec([Load(i) | r], st, sl) := exec(r, [Map.get(sl, i) | st], sl)
+  def exec([Store(i) | r], [v | st], sl) := exec(r, st, Map.put(sl, i, v))
+  def exec([IAdd | r], [b, a | st], sl) := exec(r, [a + b | st], sl)
+  def exec([ISub | r], [b, a | st], sl) := exec(r, [a - b | st], sl)
+  def exec([IMul | r], [b, a | st], sl) := exec(r, [a * b | st], sl)
+  def exec([IDiv | r], [b, a | st], sl) := exec(r, [a div b | st], sl)
 end

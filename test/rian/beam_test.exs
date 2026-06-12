@@ -168,6 +168,30 @@ defmodule Rian.BeamTest do
       assert cg.gen({:add, {:num, 1}, {:num, 2}}) == [{:push, 1}, {:push, 2}, :i_add]
     end
 
+    test "the codegen handles variables and `let` via load/store slots" do
+      {:ok, cg} = Beam.load(File.read!("examples/rian/selfhost_codegen.rian"), :rian_beam_cg_vars)
+
+      run = fn e -> cg.run(cg.gen(e)) end
+
+      # `let x = 5 in x + 1` -> a slot is stored then loaded
+      let1 = {:let, "x", {:num, 5}, {:add, {:var, "x"}, {:num, 1}}}
+      assert cg.gen(let1) == [{:push, 5}, {:store, 0}, {:load, 0}, {:push, 1}, :i_add]
+      assert run.(let1) == 6
+
+      # nested lets occupy distinct slots
+      nested =
+        {:let, "x", {:num, 10},
+         {:let, "y", {:num, 4}, {:mul, {:add, {:var, "x"}, {:var, "y"}}, {:num, 2}}}}
+
+      assert run.(nested) == 28
+
+      # lexical shadowing: the inner `x` takes its own slot, the outer survives
+      shadow =
+        {:let, "x", {:num, 1}, {:add, {:let, "x", {:num, 2}, {:var, "x"}}, {:var, "x"}}}
+
+      assert run.(shadow) == 3
+    end
+
     test "the self-hosting optimizer constant-folds + simplifies, shrinking codegen output" do
       {:ok, opt} = Beam.load(File.read!("examples/rian/selfhost_opt.rian"), :rian_beam_opt)
       {:ok, cg} = Beam.load(File.read!("examples/rian/selfhost_codegen.rian"), :rian_beam_opt_cg)

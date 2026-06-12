@@ -184,7 +184,12 @@ construction, and cons-list building all compose and lower correctly.
    appear, and **needed zero backend changes**: an optimizer over a *sum* IR
    destructures with variant patterns (long supported), not struct patterns.
    Slotted before the codegen, it shrinks output — `(2 + 3) * 4` emits a single
-   `Push 20` instead of five instructions.
+   `Push 20` instead of five instructions. The codegen also handles **variables
+   and `let`** via load/store **slots**: it threads a compile-time `name → slot`
+   environment and the VM threads a slot store (`Map(Int64, Int64)`), so
+   `let x = 5 in x + 1` lowers to `[Push 5, Store 0, Load 0, Push 1, IAdd]` and
+   lexical shadowing resolves to distinct slots — still **zero backend changes**
+   (maps suffice).
 
 ## Conclusion of the spike series
 
