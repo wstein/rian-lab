@@ -173,3 +173,34 @@ construction, and cons-list building all compose and lower correctly.
    awaits a spike whose IR nodes are structs matched by shape (e.g. an optimizer
    rewriting struct-shaped IR). **Net: the abstract-forms backend now compiles a
    five-stage compiler/runtime pipeline written in Rian, end to end.**
+9. **Self-hosting optimizer (constant folding) (ADR-0027/0031)** — **the
+   prediction did *not* fire, and that is the finding.**
+   [`examples/rian/selfhost_opt.rian`](examples/rian/selfhost_opt.rian) is a real
+   optimization pass: it folds constant subtrees (`(2 + 3) * 4` → `Num(20)`) and
+   applies algebraic identities (`x * 1` → `x`, `x * 0` → `0`, `x + 0` → `x`),
+   matching IR nodes **by shape** — `Add(Num(a), Num(b))`, `Mul(_, Num(0))`,
+   `Add(a, Num(0))` — with nested variant and literal-in-variant patterns. This
+   is exactly where the struct/map-*pattern* wall was predicted. It did not
+   appear, and **needed zero backend changes**: an optimizer over a *sum* IR
+   destructures with variant patterns (long supported), not struct patterns.
+   Slotted before the codegen, it shrinks output — `(2 + 3) * 4` emits a single
+   `Push 20` instead of five instructions.
+
+## Conclusion of the spike series
+
+Six layers — **lexer → parser → optimizer → type-checker → codegen → stack VM** —
+are now written in Rian and compile to real `.beam`, composing into a full
+source-to-value pipeline. The spike method drove exactly the increments the code
+*demanded* (maps for the evaluator's symbol table; structs for the checker's
+diagnostic record) and nothing it didn't.
+
+The one prediction that never fired — **struct/map *patterns*** — is the honest
+boundary of "self-hosting-complete for idiomatic Rian": Rian is sum-oriented, so
+ASTs and IRs are matched with *variant* patterns (supported) and structs are read
+by *field access* (supported), never matched by shape. Struct/map patterns are
+also a **parser-first** gap — `Rian.Pratt.parse_pat` has no surface for `%{…}` /
+`Name{…}` patterns — so they would be a two-part increment (parser + abstract
+forms) undertaken only when a spike genuinely needs a struct-shaped IR matched by
+pattern. None of the six layers did. Remaining ergonomic gaps (positional struct
+construction, map update `%{m | k: v}`) are small, self-contained, and likewise
+unforced by the pipeline.

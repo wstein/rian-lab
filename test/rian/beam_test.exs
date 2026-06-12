@@ -168,6 +168,23 @@ defmodule Rian.BeamTest do
       assert cg.gen({:add, {:num, 1}, {:num, 2}}) == [{:push, 1}, {:push, 2}, :i_add]
     end
 
+    test "the self-hosting optimizer constant-folds + simplifies, shrinking codegen output" do
+      {:ok, opt} = Beam.load(File.read!("examples/rian/selfhost_opt.rian"), :rian_beam_opt)
+      {:ok, cg} = Beam.load(File.read!("examples/rian/selfhost_codegen.rian"), :rian_beam_opt_cg)
+
+      # constant folding collapses a constant tree to a single literal
+      folded = opt.fold({:mul, {:add, {:num, 2}, {:num, 3}}, {:num, 4}})
+      assert folded == {:num, 20}
+      # and the optimized program is one instruction instead of five
+      assert cg.gen(folded) == [{:push, 20}]
+      assert length(cg.gen({:mul, {:add, {:num, 2}, {:num, 3}}, {:num, 4}})) == 5
+
+      # algebraic identities over a variable (matched by shape: `Num(0)`/`Num(1)`)
+      assert opt.fold({:add, {:mul, {:var, "x"}, {:num, 1}}, {:num, 0}}) == {:var, "x"}
+      assert opt.fold({:mul, {:var, "x"}, {:num, 0}}) == {:num, 0}
+      assert opt.fold({:add, {:sub, {:num, 10}, {:num, 10}}, {:var, "y"}}) == {:var, "y"}
+    end
+
     test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
       {:ok, mod} =
         Beam.load(

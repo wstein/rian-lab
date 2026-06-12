@@ -1,0 +1,54 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — a Rian optimizer (constant folding), written in Rian
+# ===========================================================================
+# Goal (ADR-0027/0031): an optimization pass over the `Expr` sum. Fold constant
+# subexpressions at compile time (`2 + 3` -> `5`) and apply algebraic identities
+# (`x + 0` -> `x`, `x * 1` -> `x`, `x * 0` -> `0`). This is where a compiler
+# pattern-matches IR nodes *by shape* — the test of whether sum-based matching
+# (variant + nested-literal patterns) is enough, or a struct/map pattern is
+# wanted. Evidence for SELFHOST.md.
+# ---------------------------------------------------------------------------
+
+mod SelfhostOpt do
+  type Expr := Num(Int64)
+             | Var(String)
+             | Add(Expr, Expr)
+             | Sub(Expr, Expr)
+             | Mul(Expr, Expr)
+             | Div(Expr, Expr)
+
+  # Fold an expression bottom-up: optimize the operands, then combine them.
+  pub def fold(e Expr) Expr
+  pub def fold(Num(n)) := Num(n)
+  pub def fold(Var(x)) := Var(x)
+  pub def fold(Add(a, b)) := add(fold(a), fold(b))
+  pub def fold(Sub(a, b)) := sub(fold(a), fold(b))
+  pub def fold(Mul(a, b)) := mul(fold(a), fold(b))
+  pub def fold(Div(a, b)) := divide(fold(a), fold(b))
+
+  # Each combiner pattern-matches its (already-folded) operands by shape: both
+  # constant -> evaluate now; an identity element -> drop it; else rebuild.
+  def add(l Expr, r Expr) Expr
+  def add(Num(a), Num(b)) := Num(a + b)
+  def add(Num(0), b) := b
+  def add(a, Num(0)) := a
+  def add(a, b) := Add(a, b)
+
+  def sub(l Expr, r Expr) Expr
+  def sub(Num(a), Num(b)) := Num(a - b)
+  def sub(a, Num(0)) := a
+  def sub(a, b) := Sub(a, b)
+
+  def mul(l Expr, r Expr) Expr
+  def mul(Num(a), Num(b)) := Num(a * b)
+  def mul(Num(0), _) := Num(0)
+  def mul(_, Num(0)) := Num(0)
+  def mul(Num(1), b) := b
+  def mul(a, Num(1)) := a
+  def mul(a, b) := Mul(a, b)
+
+  def divide(l Expr, r Expr) Expr
+  def divide(Num(a), Num(b)) := Num(a div b)
+  def divide(a, Num(1)) := a
+  def divide(a, b) := Div(a, b)
+end

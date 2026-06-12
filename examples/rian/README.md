@@ -61,6 +61,11 @@ compile + run on real BEAM bytecode:
   them on a stack (`Vec(Int64)`). The full `lex → parse → codegen → run` pipeline
   runs on `.beam`; it hits **no** backend wall (sum ASTs + list patterns, both
   already supported).
+- [selfhost_opt.rian](selfhost_opt.rian) — an **optimizer** (constant folding +
+  algebraic identities: `2 + 3 → 5`, `x * 1 → x`, `x * 0 → 0`). It matches IR
+  nodes by shape with nested variant and literal-in-variant patterns
+  (`Add(Num(a), Num(b))`, `Mul(_, Num(0))`) — and hits **no** wall. Slotting it
+  before codegen shrinks the emitted program (`(2 + 3) * 4` → a single `Push 20`).
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
