@@ -463,6 +463,16 @@ defmodule Rian.Pratt do
     {{:bind, name, e}, rest}
   end
 
+  # typed binding `x Int32 := 66` — the declared type sits between the name and
+  # `:=`. It is parsed and currently elided downstream (a binding still takes its
+  # type from the value); keeping the form legal now lets the checker enforce it
+  # later. (`name type` is otherwise not a valid statement, so this only newly
+  # accepts the typed-binding form.) Parametric types (`Vec(Int64)`) are future.
+  defp parse_stmt([{:id, name}, {:id, _type}, {:op, ":="} | rest]) do
+    {e, rest} = parse_expr(rest, 0)
+    {{:bind, name, e}, rest}
+  end
+
   defp parse_stmt(tokens) do
     {e, rest} = parse_expr(tokens, 0)
     {{:expr, e}, rest}

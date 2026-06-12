@@ -164,6 +164,16 @@ defmodule Rian.PrattTest do
                {:block,
                 [{:bind, "x", {:num, "2"}}, {:expr, {:bin, "+", {:id, "x"}, {:num, "1"}}}]}
     end
+
+    test "a typed binding `x Int32 := 66` parses (the type annotation is elided)" do
+      # `name Type := expr` binds `name` to `expr`; same shape as the untyped
+      # form (the value's type is still inferred — the annotation is documentary)
+      assert Pratt.parse_body("x Int32 := 66 ; x") ==
+               {:block, [{:bind, "x", {:num, "66"}}, {:expr, {:id, "x"}}]}
+
+      # untyped bindings are unaffected
+      assert Pratt.parse_body("y := 1") == {:block, [{:bind, "y", {:num, "1"}}]}
+    end
   end
 
   describe "string literals" do
