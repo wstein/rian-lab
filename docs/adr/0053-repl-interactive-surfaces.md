@@ -101,8 +101,10 @@ notebooks), but it is the second priority and **must impose ordered execution** 
 `mix rian.repl` (and `Rian.Repl`) is a thin loop over the existing core:
 
 1. **read** a unit (multiline-aware; `:=`/`def`/expr).
-2. **eval** = `Rian.Beam.load/2` into an incrementing session module (with the prior session env in
-   scope); a bare expression is wrapped as a 0-arity entry and called.
+2. **eval** = `Rian.Beam.load/2` into the session's single module `rian_repl_<base>`, purged and
+   reloaded per entry (with the prior session env in scope); a bare expression is wrapped as a
+   polymorphic 0-arity entry and called. One module per session keeps the atom table and code
+   memory bounded for arbitrarily long sessions.
 3. **print** value + inferred type (ADR-0034) + effect set (ADR-0048).
 4. helpers: `h`, history, completion (LSP), `--remote node@host` (connect + hot-reload via
    `:code.load_binary`).
@@ -139,8 +141,10 @@ not to function bodies (functions stay closed) — a deliberate, documented boun
 
 - **Connected-to-prod security** — auth + a sandbox/fuel story for remote eval into a live node
   (shares the comptime/LSP sandbox concerns, ADR-0030/0038); effect visibility (ADR-0048) aids review.
-- **Session env model** — how prior `:=`/`def` units stay in scope across entries (incrementing module
-  vs an accumulated session AST); interaction with redefinition.
+- **Session env model** — resolved in v1: prior `:=`/`def` units stay in scope across entries by
+  re-emitting the accumulated session program into the session's single `rian_repl_<base>` module,
+  purged and reloaded per entry; redefinition replaces the unit sharing a name (Clojure's `def`
+  model).
 - **Livebook integration shape** — a Rian smart-cell / kernel; and the eventual ordered-execution
   Jupyter kernel.
 - **Editor-eval protocol** (ADR-0038) — the LSP message that ships a form to the connected REPL.
