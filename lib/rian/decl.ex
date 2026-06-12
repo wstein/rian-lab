@@ -26,13 +26,15 @@ defmodule Rian.Decl do
       `case … do … end` expressions, string literals, and `when` guards.
     * `alias Name := Type` — transparent synonyms, resolved by substituting the
       name out of every type position (introduces no runtime form).
+    * `struct Name(field Type, …)` — product types; lower to `defstruct` (BEAM) /
+      `struct {…}` (Rust) and are built with `Name(v1, v2)` constructor calls.
 
   ## Not yet supported
 
-  `mod`/`struct` declarations. Each raises `Rian.Decl.Error`.
+  `mod` declarations. They raise `Rian.Decl.Error`.
   """
   alias Rian.{Lexer, Lower}
-  alias Rian.IR.{Clause, Field, Func, Param, Type, Variant}
+  alias Rian.IR.{Clause, Field, Func, Param, Struct, Type, Variant}
 
   defmodule Error do
     defexception [:message]
@@ -61,7 +63,11 @@ defmodule Rian.Decl do
       |> Enum.map(&subst_func(&1, aliases))
 
     types = for({:type, t} <- decls, do: parse_type(t)) |> Enum.map(&subst_type(&1, aliases))
-    %{types: types, funcs: funcs}
+
+    structs =
+      for({:struct, s} <- decls, do: parse_struct(s)) |> Enum.map(&subst_struct(&1, aliases))
+
+    %{types: types, structs: structs, funcs: funcs}
   end
 
   defp parse_alias(text) do
@@ -93,23 +99,27 @@ defmodule Rian.Decl do
   end
 
   defp subst_variant(%Variant{fields: fs} = v, aliases) do
-    %Variant{
-      v
-      | fields:
-          Enum.map(fs, fn %Field{} = fl -> %Field{fl | type: subst_type_str(fl.type, aliases)} end)
-    }
+    %Variant{v | fields: subst_fields(fs, aliases)}
+  end
+
+  defp subst_struct(%Struct{fields: fs} = s, aliases) do
+    %Struct{s | fields: subst_fields(fs, aliases)}
+  end
+
+  defp subst_fields(fs, aliases) do
+    Enum.map(fs, fn %Field{} = fl -> %Field{fl | type: subst_type_str(fl.type, aliases)} end)
   end
 
   @doc "Parse and lower every function to both targets: `[{name, %{elixir, rust}}]`."
   def compile(src) do
-    %{types: types, funcs: funcs} = parse(src)
-    Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f)} end)
+    %{types: types, structs: structs, funcs: funcs} = parse(src)
+    Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f, structs)} end)
   end
 
   @doc "Parse and lower to the BEAM target only (FFI / BEAM-only bodies)."
   def compile_beam(src) do
-    %{types: types, funcs: funcs} = parse(src)
-    Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f)} end)
+    %{types: types, structs: structs, funcs: funcs} = parse(src)
+    Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs)} end)
   end
 
   # ── Tokens -> declarations (recursive descent) ─────────────────────────
@@ -131,8 +141,17 @@ defmodule Rian.Decl do
     [{:alias, Lexer.detokenize(toks)} | split_decls(rest)]
   end
 
+  defp split_decls([{:kw, "struct"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    [{:struct, Lexer.detokenize(toks)} | split_decls(rest)]
+  end
+
   defp split_decls([{:kw, kw} | _]),
-    do: raise(Error, "unsupported declaration `#{kw}` (supported: `type` / `def` / `alias`)")
+    do:
+      raise(
+        Error,
+        "unsupported declaration `#{kw}` (supported: `type` / `struct` / `def` / `alias`)"
+      )
 
   defp split_decls([tok | _]), do: raise(Error, "expected a declaration, got #{inspect(tok)}")
 
@@ -236,6 +255,17 @@ defmodule Rian.Decl do
   end
 
   defp strip_type_params(name), do: name |> String.split("(", parts: 2) |> hd() |> String.trim()
+
+  # ── `struct` declarations ──────────────────────────────────────────────
+  # `struct Name(field Type, …)` — a product type: one constructor named after
+  # the type, with labeled fields (a bare `struct Name` is a zero-field record).
+  defp parse_struct(text) do
+    case extract_parens(text) do
+      {name, inside, ""} -> %Struct{name: String.trim(name), fields: fields(inside)}
+      {_, _, rest} -> raise Error, "trailing tokens after struct `#{text}`: #{rest}"
+      :none -> %Struct{name: String.trim(text), fields: []}
+    end
+  end
 
   # Detokenized type strings space their parens/commas (`Vec ( Int64 )`); collapse
   # them back so a parenthesized type is one whitespace-split token (`Vec(Int64)`).

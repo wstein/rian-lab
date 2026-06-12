@@ -3,7 +3,7 @@ defmodule Rian.DeclTest do
   use ExUnit.Case, async: false
 
   alias Rian.Decl
-  alias Rian.IR.{Clause, Field, Param, Type, Variant}
+  alias Rian.IR.{Clause, Field, Param, Struct, Type, Variant}
 
   describe "parsing -> core IR (Rian.IR structs)" do
     test "a `type` sum with labeled fields" do
@@ -266,10 +266,60 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "struct declarations (product types)" do
+    test "a struct parses into a %Struct{} with labeled fields" do
+      %{structs: [s]} = Decl.parse("struct Point(x Float64, y Float64)")
+
+      assert s == %Struct{
+               name: "Point",
+               fields: [%Field{label: "x", type: "Float64"}, %Field{label: "y", type: "Float64"}]
+             }
+    end
+
+    test "a struct lowers to defstruct / Rust struct, and `Name(args)` builds it" do
+      [{"origin", out}] =
+        Decl.compile("""
+        struct Point(x Float64, y Float64)
+
+        def origin(d Float64) Point := Point(d, d)
+        """)
+
+      assert out.elixir =~ "defmodule Point do defstruct [:x, :y] end"
+      assert out.elixir =~ "%Point{x: d, y: d}"
+      assert out.rust =~ "struct Point { x: f64, y: f64 }"
+      assert out.rust =~ "Point { x: d, y: d }"
+    end
+
+    test "a struct value built from source runs on the BEAM, with field access" do
+      [{"shift", out}] =
+        Decl.compile("""
+        struct Point(x Int64, y Int64)
+
+        def shift(p val Point, d Int64) Point := Point(p.x + d, p.y + d)
+        """)
+
+      Code.eval_string("defmodule ShiftFromSource do\n#{out.elixir}\nend")
+      # build the struct dynamically — the module is defined at runtime, so a
+      # `%Mod{}` literal cannot be compile-time expanded here.
+      point = struct(ShiftFromSource.Point, x: 1, y: 2)
+      assert ShiftFromSource.shift(point, 10) == struct(ShiftFromSource.Point, x: 11, y: 12)
+    end
+
+    test "an alias resolves inside struct fields" do
+      %{structs: [s]} =
+        Decl.parse("""
+        alias Id := Int64
+        struct Row(id Id, n Int64)
+        """)
+
+      assert s.fields == [%Field{label: "id", type: "Int64"}, %Field{label: "n", type: "Int64"}]
+    end
+  end
+
   describe "honest limits raise Rian.Decl.Error" do
     test "unsupported declaration keywords are rejected" do
       assert_raise Decl.Error, ~r/unsupported declaration/, fn ->
-        Decl.parse("struct Point(x Float64, y Float64)")
+        Decl.parse("mod Geometry do def f(n Int64) Int64 := n end")
       end
     end
   end

@@ -22,24 +22,34 @@ defmodule Rian.Lower do
   alias Rian.Pratt
 
   # ── Pipeline ───────────────────────────────────────────────────────────
-  def compile(types, func) do
-    env = build_env(types)
+  def compile(types, func, structs \\ []) do
+    env = build_env(types, structs)
     :ok = check!(func, env)
     meta = build_meta(types)
-    %{elixir: to_elixir(func, types), rust: to_rust(func, types, meta)}
+    smeta = build_struct_meta(structs)
+
+    %{
+      elixir: to_elixir(func, types, structs, smeta),
+      rust: to_rust(func, types, meta, structs, smeta)
+    }
   end
 
   @doc "Compile to the BEAM target only (for functions using BEAM-only constructs)."
-  def compile_beam(types, func) do
-    env = build_env(types)
+  def compile_beam(types, func, structs \\ []) do
+    env = build_env(types, structs)
     :ok = check!(func, env)
-    %{elixir: to_elixir(func, types)}
+    %{elixir: to_elixir(func, types, structs, build_struct_meta(structs))}
   end
 
-  defp build_env(types) do
-    Enum.reduce(types, E.base_env(), fn t, env ->
-      variants = Enum.map(t.variants, fn v -> {PL.to_snake(v.ctor), length(v.fields)} end)
-      E.add_type(env, PL.to_snake(t.name), variants)
+  defp build_env(types, structs) do
+    env =
+      Enum.reduce(types, E.base_env(), fn t, env ->
+        variants = Enum.map(t.variants, fn v -> {PL.to_snake(v.ctor), length(v.fields)} end)
+        E.add_type(env, PL.to_snake(t.name), variants)
+      end)
+
+    Enum.reduce(structs, env, fn s, env ->
+      PL.add_struct(env, s.name, Enum.map(s.fields, &PL.to_snake(&1.label)))
     end)
   end
 
@@ -49,6 +59,14 @@ defmodule Rian.Lower do
       labels = Enum.map(v.fields, &Map.get(&1, :label))
       named = v.fields != [] and Enum.all?(v.fields, &Map.get(&1, :label))
       {PL.to_snake(v.ctor), %{enum: t.name, ctor: v.ctor, labels: labels, named: named}}
+    end
+  end
+
+  # struct_name => %{name: "Point", labels: ["x", "y"]} — keyed by the surface
+  # (constructor) name so a `Name(args)` call in a body resolves to a struct lit.
+  defp build_struct_meta(structs) do
+    for s <- structs, into: %{} do
+      {s.name, %{name: s.name, labels: Enum.map(s.fields, & &1.label)}}
     end
   end
 
@@ -76,19 +94,45 @@ defmodule Rian.Lower do
   end
 
   # ── Elixir backend ─────────────────────────────────────────────────────
-  def to_elixir(func, types) do
+  def to_elixir(func, types, structs \\ [], smeta \\ %{}) do
     Enum.each(func.params, &Rian.Capability.beam_legal!(&1.cap))
     typespecs = Enum.map_join(types, "\n", &ex_typespec/1)
+    struct_defs = Enum.map_join(structs, "\n", &ex_struct/1)
 
     clauses =
       Enum.map_join(func.clauses, "\n", fn c ->
         head = "def #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
-        body = emit(Pratt.parse_body(c.body), :elixir) |> elem(0)
+        body_ast = c.body |> Pratt.parse_body() |> resolve_structs(smeta)
+        body = emit(body_ast, :elixir) |> elem(0)
         "#{head}#{guard_str(c, :elixir)} do #{body} end"
       end)
 
-    typespecs <> "\n" <> clauses
+    [struct_defs, typespecs, clauses]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n")
   end
+
+  # `struct Point(x Float64, y Float64)` -> a nested module carrying `defstruct`,
+  # so `%Point{…}` construction and `p.x` access resolve on the BEAM.
+  defp ex_struct(s) do
+    fields = Enum.map_join(s.fields, ", ", fn f -> ":#{f.label}" end)
+    "defmodule #{s.name} do defstruct [#{fields}] end"
+  end
+
+  # Rewrite a constructor-call `Name(v1, v2)` into a struct literal when `Name`
+  # is a declared struct, zipping the positional args onto the field labels. The
+  # struct meta is available here, so the emitter needs no ambient context.
+  defp resolve_structs({:call, {:id, name}, args}, smeta) do
+    case Map.fetch(smeta, name) do
+      {:ok, %{labels: labels}} ->
+        {:struct_lit, name, Enum.zip(labels, Enum.map(args, &resolve_structs(&1, smeta)))}
+
+      :error ->
+        {:call, {:id, name}, Enum.map(args, &resolve_structs(&1, smeta))}
+    end
+  end
+
+  defp resolve_structs(node, smeta), do: Rian.Macro.map_node(node, &resolve_structs(&1, smeta))
 
   # Optional clause guard: `nil` or a Rian guard-expression string. Lowers to
   # `when …` on Elixir and `if …` on Rust (clauses-guards §5).
@@ -176,8 +220,9 @@ defmodule Rian.Lower do
     do: "{:#{PL.to_snake(name)}, #{Enum.map_join(args, ", ", &pat_ex/1)}}"
 
   # ── Rust backend ───────────────────────────────────────────────────────
-  def to_rust(func, types, meta) do
+  def to_rust(func, types, meta, structs \\ [], smeta \\ %{}) do
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
+    struct_defs = Enum.map_join(structs, "\n\n", &rust_struct/1)
 
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
@@ -191,10 +236,12 @@ defmodule Rian.Lower do
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
         pat = tuple_or_one(c.pats, &pat_rs(&1, meta))
-        # Resolve `case` constructor patterns into the body IR here, where the
-        # type meta is available — so the recursive emitter needs no ambient
-        # context (this is the IR carrying the resolution, ADR core-IR direction).
-        body_ast = c.body |> Pratt.parse_body() |> resolve_rust_pats(meta)
+        # Resolve struct construction and `case` constructor patterns into the
+        # body IR here, where the type/struct meta is available — so the recursive
+        # emitter needs no ambient context (the IR carries the resolution).
+        body_ast =
+          c.body |> Pratt.parse_body() |> resolve_structs(smeta) |> resolve_rust_pats(meta)
+
         body = emit(body_ast, :rust) |> elem(0)
         "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(body_ast, body)},"
       end)
@@ -203,7 +250,12 @@ defmodule Rian.Lower do
       "fn #{func.name}(#{param_decls}) -> #{prim_rust(func.ret)} {\n" <>
         "    match #{scrut} {\n#{arms}\n    }\n}"
 
-    enums <> "\n\n" <> fn_str
+    [struct_defs, enums, fn_str] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+  end
+
+  defp rust_struct(s) do
+    fields = Enum.map_join(s.fields, ", ", fn f -> "#{f.label}: #{prim_rust(f.type)}" end)
+    "#[derive(Clone, Debug, PartialEq)]\nstruct #{s.name} { #{fields} }"
   end
 
   defp tuple_or_one([one], f), do: f.(one)
@@ -383,6 +435,17 @@ defmodule Rian.Lower do
     do: {"%{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir)}" end)}}", 12}
 
   defp emit({:map_lit, _}, :rust), do: raise("map literals are BEAM-only in PoC")
+
+  # struct literal — `%Name{x: …}` on the BEAM, `Name { x: … }` on Rust
+  defp emit({:struct_lit, name, pairs}, :elixir),
+    do:
+      {"%#{name}{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir)}" end)}}",
+       12}
+
+  defp emit({:struct_lit, name, pairs}, :rust),
+    do:
+      {"#{name} { #{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :rust)}" end)} }",
+       12}
 
   # pipe: native on Elixir, structural call on Rust
   defp emit({:bin, "|>", l, r}, :elixir),

@@ -68,6 +68,10 @@ defmodule Rian.Macro do
   end
 
   def map_node({:map_lit, ps}, f), do: {:map_lit, Enum.map(ps, fn {k, v} -> {k, f.(v)} end)}
+
+  def map_node({:struct_lit, n, ps}, f),
+    do: {:struct_lit, n, Enum.map(ps, fn {k, v} -> {k, f.(v)} end)}
+
   def map_node(leaf, _f), do: leaf
 
   # ── substitution: replace {:id, param} with the argument AST ───────────

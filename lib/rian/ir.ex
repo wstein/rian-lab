@@ -36,6 +36,17 @@ defmodule Rian.IR do
     defstruct name: nil, variants: []
   end
 
+  defmodule Struct do
+    @moduledoc """
+    A product-type declaration (`struct Name(field Type, …)`). Unlike a `Type`,
+    which lowers to tagged tuples / a Rust `enum`, a `Struct` lowers to a named
+    record on each target (`defstruct` on the BEAM, a `struct {…}` on Rust) and is
+    built with constructor-call syntax (`Name(v1, v2)`).
+    """
+    @enforce_keys [:name]
+    defstruct name: nil, fields: []
+  end
+
   defmodule Param do
     @moduledoc "A function parameter: `name`, `type`, reference `cap`ability."
     @enforce_keys [:name, :type]
