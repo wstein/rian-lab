@@ -7,6 +7,18 @@ defmodule Rian.Lower do
     * expression parsing   (Rian.Pratt)                    -- precedence-aware
   and emits idiomatic Elixir AND Rust.
 
+  > #### Known limitation — higher-order *application* on the Elixir text target {: .warning}
+  > Applying a function-*valued variable* (`f(x)` where `f` is a parameter or a
+  > binding) is emitted as a plain `f(x)` here, which Elixir reads as a *local
+  > function call*, not the variable application it needs (`f.(x)`). Distinguishing
+  > the two requires threading lexical scope through expression emission. The
+  > **Erlang abstract-forms backend (`Rian.Beam`) handles this correctly** and is
+  > the self-hosting bootstrap target, so higher-order execution is proven there;
+  > this text backend's fix is deferred (it is a source-generation demonstration,
+  > off the bootstrap path). Passing a lambda/capture to an FFI HOF
+  > (`Enum.map(xs, (x) -> …)`) is unaffected — the application happens inside the
+  > callee, and the value itself emits correctly.
+
   Inputs are the (would-be parser output) data:
 
       type = %{name: "Shape", variants: [
