@@ -518,7 +518,8 @@ defmodule Rian.Lower do
       end)
 
     # One param matches the value directly; N>1 match the tuple of arguments
-    # (clauses-guards §5.2).
+    # (clauses-guards §5.2). A `Vec` param lowers to a `&[T]` slice, so list/cons
+    # patterns (slice patterns) match it directly (ADR-0047).
     scrut = tuple_or_one(func.params, & &1.name)
 
     arms =
@@ -610,8 +611,13 @@ defmodule Rian.Lower do
   defp pat_rs(%PList{elems: ps, tail: :close}, m),
     do: "[#{Enum.map_join(ps, ", ", &pat_rs(&1, m))}]"
 
-  defp pat_rs(%PList{tail: t}, _) when t != :close,
-    do: raise("cons-list pattern is BEAM-only (no idiomatic Vec cons)")
+  # a cons pattern `[h, … | t]` is a Rust slice pattern `[h, …, t @ ..]` (matched
+  # against a `&[T]`); the binders are made owned again by `rust_rebinds/1`
+  # (ADR-0047 — Rian cons over a Vec/slice)
+  defp pat_rs(%PList{elems: ps, tail: tail}, m) do
+    heads = Enum.map(ps, &pat_rs(&1, m))
+    "[#{Enum.join(heads ++ [rest_pat_rs(tail)], ", ")}]"
+  end
 
   defp pat_rs(%PCtor{ctor: name, args: []}, meta) do
     info = Map.fetch!(meta, PL.to_snake(name))
@@ -632,6 +638,13 @@ defmodule Rian.Lower do
       "#{info.enum}::#{info.ctor}(#{Enum.map_join(args, ", ", &pat_rs(&1, meta))})"
     end
   end
+
+  # the cons-tail of a Rust slice pattern: `t @ ..` binds the rest as `&[T]`
+  defp rest_pat_rs(%PVar{name: n}), do: "#{n} @ .."
+  defp rest_pat_rs(%PWild{}), do: ".."
+
+  defp rest_pat_rs(other),
+    do: raise("Rust cons tail must be a variable or `_`: #{inspect(other)}")
 
   # ── Expression emission (precedence-aware, target-specific) ────────────
   @doc "Emit a single Rian expression string to :elixir or :rust."
@@ -779,8 +792,17 @@ defmodule Rian.Lower do
   defp emit(%EList{elems: elems, tail: :close}, :rust),
     do: {"vec![#{Enum.map_join(elems, ", ", &p(&1, 0, :rust))}]", 12}
 
-  defp emit(%EList{tail: tl}, :rust) when tl != :close,
-    do: raise("cons-list construction is BEAM-only (no idiomatic Vec cons)")
+  # cons `[e1, …, en | tail]` -> prepend onto an owned copy of the tail
+  # (`.to_vec()` turns the `&[T]` slice — or a `Vec` — into an owned `Vec`), in
+  # reverse so the result order is `e1, …, en, tail…` (ADR-0047)
+  defp emit(%EList{elems: elems, tail: tl}, :rust) do
+    prepends =
+      elems
+      |> Enum.reverse()
+      |> Enum.map_join(" ", fn e -> "__v.insert(0, #{p(e, 0, :rust)});" end)
+
+    {"{ let mut __v = #{p(tl, 12, :rust)}.to_vec(); #{prepends} __v }", 0}
+  end
 
   defp emit(%EMap{pairs: pairs}, :elixir),
     do: {"%{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir)}" end)}}", 12}

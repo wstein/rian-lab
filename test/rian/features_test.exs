@@ -66,14 +66,65 @@ defmodule Rian.FeaturesTest do
       assert Lower.emit_expr("[1, 2, 3]", :rust) == "vec![1, 2, 3]"
     end
 
-    test "cons construction (BEAM-only)" do
+    test "cons construction (Rust: prepend onto an owned copy of the tail, ADR-0047)" do
       assert Lower.emit_expr("[h | t]", :elixir) == "[h | t]"
-      assert_raise RuntimeError, ~r/BEAM-only/, fn -> Lower.emit_expr("[h | t]", :rust) end
+      # cons lowers to a block that prepends onto `tail.to_vec()` (a Vec)
+      assert Lower.emit_expr("[h | t]", :rust) ==
+               "{ let mut __v = t.to_vec(); __v.insert(0, h); __v }"
     end
 
     test "map literal (BEAM-only)" do
       assert Lower.emit_expr("%{a: 1, b: 2}", :elixir) == "%{a: 1, b: 2}"
       assert_raise RuntimeError, ~r/BEAM-only/, fn -> Lower.emit_expr("%{a: 1, b: 2}", :rust) end
+    end
+  end
+
+  describe "cons-recursion lowers to Rust slice patterns (ADR-0047)" do
+    @cons_src """
+    mod NumList do
+      pub def sum(xs Vec(Int64)) Int64
+      pub def sum([]) := 0
+      pub def sum([h | t]) := h + sum(t)
+
+      pub def countdown(n Int64) Vec(Int64)
+      pub def countdown(0) := []
+      pub def countdown(n) := [n | countdown(n - 1)]
+    end
+    """
+
+    test "a cons pattern becomes a slice pattern; cons construction prepends onto a Vec" do
+      [{_, %{rust: rust}}] = Rian.Decl.compile(@cons_src)
+
+      # `[h | t]` clause head -> Rust slice pattern; recursion passes the slice
+      assert rust =~ "[h, t @ ..] => h + sum(t)"
+      # `[n | countdown(n - 1)]` -> prepend onto an owned copy of the tail
+      assert rust =~ "let mut __v = countdown(n - 1).to_vec(); __v.insert(0, n); __v"
+    end
+
+    @tag :rust
+    test "the emitted Rust compiles and runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          [{_, %{rust: rust}}] = Rian.Decl.compile(@cons_src)
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_cons_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            rust <>
+              "\nfn main() { println!(\"{} {:?}\", num_list::sum(&num_list::countdown(4)), num_list::countdown(4)); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-O", "--edition", "2021", src, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "10 [4, 3, 2, 1]"
+      end
     end
   end
 

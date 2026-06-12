@@ -295,6 +295,17 @@ run("1 + 2 * (3 - 4)")  = -1     run("let x = 1 in (let x = 2 in x) + x") = 3
 
 So the complete self-hosting compiler runs on **two targets** (BEAM + JavaScript)
 from one IR. The FFI mappings are a stopgap; the portable prelude (ADR-0047 §2)
-should own `Map`/`String`/`List` so they are not per-emitter special cases. On
-**Rust**, the cons-recursive layers remain BEAM-only until a portable `Vec`/slice
-prelude lands.
+should own `Map`/`String`/`List` so they are not per-emitter special cases.
+
+**Rust gets cons.** A Rian `Vec(T)` param lowers to a `&[T]` slice, so cons
+patterns become **Rust slice patterns** — `[h | t]` → `[h, t @ ..]` — matched
+directly (match ergonomics give `h: &T`, `t: &[T]`), and cons *construction*
+`[e | tail]` prepends onto an owned copy (`tail.to_vec()` then `insert(0, e)`).
+A reduce (`sum([h|t]) := h + sum(t)`) and a fresh-head builder
+(`countdown(n) := [n | countdown(n-1)]`) now lower to Rust and **compile + run
+under rustc** (`sum(&countdown(4)) = 10`). Two ownership frictions remain (a
+real borrow-checker pass, future): returning a borrowed list *param* directly
+where an owned `Vec` is expected (`cat([], ys) := ys`), and re-inserting a
+*borrowed* head var into a new list — both need a clone/`to_vec` the textual
+emitter doesn't yet insert. The lexer also stays BEAM/JS-only on Rust (its
+`String.to_charlist`/`:lists` FFI has no Rust mapping yet).
