@@ -66,7 +66,8 @@ Every qualified call `Mod.fun(...)` resolves to exactly one of three kinds:
 2. **BEAM-stdlib module** (`:lists`, `:maps`, `Enum`, …) → **free FFI on the BEAM**; on non-BEAM,
    resolved via the **std-mapping table** to a target equivalent, **or compile error** if unmapped
    (per §2). Never a silent stub.
-3. **Rian prelude** → the portable core stdlib, provided on **every** target.
+3. **Rian prelude** → the portable core stdlib, provided on **every** target (defined in
+   [ADR-0047](0047-portable-prelude-stdlib.md)).
 
 ### 5. Allocation visibility (consolidates the ADR-0035 item)
 
