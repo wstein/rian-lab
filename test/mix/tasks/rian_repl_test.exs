@@ -132,10 +132,28 @@ defmodule Mix.Tasks.Rian.ReplTest do
       assert {:no, ~c"", []} = Task.completion_for(before("zzzq"), Repl.new())
     end
 
-    test "session-defined names complete" do
+    test "session-defined names complete with a signature hint (display-only)" do
       s = Repl.new()
       {_, s} = Repl.eval(s, "def square(n Int64) Int64\ndef square(n) := n * n")
-      assert {:yes, ~c"are", [{~c"square", []}]} = Task.completion_for(before("squ"), s)
+      # Inserted text is just the name remainder; the hint rides in :ending.
+      assert {:yes, ~c"are", [{~c"square", [ending: ~c"/1 : Int64"]}]} =
+               Task.completion_for(before("squ"), s)
+    end
+
+    test "a bound name completes with its type as a hint" do
+      s = Repl.new()
+      {_, s} = Repl.eval(s, "total := 42")
+
+      assert {:yes, ~c"al", [{~c"total", [ending: ~c" : Int64"]}]} =
+               Task.completion_for(before("tot"), s)
+    end
+
+    test "completes an argument after a meta-command (\\type EXPR)" do
+      s = Repl.new()
+      {_, s} = Repl.eval(s, "def square(n Int64) Int64\ndef square(n) := n * n")
+
+      assert {:yes, ~c"are", [{~c"square", [ending: ~c"/1 : Int64"]}]} =
+               Task.completion_for(before("\\type squ"), s)
     end
   end
 end

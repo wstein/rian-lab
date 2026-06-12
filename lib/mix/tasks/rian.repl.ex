@@ -17,7 +17,10 @@ defmodule Mix.Tasks.Rian.Repl do
   session there, so it gets the native Erlang line editor — history, arrow-key
   recall — plus **Rian-aware Tab-completion**: an `expand_fun` backed by
   `Rian.Repl.complete/2` completes keywords, the `\\` meta-commands, and the
-  session's own defined/bound names. The banner confirms when this is active.
+  session's own defined/bound names — annotating each session name with a
+  display-only signature hint (`square  /1 : Int64`, `total  : Int64`) drawn
+  from `Rian.Repl.describe/1`. Completion also works on the argument of a
+  meta-command, e.g. after `\\type `. The banner confirms when this is active.
 
   When stdin/stdout is not a TTY (a pipe, or an IO server without line editing)
   the REPL falls back to canonical-mode reads. For history and editing there,
@@ -377,12 +380,40 @@ defmodule Mix.Tasks.Rian.Repl do
   def completion_for(before_reversed, session) do
     text = before_reversed |> :lists.reverse() |> List.to_string()
     {candidates, completion} = Repl.complete(text, session)
-    matches = Enum.map(candidates, &{String.to_charlist(&1), []})
+    matches = match_list(candidates, session)
 
     cond do
       candidates == [] -> {:no, ~c"", []}
       completion == "" -> {:no, ~c"", matches}
       true -> {:yes, String.to_charlist(completion), matches}
+    end
+  end
+
+  # Build the edlin match list, annotating session names with a display-only
+  # signature hint (`{:ending, ...}`). Only the inserted `completion` text moves
+  # the line; the hint affects the listing alone, so it never corrupts the input.
+  defp match_list(candidates, session) do
+    %{functions: funcs, binds: binds} = Repl.describe(session)
+
+    Enum.map(candidates, fn name ->
+      case hint(name, funcs, binds) do
+        nil -> {String.to_charlist(name), []}
+        hint -> {String.to_charlist(name), [{:ending, String.to_charlist(hint)}]}
+      end
+    end)
+  end
+
+  defp hint(name, funcs, binds) do
+    cond do
+      Map.has_key?(funcs, name) ->
+        {arity, ret} = Map.fetch!(funcs, name)
+        "/#{arity}" <> if(ret, do: " : #{ret}", else: "")
+
+      Map.has_key?(binds, name) and binds[name] ->
+        " : #{binds[name]}"
+
+      true ->
+        nil
     end
   end
 end

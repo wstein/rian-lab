@@ -150,6 +150,36 @@ defmodule Rian.Repl do
     safe_infer_input(input, bind_env(s.binds, ic), ic)
   end
 
+  @doc """
+  Signature metadata for the session's own names — function `arity`/`ret` and
+  the inferred type of each top-level bind. Surfaces use it to annotate
+  completion candidates (e.g. `square  /1 : Int64`). Pure and no-IO; a malformed
+  accumulated program yields empty maps rather than failing.
+  """
+  @spec describe(t()) :: %{
+          functions: %{
+            optional(String.t()) => {arity :: non_neg_integer(), ret :: String.t() | nil}
+          },
+          binds: %{optional(String.t()) => String.t() | nil}
+        }
+  def describe(%Session{units: units, binds: binds} = s) do
+    functions =
+      case safe_decl(units) do
+        %{funcs: fs} -> Map.new(fs, fn f -> {f.name, {length(f.params), f.ret}} end)
+        _ -> %{}
+      end
+
+    ic = session_ic(s)
+    bind_types = bind_env(binds, ic)
+    %{functions: functions, binds: Map.new(binds, fn {n, _} -> {n, Map.get(bind_types, n)} end)}
+  end
+
+  defp safe_decl(units) do
+    Decl.parse(units_src(units))
+  rescue
+    _ -> %{}
+  end
+
   # The language's fixed completion vocabulary: keywords (mirrors `Rian.Lexer`),
   # word-operators, and the surface meta-commands.
   @keywords ~w(if do else end def type case when struct alias mod pub const macro use with)

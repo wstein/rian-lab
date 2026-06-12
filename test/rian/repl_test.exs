@@ -259,6 +259,24 @@ defmodule Rian.ReplTest do
     end
   end
 
+  describe "describe/1 — session signature metadata" do
+    test "reports a function's arity and return type" do
+      s = Repl.new()
+      {_, s} = eval(s, "def square(n Int64) Int64\ndef square(n) := n * n")
+      assert %{functions: %{"square" => {1, "Int64"}}} = Repl.describe(s)
+    end
+
+    test "reports a bind's inferred type" do
+      s = Repl.new()
+      {_, s} = eval(s, "total := 42")
+      assert %{binds: %{"total" => "Int64"}} = Repl.describe(s)
+    end
+
+    test "a fresh session has no functions or binds" do
+      assert Repl.describe(Repl.new()) == %{functions: %{}, binds: %{}}
+    end
+  end
+
   describe "vocabulary/0 — the static word list" do
     test "includes keywords, word-operators, and meta-commands" do
       vocab = Repl.vocabulary()
