@@ -85,6 +85,23 @@ defmodule Rian.BeamTest do
       assert {:file, _} = :code.is_loaded(:rian_beam_lexer)
     end
 
+    test "the self-hosting parser (a Pratt slice in Rian) compiles and parses on bytecode" do
+      {:ok, parser} =
+        Beam.load(File.read!("examples/rian/selfhost_parser.rian"), :rian_beam_parser)
+
+      {:ok, lexer} =
+        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_parser_lexer)
+
+      # the full pipeline lexer -> parser, entirely Rian-compiled-to-.beam:
+      # precedence (`*` over `+`) and parenthesisation come out right
+      ast = parser.parse(lexer.tokenize("1 + 2 * (3 - 4)"))
+      assert ast == {:add, {:num, 1}, {:mul, {:num, 2}, {:sub, {:num, 3}, {:num, 4}}}}
+
+      # left-associativity of same-precedence operators
+      assert parser.parse(lexer.tokenize("10 - 3 - 2")) ==
+               {:sub, {:sub, {:num, 10}, {:num, 3}}, {:num, 2}}
+    end
+
     test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
       {:ok, mod} =
         Beam.load(

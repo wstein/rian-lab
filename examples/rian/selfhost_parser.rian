@@ -1,0 +1,90 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — a Rian expression parser, written in Rian
+# ===========================================================================
+# Goal (ADR-0027/0031): port a slice of `Rian.Pratt` — precedence climbing over
+# `+ - * /` with parentheses — into Rian itself. It consumes the `Vec(Token)`
+# the companion lexer (`selfhost_lexer.rian`) produces, builds its OWN typed
+# `Expr` sum, and threads `(Expr, Vec(Token))` through each step as a `Parse`
+# pair. Evidence for SELFHOST.md — the first `Rian.Beam.Unsupported` it raises
+# is the next real self-hosting increment.
+#
+# Grammar (precedence: `* /` tighter than `+ -`, left-associative):
+#   expr   := term (('+' | '-') term)*
+#   term   := factor (('*' | '/') factor)*
+#   factor := TNum | '(' expr ')'
+# ---------------------------------------------------------------------------
+
+mod SelfhostParser do
+  # The token stream this parser consumes (same shape the lexer emits).
+  type Token := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
+
+  # The parser's own typed output — a sealed expression tree (ADR-0034).
+  type Expr := Num(Int64)
+             | Add(Expr, Expr)
+             | Sub(Expr, Expr)
+             | Mul(Expr, Expr)
+             | Div(Expr, Expr)
+
+  # One parse step yields the node built so far and the unconsumed tokens. A
+  # single-constructor sum is the pair `(Expr, Vec(Token))` without tuple types.
+  type Parse := P(Expr, Vec(Token))
+
+  # Entry point: parse a whole expression, discard the (expected-empty) tail.
+  pub def parse(ts Vec(Token)) Expr
+  pub def parse(ts)
+    case parse_expr(ts) do
+      P(e, _) -> e
+    end
+  end
+
+  # expr := term (('+' | '-') term)*  — fold additive operators left to right.
+  def parse_expr(ts Vec(Token)) Parse
+  def parse_expr(ts)
+    case parse_term(ts) do
+      P(left, rest) -> parse_expr_tail(left, rest)
+    end
+  end
+
+  def parse_expr_tail(left Expr, ts Vec(Token)) Parse
+  def parse_expr_tail(left, [TPlus | rest])
+    case parse_term(rest) do
+      P(right, rest2) -> parse_expr_tail(Add(left, right), rest2)
+    end
+  end
+  def parse_expr_tail(left, [TMinus | rest])
+    case parse_term(rest) do
+      P(right, rest2) -> parse_expr_tail(Sub(left, right), rest2)
+    end
+  end
+  def parse_expr_tail(left, ts) := P(left, ts)
+
+  # term := factor (('*' | '/') factor)*  — fold multiplicative operators.
+  def parse_term(ts Vec(Token)) Parse
+  def parse_term(ts)
+    case parse_factor(ts) do
+      P(left, rest) -> parse_term_tail(left, rest)
+    end
+  end
+
+  def parse_term_tail(left Expr, ts Vec(Token)) Parse
+  def parse_term_tail(left, [TStar | rest])
+    case parse_factor(rest) do
+      P(right, rest2) -> parse_term_tail(Mul(left, right), rest2)
+    end
+  end
+  def parse_term_tail(left, [TSlash | rest])
+    case parse_factor(rest) do
+      P(right, rest2) -> parse_term_tail(Div(left, right), rest2)
+    end
+  end
+  def parse_term_tail(left, ts) := P(left, ts)
+
+  # factor := TNum | '(' expr ')'  — a literal, or a parenthesized subexpression.
+  def parse_factor(ts Vec(Token)) Parse
+  def parse_factor([TNum(n) | rest]) := P(Num(n), rest)
+  def parse_factor([TLParen | rest])
+    case parse_expr(rest) do
+      P(e, [TRParen | rest2]) -> P(e, rest2)
+    end
+  end
+end

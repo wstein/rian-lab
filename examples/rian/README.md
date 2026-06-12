@@ -36,10 +36,18 @@ idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
 Suggested reading order is numeric; 04 is the one to linger on — it is what
 distinguishes Rian from "Elixir with different keywords."
 
-Outside the numbered tour, [selfhost_lexer.rian](selfhost_lexer.rian) is a
-**self-hosting spike** — a real arithmetic lexer written in Rian (its own `Token`
-sum, list-pattern recursion) that compiles and runs on the BEAM. See
-[SELFHOST.md](../../SELFHOST.md) for the blocker ledger it produced.
+Outside the numbered tour, two **self-hosting spikes** are written in Rian and
+compile + run on real BEAM bytecode:
+
+- [selfhost_lexer.rian](selfhost_lexer.rian) — a real arithmetic lexer (its own
+  `Token` sum, list-pattern recursion).
+- [selfhost_parser.rian](selfhost_parser.rian) — a precedence-climbing
+  expression parser (a slice of `Rian.Pratt`) that consumes the lexer's
+  `Vec(Token)`, builds its own `Expr` sum, and threads `(Expr, Vec(Token))` as a
+  `Parse` pair. It exercises higher-order-free recursion, sum construction,
+  nested list/variant patterns, and `case` — and hits **no** backend wall.
+
+See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
 ### Function body forms
 

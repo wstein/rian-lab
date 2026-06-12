@@ -75,9 +75,12 @@ construction, and cons-list building all compose and lower correctly.
    covers sum-variant construction+patterns (tag = `snake(Ctor)`: `Num(n)` →
    `{:num, n}`, `Zero` → `:zero`) and remote/FFI calls (`String.to_charlist` →
    `'Elixir.String'`), plus a single `mod`. **`SelfhostLexer.tokenize/1` is now a
-   genuinely-compiled `.beam` module**, not eval'd source. Still
+   genuinely-compiled `.beam` module**, not eval'd source. Since extended with
+   **higher-order functions** (lambdas/captures + fun-valued *variable
+   application*, ADR-0042), **strings** (literal/`<>`/string-pattern, ADR-0041),
+   and **`with`** error-composition (→ nested `case`, ADR-0039). Still
    `Rian.Beam.Unsupported` (never a miscompile): `struct` declarations (need
-   `%Name{}` map forms), named-arg construction, `String`/`<>`, `with`.
+   `%Name{}` map forms), named-arg construction, map literals.
 3. **Core IR + parser unification (ADR-0050)** — **parser fork closed; typed
    core IR begun.** (a) The duplicate `Decl.pattern` string parser is gone —
    clause heads and `case` arms share the one `Rian.Pratt.parse_pat` (§2). (b)
@@ -110,3 +113,19 @@ construction, and cons-list building all compose and lower correctly.
    collection-primitive layer (ADR-0047 §2) — this is what finally lets a
    cons/FFI program (the lexer) lower to Rust, and needs the collection-
    representation work (ADR-0041 / ADR-0049 emitters).
+5. **Self-hosting parser spike (ADR-0027/0031)** — **a Pratt slice runs in Rian,
+   no wall.** [`examples/rian/selfhost_parser.rian`](examples/rian/selfhost_parser.rian)
+   ports precedence climbing over `+ - * /` with parentheses into Rian: it
+   consumes the lexer's `Vec(Token)`, builds its own `Expr` sum, and threads
+   `(Expr, Vec(Token))` through each step as a single-constructor `Parse` pair.
+   It **compiles to real `.beam` and runs** — `1 + 2 * (3 - 4)` →
+   `Add(Num(1), Mul(Num(2), Sub(Num(3), Num(4))))`, correct precedence and
+   left-associativity. Crucially it raised **no `Rian.Beam.Unsupported`**: the
+   four increments above (function types/HOF, strings, `with`, plus the existing
+   variant/list/`case`/recursion core) were exactly enough to compile a real
+   parser layer. The spike used only sum construction, nested list+variant
+   patterns, `case`, and recursion — no struct or map was needed (an AST is a
+   sum; the token stream is a list). **The next layer (an evaluator / a typed
+   AST with a symbol table) is where `struct`/map literals on BEAM become the
+   likely next blocker** — but that is now a prediction to be tested by the next
+   spike, not a present wall.
