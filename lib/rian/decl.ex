@@ -192,7 +192,7 @@ defmodule Rian.Decl do
       param_type: ptype,
       param_cap: cap,
       ret: req_ret(d),
-      clauses: [%{pats: [{:var, pname}], body: body, guard: d.guard != nil}]
+      clauses: [%{pats: [{:var, pname}], body: body, guard: d.guard}]
     }
   end
 
@@ -206,7 +206,7 @@ defmodule Rian.Decl do
 
   defp clause(%{params: pstr, body: body, guard: guard}) do
     case split_top(pstr, ",") do
-      [single] -> %{pats: [pattern(single)], body: body, guard: guard != nil}
+      [single] -> %{pats: [pattern(single)], body: body, guard: guard}
       _ -> raise Error, "multi-parameter clauses are not yet supported"
     end
   end

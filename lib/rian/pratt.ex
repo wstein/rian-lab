@@ -70,6 +70,12 @@ defmodule Rian.Pratt do
       String.starts_with?(s, ";") ->
         do_tok(advance(s, 1), [{:semi} | acc])
 
+      String.starts_with?(s, "\"") ->
+        case String.split(advance(s, 1), "\"", parts: 2) do
+          [content, rest] -> do_tok(rest, [{:str, content} | acc])
+          [_] -> raise ArgumentError, "unterminated string literal"
+        end
+
       op = Enum.find(@multi, &String.starts_with?(s, &1)) ->
         do_tok(advance(s, String.length(op)), [{:op, op} | acc])
 
@@ -217,6 +223,7 @@ defmodule Rian.Pratt do
   end
 
   defp parse_primary([{:op, ":"}, {:id, name} | rest]), do: parse_postfix({:atom, name}, rest)
+  defp parse_primary([{:str, s} | rest]), do: parse_postfix({:str, s}, rest)
   defp parse_primary([{:num, n} | rest]), do: parse_postfix({:num, n}, rest)
   defp parse_primary([{:id, x} | rest]), do: parse_postfix({:id, x}, rest)
   defp parse_primary(other), do: raise(ArgumentError, "unexpected token: #{inspect(other)}")
@@ -373,6 +380,7 @@ defmodule Rian.Pratt do
   defp expect_rparen(toks), do: raise(ArgumentError, "expected `)`, got #{inspect(toks)}")
 
   defp sexpr({:num, n}), do: n
+  defp sexpr({:str, s}), do: "\"#{s}\""
   defp sexpr({:id, x}), do: x
   defp sexpr({:bin, op, l, r}), do: "(#{op} #{sexpr(l)} #{sexpr(r)})"
   defp sexpr({:unary, op, x}), do: "(#{op} #{sexpr(x)})"

@@ -131,6 +131,20 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "string literals" do
+    test "a string literal lexes and round-trips" do
+      assert p("\"zero\"") == "\"zero\""
+    end
+
+    test "string concatenation parses with `<>`" do
+      assert p("\"a\" <> b") == "(<> \"a\" b)"
+    end
+
+    test "an unterminated string is a lex error" do
+      assert_raise ArgumentError, ~r/unterminated string/, fn -> Pratt.parse("\"oops") end
+    end
+  end
+
   describe "`.` is the sole qualifier (ADR-0029; no `::` alias)" do
     test "dot lowers to a single {:dot} node" do
       assert p("Geometry.area(x)") == "(call (. Geometry area) x)"

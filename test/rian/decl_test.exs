@@ -46,7 +46,7 @@ defmodule Rian.DeclTest do
       %{funcs: [f]} = Decl.parse("def double(n Int64) Int64 := n * 2")
       assert f.param_name == "n"
       assert f.ret == "Int64"
-      assert f.clauses == [%{pats: [{:var, "n"}], body: "n * 2", guard: false}]
+      assert f.clauses == [%{pats: [{:var, "n"}], body: "n * 2", guard: nil}]
     end
 
     test "multi-line declarations are joined by continuation" do
@@ -107,6 +107,24 @@ defmodule Rian.DeclTest do
       Code.eval_string("defmodule EvalFromSource do\n#{out.elixir}\nend")
       assert EvalFromSource.eval({:num, 21}) == 42
       assert EvalFromSource.eval(:zero) == 0
+    end
+
+    test "string bodies and guards lower and run (classify-style)" do
+      [{"classify", out}] =
+        Decl.compile("""
+        def classify(n Int64) String
+        def classify(0) := "zero"
+        def classify(n) when n > 0 := "positive"
+        def classify(_) := "negative"
+        """)
+
+      assert out.elixir =~ "def classify(n) when n > 0 do \"positive\" end"
+      assert out.rust =~ "n if n > 0 => \"positive\","
+
+      Code.eval_string("defmodule ClassifyFromSource do\n#{out.elixir}\nend")
+      assert ClassifyFromSource.classify(0) == "zero"
+      assert ClassifyFromSource.classify(7) == "positive"
+      assert ClassifyFromSource.classify(-3) == "negative"
     end
   end
 

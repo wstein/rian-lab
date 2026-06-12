@@ -58,7 +58,7 @@ defmodule Rian.Lower do
 
     clauses =
       Enum.map(func.clauses, fn c ->
-        PL.lower_clause(%{pats: c.pats, guard: Map.get(c, :guard, false)}, env)
+        PL.lower_clause(%{pats: c.pats, guard: Map.get(c, :guard) != nil}, env)
       end)
 
     r = E.analyze(clauses, arity, env)
@@ -83,11 +83,23 @@ defmodule Rian.Lower do
     clauses =
       Enum.map_join(func.clauses, "\n", fn c ->
         head = "def #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
-        "#{head} do #{emit(Pratt.parse(c.body), :elixir) |> elem(0)} end"
+        "#{head}#{guard_str(c, :elixir)} do #{emit(Pratt.parse(c.body), :elixir) |> elem(0)} end"
       end)
 
     typespecs <> "\n" <> clauses
   end
+
+  # Optional clause guard: `nil` or a Rian guard-expression string. Lowers to
+  # `when …` on Elixir and `if …` on Rust (clauses-guards §5).
+  defp guard_str(c, target) do
+    case Map.get(c, :guard) do
+      g when is_binary(g) -> guard_kw(target) <> (emit(Pratt.parse(g), target) |> elem(0))
+      _ -> ""
+    end
+  end
+
+  defp guard_kw(:elixir), do: " when "
+  defp guard_kw(:rust), do: " if "
 
   # ── `&` capture support ────────────────────────────────────────────────
   # Highest placeholder index in an anonymous-capture body → the closure arity
@@ -149,7 +161,7 @@ defmodule Rian.Lower do
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
         pat = c.pats |> hd() |> pat_rs(meta)
-        "        #{pat} => #{emit(Pratt.parse(c.body), :rust) |> elem(0)},"
+        "        #{pat}#{guard_str(c, :rust)} => #{emit(Pratt.parse(c.body), :rust) |> elem(0)},"
       end)
 
     fn_str =
@@ -220,6 +232,8 @@ defmodule Rian.Lower do
   end
 
   defp emit({:num, n}, _t), do: {n, 12}
+  # string literal — same surface on both targets (Rust yields `&str`)
+  defp emit({:str, s}, _t), do: {"\"#{s}\"", 12}
   defp emit({:id, "pi"}, :elixir), do: {":math.pi()", 12}
   defp emit({:id, "pi"}, :rust), do: {"std::f64::consts::PI", 12}
   defp emit({:id, x}, _t), do: {x, 12}
