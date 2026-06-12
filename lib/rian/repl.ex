@@ -24,6 +24,10 @@ defmodule Rian.Repl do
   forall T` over the session's declarations and bindings, compiling the whole
   program, and calling it.
 
+  Each session is backed by a **single** BEAM module (`rian_repl_<base>`) that
+  is purged and reloaded on every eval, so a session's atom-table and code-
+  memory footprint stay bounded regardless of how many entries it sees.
+
   ## Scope
 
   Whatever [`Rian.Beam`](beam.ex) compiles: functions, sum-variant construction
@@ -41,19 +45,20 @@ defmodule Rian.Repl do
   defmodule Session do
     @moduledoc """
     REPL session state: accumulated `units` (declarations) and `binds`
-    (top-level `:=`), a per-session `base` and per-eval `counter` that name a
-    fresh module each compile (avoiding code-reload churn).
+    (top-level `:=`), plus a per-session `base` integer that names the
+    session's one BEAM module (`rian_repl_<base>`). That module is purged
+    and reloaded on every eval, so the atom table and code memory stay
+    bounded for any session length.
     """
     @type unit :: {names :: [String.t()], src :: String.t()}
     @type bind :: {name :: String.t(), stmt_src :: String.t()}
     @type t :: %__MODULE__{
             units: [unit],
             binds: [bind],
-            base: integer(),
-            counter: non_neg_integer()
+            base: integer()
           }
     @enforce_keys [:base]
-    defstruct units: [], binds: [], base: nil, counter: 0
+    defstruct units: [], binds: [], base: nil
   end
 
   @type result ::
@@ -99,10 +104,8 @@ defmodule Rian.Repl do
       Enum.reject(s.units, fn {ns, _} -> Enum.any?(ns, &(&1 in names)) end) ++
         [{names, String.trim(input)}]
 
-    module = module_name(s)
-
-    {:ok, ^module} = Beam.load(units_src(units), module)
-    {{:defined, names}, %{s | units: units, counter: s.counter + 1}}
+    _module = reload(s, units_src(units))
+    {{:defined, names}, %{s | units: units}}
   rescue
     e -> {{:error, Exception.message(e)}, s}
   end
@@ -122,11 +125,8 @@ defmodule Rian.Repl do
     binds = Enum.reject(s.binds, fn {n, _} -> n == name end) ++ [{name, String.trim(input)}]
 
     case run(s, binds, s.units, name) do
-      {:ok, value, counter} ->
-        {{:bound, name, value, type}, %{s | binds: binds, counter: counter}}
-
-      {:error, message} ->
-        {{:error, message}, s}
+      {:ok, value} -> {{:bound, name, value, type}, %{s | binds: binds}}
+      {:error, message} -> {{:error, message}, s}
     end
   end
 
@@ -134,7 +134,7 @@ defmodule Rian.Repl do
     type = safe_infer_input(input, bind_env(s.binds))
 
     case run(s, s.binds, s.units, input) do
-      {:ok, value, counter} -> {{:value, value, type}, %{s | counter: counter}}
+      {:ok, value} -> {{:value, value, type}, s}
       {:error, message} -> {{:error, message}, s}
     end
   end
@@ -142,11 +142,21 @@ defmodule Rian.Repl do
   # ── the compile + eval core ─────────────────────────────────────────────
 
   defp run(s, binds, units, expr_src) do
-    module = module_name(s)
-    {:ok, ^module} = Beam.load(program(units, binds, expr_src), module)
-    {:ok, apply(module, :__repl__, []), s.counter + 1}
+    module = reload(s, program(units, binds, expr_src))
+    {:ok, apply(module, :__repl__, [])}
   rescue
     e -> {:error, Exception.message(e)}
+  end
+
+  # Purge the session's prior module version and load the new source under the
+  # same name. One module per session — keeps the atom table and code memory
+  # bounded no matter how many entries the session sees.
+  defp reload(s, src) do
+    module = module_name(s)
+    _ = :code.purge(module)
+    _ = :code.delete(module)
+    {:ok, ^module} = Beam.load(src, module)
+    module
   end
 
   # Wrap `expr_src` as a polymorphic 0-arity function over the session's
@@ -178,8 +188,7 @@ defmodule Rian.Repl do
 
   defp units_src(units), do: Enum.map_join(units, "\n\n", fn {_names, src} -> src end)
 
-  defp module_name(%Session{base: base, counter: counter}),
-    do: String.to_atom("rian_repl_#{base}_#{counter}")
+  defp module_name(%Session{base: base}), do: String.to_atom("rian_repl_#{base}")
 
   defp safe_parse_body(input) do
     {:ok, Pratt.parse_body(input)}

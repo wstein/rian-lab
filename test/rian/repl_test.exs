@@ -82,6 +82,35 @@ defmodule Rian.ReplTest do
     end
   end
 
+  describe "session resource usage" do
+    test "many evals reuse a single BEAM module (no atom or code leak)" do
+      n = 200
+      s0 = Repl.new()
+      prefix = "rian_repl_#{s0.base}"
+      module = String.to_atom(prefix)
+
+      assert session_module_count(prefix) == 0
+
+      Enum.reduce(1..n, s0, fn _, s ->
+        {{:value, 2, _}, s2} = eval(s, "1 + 1")
+        s2
+      end)
+
+      # Exactly one module is loaded for the session regardless of n.
+      assert session_module_count(prefix) == 1
+      assert :code.is_loaded(module) != false
+    end
+  end
+
+  defp session_module_count(prefix) do
+    legacy_prefix = prefix <> "_"
+
+    Enum.count(:code.all_loaded(), fn {m, _} ->
+      name = Atom.to_string(m)
+      name == prefix or String.starts_with?(name, legacy_prefix)
+    end)
+  end
+
   describe "render/1 (the print phase)" do
     test "formats each result kind" do
       assert Repl.render({:value, 2, "Int64"}) == "2 : Int64"
