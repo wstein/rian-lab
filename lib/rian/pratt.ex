@@ -183,6 +183,9 @@ defmodule Rian.Pratt do
   defp parse_primary([{:op, ":"}, {:id, name} | rest]), do: parse_postfix({:atom, name}, rest)
   defp parse_primary([{:str, s} | rest]), do: parse_postfix({:str, s}, rest)
   defp parse_primary([{:num, n} | rest]), do: parse_postfix({:num, n}, rest)
+  # a `Char` literal desugars to its codepoint integer (ADR-0036) — the codepoint
+  # representation `__prim_str_chars` uses on every target, so `c == 'A'` composes
+  defp parse_primary([{:char, cp} | rest]), do: parse_postfix({:num, Integer.to_string(cp)}, rest)
   defp parse_primary([{:id, x} | rest]), do: parse_postfix({:id, x}, rest)
   defp parse_primary(other), do: raise(ArgumentError, "unexpected token: #{inspect(other)}")
 
@@ -329,6 +332,8 @@ defmodule Rian.Pratt do
   defp parse_pat([{:id, "_"} | rest]), do: {:wild, rest}
   defp parse_pat([{:op, "-"}, {:num, n} | rest]), do: {{:lit, -String.to_integer(n)}, rest}
   defp parse_pat([{:num, n} | rest]), do: {{:lit, String.to_integer(n)}, rest}
+  # a `Char` literal pattern matches its codepoint integer (ADR-0036)
+  defp parse_pat([{:char, cp} | rest]), do: {{:lit, cp}, rest}
   defp parse_pat([{:op, ":"}, {:id, name} | rest]), do: {{:atom, name}, rest}
   defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
   defp parse_pat([{:lbrace} | rest]), do: parse_pat_tuple(rest, [])

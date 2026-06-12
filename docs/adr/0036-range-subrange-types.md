@@ -115,7 +115,10 @@ on the `@type` spec and first-match clauses; no shim needed.
 - **Lands in slices** (like ADR-0033): (a) emitter range/`Char` lowering + the finite-signature path
   in `Exhaustiveness` are implementable and testable now against hand-built IR; (b) spec + example
   rewrites land now as authoritative surface (this ADR + [02_types_match.rian](../../examples/rian/02_types_match.rian));
-  (c) `range`/`Char`-literal **parsing** lands with the declaration parser.
+  (c) `range` **parsing** lands with the declaration parser. **`Char`-literal lexing/parsing is
+  done** — `Rian.Lexer` scans `'…'` to a `{:char, codepoint}` token and `Rian.Pratt` desugars it
+  (expression and pattern position) to its codepoint integer; the self-hosting lexer now reads
+  `when c == '+'` / `['(' | rest]`. See the implementation note under Open items.
 - **`range` is a bounded, finite opaque type** ([ADR-0043](0043-opaque-types.md)). This ADR's
   "representation, not newtype" mechanism *is* opacity; `range` adds a bounds invariant (fallible
   `T.of`) and a finite signature (exhaustiveness) on top of `opaque T := Base`. No rewrite here —
@@ -133,9 +136,16 @@ on the `@type` spec and first-match clauses; no shim needed.
 
 - ~~**`Char` literal vs Elixir charlist.**~~ **Resolved 2026-06-12:** `'…'` delimits **exactly one
   `Char`** (Crystal); a multi-codepoint single-quoted literal (`'AB'`) is a **lex error** (use a
-  `"…"` `String`) — Rian has **no charlists**. Escapes `'\n'`, `'\''`, `'\\'`, `'\u{1F600}'`. Lowers
-  to `?A` (BEAM integer codepoint) / `'A'` (Rust `char`) as the table above; a deliberate divergence
-  the lexer states, not inherits.
+  `"…"` `String`) — Rian has **no charlists**. Escapes `'\n'`, `'\''`, `'\\'`, `'\u{1F600}'`.
+- **Implementation note (Char literal lands — codepoint on every target).** The `Char` *literal*
+  is implemented: `Rian.Lexer` scans `'…'` (the escapes above, single codepoint enforced) and
+  `Rian.Pratt` desugars it to its **codepoint integer** in both expression and pattern position.
+  It lowers to that integer on **all** targets — *reconciling* the earlier "`?A` on BEAM / native
+  Rust `char`" split: the portable string prelude (ADR-0047 §2) settled on **codepoint-`i64`**
+  (`__prim_str_chars` yields `Vec<i64>` on Rust, BigInt codepoints in JS, a charlist on the BEAM),
+  so a literal that composes with those comparisons must be the same codepoint integer. The
+  distinct `Char` *type* (and its native-Rust-`char` representation + `'A'..'Z'` ranges) builds on
+  this literal and remains future work; until then a `Char` literal infers as `Int64`.
 - ~~**Range arithmetic & coercion.**~~ **Resolved 2026-06-12: arithmetic widens to base.**
   `Digit + Digit : Int64` — *not* `Digit`, because `9 + 9 = 18 ∉ 0..9`; any in-bounds wrap or hidden
   `RangeError` on `+` would be hidden control flow (ADR-0035). Re-narrow explicitly with `Digit.of(18)`

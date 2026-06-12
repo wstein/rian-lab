@@ -190,6 +190,18 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "char literals (ADR-0036) — desugar to codepoint integers" do
+    test "in expression position a char literal becomes its codepoint" do
+      assert Pratt.parse_body("c == '0'") ==
+               {:block, [expr: {:bin, "==", {:id, "c"}, {:num, "48"}}]}
+    end
+
+    test "in pattern position a char literal matches its codepoint" do
+      assert Pratt.parse_pats("'+'") == [{:lit, 43}]
+      assert Pratt.parse_pats("['(' | rest]") == [{:list, [lit: 40], {:tail, {:var, "rest"}}}]
+    end
+  end
+
   describe "`.` is the sole qualifier (ADR-0029; no `::` alias)" do
     test "dot lowers to a single {:dot} node" do
       assert p("Geometry.area(x)") == "(call (. Geometry area) x)"

@@ -19,6 +19,7 @@ defmodule Rian.Lexer do
       {:mapopen}                  %{
       {:comma} {:semi}            , ;
       {:str, content}             "…"
+      {:char, codepoint}          'A' · '+' · '\n' · '\u{1F600}' (ADR-0036, codepoint integer)
       {:num, lexeme}              42 · 3.14 · 1_000 · 1.0e9 (exponent normalized)
       {:op, op}                   operators + word-operators (and/or/not/in/rem/div)
       {:kw, kw}                   keywords (see @keywords)
@@ -58,6 +59,7 @@ defmodule Rian.Lexer do
   defp tok_str({:nl}, nl_as), do: nl_as
   defp tok_str({:id, x}, _), do: x
   defp tok_str({:num, n}, _), do: n
+  defp tok_str({:char, cp}, _), do: "'" <> char_source(cp) <> "'"
   defp tok_str({:str, s}, _), do: ~s("#{s}")
   defp tok_str({:op, o}, _), do: o
   defp tok_str({:kw, k}, _), do: k
@@ -73,6 +75,60 @@ defmodule Rian.Lexer do
   defp tok_str({:semi}, _), do: ";"
 
   defp advance(s, n), do: elem(String.split_at(s, n), 1)
+
+  # `Char` literal body (ADR-0036): the text after the opening `'`. Returns
+  # `{codepoint, rest}` where `rest` is the source past the closing `'`. Exactly
+  # one codepoint is allowed — `''` and multi-codepoint `'AB'` are lex errors
+  # (Rian has no charlists; use a `"…"` string). Escapes: `\n \t \r \0 \\ \' \"`
+  # and `\u{HEX}`.
+  defp lex_char("\\" <> rest) do
+    {cp, after_escape} = char_escape(rest)
+    {cp, close_char(after_escape)}
+  end
+
+  defp lex_char("'" <> _), do: raise(ArgumentError, "empty character literal '' — use a string")
+  defp lex_char(""), do: raise(ArgumentError, "unterminated character literal")
+
+  defp lex_char(str) do
+    {<<cp::utf8>>, rest} = String.next_codepoint(str)
+    {cp, close_char(rest)}
+  end
+
+  # consume the required closing quote; anything else means a multi-codepoint
+  # literal, which is rejected (no charlists).
+  defp close_char("'" <> rest), do: rest
+  defp close_char(""), do: raise(ArgumentError, "unterminated character literal")
+
+  defp close_char(other),
+    do:
+      raise(ArgumentError, "character literal must be a single codepoint near: #{inspect(other)}")
+
+  defp char_escape("n" <> rest), do: {?\n, rest}
+  defp char_escape("t" <> rest), do: {?\t, rest}
+  defp char_escape("r" <> rest), do: {?\r, rest}
+  defp char_escape("0" <> rest), do: {0, rest}
+  defp char_escape("\\" <> rest), do: {?\\, rest}
+  defp char_escape("'" <> rest), do: {?', rest}
+  defp char_escape("\"" <> rest), do: {?", rest}
+
+  defp char_escape("u{" <> rest) do
+    case String.split(rest, "}", parts: 2) do
+      [hex, after_brace] -> {String.to_integer(hex, 16), after_brace}
+      [_] -> raise ArgumentError, "unterminated `\\u{...}` escape in character literal"
+    end
+  end
+
+  defp char_escape(other),
+    do: raise(ArgumentError, "unknown character escape near: #{inspect(other)}")
+
+  # re-lexable rendering of a codepoint inside `'…'` (the inverse of `lex_char/1`)
+  defp char_source(?\n), do: "\\n"
+  defp char_source(?\t), do: "\\t"
+  defp char_source(?\r), do: "\\r"
+  defp char_source(0), do: "\\0"
+  defp char_source(?\\), do: "\\\\"
+  defp char_source(?'), do: "\\'"
+  defp char_source(cp), do: <<cp::utf8>>
 
   defp lex(str, acc) do
     cond do
@@ -111,6 +167,12 @@ defmodule Rian.Lexer do
           [content, rest] -> lex(rest, [{:str, content} | acc])
           [_] -> raise ArgumentError, "unterminated string literal"
         end
+
+      # `Char` literal `'A'` (ADR-0036) — exactly one codepoint between single
+      # quotes (Crystal-style); the parser desugars it to its codepoint integer.
+      String.starts_with?(str, "'") ->
+        {cp, rest} = lex_char(advance(str, 1))
+        lex(rest, [{:char, cp} | acc])
 
       op = Enum.find(@multi, &String.starts_with?(str, &1)) ->
         lex(advance(str, String.length(op)), [{:op, op} | acc])

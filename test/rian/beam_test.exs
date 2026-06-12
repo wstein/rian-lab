@@ -21,6 +21,24 @@ defmodule Rian.BeamTest do
       assert mod.f(10) == 21
     end
 
+    test "char literals (ADR-0036) drive clause patterns and guards on real bytecode" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def kind(cs Vec(Int64)) Symbol
+          def kind(['+' | _]) := :plus
+          def kind([d | _]) when d >= '0' and d <= '9' := :digit
+          def kind(_) := :other
+          """,
+          :rian_beam_char_lit
+        )
+
+      # `__prim_str_chars` yields codepoints, so a single-char string is `[codepoint]`
+      assert mod.kind(~c"+") == :plus
+      assert mod.kind(~c"7") == :digit
+      assert mod.kind(~c"x") == :other
+    end
+
     test "multi-clause with a `when` guard" do
       {:ok, mod} =
         Beam.load(
