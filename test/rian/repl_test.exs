@@ -31,7 +31,21 @@ defmodule Rian.ReplTest do
     test "defines a function, then calls it" do
       s = Repl.new()
       assert {{:defined, ["sq"]}, s} = eval(s, "def sq(n Int64) Int64\ndef sq(n) := n * n")
-      assert {{:value, 49, _}, _} = eval(s, "sq(7)")
+      # A local call to a session function infers its declared return type
+      # (no more bare `49` — the prompt prints `49 : Int64`).
+      assert {{:value, 49, "Int64"}, _} = eval(s, "sq(7)")
+    end
+
+    test "a bind whose RHS calls a session function records that function's return type" do
+      s = Repl.new()
+      {{:defined, ["sq"]}, s} = eval(s, "def sq(n Int64) Int64\ndef sq(n) := n * n")
+      assert {{:bound, "y", 9, "Int64"}, _} = eval(s, "y := sq(3)")
+    end
+
+    test "a sum-type constructor infers the type the variant builds" do
+      s = Repl.new()
+      {{:defined, ["Bit"]}, s} = eval(s, "type Bit := Zero | One")
+      assert {{:value, :one, "Bit"}, _} = eval(s, "One")
     end
 
     test "redefines a function (shadowing, not duplication)" do

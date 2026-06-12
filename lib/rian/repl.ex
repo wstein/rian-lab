@@ -121,7 +121,8 @@ defmodule Rian.Repl do
   end
 
   defp eval_bind(s, input, name, rhs) do
-    type = safe_infer(rhs, bind_env(s.binds))
+    ic = session_ic(s)
+    type = safe_infer(rhs, bind_env(s.binds, ic), ic)
     binds = Enum.reject(s.binds, fn {n, _} -> n == name end) ++ [{name, String.trim(input)}]
 
     case run(s, binds, s.units, name) do
@@ -131,7 +132,8 @@ defmodule Rian.Repl do
   end
 
   defp eval_expr(s, input) do
-    type = safe_infer_input(input, bind_env(s.binds))
+    ic = session_ic(s)
+    type = safe_infer_input(input, bind_env(s.binds, ic), ic)
 
     case run(s, s.binds, s.units, input) do
       {:ok, value} -> {{:value, value, type}, s}
@@ -197,32 +199,51 @@ defmodule Rian.Repl do
   end
 
   # A type env for inference: each bind's name mapped to its inferred type.
-  defp bind_env(binds) do
+  # The session's `ic` is threaded in so a bind whose RHS calls a session
+  # function (`y := sq(3)`) records the function's declared return type, not
+  # `:unknown`.
+  defp bind_env(binds, ic) do
     Enum.reduce(binds, %{}, fn {name, stmt}, acc ->
       case safe_parse_body(stmt) do
-        {:ok, {:block, [{:bind, ^name, rhs}]}} -> Map.put(acc, name, infer_or_unknown(rhs, acc))
-        _ -> acc
+        {:ok, {:block, [{:bind, ^name, rhs}]}} ->
+          Map.put(acc, name, infer_or_unknown(rhs, acc, ic))
+
+        _ ->
+          acc
       end
     end)
   end
 
-  defp safe_infer_input(input, env) do
+  # Build an inference context from the session's declarations so calls to
+  # session-defined functions (`sq(9) : Int64`) and sum-type constructors
+  # (`One : Bit`) infer concretely instead of falling back to `:unknown`.
+  # A malformed accumulated program yields an empty `ic` — a bare expression
+  # still infers, just without session-level knowledge.
+  defp session_ic(%Session{units: []}), do: %{}
+
+  defp session_ic(%Session{units: units}) do
+    Check.program_ic(Decl.parse(units_src(units)))
+  rescue
+    _ -> %{}
+  end
+
+  defp safe_infer_input(input, env, ic) do
     case safe_parse_body(input) do
-      {:ok, {:block, [{:expr, e}]}} -> safe_infer(e, env)
-      {:ok, {:block, [{:bind, _name, e}]}} -> safe_infer(e, env)
+      {:ok, {:block, [{:expr, e}]}} -> safe_infer(e, env, ic)
+      {:ok, {:block, [{:bind, _name, e}]}} -> safe_infer(e, env, ic)
       _ -> nil
     end
   end
 
-  defp safe_infer(ast, env) do
-    case infer_or_unknown(ast, env) do
+  defp safe_infer(ast, env, ic) do
+    case infer_or_unknown(ast, env, ic) do
       type when is_binary(type) -> type
       _ -> nil
     end
   end
 
-  defp infer_or_unknown(ast, env) do
-    Check.infer(ast, env, %{})
+  defp infer_or_unknown(ast, env, ic) do
+    Check.infer(ast, env, ic)
   rescue
     _ -> :unknown
   end

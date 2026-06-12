@@ -559,18 +559,32 @@ defmodule Rian.Check do
   Returns `:ok` or the first `{:error, message}`.
   """
   def check_program(%{funcs: funcs} = prog) do
-    types = all_types(prog)
+    ic = program_ic(prog)
     all_funcs = funcs ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
+    tsets = error_sets(all_types(prog))
+    eset = %{tsets: tsets, table: solve_error_sets(all_funcs, tsets)}
+    Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, eset), do: nil end)
+  end
 
-    ic = %{
+  @doc """
+  Build the inference context (`:tdefs`/`:funs`/`:ctors`) for a parsed program.
+
+  Exposed so callers that only need *inference* — notably `Rian.Repl`, which
+  threads session declarations into expression typing — can reuse the same
+  context-building rules as `check_program/1` without re-running the checker.
+  """
+  @spec program_ic(map()) :: %{tdefs: map(), funs: map(), ctors: map()}
+  def program_ic(%{} = prog) do
+    types = all_types(prog)
+
+    all_funcs =
+      Map.get(prog, :funcs, []) ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
+
+    %{
       tdefs: type_table(types),
       funs: Map.new(all_funcs, fn f -> {f.name, f.ret} end),
       ctors: ctor_types(types, prog)
     }
-
-    tsets = error_sets(types)
-    eset = %{tsets: tsets, table: solve_error_sets(all_funcs, tsets)}
-    Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, eset), do: nil end)
   end
 
   # ctor name -> the sum type it builds (so a variant value/call infers its type);
