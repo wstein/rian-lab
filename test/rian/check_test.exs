@@ -106,6 +106,24 @@ defmodule Rian.CheckTest do
       assert Check.check("def f(n Int64) Int64 := x Int64 := n ; x") == :ok
     end
 
+    test "an already-typed value widens losslessly into a wider annotation (ADR-0034 §1)" do
+      # Int32 -> Int64 (same signedness, wider)
+      assert Check.check("def f(n Int32) Int64 := x Int64 := n ; x") == :ok
+      # UInt32 -> Int64 (unsigned range fits signed)
+      assert Check.check("def f(n UInt32) Int64 := x Int64 := n ; x") == :ok
+      # Int32 -> Float64 (exactly representable)
+      assert Check.check("def f(n Int32) Float64 := x Float64 := n ; x") == :ok
+
+      # but lossy/narrowing widths are still proven mismatches
+      assert {:error, _} = Check.check("def f(n UInt32) Int32 := x Int32 := n ; x")
+      assert {:error, _} = Check.check("def f(n Int64) Float64 := x Float64 := n ; x")
+    end
+
+    test "the return type also accepts a losslessly-wider body" do
+      assert Check.check("def g(n Int32) Int64 := n") == :ok
+      assert {:error, _} = Check.check("def g(n Int64) Int32 := n")
+    end
+
     test "a string value is checked against its annotation" do
       assert Check.check(~s|def f(n Int64) String := s String := "hi" ; s|) == :ok
       assert {:error, _} = Check.check(~s|def f(n Int64) Int64 := x Int32 := "hi" ; n|)

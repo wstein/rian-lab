@@ -65,9 +65,17 @@ type *pushed down* into the value:
   *same-kind*: an integer literal takes any `Int*`/`UInt*`, a float literal any `Float*`; a
   cross-kind annotation (an integer literal into a `Float`) is **not** adopted — write an explicit
   float literal — and falls through to exact unification;
-- an **already-typed RHS must unify exactly** — `x Int32 := someInt64` is a *proven* mismatch and
-  is rejected (no implicit narrow/widen; blame is localized at the binding site). An `:unknown`
-  RHS is left unchecked (the gate reports only provable clashes).
+- an **already-typed RHS may widen losslessly** to the annotation (amended 2026-06-13): the value's
+  type must be *assignable* to the declared type, where a numeric type widens **one-directionally**
+  to a wider one — `Intₐ ⊑ Int_b` / `UIntₐ ⊑ UInt_b` for `a ≤ b`, `UIntₐ ⊑ Int_b` for `a < b` (the
+  unsigned range fits the signed target), `Intₐ ⊑ Float_b` / `UIntₐ ⊑ Float_b` when every value is
+  exactly representable (f64 to 2⁵³, f32 to 2²⁴), and `Floatₐ ⊑ Float_b` for `a ≤ b`. So
+  `x Int64 := someInt32` and `x Float64 := someInt32` are accepted, while **narrowing or lossy**
+  conversions (`x Int32 := someInt64`, `x Float32 := someInt32`, `x Int32 := someUInt32`) stay
+  *proven* mismatches, rejected with blame at the binding site. The same one-directional
+  `assignable?` rule governs a function body against its declared **return** type. Widening is
+  lossless and never silent at runtime (each `Intₙ` is a representation-intent floor, ADR-0035); an
+  `:unknown` RHS is left unchecked (the gate reports only provable clashes).
 
 The binding then carries its **declared** type downstream (display, `-spec`, later checks), not the
 inferred one. Every backend **erases** the annotation when lowering — consistent with native-per-target

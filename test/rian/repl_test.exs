@@ -115,12 +115,17 @@ defmodule Rian.ReplTest do
       assert {{:error, _}, _} = eval(Repl.new(), "x Float64 := 66")
     end
 
-    test "an already-typed value must unify exactly with the annotation" do
+    test "an already-typed value widens losslessly; narrowing is a mismatch (ADR-0034 §1)" do
       s = Repl.new()
       {{:bound, "x", 66, "Int32"}, s} = eval(s, "x Int32 := 66")
+      # same width binds exactly
       assert {{:bound, "y", 66, "Int32"}, s} = eval(s, "y Int32 := x")
-      assert {{:error, msg}, _} = eval(s, "z Int64 := x")
-      assert msg =~ "declared `Int64`"
+      # an `Int32` value widens losslessly into an `Int64` binding
+      assert {{:bound, "z", 66, "Int64"}, s} = eval(s, "z Int64 := x")
+      # but narrowing the `Int64` back into an `Int32` is a proven mismatch
+      assert {{:error, msg}, _} = eval(s, "w Int32 := z")
+      assert msg =~ "declared `Int32`"
+      assert msg =~ "Int64"
     end
 
     test "untyped bindings are unaffected" do

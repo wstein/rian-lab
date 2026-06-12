@@ -529,13 +529,9 @@ defmodule Rian.Check do
       true ->
         t = infer(ce, env, ic)
 
-        case unify(t, ann) do
-          :mismatch ->
-            {:error, "`#{name}`: binding declared `#{ann}` but its value has type `#{t}`"}
-
-          _ ->
-            nil
-        end
+        if assignable?(t, ann),
+          do: nil,
+          else: {:error, "`#{name}`: binding declared `#{ann}` but its value has type `#{t}`"}
     end
   end
 
@@ -553,6 +549,55 @@ defmodule Rian.Check do
   defp int_type?(t), do: String.match?(t, ~r/^U?Int\d*$/)
   defp float_type?(t), do: String.match?(t, ~r/^Float\d*$/)
 
+  # ── lossless numeric widening (ADR-0034 §1 amendment) ──────────────────
+  # Directional compatibility: may a value of type `from` stand where `to` is
+  # declared? Equal / `:unknown` always; a numeric type **widens losslessly** to
+  # a wider one; otherwise it must unify (Fn-structural, etc.) exactly. Widening
+  # is one-directional — narrowing (`Int64 -> Int32`) stays a proven mismatch.
+  defp assignable?(t, t), do: true
+  defp assignable?(:unknown, _to), do: true
+  defp assignable?(_from, :unknown), do: true
+
+  defp assignable?(from, to) do
+    case {num_kind(from), num_kind(to)} do
+      {nil, _} -> unify(from, to) != :mismatch
+      {_, nil} -> unify(from, to) != :mismatch
+      {a, b} -> num_widens?(a, b)
+    end
+  end
+
+  # a numeric type string -> {:int | :uint | :float, bit-width}, else nil
+  defp num_kind("UInt" <> w), do: num_bits(:uint, w)
+  defp num_kind("Int" <> w), do: num_bits(:int, w)
+  defp num_kind("Float" <> w), do: num_bits(:float, w)
+  defp num_kind(_), do: nil
+
+  defp num_bits(kind, w) do
+    case Integer.parse(w) do
+      {n, ""} -> {kind, n}
+      _ -> nil
+    end
+  end
+
+  # `from ⊑ to` — lossless widening:
+  #   Intₐ ⊑ Int_b / UIntₐ ⊑ UInt_b   for a ≤ b   (same signedness, wider)
+  #   UIntₐ ⊑ Int_b                    for a < b   (unsigned range fits signed)
+  #   Intₐ ⊑ Float_b   when |2^(a-1)| is exactly representable (a-1 ≤ mantissa)
+  #   UIntₐ ⊑ Float_b  when 2^a-1 is exactly representable (a ≤ mantissa)
+  #   Floatₐ ⊑ Float_b                 for a ≤ b
+  defp num_widens?({:int, a}, {:int, b}), do: a <= b
+  defp num_widens?({:uint, a}, {:uint, b}), do: a <= b
+  defp num_widens?({:uint, a}, {:int, b}), do: a < b
+  defp num_widens?({:int, a}, {:float, b}), do: a - 1 <= float_mantissa(b)
+  defp num_widens?({:uint, a}, {:float, b}), do: a <= float_mantissa(b)
+  defp num_widens?({:float, a}, {:float, b}), do: a <= b
+  defp num_widens?(_, _), do: false
+
+  # exact-integer mantissa bits: f64 is exact to 2^53, f32 to 2^24
+  defp float_mantissa(64), do: 53
+  defp float_mantissa(32), do: 24
+  defp float_mantissa(_), do: 0
+
   defp check_return(%Func{name: name, params: ps, ret: ret, tvars: tvars, clauses: clauses}, ic) do
     # A return type mentioning a `forall` type variable is generic; we don't yet
     # unify type variables structurally, so such a function is checked
@@ -563,14 +608,11 @@ defmodule Rian.Check do
       Enum.find_value(clauses, :ok, fn c ->
         body_t = infer(Pratt.parse_body(c.body), clause_env(c.pats, ps, ic), ic)
 
-        case unify(body_t, ret) do
-          :mismatch ->
+        if assignable?(body_t, ret),
+          do: nil,
+          else:
             {:error,
              "`#{name}`: body has type `#{body_t}` but the declared return type is `#{ret}`"}
-
-          _ ->
-            nil
-        end
       end)
     end
   end
