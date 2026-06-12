@@ -91,6 +91,16 @@ language that reads and runs whole source files." A first increment of the real
 type checker ([`Rian.Check`](../../lib/rian/check.ex), ADR-0034) has also landed
 alongside the parser work.
 
+> **Note — the Rust target is not a bootstrap stage.** The stages above track the
+> *BEAM* path (interim Elixir source → Erlang abstract forms at Stage 0.5).
+> Rust is a **backend-parallel** target: the front-end emits idiomatic,
+> ownership-checked Rust ([`Rian.Lower.to_rust/5`](../../lib/rian/lower.ex),
+> capabilities → Rust signatures via [`Rian.Capability`](../../lib/rian/capability.ex)),
+> already implemented and tested at the component level (emitted Rust is compiled
+> with `rustc` in examples). It rides Stages 0.1/0.3 automatically — parsed
+> `.rian` files emit both targets — and stays a **source emitter** permanently;
+> there is no "Rust abstract forms" swap analogous to Stage 0.5.
+
 ## Consequences
 - No fork; no permanent downstream tax; macro mandate preserved.
 - A runnable language arrives as soon as the declaration parser + driver land, on the interim
