@@ -20,7 +20,7 @@ come from the strongest source (Rust traits + coherence); the surface comes from
 ### 1. Type variables are introduced explicitly with `forall` (Crystal)
 
 ```elixir
-def map(f, xs Vec(T)) Vec(U) forall T, U
+def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U
 ```
 
 A name is a **type variable iff it is listed in `forall`**; otherwise it must resolve to a declared
@@ -91,6 +91,39 @@ exhaustiveness**. A `case` **never** dispatches on protocol membership. This is 
 §3 chose opted-in protocols over Julia's open multiple dispatch, and the reason §3 is totality-safe.
 The guarantee is load-bearing and stated verbatim so it is not eroded by a later feature.
 
+### 7. Function types are spelled `Fn(A1, …, An, R)` (Crystal `Proc`) — *implemented*
+
+A first-class function value has a type. It is spelled **`Fn(Arg1, …, ArgN, Ret)`** — the argument
+types followed by the return, **the last element always being the return**; a nullary function is
+`Fn(Ret)`. This is the type of a parameter that receives a lambda `(x) -> e` or a capture
+`&name/arity`, and it composes with `forall`: the higher-order `map` above is `f Fn(T, U)`, closing
+the previously-untyped `f` hole in §1.
+
+```elixir
+def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U
+def apply_twice(f Fn(Int64, Int64), x Int64) Int64 := f(f(x))
+def adder(n Int64) Fn(Int64, Int64) := (x) -> x + n   # returns a closure
+```
+
+**Why this spelling, not an arrow `(A) -> B`:** the parametric-application form `Fn(…)` *is* a type
+constructor application, so it **reuses the existing `Vec(T)` type-string machinery end to end** — it
+round-trips through `collapse_parens`, the param/return string parser, and alias substitution with
+**zero new grammar**. It also aligns with the family (Crystal's `Proc(Int32, String)`). The arrow form
+was rejected for v1 because the type/param parser is whitespace-and-paren-based: a parameter
+`f (Int64) -> Bool` collapses to `f(Int64)->Bool` and mis-splits the name from the type, forcing a
+parser rewrite for no semantic gain. (The arrow remains the *lambda literal* `(x) -> e`; only the
+*type* spelling is `Fn(…)`.)
+
+**Checker (implemented, [`Rian.Check`](../../lib/rian/check.ex)):** a lambda infers `Fn(_, body_t)`
+(an un-annotated argument is the `_` wildcard slot); `&name/arity` captures a known function as
+`Fn(_ × arity, return)`; applying a function-typed parameter infers its return; `Fn(…)` types unify
+**structurally** (same arity, componentwise, with `_`/type-variable/`:unknown` as wildcards). This is
+the self-hosting gate — compiler code is map/fold-shaped, now type-checked rather than `:unknown`.
+
+**Sugar roadmap (deferred):** an arrow alias `(A, B) -> R` *as sugar for* `Fn(A, B, R)` may be added
+once the type parser is tokenised (rather than string-split), so the readable arrow and the
+machinery-friendly `Fn(…)` canonical form coexist. Default until then: one way, `Fn(…)`.
+
 ## Ratings
 
 | Decision | Rating |
@@ -101,8 +134,10 @@ The guarantee is load-bearing and stated verbatim so it is not eroded by a later
 | Static-by-default dispatch; dynamic only via protocol-typed value | 4/5 |
 | Rust orphan rule for coherence; escape via owned opaque type | 4/5 |
 | Protocols add no dispatch arms — exhaustiveness untouched | 5/5 |
+| Function types `Fn(A.., R)` (reuses `Vec(T)` machinery; Crystal `Proc`) | 5/5 (implemented) |
 | Implicit-on-first-use type vars | 1/5 (rejected — typo footgun) |
 | Reuse `when` for type bounds | 1/5 (rejected — phase-muddling) |
+| Arrow `(A) -> B` *type* spelling for v1 | 2/5 (rejected — parser rewrite, no gain; `->` sugar deferred) |
 
 ## Consequences
 
