@@ -18,28 +18,28 @@ mod Geometry do
   use Std.(Vec, sqrt)          # unqualified import of selected names
 
   # `pub const` is exported with an accessor on the BEAM and `pub const` on Rust.
-  pub const TAU f64 := 6.28318530
+  pub const TAU Float64 := 6.28318530
 
   # `pub type` exports the type and its constructors.
-  pub type Shape := Circle(radius f64) | Square(side f64)
+  pub type Shape := Circle(radius Float64) | Square(side Float64)
 
   # Public, multi-clause. `Math.pi` is a cross-module call (Pascal head, lower
   # name) — it lowers to `Math.pi` on Elixir and `math::pi()` on Rust.
-  pub fn area(Shape) f64
-  pub fn area(Circle(r)) := Math.pi * r * r
-  pub fn area(Square(s)) := s * s
+  pub def area(Shape) Float64
+  pub def area(Circle(r)) := Math.pi * r * r
+  pub def area(Square(s)) := s * s
 
-  pub fn perimeter(Shape) f64
-  pub fn perimeter(Circle(r)) := TAU * r
-  pub fn perimeter(Square(s)) := 4.0 * s
+  pub def perimeter(Shape) Float64
+  pub def perimeter(Circle(r)) := TAU * r
+  pub def perimeter(Square(s)) := 4.0 * s
 
-  # Private helper (no `pub`): becomes `defp` on Elixir, a non-`pub fn` on Rust.
-  fn square(x f64) f64 := x * x
+  # Private helper (no `pub`): becomes `defp` on Elixir, a non-`pub def` on Rust.
+  def square(x Float64) Float64 := x * x
 end
 
 # Disambiguation summary (resolved at emit time, by operand case):
 #
-#   Geometry.area(x)   Rian module fn   -> Elixir Geometry.area(x) | Rust geometry::area(x)
+#   Geometry.area(x)   Rian module call  -> Elixir Geometry.area(x) | Rust geometry::area(x)
 #   Value.Num(n)       type/variant     -> Elixir {:num, n}        | Rust Value::Num(n)
 #   point.x            field access     -> Elixir point.x          | Rust point.x
 #   :lists.sum(xs)     Erlang FFI       -> Elixir :lists.sum(xs)   | (BEAM-only)

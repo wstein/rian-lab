@@ -10,26 +10,26 @@
 # ADR: docs/adr/0027-fast-track-self-hosting.md
 # ---------------------------------------------------------------------------
 
-# Erlang-module FFI: an ATOM head (`:lists`, `:maps`) -> `:lists.fn(..)`.
+# Erlang-module FFI: an ATOM head (`:lists`, `:maps`) -> `:lists.fun(..)`.
 # This is exactly Elixir's own convention for calling Erlang.
-fn total(xs val Vec(i64)) i64     := :lists.sum(xs)
-fn rev(xs val Vec(i64)) Vec(i64)  := :lists.reverse(xs)
+def total(xs val Vec(Int64)) Int64     := :lists.sum(xs)
+def rev(xs val Vec(Int64)) Vec(Int64)  := :lists.reverse(xs)
 
 # Elixir-module FFI: a PascalCase head (`String`, `Enum`, `Integer`) ->
-# `String.fn(..)`. Calls nest naturally.
-fn shout(s val str) str := String.upcase(s)
-fn clean(s val str) str := String.trim(String.downcase(s))
+# `String.fun(..)`. Calls nest naturally.
+def shout(s val String) String := String.upcase(s)
+def clean(s val String) String := String.trim(String.downcase(s))
 
 # Higher-order FFI with a Rian lambda passed to an Erlang/Elixir function:
-fn doubled(xs val Vec(i64)) Vec(i64) := Enum.map(xs, (x) -> x * 2)
-fn sum_fold(xs val Vec(i64)) i64     := :lists.foldl((x, acc) -> x + acc, 0, xs)
+def doubled(xs val Vec(Int64)) Vec(Int64) := Enum.map(xs, (x) -> x * 2)
+def sum_fold(xs val Vec(Int64)) Int64     := :lists.foldl((x, acc) -> x + acc, 0, xs)
 
 # Bare FFI calls are typed `dynamic`. An optional `extern` declaration gives a
 # precise type to a hot binding (these typed wrappers are the seed of the
 # eventual Rian stdlib). NOTE: `extern` surface syntax is still an open item —
 # shown here illustratively.
-extern :lists.sum(Vec(i64)) i64
-extern String.upcase(str) str
+extern :lists.sum(Vec(Int64)) Int64
+extern String.upcase(String) String
 
 # Because the emitted module is an ordinary BEAM module, the reverse direction
 # is free too: Erlang calls `rian_text:shout("hi")` and Elixir calls

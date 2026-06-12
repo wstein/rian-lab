@@ -26,16 +26,16 @@ macro square(x)          => x * x
 macro add_tmp(x) => if true do tmp := 100; x + tmp else 0 end
 
 # Usage looks like an ordinary call:
-fn demo_unless(n i64) i64 := unless(n > 5, n * 10)   # n=3 -> 30 ; n=7 -> 0
-fn demo_square(a i64, b i64) i64 := square(a + b)    # (a+b)*(a+b)
-fn demo_hygiene(tmp i64) i64 := add_tmp(tmp)         # 5 -> 105 (NOT 200)
+def demo_unless(n Int64) Int64 := unless(n > 5, n * 10)   # n=3 -> 30 ; n=7 -> 0
+def demo_square(a Int64, b Int64) Int64 := square(a + b)    # (a+b)*(a+b)
+def demo_hygiene(tmp Int64) Int64 := add_tmp(tmp)         # 5 -> 105 (NOT 200)
 
 # `comptime(expr)`: evaluate a constant expression at compile time and replace
 # it with its literal (the Zig model). The evaluator is a PURE SANDBOX:
 # literals, arithmetic, boolean and comparison operators only.
-fn table_size() i64 := comptime(2 + 3 * 4)           # becomes the literal 14
-fn scaled() i64     := comptime((1 + 2) * 5)          # becomes 15
-fn always() bool    := comptime(3 > 5)                # becomes false
+def table_size() Int64 := comptime(2 + 3 * 4)           # becomes the literal 14
+def scaled() Int64     := comptime((1 + 2) * 5)          # becomes 15
+def always() Bool    := comptime(3 > 5)                # becomes false
 
 # The sandbox REFUSES effects at compile time (each of these is a compile error):
 #   comptime(foo(3))            # calls are not allowed in a pure comptime sandbox

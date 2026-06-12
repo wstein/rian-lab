@@ -4,23 +4,24 @@ A guided tour of **Rian's surface syntax and character** — a typed,
 capability-disciplined language that lowers the *same source* to two targets:
 idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
 
-> **Status — read this first.** These `.rian` files are **illustrative source**,
-> validated against the specs and ADRs catalogued in the
-> [design corpus](../../docs/README.md) — they are **not yet compilable**. Rian
-> has no lexer or declaration parser yet
-> ([ADR-0031](../../docs/adr/0031-bootstrap-strategy.md), Stage 0.1 — the gate
-> to compiling real files). The compiler's passes today are driven by
-> hand-built IR, demonstrated by the runnable Elixir drivers catalogued in the
-> [project README](../../README.md). This is exactly how the corpus itself
-> presents Rian source: as the surface the verified passes will consume once the
-> parser lands.
+> **Status — read this first.** These files use the **ADR-0033 surface** (`def`,
+> `case`, juxtaposed types, Crystal primitives like `Int64`). A **Stage 0.1
+> declaration parser** ([`Rian.Decl`](../../lib/rian/decl.ex),
+> [ADR-0031](../../docs/adr/0031-bootstrap-strategy.md)) now compiles the
+> `type` + `def` subset of this surface end-to-end — parse → Elixir + Rust → run
+> (`mix run examples/decl_run.exs`). These tour files reach **beyond** that MVP
+> (`mod`, `struct`, `alias`, `case`/block bodies, macros, `extern`), so they stay
+> **illustrative** until the parser broadens; the verified passes are also
+> exercised through the hand-built-IR drivers in the
+> [project README](../../README.md). See the
+> [design corpus](../../docs/README.md) for the spec/ADR map.
 
 ## The files
 
 | File | Shows |
 | --- | --- |
 | [01_basics.rian](01_basics.rian) | Expression-orientation, `:=` single-assignment, `if`/blocks, the operator table (`/` vs `div`, `<>`, `\|>`, non-associative comparisons) |
-| [02_types_match.rian](02_types_match.rian) | `type` / `struct` / `alias`, the `match` expression, recursive sums, guarded arms |
+| [02_types_match.rian](02_types_match.rian) | `type` / `struct` / `alias`, the `case` expression, recursive sums, guarded arms |
 | [03_clauses_guards.rian](03_clauses_guards.rian) | Multi-clause functions, the restricted guard sublanguage, static exhaustiveness, union narrowing, `@partial` |
 | [04_capabilities.rian](04_capabilities.rian) | **The heart of the language** — `val`/`iso`/`ref`/`tag` driving Rust ownership and BEAM linearity, with no lifetimes |
 | [05_modules.rian](05_modules.rian) | `mod`, `pub`, `use`, `const`, and `.` as the universal qualifier |
@@ -35,13 +36,13 @@ distinguishes Rian from "Elixir with different keywords."
 
 ### Function body forms
 
-A `fn` body is one of two shapes (no semantic difference — both yield a value
+A `def` body is one of two shapes (no semantic difference — both yield a value
 via implicit return), plus the anonymous lambda form:
 
 ```elixir
-fn double(n i64) i64 := n * 2          # 1. single-expression body (the one-liner)
+def double(n Int64) Int64 := n * 2          # 1. single-expression body (the one-liner)
 
-fn norm(v val Vec(f64)) f64            # 2. block body — multiline, last expr is the value
+def norm(v val Vec(Float64)) Float64            # 2. block body — multiline, last expr is the value
   total := v |> sum
   total / len(v)
 end
@@ -58,27 +59,27 @@ a multi-clause group may mix them clause by clause (see
 ```elixir
 # comments start with `#`
 
-fn add(x i64, y i64) i64 := x + y          # single clause: typed head is the boundary
+def add(x Int64, y Int64) Int64 := x + y          # single clause: typed head is the boundary
 
-fn classify(i64) str                       # bodiless SIGNATURE line ...
-fn classify(0)            := "zero"         # ... followed by contiguous
-fn classify(n) when n > 0 := "positive"    #     pattern-head clauses
-fn classify(_)            := "negative"
+def classify(Int64) String                       # bodiless SIGNATURE line ...
+def classify(0)            := "zero"         # ... followed by contiguous
+def classify(n) when n > 0 := "positive"    #     pattern-head clauses
+def classify(_)            := "negative"
 
 name := expr                               # single-assignment binding (shadow, never mutate)
 total <- expr                              # mutation — capability-gated, BEAM-illegal unless local
 
 if c do a else b end                       # `if` is an expression; `else` is REQUIRED in value position
-match x do P -> e   ...   end              # `match` is an expression; arms use `->`, must be exhaustive
+case x do P -> e   ...   end              # `case` is an expression; arms use `->`, must be exhaustive
 
 (x) -> x * 2                               # lambda
 [1, 2, 3]      [h | t]      %{a: 1}        # list / cons / map literals
 
-type T := A | B(payload f64)               # sealed sum (ADT)
-struct P(x f64, y f64)                     # product / record
-alias Id := i64                            # transparent synonym
+type T := A | B(payload Float64)               # sealed sum (ADT)
+struct P(x Float64, y Float64)                     # product / record
+alias Id := Int64                            # transparent synonym
 
-fn f(s val Shape) ...   # val (default, borrow) | iso (owned/use-once) | ref (&mut) | tag (identity)
+def f(s val Shape) ...   # val (default, borrow) | iso (owned/use-once) | ref (&mut) | tag (identity)
 
 Geometry.area(x)   # Rian module call      point.x         # field access
 Value.Num(n)       # variant path          :lists.sum(xs)  # Erlang FFI (atom head)
@@ -98,8 +99,14 @@ and worked consequences.
 
 ## Seeing them actually run (today)
 
-Until the parser lands, the verified passes are exercised through Elixir
-drivers that feed hand-built IR equivalent to the source above:
+The Stage 0.1 parser compiles a real `.rian` file from the `type`+`def` subset:
+
+```sh
+mix run examples/decl_run.exs       # reads examples/area.rian -> Elixir + Rust, executed
+```
+
+The fuller surface is exercised through Elixir drivers that feed hand-built IR
+equivalent to the source above:
 
 ```sh
 mix run examples/lower_run.exs      # area/1: Rian source -> Elixir + Rust, executed
