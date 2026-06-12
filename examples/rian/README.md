@@ -100,7 +100,13 @@ compile + run on real BEAM bytecode:
   (ADR-0047 §2)** — `reverse`/`append`/`length`/`sum` written in Rian over cons
   recursion, **no host FFI** — so it lowers to every backend through the same
   machinery (verified on BEAM and node). The right way to retire per-emitter FFI
-  stopgaps; `Map`/`String` still need the per-target primitive layer.
+  stopgaps for lists.
+- [prelude_dict.rian](prelude_dict.rian) — **a portable `Dict` over a `__prim_*`
+  primitive layer (ADR-0047 §2).** A `Map` can't be pure Rian (it bottoms out in
+  a BEAM map / JS object / Rust `HashMap`), so a tiny set of `__prim_map_*` calls
+  is lowered natively by each backend, and the useful composite ops (`get_or`,
+  `inc`) are written **once in Rian** over them. `inc`/`get_or` run on BEAM and
+  under node; only the four primitives are per-target.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

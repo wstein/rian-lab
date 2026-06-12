@@ -419,6 +419,20 @@ defmodule Rian.BeamTest do
       assert mod.kindof(%{nope: 1}) == "other"
     end
 
+    test "a portable `Dict` over the `__prim_map_*` primitive layer (ADR-0047 §2)" do
+      {:ok, m} = Beam.load(File.read!("examples/rian/prelude_dict.rian"), :rian_beam_dict)
+
+      d = m.put(m.empty(), "x", 10)
+      # the primitives lower to native BEAM maps
+      assert m.get(d, "x") == 10
+      assert m.has(d, "y") == false
+      # composite ops (written in Rian over the primitives) work
+      assert m.get_or(d, "y", 99) == 99
+      counts = m.empty() |> m.inc("a") |> m.inc("a") |> m.inc("b")
+      assert m.get(counts, "a") == 2
+      assert m.get(counts, "b") == 1
+    end
+
     test "a portable `List` library written in Rian (cons recursion, no FFI; ADR-0047)" do
       {:ok, m} = Beam.load(File.read!("examples/rian/selfhost_listlib.rian"), :rian_beam_listlib)
 

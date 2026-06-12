@@ -211,6 +211,20 @@ defmodule Rian.JS do
   defp expr_js(%EMap{pairs: pairs}),
     do: "{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{expr_js(v)}" end)}}"
 
+  # portable-prelude primitives (ADR-0047 §2): each backend lowers `__prim_*` to
+  # its native collection op; the portable `Map`/`String` ops are written in Rian
+  # over them. Here: JS objects.
+  defp expr_js(%ECall{fun: %EId{name: "__prim_map_new"}, args: []}), do: "{}"
+
+  defp expr_js(%ECall{fun: %EId{name: "__prim_map_get"}, args: [m, k]}),
+    do: "#{paren(m)}[#{expr_js(k)}]"
+
+  defp expr_js(%ECall{fun: %EId{name: "__prim_map_put"}, args: [m, k, v]}),
+    do: "{...#{paren(m)}, [#{expr_js(k)}]: #{expr_js(v)}}"
+
+  defp expr_js(%ECall{fun: %EId{name: "__prim_map_has"}, args: [m, k]}),
+    do: "Object.hasOwn(#{paren(m)}, #{expr_js(k)})"
+
   # the handful of stdlib calls the self-hosting spikes use, mapped to portable
   # JS (a stopgap until the portable prelude, ADR-0047, owns these):
   #   Map.get/put (immutable), String.to_charlist, List.to_string, :lists.reverse

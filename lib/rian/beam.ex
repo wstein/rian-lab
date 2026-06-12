@@ -226,6 +226,20 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EDot{head: %EAtom{name: m}, name: fun}, args: args}, s),
     do: remote_call(String.to_atom(m), fun, args, s)
 
+  # portable-prelude primitives (ADR-0047 §2): each backend lowers `__prim_*`
+  # to its native collection op, and the portable `Map`/`String` ops are written
+  # in Rian over them. Here: a BEAM map and `:maps` calls.
+  defp expr_form(%ECall{fun: %EId{name: "__prim_map_new"}, args: []}, _s), do: {:map, @ln, []}
+
+  defp expr_form(%ECall{fun: %EId{name: "__prim_map_get"}, args: [m, k]}, s),
+    do: remote_call(:maps, "get", [k, m], s)
+
+  defp expr_form(%ECall{fun: %EId{name: "__prim_map_put"}, args: [m, k, v]}, s),
+    do: remote_call(:maps, "put", [k, v, m], s)
+
+  defp expr_form(%ECall{fun: %EId{name: "__prim_map_has"}, args: [m, k]}, s),
+    do: remote_call(:maps, "is_key", [k, m], s)
+
   # named construction `Name(field: v, …)` builds a **struct**: a map keyed by
   # field-name atoms plus a `__struct__` tag (the snake-cased name). Field access
   # reads it by name, so no field schema is threaded (ADR-0041 / ADR-0043).

@@ -315,10 +315,20 @@ identical on BEAM and node (`reverse([1,2,3]) = [3,2,1]`). This is the ADR-0047
 §2 approach done right for lists: a program calls `ListLib.reverse` instead of
 `:lists.reverse`, and nothing is per-emitter. `Map` and `String` are *not* like
 this — they bottom out in real per-target primitives (a hashed map, a UTF-8
-buffer), so they still need the primitive-layer design (a small set of
-`__prim_*` operations each emitter lowers, with the portable ops written in Rian
-over them). That primitive layer is the remaining, design-level portable-prelude
-work; `List` shows the shape it takes.
+buffer), so they need a **primitive-layer**: a small set of `__prim_*` operations
+each emitter lowers, with the portable ops written in Rian over them.
+
+**That primitive layer now exists for `Map`.** [`examples/rian/prelude_dict.rian`](examples/rian/prelude_dict.rian)
+defines a portable `Dict` over `__prim_map_new/get/put/has` — lowered natively by
+each backend (`#{}`/`:maps.get`/`:maps.put`/`:maps.is_key` on the BEAM;
+`{}`/`m[k]`/spread/`Object.hasOwn` in JS). The **composite** ops (`get_or`, `inc`)
+are written **once in Rian** over those primitives, not per-emitter, and run
+identically on BEAM and under node (`inc`-counters `a=2, b=1`;
+`get_or(absent, 99) = 99`). The per-target code is confined to four primitives;
+everything above is portable — the ADR-0047 §2 shape, demonstrated end to end.
+`String` is the same story with a different primitive (a UTF-8 buffer:
+`__prim_str_concat`/`__prim_str_chars`/…) and is the natural next member; the
+*pattern* is now established, not just sketched.
 
 **Rust gets cons.** A Rian `Vec(T)` param lowers to a `&[T]` slice, so cons
 patterns become **Rust slice patterns** — `[h | t]` → `[h, t @ ..]` — matched
