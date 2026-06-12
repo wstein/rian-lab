@@ -1,0 +1,106 @@
+# ADR-0050 — One Typed Core IR: single contract, sealed-sum nodes, emitters as pure consumers
+
+**Status:** Accepted (direction) · **Refines:** the `ir.ex` "expr/pattern stay tuples" pragma (overturned, with evidence)
+**Refs:** ADR-0027 (self-hosting), ADR-0031 (abstract-forms backend; Stage 0.1), ADR-0034 (types; exhaustiveness over sums), ADR-0041 (representation needs types at emission), ADR-0043 (opaque erasure), ADR-0046 (monomorphization), ADR-0049 (three new emitters incoming)
+**Owners:** Maya Lin (pipeline/emitters) · Arthur Pendelton (typed IR) · Chloe Bennett (parser unification) · Elena Rostova (migration) · Samir Patel (metric/dogfood) · Kira Neri (backend swap) · Rachel Okafor (PM)
+**Evidence:** [SELFHOST.md](../../SELFHOST.md) verdict #3 (B1 fixed in *three* places — "the fork a self-hosted front end would inherit"); README "known gaps" #1.
+
+## Context
+
+The compiler has **one representation problem in three forms**. An expr/pattern node is produced by
+**two parsers** ([`Rian.Pratt`](../../lib/rian/pratt.ex) `parse_pat` *and* [`Rian.Decl`](../../lib/rian/decl.ex)
+`pattern`) and consumed in **two shapes**: the checker walks [`Rian.PatternLower`](../../lib/rian/pattern_lower.ex)'s
+normalized `{:ctor, tag, args}` Maranget form, while the **emitter** ([`Rian.Lower`](../../lib/rian/lower.ex))
+re-walks the **raw surface tuples**. Adding one construct (B1, list patterns) touched all three.
+[`Rian.IR`](../../lib/rian/ir.ex) already structifies **declarations** but deliberately keeps **expr +
+pattern as tuples** ("struct-ifying every arithmetic node would be churn without payoff").
+
+That pragma predates two facts: the **B1 triplication** (drift is now demonstrated, not hypothetical)
+and the **Tier-1 roadmap** (ADR-0049 adds **three** emitters — ECMAScript, JVM, WASM). Building three
+more emitters on the surface-tuple representation casts three more forks. This ADR fixes the IR contract
+*before* that happens.
+
+## Decision
+
+### 1. One typed core IR is the single contract; emitters are pure consumers
+
+The pipeline is **`Lexer → Parser → surface AST → lower+check → typed core IR → emitters`**. The surface
+AST is **transient** (parser output, immediately lowered). **Every downstream pass — the checker and
+*all* emitters — consumes the typed core IR.** The emitter **stops walking surface tuples.** There is
+exactly one downstream representation.
+
+### 2. One parser
+
+`Rian.Decl` **reuses `Rian.Pratt`** for pattern and expression parsing; the duplicate `Decl.pattern` /
+`Pratt.parse_pat` split is eliminated. Patterns/expressions are parsed in **one** place.
+
+### 3. The core IR is typed
+
+After checking, core-IR nodes **carry the inferred type** (ADR-0034). This is **required**, not
+cosmetic: the emitter's representation choices need it —
+
+- closed-set `Symbol` → enum vs open `&'static str` (ADR-0041),
+- opaque-type erasure (ADR-0043),
+- monomorphization / closed-set specialization (ADR-0046).
+
+An untyped emitter literally cannot make these decisions. The checker produces the typed core IR; the
+emitter reads the types off it.
+
+### 4. The core IR is sealed sums / typed structs (expr + pattern, not just declarations)
+
+Extend the struct treatment `ir.ex` already gives declarations to **expression and pattern** nodes:
+sealed sums / typed structs, **not loose tuples**. Two payoffs the old pragma couldn't see:
+
+- **No drift** — one node shape, `@enforce_keys`-guaranteed, a single site to change.
+- **Self-hosting dogfood (ADR-0027/0034)** — when the compiler is rewritten *in Rian*, it represents
+  its own IR with Rian types, and a **sealed-sum IR gives it exhaustiveness over IR nodes**. The
+  totality gate that is Rian's pitch then applies to the compiler's *own* passes — a missed IR case is
+  a compile error in the self-hosted compiler.
+
+### 5. Migration is incremental, behind tests, and sequenced first
+
+**Not a flag-day rewrite** (all passes are green). Lock the IR *shape* here; migrate **pass-by-pass,
+behind the existing suites** — the emitter onto the typed core one construct at a time. Sequence it
+**before**:
+
+- the **ECMAScript emitter** (ADR-0049 Tier 1) — so emitter #3 is built on the core IR, not a 4th fork;
+- the **abstract-forms backend** (ADR-0031 Stage 0.5) — `:compile.forms` wants a stable typed IR, not
+  eval'd surface strings.
+
+### Success metric
+
+**Adding an expr/pattern form is a single-site change** — the core-IR node + one lowering — never three.
+B1 (list patterns), done again under this IR, must touch one place.
+
+## Ratings
+
+| Decision | Rating |
+|---|---|
+| One typed core IR; emitters pure consumers of the core (not surface) | 5/5 |
+| One parser (`Decl` reuses `Pratt`) | 5/5 |
+| Core IR typed (carries inferred types) — required by ADR-0041/0043/0046 | 5/5 |
+| Core IR as sealed sums / typed structs — exhaustiveness over IR nodes for the self-hosted compiler | 4/5 |
+| Incremental migration behind tests, before ECMAScript + Stage 0.5 | 5/5 |
+| Keep expr/pattern as loose tuples (current `ir.ex` pragma) | 2/5 (overturned, with evidence) |
+
+## Consequences
+
+- **Overturns the `ir.ex` expr/pattern-as-tuples pragma**, with evidence (B1 triplication, three
+  incoming emitters) rather than preference. `ir.ex`'s moduledoc is updated to point here.
+- **Unblocks clean implementation of every typed-emission decision** (ADR-0041/0043/0046) — the emitter
+  finally has types.
+- **De-risks the three new emitters** (ADR-0049): they are built once, against the core IR.
+- **Prerequisite for the abstract-forms backend** (ADR-0031 Stage 0.5) and for **self-hosting**
+  (ADR-0027) — the compiler-in-Rian inherits a single, exhaustively-checkable IR, not a fork.
+- This is the **last design/architecture lock**; remaining work is implementation or tagged v2 deferrals.
+
+## Open items
+
+- **Encoding of the inferred type on a node** — inline field on each node vs a side-table keyed by node
+  identity. Impl detail; the contract (emitter reads types off the core) is fixed here.
+- **How much normalization the core keeps** — does the core pattern stay the Maranget `{:ctor, tag,
+  args}` form (good for the checker) while the emitter de-normalizes for idiomatic output, or do both
+  read the normalized form? Resolve during migration.
+- **Migration order** — which emitter construct moves first; the BEAM path vs the Rust path.
+- **`ir.ex` node catalogue** — the concrete sealed-sum definitions for expr + pattern (the structs to
+  add alongside `Type`/`Struct`/`Const`/…).

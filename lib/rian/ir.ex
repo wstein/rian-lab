@@ -3,6 +3,12 @@ defmodule Rian.IR do
   The core intermediate representation — the typed structs the declaration
   parser (`Rian.Decl`) emits and the lowering backend (`Rian.Lower`) consumes.
 
+  > **Superseded direction — ADR-0050.** The "expr/pattern stay tuples" stance below is
+  > overturned (with evidence: the B1 triplication in `SELFHOST.md`, plus three incoming
+  > emitters in ADR-0049). The target is **one typed sealed-sum core IR** that the checker and
+  > *all* emitters consume, migrated incrementally. The description below reflects the
+  > *current* (pre-migration) state.
+
   Declaration-level nodes are structs (below). **Expression and pattern** nodes
   remain the tuple AST that `Rian.Pratt` produces and the emitter/checker walk —
   that *is* the Expr/Pattern IR, kept as tuples because struct-ifying every

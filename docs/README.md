@@ -57,6 +57,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0047](adr/0047-portable-prelude-stdlib.md) | Portable prelude & stdlib: three tiers, hybrid implementation, `Option` not `nil` | Accepted (direction) |
 | [0048](adr/0048-effect-tracking.md) | Effect tracking: fine-grained, inferred, ambient (not object-capability); `pure = empty effect set` | Accepted (direction) |
 | [0049](adr/0049-backend-target-roadmap.md) | Backend target roadmap & tiers: T1 BEAM/Rust/ECMAScript, T2 JVM/WASM, T3 Go | Accepted (direction) |
+| [0050](adr/0050-typed-core-ir.md) | One typed core IR: single contract, sealed-sum nodes, emitters as pure consumers | Accepted (direction) |
 
 ## Specifications
 
@@ -95,12 +96,12 @@ macros/`comptime`, FFI) and cites the spec it follows.
 These are the highest-priority items distilled from the specs' own "open items"
 sections; they are tracked here so the corpus has one place to look:
 
-- **No single typed core IR.** Each pass defines its own pattern/expression
-  shape. This produced drift between the emitter and the linearity checker —
-  now fixed: `Rian.Capability.count_uses/1` is total over the current parser
-  AST — but the structural risk remains (the emitter still consumes surface
-  patterns while the checker consumes lowered ones). A shared IR is the
-  highest-leverage refactor.
+- **No single typed core IR** — **designed: [ADR-0050](adr/0050-typed-core-ir.md)** (migration
+  pending). Each pass defines its own pattern/expression shape; the emitter consumes surface
+  patterns while the checker consumes lowered ones — the drift B1 hit in *three* places
+  ([SELFHOST.md](../SELFHOST.md)). ADR-0050 fixes the contract (one typed sealed-sum core IR,
+  emitters as pure consumers, one parser); the incremental migration is the highest-leverage
+  refactor and is sequenced before the ECMAScript emitter and Stage 0.5.
 - **Declaration parser** (ADR-0031 Stage 0.1) — the gate to compiling real files.
 - **Symbol resolution** for ADR-0029 — Rian module vs Elixir-stdlib vs field.
 - **Backend swap** to Erlang abstract forms / `:compile.forms` (ADR-0026), still
