@@ -22,7 +22,7 @@ defmodule Rian.Beam do
   declarations (need `%Name{}` map forms), named-arg construction, `String`
   literals/`<>`, remote/FFI calls, `with`.
   """
-  alias Rian.{Decl, PatternLower, Pratt}
+  alias Rian.{Core, Decl, PatternLower, Pratt}
 
   @ln 1
 
@@ -77,8 +77,11 @@ defmodule Rian.Beam do
   end
 
   defp clause_form(%{pats: pats, body: body, guard: guard}) do
-    {:clause, @ln, Enum.map(pats, &pat_form/1), guard_form(guard), body_forms(body)}
+    {:clause, @ln, Enum.map(pats, &core_pat/1), guard_form(guard), body_forms(body)}
   end
+
+  # surface pattern -> typed core IR -> Erlang form (ADR-0050: emitter consumes the core)
+  defp core_pat(surface), do: pat_form(Core.from_pat(surface))
 
   # a clause guard is a source string (from `Rian.Decl`); a case-arm guard is AST
   defp guard_form(nil), do: []
@@ -135,7 +138,7 @@ defmodule Rian.Beam do
   defp expr_form({:case, scrut, arms}) do
     {:case, @ln, expr_form(scrut),
      Enum.map(arms, fn {pat, g, body} ->
-       {:clause, @ln, [pat_form(pat)], guard_form(g), [expr_form(body)]}
+       {:clause, @ln, [core_pat(pat)], guard_form(g), [expr_form(body)]}
      end)}
   end
 
@@ -147,20 +150,26 @@ defmodule Rian.Beam do
   defp block_forms({:block, []}), do: [{:atom, @ln, nil}]
   defp block_forms({:block, stmts}), do: Enum.map(stmts, &stmt_form/1)
 
-  # ── pattern forms ─────────────────────────────────────────────────────
-  defp pat_form(:wild), do: {:var, @ln, :_}
-  defp pat_form({:var, x}), do: var_form(x)
-  defp pat_form({:lit, v}) when is_integer(v), do: {:integer, @ln, v}
-  defp pat_form({:atom, a}), do: {:atom, @ln, String.to_atom(a)}
-  defp pat_form({:tuple, ps}), do: {:tuple, @ln, Enum.map(ps, &pat_form/1)}
-  defp pat_form({:list, ps, tail}), do: cons(ps, list_tail(tail), &pat_form/1)
-  # sum-variant patterns mirror construction: nullary -> tag atom, else tagged tuple
-  defp pat_form({:ctor, name, []}), do: {:atom, @ln, tag(name)}
+  # ── pattern forms (consume the typed core IR, Rian.Core) ───────────────
+  defp pat_form(%Core.PWild{}), do: {:var, @ln, :_}
+  defp pat_form(%Core.PVar{name: x}), do: var_form(x)
+  defp pat_form(%Core.PLit{value: v}) when is_integer(v), do: {:integer, @ln, v}
+  defp pat_form(%Core.PAtom{name: a}), do: {:atom, @ln, String.to_atom(a)}
+  defp pat_form(%Core.PTuple{elems: ps}), do: {:tuple, @ln, Enum.map(ps, &pat_form/1)}
 
-  defp pat_form({:ctor, name, args}),
+  defp pat_form(%Core.PList{elems: ps, tail: tail}),
+    do: cons(ps, core_list_tail(tail), &pat_form/1)
+
+  # sum-variant patterns mirror construction: nullary -> tag atom, else tagged tuple
+  defp pat_form(%Core.PCtor{ctor: name, args: []}), do: {:atom, @ln, tag(name)}
+
+  defp pat_form(%Core.PCtor{ctor: name, args: args}),
     do: {:tuple, @ln, [{:atom, @ln, tag(name)} | Enum.map(args, &pat_form/1)]}
 
   defp pat_form(other), do: raise(Unsupported, "abstract-forms: pattern #{inspect(other)}")
+
+  defp core_list_tail(:close), do: {nil, @ln}
+  defp core_list_tail(tail), do: tail
 
   # ── helpers ───────────────────────────────────────────────────────────
   defp list_tail(:close), do: {nil, @ln}

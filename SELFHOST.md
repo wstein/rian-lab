@@ -78,14 +78,16 @@ construction, and cons-list building all compose and lower correctly.
    genuinely-compiled `.beam` module**, not eval'd source. Still
    `Rian.Beam.Unsupported` (never a miscompile): `struct` declarations (need
    `%Name{}` map forms), named-arg construction, `String`/`<>`, `with`.
-3. **Core IR + parser unification (ADR-0050)** — **parser fork closed.** The
-   duplicate `Decl.pattern` string parser is gone; clause heads and `case` arms
-   now share the one `Rian.Pratt.parse_pat` token parser (ADR-0050 §2). A pattern
-   form is added in *one* parser site, and clause heads inherited Pratt's richer
-   patterns (string-literal, negative-int) for free. **Remaining (ADR-0050 §1/§4,
-   larger):** the emitter still walks surface tuples while the checker walks the
-   normalized Maranget form — fold both onto one *typed* core IR, incrementally,
-   before the three new emitters (ADR-0049).
+3. **Core IR + parser unification (ADR-0050)** — **parser fork closed; typed
+   core IR begun.** (a) The duplicate `Decl.pattern` string parser is gone —
+   clause heads and `case` arms share the one `Rian.Pratt.parse_pat` (§2). (b)
+   `Rian.Core` now defines the **typed core *pattern* IR** (sealed-sum structs,
+   each carrying a `type` field per §3) + `from_pat/1`, and the abstract-forms
+   emitter (`Rian.Beam`) **consumes the core** (§1) — surface → core → Erlang
+   form. **Remaining (incremental, §5):** the expression catalogue; migrating
+   the other emitters (`Rian.Lower` Elixir/Rust) and the exhaustiveness
+   normalizer onto the core; the checker filling node `type`s. Done before the
+   three new emitters (ADR-0049).
 4. **Portable prelude (ADR-0041 #3 / ADR-0047)** — **mechanism + first member
    landed.** `Rian.Prelude` injects built-in types into the checker /
    exhaustiveness env / lowering meta without a user declaration and without
