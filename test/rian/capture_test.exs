@@ -1,5 +1,7 @@
 defmodule Rian.CaptureTest do
-  use ExUnit.Case, async: true
+  # async: false — `Code.eval_string`s emitted code into the global VM
+  # (compiler/code server); concurrent compilation races otherwise.
+  use ExUnit.Case, async: false
 
   alias Rian.{Capability, Lower, Pratt}
 

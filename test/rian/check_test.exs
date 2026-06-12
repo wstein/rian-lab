@@ -1,5 +1,7 @@
 defmodule Rian.CheckTest do
-  use ExUnit.Case, async: true
+  # async: false — exercises `Rian.Decl.compile`, which touches the global VM
+  # (compiler/code server); concurrent module compilation races otherwise.
+  use ExUnit.Case, async: false
 
   alias Rian.{Check, Pratt}
 
