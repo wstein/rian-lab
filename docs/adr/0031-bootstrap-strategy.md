@@ -69,20 +69,27 @@ plus interim source emission — **not** the compiler source.
 
 ## Roadmap (refines ADR-0027)
 
-| Stage | Deliverable | Backend |
-|---|---|---|
-| **0 (today)** | Front-end components + per-function emission, verified | Elixir source (`eval`) |
-| **0.1 — the gate** | **Lexer + declaration parser**: parse whole `mod`/`type`/`fn`/`macro` files into the structures the pipeline already consumes | — |
-| **0.2** | Module emitter + driver: parsed defs → one module → run | Elixir source |
-| **0.3** | **Functioning language**: compile & run real `.rian` files; iterate syntax/behavior freely here | Elixir source (interim) |
-| **0.5** | Swap backend to Erlang abstract forms / Core Erlang (`:compile.forms`); invisible to the language | Erlang-native (ADR-0026) |
-| **1** | Self-host: rewrite the compiler in Rian, FFI to `:lists`/`:maps`/`:compile` | BEAM |
-| **2** | Fixpoint: Stage1 compiles itself; compare artifacts | BEAM |
+State legend: ✅ done · 🟡 in progress · ⬜ not started. State reflects the
+implementation as of 2026-06-12 (214 component tests green at HEAD).
 
-The single highest-leverage next step is **Stage 0.1 — the lexer + declaration parser** —
-because every downstream component (checker, exhaustiveness, capabilities, macros, emitters)
-already exists and is tested. That parser is what turns "verified components" into "a language
-that reads source files."
+| Stage | Deliverable | Backend | State |
+|---|---|---|---|
+| **0 (today)** | Front-end components + per-function emission, verified | Elixir source (`eval`) | ✅ **Done** — all passes implemented & tested ([lib/rian/](../../lib/rian/)) |
+| **0.1 — the gate** | **Lexer + declaration parser**: parse whole `mod`/`type`/`fn`/`macro` files into the structures the pipeline already consumes | — | 🟡 **In progress** — [`Rian.Lexer`](../../lib/rian/lexer.ex) + [`Rian.Decl`](../../lib/rian/decl.ex) parse `type`/`struct`/`alias`/`def` (`:=` / `… end` block / `case` bodies, `when` guards, multi-param). `mod` parsing underway; `macro` files not yet |
+| **0.2** | Module emitter + driver: parsed defs → one module → run | Elixir source | 🟡 **Partial** — [`Decl.compile/1`](../../lib/rian/decl.ex) parses → lowers → runs a module end-to-end ([decl_run.exs](../../examples/decl_run.exs)); `mod`-level grouping/visibility pending |
+| **0.3** | **Functioning language**: compile & run real `.rian` files; iterate syntax/behavior freely here | Elixir source (interim) | 🟡 **Started** — real files compile & run ([examples/area.rian](../../examples/area.rian)); exhaustiveness gate fires on parsed source. Surface still narrow |
+| **0.5** | Swap backend to Erlang abstract forms / Core Erlang (`:compile.forms`); invisible to the language | Erlang-native (ADR-0026) | ⬜ **Not started** — interim backend still emits Elixir/text source |
+| **1** | Self-host: rewrite the compiler in Rian, FFI to `:lists`/`:maps`/`:compile` | BEAM | ⬜ **Not started** |
+| **2** | Fixpoint: Stage1 compiles itself; compare artifacts | BEAM | ⬜ **Not started** |
+
+The highest-leverage work now is **closing out Stage 0.1 → 0.2**: land `mod`
+parsing and module-level grouping/visibility so multi-declaration files emit as
+one cohesive module. The downstream components (checker, exhaustiveness,
+capabilities, macros, emitters) already exist and are tested — finishing the
+declaration parser + module emitter is what turns "verified components" into "a
+language that reads and runs whole source files." A first increment of the real
+type checker ([`Rian.Check`](../../lib/rian/check.ex), ADR-0034) has also landed
+alongside the parser work.
 
 ## Consequences
 - No fork; no permanent downstream tax; macro mandate preserved.

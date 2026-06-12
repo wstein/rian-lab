@@ -19,8 +19,8 @@ the normative behaviour the implementation must match).
 | Capability → Rust sig + BEAM linearity | Implemented (partial) | [capability.ex](../lib/rian/capability.ex) |
 | End-to-end lowering (Elixir + Rust) | Implemented | [lower.ex](../lib/rian/lower.ex) |
 | Hygienic macros + pure comptime | Implemented | [macro.ex](../lib/rian/macro.ex), [comptime.ex](../lib/rian/comptime.ex) |
-| Lexer + declaration parser | **Stage 0.1 (MVP)** | [decl.ex](../lib/rian/decl.ex) — token-driven; `type` + single/multi-param `def`, `:=`/block/`case` bodies, end-to-end ([decl_run.exs](../examples/decl_run.exs)) |
-| Real type checker | **Not started** | passes are "typecheck-shape" only; FFI is `dynamic` |
+| Lexer + declaration parser | **Stage 0.1 (in progress)** | [decl.ex](../lib/rian/decl.ex) — token-driven; `type`/`struct`/`alias` + single/multi-param `def`, `:=`/block/`case` bodies, `when` guards, end-to-end ([decl_run.exs](../examples/decl_run.exs)); `mod` parsing underway, `macro` files not yet |
+| Real type checker | **Started (conservative)** | [check.ex](../lib/rian/check.ex) — first ADR-0034 increment: unification-based inference that rejects only provable return-type mismatches; FFI still `dynamic` |
 | Erlang abstract-forms backend | Not started | interim backend emits Elixir/text source |
 
 All passes today are driven by **hand-built IR**, not by parsing `.rian` source.
