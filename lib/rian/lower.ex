@@ -181,7 +181,7 @@ defmodule Rian.Lower do
   defp resolve_structs({:call, {:id, name}, args}, smeta) do
     case Map.fetch(smeta, name) do
       {:ok, %{labels: labels}} ->
-        {:struct_lit, name, Enum.zip(labels, Enum.map(args, &resolve_structs(&1, smeta)))}
+        {:struct_lit, name, struct_pairs(name, labels, args, smeta)}
 
       :error ->
         {:call, {:id, name}, Enum.map(args, &resolve_structs(&1, smeta))}
@@ -189,6 +189,31 @@ defmodule Rian.Lower do
   end
 
   defp resolve_structs(node, smeta), do: Rian.Macro.map_node(node, &resolve_structs(&1, smeta))
+
+  # Build the `{label, value}` pairs of a struct literal. All-positional args zip
+  # onto the declared field order; all-named args (`x: …`) are placed by name (so
+  # source order is free); a mix is rejected.
+  defp struct_pairs(name, labels, args, smeta) do
+    cond do
+      Enum.all?(args, &match?({:label, _, _}, &1)) and args != [] ->
+        given = Map.new(args, fn {:label, l, e} -> {l, resolve_structs(e, smeta)} end)
+        extra = Map.keys(given) -- labels
+        if extra != [], do: raise("struct #{name}: unknown field(s) #{inspect(extra)}")
+
+        Enum.map(labels, fn l ->
+          case Map.fetch(given, l) do
+            {:ok, v} -> {l, v}
+            :error -> raise("struct #{name}: missing field `#{l}`")
+          end
+        end)
+
+      Enum.any?(args, &match?({:label, _, _}, &1)) ->
+        raise("struct #{name}: mix of positional and named fields")
+
+      true ->
+        Enum.zip(labels, Enum.map(args, &resolve_structs(&1, smeta)))
+    end
+  end
 
   # Optional clause guard: `nil` or a Rian guard-expression string. Lowers to
   # `when …` on Elixir and `if …` on Rust (clauses-guards §5).

@@ -305,6 +305,31 @@ defmodule Rian.DeclTest do
       assert ShiftFromSource.shift(point, 10) == struct(ShiftFromSource.Point, x: 11, y: 12)
     end
 
+    test "named construction places fields by name (order-independent)" do
+      [{"make", out}] =
+        Decl.compile("""
+        struct Point(x Int64, y Int64)
+
+        def make(a Int64, b Int64) Point := Point(y: b, x: a)
+        """)
+
+      # written `y:` first, but emitted in the struct's declared field order
+      assert out.elixir =~ "%Point{x: a, y: b}"
+      assert out.rust =~ "Point { x: a, y: b }"
+
+      Code.eval_string("defmodule MakeFromSource do\n#{out.elixir}\nend")
+      assert MakeFromSource.make(1, 2) == struct(MakeFromSource.Point, x: 1, y: 2)
+    end
+
+    test "a missing named field is rejected at lowering" do
+      assert_raise RuntimeError, ~r/missing field `y`/, fn ->
+        Decl.compile("""
+        struct Point(x Int64, y Int64)
+        def bad(a Int64) Point := Point(x: a)
+        """)
+      end
+    end
+
     test "an alias resolves inside struct fields" do
       %{structs: [s]} =
         Decl.parse("""

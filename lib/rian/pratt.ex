@@ -172,21 +172,25 @@ defmodule Rian.Pratt do
 
   defp parse_args([{:rparen} | rest]), do: {[], rest}
 
+  # `name: expr` — a labeled argument (named struct/variant construction). `id :`
+  # is unambiguous here (an atom is `: id`, colon first), so it cannot collide.
+  defp parse_args([{:id, name}, {:op, ":"} | rest]) do
+    {v, rest} = parse_expr(rest, 0)
+    finish_arg({:label, name, v}, rest)
+  end
+
   defp parse_args(tokens) do
     {a, tokens} = parse_expr(tokens, 0)
-
-    case tokens do
-      [{:comma} | rest] ->
-        {more, rest} = parse_args(rest)
-        {[a | more], rest}
-
-      [{:rparen} | rest] ->
-        {[a], rest}
-
-      _ ->
-        raise ArgumentError, "expected `,` or `)`"
-    end
+    finish_arg(a, tokens)
   end
+
+  defp finish_arg(a, [{:comma} | rest]) do
+    {more, rest} = parse_args(rest)
+    {[a | more], rest}
+  end
+
+  defp finish_arg(a, [{:rparen} | rest]), do: {[a], rest}
+  defp finish_arg(_a, _), do: raise(ArgumentError, "expected `,` or `)`")
 
   defp lambda_ahead?([{:lparen} | rest]), do: match?([{:op, "->"} | _], after_paren(rest, 1))
 
@@ -381,6 +385,8 @@ defmodule Rian.Pratt do
   defp sexpr({:cap_arg, n}), do: "&#{n}"
   defp sexpr({:capture, b}), do: "(& #{sexpr(b)})"
   defp sexpr({:capture_named, p, a}), do: "(&/ #{sexpr(p)} #{a})"
+
+  defp sexpr({:label, n, e}), do: "#{n}: #{sexpr(e)}"
 
   defp sexpr({:call, f, args}),
     do: "(call #{sexpr(f)}#{Enum.map_join(args, "", fn a -> " " <> sexpr(a) end)})"

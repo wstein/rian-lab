@@ -27,7 +27,8 @@ defmodule Rian.Decl do
     * `alias Name := Type` — transparent synonyms, resolved by substituting the
       name out of every type position (introduces no runtime form).
     * `struct Name(field Type, …)` — product types; lower to `defstruct` (BEAM) /
-      `struct {…}` (Rust) and are built with `Name(v1, v2)` constructor calls.
+      `struct {…}` (Rust) and are built with positional `Name(v1, v2)` or named
+      `Name(field: v, …)` constructor calls.
     * `mod Name do … end` — modules grouping types/structs/defs; lower to a
       `defmodule` (BEAM) / `mod` (Rust). `pub` exports a `def`/`type`/`struct`
       (`def`/`pub fn`); unmarked items are private (`defp`/`fn`).
