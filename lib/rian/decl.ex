@@ -36,7 +36,7 @@ defmodule Rian.Decl do
 
   Inside a `mod`, `const` and `use` (imports) raise `Rian.Decl.Error`.
   """
-  alias Rian.{Lexer, Lower}
+  alias Rian.{Check, Lexer, Lower}
   alias Rian.IR.{Clause, Field, Func, Mod, Param, Struct, Type, Variant}
 
   defmodule Error do
@@ -137,14 +137,16 @@ defmodule Rian.Decl do
   keyed by the module name.
   """
   def compile(src) do
-    %{types: types, structs: structs, funcs: funcs, mods: mods} = parse(src)
+    %{types: types, structs: structs, funcs: funcs, mods: mods} = prog = parse(src)
+    :ok = Check.gate!(prog)
     funs = Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f, structs)} end)
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module(m)} end)
   end
 
   @doc "Parse and lower to the BEAM target only (FFI / BEAM-only bodies)."
   def compile_beam(src) do
-    %{types: types, structs: structs, funcs: funcs, mods: mods} = parse(src)
+    %{types: types, structs: structs, funcs: funcs, mods: mods} = prog = parse(src)
+    :ok = Check.gate!(prog)
     funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs)} end)
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m)} end)
   end

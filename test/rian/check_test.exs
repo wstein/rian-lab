@@ -73,4 +73,26 @@ defmodule Rian.CheckTest do
       assert Check.check(~s|def name(n Int64) String := "n"|) == :ok
     end
   end
+
+  describe "the type gate fires at compile time" do
+    test "Decl.compile refuses a proven return-type mismatch" do
+      assert_raise Check.Error, ~r/declared return type is `Bool`/, fn ->
+        Rian.Decl.compile("def f(n Int64) Bool := n + 1")
+      end
+    end
+
+    test "a well-typed program compiles through the gate" do
+      assert [{"double", _}] = Rian.Decl.compile("def double(n Int64) Int64 := n * 2")
+    end
+
+    test "the gate also checks functions inside a module" do
+      assert_raise Check.Error, ~r/declared return type is `Bool`/, fn ->
+        Rian.Decl.compile("""
+        mod M do
+          pub def f(n Int64) Bool := n + 1
+        end
+        """)
+      end
+    end
+  end
 end

@@ -18,6 +18,11 @@ defmodule Rian.Check do
   alias Rian.IR.Func
   alias Rian.Pratt
 
+  defmodule Error do
+    @moduledoc "Raised by the compile-time type gate on a proven type mismatch."
+    defexception [:message]
+  end
+
   @bool_ops ~w(< <= > >= == != and or in)
   @int_ops ~w(div rem)
   @arith ~w(+ - *)
@@ -106,8 +111,25 @@ defmodule Rian.Check do
   end
 
   @doc "Parse source and check every function; returns `:ok` or the first `{:error, message}`."
-  def check(src) do
-    %{funcs: funcs} = Rian.Decl.parse(src)
-    Enum.find_value(funcs, :ok, fn f -> with :ok <- check_func(f), do: nil end)
+  def check(src), do: src |> Rian.Decl.parse() |> check_program()
+
+  @doc """
+  Check every function in a parsed program — top-level and inside every module.
+  Returns `:ok` or the first `{:error, message}`.
+  """
+  def check_program(%{funcs: funcs} = prog) do
+    mod_funcs = for m <- Map.get(prog, :mods, []), f <- m.funcs, do: f
+
+    Enum.find_value(funcs ++ mod_funcs, :ok, fn f ->
+      with :ok <- check_func(f), do: nil
+    end)
+  end
+
+  @doc "The compile-time type gate: raise `Rian.Check.Error` on a proven mismatch, else `:ok`."
+  def gate!(prog) do
+    case check_program(prog) do
+      :ok -> :ok
+      {:error, msg} -> raise Error, msg
+    end
   end
 end
