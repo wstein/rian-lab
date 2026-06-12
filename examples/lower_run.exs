@@ -4,8 +4,8 @@ types = [
   %{
     name: "Shape",
     variants: [
-      %{ctor: "Circle", fields: [%{label: "radius", type: "f64"}]},
-      %{ctor: "Square", fields: [%{label: "side", type: "f64"}]}
+      %{ctor: "Circle", fields: [%{label: "radius", type: "Float64"}]},
+      %{ctor: "Square", fields: [%{label: "side", type: "Float64"}]}
     ]
   }
 ]
@@ -15,7 +15,7 @@ func = %{
   param_name: "shape",
   param_type: "Shape",
   param_cap: :iso,
-  ret: "f64",
+  ret: "Float64",
   clauses: [
     %{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"},
     %{pats: [{:ctor, "Square", [{:var, "s"}]}], body: "s * s"}

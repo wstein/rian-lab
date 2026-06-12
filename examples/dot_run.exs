@@ -9,10 +9,10 @@ end)
 
 IO.puts("\n===== USER EXAMPLE: match on Value.Num(x) =====")
 types = [%{name: "Value", variants: [
-  %{ctor: "Num", fields: [%{type: "i64"}]},
+  %{ctor: "Num", fields: [%{type: "Int64"}]},
   %{ctor: "Zero", fields: []}
 ]}]
-eval = %{name: "eval", param_name: "v", param_type: "Value", param_cap: :iso, ret: "i64",
+eval = %{name: "eval", param_name: "v", param_type: "Value", param_cap: :iso, ret: "Int64",
   clauses: [
     %{pats: [{:ctor, "Num", [{:var, "n"}]}], body: "n * 2"},
     %{pats: [{:ctor, "Zero", []}], body: "0"}

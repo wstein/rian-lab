@@ -14,33 +14,49 @@ defmodule Rian.Capability do
   path; `val` is freely shareable. `ref` is rejected on the BEAM target.
   """
 
-  @copy ~w(i8 i16 i32 i64 i128 isize u8 u16 u32 u64 u128 usize f32 f64 bool char)
+  # Crystal-family primitive vocabulary (ADR-0033). The `Copy` set is the
+  # width-explicit scalars (Int*/UInt*/Float*) plus Bool/Char; `String`/`Symbol`
+  # are not Copy. Source names map to each target — `Int64` is Rian's name, not
+  # Rust's `i64`.
+  @copy for(p <- ~w(Int UInt), w <- ~w(8 16 32 64 128), do: p <> w) ++
+          ~w(Float32 Float64 Bool Char)
 
   # ── Rust parameter-type lowering ───────────────────────────────────────
   def rust_param(:iso, t), do: owned(t)
-  def rust_param(:val, t), do: if(copy?(t), do: t, else: borrowed(t))
+  def rust_param(:val, t), do: if(copy?(t), do: rust_name(t), else: borrowed(t))
   def rust_param(:ref, t), do: "&mut " <> owned(t)
   def rust_param(:tag, t), do: "&" <> owned(t)
 
   def copy?(t), do: t in @copy
 
-  def owned("str"), do: "String"
+  # Source primitive -> Rust spelling (`Int64` -> `i64`, …). Nominal types and
+  # `Vec(...)` pass through unchanged. Only exact `@copy` members are remapped,
+  # so a nominal type that happens to start with `Int` is untouched.
+  def rust_name(t), do: if(t in @copy, do: rust_scalar(t), else: t)
+
+  defp rust_scalar("Int" <> w), do: "i" <> w
+  defp rust_scalar("UInt" <> w), do: "u" <> w
+  defp rust_scalar("Float" <> w), do: "f" <> w
+  defp rust_scalar("Bool"), do: "bool"
+  defp rust_scalar("Char"), do: "char"
+
+  def owned("String"), do: "String"
 
   def owned("Vec(" <> rest) do
     inner = String.trim_trailing(rest, ")")
     "Vec<" <> owned(inner) <> ">"
   end
 
-  def owned(t), do: t
+  def owned(t), do: rust_name(t)
 
-  def borrowed("str"), do: "&str"
+  def borrowed("String"), do: "&str"
 
   def borrowed("Vec(" <> rest) do
     inner = String.trim_trailing(rest, ")")
     "&[" <> owned(inner) <> "]"
   end
 
-  def borrowed(t), do: "&" <> t
+  def borrowed(t), do: "&" <> rust_name(t)
 
   # ── BEAM-side legality ─────────────────────────────────────────────────
   def beam_legal!(:ref),

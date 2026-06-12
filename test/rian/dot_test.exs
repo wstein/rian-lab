@@ -33,7 +33,7 @@ defmodule Rian.DotTest do
         %{
           name: "Value",
           variants: [
-            %{ctor: "Num", fields: [%{type: "i64"}]},
+            %{ctor: "Num", fields: [%{type: "Int64"}]},
             %{ctor: "Zero", fields: []}
           ]
         }
@@ -46,7 +46,7 @@ defmodule Rian.DotTest do
         param_name: "v",
         param_type: "Value",
         param_cap: :iso,
-        ret: "i64",
+        ret: "Int64",
         clauses: [
           %{pats: [{:ctor, "Num", [{:var, "n"}]}], body: "n * 2"},
           %{pats: [{:ctor, "Zero", []}], body: "0"}

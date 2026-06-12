@@ -416,10 +416,19 @@ defmodule Rian.Lower do
   # ── primitive type mapping ─────────────────────────────────────────────
   defp pascal?(s), do: String.match?(s, ~r/^[A-Z]/)
 
-  defp prim_rust(t), do: t
-  defp prim_ex("f64"), do: "float()"
-  defp prim_ex("f32"), do: "float()"
-  defp prim_ex("bool"), do: "boolean()"
-  defp prim_ex("str"), do: "String.t()"
-  defp prim_ex(t), do: if(String.starts_with?(t, ["i", "u"]), do: "integer()", else: "term()")
+  # Crystal source name -> Rust (owned form) / Elixir typespec (ADR-0033).
+  defp prim_rust(t), do: Rian.Capability.owned(t)
+
+  defp prim_ex("Bool"), do: "boolean()"
+  defp prim_ex("String"), do: "String.t()"
+  defp prim_ex("Symbol"), do: "atom()"
+  defp prim_ex("Char"), do: "char()"
+
+  defp prim_ex(t) do
+    cond do
+      Regex.match?(~r/^(Int|UInt)(8|16|32|64|128)$/, t) -> "integer()"
+      Regex.match?(~r/^Float(32|64)$/, t) -> "float()"
+      true -> "term()"
+    end
+  end
 end

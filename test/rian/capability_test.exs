@@ -4,33 +4,33 @@ defmodule Rian.CapabilityTest do
   alias Rian.Lower
   alias Rian.Pratt
 
-  describe "Rust parameter-type matrix" do
+  describe "Rust parameter-type matrix (Crystal source names -> Rust)" do
     test "val borrows (idiomatic &str / &[T] / &T), Copy passes by value" do
-      assert C.rust_param(:val, "i64") == "i64"
-      assert C.rust_param(:val, "f64") == "f64"
-      assert C.rust_param(:val, "str") == "&str"
-      assert C.rust_param(:val, "Vec(f64)") == "&[f64]"
+      assert C.rust_param(:val, "Int64") == "i64"
+      assert C.rust_param(:val, "Float64") == "f64"
+      assert C.rust_param(:val, "String") == "&str"
+      assert C.rust_param(:val, "Vec(Float64)") == "&[f64]"
       assert C.rust_param(:val, "Shape") == "&Shape"
     end
 
     test "iso owns / moves" do
-      assert C.rust_param(:iso, "str") == "String"
-      assert C.rust_param(:iso, "Vec(f64)") == "Vec<f64>"
+      assert C.rust_param(:iso, "String") == "String"
+      assert C.rust_param(:iso, "Vec(Float64)") == "Vec<f64>"
       assert C.rust_param(:iso, "Shape") == "Shape"
-      assert C.rust_param(:iso, "i64") == "i64"
+      assert C.rust_param(:iso, "Int64") == "i64"
     end
 
     test "ref is &mut over the owned form" do
-      assert C.rust_param(:ref, "i64") == "&mut i64"
-      assert C.rust_param(:ref, "str") == "&mut String"
-      assert C.rust_param(:ref, "Vec(f64)") == "&mut Vec<f64>"
+      assert C.rust_param(:ref, "Int64") == "&mut i64"
+      assert C.rust_param(:ref, "String") == "&mut String"
+      assert C.rust_param(:ref, "Vec(Float64)") == "&mut Vec<f64>"
     end
 
     test "copy? classifies primitives" do
-      assert C.copy?("i64")
-      assert C.copy?("f64")
-      assert C.copy?("bool")
-      refute C.copy?("str")
+      assert C.copy?("Int64")
+      assert C.copy?("Float64")
+      assert C.copy?("Bool")
+      refute C.copy?("String")
       refute C.copy?("Shape")
     end
   end
@@ -127,7 +127,12 @@ defmodule Rian.CapabilityTest do
 
   describe "capability drives the emitted Rust signature" do
     defp types do
-      [%{name: "Shape", variants: [%{ctor: "Circle", fields: [%{label: "radius", type: "f64"}]}]}]
+      [
+        %{
+          name: "Shape",
+          variants: [%{ctor: "Circle", fields: [%{label: "radius", type: "Float64"}]}]
+        }
+      ]
     end
 
     defp area(cap) do
@@ -136,7 +141,7 @@ defmodule Rian.CapabilityTest do
         param_name: "shape",
         param_type: "Shape",
         param_cap: cap,
-        ret: "f64",
+        ret: "Float64",
         clauses: [%{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"}]
       }
     end

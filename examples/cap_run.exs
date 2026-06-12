@@ -3,7 +3,7 @@ alias Rian.Lower
 alias Rian.Pratt
 
 IO.puts("===== CAPABILITY -> RUST PARAMETER TYPE =====")
-types_demo = ["i64", "f64", "str", "Vec(f64)", "Shape"]
+types_demo = ["Int64", "Float64", "String", "Vec(Float64)", "Shape"]
 
 for cap <- [:val, :iso, :ref, :tag] do
   row = Enum.map_join(types_demo, "  |  ", fn t -> "#{t}: #{C.rust_param(cap, t)}" end)
@@ -15,13 +15,13 @@ sig = fn name, ty -> "fn #{name}(x: #{ty}) {}" end
 
 rust_sigs =
   [
-    {"v_i64", C.rust_param(:val, "i64")},
-    {"v_str", C.rust_param(:val, "str")},
-    {"v_vec", C.rust_param(:val, "Vec(f64)")},
-    {"i_str", C.rust_param(:iso, "str")},
-    {"i_vec", C.rust_param(:iso, "Vec(f64)")},
-    {"r_i64", C.rust_param(:ref, "i64")},
-    {"r_str", C.rust_param(:ref, "str")}
+    {"v_i64", C.rust_param(:val, "Int64")},
+    {"v_str", C.rust_param(:val, "String")},
+    {"v_vec", C.rust_param(:val, "Vec(Float64)")},
+    {"i_str", C.rust_param(:iso, "String")},
+    {"i_vec", C.rust_param(:iso, "Vec(Float64)")},
+    {"r_i64", C.rust_param(:ref, "Int64")},
+    {"r_str", C.rust_param(:ref, "String")}
   ]
   |> Enum.map_join("\n", fn {n, t} -> sig.(n, t) end)
 
@@ -33,8 +33,8 @@ types = [
   %{
     name: "Shape",
     variants: [
-      %{ctor: "Circle", fields: [%{label: "radius", type: "f64"}]},
-      %{ctor: "Square", fields: [%{label: "side", type: "f64"}]}
+      %{ctor: "Circle", fields: [%{label: "radius", type: "Float64"}]},
+      %{ctor: "Square", fields: [%{label: "side", type: "Float64"}]}
     ]
   }
 ]
@@ -44,7 +44,7 @@ area = %{
   param_name: "shape",
   param_type: "Shape",
   param_cap: :val,
-  ret: "f64",
+  ret: "Float64",
   clauses: [
     %{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"},
     %{pats: [{:ctor, "Square", [{:var, "s"}]}], body: "s * s"}
