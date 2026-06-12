@@ -338,13 +338,21 @@ under node from one portable definition.
 
 So both collection members (`Map`, `String`) follow the ADR-0047 §2 shape:
 per-target code confined to a handful of `__prim_*`, everything above portable.
-The one Rust gap they share is the **call-site borrow**: a composite that passes
-an *owned* result (a `Vec`/`String` from a primitive or constructor) into a
-`&[T]`/`&str` parameter — `Str.length(s) := count(chars(s))`, or the lexer's
-`lex(__prim_str_chars(src))` — needs an inserted `&` that the textual emitter
-can't place without callee signatures. That `&`-insertion (a small borrow pass
-over a per-module signature table) is the consolidated remaining Rust item; with
-it, `Str.length`, the lexer, and the parser→VM call chains would all lower.
+
+**The call-site borrow pass now closes that gap — and the lexer reaches Rust.**
+A per-module signature table drives a small Rust pre-pass: when an argument
+*produces* an owned `Vec`/`String` (a `__prim_*` call, a constructor, or a
+value-returning call) but the callee's parameter is a borrow (`&[T]`/`&str`), the
+argument is wrapped in `&`. Paired with rebinding a cons clause's borrowed
+*heads* to owned (`let c = c.clone();`) at arm entry — so a head re-inserted into
+a list or compared in the body is owned — the **FFI-free lexer now lowers to Rust
+and runs under rustc**: `tokenize("12 + 3 * 4")` yields 5 tokens, through cons
+patterns, guard derefs (`*c >= 48`), and fresh-head construction. So the
+self-hosting **lexer runs on all three targets** (BEAM, JS, Rust), and `Str` (incl.
+the `length` composite) lowers fully. The remaining Rust niceties are small:
+`type` declarations emit a private `enum`, so a `pub` function returning one warns
+across the module boundary (a `pub enum` for types used in a `pub` signature), and
+the partial **parser** still needs total clauses (Rust enforces exhaustiveness).
 
 **Rust gets cons.** A Rian `Vec(T)` param lowers to a `&[T]` slice, so cons
 patterns become **Rust slice patterns** — `[h | t]` → `[h, t @ ..]` — matched

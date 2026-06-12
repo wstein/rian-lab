@@ -129,7 +129,10 @@ defmodule Rian.Lower do
     env = build_env(types, structs)
     Enum.each(funcs, &(:ok = check!(&1, env)))
     consts = Map.get(m, :consts, [])
-    ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts))
+    # a signature table (name -> func) lets the Rust call-site borrow pass see
+    # which params are `&[T]`/`&str` and which calls return owned values
+    sigs = Map.new(funcs, fn f -> {f.name, f} end)
+    ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts), sigs)
 
     body =
       [
@@ -249,7 +252,8 @@ defmodule Rian.Lower do
 
   # The resolution context threaded into every body: `meta` (sum-variant table),
   # `smeta` (struct table), `cset` (in-scope constant names).
-  defp ctx(meta, smeta, cset), do: %{meta: meta, smeta: smeta, cset: cset}
+  defp ctx(meta, smeta, cset, funs \\ %{}),
+    do: %{meta: meta, smeta: smeta, cset: cset, funs: funs}
 
   # The `def`/`defp` clauses of one function (no type/struct preamble). `def_kw`
   # selects the visibility keyword (top-level is always `def`; inside a `mod` a
@@ -439,6 +443,62 @@ defmodule Rian.Lower do
 
   defp resolve_rust_pats(node, meta), do: Rian.Macro.map_node(node, &resolve_rust_pats(&1, meta))
 
+  # Rust call-site borrow pass (ADR-0047): when an argument *produces* an owned
+  # value (a `Vec`/`String` from a constructor or a value-returning call) but the
+  # callee's parameter is a borrow (`&[T]`/`&str`), wrap it in `&` so it coerces.
+  # A bare variable is left alone — it is already the borrow the param expects.
+  defp insert_borrows({:call, {:id, name} = fun, args}, funs) do
+    args = Enum.map(args, &insert_borrows(&1, funs))
+
+    case param_rtypes(name, funs) do
+      nil ->
+        {:call, fun, args}
+
+      ptypes ->
+        borrowed =
+          args
+          |> Enum.zip(ptypes)
+          |> Enum.map(fn {a, pt} ->
+            if borrow_type?(pt) and owned_arg?(a, funs), do: {:unary, "&", a}, else: a
+          end)
+
+        {:call, fun, borrowed}
+    end
+  end
+
+  defp insert_borrows(node, funs), do: Rian.Macro.map_node(node, &insert_borrows(&1, funs))
+
+  # the callee's parameter Rust types, or nil when the callee is unknown (an
+  # external/primitive call — leave its args untouched)
+  defp param_rtypes(name, funs) do
+    case Map.get(funs, name) do
+      %{params: ps} -> Enum.map(ps, fn p -> Rian.Capability.rust_param(p.cap, p.type) end)
+      _ -> nil
+    end
+  end
+
+  defp borrow_type?("&" <> _), do: true
+  defp borrow_type?(_), do: false
+
+  # does this argument expression produce an owned `Vec`/`String`?
+  defp owned_arg?({:list_lit, _, _}, _funs), do: true
+  defp owned_arg?({:call, {:id, "__prim_str_chars"}, _}, _funs), do: true
+  defp owned_arg?({:call, {:id, "__prim_str_from_chars"}, _}, _funs), do: true
+  defp owned_arg?({:call, {:id, "__prim_str_concat"}, _}, _funs), do: true
+
+  defp owned_arg?({:call, {:id, name}, _}, funs) do
+    case Map.get(funs, name) do
+      %{ret: ret} -> owned_rtype?(ret)
+      _ -> false
+    end
+  end
+
+  defp owned_arg?(_node, _funs), do: false
+
+  defp owned_rtype?("Vec(" <> _), do: true
+  defp owned_rtype?("String"), do: true
+  defp owned_rtype?(_), do: false
+
   defp rpat({:rpat, s}), do: s
   defp rpat(pat), do: pat_rs(pat, %{})
 
@@ -545,7 +605,13 @@ defmodule Rian.Lower do
         # Resolve construction (struct + variant), constant references, and `case`
         # patterns on the surface (where the meta is available), then translate to
         # the typed core IR the emitter consumes (ADR-0050).
-        ast = c.body |> body_ast(ctx) |> resolve_rust_pats(ctx.meta) |> Core.from_expr()
+        ast =
+          c.body
+          |> body_ast(ctx)
+          |> resolve_rust_pats(ctx.meta)
+          |> insert_borrows(Map.get(ctx, :funs, %{}))
+          |> Core.from_expr()
+
         body = emit(ast, :rust) |> elem(0)
         rebinds = arm_rebinds(c.pats, iso)
 
@@ -594,26 +660,25 @@ defmodule Rian.Lower do
     end
   end
 
+  # Make a cons clause's borrowed binders owned at arm entry, so the body uses
+  # them uniformly (insert into a `Vec`, comparisons, etc.). A **head** bound in
+  # a slice element is a `&T` borrow → `clone()` (works for `Copy` and non-`Copy`
+  # alike); this applies to *every* cons clause. A **tail** is a `&[T]` slice;
+  # only `iso` (owned-`Vec`) params rebind it via `to_vec()`, since `val` params
+  # keep the slice for zero-copy recursion.
   defp arm_rebinds(pats, iso) do
     pats
     |> Enum.with_index()
     |> Enum.flat_map(fn {pat, i} ->
-      if MapSet.member?(iso, i), do: rust_rebinds(Core.from_pat(pat)), else: []
+      core = Core.from_pat(pat)
+      heads = Enum.map(slice_elem_vars(core), &"let #{&1} = #{&1}.clone();")
+      tails = if MapSet.member?(iso, i), do: cons_tail_rebinds(core), else: []
+      heads ++ tails
     end)
   end
 
-  # under an `.as_slice()` match the binders are borrows/slices; rebind each to an
-  # owned value — the cons tail via `to_vec()`, every other binder via `clone()`
-  defp rust_rebinds(%PList{elems: ps, tail: tail}),
-    do: Enum.flat_map(ps, &rust_rebinds/1) ++ tail_rebind(tail)
-
-  defp rust_rebinds(%PCtor{args: args}), do: Enum.flat_map(args, &rust_rebinds/1)
-  defp rust_rebinds(%PTuple{elems: ps}), do: Enum.flat_map(ps, &rust_rebinds/1)
-  defp rust_rebinds(%PVar{name: n}), do: ["let #{n} = #{n}.clone();"]
-  defp rust_rebinds(_), do: []
-
-  defp tail_rebind(%PVar{name: n}), do: ["let #{n} = #{n}.to_vec();"]
-  defp tail_rebind(_), do: []
+  defp cons_tail_rebinds(%PList{tail: %PVar{name: n}}), do: ["let #{n} = #{n}.to_vec();"]
+  defp cons_tail_rebinds(_), do: []
 
   # variables bound inside the *element* positions of a list pattern — under a
   # slice match they are `&T` borrows, so a guard comparing them needs `*`
@@ -816,6 +881,8 @@ defmodule Rian.Lower do
   defp emit(%EUnary{op: "-", arg: x}, t), do: {"-" <> p(x, 11, t), 11}
   defp emit(%EUnary{op: "not", arg: x}, :elixir), do: {"not " <> p(x, 11, :elixir), 11}
   defp emit(%EUnary{op: "not", arg: x}, :rust), do: {"!" <> p(x, 11, :rust), 11}
+  # `&` is injected by the call-site borrow pass (Rust only) — never parsed
+  defp emit(%EUnary{op: "&", arg: x}, :rust), do: {"&" <> p(x, 11, :rust), 11}
 
   # lambdas — Elixir anonymous fn, Rust closure
   defp emit(%ELambda{params: params, body: body}, :elixir) do

@@ -95,8 +95,9 @@ defmodule Rian.FeaturesTest do
     test "a cons pattern becomes a slice pattern; cons construction prepends onto a Vec" do
       [{_, %{rust: rust}}] = Rian.Decl.compile(@cons_src)
 
-      # `[h | t]` clause head -> Rust slice pattern; recursion passes the slice
-      assert rust =~ "[h, t @ ..] => h + sum(t)"
+      # `[h | t]` clause head -> Rust slice pattern; the head is rebound owned
+      # (`clone`) at arm entry, the tail slice is passed straight to the recursion
+      assert rust =~ "[h, t @ ..] => { let h = h.clone(); h + sum(t) }"
       # `[n | countdown(n - 1)]` -> prepend onto an owned copy of the tail
       assert rust =~ "let mut __v = countdown(n - 1).to_vec(); __v.insert(0, n); __v"
     end
@@ -147,6 +148,49 @@ defmodule Rian.FeaturesTest do
       assert rust =~ "let h = h.clone(); let t = t.to_vec();"
       # returning a (non-matched, owned) param directly is allowed
       assert rust =~ "([], ys) => ys,"
+    end
+
+    test "the call-site borrow pass inserts `&` for an owned arg into a `&[T]`/`&str` param" do
+      # `count(__prim_str_chars(s))` passes an owned Vec into a `&[i64]` param
+      [{_, %{rust: rust}}] = Rian.Decl.compile(File.read!("examples/rian/prelude_str.rian"))
+      assert rust =~ "count(&"
+    end
+
+    @tag :rust
+    test "the FFI-free lexer lowers to Rust and runs under rustc (cons + guards + build)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust =
+            File.read!("examples/rian/selfhost_lexer.rian")
+            |> Rian.Decl.compile()
+            |> Enum.map_join("\n", fn {_, %{rust: r}} -> r end)
+
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_lex_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+          # a token-count helper inside the mod avoids naming the (private) Token
+          runner =
+            String.replace_suffix(
+              rust,
+              "}",
+              "  pub fn ntok(s: &str) -> usize { tokenize(s).len() }\n}"
+            )
+
+          File.write!(
+            src,
+            "#![allow(dead_code)]\n#{runner}\nfn main() { println!(\"{}\", selfhost_lexer::ntok(\"12 + 3 * 4\")); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["--edition", "2021", src, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          # [TNum(12), TPlus, TNum(3), TStar, TNum(4)] = 5 tokens
+          assert String.trim(out) == "5"
+      end
     end
 
     @guarded_src """
