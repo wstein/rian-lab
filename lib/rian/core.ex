@@ -21,10 +21,11 @@ defmodule Rian.Core do
   ([`Rian.Check`](check.ex)) — `infer/3` dispatches on core nodes and
   `annotate/3` fills each node's `type` (§3). One representation, one inference.
 
-  Remaining (ADR-0050 §5): the exhaustiveness normalizer
-  ([`Rian.PatternLower`](pattern_lower.ex)) still consumes surface patterns
-  (it keeps a documented surface contract with direct tests); and emitters do
-  not yet *read* `node.type` for representation choices (the §3 payoff).
+  The exhaustiveness normalizer ([`Rian.PatternLower`](pattern_lower.ex)) consumes
+  the core too (with a surface shim for back-compat). **Every parser-downstream
+  pass now reads one representation.** Remaining (the §3 *payoff*, future work):
+  emitters *reading* `node.type` for representation choices (closed-set symbols,
+  opaque erasure, monomorphization) rather than recomputing from meta.
   """
 
   defmodule PWild do
@@ -64,6 +65,29 @@ defmodule Rian.Core do
     @moduledoc "A sum-variant pattern `Ctor(args…)` (nullary when `args == []`)."
     @enforce_keys [:ctor]
     defstruct ctor: nil, args: [], type: nil
+  end
+
+  defmodule PAs do
+    @moduledoc "An as-pattern `name @ pat` (binds `name` to the whole match)."
+    @enforce_keys [:name, :pat]
+    defstruct [:name, :pat, type: nil]
+  end
+
+  defmodule PPin do
+    @moduledoc "A pin `^expr` — matches the value of `expr` (refutable)."
+    @enforce_keys [:expr]
+    defstruct [:expr, type: nil]
+  end
+
+  defmodule PStruct do
+    @moduledoc "A struct pattern `%Name{field: pat, …}`; `fields` are `{field, pat}`."
+    @enforce_keys [:name]
+    defstruct [:name, fields: [], type: nil]
+  end
+
+  defmodule PMap do
+    @moduledoc "A map pattern `%{key => pat, …}`; `pairs` are `{key, pat}` (refutable when non-empty)."
+    defstruct pairs: [], type: nil
   end
 
   # ── expression nodes ───────────────────────────────────────────────────
@@ -278,4 +302,15 @@ defmodule Rian.Core do
 
   def from_pat({:list, ps, {:tail, t}}),
     do: %PList{elems: Enum.map(ps, &from_pat/1), tail: from_pat(t)}
+
+  def from_pat({:as, name, p}), do: %PAs{name: name, pat: from_pat(p)}
+  # the pinned expression is carried verbatim — it is matched at runtime, not
+  # destructured, and the exhaustiveness lowerer treats a pin as a guard
+  def from_pat({:pin, e}), do: %PPin{expr: e}
+
+  def from_pat({:struct, name, fields}),
+    do: %PStruct{name: name, fields: Enum.map(fields, fn {f, p} -> {f, from_pat(p)} end)}
+
+  def from_pat({:map, kvs}),
+    do: %PMap{pairs: Enum.map(kvs, fn {k, p} -> {k, from_pat(p)} end)}
 end
