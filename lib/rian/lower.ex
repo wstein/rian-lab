@@ -518,9 +518,13 @@ defmodule Rian.Lower do
       end)
 
     # One param matches the value directly; N>1 match the tuple of arguments
-    # (clauses-guards §5.2). A `Vec` param lowers to a `&[T]` slice, so list/cons
-    # patterns (slice patterns) match it directly (ADR-0047).
-    scrut = tuple_or_one(func.params, & &1.name)
+    # (clauses-guards §5.2). A `val Vec` param lowers to a `&[T]` slice, so cons
+    # patterns match it directly; an `iso Vec` param is an owned `Vec<T>`, so it
+    # is matched via `.as_slice()` and its binders are made owned again
+    # (`rust_rebinds/2`) — letting a cons function *return* or *rebuild* a list
+    # (e.g. `cat`) lower with owned semantics (ADR-0047).
+    iso = iso_cons_positions(func)
+    scrut = rust_scrut(func.params, iso)
 
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
@@ -530,7 +534,14 @@ defmodule Rian.Lower do
         # the typed core IR the emitter consumes (ADR-0050).
         ast = c.body |> body_ast(ctx) |> resolve_rust_pats(ctx.meta) |> Core.from_expr()
         body = emit(ast, :rust) |> elem(0)
-        "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(ast, body)},"
+        rebinds = arm_rebinds(c.pats, iso)
+
+        arm =
+          if rebinds == [],
+            do: rust_arm_body(ast, body),
+            else: "{ #{Enum.join(rebinds, " ")} #{body} }"
+
+        "        #{pat}#{guard_str(c, :rust)} => #{arm},"
       end)
 
     fn_str =
@@ -539,6 +550,54 @@ defmodule Rian.Lower do
 
     join_doc(rs_doc(Map.get(func, :doc), "///"), fn_str)
   end
+
+  # param positions that are an owned `iso Vec` destructured by a list/cons
+  # pattern — those match `param.as_slice()` and get owned rebinds in each arm
+  defp iso_cons_positions(func) do
+    func.params
+    |> Enum.with_index()
+    |> Enum.filter(fn {p, i} ->
+      p.cap == :iso and match?("Vec(" <> _, p.type) and
+        Enum.any?(func.clauses, fn c -> match?(%PList{}, Core.from_pat(Enum.at(c.pats, i))) end)
+    end)
+    |> Enum.map(fn {_, i} -> i end)
+    |> MapSet.new()
+  end
+
+  defp rust_scrut(params, iso) do
+    parts =
+      params
+      |> Enum.with_index()
+      |> Enum.map(fn {p, i} ->
+        if MapSet.member?(iso, i), do: "#{p.name}.as_slice()", else: p.name
+      end)
+
+    case parts do
+      [one] -> one
+      many -> "(#{Enum.join(many, ", ")})"
+    end
+  end
+
+  defp arm_rebinds(pats, iso) do
+    pats
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {pat, i} ->
+      if MapSet.member?(iso, i), do: rust_rebinds(Core.from_pat(pat)), else: []
+    end)
+  end
+
+  # under an `.as_slice()` match the binders are borrows/slices; rebind each to an
+  # owned value — the cons tail via `to_vec()`, every other binder via `clone()`
+  defp rust_rebinds(%PList{elems: ps, tail: tail}),
+    do: Enum.flat_map(ps, &rust_rebinds/1) ++ tail_rebind(tail)
+
+  defp rust_rebinds(%PCtor{args: args}), do: Enum.flat_map(args, &rust_rebinds/1)
+  defp rust_rebinds(%PTuple{elems: ps}), do: Enum.flat_map(ps, &rust_rebinds/1)
+  defp rust_rebinds(%PVar{name: n}), do: ["let #{n} = #{n}.clone();"]
+  defp rust_rebinds(_), do: []
+
+  defp tail_rebind(%PVar{name: n}), do: ["let #{n} = #{n}.to_vec();"]
+  defp tail_rebind(_), do: []
 
   # `T | E` in return position is sugar for `Result(T, E)` (ADR-0040 §2) — the ok
   # type then the (single, possibly-named) error set. It lowers to Rust

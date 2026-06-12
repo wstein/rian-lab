@@ -126,6 +126,54 @@ defmodule Rian.FeaturesTest do
           assert String.trim(out) == "10 [4, 3, 2, 1]"
       end
     end
+
+    @iso_src """
+    mod ListOps do
+      pub def cat(xs iso Vec(Int64), ys iso Vec(Int64)) Vec(Int64)
+      pub def cat([], ys) := ys
+      pub def cat([h | t], ys) := [h | cat(t, ys)]
+
+      pub def rev(xs iso Vec(Int64)) Vec(Int64)
+      pub def rev([]) := []
+      pub def rev([h | t]) := cat(rev(t), [h | []])
+    end
+    """
+
+    test "an `iso Vec` cons fn that returns/rebuilds a list matches .as_slice() + owned rebinds" do
+      [{_, %{rust: rust}}] = Rian.Decl.compile(@iso_src)
+
+      # owned param -> matched via `.as_slice()`; binders rebound to owned values
+      assert rust =~ "match (xs.as_slice(), ys)"
+      assert rust =~ "let h = h.clone(); let t = t.to_vec();"
+      # returning a (non-matched, owned) param directly is allowed
+      assert rust =~ "([], ys) => ys,"
+    end
+
+    @tag :rust
+    test "the `iso Vec` list-returning Rust compiles and runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          [{_, %{rust: rust}}] = Rian.Decl.compile(@iso_src)
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_iso_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            rust <>
+              "\nfn main() { println!(\"{:?} {:?}\", list_ops::cat(vec![1,2], vec![3,4]), list_ops::rev(vec![1,2,3])); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-O", "--edition", "2021", src, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "[1, 2, 3, 4] [3, 2, 1]"
+      end
+    end
   end
 
   describe "all three features execute on the BEAM" do

@@ -313,10 +313,23 @@ patterns become **Rust slice patterns** — `[h | t]` → `[h, t @ ..]` — matc
 directly (match ergonomics give `h: &T`, `t: &[T]`), and cons *construction*
 `[e | tail]` prepends onto an owned copy (`tail.to_vec()` then `insert(0, e)`).
 A reduce (`sum([h|t]) := h + sum(t)`) and a fresh-head builder
-(`countdown(n) := [n | countdown(n-1)]`) now lower to Rust and **compile + run
-under rustc** (`sum(&countdown(4)) = 10`). Two ownership frictions remain (a
-real borrow-checker pass, future): returning a borrowed list *param* directly
-where an owned `Vec` is expected (`cat([], ys) := ys`), and re-inserting a
-*borrowed* head var into a new list — both need a clone/`to_vec` the textual
-emitter doesn't yet insert. The lexer also stays BEAM/JS-only on Rust (its
-`String.to_charlist`/`:lists` FFI has no Rust mapping yet).
+(`countdown(n) := [n | countdown(n-1)]`) lower to Rust and **compile + run
+under rustc** (`sum(&countdown(4)) = 10`) with `val Vec` → `&[T]` slice patterns.
+
+For functions that **return or rebuild** a list — where the borrowed-slice
+convention forces clones — the answer is the **`iso` capability** (`iso Vec(T)` →
+an owned `Vec<T>`, capability-consistent: `iso` owns/moves). An `iso Vec` param
+destructured by a cons pattern is matched via `.as_slice()`, and its binders are
+rebound to owned values (`let h = h.clone(); let t = t.to_vec();`). With that,
+`cat([], ys) := ys` (return a param) and `cat([h|t], ys) := [h | cat(t,ys)]`
+(re-insert a borrowed head) — and `rev`, which calls `cat` — lower to Rust and
+**compile + run under rustc** (`cat([1,2],[3,4]) = [1,2,3,4]`, `rev([1,2,3]) =
+[3,2,1]`). So `val` handles reduce/build (zero-copy slices), `iso` handles
+return/rebuild (owned).
+
+Two edges remain on Rust, both real follow-ups: **guards on borrowed binders**
+need `*`-deref (`when c == 32` over a `&i64`), which blocks the guard-heavy
+**lexer**; and the cons-recursive **parser** is gated out of the dual-target
+path by **exhaustiveness** (it is deliberately partial — `parse_factor` doesn't
+cover every token), not by ownership. The lexer's `String`/`:lists` FFI also has
+no Rust mapping yet.
