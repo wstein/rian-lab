@@ -119,6 +119,48 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "error-set composition (ADR-0040 §4)" do
+    test "an error tag in the declared `T | E` set passes" do
+      assert Check.check("def find(id Int64) User | NotFound := {:error, NotFound}") == :ok
+    end
+
+    test "constructing an error outside the declared set is rejected" do
+      assert {:error, msg} =
+               Check.check("def find(id Int64) User | NotFound := {:error, Timeout}")
+
+      assert msg =~ "Timeout"
+      assert msg =~ "declared set `NotFound`"
+    end
+
+    test "a named error set expands to its tags (subset is allowed)" do
+      assert Check.check("""
+             type LookupError := NotFound | Timeout
+             def look(id Int64) User | LookupError := {:error, Timeout}
+             """) == :ok
+    end
+
+    test "a tag outside a named error set is rejected" do
+      assert {:error, msg} =
+               Check.check("""
+               type LookupError := NotFound | Timeout
+               def look(id Int64) User | LookupError := {:error, Other}
+               """)
+
+      assert msg =~ "Other"
+      assert msg =~ "`LookupError`"
+    end
+
+    test "the error-set gate fires through Decl.compile" do
+      assert_raise Check.Error, ~r/not in its declared set/, fn ->
+        Rian.Decl.compile("def f(n Int64) Int64 | NotFound := {:error, Nope}")
+      end
+    end
+
+    test "a non-Result return type is unconstrained by the error-set check" do
+      assert Check.check("def g(n Int64) Int64 := n + 1") == :ok
+    end
+  end
+
   describe "the type gate fires at compile time" do
     test "Decl.compile refuses a proven return-type mismatch" do
       assert_raise Check.Error, ~r/declared return type is `Bool`/, fn ->

@@ -14,9 +14,15 @@ defmodule Rian.Check do
   clause head, which is a one-arm `case` on the parameters — refines a matched
   constructor's bound variables to that variant's field types, so the checker
   infers through `case` bodies and pattern clauses rather than giving up at
-  `:unknown`. Error sets (pillar 2) and protocol bounds (pillar 3) await their
-  surface (`Result`/error tags, protocols); their runtime substrate already
-  exists as sum types checked by the exhaustiveness gate.
+  `:unknown`.
+
+  **Error sets (ADR-0034 pillar 2 / ADR-0040 §4)** are checked at the declared
+  boundary: a `T | E` return type declares the error set `E`; the body's
+  constructed error tags (`{:error, Tag}`) must be a *subset* of `E`
+  (over-declaration is allowed). A named `E` expands to its variant tags.
+  *Not yet:* inferring a private function's set from its propagated callees (the
+  `with`-composition half of §4). Protocol bounds (pillar 3, ADR-0042) await
+  implementation of the `forall`/`protocol` surface.
 
   Types here are the Crystal-family primitive names (`Int64`/`Float64`/`String`/
   `Bool`, ADR-0033) plus `:unknown`. `unify/2` is the kernel: equal types unify
@@ -124,13 +130,23 @@ defmodule Rian.Check do
 
   # ── function checking ──────────────────────────────────────────────────
   @doc """
-  Check one function: each clause body's inferred type must not *contradict* the
-  declared return type. `tdefs` enables flow narrowing. Returns `:ok` or
-  `{:error, message}`.
-  """
-  def check_func(func, tdefs \\ %{})
+  Check one function. `tdefs` enables flow narrowing; `tsets` maps an error-set
+  type name to its tags (for the ADR-0040 §4 declared-⊆ check). Returns `:ok` or
+  `{:error, message}`. Two checks run:
 
-  def check_func(%Func{name: name, params: ps, ret: ret, clauses: clauses}, tdefs) do
+    * **return type** — no clause body's inferred concrete type may *contradict*
+      the declared return type;
+    * **error set** — when the return type is `T | E` (a `Result`), every error
+      tag the body constructs (`{:error, Tag}`) must be in the declared set `E`
+      (over-declaration is allowed; ADR-0040 §4).
+  """
+  def check_func(func, tdefs \\ %{}, tsets \\ %{})
+
+  def check_func(%Func{} = f, tdefs, tsets) do
+    with :ok <- check_return(f, tdefs), do: check_error_set(f, tsets)
+  end
+
+  defp check_return(%Func{name: name, params: ps, ret: ret, clauses: clauses}, tdefs) do
     Enum.find_value(clauses, :ok, fn c ->
       body_t = infer(Pratt.parse_body(c.body), clause_env(c.pats, ps, tdefs), tdefs)
 
@@ -144,6 +160,44 @@ defmodule Rian.Check do
       end
     end)
   end
+
+  # ADR-0040 §4: a `T | E` return type declares the error set `E`; every error
+  # the body actually constructs must be in it (the body's set ⊆ the declared
+  # set — over-declaration is fine). Non-`Result` returns are unconstrained here.
+  defp check_error_set(%Func{ret: ret} = f, tsets) do
+    case String.split(ret, "|") |> Enum.map(&String.trim/1) do
+      [ok_t, err_t] when ok_t != "" ->
+        declared = MapSet.new(Map.get(tsets, err_t, [err_t]))
+
+        produced =
+          f.clauses
+          |> Enum.flat_map(fn c -> c.body |> Pratt.parse_body() |> error_tags() end)
+          |> Enum.reject(&is_nil/1)
+          |> MapSet.new()
+
+        case MapSet.difference(produced, declared) |> MapSet.to_list() do
+          [] ->
+            :ok
+
+          extra ->
+            {:error,
+             "`#{f.name}`: returns error(s) #{inspect(extra)} not in its declared set `#{err_t}`"}
+        end
+
+      _ ->
+        :ok
+    end
+  end
+
+  # Collect the tag names of every `{:error, Tag}` constructed in an expression.
+  defp error_tags({:tuple, [{:atom, "error"}, e]}), do: [tag_name(e) | error_tags(e)]
+  defp error_tags(t) when is_tuple(t), do: t |> Tuple.to_list() |> Enum.flat_map(&error_tags/1)
+  defp error_tags(l) when is_list(l), do: Enum.flat_map(l, &error_tags/1)
+  defp error_tags(_), do: []
+
+  defp tag_name({:id, n}), do: n
+  defp tag_name({:call, {:id, n}, _}), do: n
+  defp tag_name(_), do: nil
 
   # Bind names introduced by the clause head, narrowing constructor patterns
   # against their parameter type (flow narrowing applies to clause heads too —
@@ -162,21 +216,32 @@ defmodule Rian.Check do
   Returns `:ok` or the first `{:error, message}`.
   """
   def check_program(%{funcs: funcs} = prog) do
-    tdefs = type_table(prog)
+    types = all_types(prog)
+    tdefs = type_table(types)
+    tsets = error_sets(types)
     mod_funcs = for m <- Map.get(prog, :mods, []), f <- m.funcs, do: f
 
     Enum.find_value(funcs ++ mod_funcs, :ok, fn f ->
-      with :ok <- check_func(f, tdefs), do: nil
+      with :ok <- check_func(f, tdefs, tsets), do: nil
     end)
   end
 
-  # Constructor table for flow narrowing: every sum-type variant (top-level and
-  # inside modules) mapped to its ordered field types.
-  defp type_table(prog) do
-    types = Map.get(prog, :types, []) ++ for(m <- Map.get(prog, :mods, []), t <- m.types, do: t)
+  defp all_types(prog),
+    do: Map.get(prog, :types, []) ++ for(m <- Map.get(prog, :mods, []), t <- m.types, do: t)
 
+  # Constructor table for flow narrowing: every sum-type variant mapped to its
+  # ordered field types.
+  defp type_table(types) do
     for t <- types, v <- t.variants, into: %{} do
       {v.ctor, Enum.map(v.fields, & &1.type)}
+    end
+  end
+
+  # Error-set table (ADR-0040 §4): a sum type's name -> its tag (variant) names,
+  # so a declared `T | E` can be expanded when `E` is a named set.
+  defp error_sets(types) do
+    for t <- types, into: %{} do
+      {t.name, Enum.map(t.variants, & &1.ctor)}
     end
   end
 
