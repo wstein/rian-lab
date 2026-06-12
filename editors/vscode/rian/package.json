@@ -1,0 +1,46 @@
+{
+  "name": "rian-syntax",
+  "displayName": "Rian Language Syntax",
+  "description": "Syntax highlighting for the Rian programming language (TextMate grammar).",
+  "version": "0.1.0",
+  "publisher": "rian-lang",
+  "engines": {
+    "vscode": "^1.60.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "scripts": {
+    "test": "vscode-tmgrammar-test \"tests/**/*.rian\"",
+    "lint": "prettier --check \"**/*.{json,md}\"",
+    "format": "prettier --write \"**/*.{json,md}\"",
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0",
+    "prettier": "^3.0.0",
+    "vscode-tmgrammar-test": "^0.1.3"
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "rian",
+        "aliases": [
+          "Rian",
+          "rian"
+        ],
+        "extensions": [
+          ".rian"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "rian",
+        "scopeName": "source.rian",
+        "path": "./syntaxes/rian.tmLanguage.json"
+      }
+    ]
+  }
+}
