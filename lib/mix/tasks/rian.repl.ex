@@ -10,30 +10,34 @@ defmodule Mix.Tasks.Rian.Repl do
       mix rian.repl --eval "EXPR"   # evaluate one entry and exit
       mix rian.repl --completions   # print the completion word list (for rlwrap)
 
-  ## Line editing & history
+  ## Line editing, history & completion
 
-  `mix` launches the VM with `-noshell`, so the native Erlang line editor
-  (history, arrow-key recall) is not available — `mix rian.repl` reads through
-  the terminal's canonical mode (basic backspace only). For full readline
-  editing, history, and reverse-search, wrap the REPL with
-  [`rlwrap`](https://github.com/hanslub42/rlwrap):
+  On a real terminal the REPL upgrades the `-noshell` `user_drv` into an
+  interactive line-editing group (via `:user_drv.start_shell/1`) and runs the
+  session there, so it gets the native Erlang line editor — history, arrow-key
+  recall — plus **Rian-aware Tab-completion**: an `expand_fun` backed by
+  `Rian.Repl.complete/2` completes keywords, the `\\` meta-commands, and the
+  session's own defined/bound names. The banner confirms when this is active.
+
+  When stdin/stdout is not a TTY (a pipe, or an IO server without line editing)
+  the REPL falls back to canonical-mode reads. For history and editing there,
+  wrap it with [`rlwrap`](https://github.com/hanslub42/rlwrap):
 
       rlwrap mix rian.repl
 
-  Tab-completion of the language vocabulary works by feeding `rlwrap` the static
-  word list this task can print:
+  `rlwrap` can complete the fixed language vocabulary from the static word list
+  this task prints (session names aren't known ahead of time in that mode):
 
       rlwrap -f <(mix rian.repl --completions) mix rian.repl
-
-  If the REPL is ever driven from an IO server that *does* support line editing,
-  it enables history automatically and the banner says so.
 
   ## Meta-commands
 
   Lines beginning with `\\` are surface commands, not Rian (the lexer never
   starts an expression with `\\`, so they can't collide with code): `\\help`,
   `\\env` (names defined/bound in the session), `\\type EXPR` (infer a type
-  without evaluating), and `\\reset` (fresh session).
+  without evaluating), `\\reset` (fresh session), and `\\quit` (exit — the
+  portable way out, since in line-editing mode `Ctrl-D` is forward-delete, not
+  EOF).
 
   ## Entries
 
@@ -94,21 +98,59 @@ defmodule Mix.Tasks.Rian.Repl do
     print(Repl.render(result))
   end
 
+  # On a real terminal, run inside a native line-editing group (history, arrow
+  # recall, and Rian-aware tab-completion via `expand_fun`); otherwise read
+  # through canonical mode, where `rlwrap mix rian.repl` supplies history.
   defp interactive do
-    editing? = enable_line_editing()
-    IO.puts(banner(editing?))
-    loop(Repl.new())
+    if tty?() and start_line_editing_reader() == :ok do
+      # The reader runs the session in its own process and signals us at EOF; the
+      # graceful `System.stop/0` then restores the terminal as the VM shuts down.
+      receive do
+        :rian_repl_eof -> System.stop()
+      end
+
+      Process.sleep(:infinity)
+    else
+      IO.puts(banner(false))
+      loop(Repl.new())
+    end
   end
 
-  # Try to turn on the native line editor + history. Under a plain `mix` task the
-  # VM runs `-noshell` (no `user_drv`), so this returns `{:error, :enotsup}` and we
-  # fall back to canonical-mode input — `rlwrap mix rian.repl` adds history there.
-  defp enable_line_editing do
-    :io.setopts(:standard_io, [{:line_editing, true}, {:line_history, true}]) == :ok
+  defp tty?() do
+    :prim_tty.isatty(:stdin) == true and :prim_tty.isatty(:stdout) == true
   rescue
     _ -> false
   catch
     _, _ -> false
+  end
+
+  # Upgrade the `-noshell` user_drv into an interactive line-editing group whose
+  # "shell" is our reader. `start_shell/1` runs the MFA, which must spawn the
+  # reader process and return its pid (the spawned process inherits the editing
+  # group as its group leader, so `IO.gets` there gets edlin + completion).
+  defp start_line_editing_reader do
+    ensure_completion_table()
+    parent = self()
+
+    case :user_drv.start_shell(%{initial_shell: {__MODULE__, :reader_spawn, [parent]}}) do
+      :ok -> :ok
+      _ -> :error
+    end
+  rescue
+    _ -> :error
+  catch
+    _, _ -> :error
+  end
+
+  @doc false
+  def reader_spawn(parent), do: spawn(fn -> reader_run(parent) end)
+
+  defp reader_run(parent) do
+    :io.setopts([{:expand_fun, &__MODULE__.expand_fun/1}])
+    IO.puts(banner(true))
+    loop(Repl.new())
+    send(parent, :rian_repl_eof)
+    Process.sleep(:infinity)
   end
 
   @doc """
@@ -117,13 +159,22 @@ defmodule Mix.Tasks.Rian.Repl do
   """
   @spec loop(Repl.t()) :: :ok
   def loop(session) do
+    track_session(session)
+
     case read_entry() do
       :eof ->
         IO.write("\n")
         :ok
 
       {:entry, text} ->
-        loop(handle_entry(text, session))
+        case handle_entry(text, session) do
+          :halt ->
+            IO.write("\n")
+            :ok
+
+          next ->
+            loop(next)
+        end
     end
   end
 
@@ -156,6 +207,9 @@ defmodule Mix.Tasks.Rian.Repl do
         print("session reset")
         Repl.new()
 
+      {:quit, _} ->
+        :halt
+
       {:unknown, cmd} ->
         print("unknown command: #{cmd} (try \\help)")
         session
@@ -172,6 +226,8 @@ defmodule Mix.Tasks.Rian.Repl do
       ["\\?"] -> {:help, ""}
       ["\\env"] -> {:env, ""}
       ["\\reset"] -> {:reset, ""}
+      ["\\quit"] -> {:quit, ""}
+      ["\\q"] -> {:quit, ""}
       ["\\type", expr] -> {:type, expr}
       ["\\type"] -> {:type, ""}
       ["\\" <> _ = cmd | _] -> {:unknown, cmd}
@@ -189,7 +245,9 @@ defmodule Mix.Tasks.Rian.Repl do
     case IO.gets(prompt) do
       :eof -> if blank?(buffer), do: :eof, else: {:entry, buffer}
       {:error, _reason} -> :eof
-      line when is_binary(line) -> accumulate(buffer, line)
+      # A captured StringIO yields a binary; the line-editing group yields a
+      # charlist — normalize both to a string.
+      data -> accumulate(buffer, IO.chardata_to_string(data))
     end
   end
 
@@ -235,6 +293,7 @@ defmodule Mix.Tasks.Rian.Repl do
       \\env             names defined and bound in the session
       \\type EXPR       infer EXPR's type without evaluating it
       \\reset           start a fresh session
+      \\quit, \\q        exit the REPL
     Everything else is Rian: expressions evaluate on Enter; finish a definition with a blank line.
     """)
   end
@@ -266,11 +325,61 @@ defmodule Mix.Tasks.Rian.Repl do
   defp banner(editing?) do
     edit_hint =
       if editing?,
-        do: "Line editing + history are on.",
+        do: "Line editing, history, and Tab-completion are on.",
         else: "For history/editing, run `rlwrap mix rian.repl`."
 
     "Rian REPL — compiling REPL (ADR-0053). " <>
       "Expressions evaluate on Enter; finish a definition with a blank line. " <>
-      "\\help for commands; Ctrl-D to exit. " <> edit_hint
+      "\\help for commands; \\quit to exit. " <> edit_hint
+  end
+
+  # ── tab-completion (expand_fun) ──────────────────────────────────────────
+  #
+  # The line editor invokes `expand_fun/1` in the *group* process, not the loop
+  # process, so the live session is shared through a public ETS table the loop
+  # keeps current via `track_session/1`.
+
+  @completion_table :rian_repl_completion
+
+  defp ensure_completion_table do
+    if :ets.whereis(@completion_table) == :undefined do
+      :ets.new(@completion_table, [:named_table, :public, :set])
+    end
+
+    :ok
+  end
+
+  defp track_session(session) do
+    if :ets.whereis(@completion_table) != :undefined do
+      :ets.insert(@completion_table, {:session, session})
+    end
+
+    session
+  end
+
+  defp tracked_session do
+    case :ets.whereis(@completion_table) != :undefined and
+           :ets.lookup(@completion_table, :session) do
+      [{:session, session}] -> session
+      _ -> Repl.new()
+    end
+  end
+
+  @doc false
+  @spec expand_fun(charlist()) :: {:yes | :no, charlist(), [{charlist(), list()}]}
+  def expand_fun(before_reversed), do: completion_for(before_reversed, tracked_session())
+
+  @doc false
+  @spec completion_for(charlist(), Repl.t()) :: {:yes | :no, charlist(), [{charlist(), list()}]}
+  def completion_for(before_reversed, session) do
+    text = before_reversed |> :lists.reverse() |> List.to_string()
+    {candidates, completion} = Repl.complete(text, session)
+    matches = Enum.map(candidates, &{String.to_charlist(&1), []})
+
+    cond do
+      candidates == [] -> {:no, ~c"", []}
+      completion == "" -> {:no, ~c"", matches}
+      true -> {:yes, String.to_charlist(completion), matches}
+    end
   end
 end

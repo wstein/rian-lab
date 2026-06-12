@@ -97,6 +97,12 @@ defmodule Mix.Tasks.Rian.ReplTest do
       assert out =~ "unknown command"
       refute out =~ "cannot scan"
     end
+
+    test "\\quit ends the loop — later input is not evaluated" do
+      out = session_output("1 + 1\n\\quit\n2 + 2\n")
+      assert out =~ "2 : Int64"
+      refute out =~ "4 : Int64"
+    end
   end
 
   describe "--completions" do
@@ -105,6 +111,31 @@ defmodule Mix.Tasks.Rian.ReplTest do
       assert out =~ "def"
       assert out =~ "\\help"
       assert out =~ "\\type"
+    end
+  end
+
+  describe "completion_for/2 — the expand_fun mapping" do
+    # The line editor passes the text before the cursor, reversed, as a charlist.
+    defp before(text), do: Enum.reverse(String.to_charlist(text))
+
+    test "a unique completion is inserted (yes + remainder + the match)" do
+      assert {:yes, ~c"f", [{~c"def", []}]} = Task.completion_for(before("de"), Repl.new())
+    end
+
+    test "several candidates with no shared continuation only list them (no insert)" do
+      assert {:no, ~c"", matches} = Task.completion_for(before("\\"), Repl.new())
+      titles = Enum.map(matches, fn {chars, _} -> List.to_string(chars) end)
+      assert "\\help" in titles and "\\type" in titles
+    end
+
+    test "no match yields nothing" do
+      assert {:no, ~c"", []} = Task.completion_for(before("zzzq"), Repl.new())
+    end
+
+    test "session-defined names complete" do
+      s = Repl.new()
+      {_, s} = Repl.eval(s, "def square(n Int64) Int64\ndef square(n) := n * n")
+      assert {:yes, ~c"are", [{~c"square", []}]} = Task.completion_for(before("squ"), s)
     end
   end
 end

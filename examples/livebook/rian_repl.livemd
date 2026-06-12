@@ -115,6 +115,20 @@ evaluating it — and `info/1` returns the names the session currently knows
 (`%{defined: ["sq"], bound: ["x"]}`). Neither compiles or runs code, so they're
 safe to call on every keystroke.
 
+A third helper, `Repl.complete/2`, powers Tab-completion: given the text before
+the cursor and a session it returns the matching candidates plus the shared
+continuation to insert. `mix rian.repl` wires it into the terminal's line editor
+as an `expand_fun`; a smart-cell could bind it to a completion key the same way.
+
+```elixir
+%{
+  # a keyword: one candidate, "f" left to insert
+  keyword: Repl.complete("de", session),
+  # the session-defined name `sq`
+  session_name: Repl.complete("sq", session)
+}
+```
+
 ## Next: a `Kino.SmartCell` companion
 
 Wrapping the above in a `Kino.SmartCell` — input editor, output area,

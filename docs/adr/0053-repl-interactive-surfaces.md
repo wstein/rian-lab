@@ -131,7 +131,7 @@ part the existing components already support:
 | Local compiling REPL — `Lexer → Decl/Pratt → Check → Beam → load → eval` (§1) | `--remote`/connected REPL into a running node (§2) |
 | Top-level redefinition/shadowing; `:=` binds visible to later expressions (§3) | Editor-eval LSP protocol (§5) |
 | Prints **value + inferred type** (§4); the current `Rian.Beam` construct scope | **Effect-set** in the output (needs the ADR-0048 effect checker) |
-| One eval engine the future surfaces reuse (§6); BEAM-only (§7); `\help`/`\env`/`\type`/`\reset` meta-commands + engine introspection (`Rian.Repl.info/1`, `type_of/2`) | Livebook / Jupyter surfaces (§8); native line editor; syntactic completion |
+| One eval engine the future surfaces reuse (§6); BEAM-only (§7); `\help`/`\env`/`\type`/`\reset`/`\quit` meta-commands + engine introspection (`Rian.Repl.info/1`, `type_of/2`); native line editing, history & Rian-aware Tab-completion on a TTY (`Rian.Repl.complete/2`) | Livebook / Jupyter surfaces (§8); history persisted across sessions; richer completion (signatures, types) |
 
 v1 is complete and correct for its scope (the `Rian.Beam` construct set: functions, sum variants,
 `case`/`if`, guards, arithmetic, tuples/cons, atoms; **not** strings/`struct`/FFI/`with`, which raise a
@@ -159,10 +159,17 @@ not to function bodies (functions stay closed) — a deliberate, documented boun
 - **Livebook integration shape** — a Rian smart-cell / kernel; and the eventual ordered-execution
   Jupyter kernel.
 - **Editor-eval protocol** (ADR-0038) — the LSP message that ships a form to the connected REPL.
-- **Line editing & history** — `mix` launches the VM with `-noshell`, so the native Erlang line
-  editor (`user_drv`/`edlin`: history, arrow recall) is not running and `:io.setopts(line_editing)`
-  returns `{error, enotsup}`. v1 reads through the terminal's canonical mode and documents
-  `rlwrap mix rian.repl` (with `--completions` feeding `rlwrap -f`) as the supported editing/history
-  path. The loop attempts `line_editing` and lights up automatically if ever driven from a
-  line-editing IO server; a native in-task editor (starting `user_drv`, or a raw-mode reader) is a
-  future option, not shipped.
+- **Line editing, history & completion** — `mix` launches the VM with `-noshell`, so the line
+  editor is not running by default. On a real TTY the REPL upgrades that `-noshell` `user_drv` into
+  an interactive line-editing group with `:user_drv.start_shell/1`, running the session as the
+  group's "shell": this restores history and arrow recall and installs an `expand_fun` (backed by
+  `Rian.Repl.complete/2`) for **Rian-aware Tab-completion** of keywords, `\`-meta-commands, and the
+  session's own defined/bound names (kept current across the loop/group process boundary via a
+  small public ETS table). Because the live session is what completion reads, completion is
+  session-accurate, not a static list. In line-editing mode `Ctrl-D` is edlin's forward-delete, so
+  `\quit` is the portable exit; quitting calls `System.stop/0` for a graceful shutdown that restores
+  the terminal. When stdin/stdout is not a TTY (a pipe, CI) the REPL falls back to canonical-mode
+  reads, where `rlwrap mix rian.repl` (with `--completions` feeding `rlwrap -f`) supplies history and
+  static completion. The TTY path is exercised by a pty harness (`test/manual/pty_completion_check.py`)
+  rather than the ExUnit suite, since CI has no controlling terminal; the completion logic itself is
+  unit-tested via `Rian.Repl.complete/2` and `Mix.Tasks.Rian.Repl.completion_for/2`.
