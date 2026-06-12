@@ -214,6 +214,38 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "prelude: Option (ADR-0047 §3 — no nil)" do
+    test "Some/None are built-in — usable with no `type Option` declaration" do
+      [{"wrap", out}] = Decl.compile("def wrap(x Int64) Option := Some(x)")
+      assert out.elixir =~ "def wrap(x) do {:some, x} end"
+      # native Rust Option; the prelude type is NOT re-emitted as a user enum
+      assert out.rust =~ "Option::Some(x)"
+      refute out.rust =~ "enum Option"
+
+      Code.eval_string("defmodule WrapO do\n#{out.elixir}\nend")
+      assert WrapO.wrap(5) == {:some, 5}
+    end
+
+    test "case over Option is exhaustive with Some/None and no catch-all" do
+      [{"uo", out}] =
+        Decl.compile_beam("""
+        def uo(o Option, d Int64) Int64
+        def uo(Some(x), _) := x
+        def uo(None, d) := d
+        """)
+
+      Code.eval_string("defmodule UoO do\n#{out.elixir}\nend")
+      assert UoO.uo({:some, 7}, 0) == 7
+      assert UoO.uo(:none, 0) == 0
+    end
+
+    test "a non-exhaustive Option match is refused (None missing) — prelude is known to the gate" do
+      assert_raise RuntimeError, ~r/non-exhaustive/, fn ->
+        Decl.compile_beam("def uo(o Option) Int64\ndef uo(Some(x)) := x")
+      end
+    end
+  end
+
   describe "with expressions (ADR-0040 propagation)" do
     @with_src """
     mod Wth do

@@ -150,7 +150,7 @@ defmodule Rian.Check do
   # A `{:var}` takes the matched type directly; a constructor pattern looks up
   # its field types and narrows each argument pattern in turn (recursively).
   # Unknown constructor or no `tdefs` -> field variables stay `:unknown`.
-  defp narrow({:var, name}, type, _ic, env), do: Map.put(env, name, type)
+  defp narrow({:var, name}, type, _ic, env), do: Map.put(env, name, concretize(type))
 
   defp narrow({:ctor, ctor, args}, _type, ic, env) do
     field_types = Map.get(Map.get(ic, :tdefs, %{}), ctor, [])
@@ -163,6 +163,12 @@ defmodule Rian.Check do
   end
 
   defp narrow(_pat, _type, _ic, env), do: env
+
+  # a field type that is a type *variable* (a generic like `Option(T)`'s `T`)
+  # narrows to `:unknown` — we don't instantiate generics yet (conservative)
+  defp concretize(t) when is_binary(t), do: if(tvar?(t), do: :unknown, else: t)
+  defp concretize(t), do: t
+  defp tvar?(t), do: String.match?(t, ~r/^[A-Z][0-9]?$/)
 
   # a mismatch deep in arithmetic stays conservative (we do not model coercion
   # fully yet) rather than rejecting; only the body-vs-return check rejects
@@ -296,8 +302,11 @@ defmodule Rian.Check do
     Enum.reduce(structs, from_variants, fn s, acc -> Map.put(acc, s.name, s.name) end)
   end
 
-  defp all_types(prog),
-    do: Map.get(prog, :types, []) ++ for(m <- Map.get(prog, :mods, []), t <- m.types, do: t)
+  defp all_types(prog) do
+    Rian.Prelude.with_prelude(
+      Map.get(prog, :types, []) ++ for(m <- Map.get(prog, :mods, []), t <- m.types, do: t)
+    )
+  end
 
   # Constructor table for flow narrowing: every sum-type variant mapped to its
   # ordered field types.

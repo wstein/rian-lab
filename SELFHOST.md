@@ -86,5 +86,14 @@ construction, and cons-list building all compose and lower correctly.
    larger):** the emitter still walks surface tuples while the checker walks the
    normalized Maranget form — fold both onto one *typed* core IR, incrementally,
    before the three new emitters (ADR-0049).
-4. **Portable prelude (ADR-0041 #3 / ADR-0047)** — open; gates only multi-target
-   self-hosting (the BEAM bootstrap is happy on Elixir-stdlib FFI).
+4. **Portable prelude (ADR-0041 #3 / ADR-0047)** — **mechanism + first member
+   landed.** `Rian.Prelude` injects built-in types into the checker /
+   exhaustiveness env / lowering meta without a user declaration and without
+   re-emitting them. First member is the flagship **`Option(T) = Some(T) | None`
+   (no `nil`, ADR-0047 §3)**: lowers to `{:some, v}`/`:none` (BEAM) and native
+   `Option::Some(v)`/`Option::None` (Rust); `case` over it is exhaustiveness-
+   checked (a missing `None` is refused). **Remaining (large, open):** the
+   portable `List`/`Map`/`String` *operations* written in Rian over a per-target
+   collection-primitive layer (ADR-0047 §2) — this is what finally lets a
+   cons/FFI program (the lexer) lower to Rust, and needs the collection-
+   representation work (ADR-0041 / ADR-0049 emitters).

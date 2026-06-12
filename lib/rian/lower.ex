@@ -120,9 +120,12 @@ defmodule Rian.Lower do
     "#{vis}const #{c.name}: #{prim_rust(c.type)} = #{val};"
   end
 
+  # env / meta know the prelude types (e.g. `Option`) as well as the user's, so
+  # `Some`/`None` resolve and `case` over them is exhaustiveness-checked — but the
+  # prelude definitions are *not* emitted (they are built into each target).
   defp build_env(types, structs) do
     env =
-      Enum.reduce(types, E.base_env(), fn t, env ->
+      Enum.reduce(Rian.Prelude.with_prelude(types), E.base_env(), fn t, env ->
         variants = Enum.map(t.variants, fn v -> {PL.to_snake(v.ctor), length(v.fields)} end)
         E.add_type(env, PL.to_snake(t.name), variants)
       end)
@@ -134,7 +137,7 @@ defmodule Rian.Lower do
 
   # ctor_snake => %{enum: "Shape", labels: ["radius"], named: true}
   defp build_meta(types) do
-    for t <- types, v <- t.variants, into: %{} do
+    for t <- Rian.Prelude.with_prelude(types), v <- t.variants, into: %{} do
       labels = Enum.map(v.fields, &Map.get(&1, :label))
       named = v.fields != [] and Enum.all?(v.fields, &Map.get(&1, :label))
       {PL.to_snake(v.ctor), %{enum: t.name, ctor: v.ctor, labels: labels, named: named}}
