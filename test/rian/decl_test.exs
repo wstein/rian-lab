@@ -3,16 +3,17 @@ defmodule Rian.DeclTest do
   use ExUnit.Case, async: false
 
   alias Rian.Decl
+  alias Rian.IR.{Clause, Field, Param, Type, Variant}
 
-  describe "parsing -> pipeline IR" do
+  describe "parsing -> core IR (Rian.IR structs)" do
     test "a `type` sum with labeled fields" do
       %{types: [t]} = Decl.parse("type Shape := Circle(radius Float64) | Square(side Float64)")
 
-      assert t == %{
+      assert t == %Type{
                name: "Shape",
                variants: [
-                 %{ctor: "Circle", fields: [%{label: "radius", type: "Float64"}]},
-                 %{ctor: "Square", fields: [%{label: "side", type: "Float64"}]}
+                 %Variant{ctor: "Circle", fields: [%Field{label: "radius", type: "Float64"}]},
+                 %Variant{ctor: "Square", fields: [%Field{label: "side", type: "Float64"}]}
                ]
              }
     end
@@ -21,12 +22,12 @@ defmodule Rian.DeclTest do
       %{types: [t]} = Decl.parse("type Value := Num(Int64) | Zero")
 
       assert t.variants == [
-               %{ctor: "Num", fields: [%{type: "Int64"}]},
-               %{ctor: "Zero", fields: []}
+               %Variant{ctor: "Num", fields: [%Field{type: "Int64"}]},
+               %Variant{ctor: "Zero", fields: []}
              ]
     end
 
-    test "a bodiless signature plus pattern clauses groups into one function" do
+    test "a bodiless signature plus pattern clauses groups into one Func" do
       %{funcs: [f]} =
         Decl.parse("""
         def area(s val Shape) Float64
@@ -35,16 +36,18 @@ defmodule Rian.DeclTest do
         """)
 
       assert f.name == "area"
-      assert f.params == [%{name: "s", type: "Shape", cap: :val}]
+      assert f.params == [%Param{name: "s", type: "Shape", cap: :val}]
       assert f.ret == "Float64"
-      assert [%{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"} | _] = f.clauses
+
+      assert [%Clause{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"} | _] =
+               f.clauses
     end
 
     test "a single typed clause binds its parameter as the pattern" do
       %{funcs: [f]} = Decl.parse("def double(n Int64) Int64 := n * 2")
-      assert f.params == [%{name: "n", type: "Int64", cap: :val}]
+      assert f.params == [%Param{name: "n", type: "Int64", cap: :val}]
       assert f.ret == "Int64"
-      assert f.clauses == [%{pats: [{:var, "n"}], body: "n * 2", guard: nil}]
+      assert f.clauses == [%Clause{pats: [{:var, "n"}], body: "n * 2", guard: nil}]
     end
 
     test "multi-line declarations are joined by continuation" do
@@ -56,12 +59,14 @@ defmodule Rian.DeclTest do
         """)
 
       assert t.name == "Tree"
-      assert [%{ctor: "Leaf", fields: []}, %{ctor: "Node", fields: node_fields}] = t.variants
+
+      assert [%Variant{ctor: "Leaf", fields: []}, %Variant{ctor: "Node", fields: node_fields}] =
+               t.variants
 
       assert node_fields == [
-               %{label: "left", type: "Tree"},
-               %{label: "value", type: "Int64"},
-               %{label: "right", type: "Tree"}
+               %Field{label: "left", type: "Tree"},
+               %Field{label: "value", type: "Int64"},
+               %Field{label: "right", type: "Tree"}
              ]
     end
   end

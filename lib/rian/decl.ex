@@ -30,6 +30,7 @@ defmodule Rian.Decl do
   `mod`/`struct`/`alias` declarations. Each raises `Rian.Decl.Error`.
   """
   alias Rian.{Lexer, Lower}
+  alias Rian.IR.{Clause, Field, Func, Param, Type, Variant}
 
   defmodule Error do
     defexception [:message]
@@ -174,7 +175,7 @@ defmodule Rian.Decl do
   defp parse_type(rest) do
     case split_once(rest, ":=") do
       {left, right} ->
-        %{
+        %Type{
           name: strip_type_params(left),
           variants: right |> split_top("|") |> Enum.map(&variant/1)
         }
@@ -188,9 +189,9 @@ defmodule Rian.Decl do
 
   defp variant(v) do
     case extract_parens(v) do
-      {ctor, inside, ""} -> %{ctor: String.trim(ctor), fields: fields(inside)}
+      {ctor, inside, ""} -> %Variant{ctor: String.trim(ctor), fields: fields(inside)}
       {_, _, rest} -> raise Error, "trailing tokens after variant `#{v}`: #{rest}"
-      :none -> %{ctor: String.trim(v), fields: []}
+      :none -> %Variant{ctor: String.trim(v), fields: []}
     end
   end
 
@@ -203,8 +204,8 @@ defmodule Rian.Decl do
 
   defp field(f) do
     case f |> String.split(~r/\s+/, trim: true) |> Enum.reject(&(&1 in @caps)) do
-      [type] -> %{type: type}
-      [label, type] -> %{label: label, type: type}
+      [type] -> %Field{type: type}
+      [label, type] -> %Field{label: label, type: type}
       _ -> raise Error, "bad field `#{f}`"
     end
   end
@@ -230,7 +231,7 @@ defmodule Rian.Decl do
   defp build_func([%{body: nil} = sig | [_ | _] = clauses]) do
     params = parse_params(sig.params)
 
-    %{
+    %Func{
       name: sig.name,
       params: params,
       ret: req_ret(sig),
@@ -242,11 +243,11 @@ defmodule Rian.Decl do
   defp build_func([%{body: body} = d]) when not is_nil(body) do
     params = parse_params(d.params)
 
-    %{
+    %Func{
       name: d.name,
       params: params,
       ret: req_ret(d),
-      clauses: [%{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}]
+      clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}]
     }
   end
 
@@ -265,7 +266,7 @@ defmodule Rian.Decl do
       raise Error, "clause has #{length(pats)} patterns but the signature has arity #{arity}"
     end
 
-    %{pats: pats, body: body, guard: guard}
+    %Clause{pats: pats, body: body, guard: guard}
   end
 
   defp parse_params(str) do
@@ -274,7 +275,7 @@ defmodule Rian.Decl do
     |> Enum.with_index()
     |> Enum.map(fn {p, i} ->
       {name, cap, type} = param(p)
-      %{name: name || "arg#{i}", type: type, cap: cap}
+      %Param{name: name || "arg#{i}", type: type, cap: cap}
     end)
   end
 
