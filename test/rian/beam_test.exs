@@ -60,15 +60,40 @@ defmodule Rian.BeamTest do
       assert mod.sign(-3) == 0
     end
 
+    test "sum-variant construction + patterns compile to tagged tuples / atoms" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          type V := Num(Int64) | Zero
+          def eval(v V) Int64
+          def eval(Num(n)) := n * 2
+          def eval(Zero) := 0
+          """,
+          :rian_beam_variant
+        )
+
+      # Num(n) -> {:num, n}, Zero -> :zero (tag = snake(Ctor))
+      assert mod.eval({:num, 21}) == 42
+      assert mod.eval(:zero) == 0
+    end
+
+    test "the full self-hosting lexer compiles to real bytecode (variants + FFI + recursion)" do
+      {:ok, mod} =
+        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_lexer)
+
+      assert mod.tokenize("1 + 2") == [{:t_num, 1}, :t_plus, {:t_num, 2}]
+      assert {:file, _} = :code.is_loaded(:rian_beam_lexer)
+    end
+
     test "a construct outside the core raises a clear Unsupported (never a miscompile)" do
-      # sum-variant construction needs the variant→tagged-tuple meta (next increment)
-      assert_raise Beam.Unsupported, ~r/constructor\/type `Red`/, fn ->
-        Beam.compile("type C := Red | Green\ndef pick(b Bool) C := Red", :rian_beam_bad)
+      # struct declarations need %Name{} map forms (next increment)
+      assert_raise Beam.Unsupported, ~r/struct/, fn ->
+        Beam.compile("struct P(x Int64)\ndef o(n Int64) P := P(n)", :rian_beam_bad)
       end
 
-      # String literals / `<>` are not in this increment either
+      # String `<>` concatenation is not in this increment
       assert_raise Beam.Unsupported, fn ->
-        Beam.compile(~s|def g(n Int64) String := "hi"|, :rian_beam_bad2)
+        Beam.compile("def g(a String, b String) String := a <> b", :rian_beam_bad2)
       end
     end
   end

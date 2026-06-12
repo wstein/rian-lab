@@ -69,15 +69,15 @@ construction, and cons-list building all compose and lower correctly.
    is genuinely type-checked (a `lex([]) := 0` bug is caught). `forall` binders
    parse; protocol/impl + structural type-variable unification are the next
    ADR-0042 increment. (Was B4.)
-2. **Abstract-forms backend (ADR-0031)** — **done (core).** `Rian.Beam` lowers a
-   parsed function group to the **Erlang abstract format** and `:compile.forms`
-   → real loadable `.beam` bytecode (no `eval`, no Elixir-compiler dependency,
-   line-tracked). Proven on `double`, `max2` (multi-clause+guard), and `sum`
-   (cons recursion). **Next increment:** variant/struct construction+patterns
-   (needs the variant→tagged-tuple meta), `String`/`<>`, remote/FFI calls, `with`
-   — currently each raises `Rian.Beam.Unsupported` (never a silent miscompile),
-   so the full lexer (which builds `Token` variants) still uses the Elixir-source
-   path until that lands.
+2. **Abstract-forms backend (ADR-0031)** — **the full lexer now compiles to real
+   bytecode.** `Rian.Beam` lowers to the **Erlang abstract format** + `:compile.forms`
+   → loadable `.beam` (no `eval`, no Elixir-compiler dep, line-tracked). Now
+   covers sum-variant construction+patterns (tag = `snake(Ctor)`: `Num(n)` →
+   `{:num, n}`, `Zero` → `:zero`) and remote/FFI calls (`String.to_charlist` →
+   `'Elixir.String'`), plus a single `mod`. **`SelfhostLexer.tokenize/1` is now a
+   genuinely-compiled `.beam` module**, not eval'd source. Still
+   `Rian.Beam.Unsupported` (never a miscompile): `struct` declarations (need
+   `%Name{}` map forms), named-arg construction, `String`/`<>`, `with`.
 3. **Core IR + parser unification (ADR-0050)** — **parser fork closed.** The
    duplicate `Decl.pattern` string parser is gone; clause heads and `case` arms
    now share the one `Rian.Pratt.parse_pat` token parser (ADR-0050 §2). A pattern

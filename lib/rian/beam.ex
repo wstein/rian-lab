@@ -11,17 +11,18 @@ defmodule Rian.Beam do
 
   ## Scope (this increment)
 
-  The **primitive function core**, enough to compile real recursive functions to
-  bytecode: multi-clause `def`s; `Int64`/`Float64`/`Bool` literals; variables;
-  binary arithmetic/comparison/boolean operators; tuples; cons-list literals and
-  patterns; atoms; `when` guards; local calls; `case`; `if`.
+  The function core plus **sum-variant** construction and patterns, enough to
+  compile a real lexer: multi-clause `def`s (top-level *or* a single `mod`);
+  `Int64`/`Float64`/`Bool` literals; variables; binary operators; tuples; cons
+  lists (literals + patterns); atoms; sum-variant construction (`TPlus`,
+  `TNum(x)`) and patterns → tagged tuples / atoms (`{:t_num, X}` / `:t_plus`,
+  the tag = `snake(Ctor)`); `when` guards; local calls; `case`; `if`.
 
-  **Not yet** (raise a clear error, never a silent miscompile): user sum/struct
-  *construction* and patterns (need the variant→tagged-tuple meta — the next
-  increment), `String` literals/`<>`, remote/FFI calls, `with`. Functions using
-  those still go through the interim Elixir-source path (`Rian.Lower`).
+  **Not yet** (raise a clear error, never a silent miscompile): `struct`
+  declarations (need `%Name{}` map forms), named-arg construction, `String`
+  literals/`<>`, remote/FFI calls, `with`.
   """
-  alias Rian.{Decl, Pratt}
+  alias Rian.{Decl, PatternLower, Pratt}
 
   @ln 1
 
@@ -40,9 +41,15 @@ defmodule Rian.Beam do
     {:ok, module}
   end
 
-  @doc "Compile top-level functions of `src` to `{:ok, module, beam_binary}` via `:compile.forms`."
+  @doc "Compile `src`'s functions to `{:ok, module, beam_binary}` via `:compile.forms`."
   def compile(src, module) when is_atom(module) do
-    %{funcs: funcs} = Decl.parse(src)
+    prog = Decl.parse(src)
+
+    if prog.structs != [] or Enum.any?(prog.mods, &(&1.structs != [])) do
+      raise Unsupported, "abstract-forms: `struct` declarations not yet supported"
+    end
+
+    funcs = funcs_of(prog)
 
     forms =
       [
@@ -56,6 +63,10 @@ defmodule Rian.Beam do
       error -> raise Unsupported, "compile.forms failed: #{inspect(error)}"
     end
   end
+
+  # the functions to compile: a single `mod`'s, else the top-level ones
+  defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
+  defp funcs_of(%{funcs: funcs}), do: funcs
 
   defp arity(%{clauses: [c | _]}), do: length(c.pats)
 
@@ -83,7 +94,8 @@ defmodule Rian.Beam do
   # ── expression forms ──────────────────────────────────────────────────
   defp expr_form({:num, n}), do: num_form(n)
   defp expr_form({:id, b}) when b in ~w(true false), do: {:atom, @ln, String.to_atom(b)}
-  defp expr_form({:id, x}), do: if(pascal?(x), do: ctor_todo(x), else: var_form(x))
+  # a bare PascalCase id is a nullary sum-variant value -> its snake atom tag
+  defp expr_form({:id, x}), do: if(pascal?(x), do: {:atom, @ln, tag(x)}, else: var_form(x))
   defp expr_form({:atom, a}), do: {:atom, @ln, String.to_atom(a)}
   defp expr_form({:unary, "-", x}), do: {:op, @ln, :-, expr_form(x)}
   defp expr_form({:unary, "not", x}), do: {:op, @ln, :not, expr_form(x)}
@@ -91,9 +103,25 @@ defmodule Rian.Beam do
   defp expr_form({:tuple, es}), do: {:tuple, @ln, Enum.map(es, &expr_form/1)}
   defp expr_form({:list_lit, es, tail}), do: cons(es, list_tail(tail), &expr_form/1)
 
+  # a remote call `Mod.fun(…)` — free BEAM FFI (ADR-0041): a Pascal head is an
+  # Elixir module (`String` -> `'Elixir.String'`), an atom head is an Erlang one
+  defp expr_form({:call, {:dot, {:id, m}, fun}, args}),
+    do: remote_call(if(pascal?(m), do: :"Elixir.#{m}", else: String.to_atom(m)), fun, args)
+
+  defp expr_form({:call, {:atom, m}, args}) when is_binary(m),
+    do: {:call, @ln, {:atom, @ln, String.to_atom(m)}, Enum.map(args, &expr_form/1)}
+
+  defp expr_form({:call, {:dot, {:atom, m}, fun}, args}),
+    do: remote_call(String.to_atom(m), fun, args)
+
+  # a PascalCase call is sum-variant construction -> a tagged tuple `{tag, args…}`
+  # (labels erased, positional); a lowercase call is a local function call
   defp expr_form({:call, {:id, f}, args}) do
-    if pascal?(f), do: ctor_todo(f)
-    {:call, @ln, {:atom, @ln, String.to_atom(f)}, Enum.map(args, &expr_form/1)}
+    arg_forms = Enum.map(args, &expr_form/1)
+
+    if pascal?(f),
+      do: {:tuple, @ln, [{:atom, @ln, tag(f)} | arg_forms]},
+      else: {:call, @ln, {:atom, @ln, String.to_atom(f)}, arg_forms}
   end
 
   defp expr_form({:if, c, t, e}) do
@@ -126,6 +154,12 @@ defmodule Rian.Beam do
   defp pat_form({:atom, a}), do: {:atom, @ln, String.to_atom(a)}
   defp pat_form({:tuple, ps}), do: {:tuple, @ln, Enum.map(ps, &pat_form/1)}
   defp pat_form({:list, ps, tail}), do: cons(ps, list_tail(tail), &pat_form/1)
+  # sum-variant patterns mirror construction: nullary -> tag atom, else tagged tuple
+  defp pat_form({:ctor, name, []}), do: {:atom, @ln, tag(name)}
+
+  defp pat_form({:ctor, name, args}),
+    do: {:tuple, @ln, [{:atom, @ln, tag(name)} | Enum.map(args, &pat_form/1)]}
+
   defp pat_form(other), do: raise(Unsupported, "abstract-forms: pattern #{inspect(other)}")
 
   # ── helpers ───────────────────────────────────────────────────────────
@@ -169,10 +203,11 @@ defmodule Rian.Beam do
 
   defp pascal?(s), do: String.match?(s, ~r/^[A-Z]/)
 
-  defp ctor_todo(name),
-    do:
-      raise(
-        Unsupported,
-        "abstract-forms: constructor/type `#{name}` needs variant meta (next increment)"
-      )
+  # a sum-variant's BEAM tag atom — `snake(Ctor)` (`TNum` -> `:t_num`)
+  defp tag(ctor), do: PatternLower.to_snake(ctor)
+
+  defp remote_call(mod, fun, args) do
+    {:call, @ln, {:remote, @ln, {:atom, @ln, mod}, {:atom, @ln, String.to_atom(fun)}},
+     Enum.map(args, &expr_form/1)}
+  end
 end
