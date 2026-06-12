@@ -61,7 +61,7 @@ defmodule Mix.Tasks.Rian.Repl do
   The read → eval → print loop over the standard IO device. Public so it can be
   driven from a captured device in tests; `run/1` is the normal entry point.
   """
-  @spec loop(Repl.Session.t()) :: :ok
+  @spec loop(Repl.t()) :: :ok
   def loop(session) do
     IO.write(prompt())
 

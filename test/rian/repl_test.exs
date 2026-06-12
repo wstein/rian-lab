@@ -2,6 +2,8 @@ defmodule Rian.ReplTest do
   # Not async: each entry compiles + loads a BEAM module.
   use ExUnit.Case, async: false
 
+  import ExUnit.CaptureIO
+
   alias Rian.Repl
 
   defp eval(session, input), do: Repl.eval(session, input)
@@ -93,6 +95,26 @@ defmodule Rian.ReplTest do
     test "a parse error is reported" do
       s = Repl.new()
       assert {{:error, _message}, ^s} = eval(s, "1 +")
+    end
+  end
+
+  describe "engine contract" do
+    test "eval/2 performs no IO (stdout, stderr) across success and error paths" do
+      run = fn ->
+        s = Repl.new()
+        {_, s} = eval(s, "1 + 1")
+        {_, s} = eval(s, "def f(n Int64) Int64\ndef f(n) := n + 1")
+        {_, s} = eval(s, "f(10)")
+        {_, s} = eval(s, "x := 7")
+        {_, s} = eval(s, "x + f(x)")
+        # error paths
+        {_, s} = eval(s, "1 +")
+        {_, _} = eval(s, "a.field")
+        s
+      end
+
+      assert capture_io(run) == ""
+      assert capture_io(:stderr, run) == ""
     end
   end
 

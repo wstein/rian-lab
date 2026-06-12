@@ -28,14 +28,24 @@ defmodule Rian.Repl do
   is purged and reloaded on every eval, so a session's atom-table and code-
   memory footprint stay bounded regardless of how many entries it sees.
 
+  ## Engine contract
+
+  `eval/2` is **pure of IO**: it never reads stdin, never writes stdout/stderr,
+  never logs. All output happens in the print phase (`render/1`), which returns
+  a string — so any surface (the `mix rian.repl` loop, a Livebook smart-cell,
+  the web playground) drives the engine without conflicting with the surface's
+  own IO model. The no-IO property is asserted by `Rian.ReplTest`.
+
   ## Scope
 
   Whatever [`Rian.Beam`](beam.ex) compiles: functions, sum-variant construction
   and patterns, `case`/`if`, `when` guards, arithmetic, tuples, cons lists,
-  atoms, local calls. Constructs outside that set (strings, `struct`, FFI,
-  `with`) raise a clear error — never a silent miscompile. Output is the value
-  and its inferred type (ADR-0034); the effect set (ADR-0048) joins once the
-  effect checker lands.
+  maps, atoms, strings with `<>` concat, FFI calls, `with` error composition,
+  and local calls. Constructs not yet lowered (currently `struct` declarations
+  and bare field access `a.field`) raise a clear error — never a silent
+  miscompile. Output is the value and its inferred type (ADR-0034), with a
+  session function's declared return type threaded through local-call
+  inference; the effect set (ADR-0048) joins once the effect checker lands.
   """
 
   alias Rian.{Beam, Check, Decl, Pratt}
@@ -61,6 +71,13 @@ defmodule Rian.Repl do
     defstruct units: [], binds: [], base: nil
   end
 
+  @typedoc "Opaque session value driven by `new/0`, `eval/2`, and `render/1`."
+  @type t :: Session.t()
+
+  @typedoc """
+  An eval outcome — what `eval/2` returns alongside the next session, and what
+  `render/1` formats for display. Surfaces pattern-match on these directly.
+  """
   @type result ::
           :empty
           | {:value, term(), String.t() | nil}
@@ -69,14 +86,16 @@ defmodule Rian.Repl do
           | {:error, String.t()}
 
   @doc "A fresh, empty session."
-  @spec new() :: Session.t()
+  @spec new() :: t()
   def new, do: %Session{base: :erlang.unique_integer([:positive])}
 
   @doc """
   Evaluate one entry against `session`. Returns `{result, session'}`; the session
   advances only on success (a failed entry leaves it unchanged).
+
+  This function performs no IO — see the engine contract in the module doc.
   """
-  @spec eval(Session.t(), String.t()) :: {result, Session.t()}
+  @spec eval(t(), String.t()) :: {result(), t()}
   def eval(%Session{} = s, input) do
     cond do
       String.trim(input) == "" -> {:empty, s}
@@ -86,7 +105,7 @@ defmodule Rian.Repl do
   end
 
   @doc "Render a `result` for display — the print phase (ADR-0053 §1)."
-  @spec render(result) :: String.t()
+  @spec render(result()) :: String.t()
   def render(:empty), do: ""
   def render({:value, v, nil}), do: inspect(v)
   def render({:value, v, type}), do: "#{inspect(v)} : #{type}"
