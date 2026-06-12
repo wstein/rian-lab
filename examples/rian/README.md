@@ -76,6 +76,10 @@ compile + run on real BEAM bytecode:
   generator, stack VM) into a single self-contained program compiled to one
   `.beam`: `run("1 + 2 * (3 - 4)") → -1`. `String → Vec(Token) → Expr → Expr′ →
   Vec(Instr) → Int64`, end to end — the front-to-back pipeline as one artifact.
+  It also parses **`let`-bindings and variables** from source — the lexer scans
+  identifiers and the `let`/`in` keywords, the parser builds `Let`/`Var`, and the
+  codegen allocates slots: `run("let x = 5 in x + 1") → 6`, with correct lexical
+  shadowing.
 - [selfhost_modules.rian](selfhost_modules.rian) — **the same calc split across
   many modules.** `mod CalcLex` / `CalcParse` / `CalcGen` / `Calc` each compile
   to their own BEAM module (`Elixir.CalcLex`, …); the driver `Calc.run` calls

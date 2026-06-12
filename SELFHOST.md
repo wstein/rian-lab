@@ -233,6 +233,15 @@ optimizer is in-line: a constant program folds to a single instruction
 that the toolchain compiles a real, multi-pass compiler written in its own
 language.
 
+The calc's surface has since **grown past arithmetic**: the lexer scans
+identifiers and the `let`/`in` keywords (and `=`), the parser builds `Let`/`Var`,
+and the codegen allocates load/store slots — so variables flow from source text
+end to end: `run("let x = 5 in x + 1") = 6`, with correct lexical shadowing
+(`run("let x = 1 in (let x = 2 in x) + x") = 3`). Building an identifier token
+means accumulating codepoints and `List.to_string`-ing them (BEAM FFI) — the same
+class of crutch the lexer already used; a portable `String` builder is the
+multi-target fix.
+
 ## Module system — a compiler is many modules
 
 A real compiler is split across files; [`examples/rian/selfhost_modules.rian`](examples/rian/selfhost_modules.rian)

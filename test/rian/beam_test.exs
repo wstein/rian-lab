@@ -240,6 +240,17 @@ defmodule Rian.BeamTest do
       assert calc.emit("(2 + 3) * 4") == [{:push, 20}]
     end
 
+    test "the calc parses `let`/variables from source (identifiers + keywords)" do
+      {:ok, calc} = Beam.load(File.read!("examples/rian/selfhost_calc.rian"), :rian_beam_calc_let)
+
+      # identifiers, the `let`/`in` keywords, and `=` are lexed; `let` parses
+      assert calc.run("let x = 5 in x + 1") == 6
+      assert calc.run("let x = 10 in let y = 4 in (x + y) * 2") == 28
+      assert calc.run("let a = 2 in let b = 3 in a * b + a") == 8
+      # lexical shadowing resolves through codegen's slots
+      assert calc.run("let x = 1 in (let x = 2 in x) + x") == 3
+    end
+
     test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
       {:ok, mod} =
         Beam.load(
