@@ -551,12 +551,22 @@ defmodule Rian.Decl do
     cond do
       s == "_" -> :wild
       Regex.match?(~r/^-?\d+$/, s) -> {:lit, String.to_integer(s)}
+      String.starts_with?(s, "{") -> tuple_pattern(s)
+      match?(["", name] when name != "", String.split(s, ":", parts: 2)) -> atom_pattern(s)
       match?({_, _, _}, extract_parens(s)) -> ctor_pattern(s)
       Regex.match?(~r/^[A-Z]/, s) -> {:ctor, s, []}
       Regex.match?(~r/^[a-z_]\w*$/, s) -> {:var, s}
       true -> raise Error, "unsupported pattern `#{s}`"
     end
   end
+
+  # `{p1, p2, …}` — a tuple pattern (`{:ok, v}` is the Result surface, ADR-0040)
+  defp tuple_pattern(s) do
+    inner = s |> String.trim() |> String.trim_leading("{") |> String.trim_trailing("}")
+    {:tuple, inner |> split_top(",") |> Enum.map(&pattern/1)}
+  end
+
+  defp atom_pattern(s), do: {:atom, s |> String.trim_leading(":") |> String.trim()}
 
   defp ctor_pattern(s) do
     {ctor, inside, ""} = extract_parens(s)
@@ -588,7 +598,8 @@ defmodule Rian.Decl do
     {l, String.trim(r)}
   end
 
-  # split on a single-char separator at paren-depth 0; trims, drops empties
+  # split on a single-char separator at bracket-depth 0 (`(…)` and `{…}`); trims,
+  # drops empties
   defp split_top(str, sep) do
     {parts, {cur, _}} =
       str
@@ -596,8 +607,8 @@ defmodule Rian.Decl do
       |> Enum.reduce({[], {"", 0}}, fn ch, {parts, {cur, depth}} ->
         cond do
           ch == sep and depth == 0 -> {[cur | parts], {"", 0}}
-          ch == "(" -> {parts, {cur <> ch, depth + 1}}
-          ch == ")" -> {parts, {cur <> ch, depth - 1}}
+          ch in ["(", "{"] -> {parts, {cur <> ch, depth + 1}}
+          ch in [")", "}"] -> {parts, {cur <> ch, depth - 1}}
           true -> {parts, {cur <> ch, depth}}
         end
       end)

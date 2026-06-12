@@ -141,6 +141,7 @@ defmodule Rian.Pratt do
   defp parse_primary([{:kw, "case"} | rest]), do: parse_case(rest)
   defp parse_primary([{:lbracket} | rest]), do: parse_list(rest, [])
   defp parse_primary([{:mapopen} | rest]), do: parse_map(rest, [])
+  defp parse_primary([{:lbrace} | rest]), do: parse_tuple(rest, [])
 
   defp parse_primary([{:lparen} | _] = tokens) do
     if lambda_ahead?(tokens) do
@@ -271,9 +272,12 @@ defmodule Rian.Pratt do
     parse_arms(tokens, [{pat, guard, body} | acc])
   end
 
-  # token-level pattern parser (arm heads): wildcard, integer, var, constructor
+  # token-level pattern parser (arm heads): wildcard, integer, atom, tuple, var, constructor
   defp parse_pat([{:id, "_"} | rest]), do: {:wild, rest}
   defp parse_pat([{:num, n} | rest]), do: {{:lit, String.to_integer(n)}, rest}
+  defp parse_pat([{:op, ":"}, {:id, name} | rest]), do: {{:atom, name}, rest}
+  defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
+  defp parse_pat([{:lbrace} | rest]), do: parse_pat_tuple(rest, [])
 
   defp parse_pat([{:id, name} | rest]) do
     if pascal?(name) do
@@ -291,6 +295,18 @@ defmodule Rian.Pratt do
   end
 
   defp parse_pat(other), do: raise(ArgumentError, "unsupported pattern: #{inspect(other)}")
+
+  defp parse_pat_tuple([{:rbrace} | rest], acc), do: {{:tuple, Enum.reverse(acc)}, rest}
+
+  defp parse_pat_tuple(tokens, acc) do
+    {p, tokens} = parse_pat(tokens)
+
+    case tokens do
+      [{:comma} | rest] -> parse_pat_tuple(rest, [p | acc])
+      [{:rbrace} | rest] -> {{:tuple, Enum.reverse([p | acc])}, rest}
+      other -> raise ArgumentError, "bad tuple pattern: #{inspect(other)}"
+    end
+  end
 
   defp parse_pat_args([{:rparen} | rest], acc), do: {Enum.reverse(acc), rest}
 
@@ -355,6 +371,19 @@ defmodule Rian.Pratt do
     end
   end
 
+  # tuple literal `{e1, e2, …}` (a bare `{}` is the empty tuple)
+  defp parse_tuple([{:rbrace} | rest], acc), do: {{:tuple, Enum.reverse(acc)}, rest}
+
+  defp parse_tuple(tokens, acc) do
+    {e, tokens} = parse_expr(tokens, 0)
+
+    case tokens do
+      [{:comma} | rest] -> parse_tuple(rest, [e | acc])
+      [{:rbrace} | rest] -> {{:tuple, Enum.reverse([e | acc])}, rest}
+      other -> raise ArgumentError, "bad tuple: #{inspect(other)}"
+    end
+  end
+
   defp parse_map([{:rbrace} | rest], acc), do: {{:map_lit, Enum.reverse(acc)}, rest}
 
   defp parse_map([{:id, k}, {:op, ":"} | rest], acc) do
@@ -405,6 +434,8 @@ defmodule Rian.Pratt do
   defp sexpr({:block, stmts}),
     do: "(block#{Enum.map_join(stmts, "", fn s -> " " <> sexpr_stmt(s) end)})"
 
+  defp sexpr({:tuple, es}), do: "{#{Enum.map_join(es, " ", &sexpr/1)}}"
+
   defp sexpr({:list_lit, elems, nil}), do: "[#{Enum.map_join(elems, " ", &sexpr/1)}]"
 
   defp sexpr({:list_lit, elems, {:tail, t}}),
@@ -417,7 +448,10 @@ defmodule Rian.Pratt do
   defp sexpr_stmt({:expr, e}), do: sexpr(e)
 
   defp sexpr_pat(:wild), do: "_"
+  defp sexpr_pat({:lit, v}) when is_binary(v), do: "\"#{v}\""
   defp sexpr_pat({:lit, v}), do: to_string(v)
+  defp sexpr_pat({:atom, a}), do: ":" <> a
+  defp sexpr_pat({:tuple, ps}), do: "{#{Enum.map_join(ps, ", ", &sexpr_pat/1)}}"
   defp sexpr_pat({:var, x}), do: x
   defp sexpr_pat({:ctor, n, []}), do: n
   defp sexpr_pat({:ctor, n, args}), do: "#{n}(#{Enum.map_join(args, ", ", &sexpr_pat/1)})"

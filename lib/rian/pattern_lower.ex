@@ -52,6 +52,8 @@ defmodule Rian.PatternLower do
   def lower({:as, _name, p}, env), do: lower(p, env)
   def lower({:pin, _expr}, _env), do: {:wild, true}
   def lower({:lit, v}, _env), do: {{:ctor, {:lit, v}, []}, false}
+  # an atom (`:ok`) is a nullary literal constructor over the open atom universe
+  def lower({:atom, a}, _env), do: {{:ctor, {:lit, String.to_atom(a)}, []}, false}
 
   def lower({:tuple, ps}, env) do
     {cps, intro} = lower_many(ps, env)

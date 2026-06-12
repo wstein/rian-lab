@@ -214,6 +214,37 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "tuples and atoms (the Result surface, ADR-0040)" do
+    test "tuple construction lowers to a BEAM tuple / Rust tuple and runs" do
+      [{"pair", out}] = Decl.compile("def pair(a Int64, b Int64) Pair := {a, b}")
+      assert out.elixir =~ "def pair(a, b) do {a, b} end"
+      assert out.rust =~ "(a, b)"
+      Code.eval_string("defmodule TupT do\n#{out.elixir}\nend")
+      assert TupT.pair(1, 2) == {1, 2}
+    end
+
+    test "a tuple pattern in a clause head destructures and runs" do
+      [{"fst", out}] =
+        Decl.compile("""
+        def fst(Pair) Int64
+        def fst({a, b}) := a
+        """)
+
+      assert out.elixir =~ "def fst({a, b}) do a end"
+      Code.eval_string("defmodule TupP do\n#{out.elixir}\nend")
+      assert TupP.fst({3, 4}) == 3
+    end
+
+    test "`{:ok, v}` / `{:error, e}` are the Result surface — tagged tuple / Ok-Err on Rust" do
+      [{"wrap", out}] = Decl.compile("def wrap(v Int64) R := {:ok, v}")
+      assert out.elixir =~ "{:ok, v}"
+      assert out.rust =~ "Ok(v)"
+
+      [{"fail", out2}] = Decl.compile("def fail(e Int64) R := {:error, e}")
+      assert out2.rust =~ "Err(e)"
+    end
+  end
+
   describe "sum-variant construction in bodies" do
     test "positional and nullary variant construction lower and run" do
       results =

@@ -388,6 +388,7 @@ defmodule Rian.Lower do
   defp pat_ex({:var, x}), do: x
   defp pat_ex({:lit, v}) when is_binary(v), do: inspect(v)
   defp pat_ex({:lit, v}), do: to_string(v)
+  defp pat_ex({:atom, a}), do: ":" <> a
   defp pat_ex({:tuple, ps}), do: "{#{Enum.map_join(ps, ", ", &pat_ex/1)}}"
   defp pat_ex({:ctor, name, []}), do: ":" <> Atom.to_string(PL.to_snake(name))
 
@@ -464,6 +465,10 @@ defmodule Rian.Lower do
   defp pat_rs({:var, x}, _), do: x
   defp pat_rs({:lit, v}, _) when is_binary(v), do: inspect(v)
   defp pat_rs({:lit, v}, _), do: to_string(v)
+  defp pat_rs({:tuple, [{:atom, "ok"}, p]}, m), do: "Ok(#{pat_rs(p, m)})"
+  defp pat_rs({:tuple, [{:atom, "error"}, p]}, m), do: "Err(#{pat_rs(p, m)})"
+  defp pat_rs({:tuple, ps}, m), do: "(#{Enum.map_join(ps, ", ", &pat_rs(&1, m))})"
+  defp pat_rs({:atom, a}, _), do: raise("Erlang atom pattern is BEAM-only: :#{a}")
 
   defp pat_rs({:ctor, name, []}, meta) do
     info = Map.fetch!(meta, PL.to_snake(name))
@@ -616,6 +621,14 @@ defmodule Rian.Lower do
   # constant reference — a 0-arity accessor call on the BEAM, the `const` name on Rust
   defp emit({:const_ref, name}, :elixir), do: {"#{PL.to_snake(name)}()", 12}
   defp emit({:const_ref, name}, :rust), do: {name, 12}
+
+  # tuple literal — a BEAM tuple / a Rust tuple. The `{:ok, v}` / `{:error, e}`
+  # shapes are the canonical Result surface (ADR-0040): they keep their tagged
+  # tuple on the BEAM but lower to Rust `Ok(…)` / `Err(…)`.
+  defp emit({:tuple, [{:atom, "ok"}, v]}, :rust), do: {"Ok(#{p(v, 0, :rust)})", 12}
+  defp emit({:tuple, [{:atom, "error"}, e]}, :rust), do: {"Err(#{p(e, 0, :rust)})", 12}
+  defp emit({:tuple, es}, :rust), do: {"(#{Enum.map_join(es, ", ", &p(&1, 0, :rust))})", 12}
+  defp emit({:tuple, es}, :elixir), do: {"{#{Enum.map_join(es, ", ", &p(&1, 0, :elixir))}}", 12}
 
   # sum-variant construction — a snake atom / tagged tuple on the BEAM (labels
   # erased), an `Enum::Variant` path on Rust (named `{…}` or positional `(…)`).
