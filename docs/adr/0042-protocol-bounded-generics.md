@@ -82,7 +82,7 @@ Dispatch is **static where the type is known** — the target is predictable fro
 guarantees **exactly one canonical impl per (protocol, type)** — no last-wins surprises, no ambiguous
 dispatch (a correctness and supply-chain hazard, Marcus). The known cost — you cannot impl an
 *external* protocol for an *external* type — has a principled escape hatch: **wrap the type in an
-opaque type you own** (pending opaque-types ADR), making this ADR a forward dependency on it.
+opaque type you own** ([ADR-0043](0043-opaque-types.md)).
 
 ### 6. Protocols do not reintroduce open dispatch — totality is untouched
 

@@ -116,6 +116,10 @@ on the `@type` spec and first-match clauses; no shim needed.
   in `Exhaustiveness` are implementable and testable now against hand-built IR; (b) spec + example
   rewrites land now as authoritative surface (this ADR + [02_types_match.rian](../../examples/rian/02_types_match.rian));
   (c) `range`/`Char`-literal **parsing** lands with the declaration parser.
+- **`range` is a bounded, finite opaque type** ([ADR-0043](0043-opaque-types.md)). This ADR's
+  "representation, not newtype" mechanism *is* opacity; `range` adds a bounds invariant (fallible
+  `T.of`) and a finite signature (exhaustiveness) on top of `opaque T := Base`. No rewrite here —
+  ADR-0043 is the general mechanism, `range` the constrained special case.
 - **Subrange types are the promoted overflow-safety idiom** (decision-lock 2026-06-12). Per the
   ADR-0035 scope clarification (native-per-target integer semantics), bounding a quantity with a
   `range` type — checked construction, `Name | RangeError`, no panic — is *the* in-domain-by-
