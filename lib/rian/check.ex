@@ -37,8 +37,10 @@ defmodule Rian.Check do
   to themselves, `:unknown` unifies with anything, two differing concrete types
   are a `:mismatch`.
   """
+  alias Rian.{Core, Pratt}
+  alias Rian.Core.{EBin, EBlock, ECall, ECase, EId, EIf, EList, ENum, EStr, EUnary, EWith}
+  alias Rian.Core.{PCtor, PVar}
   alias Rian.IR.Func
-  alias Rian.Pratt
 
   defmodule Error do
     @moduledoc "Raised by the compile-time type gate on a proven type mismatch."
@@ -61,20 +63,26 @@ defmodule Rian.Check do
   # for flow narrowing), `:funs` (function name -> declared return type), and
   # `:ctors` (ctor -> its sum-type name, so a variant value infers its type).
   # `%{}` disables all three. `env` is the per-scope variable map.
-  @doc "Infer the type of an expression AST under `env` (name -> type); `:unknown` when unsure."
+  @doc """
+  Infer the type of an expression under `env` (name -> type); `:unknown` when
+  unsure. Accepts the **typed core IR** (`Rian.Core`); a surface tuple is
+  accepted too and translated, so existing callers keep working (ADR-0050 — the
+  checker consumes the core, one inference, no second representation).
+  """
   def infer(ast, env \\ %{}, ic \\ %{})
+  def infer(ast, env, ic) when is_tuple(ast), do: infer(Core.from_expr(ast), env, ic)
 
-  def infer({:num, n}, _env, _ic),
+  def infer(%ENum{text: n}, _env, _ic),
     do: if(String.contains?(n, ".") or String.match?(n, ~r/[eE]/), do: "Float64", else: "Int64")
 
-  def infer({:str, _}, _env, _ic), do: "String"
-  def infer({:id, b}, _env, _ic) when b in ~w(true false), do: "Bool"
+  def infer(%EStr{}, _env, _ic), do: "String"
+  def infer(%EId{name: b}, _env, _ic) when b in ~w(true false), do: "Bool"
   # a name resolves to a bound var, else a nullary variant constructor, else unknown
-  def infer({:id, x}, env, ic), do: Map.get(env, x) || ctor_type(ic, x) || :unknown
-  def infer({:unary, "-", x}, env, ic), do: infer(x, env, ic)
-  def infer({:unary, "not", _}, _env, _ic), do: "Bool"
+  def infer(%EId{name: x}, env, ic), do: Map.get(env, x) || ctor_type(ic, x) || :unknown
+  def infer(%EUnary{op: "-", arg: x}, env, ic), do: infer(x, env, ic)
+  def infer(%EUnary{op: "not"}, _env, _ic), do: "Bool"
 
-  def infer({:bin, op, l, r}, env, ic) do
+  def infer(%EBin{op: op, left: l, right: r}, env, ic) do
     cond do
       op in @bool_ops -> "Bool"
       op == "<>" -> "String"
@@ -87,16 +95,16 @@ defmodule Rian.Check do
 
   # a call to a constructor infers its sum type; a call to a known function infers
   # that function's declared return type; otherwise unknown
-  def infer({:call, {:id, f}, _args}, _env, ic),
+  def infer(%ECall{fun: %EId{name: f}}, _env, ic),
     do: ctor_type(ic, f) || Map.get(Map.get(ic, :funs, %{}), f) || :unknown
 
-  def infer({:if, _c, then_arm, else_arm}, env, ic),
-    do: conservative(unify(infer(then_arm, env, ic), infer(else_arm, env, ic)))
+  def infer(%EIf{then: t, else: e}, env, ic),
+    do: conservative(unify(infer(t, env, ic), infer(e, env, ic)))
 
   # `case` — flow narrowing: each arm body is inferred under an env where the
   # arm pattern's bindings are refined against the scrutinee's type. The case's
   # type is the unification of all arm bodies (conservative on mismatch).
-  def infer({:case, scrut, arms}, env, ic) do
+  def infer(%ECase{scrut: scrut, arms: arms}, env, ic) do
     st = infer(scrut, env, ic)
 
     arms
@@ -106,7 +114,7 @@ defmodule Rian.Check do
 
   # a list literal infers `Vec(T)` (the family list type) when its elements — and
   # any cons tail — agree on a concrete element type `T`; else `:unknown`
-  def infer({:list_lit, elems, tail}, env, ic) do
+  def infer(%EList{elems: elems, tail: tail}, env, ic) do
     elem_t =
       elems
       |> Enum.map(&infer(&1, env, ic))
@@ -118,16 +126,16 @@ defmodule Rian.Check do
     end
   end
 
-  def infer({:block, stmts}, env, ic), do: infer_block(stmts, env, ic, :unknown)
+  def infer(%EBlock{stmts: stmts}, env, ic), do: infer_block(stmts, env, ic, :unknown)
   # a `with` yields its do-block value on the happy path (clause-bound vars are
   # not tracked yet -> they infer `:unknown`, keeping the checker conservative)
-  def infer({:with, _clauses, body, _els}, env, ic), do: infer(body, env, ic)
+  def infer(%EWith{body: body}, env, ic), do: infer(body, env, ic)
   def infer(_other, _env, _ic), do: :unknown
 
   defp ctor_type(ic, name), do: Map.get(Map.get(ic, :ctors, %{}), name)
 
-  defp infer_tail(nil, _env, _ic), do: :unknown
-  defp infer_tail({:tail, e}, env, ic), do: infer(e, env, ic)
+  defp infer_tail(:close, _env, _ic), do: :unknown
+  defp infer_tail(tail, env, ic), do: infer(tail, env, ic)
 
   # `Vec(T)` string helpers (types are strings; concrete generics unify by ==).
   defp list_of(:unknown), do: :unknown
@@ -146,13 +154,12 @@ defmodule Rian.Check do
   defp infer_block([{:expr, e} | rest], env, ic, _value),
     do: infer_block(rest, env, ic, infer(e, env, ic))
 
-  # Narrow one pattern against the type it matches, binding its variables.
-  # A `{:var}` takes the matched type directly; a constructor pattern looks up
-  # its field types and narrows each argument pattern in turn (recursively).
-  # Unknown constructor or no `tdefs` -> field variables stay `:unknown`.
-  defp narrow({:var, name}, type, _ic, env), do: Map.put(env, name, concretize(type))
+  # Narrow one core pattern against the type it matches, binding its variables.
+  # A `PVar` takes the matched type directly; a `PCtor` looks up its field types
+  # and narrows each argument in turn. Unknown ctor / no `tdefs` -> `:unknown`.
+  defp narrow(%PVar{name: name}, type, _ic, env), do: Map.put(env, name, concretize(type))
 
-  defp narrow({:ctor, ctor, args}, _type, ic, env) do
+  defp narrow(%PCtor{ctor: ctor, args: args}, _type, ic, env) do
     field_types = Map.get(Map.get(ic, :tdefs, %{}), ctor, [])
 
     args
@@ -268,7 +275,9 @@ defmodule Rian.Check do
   defp clause_env(pats, params, ic) do
     pats
     |> Enum.zip(params)
-    |> Enum.reduce(%{}, fn {pat, param}, env -> narrow(pat, param.type, ic, env) end)
+    |> Enum.reduce(%{}, fn {pat, param}, env ->
+      narrow(Core.from_pat(pat), param.type, ic, env)
+    end)
   end
 
   @doc "Parse source and check every function; returns `:ok` or the first `{:error, message}`."

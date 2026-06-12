@@ -13,13 +13,15 @@ defmodule Rian.Core do
   ## Migration status
 
   The **pattern and expression** node catalogues exist (`from_pat/1`,
-  `from_expr/1`). Consumers migrated so far: the abstract-forms emitter
-  ([`Rian.Beam`](beam.ex)) consumes the core for **both** patterns and
-  expressions; [`Rian.Lower`](lower.ex)'s Elixir + Rust **pattern** emitters
-  consume the core too. Remaining, pass-by-pass behind tests (ADR-0050 §5):
-  `Rian.Lower`'s *expression* emit (the precedence-aware `emit/2` + the
-  resolved variant/struct/const nodes), the exhaustiveness normalizer
-  (`PatternLower`), and the checker filling node `type`s (§3).
+  `from_expr/1`). Consumers on the core so far: the abstract-forms emitter
+  ([`Rian.Beam`](beam.ex)) for **both** patterns and expressions; the
+  ECMAScript emitter ([`Rian.JS`](js.ex)); [`Rian.Lower`](lower.ex)'s Elixir +
+  Rust **pattern** emitters; and the **type checker** ([`Rian.Check`](check.ex))
+  — `infer/3` now dispatches on core nodes (one inference, no second
+  representation). Remaining, pass-by-pass behind tests (ADR-0050 §5):
+  `Rian.Lower`'s *expression* `emit/2` (+ the resolved variant/struct/const
+  nodes), the exhaustiveness normalizer (`PatternLower`), and an `annotate` pass
+  that *fills* each node's `type` so the emitter reads representation off it (§3).
   """
 
   defmodule PWild do
