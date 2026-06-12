@@ -468,22 +468,54 @@ defmodule Rian.Pratt do
     {{:bind, name, e}, rest}
   end
 
-  # typed binding `x Int32 := 66` — the declared type sits between the name and
-  # `:=`. The annotation is carried as a `{:typed_bind, name, type, expr}` node so
-  # the checker can enforce it (ADR-0034 §1: a numeric literal *adopts* the
-  # declared width; an already-typed RHS must *unify exactly*) and display the
-  # binding at the declared type. Every backend erases the annotation — `Int*`
-  # is representation intent, not a portable overflow contract (ADR-0034 §1).
-  # (`name type` is otherwise not a valid statement, so this only newly accepts
-  # the typed-binding form.) Parametric types (`Vec(Int64)`) are future.
-  defp parse_stmt([{:id, name}, {:id, type}, {:op, ":="} | rest]) do
-    {e, rest} = parse_expr(rest, 0)
-    {{:typed_bind, name, type, e}, rest}
+  # typed binding `x Int32 := 66` / `xs Vec(Int64) := [1, 2, 3]` — a declared type
+  # sits between the name and `:=`. It is carried as a `{:typed_bind, name, type,
+  # expr}` node so the checker can enforce it (ADR-0034 §1: a numeric literal
+  # *adopts* the declared width; an already-typed RHS must *unify exactly*) and
+  # display the binding at the declared type. Every backend erases the annotation —
+  # `Int*` is representation intent, not a portable overflow contract (ADR-0034 §1).
+  # The type may be parametric (`Vec(Int64)`, `Map(String, Int64)`, nested). A
+  # `name type` sequence is otherwise not a valid statement, so when the type
+  # phrase is *not* followed by `:=` we fall back to parsing an expression.
+  defp parse_stmt([{:id, name}, {:id, _} | _] = tokens) do
+    [{:id, ^name} | rest] = tokens
+
+    case parse_type(rest) do
+      {type, [{:op, ":="} | rest]} ->
+        {e, rest} = parse_expr(rest, 0)
+        {{:typed_bind, name, type, e}, rest}
+
+      _ ->
+        {e, rest} = parse_expr(tokens, 0)
+        {{:expr, e}, rest}
+    end
   end
 
   defp parse_stmt(tokens) do
     {e, rest} = parse_expr(tokens, 0)
     {{:expr, e}, rest}
+  end
+
+  # A type phrase in annotation position: `Name` with an optional parenthesized,
+  # comma-separated list of nested type phrases — `Int32`, `Vec(Int64)`,
+  # `Map(String, Int64)`, `Vec(Vec(Int64))`. Rendered with **no interior spaces**
+  # to match the checker's canonical type strings (`Check.list_of`, `Decl`'s
+  # `collapse_parens`), so an annotation unifies with an inferred parametric type.
+  defp parse_type([{:id, name}, {:lparen} | rest]) do
+    {args, rest} = parse_type_args(rest, [])
+    {"#{name}(#{Enum.join(args, ",")})", rest}
+  end
+
+  defp parse_type([{:id, name} | rest]), do: {name, rest}
+
+  defp parse_type_args(tokens, acc) do
+    {t, rest} = parse_type(tokens)
+
+    case rest do
+      [{:rparen} | rest] -> {Enum.reverse([t | acc]), rest}
+      [{:comma} | rest] -> parse_type_args(rest, [t | acc])
+      other -> raise ArgumentError, "malformed type argument list: #{inspect(other)}"
+    end
   end
 
   defp parse_list([{:rbracket} | rest], acc), do: {{:list_lit, Enum.reverse(acc), nil}, rest}

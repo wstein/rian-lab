@@ -174,6 +174,19 @@ defmodule Rian.PrattTest do
       # untyped bindings are unaffected
       assert Pratt.parse_body("y := 1") == {:block, [{:bind, "y", {:num, "1"}}]}
     end
+
+    test "a typed binding accepts a parametric type, rendered space-free" do
+      # the type string matches the checker's canonical form (`Vec(Int64)`, no
+      # interior spaces) so an annotation unifies with an inferred parametric type
+      assert Pratt.parse_body("xs Vec(Int64) := [1]") ==
+               {:block, [{:typed_bind, "xs", "Vec(Int64)", {:list_lit, [num: "1"], nil}}]}
+
+      assert {:block, [{:typed_bind, "m", "Map(String,Int64)", _}]} =
+               Pratt.parse_body("m Map(String, Int64) := d")
+
+      assert {:block, [{:typed_bind, "v", "Vec(Vec(Int64))", _}]} =
+               Pratt.parse_body("v Vec(Vec(Int64)) := xss")
+    end
   end
 
   describe "string literals" do

@@ -115,6 +115,18 @@ defmodule Rian.CheckTest do
       # `x` is Int32, so `x + 1` is Int32-vs-Int64 — conservative `:unknown`, not an error
       assert Check.check("def f(n Int64) Int64 := x Int32 := 5 ; y Int32 := x + 1 ; n") == :ok
     end
+
+    test "a parametric annotation is enforced against the inferred element type" do
+      assert Check.check("def f(n Int64) Int64 := xs Vec(Int64) := [1, 2, 3] ; n") == :ok
+
+      assert {:error, msg} = Check.check("def f(n Int64) Int64 := xs Vec(Bool) := [1, 2, 3] ; n")
+      assert msg =~ "declared `Vec(Bool)`"
+      assert msg =~ "type `Vec(Int64)`"
+    end
+
+    test "a parametric binding displays at its declared type" do
+      assert Check.infer(Pratt.parse_body("xs Vec(Int64) := [1, 2, 3] ; xs")) == "Vec(Int64)"
+    end
   end
 
   describe "flow narrowing (ADR-0034 pillar 4)" do

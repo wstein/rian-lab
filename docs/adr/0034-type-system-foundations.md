@@ -72,8 +72,10 @@ type *pushed down* into the value:
 The binding then carries its **declared** type downstream (display, `-spec`, later checks), not the
 inferred one. Every backend **erases** the annotation when lowering — consistent with native-per-target
 representation (the value compiles unchanged). Parsed as `{:typed_bind, name, type, expr}`
-(`Rian.Pratt`); enforced by `Rian.Check.check_binds/2`. Parametric annotations (`Vec(Int64)`) are
-future work.
+(`Rian.Pratt`); enforced by `Rian.Check.check_binds/2`. The annotation may be **parametric** —
+`xs Vec(Int64) := […]`, `m Map(String, Int64) := …`, nested — rendered space-free to match the
+checker's canonical type strings so it unifies with the inferred parametric type (a `Vec(Bool)`
+annotation over a `Vec(Int64)` value is a proven mismatch).
 
 ### 2. Errors are values, typed as error sets (Zig)
 
