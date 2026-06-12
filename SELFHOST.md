@@ -90,10 +90,13 @@ construction, and cons-list building all compose and lower correctly.
    too, and a **third emitter — ECMAScript (`Rian.JS`, ADR-0049 Tier 1) — is
    built directly on the core** (`Core.from_expr`/`from_pat`), validating the
    ADR-0050 thesis in practice (a new backend with no new fork; runs under
-   node). **Remaining (incremental, §5):** migrate `Rian.Lower`'s precedence-aware
-   expression `emit/2` onto the core (entangled with the Rust pattern-meta
-   baking — wants the §3 types-on-nodes work first); the exhaustiveness
-   normalizer (`PatternLower`); the checker filling node `type`s.
+   node). The checker (`Check.infer`) consumes the core too, and `Check.annotate`
+   fills node `type`s (§3). **`Rian.Lower.emit/2` now consumes the core** — the
+   last surface-tuple expression consumer; the Rust pattern-meta baking stays a
+   surface pre-pass whose `{:rpat}` marker passes through `from_pat`, so no meta
+   threading was needed. **Remaining (incremental, §5):** the exhaustiveness
+   normalizer (`PatternLower`, on its documented surface contract); emitters
+   *reading* `node.type` for representation choices (the §3 payoff).
 4. **Portable prelude (ADR-0041 #3 / ADR-0047)** — **mechanism + first member
    landed.** `Rian.Prelude` injects built-in types into the checker /
    exhaustiveness env / lowering meta without a user declaration and without

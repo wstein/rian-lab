@@ -19,6 +19,32 @@ defmodule Rian.Lower do
   """
   alias Rian.Core
   alias Rian.Core.{PAtom, PCtor, PList, PLit, PTuple, PVar, PWild}
+
+  alias Rian.Core.{
+    EAtom,
+    EBin,
+    EBlock,
+    ECall,
+    ECapArg,
+    ECapture,
+    ECaptureNamed,
+    ECase,
+    EConstRef,
+    EDot,
+    EId,
+    EIf,
+    ELambda,
+    EList,
+    EMap,
+    ENum,
+    EStr,
+    EStruct,
+    ETuple,
+    EUnary,
+    EVariant,
+    EWith
+  }
+
   alias Rian.Exhaustiveness, as: E
   alias Rian.PatternLower, as: PL
   alias Rian.Pratt
@@ -124,14 +150,22 @@ defmodule Rian.Lower do
   # `const NAME Type := value` -> a 0-arity accessor on the BEAM (`def`/`defp`).
   defp ex_const(c, ctx) do
     def_kw = if c.pub?, do: "def", else: "defp"
-    val = c.value |> body_ast(ctx) |> emit(:elixir) |> elem(0)
+    val = c.value |> body_ast(ctx) |> Core.from_expr() |> emit(:elixir) |> elem(0)
     "#{def_kw} #{PL.to_snake(c.name)}() do #{val} end"
   end
 
   # `const NAME Type := value` -> a Rust `const` (`pub const` when exported).
   defp rust_const(c, ctx) do
     vis = if c.pub?, do: "pub ", else: ""
-    val = c.value |> body_ast(ctx) |> resolve_rust_pats(ctx.meta) |> emit(:rust) |> elem(0)
+
+    val =
+      c.value
+      |> body_ast(ctx)
+      |> resolve_rust_pats(ctx.meta)
+      |> Core.from_expr()
+      |> emit(:rust)
+      |> elem(0)
+
     "#{vis}const #{c.name}: #{prim_rust(c.type)} = #{val};"
   end
 
@@ -214,7 +248,7 @@ defmodule Rian.Lower do
     clauses =
       Enum.map_join(func.clauses, "\n", fn c ->
         head = "#{def_kw} #{func.name}(#{Enum.map_join(c.pats, ", ", &core_pat_ex/1)})"
-        body = c.body |> body_ast(ctx) |> emit(:elixir) |> elem(0)
+        body = c.body |> body_ast(ctx) |> Core.from_expr() |> emit(:elixir) |> elem(0)
         "#{head}#{guard_str(c, :elixir)} do #{body} end"
       end)
 
@@ -337,8 +371,11 @@ defmodule Rian.Lower do
   # `when …` on Elixir and `if …` on Rust (clauses-guards §5).
   defp guard_str(c, target) do
     case Map.get(c, :guard) do
-      g when is_binary(g) -> guard_kw(target) <> (emit(Pratt.parse(g), target) |> elem(0))
-      _ -> ""
+      g when is_binary(g) ->
+        guard_kw(target) <> (emit(Core.from_expr(Pratt.parse(g)), target) |> elem(0))
+
+      _ ->
+        ""
     end
   end
 
@@ -347,7 +384,7 @@ defmodule Rian.Lower do
 
   # A Rust match arm needs braces around a multi-statement block body; a single
   # expression (the `:= expr` case) is emitted bare.
-  defp rust_arm_body({:block, [_, _ | _]}, s), do: "{ #{s} }"
+  defp rust_arm_body(%EBlock{stmts: [_, _ | _]}, s), do: "{ #{s} }"
   defp rust_arm_body(_, s), do: s
 
   defp case_guard(nil, _), do: ""
@@ -378,7 +415,7 @@ defmodule Rian.Lower do
   defp resolve_rust_pats(node, meta), do: Rian.Macro.map_node(node, &resolve_rust_pats(&1, meta))
 
   defp rpat({:rpat, s}), do: s
-  defp rpat(pat), do: core_pat_rs(pat, %{})
+  defp rpat(pat), do: pat_rs(pat, %{})
 
   # Rust `with` lowering: a right-nested `match` chain. Each clause matches its
   # ok-pattern and continues, or falls through to the `else` arms (or yields the
@@ -393,21 +430,23 @@ defmodule Rian.Lower do
   # ── `&` capture support ────────────────────────────────────────────────
   # Highest placeholder index in an anonymous-capture body → the closure arity
   # the Rust target must spell out (`&(&1 + &2)` ⇒ 2 ⇒ `|a1, a2| …`).
-  defp cap_arity({:cap_arg, n}), do: n
-  defp cap_arity({:bin, _, l, r}), do: max(cap_arity(l), cap_arity(r))
-  defp cap_arity({:unary, _, x}), do: cap_arity(x)
-  defp cap_arity({:dot, o, _}), do: cap_arity(o)
-  defp cap_arity({:if, c, t, e}), do: max(cap_arity(c), max(cap_arity(t), cap_arity(e)))
+  defp cap_arity(%ECapArg{n: n}), do: n
+  defp cap_arity(%EBin{left: l, right: r}), do: max(cap_arity(l), cap_arity(r))
+  defp cap_arity(%EUnary{arg: x}), do: cap_arity(x)
+  defp cap_arity(%EDot{head: o}), do: cap_arity(o)
 
-  defp cap_arity({:call, f, args}),
+  defp cap_arity(%EIf{cond: c, then: t, else: e}),
+    do: max(cap_arity(c), max(cap_arity(t), cap_arity(e)))
+
+  defp cap_arity(%ECall{fun: f, args: args}),
     do: Enum.reduce([f | args], 0, fn n, acc -> max(cap_arity(n), acc) end)
 
-  defp cap_arity({:list_lit, es, tail}) do
+  defp cap_arity(%EList{elems: es, tail: tail}) do
     base = Enum.reduce(es, 0, fn e, acc -> max(cap_arity(e), acc) end)
-    if match?({:tail, _}, tail), do: max(base, cap_arity(elem(tail, 1))), else: base
+    if tail == :close, do: base, else: max(base, cap_arity(tail))
   end
 
-  defp cap_arity({:map_lit, ps}),
+  defp cap_arity(%EMap{pairs: ps}),
     do: Enum.reduce(ps, 0, fn {_, v}, acc -> max(cap_arity(v), acc) end)
 
   defp cap_arity(_), do: 0
@@ -474,9 +513,9 @@ defmodule Rian.Lower do
       Enum.map_join(func.clauses, "\n", fn c ->
         pat = tuple_or_one(c.pats, &core_pat_rs(&1, ctx.meta))
         # Resolve construction (struct + variant), constant references, and `case`
-        # patterns into the body IR here, where the meta is available — so the
-        # recursive emitter needs no ambient context (the IR carries it).
-        ast = c.body |> body_ast(ctx) |> resolve_rust_pats(ctx.meta)
+        # patterns on the surface (where the meta is available), then translate to
+        # the typed core IR the emitter consumes (ADR-0050).
+        ast = c.body |> body_ast(ctx) |> resolve_rust_pats(ctx.meta) |> Core.from_expr()
         body = emit(ast, :rust) |> elem(0)
         "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(ast, body)},"
       end)
@@ -584,10 +623,10 @@ defmodule Rian.Lower do
 
   # ── Expression emission (precedence-aware, target-specific) ────────────
   @doc "Emit a single Rian expression string to :elixir or :rust."
-  def emit_expr(src, target), do: emit(Rian.Pratt.parse(src), target) |> elem(0)
+  def emit_expr(src, target), do: emit(Core.from_expr(Rian.Pratt.parse(src)), target) |> elem(0)
 
   @doc "Emit an already-built AST (e.g. after macro expansion / comptime folding)."
-  def emit_ast(ast, target), do: emit(ast, target) |> elem(0)
+  def emit_ast(ast, target), do: emit(Core.from_expr(ast), target) |> elem(0)
 
   # emit/2 -> {string, prec}; p/3 wraps in parens when prec < ctx.
   defp p(node, ctx, t) do
@@ -595,23 +634,23 @@ defmodule Rian.Lower do
     if pr < ctx, do: "(" <> s <> ")", else: s
   end
 
-  defp emit({:num, n}, _t), do: {n, 12}
+  defp emit(%ENum{text: n}, _t), do: {n, 12}
   # string literal — same surface on both targets (Rust yields `&str`)
-  defp emit({:str, s}, _t), do: {"\"#{s}\"", 12}
-  defp emit({:id, "pi"}, :elixir), do: {":math.pi()", 12}
-  defp emit({:id, "pi"}, :rust), do: {"std::f64::consts::PI", 12}
-  defp emit({:id, x}, _t), do: {x, 12}
+  defp emit(%EStr{value: s}, _t), do: {"\"#{s}\"", 12}
+  defp emit(%EId{name: "pi"}, :elixir), do: {":math.pi()", 12}
+  defp emit(%EId{name: "pi"}, :rust), do: {"std::f64::consts::PI", 12}
+  defp emit(%EId{name: x}, _t), do: {x, 12}
   # atom literal / Erlang FFI (BEAM-only on Rust)
-  defp emit({:atom, a}, :elixir), do: {":" <> a, 12}
-  defp emit({:atom, a}, :rust), do: raise("Erlang atom is BEAM-only: :#{a}")
-  defp emit({:dot, {:atom, m}, n}, :elixir), do: {":#{m}.#{n}", 12}
-  defp emit({:dot, {:atom, m}, _}, :rust), do: raise("Erlang FFI is BEAM-only: :#{m}")
+  defp emit(%EAtom{name: a}, :elixir), do: {":" <> a, 12}
+  defp emit(%EAtom{name: a}, :rust), do: raise("Erlang atom is BEAM-only: :#{a}")
+  defp emit(%EDot{head: %EAtom{name: m}, name: n}, :elixir), do: {":#{m}.#{n}", 12}
+  defp emit(%EDot{head: %EAtom{name: m}}, :rust), do: raise("Erlang FFI is BEAM-only: :#{m}")
 
   # dotted access: Elixir uses `.` for both module calls and field access
-  defp emit({:dot, head, n}, :elixir), do: {p(head, 12, :elixir) <> ".#{n}", 12}
+  defp emit(%EDot{head: head, name: n}, :elixir), do: {p(head, 12, :elixir) <> ".#{n}", 12}
 
   # Rust: case of head/name selects field vs module-path vs type/variant-path
-  defp emit({:dot, {:id, m}, n}, :rust) do
+  defp emit(%EDot{head: %EId{name: m}, name: n}, :rust) do
     cond do
       # value.field
       not pascal?(m) -> {"#{m}.#{n}", 12}
@@ -622,68 +661,68 @@ defmodule Rian.Lower do
     end
   end
 
-  defp emit({:dot, head, n}, :rust), do: {p(head, 12, :rust) <> "::#{n}", 12}
+  defp emit(%EDot{head: head, name: n}, :rust), do: {p(head, 12, :rust) <> "::#{n}", 12}
 
-  defp emit({:call, f, args}, t),
+  defp emit(%ECall{fun: f, args: args}, t),
     do: {p(f, 12, t) <> "(" <> Enum.map_join(args, ", ", &p(&1, 0, t)) <> ")", 12}
 
   # `&` captures (B'). Placeholders: Elixir's native `&N`, Rust's closure args `aN`.
-  defp emit({:cap_arg, n}, :elixir), do: {"&#{n}", 12}
-  defp emit({:cap_arg, n}, :rust), do: {"a#{n}", 12}
+  defp emit(%ECapArg{n: n}, :elixir), do: {"&#{n}", 12}
+  defp emit(%ECapArg{n: n}, :rust), do: {"a#{n}", 12}
 
   # `&(&1 + &2)` — Elixir's native capture; Rust an explicit closure `|a1, a2| …`.
-  defp emit({:capture, body}, :elixir), do: {"&(#{p(body, 0, :elixir)})", 12}
+  defp emit(%ECapture{body: body}, :elixir), do: {"&(#{p(body, 0, :elixir)})", 12}
 
-  defp emit({:capture, body}, :rust) do
+  defp emit(%ECapture{body: body}, :rust) do
     {"|#{closure_params(1, cap_arity(body))}| #{p(body, 0, :rust)}", 12}
   end
 
   # `&name/arity` — Elixir's native capture; Rust a forwarding closure.
-  defp emit({:capture_named, path, arity}, :elixir),
+  defp emit(%ECaptureNamed{path: path, arity: arity}, :elixir),
     do: {"&#{p(path, 12, :elixir)}/#{arity}", 12}
 
-  defp emit({:capture_named, path, arity}, :rust) do
+  defp emit(%ECaptureNamed{path: path, arity: arity}, :rust) do
     ps = closure_params(0, arity - 1)
     {"|#{ps}| #{p(path, 12, :rust)}(#{ps})", 12}
   end
 
-  defp emit({:unary, "-", x}, t), do: {"-" <> p(x, 11, t), 11}
-  defp emit({:unary, "not", x}, :elixir), do: {"not " <> p(x, 11, :elixir), 11}
-  defp emit({:unary, "not", x}, :rust), do: {"!" <> p(x, 11, :rust), 11}
+  defp emit(%EUnary{op: "-", arg: x}, t), do: {"-" <> p(x, 11, t), 11}
+  defp emit(%EUnary{op: "not", arg: x}, :elixir), do: {"not " <> p(x, 11, :elixir), 11}
+  defp emit(%EUnary{op: "not", arg: x}, :rust), do: {"!" <> p(x, 11, :rust), 11}
 
   # lambdas — Elixir anonymous fn, Rust closure
-  defp emit({:lambda, params, body}, :elixir) do
+  defp emit(%ELambda{params: params, body: body}, :elixir) do
     ps = Enum.map_join(params, ", ", fn {n, _} -> n end)
     {"fn #{ps} -> #{p(body, 0, :elixir)} end", 12}
   end
 
-  defp emit({:lambda, params, body}, :rust) do
+  defp emit(%ELambda{params: params, body: body}, :rust) do
     ps = Enum.map_join(params, ", ", fn {n, _} -> n end)
     {"|#{ps}| #{p(body, 0, :rust)}", 12}
   end
 
   # if-expression
-  defp emit({:if, c, t, e}, :elixir),
+  defp emit(%EIf{cond: c, then: t, else: e}, :elixir),
     do:
       {"if #{p(c, 0, :elixir)} do #{emit_block(t, :elixir)} else #{emit_block(e, :elixir)} end",
        0}
 
-  defp emit({:if, c, t, e}, :rust),
+  defp emit(%EIf{cond: c, then: t, else: e}, :rust),
     do: {"if #{p(c, 0, :rust)} { #{emit_block(t, :rust)} } else { #{emit_block(e, :rust)} }", 0}
 
-  defp emit({:block, _} = b, t), do: {emit_block(b, t), 0}
+  defp emit(%EBlock{} = b, t), do: {emit_block(b, t), 0}
 
   # case expression — Elixir `case … do … -> … end`; Rust `match … { … => …, }`
-  defp emit({:case, scrut, arms}, :elixir) do
+  defp emit(%ECase{scrut: scrut, arms: arms}, :elixir) do
     body =
       Enum.map_join(arms, "; ", fn {pt, g, b} ->
-        "#{core_pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
+        "#{pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
       end)
 
     {"case #{p(scrut, 0, :elixir)} do #{body} end", 0}
   end
 
-  defp emit({:case, scrut, arms}, :rust) do
+  defp emit(%ECase{scrut: scrut, arms: arms}, :rust) do
     body =
       Enum.map_join(arms, " ", fn {pt, g, b} ->
         "#{rpat(pt)}#{case_guard(g, :rust)} => #{p(b, 0, :rust)},"
@@ -694,9 +733,8 @@ defmodule Rian.Lower do
 
   # with expression — Elixir native `with`/`else`; Rust nested `match` chain that
   # short-circuits to the `else` arms (or yields the non-matching value).
-  defp emit({:with, clauses, body, els}, :elixir) do
-    cs =
-      Enum.map_join(clauses, ", ", fn {pt, e} -> "#{core_pat_ex(pt)} <- #{p(e, 0, :elixir)}" end)
+  defp emit(%EWith{clauses: clauses, body: body, els: els}, :elixir) do
+    cs = Enum.map_join(clauses, ", ", fn {pt, e} -> "#{pat_ex(pt)} <- #{p(e, 0, :elixir)}" end)
 
     else_str =
       if els == [],
@@ -704,13 +742,13 @@ defmodule Rian.Lower do
         else:
           " else " <>
             Enum.map_join(els, "; ", fn {pt, g, b} ->
-              "#{core_pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
+              "#{pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
             end)
 
     {"with #{cs} do #{emit_block(body, :elixir)}#{else_str} end", 0}
   end
 
-  defp emit({:with, clauses, body, els}, :rust) do
+  defp emit(%EWith{clauses: clauses, body: body, els: els}, :rust) do
     else_rs =
       Enum.map_join(els, " ", fn {pt, g, b} ->
         "#{rpat(pt)}#{case_guard(g, :rust)} => #{p(b, 0, :rust)},"
@@ -720,105 +758,107 @@ defmodule Rian.Lower do
   end
 
   # list / map literals
-  defp emit({:list_lit, elems, nil}, :elixir),
+  defp emit(%EList{elems: elems, tail: :close}, :elixir),
     do: {"[#{Enum.map_join(elems, ", ", &p(&1, 0, :elixir))}]", 12}
 
-  defp emit({:list_lit, elems, {:tail, tl}}, :elixir),
+  defp emit(%EList{elems: elems, tail: tl}, :elixir),
     do: {"[#{Enum.map_join(elems, ", ", &p(&1, 0, :elixir))} | #{p(tl, 0, :elixir)}]", 12}
 
-  defp emit({:list_lit, elems, nil}, :rust),
+  defp emit(%EList{elems: elems, tail: :close}, :rust),
     do: {"vec![#{Enum.map_join(elems, ", ", &p(&1, 0, :rust))}]", 12}
 
-  defp emit({:list_lit, _, {:tail, _}}, :rust),
+  defp emit(%EList{tail: tl}, :rust) when tl != :close,
     do: raise("cons-list construction is BEAM-only (no idiomatic Vec cons)")
 
-  defp emit({:map_lit, pairs}, :elixir),
+  defp emit(%EMap{pairs: pairs}, :elixir),
     do: {"%{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir)}" end)}}", 12}
 
-  defp emit({:map_lit, _}, :rust), do: raise("map literals are BEAM-only in PoC")
+  defp emit(%EMap{}, :rust), do: raise("map literals are BEAM-only in PoC")
 
   # constant reference — a 0-arity accessor call on the BEAM, the `const` name on Rust
-  defp emit({:const_ref, name}, :elixir), do: {"#{PL.to_snake(name)}()", 12}
-  defp emit({:const_ref, name}, :rust), do: {name, 12}
+  defp emit(%EConstRef{name: name}, :elixir), do: {"#{PL.to_snake(name)}()", 12}
+  defp emit(%EConstRef{name: name}, :rust), do: {name, 12}
 
   # tuple literal — a BEAM tuple / a Rust tuple. The `{:ok, v}` / `{:error, e}`
   # shapes are the canonical Result surface (ADR-0040): they keep their tagged
   # tuple on the BEAM but lower to Rust `Ok(…)` / `Err(…)`.
-  defp emit({:tuple, [{:atom, "ok"}, v]}, :rust), do: {"Ok(#{p(v, 0, :rust)})", 12}
-  defp emit({:tuple, [{:atom, "error"}, e]}, :rust), do: {"Err(#{p(e, 0, :rust)})", 12}
-  defp emit({:tuple, es}, :rust), do: {"(#{Enum.map_join(es, ", ", &p(&1, 0, :rust))})", 12}
-  defp emit({:tuple, es}, :elixir), do: {"{#{Enum.map_join(es, ", ", &p(&1, 0, :elixir))}}", 12}
+  defp emit(%ETuple{elems: [%EAtom{name: "ok"}, v]}, :rust), do: {"Ok(#{p(v, 0, :rust)})", 12}
+  defp emit(%ETuple{elems: [%EAtom{name: "error"}, e]}, :rust), do: {"Err(#{p(e, 0, :rust)})", 12}
+  defp emit(%ETuple{elems: es}, :rust), do: {"(#{Enum.map_join(es, ", ", &p(&1, 0, :rust))})", 12}
+
+  defp emit(%ETuple{elems: es}, :elixir),
+    do: {"{#{Enum.map_join(es, ", ", &p(&1, 0, :elixir))}}", 12}
 
   # sum-variant construction — a snake atom / tagged tuple on the BEAM (labels
   # erased), an `Enum::Variant` path on Rust (named `{…}` or positional `(…)`).
-  defp emit({:variant_lit, _enum, ctor, _named, []}, :elixir),
+  defp emit(%EVariant{ctor: ctor, pairs: []}, :elixir),
     do: {":" <> Atom.to_string(PL.to_snake(ctor)), 12}
 
-  defp emit({:variant_lit, _enum, ctor, _named, pairs}, :elixir) do
+  defp emit(%EVariant{ctor: ctor, pairs: pairs}, :elixir) do
     vals = Enum.map_join(pairs, ", ", fn {_l, v} -> p(v, 0, :elixir) end)
     {"{:#{PL.to_snake(ctor)}, #{vals}}", 12}
   end
 
-  defp emit({:variant_lit, enum, ctor, _named, []}, :rust), do: {"#{enum}::#{ctor}", 12}
+  defp emit(%EVariant{enum: enum, ctor: ctor, pairs: []}, :rust), do: {"#{enum}::#{ctor}", 12}
 
-  defp emit({:variant_lit, enum, ctor, true, pairs}, :rust) do
+  defp emit(%EVariant{enum: enum, ctor: ctor, named: true, pairs: pairs}, :rust) do
     fields = Enum.map_join(pairs, ", ", fn {l, v} -> "#{l}: #{p(v, 0, :rust)}" end)
     {"#{enum}::#{ctor} { #{fields} }", 12}
   end
 
-  defp emit({:variant_lit, enum, ctor, false, pairs}, :rust) do
+  defp emit(%EVariant{enum: enum, ctor: ctor, named: false, pairs: pairs}, :rust) do
     {"#{enum}::#{ctor}(#{Enum.map_join(pairs, ", ", fn {_l, v} -> p(v, 0, :rust) end)})", 12}
   end
 
   # struct literal — `%Name{x: …}` on the BEAM, `Name { x: … }` on Rust
-  defp emit({:struct_lit, name, pairs}, :elixir),
+  defp emit(%EStruct{name: name, pairs: pairs}, :elixir),
     do:
       {"%#{name}{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir)}" end)}}",
        12}
 
-  defp emit({:struct_lit, name, pairs}, :rust),
+  defp emit(%EStruct{name: name, pairs: pairs}, :rust),
     do:
       {"#{name} { #{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :rust)}" end)} }",
        12}
 
   # pipe: native on Elixir, structural call on Rust
-  defp emit({:bin, "|>", l, r}, :elixir),
+  defp emit(%EBin{op: "|>", left: l, right: r}, :elixir),
     do: {p(l, prec("|>"), :elixir) <> " |> " <> p(r, prec("|>") + 1, :elixir), prec("|>")}
 
-  defp emit({:bin, "|>", l, r}, :rust), do: emit(pipe_to_call(l, r), :rust)
+  defp emit(%EBin{op: "|>", left: l, right: r}, :rust), do: emit(pipe_to_call(l, r), :rust)
 
   # concat: native <> on Elixir, flattened format! on Rust
-  defp emit({:bin, "<>", l, r}, :elixir),
+  defp emit(%EBin{op: "<>", left: l, right: r}, :elixir),
     do: {p(l, prec("<>") + 1, :elixir) <> " <> " <> p(r, prec("<>"), :elixir), prec("<>")}
 
-  defp emit({:bin, "<>", _, _} = node, :rust) do
+  defp emit(%EBin{op: "<>"} = node, :rust) do
     parts = flatten_concat(node)
     fmt = String.duplicate("{}", length(parts))
     {"format!(\"#{fmt}\", #{Enum.map_join(parts, ", ", &p(&1, 0, :rust))})", 12}
   end
 
   # integer div / rem
-  defp emit({:bin, "div", l, r}, :elixir),
+  defp emit(%EBin{op: "div", left: l, right: r}, :elixir),
     do: {"div(#{p(l, 0, :elixir)}, #{p(r, 0, :elixir)})", 12}
 
-  defp emit({:bin, "rem", l, r}, :elixir),
+  defp emit(%EBin{op: "rem", left: l, right: r}, :elixir),
     do: {"rem(#{p(l, 0, :elixir)}, #{p(r, 0, :elixir)})", 12}
 
-  defp emit({:bin, "div", l, r}, :rust),
+  defp emit(%EBin{op: "div", left: l, right: r}, :rust),
     do: {p(l, prec("div"), :rust) <> " / " <> p(r, prec("div") + 1, :rust), prec("div")}
 
-  defp emit({:bin, "rem", l, r}, :rust),
+  defp emit(%EBin{op: "rem", left: l, right: r}, :rust),
     do: {p(l, prec("rem"), :rust) <> " % " <> p(r, prec("rem") + 1, :rust), prec("rem")}
 
   # float division: native on Elixir, explicit f64 cast on Rust
-  defp emit({:bin, "/", l, r}, :elixir),
+  defp emit(%EBin{op: "/", left: l, right: r}, :elixir),
     do: {p(l, prec("/"), :elixir) <> " / " <> p(r, prec("/") + 1, :elixir), prec("/")}
 
-  defp emit({:bin, "/", l, r}, :rust),
+  defp emit(%EBin{op: "/", left: l, right: r}, :rust),
     do: {"(#{p(l, 0, :rust)} as f64) / (#{p(r, 0, :rust)} as f64)", 10}
 
   # generic binary (arith, comparison, and/or) — MUST be last
-  defp emit({:bin, op, l, r}, t) do
+  defp emit(%EBin{op: op, left: l, right: r}, t) do
     pr = prec(op)
 
     {lc, rc} =
@@ -831,27 +871,29 @@ defmodule Rian.Lower do
     {p(l, lc, t) <> " " <> disp(op, t) <> " " <> p(r, rc, t), pr}
   end
 
-  defp emit_block({:block, []}, :elixir), do: "nil"
-  defp emit_block({:block, []}, :rust), do: "()"
+  defp emit_block(%EBlock{stmts: []}, :elixir), do: "nil"
+  defp emit_block(%EBlock{stmts: []}, :rust), do: "()"
 
-  defp emit_block({:block, stmts}, :elixir) do
+  defp emit_block(%EBlock{stmts: stmts}, :elixir) do
     Enum.map_join(stmts, "; ", fn
       {:bind, n, e} -> "#{n} = #{p(e, 0, :elixir)}"
       {:expr, e} -> p(e, 0, :elixir)
     end)
   end
 
-  defp emit_block({:block, stmts}, :rust) do
+  defp emit_block(%EBlock{stmts: stmts}, :rust) do
     Enum.map_join(stmts, " ", fn
       {:bind, n, e} -> "let #{n} = #{p(e, 0, :rust)};"
       {:expr, e} -> p(e, 0, :rust)
     end)
   end
 
-  defp pipe_to_call(l, {:call, f, args}), do: {:call, f, [l | args]}
-  defp pipe_to_call(l, f), do: {:call, f, [l]}
+  defp pipe_to_call(l, %ECall{fun: f, args: args}), do: %ECall{fun: f, args: [l | args]}
+  defp pipe_to_call(l, f), do: %ECall{fun: f, args: [l]}
 
-  defp flatten_concat({:bin, "<>", l, r}), do: flatten_concat(l) ++ flatten_concat(r)
+  defp flatten_concat(%EBin{op: "<>", left: l, right: r}),
+    do: flatten_concat(l) ++ flatten_concat(r)
+
   defp flatten_concat(x), do: [x]
 
   defp disp("and", :rust), do: "&&"

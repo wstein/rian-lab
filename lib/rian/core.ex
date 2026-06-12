@@ -13,15 +13,18 @@ defmodule Rian.Core do
   ## Migration status
 
   The **pattern and expression** node catalogues exist (`from_pat/1`,
-  `from_expr/1`). Consumers on the core so far: the abstract-forms emitter
-  ([`Rian.Beam`](beam.ex)) for **both** patterns and expressions; the
-  ECMAScript emitter ([`Rian.JS`](js.ex)); [`Rian.Lower`](lower.ex)'s Elixir +
-  Rust **pattern** emitters; and the **type checker** ([`Rian.Check`](check.ex))
-  — `infer/3` now dispatches on core nodes (one inference, no second
-  representation). Remaining, pass-by-pass behind tests (ADR-0050 §5):
-  `Rian.Lower`'s *expression* `emit/2` (+ the resolved variant/struct/const
-  nodes), the exhaustiveness normalizer (`PatternLower`), and an `annotate` pass
-  that *fills* each node's `type` so the emitter reads representation off it (§3).
+  `from_expr/1`), including the resolved construction nodes
+  (`EVariant`/`EStruct`/`EConstRef`). **Every expression/pattern consumer now
+  reads the core:** the abstract-forms emitter ([`Rian.Beam`](beam.ex)), the
+  ECMAScript emitter ([`Rian.JS`](js.ex)), **all of [`Rian.Lower`](lower.ex)**
+  (its `emit/2` and both pattern emitters), and the **type checker**
+  ([`Rian.Check`](check.ex)) — `infer/3` dispatches on core nodes and
+  `annotate/3` fills each node's `type` (§3). One representation, one inference.
+
+  Remaining (ADR-0050 §5): the exhaustiveness normalizer
+  ([`Rian.PatternLower`](pattern_lower.ex)) still consumes surface patterns
+  (it keeps a documented surface contract with direct tests); and emitters do
+  not yet *read* `node.type` for representation choices (the §3 payoff).
   """
 
   defmodule PWild do
@@ -180,6 +183,25 @@ defmodule Rian.Core do
     defstruct [:name, :expr, type: nil]
   end
 
+  # ── resolved construction nodes (produced by Rian.Lower's resolution passes) ──
+  defmodule EVariant do
+    @moduledoc "A resolved sum-variant construction; `pairs` are `{label | nil, value}`."
+    @enforce_keys [:enum, :ctor, :named]
+    defstruct [:enum, :ctor, :named, pairs: [], type: nil]
+  end
+
+  defmodule EStruct do
+    @moduledoc "A resolved struct construction `%Name{…}`; `pairs` are `{label, value}`."
+    @enforce_keys [:name]
+    defstruct [:name, pairs: [], type: nil]
+  end
+
+  defmodule EConstRef do
+    @moduledoc "A resolved reference to a module constant."
+    @enforce_keys [:name]
+    defstruct [:name, type: nil]
+  end
+
   @doc "Translate a surface expression (the `Rian.Pratt` tuple AST) into the typed core."
   def from_expr({:num, n}), do: %ENum{text: n}
   def from_expr({:str, s}), do: %EStr{value: s}
@@ -207,6 +229,13 @@ defmodule Rian.Core do
   def from_expr({:label, n, e}), do: %ELabel{name: n, expr: from_expr(e)}
   def from_expr({:lambda, ps, b}), do: %ELambda{params: ps, body: from_expr(b)}
 
+  # resolved construction nodes (Rian.Lower's resolve_* passes produce these)
+  def from_expr({:variant_lit, enum, ctor, named, pairs}),
+    do: %EVariant{enum: enum, ctor: ctor, named: named, pairs: from_pairs(pairs)}
+
+  def from_expr({:struct_lit, name, pairs}), do: %EStruct{name: name, pairs: from_pairs(pairs)}
+  def from_expr({:const_ref, name}), do: %EConstRef{name: name}
+
   def from_expr({:list_lit, es, tail}),
     do: %EList{elems: Enum.map(es, &from_expr/1), tail: from_tail(tail)}
 
@@ -227,6 +256,8 @@ defmodule Rian.Core do
   defp from_tail(:close), do: :close
   defp from_tail({:tail, e}), do: from_expr(e)
 
+  defp from_pairs(pairs), do: Enum.map(pairs, fn {label, v} -> {label, from_expr(v)} end)
+
   defp from_stmt({:bind, n, e}), do: {:bind, n, from_expr(e)}
   defp from_stmt({:expr, e}), do: {:expr, from_expr(e)}
 
@@ -234,6 +265,9 @@ defmodule Rian.Core do
     do: {from_pat(pat), guard && from_expr(guard), from_expr(body)}
 
   @doc "Translate a surface pattern (the `Rian.Pratt` tuple AST) into the typed core."
+  # `{:rpat, str}` is a pre-rendered Rust pattern baked by `Rian.Lower`'s
+  # Rust-only pass (it carries the type meta); pass it through unchanged.
+  def from_pat({:rpat, _} = baked), do: baked
   def from_pat(:wild), do: %PWild{}
   def from_pat({:var, name}), do: %PVar{name: name}
   def from_pat({:lit, value}), do: %PLit{value: value}
