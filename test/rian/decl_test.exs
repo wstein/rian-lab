@@ -273,6 +273,30 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "`T | E` return-type sugar (ADR-0040 §2)" do
+    test "lowers to Rust Result<T, E>; the BEAM body carries the tagged tuple" do
+      [{"find", out}] = Decl.compile("def find(id Int64) User | NotFound := {:ok, id}")
+      assert out.rust =~ "fn find(id: i64) -> Result<User, NotFound>"
+      assert out.elixir =~ "def find(id) do {:ok, id} end"
+    end
+
+    test "an alias resolves inside the result type" do
+      [{"f", out}] =
+        Decl.compile("""
+        alias Id := Int64
+        def f(x Id) Id | NotFound := {:ok, x}
+        """)
+
+      assert out.rust =~ "-> Result<i64, NotFound>"
+    end
+
+    test "an inline multi-tag error set is rejected (must be a named set)" do
+      assert_raise RuntimeError, ~r/must be named/, fn ->
+        Decl.compile("def f(x Int64) User | A | B := {:ok, x}")
+      end
+    end
+  end
+
   describe "tuples and atoms (the Result surface, ADR-0040)" do
     test "tuple construction lowers to a BEAM tuple / Rust tuple and runs" do
       [{"pair", out}] = Decl.compile("def pair(a Int64, b Int64) Pair := {a, b}")

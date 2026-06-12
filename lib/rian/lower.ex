@@ -446,8 +446,31 @@ defmodule Rian.Lower do
         "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(ast, body)},"
       end)
 
-    "#{vis}fn #{func.name}(#{param_decls}) -> #{prim_rust(func.ret)} {\n" <>
+    "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} {\n" <>
       "    match #{scrut} {\n#{arms}\n    }\n}"
+  end
+
+  # `T | E` in return position is sugar for `Result(T, E)` (ADR-0040 §2) — the ok
+  # type then the (single, possibly-named) error set. It lowers to Rust
+  # `Result<T, E>`; on the BEAM the value shape `{:ok,_}`/`{:error,_}` carries it.
+  defp rust_ret(ret) do
+    case result_parts(ret) do
+      {:plain, t} -> prim_rust(t)
+      {:result, ok, err} -> "Result<#{prim_rust(ok)}, #{prim_rust(err)}>"
+    end
+  end
+
+  defp result_parts(ret) do
+    case ret |> String.split("|") |> Enum.map(&String.trim/1) do
+      [_single] ->
+        {:plain, ret}
+
+      [ok, err] ->
+        {:result, ok, err}
+
+      parts ->
+        raise "inline multi-tag error set must be named (ADR-0040): #{Enum.join(parts, " | ")}"
+    end
   end
 
   defp rust_struct(s) do
