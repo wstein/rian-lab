@@ -209,6 +209,21 @@ defmodule Rian.BeamTest do
       assert opt.fold({:add, {:sub, {:num, 10}, {:num, 10}}, {:var, "y"}}) == {:var, "y"}
     end
 
+    test "the whole calc compiler in ONE Rian module: source string -> value on bytecode" do
+      {:ok, calc} = Beam.load(File.read!("examples/rian/selfhost_calc.rian"), :rian_beam_calc)
+
+      # one module, one .beam: lex -> parse -> fold -> codegen -> VM
+      assert calc.run("2 + 3 * 4") == 14
+      assert calc.run("1 + 2 * (3 - 4)") == -1
+      assert calc.run("(2 + 3) * 4") == 20
+      assert calc.run("10 - 3 - 2") == 5
+      assert calc.run("8 / 4 / 2") == 1
+
+      # the optimizer is in the pipeline: a constant program folds to one Push
+      assert calc.emit("2 + 3 * 4") == [{:push, 14}]
+      assert calc.emit("(2 + 3) * 4") == [{:push, 20}]
+    end
+
     test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
       {:ok, mod} =
         Beam.load(

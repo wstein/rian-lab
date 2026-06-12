@@ -214,6 +214,25 @@ not just by field access. Remaining ergonomic gaps (positional struct
 construction, map update `%{m | k: v}`) are small, self-contained, and still
 unforced by the pipeline.
 
+## The whole compiler as one Rian artifact
+
+[`examples/rian/selfhost_calc.rian`](examples/rian/selfhost_calc.rian) unifies
+every layer — lexer, parser, optimizer, code generator, stack VM — into a
+**single self-contained Rian module** that compiles to **one real `.beam`** and
+turns source text straight into a value:
+
+```text
+run("1 + 2 * (3 - 4)")  =  -1        run("(2 + 3) * 4")  =  20
+String -> Vec(Token) -> Expr -> Expr(folded) -> Vec(Instr) -> Int64
+```
+
+This is the front-to-back pipeline as one artifact, written entirely in Rian and
+compiled by the abstract-forms backend — no `eval`, no per-stage test glue. The
+optimizer is in-line: a constant program folds to a single instruction
+(`emit("2 + 3 * 4") == [Push(14)]`). It is the strongest single piece of evidence
+that the toolchain compiles a real, multi-pass compiler written in its own
+language.
+
 ## Multi-target (ADR-0049 / ADR-0050)
 
 The BEAM path drove these spikes, but the typed core IR is shared, so a

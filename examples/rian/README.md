@@ -71,6 +71,11 @@ compile + run on real BEAM bytecode:
   Being variant-only, it is **tri-target**: it lowers to BEAM (runs), Rust (an
   idiomatic `enum` + `match`), and JavaScript (runs under node) — one IR, three
   back ends (ADR-0050).
+- [selfhost_calc.rian](selfhost_calc.rian) — **the whole calc compiler in one
+  Rian module.** It ties every layer above (lexer, parser, optimizer, code
+  generator, stack VM) into a single self-contained program compiled to one
+  `.beam`: `run("1 + 2 * (3 - 4)") → -1`. `String → Vec(Token) → Expr → Expr′ →
+  Vec(Instr) → Int64`, end to end — the front-to-back pipeline as one artifact.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
