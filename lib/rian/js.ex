@@ -11,7 +11,12 @@ defmodule Rian.JS do
   through to the next clause, ending in a `throw` (no clause matched).
 
   `Int64` lowers to **`BigInt`** (ADR-0049 §3): integer literals are `42n` and
-  integer arithmetic stays in BigInt.
+  integer arithmetic stays in BigInt. **`Int53`** — the ECMAScript-safe integer
+  (a native JS `number` is exact only to 2^53) — instead uses native numbers
+  (`42`, no suffix). The mode is **per-function**: a function whose signature is
+  typed `Int53` emits *all* its integer literals natively, so within one function
+  body BigInt and number never mix (an `Int53` function is uniformly native, an
+  `Int64` one uniformly BigInt).
 
   ## Scope (this increment)
 
@@ -68,14 +73,25 @@ defmodule Rian.JS do
   defp funcs_of(%{funcs: funcs}), do: funcs
 
   # ── function / clause dispatch ──────────────────────────────────────────
-  defp function_js(%{name: name, clauses: clauses, pub?: pub?}) do
+  defp function_js(%{name: name, clauses: clauses, pub?: pub?} = f) do
     arity = length(hd(clauses).pats)
     params = Enum.map_join(0..(arity - 1)//1, ", ", &"a#{&1}")
+    # `Int64` lowers to BigInt (64-bit safe); a function typed `Int53` instead
+    # uses native JS numbers (exact to 2^53). The mode is per-function, so a body
+    # is uniformly native or BigInt and the two never mix. Carried via the process
+    # dict (a single sequential emitter pass).
+    Process.put(:rian_js_int53, int53_fn?(f))
     body = Enum.map_join(clauses, "\n", &clause_js/1)
     export = if pub?, do: "export ", else: ""
 
     "#{export}function #{name}(#{params}) {\n#{body}\n  throw new Error(\"#{name}: no clause matched\");\n}"
   end
+
+  # a function is "Int53-mode" if its signature mentions `Int53` (param or return)
+  defp int53_fn?(%{params: params, ret: ret}),
+    do: ret == "Int53" or Enum.any?(params, &(&1.type == "Int53"))
+
+  defp int53_fn?(_), do: false
 
   # `{ if (<structural tests>) { <binds> <guarded return> } }` — the binds live
   # *inside* the structural test so a nested field access (`a0[1][1]`) only runs
@@ -287,9 +303,19 @@ defmodule Rian.JS do
   defp branch_js(expr), do: expr_js(expr)
 
   # ── helpers ─────────────────────────────────────────────────────────────
-  # Int64 -> BigInt literal (`42n`); a Float64 literal is a plain JS number
-  defp num_js(n), do: if(float?(n), do: n, else: "#{n}n")
-  defp lit_js(v) when is_integer(v), do: "#{v}n"
+  # Int64 -> BigInt literal (`42n`); a Float64 literal is a plain JS number; in an
+  # `Int53` function, an integer literal is a plain (native) JS number too
+  defp num_js(n) do
+    cond do
+      float?(n) -> n
+      Process.get(:rian_js_int53, false) -> n
+      true -> "#{n}n"
+    end
+  end
+
+  defp lit_js(v) when is_integer(v),
+    do: if(Process.get(:rian_js_int53, false), do: "#{v}", else: "#{v}n")
+
   defp lit_js(v) when is_binary(v), do: inspect(v)
 
   defp float?(n), do: String.contains?(n, ".") or String.match?(n, ~r/[eE]/)

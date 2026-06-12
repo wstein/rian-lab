@@ -31,6 +31,21 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "Int53 uses native JS numbers (not BigInt) — exact to 2^53 (ADR-0049)" do
+      js53 = JS.compile("def inc(n Int53) Int53 := n + 1")
+      # native number literal — no `n` suffix
+      assert js53 =~ "(n + 1)"
+      refute js53 =~ "1n"
+
+      # Int64 is unchanged (BigInt)
+      assert JS.compile("def inc(n Int64) Int64 := n + 1") =~ "(n + 1n)"
+
+      case node_eval(js53, "[inc(41), typeof inc(41)].join(',')") do
+        :no_node -> :ok
+        out -> assert out == "42,number"
+      end
+    end
+
     test "multi-clause with a guard lowers to a dispatcher (binds precede the guard)" do
       js =
         JS.compile("""

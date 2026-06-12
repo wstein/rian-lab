@@ -19,7 +19,7 @@ defmodule Rian.Capability do
   # are not Copy. Source names map to each target — `Int64` is Rian's name, not
   # Rust's `i64`.
   @copy for(p <- ~w(Int UInt), w <- ~w(8 16 32 64 128), do: p <> w) ++
-          ~w(Float32 Float64 Bool Char)
+          ~w(Int53 Float32 Float64 Bool Char)
 
   # ── Rust parameter-type lowering ───────────────────────────────────────
   def rust_param(:iso, t), do: owned(t)
@@ -34,6 +34,9 @@ defmodule Rian.Capability do
   # so a nominal type that happens to start with `Int` is untouched.
   def rust_name(t), do: if(t in @copy, do: rust_scalar(t), else: t)
 
+  # `Int53` is the ECMAScript-safe integer (a native JS `number` is exact only to
+  # 2^53); on the BEAM/Rust it is a 64-bit integer (`i64`).
+  defp rust_scalar("Int53"), do: "i64"
   defp rust_scalar("Int" <> w), do: "i" <> w
   defp rust_scalar("UInt" <> w), do: "u" <> w
   defp rust_scalar("Float" <> w), do: "f" <> w
