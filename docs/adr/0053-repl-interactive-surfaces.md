@@ -37,7 +37,9 @@ node, so it ships *after* both: (a) an authentication story (who is allowed to a
 connection is authorized, how the audit trail is captured); and (b) a sandbox/fuel story (what
 the connected session is and is not allowed to call, with caps on time/memory/effect scope).
 These share the comptime/LSP sandbox concerns (ADR-0030/0038) and lean on effect visibility
-(ADR-0048) for review — neither is started here; both are required before `--remote` lands.
+(ADR-0048) for review — neither is started here; both are specified in [ADR-0054 — Connected
+REPL Prerequisites](0054-connected-repl-prerequisites.md), which is required before `--remote`
+lands.
 
 ### 3. Single-assignment at the prompt = redefinition, not mutation
 
@@ -146,10 +148,10 @@ not to function bodies (functions stay closed) — a deliberate, documented boun
 
 ## Open items
 
-- **Connected-to-prod security** — *gating* prerequisites for `--remote` (see §2): auth (attach
-  authorization + audit trail) and a sandbox/fuel story (call/effect scope, time/memory caps).
-  Shares the comptime/LSP sandbox concerns (ADR-0030/0038); effect visibility (ADR-0048) aids
-  review. The connected REPL does not ship until both are in place.
+- **Connected-to-prod security** — *gating* prerequisites for `--remote`, specified in their own
+  ADR: [ADR-0054 — Connected REPL Prerequisites](0054-connected-repl-prerequisites.md). Both
+  attach authentication and an evaluation sandbox/fuel envelope ship before `--remote` does;
+  they reuse the comptime sandbox (ADR-0030) and effect visibility (ADR-0048).
 - **Session env model** — resolved in v1: prior `:=`/`def` units stay in scope across entries by
   re-emitting the accumulated session program into the session's single `rian_repl_<base>` module,
   purged and reloaded per entry; redefinition replaces the unit sharing a name (Clojure's `def`

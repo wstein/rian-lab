@@ -1,0 +1,73 @@
+# ADR-0054 — Connected REPL Prerequisites: attach authentication and an evaluation sandbox/fuel envelope
+
+**Status:** Accepted (direction) · gates [ADR-0053 §2](0053-repl-interactive-surfaces.md) before `--remote` ships
+**Refs:** ADR-0030 (comptime sandbox), ADR-0038 (LSP / editor-eval), ADR-0048 (effect visibility), ADR-0053 (REPL & interactive surfaces)
+**Owners:** Marcus Chen (security) · Kira Neri (remote/ops) · Maya Lin (architecture) · Arthur Pendelton (compiling REPL) · Rachel Okafor (PM)
+
+## Context
+
+[ADR-0053 §2](0053-repl-interactive-surfaces.md#2-a-connected-repl--the-differentiator) commits Rian to a *connected* REPL — `mix rian.repl --remote node@host` attaches to a running Rian/BEAM application and evaluates forms in its live context. That capability is the Clojure/IEx differentiator that ADR-0053 builds toward. It is also, by construction, **arbitrary code execution against a live node**: every form that lands at the prompt is parsed, type-checked, lowered, and applied inside the target VM's process tree.
+
+ADR-0053 already lists the security concerns in its "Open items," but framing them alongside the feature work invites the false reading that the two tracks can ship in parallel — a `--remote` v1 today, hardening later. That sequencing is not defensible. A connected REPL without an answer to "who is allowed to attach and what are they allowed to run" is a remote shell with no audit trail and no fuel limit. Splitting the prerequisites into their own ADR makes the dependency explicit: ADR-0054 lands before `--remote` does, not alongside it.
+
+This ADR does not specify the implementations — those are separate engineering projects that share concerns with the comptime sandbox (ADR-0030) and the LSP eval surface (ADR-0038). It specifies *what* must be true before `--remote` can ship and *which* questions each prerequisite has to answer.
+
+## Decision
+
+### 1. Attach authentication is a gating prerequisite
+
+Before `mix rian.repl --remote node@host` is shipped, the connection path must answer all four:
+
+* **Identity** — how is the connecting principal identified? At minimum: a credential the operator can revoke without restarting the node. SSH-key parity (the operator already trusts the OS user) is the floor; a Rian-issued attach token tied to the deploy identity is the direction.
+* **Authorization** — which principals may attach to which node? Authorization is per-node and per-environment, not per-host: a dev node and a prod node never share an attach policy, and the policy is configuration that travels with the deploy, not local-machine state.
+* **Audit trail** — every attach is logged with `{principal, node, started_at, ended_at}`. Every evaluated form is recorded with its source and the inferred effect set (ADR-0048). The log is structured (machine-queryable) and lives somewhere the operator can read it without the node's cooperation — a `--remote` session that can disable its own logging is not a `--remote` session that can ship.
+* **Disconnect** — the operator can force-disconnect an attached session and revoke its credential without restarting the host node. A long-running form does not survive credential revocation.
+
+### 2. Evaluation sandbox/fuel is a gating prerequisite
+
+A `--remote` session must run within an envelope the host node enforces. Before `--remote` ships, the envelope must answer all four:
+
+* **Effect scope** — which effects (ADR-0048) may the session perform? The default is the deploy's *least-privilege* effect set; widening is an explicit grant tied to the attach authorization. A session that lacks `:fs:write` cannot acquire it mid-evaluation by calling a host function that has it; effect checking happens at the evaluated form's boundary, not transitively swallowed by the callee.
+* **Call scope** — which functions may the session call? Two cuts: (a) a *deny list* for known-dangerous primitives (`:os.cmd`, `:erlang.halt`, raw `:gen_tcp`); (b) a *project capability* — only modules the deploy itself exposed via its capability manifest are callable. The deny list is the safety net; the manifest is the model.
+* **Fuel** — every evaluated form has a wall-clock cap, a reduction cap, and a memory-growth cap. A form that exceeds any cap is killed and reported back to the attached session; the host node is unaffected. Caps are per-form, not per-session, so a single runaway form doesn't take down the attach.
+* **Determinism of failure** — a sandbox violation (effect, call, or fuel) is a *typed error result* at the prompt — `error: sandbox denied :fs:write at line 3` — never a silent no-op and never a crash that propagates beyond the attached form. The session continues unless the operator chooses otherwise.
+
+### 3. The prerequisites compose with the rest of the platform
+
+Both items above share design surface with existing ADRs and should be implemented as extensions of those, not as bespoke REPL infrastructure:
+
+* The **comptime sandbox (ADR-0030)** already establishes the effect/call/fuel envelope for type-level execution. The connected REPL's envelope is the *same* envelope with a different policy default (least-privilege for prod attach; comptime trusts its compile-time host more). One sandbox implementation, two policies.
+* The **LSP eval protocol (ADR-0038)** ships a form to a connected REPL — the editor-attach path is `--remote`'s richer sibling. Authentication and sandbox apply identically; the LSP message just substitutes for the terminal as the form's source.
+* **Effect visibility (ADR-0048)** is the audit trail's vocabulary. Each logged form's effect set is what a reviewer reads to decide whether a session did what it said it would do. The connected REPL is one of the consumers that makes ADR-0048's existence load-bearing rather than aspirational.
+
+### 4. Shipping order
+
+1. Comptime sandbox (ADR-0030) lands. The connected REPL's call/fuel/effect-scope enforcement reuses it.
+2. Effect checker (ADR-0048) lands. The audit trail can record meaningful effect sets per form.
+3. Attach authentication lands as a stand-alone piece — usable on a fresh node for operator parity with `iex --remsh`, before any sandbox policy is applied.
+4. Connected REPL `--remote` ships. Its default policy is least-privilege; widening requires explicit grants.
+
+Steps 1 and 2 are themselves ordered with respect to the broader compiler roadmap; this ADR does not move their dates, only commits the connected REPL to following them.
+
+## Status of options
+
+| Option | Score (Marcus / Kira / Maya) |
+|---|---|
+| Ship `--remote` v1 with operator-level SSH-only auth, harden later | **rejected** (0/5 across the board — operator-level auth was never the gap; the gap is policy-aware authorization, audit, and an enforced eval envelope) |
+| Build a bespoke REPL-only sandbox separate from ADR-0030 | 1/5 (parallel paths duplicate effect/call enforcement and will drift) |
+| Make ADR-0030 and ADR-0048 hard prerequisites; ship `--remote` after both | **4/5** — accepted |
+| Make ADR-0038 (LSP) a hard prerequisite too | 3/5 (LSP is a *consumer* of the same envelope, not a gating dependency for the terminal `--remote` flow) |
+
+## Consequences
+
+* **No `--remote` v1 before this ADR is satisfied.** Direction-only language in ADR-0053 §2 stays direction-only until both gating items above hold.
+* **The comptime sandbox (ADR-0030) becomes load-bearing for more than comptime.** Its API surface should be designed with the connected REPL as a second consumer from day one, not retrofit later. (Practical impact: the sandbox configuration must be value-passable, not embedded in compile-time constants.)
+* **The effect checker (ADR-0048) becomes the audit-trail vocabulary.** Its surface needs to be queryable from the host node at runtime (not only at compile), which slightly raises the API target above the original "compile-time only" framing.
+* **Local `mix rian.repl` and `mix rian.repl --eval "EXPR"` are unaffected.** They run in a fresh node the developer started — there is no live application to sandbox against. The `--eval` trusted-input note in [`Mix.Tasks.Rian.Repl`](../../lib/mix/tasks/rian.repl.ex) covers that surface's threat model.
+
+## Open items
+
+* **Per-node policy schema.** Where does the deploy declare which principals can attach with which effect-set/manifest grants? Candidates: a sibling of the project's deploy descriptor; a capability-manifest extension; a separate `rian_attach.toml`. Decide when ADR-0030 lands and the comptime sandbox configuration shape stabilizes.
+* **Multi-attach semantics.** Can two principals attach to the same node concurrently? If yes, are their effect-scope grants additive or independent? Default: independent (each session is sandboxed against the policy that granted its attach).
+* **Backpressure on the audit log.** A high-frequency attached session can produce a lot of structured events. Drop-on-overflow vs block-the-eval is a policy decision; default to *block*, on the principle that "no audit, no eval" is the right side of the trade.
+* **Attach-token rotation.** Mechanism and default rotation interval — likely the same answer as the deploy's secrets-rotation story; should not be solved twice.
