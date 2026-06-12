@@ -19,13 +19,16 @@ the normative behaviour the implementation must match).
 | Capability → Rust sig + BEAM linearity | Implemented (partial) | [capability.ex](../lib/rian/capability.ex) |
 | End-to-end lowering (Elixir + Rust) | Implemented | [lower.ex](../lib/rian/lower.ex) |
 | Hygienic macros + pure comptime | Implemented | [macro.ex](../lib/rian/macro.ex), [comptime.ex](../lib/rian/comptime.ex) |
-| Lexer + declaration parser | **Stage 0.1 (in progress)** | [decl.ex](../lib/rian/decl.ex) — token-driven; `type`/`struct`/`alias` + single/multi-param `def`, `:=`/block/`case` bodies, `when` guards, end-to-end ([decl_run.exs](../examples/decl_run.exs)); `mod` parsing underway, `macro` files not yet |
-| Real type checker | **Started (conservative)** | [check.ex](../lib/rian/check.ex) — first ADR-0034 increment: unification-based inference that rejects only provable return-type mismatches; FFI still `dynamic` |
+| Lexer + declaration parser | **Stage 0.1 (broad)** | [decl.ex](../lib/rian/decl.ex) — token-driven; `type`/`struct`/`alias`/`const`/`use`/`mod` + single/multi-param `def`, `:=`/block/`case` bodies, `when` guards, `pub` visibility. Struct & sum-variant construction (positional + named) and constant references lower per target. The modules tour ([05_modules.rian](../examples/rian/05_modules.rian)) parses and lowers end-to-end. Not yet: `macro` files |
+| Real type checker | **Compile gate + flow narrowing** | [check.ex](../lib/rian/check.ex) — ADR-0034 §1/§4: unification-based inference gates `compile`, rejecting only *provable* return-type mismatches; `case` arms and pattern clauses narrow bound variables to the matched variant's field types. Error sets (§2) and protocol bounds (§3) await their surface |
 | Erlang abstract-forms backend | Not started | interim backend emits Elixir/text source |
 
-All passes today are driven by **hand-built IR**, not by parsing `.rian` source.
-The component test suites pass; cross-pass integration is thin. Treat the
-"verified" banners inside individual specs as *component-level*, not end-to-end.
+A growing slice now flows **from `.rian` source** through the parser → typed core
+IR → dual-target lowering (the modules tour compiles end-to-end); the remaining
+passes still run on hand-built IR. The component suites pass and this front-end
+path is integration-tested ([decl_run.exs](../examples/decl_run.exs),
+[decl_test.exs](../test/rian/decl_test.exs)). Treat the "verified" banners inside
+individual specs as *component-level* unless the tour exercises them end-to-end.
 
 ## Architecture Decision Records
 

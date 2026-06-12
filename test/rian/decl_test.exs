@@ -214,6 +214,55 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "sum-variant construction in bodies" do
+    test "positional and nullary variant construction lower and run" do
+      results =
+        Decl.compile("""
+        type Shape := Circle(radius Float64) | Square(side Float64)
+        type Color := Red | Green | Blue
+
+        def circ(r Float64) Shape := Circle(r)
+        def pick(b Bool) Color := Red
+        """)
+
+      {"circ", c} = List.keyfind(results, "circ", 0)
+      {"pick", p} = List.keyfind(results, "pick", 0)
+
+      assert c.elixir =~ "def circ(r) do {:circle, r} end"
+      assert c.rust =~ "Shape::Circle { radius: r }"
+      assert p.elixir =~ "def pick(b) do :red end"
+      assert p.rust =~ "Color::Red"
+
+      Code.eval_string("defmodule Ctor1 do\n#{c.elixir}\nend")
+      assert Ctor1.circ(2.0) == {:circle, 2.0}
+    end
+
+    test "named variant construction places fields by label" do
+      [{"circ", c}] =
+        Decl.compile("""
+        type Shape := Circle(radius Float64) | Square(side Float64)
+        def circ(r Float64) Shape := Circle(radius: r)
+        """)
+
+      assert c.elixir =~ "def circ(r) do {:circle, r} end"
+      assert c.rust =~ "Shape::Circle { radius: r }"
+    end
+
+    test "an unlabeled-field variant constructs as a positional tuple / tuple variant" do
+      [{"wrap", c}] =
+        Decl.compile("""
+        type Value := Num(Int64) | Zero
+        def wrap(n Int64) Value := Num(n)
+        """)
+
+      assert c.elixir =~ "def wrap(n) do {:num, n} end"
+      assert c.rust =~ "Value::Num(n)"
+
+      Code.eval_string("defmodule Ctor2 do\n#{c.elixir}\nend")
+      assert Ctor2.wrap(7) == {:num, 7}
+    end
+  end
+
   describe "the exhaustiveness gate fires on parsed source" do
     test "a missing variant clause is refused at lowering" do
       src = """

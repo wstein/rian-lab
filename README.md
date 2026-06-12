@@ -13,12 +13,17 @@ the *same source* to two targets:
 > component level. A **Stage 0.1 declaration parser** ([`Rian.Decl`](lib/rian/decl.ex),
 > [ADR-0031](docs/adr/0031-bootstrap-strategy.md)) — token-driven recursive
 > descent over a real lexer ([`Rian.Lexer`](lib/rian/lexer.ex)) — now compiles
-> real `.rian` files end-to-end: `type` declarations and single- or
-> multi-parameter `def` functions, with `:=` one-liner **and** multiline `… end`
-> block bodies (string literals + `when` guards), parse to the pipeline IR, lower
-> to Elixir + Rust, and run (try `mix run examples/decl_run.exs`). Not yet
-> parsed: `mod`/`struct`/`alias`. See
-> [docs/README.md](docs/README.md) for an honest status map.
+> real `.rian` files end-to-end: `type`/`struct`/`alias`/`const`/`use`/`mod`
+> declarations and single- or multi-parameter `def` functions (with `pub`
+> visibility), `:=` one-liner **and** multiline `… end` block bodies (`case`,
+> string literals, `when` guards), and struct/sum-variant construction — all
+> parse to the pipeline IR, lower to Elixir + Rust, and run. The whole modules
+> tour ([examples/rian/05_modules.rian](examples/rian/05_modules.rian)) compiles
+> end-to-end. A conservative, unification-based **type checker**
+> ([`Rian.Check`](lib/rian/check.ex), [ADR-0034](docs/adr/0034-type-system-foundations.md))
+> gates compilation and narrows types through `case`/clauses. Try
+> `mix run examples/decl_run.exs`. See [docs/README.md](docs/README.md) for an
+> honest status map.
 
 ## Pipeline
 

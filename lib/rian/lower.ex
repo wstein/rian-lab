@@ -56,21 +56,16 @@ defmodule Rian.Lower do
   defp module_elixir(%{name: name, types: types, structs: structs, funcs: funcs} = m) do
     env = build_env(types, structs)
     Enum.each(funcs, &(:ok = check!(&1, env)))
-    smeta = build_struct_meta(structs)
     consts = Map.get(m, :consts, [])
-    cset = const_set(consts)
+    ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts))
 
     body =
       [
         Enum.map_join(Map.get(m, :uses, []), "\n", &ex_use/1),
         Enum.map_join(structs, "\n", &ex_struct/1),
         Enum.map_join(types, "\n", &ex_typespec/1),
-        Enum.map_join(consts, "\n", &ex_const(&1, smeta, cset)),
-        Enum.map_join(
-          funcs,
-          "\n",
-          &elixir_clauses(&1, smeta, cset, if(&1.pub?, do: "def", else: "defp"))
-        )
+        Enum.map_join(consts, "\n", &ex_const(&1, ctx)),
+        Enum.map_join(funcs, "\n", &elixir_clauses(&1, ctx, if(&1.pub?, do: "def", else: "defp")))
       ]
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n")
@@ -81,22 +76,16 @@ defmodule Rian.Lower do
   defp module_rust(%{name: name, types: types, structs: structs, funcs: funcs} = m) do
     env = build_env(types, structs)
     Enum.each(funcs, &(:ok = check!(&1, env)))
-    meta = build_meta(types)
-    smeta = build_struct_meta(structs)
     consts = Map.get(m, :consts, [])
-    cset = const_set(consts)
+    ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts))
 
     body =
       [
         Enum.map_join(Map.get(m, :uses, []), "\n", &rust_use/1),
         Enum.map_join(structs, "\n\n", &rust_struct/1),
         Enum.map_join(types, "\n\n", &rust_enum/1),
-        Enum.map_join(consts, "\n", &rust_const(&1, meta, smeta, cset)),
-        Enum.map_join(
-          funcs,
-          "\n\n",
-          &rust_fn(&1, meta, smeta, cset, if(&1.pub?, do: "pub ", else: ""))
-        )
+        Enum.map_join(consts, "\n", &rust_const(&1, ctx)),
+        Enum.map_join(funcs, "\n\n", &rust_fn(&1, ctx, if(&1.pub?, do: "pub ", else: "")))
       ]
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n\n")
@@ -118,16 +107,16 @@ defmodule Rian.Lower do
   end
 
   # `const NAME Type := value` -> a 0-arity accessor on the BEAM (`def`/`defp`).
-  defp ex_const(c, smeta, cset) do
+  defp ex_const(c, ctx) do
     def_kw = if c.pub?, do: "def", else: "defp"
-    val = c.value |> body_ast(smeta, cset) |> emit(:elixir) |> elem(0)
+    val = c.value |> body_ast(ctx) |> emit(:elixir) |> elem(0)
     "#{def_kw} #{PL.to_snake(c.name)}() do #{val} end"
   end
 
   # `const NAME Type := value` -> a Rust `const` (`pub const` when exported).
-  defp rust_const(c, meta, smeta, cset) do
+  defp rust_const(c, ctx) do
     vis = if c.pub?, do: "pub ", else: ""
-    val = c.value |> body_ast(smeta, cset) |> resolve_rust_pats(meta) |> emit(:rust) |> elem(0)
+    val = c.value |> body_ast(ctx) |> resolve_rust_pats(ctx.meta) |> emit(:rust) |> elem(0)
     "#{vis}const #{c.name}: #{prim_rust(c.type)} = #{val};"
   end
 
@@ -187,29 +176,39 @@ defmodule Rian.Lower do
   def to_elixir(func, types, structs \\ [], smeta \\ %{}) do
     typespecs = Enum.map_join(types, "\n", &ex_typespec/1)
     struct_defs = Enum.map_join(structs, "\n", &ex_struct/1)
+    ctx = ctx(build_meta(types), smeta, MapSet.new())
 
-    [struct_defs, typespecs, elixir_clauses(func, smeta, MapSet.new(), "def")]
+    [struct_defs, typespecs, elixir_clauses(func, ctx, "def")]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
   end
 
+  # The resolution context threaded into every body: `meta` (sum-variant table),
+  # `smeta` (struct table), `cset` (in-scope constant names).
+  defp ctx(meta, smeta, cset), do: %{meta: meta, smeta: smeta, cset: cset}
+
   # The `def`/`defp` clauses of one function (no type/struct preamble). `def_kw`
   # selects the visibility keyword (top-level is always `def`; inside a `mod` a
-  # private function is `defp`). `cset` is the set of in-scope constant names.
-  defp elixir_clauses(func, smeta, cset, def_kw) do
+  # private function is `defp`).
+  defp elixir_clauses(func, ctx, def_kw) do
     Enum.each(func.params, &Rian.Capability.beam_legal!(&1.cap))
 
     Enum.map_join(func.clauses, "\n", fn c ->
       head = "#{def_kw} #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
-      body = c.body |> body_ast(smeta, cset) |> emit(:elixir) |> elem(0)
+      body = c.body |> body_ast(ctx) |> emit(:elixir) |> elem(0)
       "#{head}#{guard_str(c, :elixir)} do #{body} end"
     end)
   end
 
-  # Parse a body source and run the target-neutral resolution passes (struct
-  # construction + constant references) the emitter relies on.
-  defp body_ast(src, smeta, cset),
-    do: src |> Pratt.parse_body() |> resolve_structs(smeta) |> resolve_consts(cset)
+  # Parse a body source and run the target-neutral resolution passes the emitter
+  # relies on: struct construction, sum-variant construction, constant references.
+  defp body_ast(src, ctx) do
+    src
+    |> Pratt.parse_body()
+    |> resolve_structs(ctx.smeta)
+    |> resolve_variants(ctx.meta)
+    |> resolve_consts(ctx.cset)
+  end
 
   # `struct Point(x Float64, y Float64)` -> a nested module carrying `defstruct`,
   # so `%Point{…}` construction and `p.x` access resolve on the BEAM.
@@ -232,6 +231,49 @@ defmodule Rian.Lower do
   end
 
   defp resolve_structs(node, smeta), do: Rian.Macro.map_node(node, &resolve_structs(&1, smeta))
+
+  # Rewrite a sum-variant constructor — a call `Ctor(args)` or a bare nullary
+  # `Ctor` — into a `{:variant_lit, …}` node carrying the enum/labels/named info
+  # from `meta`, so the emitter spells it per target (a tagged tuple/atom on the
+  # BEAM, an `Enum::Variant {…}` on Rust) without ambient context.
+  defp resolve_variants({:call, {:id, name}, args}, meta) do
+    case variant_info(meta, name) do
+      nil -> {:call, {:id, name}, Enum.map(args, &resolve_variants(&1, meta))}
+      info -> variant_lit(info, variant_pairs(info, args, meta))
+    end
+  end
+
+  defp resolve_variants({:id, name} = node, meta) do
+    case variant_info(meta, name) do
+      %{labels: []} = info -> variant_lit(info, [])
+      _ -> node
+    end
+  end
+
+  defp resolve_variants(node, meta), do: Rian.Macro.map_node(node, &resolve_variants(&1, meta))
+
+  defp variant_info(meta, name) when is_binary(name) do
+    if pascal?(name), do: Map.get(meta, PL.to_snake(name)), else: nil
+  end
+
+  defp variant_lit(info, pairs),
+    do: {:variant_lit, info.enum, info.ctor, info.named, pairs}
+
+  # `{label_or_nil, value}` pairs in declared field order — positional args zip
+  # onto the labels; all-named args (`radius: …`) are placed by name.
+  defp variant_pairs(info, args, meta) do
+    cond do
+      args != [] and Enum.all?(args, &match?({:label, _, _}, &1)) ->
+        given = Map.new(args, fn {:label, l, e} -> {l, resolve_variants(e, meta)} end)
+        Enum.map(info.labels, fn l -> {l, Map.fetch!(given, l)} end)
+
+      Enum.any?(args, &match?({:label, _, _}, &1)) ->
+        raise("variant #{info.ctor}: mix of positional and named fields")
+
+      true ->
+        Enum.zip(info.labels, Enum.map(args, &resolve_variants(&1, meta)))
+    end
+  end
 
   # Rewrite a reference to an in-scope constant (`{:id, NAME}`) into a
   # `{:const_ref, NAME}` node, so the emitter spells it per target (a BEAM
@@ -357,14 +399,13 @@ defmodule Rian.Lower do
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
     struct_defs = Enum.map_join(structs, "\n\n", &rust_struct/1)
 
-    [struct_defs, enums, rust_fn(func, meta, smeta, MapSet.new(), "")]
+    [struct_defs, enums, rust_fn(func, ctx(meta, smeta, MapSet.new()), "")]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
 
-  # One Rust `fn` (no type/struct preamble). `vis` is `""` or `"pub "`; `cset` is
-  # the set of in-scope constant names.
-  defp rust_fn(func, meta, smeta, cset, vis) do
+  # One Rust `fn` (no type/struct preamble). `vis` is `""` or `"pub "`.
+  defp rust_fn(func, ctx, vis) do
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
         "#{p.name}: #{Rian.Capability.rust_param(p.cap, p.type)}"
@@ -376,11 +417,11 @@ defmodule Rian.Lower do
 
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
-        pat = tuple_or_one(c.pats, &pat_rs(&1, meta))
-        # Resolve struct construction, constant references, and `case` constructor
+        pat = tuple_or_one(c.pats, &pat_rs(&1, ctx.meta))
+        # Resolve construction (struct + variant), constant references, and `case`
         # patterns into the body IR here, where the meta is available — so the
         # recursive emitter needs no ambient context (the IR carries it).
-        ast = c.body |> body_ast(smeta, cset) |> resolve_rust_pats(meta)
+        ast = c.body |> body_ast(ctx) |> resolve_rust_pats(ctx.meta)
         body = emit(ast, :rust) |> elem(0)
         "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(ast, body)},"
       end)
@@ -575,6 +616,27 @@ defmodule Rian.Lower do
   # constant reference — a 0-arity accessor call on the BEAM, the `const` name on Rust
   defp emit({:const_ref, name}, :elixir), do: {"#{PL.to_snake(name)}()", 12}
   defp emit({:const_ref, name}, :rust), do: {name, 12}
+
+  # sum-variant construction — a snake atom / tagged tuple on the BEAM (labels
+  # erased), an `Enum::Variant` path on Rust (named `{…}` or positional `(…)`).
+  defp emit({:variant_lit, _enum, ctor, _named, []}, :elixir),
+    do: {":" <> Atom.to_string(PL.to_snake(ctor)), 12}
+
+  defp emit({:variant_lit, _enum, ctor, _named, pairs}, :elixir) do
+    vals = Enum.map_join(pairs, ", ", fn {_l, v} -> p(v, 0, :elixir) end)
+    {"{:#{PL.to_snake(ctor)}, #{vals}}", 12}
+  end
+
+  defp emit({:variant_lit, enum, ctor, _named, []}, :rust), do: {"#{enum}::#{ctor}", 12}
+
+  defp emit({:variant_lit, enum, ctor, true, pairs}, :rust) do
+    fields = Enum.map_join(pairs, ", ", fn {l, v} -> "#{l}: #{p(v, 0, :rust)}" end)
+    {"#{enum}::#{ctor} { #{fields} }", 12}
+  end
+
+  defp emit({:variant_lit, enum, ctor, false, pairs}, :rust) do
+    {"#{enum}::#{ctor}(#{Enum.map_join(pairs, ", ", fn {_l, v} -> p(v, 0, :rust) end)})", 12}
+  end
 
   # struct literal — `%Name{x: …}` on the BEAM, `Name { x: … }` on Rust
   defp emit({:struct_lit, name, pairs}, :elixir),
