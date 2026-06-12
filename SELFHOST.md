@@ -214,6 +214,29 @@ not just by field access. Remaining ergonomic gaps (positional struct
 construction, map update `%{m | k: v}`) are small, self-contained, and still
 unforced by the pipeline.
 
+## Fixpoint harness — demo → regression test
+
+A spike that *runs* proves capability; it does not prove *correctness against the
+reference*. `Rian.Fixpoint` closes that gap: it compiles a Rian-written lexer to
+real `.beam` and **diffs its token stream against `Rian.Lexer`** (the Elixir
+tokenizer the rest of the toolchain trusts) over a corpus. Drift in *either*
+lexer now fails the diff, so the self-hosting lexer is a checked equivalence, not
+a one-off demonstration.
+
+A Rian lexer emits its own `Token` sum (lowered to `{:t_num, n}` / `:t_plus` /
+…), so the harness takes a `project` function mapping each Rian token onto the
+reference shape; over the shared input domain the projected streams must be
+identical. Today that domain is the toy lexer's arithmetic (`digits`, `+ - * /
+( )`, spaces), where `selfhost_lexer.rian` and `Rian.Lexer.expr_tokens/1` agree
+token-for-token across the corpus (`test/rian/fixpoint_test.exs`), and a
+deliberately wrong projection is *caught* — the diff has teeth, it is not
+vacuously green.
+
+This is the verification step the **real-lexer port** (the next self-hosting
+move) plugs into: as the Rian lexer grows toward the full Rian token vocabulary,
+widen the corpus and projection and the harness keeps proving agreement — turning
+each ported slice into a regression test rather than a fresh demo.
+
 ## The whole compiler as one Rian artifact
 
 [`examples/rian/selfhost_calc.rian`](examples/rian/selfhost_calc.rian) unifies
