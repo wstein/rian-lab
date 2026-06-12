@@ -128,6 +128,20 @@ defmodule Rian.BeamTest do
       # left-associativity of same-precedence operators
       assert parser.parse(lexer.tokenize("10 - 3 - 2")) ==
                {:sub, {:sub, {:num, 10}, {:num, 3}}, {:num, 2}}
+
+      # the parser is TOTAL: malformed/empty input yields `EErr`, not a crash —
+      # so every clause is exhaustive (and the parser clears the dual-target gate)
+      assert parser.parse([]) == :e_err
+      assert parser.parse(lexer.tokenize(")")) == :e_err
+    end
+
+    test "the total parser clears the exhaustiveness gate and lowers to both targets" do
+      # (was rejected by `Lower.check!` as partial before `EErr` made it total)
+      out = Rian.Decl.compile(File.read!("examples/rian/selfhost_parser.rian"))
+      rust = Enum.map_join(out, "\n", fn {_, %{rust: r}} -> r end)
+      assert rust =~ "enum Expr"
+      # the parse-error fallback is present in the emitted Rust
+      assert rust =~ "Expr::EErr"
     end
 
     test "the self-hosting evaluator folds the Expr sum with a map symbol table" do

@@ -353,9 +353,22 @@ the `length` composite) lowers fully. The lexer is also **callable cross-module*
 on Rust now: a type named in a `pub` function's signature is emitted `pub` (a
 `pub enum` / `pub struct`, fields public too), so `pub fn tokenize(…) ->
 Vec<Token>` no longer exposes a private `Token` — external code can name
-`selfhost_lexer::Token` and call `tokenize`. The one Rust item still open is the
-partial **parser**: it needs total clauses (Rust enforces exhaustiveness; the
-gate is the same one Rian enforces — by design, not an emitter bug).
+`selfhost_lexer::Token` and call `tokenize`.
+
+**The parser is now total**, so it clears the exhaustiveness gate too: an
+unexpected/leftover token yields an `EErr` node rather than a missing clause, and
+the parser lowers to both targets (`parse([]) = EErr` on the BEAM; the emitted
+Rust carries `Expr::EErr`). That was the gate the user flagged — Rust requires
+exhaustive `match`es, the same totality Rian enforces, so the fix was total
+clauses, by design.
+
+Lowering the parser surfaced the **next** Rust item (a separate, real codegen
+feature, not exhaustiveness): a **recursive ADT** — `type Expr := Add(Expr, Expr)`
+→ `enum Expr { Add(Expr, Expr) }` — has infinite size in Rust and must be
+`Box`-indirected (`Add(Box<Expr>, Box<Expr>)`, `Box::new(...)` at construction,
+deref at use). This affects every tree-shaped ADT (parser/optimizer/evaluator/
+checker), which run fine on BEAM/JS (boxing is implicit there) but need the Box
+pass to `rustc`-compile. It is the consolidated next Rust increment.
 
 **Rust gets cons.** A Rian `Vec(T)` param lowers to a `&[T]` slice, so cons
 patterns become **Rust slice patterns** — `[h | t]` → `[h, t @ ..]` — matched

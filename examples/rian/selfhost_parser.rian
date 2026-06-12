@@ -18,12 +18,16 @@ mod SelfhostParser do
   # The token stream this parser consumes (same shape the lexer emits).
   type Token := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
 
-  # The parser's own typed output — a sealed expression tree (ADR-0034).
+  # The parser's own typed output — a sealed expression tree (ADR-0034). `EErr`
+  # makes the parser **total**: an unexpected/leftover token yields `EErr` rather
+  # than a missing clause, so every `def` is exhaustive (and lowers to Rust,
+  # whose `match` must be total — there is no partial path).
   type Expr := Num(Int64)
              | Add(Expr, Expr)
              | Sub(Expr, Expr)
              | Mul(Expr, Expr)
              | Div(Expr, Expr)
+             | EErr
 
   # One parse step yields the node built so far and the unconsumed tokens. A
   # single-constructor sum is the pair `(Expr, Vec(Token))` without tuple types.
@@ -79,12 +83,15 @@ mod SelfhostParser do
   end
   def parse_term_tail(left, ts) := P(left, ts)
 
-  # factor := TNum | '(' expr ')'  — a literal, or a parenthesized subexpression.
+  # factor := TNum | '(' expr ')'  — a literal, or a parenthesized subexpression;
+  # any other (or missing) token is a parse error (`EErr`), keeping it total.
   def parse_factor(ts Vec(Token)) Parse
   def parse_factor([TNum(n) | rest]) := P(Num(n), rest)
   def parse_factor([TLParen | rest])
     case parse_expr(rest) do
       P(e, [TRParen | rest2]) -> P(e, rest2)
+      P(_, other) -> P(EErr, other)
     end
   end
+  def parse_factor(ts) := P(EErr, ts)
 end
