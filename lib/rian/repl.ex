@@ -11,6 +11,12 @@ defmodule Rian.Repl do
   and every future surface (Livebook, the web playground) reuse this engine, so
   none can drift from the real compiler.
 
+  Surfaces also share three pure, no-IO introspection helpers: `info/1` (the
+  names a session knows), `type_of/2` (a form's type without evaluating it), and
+  `complete/2` (Rian-aware tab-completion over keywords, meta-commands, and
+  session names). The interactive loop wires `complete/2` into the terminal's
+  line editor as its `expand_fun`.
+
   ## Session model (ADR-0053 §3)
 
   A session accumulates two things:
@@ -143,6 +149,82 @@ defmodule Rian.Repl do
     ic = session_ic(s)
     safe_infer_input(input, bind_env(s.binds, ic), ic)
   end
+
+  # The language's fixed completion vocabulary: keywords (mirrors `Rian.Lexer`),
+  # word-operators, and the surface meta-commands.
+  @keywords ~w(if do else end def type case when struct alias mod pub const macro use with)
+  @word_ops ~w(and or not in rem div)
+  @meta_commands ~w(\\help \\env \\type \\reset)
+
+  @doc """
+  The fixed completion vocabulary — keywords, word-operators, and meta-commands
+  — independent of any session. Surfaces use it for static completion aids (e.g.
+  the `--completions` word list fed to `rlwrap -f`). Session-aware completion
+  goes through `complete/2`.
+  """
+  @spec vocabulary() :: [String.t()]
+  def vocabulary, do: @keywords ++ @word_ops ++ @meta_commands
+
+  @doc """
+  Rian-aware tab-completion: given the text *before the cursor* and a `session`,
+  return `{candidates, completion}` — the full words that complete the trailing
+  token, and the `completion` string to append to what's already typed (the
+  shared continuation, `""` when several candidates diverge or none match).
+
+  Context-sensitive: a token beginning with `\\` completes against the surface
+  meta-commands; otherwise against keywords, word-operators, and the session's
+  own `defined`/`bound` names (`info/1`). Pure and no-IO — the `expand_fun` a
+  line-editing surface installs is a thin wrapper over this.
+  """
+  @spec complete(String.t(), t()) :: {[String.t()], String.t()}
+  def complete(before_cursor, %Session{} = s) do
+    word = trailing_token(before_cursor)
+
+    candidates =
+      word
+      |> candidate_pool(s)
+      |> Enum.filter(&String.starts_with?(&1, word))
+      |> Enum.uniq()
+      |> Enum.sort()
+
+    {candidates, continuation(word, candidates)}
+  end
+
+  defp candidate_pool("\\" <> _, _s), do: @meta_commands
+
+  defp candidate_pool(_word, s) do
+    %{defined: defined, bound: bound} = info(s)
+    @keywords ++ @word_ops ++ defined ++ bound
+  end
+
+  # The trailing identifier-or-command token the cursor sits at the end of: the
+  # maximal run of `\`/word characters, or `""` at a delimiter/whitespace.
+  defp trailing_token(text) do
+    case Regex.run(~r/[\\A-Za-z0-9_]*$/, text) do
+      [token] -> token
+      _ -> ""
+    end
+  end
+
+  # The characters to append: the candidates' longest common prefix beyond what
+  # the user has already typed. `""` when nothing matches or they diverge here.
+  defp continuation(_word, []), do: ""
+
+  defp continuation(word, candidates) do
+    candidates
+    |> longest_common_prefix()
+    |> String.replace_prefix(word, "")
+  end
+
+  defp longest_common_prefix([only]), do: only
+  defp longest_common_prefix([first | rest]), do: Enum.reduce(rest, first, &common_prefix/2)
+
+  defp common_prefix(a, b), do: common_prefix(a, b, "")
+
+  defp common_prefix(<<c::utf8, a::binary>>, <<c::utf8, b::binary>>, acc),
+    do: common_prefix(a, b, acc <> <<c::utf8>>)
+
+  defp common_prefix(_a, _b, acc), do: acc
 
   # ── declarations ────────────────────────────────────────────────────────
 

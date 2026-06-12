@@ -254,13 +254,10 @@ defmodule Mix.Tasks.Rian.Repl do
   defp render_type(type, expr), do: "#{String.trim(expr)} : #{type}"
 
   # One candidate per line for `rlwrap -f` static completion. The session's own
-  # names aren't known ahead of time; this is the fixed language vocabulary plus
-  # the meta-commands.
+  # names aren't known ahead of time, so this is the fixed language vocabulary
+  # (`Rian.Repl.vocabulary/0`) — the same source `complete/2` extends per session.
   defp dump_completions do
-    keywords = ~w(if do else end case when struct alias mod pub const macro use with and or not in rem div)
-    commands = ["\\help", "\\env", "\\type", "\\reset"]
-
-    (@decl_keywords ++ keywords ++ commands)
+    Repl.vocabulary()
     |> Enum.uniq()
     |> Enum.sort()
     |> Enum.each(&IO.puts/1)

@@ -207,6 +207,67 @@ defmodule Rian.ReplTest do
     end
   end
 
+  describe "complete/2 — Rian-aware tab-completion" do
+    test "completes a keyword from a prefix" do
+      assert {["def"], "f"} = Repl.complete("de", Repl.new())
+    end
+
+    test "an empty trailing token offers nothing to append" do
+      assert {_candidates, ""} = Repl.complete("1 + ", Repl.new())
+    end
+
+    test "a `\\`-token completes against meta-commands only" do
+      {candidates, completion} = Repl.complete("\\t", Repl.new())
+      assert candidates == ["\\type"]
+      assert completion == "ype"
+    end
+
+    test "lists meta-commands sharing a prefix without a spurious append" do
+      {candidates, completion} = Repl.complete("\\", Repl.new())
+      assert "\\help" in candidates and "\\env" in candidates
+      assert completion == ""
+    end
+
+    test "completes session-defined names" do
+      s = Repl.new()
+      {_, s} = eval(s, "def square(n Int64) Int64\ndef square(n) := n * n")
+      {candidates, completion} = Repl.complete("squ", s)
+      assert candidates == ["square"]
+      assert completion == "are"
+    end
+
+    test "completes session-bound names" do
+      s = Repl.new()
+      {_, s} = eval(s, "total := 42")
+      assert {["total"], "al"} = Repl.complete("tot", s)
+    end
+
+    test "no match yields no candidates and nothing to append" do
+      assert {[], ""} = Repl.complete("zzzq", Repl.new())
+    end
+
+    test "appends only the shared continuation when candidates diverge" do
+      # `i` matches `if` and `in` — shared prefix is just `i`, nothing to add.
+      {candidates, completion} = Repl.complete("i", Repl.new())
+      assert "if" in candidates and "in" in candidates
+      assert completion == ""
+    end
+
+    test "is pure — performs no IO" do
+      s = Repl.new()
+      assert capture_io(fn -> Repl.complete("de", s) end) == ""
+    end
+  end
+
+  describe "vocabulary/0 — the static word list" do
+    test "includes keywords, word-operators, and meta-commands" do
+      vocab = Repl.vocabulary()
+      assert "def" in vocab
+      assert "rem" in vocab
+      assert "\\type" in vocab
+    end
+  end
+
   describe "render/1 (the print phase)" do
     test "formats each result kind" do
       assert Repl.render({:value, 2, "Int64"}) == "2 : Int64"
