@@ -32,6 +32,13 @@ Rian/BEAM application** and evaluates forms in its **live context**, redefining 
 BEAM hot code loading (the Clojure nREPL / IEx remote-shell model). REPL-driven development —
 evaluate-in-the-running-app, not edit-compile-restart — is the point, and the BEAM makes it native.
 
+**Prerequisites — gating, not parallel.** `--remote` is arbitrary code execution against a live
+node, so it ships *after* both: (a) an authentication story (who is allowed to attach, how the
+connection is authorized, how the audit trail is captured); and (b) a sandbox/fuel story (what
+the connected session is and is not allowed to call, with caps on time/memory/effect scope).
+These share the comptime/LSP sandbox concerns (ADR-0030/0038) and lean on effect visibility
+(ADR-0048) for review — neither is started here; both are required before `--remote` lands.
+
 ### 3. Single-assignment at the prompt = redefinition, not mutation
 
 The REPL is a stream of **top-level units**. A later `x := 2` after `x := 1` **redefines/shadows** the
@@ -139,8 +146,10 @@ not to function bodies (functions stay closed) — a deliberate, documented boun
 
 ## Open items
 
-- **Connected-to-prod security** — auth + a sandbox/fuel story for remote eval into a live node
-  (shares the comptime/LSP sandbox concerns, ADR-0030/0038); effect visibility (ADR-0048) aids review.
+- **Connected-to-prod security** — *gating* prerequisites for `--remote` (see §2): auth (attach
+  authorization + audit trail) and a sandbox/fuel story (call/effect scope, time/memory caps).
+  Shares the comptime/LSP sandbox concerns (ADR-0030/0038); effect visibility (ADR-0048) aids
+  review. The connected REPL does not ship until both are in place.
 - **Session env model** — resolved in v1: prior `:=`/`def` units stay in scope across entries by
   re-emitting the accumulated session program into the session's single `rian_repl_<base>` module,
   purged and reloaded per entry; redefinition replaces the unit sharing a name (Clojure's `def`
