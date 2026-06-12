@@ -93,7 +93,8 @@ alongside the parser work.
 
 > **Note — the Rust target is not a bootstrap stage.** The stages above track the
 > *BEAM* path (interim Elixir source → Erlang abstract forms at Stage 0.5).
-> Rust is a **backend-parallel** target: the front-end emits idiomatic,
+> Rust — and every other target (ECMAScript, JVM, WASM, Go; see the tiers in
+> [ADR-0049](0049-backend-target-roadmap.md)) — is a **backend-parallel** target: the front-end emits idiomatic,
 > ownership-checked Rust ([`Rian.Lower.to_rust/5`](../../lib/rian/lower.ex),
 > capabilities → Rust signatures via [`Rian.Capability`](../../lib/rian/capability.ex)),
 > already implemented and tested at the component level (emitted Rust is compiled

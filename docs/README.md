@@ -56,6 +56,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0046](adr/0046-compile-time-by-default.md) | Compile-Time by Default: universal compile-time checks; per-target specialization; semantic-only optimization | Accepted |
 | [0047](adr/0047-portable-prelude-stdlib.md) | Portable prelude & stdlib: three tiers, hybrid implementation, `Option` not `nil` | Accepted (direction) |
 | [0048](adr/0048-effect-tracking.md) | Effect tracking: fine-grained, inferred, ambient (not object-capability); `pure = empty effect set` | Accepted (direction) |
+| [0049](adr/0049-backend-target-roadmap.md) | Backend target roadmap & tiers: T1 BEAM/Rust/ECMAScript, T2 JVM/WASM, T3 Go | Accepted (direction) |
 
 ## Specifications
 

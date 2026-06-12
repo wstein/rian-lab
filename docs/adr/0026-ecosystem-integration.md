@@ -19,6 +19,11 @@ Three concerns were conflated and must be separated:
 
 **Do not fork Elixir or OTP.** Integrate via stable, public BEAM APIs.
 
+> **Target priority.** This ADR's six targets (JVM, Rust, Go, BEAM, JS, WASM) are **tiered** in
+> [ADR-0049](0049-backend-target-roadmap.md): **Tier 1** = BEAM, Rust, ECMAScript (JS, emitted
+> directly; PureScript is a reference, not a dependency); **Tier 2** = JVM, WASM (via the Rust→`wasm32`
+> pipeline); **Tier 3** = Go.
+
 1. **BEAM target = Erlang-native, not Elixir source.** The production backend emits **Core
    Erlang / abstract forms** and compiles them in-process via `:compile.forms/2`, loading with
    `:code.load_binary/3`. A readable Erlang `.erl` emitter is the pragmatic first step and a
