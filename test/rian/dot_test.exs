@@ -43,9 +43,7 @@ defmodule Rian.DotTest do
     defp eval_fn do
       %{
         name: "eval",
-        param_name: "v",
-        param_type: "Value",
-        param_cap: :iso,
+        params: [%{name: "v", type: "Value", cap: :iso}],
         ret: "Int64",
         clauses: [
           %{pats: [{:ctor, "Num", [{:var, "n"}]}], body: "n * 2"},

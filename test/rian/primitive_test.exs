@@ -30,9 +30,7 @@ defmodule Rian.PrimitiveTest do
   defp func do
     %{
       name: "tag",
-      param_name: "p",
-      param_type: "Prim",
-      param_cap: :val,
+      params: [%{name: "p", type: "Prim", cap: :val}],
       ret: "Int64",
       clauses: [
         %{pats: [{:ctor, "P", Enum.map(~w(a b c d e), &{:var, &1})}], body: "0"}

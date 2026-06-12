@@ -7,33 +7,25 @@ defmodule Rian.FfiTest do
       [
         %{
           name: "total",
-          param_name: "xs",
-          param_type: "Vec(Int64)",
-          param_cap: :val,
+          params: [%{name: "xs", type: "Vec(Int64)", cap: :val}],
           ret: "Int64",
           clauses: [%{pats: [{:var, "xs"}], body: ":lists.sum(xs)"}]
         },
         %{
           name: "rev",
-          param_name: "xs",
-          param_type: "Vec(Int64)",
-          param_cap: :val,
+          params: [%{name: "xs", type: "Vec(Int64)", cap: :val}],
           ret: "Vec(Int64)",
           clauses: [%{pats: [{:var, "xs"}], body: ":lists.reverse(xs)"}]
         },
         %{
           name: "shout",
-          param_name: "s",
-          param_type: "String",
-          param_cap: :val,
+          params: [%{name: "s", type: "String", cap: :val}],
           ret: "String",
           clauses: [%{pats: [{:var, "s"}], body: "String.upcase(s)"}]
         },
         %{
           name: "clean",
-          param_name: "s",
-          param_type: "String",
-          param_cap: :val,
+          params: [%{name: "s", type: "String", cap: :val}],
           ret: "String",
           clauses: [%{pats: [{:var, "s"}], body: "String.trim(String.downcase(s))"}]
         }

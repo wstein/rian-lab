@@ -10,20 +10,20 @@ defmodule Rian.Decl do
   ## Supported (MVP)
 
     * `type Name := Ctor(field Type, …) | Ctor2 | …` — sum declarations.
-    * single-parameter `def` functions:
-      * single typed clause — `def double(n Int64) Int64 := n * 2`
+    * `def` functions, single- or multi-parameter:
+      * single typed clause — `def add(x Int64, y Int64) Int64 := x + y`
       * bodiless signature + pattern clauses —
-        `def area(s val Shape) Float64` then `def area(Circle(r)) := …`
+        `def max2(a Int64, b Int64) Int64` then `def max2(a, b) when a >= b := a`
+    * `:=` bodies (single expressions parsed by `Rian.Pratt`), including string
+      literals and `when` guards.
 
-  Bodies after `:=` are single expressions parsed by `Rian.Pratt`. Multi-line
-  type/def declarations are joined (a line that does not start a declaration
-  continues the previous one).
+  Multi-line type/def declarations are joined (a line that does not start a
+  declaration continues the previous one).
 
   ## Not yet supported
 
-  Multi-parameter functions (the emitter is single-scrutinee), `do … end` block
-  and `case` bodies, string literals in bodies (the Pratt lexer has none), and
-  `mod`/`struct`/`alias` declarations. Each raises `Rian.Decl.Error`.
+  `do … end` block and `case` expression bodies, and `mod`/`struct`/`alias`
+  declarations. Each raises `Rian.Decl.Error`.
   """
   alias Rian.Lower
 
@@ -169,30 +169,25 @@ defmodule Rian.Decl do
 
   # multi-clause: bodiless signature followed by >=1 pattern clauses
   defp build_func([%{body: nil} = sig | [_ | _] = clauses]) do
-    {pname, cap, ptype} = one_param(sig.params)
+    params = parse_params(sig.params)
 
     %{
       name: sig.name,
-      param_name: pname || "arg",
-      param_type: ptype,
-      param_cap: cap,
+      params: params,
       ret: req_ret(sig),
-      clauses: Enum.map(clauses, &clause/1)
+      clauses: Enum.map(clauses, &clause(&1, length(params)))
     }
   end
 
-  # single typed clause
+  # single typed clause — each parameter binds itself as the clause pattern
   defp build_func([%{body: body} = d]) when not is_nil(body) do
-    {pname, cap, ptype} = one_param(d.params)
-    pname = pname || "arg"
+    params = parse_params(d.params)
 
     %{
       name: d.name,
-      param_name: pname,
-      param_type: ptype,
-      param_cap: cap,
+      params: params,
       ret: req_ret(d),
-      clauses: [%{pats: [{:var, pname}], body: body, guard: d.guard}]
+      clauses: [%{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}]
     }
   end
 
@@ -202,21 +197,26 @@ defmodule Rian.Decl do
   defp build_func(group),
     do: raise(Error, "cannot group clauses of `#{hd(group).name}`")
 
-  defp clause(%{body: nil, name: n}), do: raise(Error, "clause of `#{n}` has no body")
+  defp clause(%{body: nil, name: n}, _arity), do: raise(Error, "clause of `#{n}` has no body")
 
-  defp clause(%{params: pstr, body: body, guard: guard}) do
-    case split_top(pstr, ",") do
-      [single] -> %{pats: [pattern(single)], body: body, guard: guard}
-      _ -> raise Error, "multi-parameter clauses are not yet supported"
+  defp clause(%{params: pstr, body: body, guard: guard}, arity) do
+    pats = pstr |> split_top(",") |> Enum.map(&pattern/1)
+
+    if length(pats) != arity do
+      raise Error, "clause has #{length(pats)} patterns but the signature has arity #{arity}"
     end
+
+    %{pats: pats, body: body, guard: guard}
   end
 
-  defp one_param(params) do
-    case split_top(params, ",") do
-      [single] -> param(single)
-      [] -> raise Error, "function needs a parameter (single-parameter MVP)"
-      _ -> raise Error, "multi-parameter functions are not yet supported (single-parameter MVP)"
-    end
+  defp parse_params(str) do
+    str
+    |> split_top(",")
+    |> Enum.with_index()
+    |> Enum.map(fn {p, i} ->
+      {name, cap, type} = param(p)
+      %{name: name || "arg#{i}", type: type, cap: cap}
+    end)
   end
 
   defp param(p) do

@@ -12,9 +12,7 @@ types = [
 
 func = %{
   name: "area",
-  param_name: "shape",
-  param_type: "Shape",
-  param_cap: :iso,
+  params: [%{name: "shape", type: "Shape", cap: :iso}],
   ret: "Float64",
   clauses: [
     %{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"},

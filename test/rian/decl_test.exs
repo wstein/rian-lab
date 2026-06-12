@@ -35,16 +35,14 @@ defmodule Rian.DeclTest do
         """)
 
       assert f.name == "area"
-      assert f.param_name == "s"
-      assert f.param_cap == :val
-      assert f.param_type == "Shape"
+      assert f.params == [%{name: "s", type: "Shape", cap: :val}]
       assert f.ret == "Float64"
       assert [%{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"} | _] = f.clauses
     end
 
     test "a single typed clause binds its parameter as the pattern" do
       %{funcs: [f]} = Decl.parse("def double(n Int64) Int64 := n * 2")
-      assert f.param_name == "n"
+      assert f.params == [%{name: "n", type: "Int64", cap: :val}]
       assert f.ret == "Int64"
       assert f.clauses == [%{pats: [{:var, "n"}], body: "n * 2", guard: nil}]
     end
@@ -141,13 +139,46 @@ defmodule Rian.DeclTest do
     end
   end
 
-  describe "honest limits raise Rian.Decl.Error" do
-    test "multi-parameter functions are not yet supported" do
-      assert_raise Decl.Error, ~r/multi-parameter/, fn ->
-        Decl.parse("def add(x Int64, y Int64) Int64 := x + y")
-      end
+  describe "multi-parameter functions (clauses-guards §5.2)" do
+    test "single-clause: Elixir multi-arg def; Rust matches the argument tuple" do
+      [{"add", out}] = Decl.compile("def add(x Int64, y Int64) Int64 := x + y")
+
+      assert out.elixir =~ "def add(x, y) do x + y end"
+      assert out.rust =~ "fn add(x: i64, y: i64) -> i64"
+      assert out.rust =~ "match (x, y) {"
+      assert out.rust =~ "(x, y) => x + y,"
+
+      Code.eval_string("defmodule AddFromSource do\n#{out.elixir}\nend")
+      assert AddFromSource.add(2, 3) == 5
     end
 
+    test "multi-clause with guards lowers and runs (max2)" do
+      [{"max2", out}] =
+        Decl.compile("""
+        def max2(a Int64, b Int64) Int64
+        def max2(a, b) when a >= b := a
+        def max2(_, b) := b
+        """)
+
+      assert out.elixir =~ "def max2(a, b) when a >= b do a end"
+      assert out.rust =~ "(a, b) if a >= b => a,"
+
+      Code.eval_string("defmodule Max2FromSource do\n#{out.elixir}\nend")
+      assert Max2FromSource.max2(3, 7) == 7
+      assert Max2FromSource.max2(9, 2) == 9
+    end
+
+    test "a clause whose arity differs from the signature is rejected" do
+      assert_raise Decl.Error, ~r/arity/, fn ->
+        Decl.parse("""
+        def f(a Int64, b Int64) Int64
+        def f(a) := a
+        """)
+      end
+    end
+  end
+
+  describe "honest limits raise Rian.Decl.Error" do
     test "unsupported declaration keywords are rejected" do
       assert_raise Decl.Error, ~r/unsupported declaration/, fn ->
         Decl.parse("struct Point(x Float64, y Float64)")

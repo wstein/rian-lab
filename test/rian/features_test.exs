@@ -17,9 +17,7 @@ defmodule Rian.FeaturesTest do
       Enum.map_join(fns, "\n", fn {name, param, body} ->
         f = %{
           name: name,
-          param_name: param,
-          param_type: "term",
-          param_cap: :val,
+          params: [%{name: param, type: "term", cap: :val}],
           ret: "term",
           clauses: [%{pats: [{:var, param}], body: body}]
         }

@@ -12,7 +12,7 @@ types = [%{name: "Value", variants: [
   %{ctor: "Num", fields: [%{type: "Int64"}]},
   %{ctor: "Zero", fields: []}
 ]}]
-eval = %{name: "eval", param_name: "v", param_type: "Value", param_cap: :iso, ret: "Int64",
+eval = %{name: "eval", params: [%{name: "v", type: "Value", cap: :iso}], ret: "Int64",
   clauses: [
     %{pats: [{:ctor, "Num", [{:var, "n"}]}], body: "n * 2"},
     %{pats: [{:ctor, "Zero", []}], body: "0"}

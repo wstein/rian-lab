@@ -41,9 +41,7 @@ types = [
 
 area = %{
   name: "area",
-  param_name: "shape",
-  param_type: "Shape",
-  param_cap: :val,
+  params: [%{name: "shape", type: "Shape", cap: :val}],
   ret: "Float64",
   clauses: [
     %{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"},
@@ -97,7 +95,7 @@ bad_block =
 :io.format("block consume-twice => ~p~n", [bad_block])
 
 IO.puts("\n===== `ref` ON THE BEAM TARGET =====")
-ref_func = %{area | param_cap: :ref}
+ref_func = %{area | params: [%{hd(area.params) | cap: :ref}]}
 
 try do
   Lower.to_elixir(ref_func, types)

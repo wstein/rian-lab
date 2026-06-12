@@ -17,8 +17,7 @@ defmodule Rian.LowerTest do
   defp area do
     %{
       name: "area",
-      param_name: "shape",
-      param_type: "Shape",
+      params: [%{name: "shape", type: "Shape", cap: :val}],
       ret: "Float64",
       clauses: [
         %{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"},

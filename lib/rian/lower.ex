@@ -13,7 +13,7 @@ defmodule Rian.Lower do
                  %{ctor: "Circle", fields: [%{label: "radius", type: "f64"}]},
                  %{ctor: "Square", fields: [%{label: "side",   type: "f64"}]}]}
 
-      func = %{name: "area", param_name: "shape", param_type: "Shape", ret: "f64",
+      func = %{name: "area", params: [%{name: "shape", type: "Shape", cap: :val}], ret: "Float64",
                clauses: [%{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"},
                          %{pats: [{:ctor, "Square", [{:var, "s"}]}], body: "s * s"}]}
   """
@@ -77,7 +77,7 @@ defmodule Rian.Lower do
 
   # ── Elixir backend ─────────────────────────────────────────────────────
   def to_elixir(func, types) do
-    Rian.Capability.beam_legal!(Map.get(func, :param_cap, :val))
+    Enum.each(func.params, &Rian.Capability.beam_legal!(&1.cap))
     typespecs = Enum.map_join(types, "\n", &ex_typespec/1)
 
     clauses =
@@ -154,22 +154,31 @@ defmodule Rian.Lower do
   # ── Rust backend ───────────────────────────────────────────────────────
   def to_rust(func, types, meta) do
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
-    scrut = func.param_name
-    cap = Map.get(func, :param_cap, :val)
-    scrut_type = Rian.Capability.rust_param(cap, func.param_type)
+
+    param_decls =
+      Enum.map_join(func.params, ", ", fn p ->
+        "#{p.name}: #{Rian.Capability.rust_param(p.cap, p.type)}"
+      end)
+
+    # One param matches the value directly; N>1 match the tuple of arguments
+    # (clauses-guards §5.2).
+    scrut = tuple_or_one(func.params, & &1.name)
 
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
-        pat = c.pats |> hd() |> pat_rs(meta)
+        pat = tuple_or_one(c.pats, &pat_rs(&1, meta))
         "        #{pat}#{guard_str(c, :rust)} => #{emit(Pratt.parse(c.body), :rust) |> elem(0)},"
       end)
 
     fn_str =
-      "fn #{func.name}(#{scrut}: #{scrut_type}) -> #{prim_rust(func.ret)} {\n" <>
+      "fn #{func.name}(#{param_decls}) -> #{prim_rust(func.ret)} {\n" <>
         "    match #{scrut} {\n#{arms}\n    }\n}"
 
     enums <> "\n\n" <> fn_str
   end
+
+  defp tuple_or_one([one], f), do: f.(one)
+  defp tuple_or_one(many, f), do: "(" <> Enum.map_join(many, ", ", f) <> ")"
 
   defp rust_enum(t) do
     variants =

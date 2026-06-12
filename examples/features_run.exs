@@ -18,19 +18,19 @@ end)
 
 IO.puts("\n===== EXECUTE ON THE BEAM =====")
 funcs = [
-  {%{name: "dbl_all", param_name: "xs", param_type: "Vec(Int64)", param_cap: :val, ret: "Vec(Int64)",
+  {%{name: "dbl_all", params: [%{name: "xs", type: "Vec(Int64)", cap: :val}], ret: "Vec(Int64)",
      clauses: [%{pats: [{:var, "xs"}], body: "Enum.map(xs, (x) -> x * 2)"}]}, [[1,2,3]], [2,4,6]},
-  {%{name: "sum", param_name: "xs", param_type: "Vec(Int64)", param_cap: :val, ret: "Int64",
+  {%{name: "sum", params: [%{name: "xs", type: "Vec(Int64)", cap: :val}], ret: "Int64",
      clauses: [%{pats: [{:var, "xs"}], body: ":lists.foldl((x, acc) -> x + acc, 0, xs)"}]}, [[1,2,3,4]], 10},
-  {%{name: "sign", param_name: "n", param_type: "Int64", param_cap: :val, ret: "Int64",
+  {%{name: "sign", params: [%{name: "n", type: "Int64", cap: :val}], ret: "Int64",
      clauses: [%{pats: [{:var, "n"}], body: "if n >= 0 do 1 else 0 - 1 end"}]}, [-5], -1},
-  {%{name: "step", param_name: "n", param_type: "Int64", param_cap: :val, ret: "Int64",
+  {%{name: "step", params: [%{name: "n", type: "Int64", cap: :val}], ret: "Int64",
      clauses: [%{pats: [{:var, "n"}], body: "if n > 0 do a := n * 2; a + 1 else 0 end"}]}, [3], 7},
-  {%{name: "nums", param_name: "_x", param_type: "Int64", param_cap: :val, ret: "Vec(Int64)",
+  {%{name: "nums", params: [%{name: "_x", type: "Int64", cap: :val}], ret: "Vec(Int64)",
      clauses: [%{pats: [{:var, "_x"}], body: "[10, 20, 30]"}]}, [0], [10,20,30]},
-  {%{name: "pre", param_name: "p", param_type: "Int64", param_cap: :val, ret: "Vec(Int64)",
+  {%{name: "pre", params: [%{name: "p", type: "Int64", cap: :val}], ret: "Vec(Int64)",
      clauses: [%{pats: [{:var, "p"}], body: "[p | [1, 2]]"}]}, [0], [0,1,2]},
-  {%{name: "rec", param_name: "_x", param_type: "Int64", param_cap: :val, ret: "Map",
+  {%{name: "rec", params: [%{name: "_x", type: "Int64", cap: :val}], ret: "Map",
      clauses: [%{pats: [{:var, "_x"}], body: "%{a: 1, b: 2}"}]}, [0], %{a: 1, b: 2}}
 ]
 defs = Enum.map_join(funcs, "\n", fn {f,_,_} -> Lower.compile_beam([], f).elixir |> String.split("\n") |> List.last() end)
