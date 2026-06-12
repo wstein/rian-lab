@@ -195,9 +195,14 @@ defmodule Rian.Check do
   defp error_tags(l) when is_list(l), do: Enum.flat_map(l, &error_tags/1)
   defp error_tags(_), do: []
 
-  defp tag_name({:id, n}), do: n
-  defp tag_name({:call, {:id, n}, _}), do: n
+  # An error tag is a PascalCase constructor (`NotFound`, `DivByZero(…)`). A
+  # lowercase identifier in error position is a *bound variable* re-propagating an
+  # existing error (`{:error, e} -> {:error, e}`), not a newly-constructed tag.
+  defp tag_name({:id, n}), do: if(pascal?(n), do: n)
+  defp tag_name({:call, {:id, n}, _}), do: if(pascal?(n), do: n)
   defp tag_name(_), do: nil
+
+  defp pascal?(s), do: String.match?(s, ~r/^[A-Z]/)
 
   # Bind names introduced by the clause head, narrowing constructor patterns
   # against their parameter type (flow narrowing applies to clause heads too —

@@ -66,6 +66,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [exhaustiveness.md](spec/exhaustiveness.md) | Usefulness algorithm, signatures, witnesses |
 | [capability-lowering.md](spec/capability-lowering.md) | `val`/`iso`/`ref`/`tag` → Rust + BEAM linearity |
 | [modules.md](spec/modules.md) | `mod`, visibility, imports |
+| [error-handling.md](spec/error-handling.md) | `Result`, the `T \| E` sugar, `with` propagation, error-set composition |
 | [end-to-end-lowering.md](spec/end-to-end-lowering.md) | Whole-pipeline `area/1` walkthrough |
 | [selfhost-features.md](spec/selfhost-features.md) | Lambdas, `if`/blocks, list/map literals |
 
