@@ -85,6 +85,60 @@ defmodule Rian.BeamTest do
       assert {:file, _} = :code.is_loaded(:rian_beam_lexer)
     end
 
+    test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def apply_twice(f Fn(Int64, Int64), x Int64) Int64 := f(f(x))
+          def inc(n Int64) Int64 := n + 1
+          def run(x Int64) Int64 := apply_twice(&inc/1, x)
+          """,
+          :rian_beam_hof_capture
+        )
+
+      # `f(...)` where `f` is a parameter compiles to a *variable* application,
+      # not a local call — and `&inc/1` is a real Erlang fun reference
+      assert mod.run(10) == 12
+      # an externally-supplied fun works too (it is just a value)
+      assert mod.apply_twice(fn x -> x * x end, 3) == 81
+    end
+
+    test "higher-order: a recursive `map` applying a fun-valued parameter runs on bytecode" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U
+          def map(_, []) := []
+          def map(f, [h | t]) := [f(h) | map(f, t)]
+          def dbl(n Int64) Int64 := n * 2
+          def doubled(xs Vec(Int64)) Vec(Int64) := map(&dbl/1, xs)
+          """,
+          :rian_beam_hof_map
+        )
+
+      assert mod.doubled([1, 2, 3]) == [2, 4, 6]
+      assert mod.map(fn x -> x + 100 end, [1, 2, 3]) == [101, 102, 103]
+    end
+
+    test "higher-order: a returned closure and an anonymous `&(&1 + …)` capture" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def adder(n Int64) Fn(Int64, Int64) := (x) -> x + n
+          def twice(n Int64) Int64
+            g := &(&1 + &1)
+            g(n)
+          end
+          """,
+          :rian_beam_hof_closure
+        )
+
+      # `adder` returns an Erlang fun that closes over `n`
+      assert mod.adder(5).(37) == 42
+      # an anonymous capture bound to a local var, then applied as `g(n)`
+      assert mod.twice(21) == 42
+    end
+
     test "a construct outside the core raises a clear Unsupported (never a miscompile)" do
       # struct declarations need %Name{} map forms (next increment)
       assert_raise Beam.Unsupported, ~r/struct/, fn ->
