@@ -44,7 +44,8 @@ Three concerns were conflated and must be separated:
      with the right `-behaviour()` attribute and exports.
    - **Predictable module naming** — Rian modules are ordinary BEAM modules; MFA interop is free
      both ways (`rian_geometry:area(...)` from Erlang, `:rian_geometry.area(...)` from Elixir).
-   - **EEP-48 doc chunks** — `h` in IEx/erl shell, ExDoc, `code:get_doc/1` work on Rian modules.
+   - **EEP-48 doc chunks** — `h` in IEx/erl shell, ExDoc, `code:get_doc/1` work on Rian modules. The
+     *input surface* (`@moduledoc`/`@doc`/`@typedoc`) is defined in [ADR-0051](0051-doc-comments.md).
    - **Dialyzer-compatible `-spec`/`-type`** — Rian is typed, so emit precise specs.
    - **OTP releases** via relx / `mix release` (later).
    - **Upstream small hooks** if a build/packaging gap blocks us, rather than forking.

@@ -58,6 +58,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0048](adr/0048-effect-tracking.md) | Effect tracking: fine-grained, inferred, ambient (not object-capability); `pure = empty effect set` | Accepted (direction) |
 | [0049](adr/0049-backend-target-roadmap.md) | Backend target roadmap & tiers: T1 BEAM/Rust/ECMAScript, T2 JVM/WASM, T3 Go | Accepted (direction) |
 | [0050](adr/0050-typed-core-ir.md) | One typed core IR: single contract, sealed-sum nodes, emitters as pure consumers | Accepted (direction) |
+| [0051](adr/0051-doc-comments.md) | Doc comments: `@moduledoc`/`@doc`/`@typedoc` → EEP-48/rustdoc/JSDoc; documented self-hosting from day one | Accepted (direction) |
 
 ## Specifications
 
