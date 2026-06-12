@@ -109,9 +109,39 @@ alongside the parser work.
   backend-only swap.
 
 ## Open items
-- Decide the interim cutover point from Elixir-source emission to abstract forms (likely once
-  the module emitter is stable and pattern/guard lowering is exercised on real files).
-- Mix compiler + rebar3 plugin packaging (ADR-0026) can land alongside Stage 0.3.
+
+**Cutover & packaging — resolved in the 2026-06-12 decision-lock review:**
+
+- **The cutover is a *gate*, not a date, preceded by an early de-risking spike.** The interim
+  Elixir-source/`eval` backend is a dev accelerator, not a shippable target (ADR-0026 demotes
+  Elixir-source: `'Elixir.Mod':func` prefixing makes it non-first-class for Erlang callers, and
+  `eval` produces no hashable `.beam`). Therefore:
+  - **Spike now:** push one function (`area/1`) through abstract forms → `:compile.forms` →
+    `:code.load_binary` → call, as a test — closing the "invisible swap has no test coverage" gap
+    *before* Stage 0.5, not discovering it there.
+  - **Freeze** the Elixir-source emitter at expression / single-function `eval` (enough for dev
+    iteration). All **module-level** work — naming, OTP behaviours, `-spec`, EEP-48 docs — skips the
+    textual path and targets the Erlang-native emitter (it is throwaway *and* non-first-class on
+    Elixir-source).
+  - **Readable `.erl` first** as the first Erlang-native output (ADR-0026 pragmatic step + permanent
+    debug output) — it is the prettyprint of the abstract forms, so it costs nothing extra.
+  - **Full-cutover gate = the ADR-0026 interop acceptance test passing** (a Rian module callable from
+    both `erl` and IEx with no shims) *and* pattern/guard lowering exercised on real files
+    (≈ end 0.3 / start 0.5). That test *cannot* pass on the Elixir-source backend, so it defines the
+    cutover.
+- **Packaging splits by readiness, not "alongside 0.3":**
+  - **Manifest schema** (app/version/deps → Hex metadata; ADR-0026 open item) is backend-independent
+    and starts **now** at 0.3.
+  - A **throwaway `Mix.Tasks.Compile.Rian` dev harness** may land at 0.3 to dogfood the driver and
+    serve as the integration test bed — **unpublished**, and it must **invoke the self-contained
+    escript** (ADR-0026), never the host Elixir in-process.
+  - **Publishable** Mix compiler + rebar3 plugin (and **Hex publish/consume**) wait until **after the
+    0.5 cutover**, so they emit first-class, hashable `.beam` — not `'Elixir.Mod'`-prefixed `eval`
+    output. The **rebar3 plugin is the first-class priority** (ADR-0026's "Erlang citizen" thesis);
+    the Mix harness is merely the cheaper first prototype.
+
+**Other open items:**
+
 - **Non-BEAM concurrency is an unfilled gap, now named** (decision-lock 2026-06-12). Non-BEAM
   targets (Rust/Go/JS/WASM) get the *sequential core* only — there is no concurrency story for them.
   This is a deliberate deferral, not a decision: *if* structured concurrency is ever added there it

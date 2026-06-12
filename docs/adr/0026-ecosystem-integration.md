@@ -81,7 +81,11 @@ The BEAM provides Core Erlang precisely so languages interoperate without forkin
 - Interop acceptance test: a Rian module callable from both `erl` and IEx with no shims.
 
 ## Open items
-- Choose Core Erlang vs abstract forms as the production IR (abstract forms are better
-  documented and carry `-spec`/docs more directly; Core Erlang is more regular for codegen).
+- ~~Choose Core Erlang vs abstract forms as the production IR.~~ **Resolved 2026-06-12: abstract
+  forms.** For a *typed* language emitting precise `-spec`/`-type` and EEP-48 docs, abstract forms
+  carry specs and docs **directly**, and the readable `.erl` debug emitter (the "readable `.erl`
+  first" step above) is their prettyprint — so it costs nothing extra. Core Erlang's only edge is
+  codegen regularity; revisit *only* if nested-pattern/guard codegen against abstract forms proves
+  painful. Cutover sequencing is in [ADR-0031](0031-bootstrap-strategy.md) (open items).
 - Behaviour syntax in Rian surface (how a Rian module declares `gen_server`).
 - Hex metadata mapping (app name, version, deps) from a Rian manifest.
