@@ -107,6 +107,9 @@ defmodule Rian.Lower do
   defp rust_arm_body({:block, [_, _ | _]}, s), do: "{ #{s} }"
   defp rust_arm_body(_, s), do: s
 
+  defp case_guard(nil, _), do: ""
+  defp case_guard(g, target), do: guard_kw(target) <> (emit(g, target) |> elem(0))
+
   # ── `&` capture support ────────────────────────────────────────────────
   # Highest placeholder index in an anonymous-capture body → the closure arity
   # the Rust target must spell out (`&(&1 + &2)` ⇒ 2 ⇒ `|a1, a2| …`).
@@ -159,6 +162,10 @@ defmodule Rian.Lower do
 
   # ── Rust backend ───────────────────────────────────────────────────────
   def to_rust(func, types, meta) do
+    # Ambient type meta for `case` constructor patterns nested in bodies, which
+    # the recursive expression emitter would otherwise have no channel to reach
+    # (a compiler-internal context, not language-level hidden control flow).
+    Process.put({:rian, :meta}, meta)
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
 
     param_decls =
@@ -325,6 +332,27 @@ defmodule Rian.Lower do
     do: {"if #{p(c, 0, :rust)} { #{emit_block(t, :rust)} } else { #{emit_block(e, :rust)} }", 0}
 
   defp emit({:block, _} = b, t), do: {emit_block(b, t), 0}
+
+  # case expression — Elixir `case … do … -> … end`; Rust `match … { … => …, }`
+  defp emit({:case, scrut, arms}, :elixir) do
+    body =
+      Enum.map_join(arms, "; ", fn {pt, g, b} ->
+        "#{pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
+      end)
+
+    {"case #{p(scrut, 0, :elixir)} do #{body} end", 0}
+  end
+
+  defp emit({:case, scrut, arms}, :rust) do
+    meta = Process.get({:rian, :meta}, %{})
+
+    body =
+      Enum.map_join(arms, " ", fn {pt, g, b} ->
+        "#{pat_rs(pt, meta)}#{case_guard(g, :rust)} => #{p(b, 0, :rust)},"
+      end)
+
+    {"match #{p(scrut, 0, :rust)} { #{body} }", 0}
+  end
 
   # list / map literals
   defp emit({:list_lit, elems, nil}, :elixir),

@@ -136,6 +136,21 @@ defmodule Rian.Capability do
     )
   end
 
+  defp count_uses({:case, scrut, arms}, bound) do
+    # branch-aware (max over arms, like `if`); each arm's pattern variables
+    # shadow the outer linear environment within that arm.
+    branches =
+      arms
+      |> Enum.map(fn {pat, guard, body} ->
+        inner = MapSet.union(bound, pat_vars(pat))
+        guard_uses = if guard, do: count_uses(guard, inner), else: %{}
+        merge(guard_uses, count_uses(body, inner))
+      end)
+      |> Enum.reduce(%{}, &max_merge/2)
+
+    merge(count_uses(scrut, bound), branches)
+  end
+
   defp count_uses({:block, stmts}, bound), do: count_block(stmts, bound, %{})
 
   defp count_block([], _bound, acc), do: acc
@@ -148,4 +163,12 @@ defmodule Rian.Capability do
 
   defp merge(a, b), do: Map.merge(a, b, fn _, x, y -> x + y end)
   defp max_merge(a, b), do: Map.merge(a, b, fn _, x, y -> max(x, y) end)
+
+  # variables a `case` pattern binds (they shadow the linear env within the arm)
+  defp pat_vars({:var, x}), do: MapSet.new([x])
+
+  defp pat_vars({:ctor, _, args}),
+    do: Enum.reduce(args, MapSet.new(), &MapSet.union(pat_vars(&1), &2))
+
+  defp pat_vars(_), do: MapSet.new()
 end

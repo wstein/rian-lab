@@ -107,6 +107,29 @@ defmodule Rian.DeclTest do
       assert EvalFromSource.eval(:zero) == 0
     end
 
+    test "a `case` body lowers to both targets — Rust resolves constructor patterns via meta" do
+      [{"area", out}] =
+        Decl.compile("""
+        type Shape := Circle(radius Float64) | Square(side Float64)
+
+        def area(s val Shape) Float64
+          case s do
+            Circle(r) -> 3.14 * r * r
+            Square(x) -> x * x
+          end
+        end
+        """)
+
+      assert out.elixir =~ "case s do {:circle, r} -> 3.14 * r * r; {:square, x} -> x * x end"
+      # the ambient type meta lets the nested `case` emit Rust enum patterns
+      assert out.rust =~ "Shape::Circle { radius: r } => 3.14 * r * r,"
+      assert out.rust =~ "Shape::Square { side: x } => x * x,"
+
+      Code.eval_string("defmodule AreaCaseFromSource do\n#{out.elixir}\nend")
+      assert_in_delta AreaCaseFromSource.area({:circle, 2.0}), 3.14 * 4, 1.0e-9
+      assert AreaCaseFromSource.area({:square, 3.0}) == 9.0
+    end
+
     test "multiline block bodies lower and run (the token parser's headline)" do
       [{"step", out}] =
         Decl.compile("""

@@ -88,6 +88,16 @@ defmodule Rian.CapabilityTest do
                {:error, [{"f", 2}]}
     end
 
+    test "case is branch-aware: an iso used once per arm is consumed once" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("case c do A -> read(f) B -> drop(f) end")) ==
+               :ok
+    end
+
+    test "case flags an iso used twice within a single arm" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("case c do A -> pair(f, f) B -> 0 end")) ==
+               {:error, [{"f", 2}]}
+    end
+
     test "lambda parameters shadow the linear environment" do
       assert C.lin_check(%{"x" => :iso}, Pratt.parse("(x) -> pair(x, x)")) == :ok
     end

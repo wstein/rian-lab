@@ -22,13 +22,12 @@ defmodule Rian.Decl do
       * single typed clause — `def add(x Int64, y Int64) Int64 := x + y`
       * bodiless signature + pattern clauses —
         `def max2(a Int64, b Int64) Int64` then `def max2(a, b) when a >= b := a`
-    * `:=` one-liner bodies **and** multiline `… end` **block bodies**,
-      including string literals and `when` guards.
+    * `:=` one-liner bodies **and** multiline `… end` **block bodies**, including
+      `case … do … end` expressions, string literals, and `when` guards.
 
   ## Not yet supported
 
-  `case` expression bodies, and `mod`/`struct`/`alias` declarations. Each raises
-  `Rian.Decl.Error`.
+  `mod`/`struct`/`alias` declarations. Each raises `Rian.Decl.Error`.
   """
   alias Rian.{Lexer, Lower}
 
@@ -119,7 +118,7 @@ defmodule Rian.Decl do
       {def_raw(name, params, head, nil), rest}
     else
       {block_toks, rest} = take_block(rest, 1, [])
-      {def_raw(name, params, head, Lexer.detokenize(block_toks, ";")), rest}
+      {def_raw(name, params, head, detok_block(block_toks)), rest}
     end
   end
 
@@ -158,6 +157,18 @@ defmodule Rian.Decl do
   defp take_parens([{:rparen} = t | rest], d, acc), do: take_parens(rest, d - 1, [t | acc])
   defp take_parens([t | rest], d, acc), do: take_parens(rest, d, [t | acc])
   defp take_parens([], _, _), do: raise(Error, "unbalanced `(` in the parameter list")
+
+  # Detokenize a block body: a newline at block level (depth 0) separates
+  # statements (`;`); a newline inside a nested `do … end` (a `case`/`if`) is
+  # insignificant (those arms self-delimit), so it becomes whitespace.
+  defp detok_block(tokens), do: tokens |> block_seps(0, []) |> Lexer.detokenize()
+
+  defp block_seps([], _d, acc), do: Enum.reverse(acc)
+  defp block_seps([{:kw, "do"} = t | r], d, acc), do: block_seps(r, d + 1, [t | acc])
+  defp block_seps([{:kw, "end"} = t | r], d, acc), do: block_seps(r, d - 1, [t | acc])
+  defp block_seps([{:nl} | r], 0, acc), do: block_seps(r, 0, [{:semi} | acc])
+  defp block_seps([{:nl} | r], d, acc), do: block_seps(r, d, acc)
+  defp block_seps([t | r], d, acc), do: block_seps(r, d, [t | acc])
 
   # ── `type` declarations ────────────────────────────────────────────────
   defp parse_type(rest) do

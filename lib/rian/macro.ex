@@ -48,6 +48,9 @@ defmodule Rian.Macro do
   def map_node({:lambda, ps, b}, f), do: {:lambda, ps, f.(b)}
   def map_node({:if, c, t, e}, f), do: {:if, f.(c), f.(t), f.(e)}
 
+  def map_node({:case, s, arms}, f),
+    do: {:case, f.(s), Enum.map(arms, fn {p, g, b} -> {p, g && f.(g), f.(b)} end)}
+
   def map_node({:block, stmts}, f) do
     {:block,
      Enum.map(stmts, fn
@@ -106,6 +109,13 @@ defmodule Rian.Macro do
   defp collect_binders({:if, c, t, e}),
     do: collect_binders(c) ++ collect_binders(t) ++ collect_binders(e)
 
+  defp collect_binders({:case, s, arms}) do
+    collect_binders(s) ++
+      Enum.flat_map(arms, fn {_p, g, b} ->
+        ((g && collect_binders(g)) || []) ++ collect_binders(b)
+      end)
+  end
+
   defp collect_binders({:list_lit, es, tail}) do
     Enum.flat_map(es, &collect_binders/1) ++
       case tail do
@@ -129,6 +139,11 @@ defmodule Rian.Macro do
     do: {:lambda, Enum.map(ps, fn {n, t} -> {Map.get(ren, n, n), t} end), rename(b, ren)}
 
   defp rename({:if, c, t, e}, ren), do: {:if, rename(c, ren), rename(t, ren), rename(e, ren)}
+
+  defp rename({:case, s, arms}, ren),
+    do:
+      {:case, rename(s, ren),
+       Enum.map(arms, fn {p, g, b} -> {p, g && rename(g, ren), rename(b, ren)} end)}
 
   defp rename({:block, stmts}, ren) do
     {:block,

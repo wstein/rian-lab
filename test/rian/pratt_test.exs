@@ -131,6 +131,17 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "case expressions" do
+    test "parses scrutinee and pattern arms" do
+      assert p("case x do Circle(r) -> r Square(s) -> s end") ==
+               "(case x (Circle(r) -> r) (Square(s) -> s))"
+    end
+
+    test "wildcard and literal arms parse" do
+      assert p("case n do 0 -> a _ -> b end") == "(case n (0 -> a) (_ -> b))"
+    end
+  end
+
   describe "parse_body (function bodies: block-or-expression)" do
     test "a single expression becomes a one-statement block" do
       assert Pratt.parse_body("a + b") == {:block, [{:expr, {:bin, "+", {:id, "a"}, {:id, "b"}}}]}

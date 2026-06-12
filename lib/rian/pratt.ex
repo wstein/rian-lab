@@ -136,6 +136,7 @@ defmodule Rian.Pratt do
   defp collect_dots(node, rest), do: {node, rest}
 
   defp parse_primary([{:kw, "if"} | rest]), do: parse_if(rest)
+  defp parse_primary([{:kw, "case"} | rest]), do: parse_case(rest)
   defp parse_primary([{:lbracket} | rest]), do: parse_list(rest, [])
   defp parse_primary([{:mapopen} | rest]), do: parse_map(rest, [])
 
@@ -239,6 +240,66 @@ defmodule Rian.Pratt do
     {{:if, cnd, then_b, else_b}, tokens}
   end
 
+  # `case scrut do pattern [when guard] -> body … end` (Elixir form, ADR-0033).
+  defp parse_case(tokens) do
+    {scrut, tokens} = parse_expr(tokens, 0)
+    tokens = expect_kw(tokens, "do")
+    {arms, tokens} = parse_arms(tokens, [])
+    tokens = expect_kw(tokens, "end")
+    {{:case, scrut, arms}, tokens}
+  end
+
+  defp parse_arms([{:kw, "end"} | _] = tokens, acc), do: {Enum.reverse(acc), tokens}
+
+  defp parse_arms(tokens, acc) do
+    {pat, tokens} = parse_pat(tokens)
+
+    {guard, tokens} =
+      case tokens do
+        [{:kw, "when"} | rest] -> parse_expr(rest, 0)
+        _ -> {nil, tokens}
+      end
+
+    tokens = expect_op(tokens, "->")
+    {body, tokens} = parse_expr(tokens, 0)
+    parse_arms(tokens, [{pat, guard, body} | acc])
+  end
+
+  # token-level pattern parser (arm heads): wildcard, integer, var, constructor
+  defp parse_pat([{:id, "_"} | rest]), do: {:wild, rest}
+  defp parse_pat([{:num, n} | rest]), do: {{:lit, String.to_integer(n)}, rest}
+
+  defp parse_pat([{:id, name} | rest]) do
+    if pascal?(name) do
+      case rest do
+        [{:lparen} | r] ->
+          {args, r} = parse_pat_args(r, [])
+          {{:ctor, name, args}, r}
+
+        _ ->
+          {{:ctor, name, []}, rest}
+      end
+    else
+      {{:var, name}, rest}
+    end
+  end
+
+  defp parse_pat(other), do: raise(ArgumentError, "unsupported pattern: #{inspect(other)}")
+
+  defp parse_pat_args([{:rparen} | rest], acc), do: {Enum.reverse(acc), rest}
+
+  defp parse_pat_args(tokens, acc) do
+    {p, tokens} = parse_pat(tokens)
+
+    case tokens do
+      [{:comma} | rest] -> parse_pat_args(rest, [p | acc])
+      [{:rparen} | rest] -> {Enum.reverse([p | acc]), rest}
+      other -> raise ArgumentError, "expected `,` or `)` in pattern: #{inspect(other)}"
+    end
+  end
+
+  defp pascal?(s), do: String.match?(s, ~r/^[A-Z]/)
+
   defp parse_block(tokens) do
     {stmts, tokens} = parse_stmts(tokens, [])
     {{:block, Enum.reverse(stmts)}, tokens}
@@ -329,6 +390,10 @@ defmodule Rian.Pratt do
 
   defp sexpr({:if, c, t, e}), do: "(if #{sexpr(c)} #{sexpr(t)} #{sexpr(e)})"
 
+  defp sexpr({:case, s, arms}),
+    do:
+      "(case #{sexpr(s)}#{Enum.map_join(arms, "", fn {p, _g, b} -> " (#{sexpr_pat(p)} -> #{sexpr(b)})" end)})"
+
   defp sexpr({:block, stmts}),
     do: "(block#{Enum.map_join(stmts, "", fn s -> " " <> sexpr_stmt(s) end)})"
 
@@ -342,4 +407,10 @@ defmodule Rian.Pratt do
 
   defp sexpr_stmt({:bind, n, e}), do: "(:= #{n} #{sexpr(e)})"
   defp sexpr_stmt({:expr, e}), do: sexpr(e)
+
+  defp sexpr_pat(:wild), do: "_"
+  defp sexpr_pat({:lit, v}), do: to_string(v)
+  defp sexpr_pat({:var, x}), do: x
+  defp sexpr_pat({:ctor, n, []}), do: n
+  defp sexpr_pat({:ctor, n, args}), do: "#{n}(#{Enum.map_join(args, ", ", &sexpr_pat/1)})"
 end
