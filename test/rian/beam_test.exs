@@ -147,6 +147,27 @@ defmodule Rian.BeamTest do
                "type error in if-branch: expected Int, got Bool"
     end
 
+    test "the full self-hosting pipeline: lex -> parse -> codegen -> stack VM, on bytecode" do
+      {:ok, cg} = Beam.load(File.read!("examples/rian/selfhost_codegen.rian"), :rian_beam_cg)
+
+      {:ok, parser} =
+        Beam.load(File.read!("examples/rian/selfhost_parser.rian"), :rian_beam_cg_parser)
+
+      {:ok, lexer} =
+        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_cg_lexer)
+
+      compile_run = fn s -> cg.run(cg.gen(parser.parse(lexer.tokenize(s)))) end
+
+      # five Rian modules, all compiled to .beam: source -> value
+      assert compile_run.("2 + 3 * 4") == 14
+      assert compile_run.("1 + 2 * (3 - 4)") == -1
+      assert compile_run.("(1 + 2) * 3") == 9
+      assert compile_run.("8 / 4 / 2") == 1
+
+      # the generated post-order program is what runs
+      assert cg.gen({:add, {:num, 1}, {:num, 2}}) == [{:push, 1}, {:push, 2}, :i_add]
+    end
+
     test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
       {:ok, mod} =
         Beam.load(

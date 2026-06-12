@@ -1,0 +1,51 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — a Rian code generator + stack VM, written in Rian
+# ===========================================================================
+# Goal (ADR-0027/0031): the layer after the type-checker. Compile the `Expr`
+# sum to a flat list of **stack-machine instructions** (post-order), then run
+# those instructions on a tiny stack VM — both written in Rian. This is the
+# "back end" of the self-hosting toolchain: `Expr -> Vec(Instr) -> Int64`.
+# Evidence for SELFHOST.md.
+#
+#   gen(Add(Num(1), Num(2)))  =  [Push(1), Push(2), IAdd]
+#   run([Push(1), Push(2), IAdd])  =  3
+# ---------------------------------------------------------------------------
+
+mod SelfhostCodegen do
+  type Expr := Num(Int64)
+             | Add(Expr, Expr)
+             | Sub(Expr, Expr)
+             | Mul(Expr, Expr)
+             | Div(Expr, Expr)
+
+  # A stack-machine instruction set: push a literal, or pop two / push one.
+  type Instr := Push(Int64) | IAdd | ISub | IMul | IDiv
+
+  # Compile an expression to a post-order instruction list: emit the operands,
+  # then the operator (so the operator finds them on top of the stack).
+  pub def gen(e Expr) Vec(Instr)
+  pub def gen(Num(n)) := [Push(n)]
+  pub def gen(Add(a, b)) := bin(a, b, IAdd)
+  pub def gen(Sub(a, b)) := bin(a, b, ISub)
+  pub def gen(Mul(a, b)) := bin(a, b, IMul)
+  pub def gen(Div(a, b)) := bin(a, b, IDiv)
+
+  def bin(a Expr, b Expr, op Instr) Vec(Instr) := concat(gen(a), concat(gen(b), [op]))
+
+  # List concatenation, written in Rian (there is no `++` operator).
+  def concat(xs Vec(Instr), ys Vec(Instr)) Vec(Instr)
+  def concat([], ys) := ys
+  def concat([h | t], ys) := [h | concat(t, ys)]
+
+  # Execute an instruction list against a stack (a `Vec(Int64)`), returning the
+  # value left on top. Binary ops pop two operands (`[b, a | s]`) and push one.
+  pub def run(prog Vec(Instr)) Int64 := exec(prog, [])
+
+  def exec(prog Vec(Instr), stack Vec(Int64)) Int64
+  def exec([], [top | _]) := top
+  def exec([Push(n) | rest], stack) := exec(rest, [n | stack])
+  def exec([IAdd | rest], [b, a | s]) := exec(rest, [a + b | s])
+  def exec([ISub | rest], [b, a | s]) := exec(rest, [a - b | s])
+  def exec([IMul | rest], [b, a | s]) := exec(rest, [a * b | s])
+  def exec([IDiv | rest], [b, a | s]) := exec(rest, [a div b | s])
+end

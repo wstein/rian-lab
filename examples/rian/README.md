@@ -56,6 +56,11 @@ compile + run on real BEAM bytecode:
   error** via a `struct Mismatch(op, expected, got)`. The diagnostic record is
   the first place a checker wants a `struct`; it drove the BEAM **struct**
   increment (a struct value is a tagged map, read by field access).
+- [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
+  VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
+  them on a stack (`Vec(Int64)`). The full `lex → parse → codegen → run` pipeline
+  runs on `.beam`; it hits **no** backend wall (sum ASTs + list patterns, both
+  already supported).
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

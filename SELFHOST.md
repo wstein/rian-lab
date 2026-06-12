@@ -158,3 +158,18 @@ construction, and cons-list building all compose and lower correctly.
    layers (lexer → parser → evaluator → type-checker) now compile to real `.beam`
    and run.** Still unlowered (next, if a spike demands them): *positional*
    struct construction, map/struct *patterns*, and map *update* (`%{m | k: v}`).
+8. **Self-hosting code generator + stack VM (ADR-0027/0031)** — **a fifth layer,
+   no wall.** [`examples/rian/selfhost_codegen.rian`](examples/rian/selfhost_codegen.rian)
+   compiles the `Expr` sum to a post-order list of stack-machine `Instr`
+   (`Push`/`IAdd`/…) and executes them on a stack (`Vec(Int64)`). The **full
+   `lex → parse → codegen → run` pipeline — five Rian modules, all compiled to
+   `.beam`** — turns source straight into a value: `2 + 3 * 4` → `14`,
+   `1 + 2 * (3 - 4)` → `-1`. Like the parser, it raised **no
+   `Rian.Beam.Unsupported`**: a code generator over a *sum* AST destructures
+   with variant patterns and builds instruction lists with cons — both long
+   supported — and the VM reads the stack with two-head cons patterns
+   (`[b, a | s]`). The predicted struct/map-*pattern* wall was **not** reached,
+   because every spike's IR is sum-based (variants), not struct-based; that wall
+   awaits a spike whose IR nodes are structs matched by shape (e.g. an optimizer
+   rewriting struct-shaped IR). **Net: the abstract-forms backend now compiles a
+   five-stage compiler/runtime pipeline written in Rian, end to end.**
