@@ -68,7 +68,7 @@ def classify(n) when n > 0 := "positive"    #     pattern-head clauses
 def classify(_)            := "negative"
 
 name := expr                               # single-assignment binding (shadow, never mutate)
-total <- expr                              # mutation — capability-gated, BEAM-illegal unless local
+total <~ expr                              # mutation — capability-gated, BEAM-illegal unless local
 
 if c do a else b end                       # `if` is an expression; `else` is REQUIRED in value position
 case x do P -> e   ...   end              # `case` is an expression; arms use `->`, must be exhaustive
@@ -93,7 +93,7 @@ comptime(2 + 3 * 4)                        # pure compile-time constant folding 
 ## Operator precedence (tightest → loosest)
 
 `f(…)` · `.field` › unary `-`/`not` › `* / rem div` › `+ -` › `<>` › `in` ›
-`|>` › `< <= > >=` *(non-assoc)* › `== !=` *(non-assoc)* › `and` › `or` › `<-`.
+`|>` › `< <= > >=` *(non-assoc)* › `== !=` *(non-assoc)* › `and` › `or` › `<~`.
 
 See [docs/spec/expressions.md](../../docs/spec/expressions.md) for the full table
 and worked consequences.

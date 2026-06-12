@@ -35,7 +35,7 @@ grade :=
   statement (matches Rust's `if` typing).
 - `:=` bindings are **single-assignment** and **irrefutable** (tuple/struct destructuring is
   fine; `Some(x) := opt` is refutable → compile error, use `match`). Rebinding a name is
-  shadowing, not mutation. Mutation is `<-` (capability-gated; BEAM-illegal unless local).
+  shadowing, not mutation. Mutation is `<~` (capability-gated; BEAM-illegal unless local).
 
 ---
 
@@ -54,10 +54,10 @@ grade :=
 | 9 | `==` `!=` | **non-assoc** | |
 | 10 | `and` | left | short-circuit, boolean operands |
 | 11 | `or` | left | short-circuit |
-| 12 | `<-` | right | mutation; yields unit |
+| 12 | `<~` | right | mutation; yields unit |
 
 Worked consequences: `a + b \|> f` = `(a + b) \|> f`; `x \|> f < y` = `(x \|> f) < y`;
-`not a and b` = `(not a) and b`; `x <- a or b` = `x <- (a or b)`.
+`not a and b` = `(not a) and b`; `x <~ a or b` = `x <~ (a or b)`.
 
 Parsed with precedence climbing (Pratt). `.` accesses fields only — there is **no method-call
 syntax** (`x.f(a)`); call via `f(x, a)` or `x |> f(a)`.
@@ -78,7 +78,7 @@ syntax** (`x.f(a)`); call via `f(x, a)` or `x |> f(a)`.
 | `if c do a else b end` | `if c, do: a, else: b` | `if c { a } else { b }` |
 | `name := e` | `name = e` | `let name = e;` |
 | `{a, b} := p` | `{a, b} = p` | `let (a, b) = p;` |
-| `total <- e` | (local rewrite / error) | `total = e;` (on a `mut` binding) |
+| `total <~ e` | (local rewrite / error) | `total = e;` (on a `mut` binding) |
 | block (last expr is value) | `do … end` body | `{ …; final }` |
 
 `/` always producing float and `div` for integer division mirrors Elixir exactly and removes

@@ -23,7 +23,7 @@ end
 
 # `:=` is single-assignment and irrefutable. Re-using a name SHADOWS the old
 # binding (a fresh value), it does not mutate it. Mutation is a different
-# operator, `<-`, and is capability-gated (see 04_capabilities.rian).
+# operator, `<~`, and is capability-gated (see 04_capabilities.rian).
 def shadow_demo(n Int64) Int64
   x := n + 1
   x := x * 10         # shadow: a NEW `x`, the old one is untouched

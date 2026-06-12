@@ -30,7 +30,7 @@ def norm(v val Vec(Float64)) Float64
 end
 
 # A block body can contain `if`/`case` expressions, more bindings, and
-# (capability permitting) local mutation with `<-`. Here a running total is
+# (capability permitting) local mutation with `<~`. Here a running total is
 # threaded through bindings — shadowing, the immutable default.
 def stats(xs val Vec(Int64)) Int64
   s := :lists.sum(xs)

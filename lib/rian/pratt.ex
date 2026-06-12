@@ -13,7 +13,9 @@ defmodule Rian.Pratt do
     defexception [:message]
   end
 
-  @infix ~w(+ - * / rem div <> in |> < <= > >= == != and or <-)
+  # `<~` is capability-gated mutation (ADR-0039). `<-` is NOT a general infix —
+  # it is the failable-bind arrow, valid only in `with`/`for` clause headers.
+  @infix ~w(+ - * / rem div <> in |> < <= > >= == != and or <~)
 
   def parse(str) do
     {ast, rest} = parse_expr(Rian.Lexer.expr_tokens(str), 0)
@@ -45,7 +47,7 @@ defmodule Rian.Pratt do
       op in ~w(== !=) -> {9, :none}
       op == "and" -> {10, :left}
       op == "or" -> {11, :left}
-      op == "<-" -> {12, :right}
+      op == "<~" -> {12, :right}
     end
   end
 

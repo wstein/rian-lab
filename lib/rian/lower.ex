@@ -724,6 +724,9 @@ defmodule Rian.Lower do
 
   defp disp("and", :rust), do: "&&"
   defp disp("or", :rust), do: "||"
+  # `<~` is capability-gated mutation (ADR-0039): BEAM rebinding / Rust
+  # reassignment — both spelled `=` on the target.
+  defp disp("<~", _), do: "="
   defp disp(op, _), do: op
 
   defp prec(op) do
@@ -737,13 +740,13 @@ defmodule Rian.Lower do
       op in ~w(== !=) -> 4
       op == "and" -> 3
       op == "or" -> 2
-      op == "<-" -> 1
+      op == "<~" -> 1
     end
   end
 
   defp assoc(op) do
     cond do
-      op == "<>" or op == "<-" -> :right
+      op == "<>" or op == "<~" -> :right
       op in ~w(< <= > >= == != in) -> :none
       true -> :left
     end

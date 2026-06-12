@@ -32,7 +32,7 @@ defmodule Rian.Lexer do
   # declaration/`case` keywords for the token-driven declaration parser.
   @keywords ~w(if do else end def type case when struct alias mod pub const macro use)
 
-  @multi ["->", ":=", "|>", "<>", "<-", "<=", ">=", "==", "!="]
+  @multi ["->", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!="]
   @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&"]
 
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/

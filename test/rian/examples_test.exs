@@ -59,6 +59,12 @@ defmodule Rian.ExamplesTest do
       assert Pratt.parse("x |> greet |> String.upcase")
     end
 
+    test "`<~` is capability-gated mutation; lowers to rebinding/reassignment (ADR-0039)" do
+      assert Pratt.parse_sexpr("total <~ total + n") == "(<~ total (+ total n))"
+      assert Lower.emit_expr("total <~ total + n", :elixir) == "total = total + n"
+      assert Lower.emit_expr("total <~ total + n", :rust) == "total = total + n"
+    end
+
     test "FFI atom-head call lowers (07_ffi)" do
       assert Lower.emit_expr(":lists.sum(xs)", :elixir) == ":lists.sum(xs)"
     end

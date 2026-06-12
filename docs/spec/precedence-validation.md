@@ -31,11 +31,11 @@ S-expression rendering: `(op lhs rhs)` for binary, `(op x)` for unary, `(call f 
 a + b |> f             => (|> (+ a b) f)
 x |> f < y             => (< (|> x f) y)
 not a and b            => (and (not a) b)
-x <- a or b            => (<- x (or a b))
+x <~ a or b            => (<~ x (or a b))
 a + b * c              => (+ a (* b c))
 a - b + c              => (+ (- a b) c)
 a <> b <> c            => (<> a (<> b c))
-a <- b <- c            => (<- a (<- b c))
+a <~ b <~ c            => (<~ a (<~ b c))
 a and b or c           => (or (and a b) c)
 a |> f |> g            => (|> (|> a f) g)
 a <> b |> f            => (|> (<> a b) f)
@@ -46,7 +46,7 @@ Geometry.area(x)       => (call (. Geometry area) x)
 ```
 
 Each line confirms a table decision: pipe looser than arithmetic and concat; pipe tighter than
-comparison; unary tighter than `*`; `+`/`-` left-assoc; `<>` and `<-` right-assoc; `and` tighter
+comparison; unary tighter than `*`; `+`/`-` left-assoc; `<>` and `<~` right-assoc; `and` tighter
 than `or`; `in` tighter than `or`; comparison tighter than equality (cross-level chaining
 allowed); postfix `.`/`::`/call tightest.
 

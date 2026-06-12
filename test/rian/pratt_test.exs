@@ -18,8 +18,8 @@ defmodule Rian.PrattTest do
       assert p("not a and b") == "(and (not a) b)"
     end
 
-    test "x <- a or b  ==  x <- (a or b)" do
-      assert p("x <- a or b") == "(<- x (or a b))"
+    test "x <~ a or b  ==  x <~ (a or b)" do
+      assert p("x <~ a or b") == "(<~ x (or a b))"
     end
   end
 
@@ -47,8 +47,8 @@ defmodule Rian.PrattTest do
       assert p("a <> b <> c") == "(<> a (<> b c))"
     end
 
-    test "<- is right-associative" do
-      assert p("a <- b <- c") == "(<- a (<- b c))"
+    test "<~ is right-associative" do
+      assert p("a <~ b <~ c") == "(<~ a (<~ b c))"
     end
   end
 
