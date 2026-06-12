@@ -164,7 +164,7 @@ defmodule Rian.Check do
   def infer(%ECall{fun: %EId{name: f}}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)
-      true -> ctor_type(ic, f) || Map.get(Map.get(ic, :funs, %{}), f) || :unknown
+      true -> ctor_type(ic, f) || called_ret(ic, f)
     end
   end
 
@@ -283,6 +283,21 @@ defmodule Rian.Check do
     do: [{:expr, annotate(e, env, ic)} | ann_stmts(rest, env, ic)]
 
   defp ctor_type(ic, name), do: Map.get(Map.get(ic, :ctors, %{}), name)
+
+  # a named function's declared return type — but a *generic* return (one that
+  # mentions an un-instantiated type variable, e.g. `Vec(U)` from a `forall`
+  # function) infers `:unknown`: we don't instantiate generics, so pinning it to
+  # the literal `Vec(U)` would wrongly contradict a concrete caller (conservative)
+  defp called_ret(ic, f) do
+    case Map.get(Map.get(ic, :funs, %{}), f) do
+      nil -> :unknown
+      ret -> if has_tvar?(ret), do: :unknown, else: ret
+    end
+  end
+
+  # does a type string mention a standalone type variable (a single capital,
+  # optionally one digit) — `U`, `Vec(U)`, `Fn(T, U)` yes; `Int64`, `Vec(Int64)` no
+  defp has_tvar?(s), do: Regex.match?(~r/\b[A-Z][0-9]?\b/, s)
 
   defp infer_tail(:close, _env, _ic), do: :unknown
   defp infer_tail(tail, env, ic), do: infer(tail, env, ic)

@@ -72,3 +72,34 @@ def show2(Add(a, b))                  # block body: name the parts, then join
   rs := show2(b)
   "(" <> ls <> " + " <> rs <> ")"
 end
+
+# --- (4) functions as VALUES: the `Fn(…)` type (ADR-0042) -----------------
+# A function value has a type, written `Fn(Arg1, …, ArgN, Ret)` — the argument
+# types followed by the return type. THE LAST ELEMENT IS ALWAYS THE RETURN.
+#
+#   Fn(Int64, Bool)            a one-arg fn: takes Int64, returns Bool
+#   Fn(Int64, Int64, Int64)    a two-arg fn: (Int64, Int64) -> Int64
+#   Fn(Bool)                   a NULLARY fn: () -> Bool  (just the return)
+#
+# This is the type you give a parameter that receives a lambda `(x) -> e` or a
+# capture `&name/arity`. Applying such a parameter (`f(x)`) yields its return
+# type, so the checker types higher-order code instead of giving up.
+
+# A higher-order function: `f` is itself a function. Applying it twice is typed
+# end to end — `f(x)` is Int64, so `f(f(x))` is Int64, matching the return.
+def apply_twice(f Fn(Int64, Int64), x Int64) Int64 := f(f(x))
+
+# The canonical generic `map`: `f` maps each `T` to a `U`, `xs` is a `Vec(T)`,
+# the result is a `Vec(U)`. `forall T, U` binds the type variables (ADR-0042).
+def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U
+def map(_, [])      := []
+def map(f, [h | t]) := [f(h) | map(f, t)]
+
+# A function may RETURN a function (a closure over its parameters). The declared
+# return type is an `Fn(…)`; the lambda body is checked against it.
+def adder(n Int64) Fn(Int64, Int64) := (x) -> x + n
+
+# Both a lambda literal and a named-function capture are values of an `Fn(…)`
+# type, so either can be passed where an `Fn(…)` parameter is expected.
+def doubled(xs val Vec(Int64)) Vec(Int64) := map((x) -> x * 2, xs)
+def doubled_cap(xs val Vec(Int64)) Vec(Int64) := map(&double/1, xs)

@@ -297,6 +297,24 @@ defmodule Rian.CheckTest do
       %{funcs: [f]} = Rian.Decl.parse(src)
       assert [%{name: "f", type: "Fn(T,U)"}, %{name: "xs", type: "Vec(T)"}] = f.params
     end
+
+    test "calling a generic function yields `:unknown`, not its literal `Vec(U)`" do
+      # `map` returns `Vec(U)`; we don't instantiate generics, so a concrete
+      # caller must NOT be contradicted by the uninstantiated return.
+      assert Check.check("""
+             def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U := []
+             def double(n Int64) Int64 := n * 2
+             def doubled(xs val Vec(Int64)) Vec(Int64) := map(&double/1, xs)
+             """) == :ok
+    end
+
+    test "a full higher-order recursive `map` over a Vec checks end to end" do
+      assert Check.check("""
+             def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U
+             def map(_, []) := []
+             def map(f, [h | t]) := [f(h) | map(f, t)]
+             """) == :ok
+    end
   end
 
   describe "annotate/3 — types on nodes (ADR-0050 §3)" do
