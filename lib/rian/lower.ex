@@ -110,6 +110,21 @@ defmodule Rian.Lower do
   defp case_guard(nil, _), do: ""
   defp case_guard(g, target), do: guard_kw(target) <> (emit(g, target) |> elem(0))
 
+  # Resolve every `case` arm pattern in a body to its Rust spelling using the
+  # type meta, storing it back into the IR as `{:rpat, str}`. After this pass the
+  # Rust emitter needs no ambient meta — the IR carries the resolution.
+  defp resolve_rust_pats({:case, scrut, arms}, meta) do
+    {:case, resolve_rust_pats(scrut, meta),
+     Enum.map(arms, fn {pt, g, b} ->
+       {{:rpat, pat_rs(pt, meta)}, g && resolve_rust_pats(g, meta), resolve_rust_pats(b, meta)}
+     end)}
+  end
+
+  defp resolve_rust_pats(node, meta), do: Rian.Macro.map_node(node, &resolve_rust_pats(&1, meta))
+
+  defp rpat({:rpat, s}), do: s
+  defp rpat(pat), do: pat_rs(pat, %{})
+
   # ── `&` capture support ────────────────────────────────────────────────
   # Highest placeholder index in an anonymous-capture body → the closure arity
   # the Rust target must spell out (`&(&1 + &2)` ⇒ 2 ⇒ `|a1, a2| …`).
@@ -162,10 +177,6 @@ defmodule Rian.Lower do
 
   # ── Rust backend ───────────────────────────────────────────────────────
   def to_rust(func, types, meta) do
-    # Ambient type meta for `case` constructor patterns nested in bodies, which
-    # the recursive expression emitter would otherwise have no channel to reach
-    # (a compiler-internal context, not language-level hidden control flow).
-    Process.put({:rian, :meta}, meta)
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
 
     param_decls =
@@ -180,7 +191,10 @@ defmodule Rian.Lower do
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
         pat = tuple_or_one(c.pats, &pat_rs(&1, meta))
-        body_ast = Pratt.parse_body(c.body)
+        # Resolve `case` constructor patterns into the body IR here, where the
+        # type meta is available — so the recursive emitter needs no ambient
+        # context (this is the IR carrying the resolution, ADR core-IR direction).
+        body_ast = c.body |> Pratt.parse_body() |> resolve_rust_pats(meta)
         body = emit(body_ast, :rust) |> elem(0)
         "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(body_ast, body)},"
       end)
@@ -344,11 +358,9 @@ defmodule Rian.Lower do
   end
 
   defp emit({:case, scrut, arms}, :rust) do
-    meta = Process.get({:rian, :meta}, %{})
-
     body =
       Enum.map_join(arms, " ", fn {pt, g, b} ->
-        "#{pat_rs(pt, meta)}#{case_guard(g, :rust)} => #{p(b, 0, :rust)},"
+        "#{rpat(pt)}#{case_guard(g, :rust)} => #{p(b, 0, :rust)},"
       end)
 
     {"match #{p(scrut, 0, :rust)} { #{body} }", 0}
