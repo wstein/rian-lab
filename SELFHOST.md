@@ -78,7 +78,13 @@ construction, and cons-list building all compose and lower correctly.
    — currently each raises `Rian.Beam.Unsupported` (never a silent miscompile),
    so the full lexer (which builds `Token` variants) still uses the Elixir-source
    path until that lands.
-3. **Core IR + parser unification** — open. B1 had to be fixed in *three* places
-   (`Pratt.parse_pat`, `Decl.pattern`, the emitters); that triplication is the
-   fork a self-hosted front end would inherit.
-4. **Portable prelude (ADR-0041 #3)** — open; gates only multi-target self-hosting.
+3. **Core IR + parser unification (ADR-0050)** — **parser fork closed.** The
+   duplicate `Decl.pattern` string parser is gone; clause heads and `case` arms
+   now share the one `Rian.Pratt.parse_pat` token parser (ADR-0050 §2). A pattern
+   form is added in *one* parser site, and clause heads inherited Pratt's richer
+   patterns (string-literal, negative-int) for free. **Remaining (ADR-0050 §1/§4,
+   larger):** the emitter still walks surface tuples while the checker walks the
+   normalized Maranget form — fold both onto one *typed* core IR, incrementally,
+   before the three new emitters (ADR-0049).
+4. **Portable prelude (ADR-0041 #3 / ADR-0047)** — open; gates only multi-target
+   self-hosting (the BEAM bootstrap is happy on Elixir-stdlib FFI).

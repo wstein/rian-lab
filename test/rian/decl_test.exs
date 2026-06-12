@@ -328,6 +328,36 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "one parser (ADR-0050 §2) — clause heads reuse Pratt's pattern parser" do
+    test "string-literal clause patterns now work (parity the old Decl parser lacked)" do
+      [{"classify", out}] =
+        Decl.compile_beam("""
+        def classify(s String) Int64
+        def classify("hi") := 1
+        def classify(_) := 0
+        """)
+
+      assert out.elixir =~ "def classify(\"hi\") do 1 end"
+      Code.eval_string("defmodule ClsT do\n#{out.elixir}\nend")
+      assert ClsT.classify("hi") == 1
+      assert ClsT.classify("x") == 0
+    end
+
+    test "negative-integer clause patterns work" do
+      [{"f", out}] =
+        Decl.compile_beam("""
+        def f(n Int64) Int64
+        def f(-1) := 0
+        def f(n) := n
+        """)
+
+      assert out.elixir =~ "def f(-1) do 0 end"
+      Code.eval_string("defmodule NegT do\n#{out.elixir}\nend")
+      assert NegT.f(-1) == 0
+      assert NegT.f(7) == 7
+    end
+  end
+
   describe "list patterns (B1 / self-hosting spike)" do
     test "cons recursion in clause heads runs on the BEAM" do
       [{"sum", out}] =

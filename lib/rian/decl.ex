@@ -42,7 +42,7 @@ defmodule Rian.Decl do
   A top-level `const`/`use` (outside any `mod`) is rejected. `macro` and other
   reserved keywords raise `Rian.Decl.Error`.
   """
-  alias Rian.{Check, Lexer, Lower}
+  alias Rian.{Check, Lexer, Lower, Pratt}
   alias Rian.IR.{Clause, Const, Field, Func, Mod, Param, Struct, Type, Use, Variant}
 
   defmodule Error do
@@ -534,7 +534,9 @@ defmodule Rian.Decl do
   defp clause(%{body: nil, name: n}, _arity), do: raise(Error, "clause of `#{n}` has no body")
 
   defp clause(%{params: pstr, body: body, guard: guard}, arity) do
-    pats = pstr |> split_top(",") |> Enum.map(&pattern/1)
+    # one parser (ADR-0050 §2): clause-head patterns are parsed by the same
+    # `Rian.Pratt` token parser the `case` arms use — no separate string parser.
+    pats = Pratt.parse_pats(pstr)
 
     if length(pats) != arity do
       raise Error, "clause has #{length(pats)} patterns but the signature has arity #{arity}"
@@ -572,57 +574,6 @@ defmodule Rian.Decl do
       [name, type] -> {name, cap, type}
       _ -> raise Error, "bad parameter `#{p}`"
     end
-  end
-
-  # ── patterns (clause heads) ────────────────────────────────────────────
-  defp pattern(str) do
-    s = String.trim(str)
-
-    cond do
-      s == "_" -> :wild
-      Regex.match?(~r/^-?\d+$/, s) -> {:lit, String.to_integer(s)}
-      String.starts_with?(s, "[") -> list_pattern(s)
-      String.starts_with?(s, "{") -> tuple_pattern(s)
-      match?(["", name] when name != "", String.split(s, ":", parts: 2)) -> atom_pattern(s)
-      match?({_, _, _}, extract_parens(s)) -> ctor_pattern(s)
-      Regex.match?(~r/^[A-Z]/, s) -> {:ctor, s, []}
-      Regex.match?(~r/^[a-z_]\w*$/, s) -> {:var, s}
-      true -> raise Error, "unsupported pattern `#{s}`"
-    end
-  end
-
-  # `{p1, p2, …}` — a tuple pattern (`{:ok, v}` is the Result surface, ADR-0040)
-  defp tuple_pattern(s) do
-    inner = s |> String.trim() |> String.trim_leading("{") |> String.trim_trailing("}")
-    {:tuple, inner |> split_top(",") |> Enum.map(&pattern/1)}
-  end
-
-  # `[p1, …]` (closed) or `[p1, … | tail]` (cons tail)
-  defp list_pattern(s) do
-    inner = s |> String.trim() |> String.trim_leading("[") |> String.trim_trailing("]")
-
-    case split_top(inner, "|") do
-      [] -> {:list, [], :close}
-      [elems] -> {:list, elem_pats(elems), :close}
-      [elems, tail] -> {:list, elem_pats(elems), {:tail, pattern(tail)}}
-      _ -> raise Error, "bad list pattern `#{s}`"
-    end
-  end
-
-  defp elem_pats(s), do: s |> split_top(",") |> Enum.map(&pattern/1)
-
-  defp atom_pattern(s), do: {:atom, s |> String.trim_leading(":") |> String.trim()}
-
-  defp ctor_pattern(s) do
-    {ctor, inside, ""} = extract_parens(s)
-
-    args =
-      case String.trim(inside) do
-        "" -> []
-        i -> i |> split_top(",") |> Enum.map(&pattern/1)
-      end
-
-    {:ctor, String.trim(ctor), args}
   end
 
   defp req_ret(%{ret: nil, name: n}), do: raise(Error, "function `#{n}` needs a return type")

@@ -26,6 +26,28 @@ defmodule Rian.Pratt do
   def parse_sexpr(str), do: sexpr(parse(str))
 
   @doc """
+  Parse a comma-separated pattern list (a clause head's parameters) into surface
+  patterns. The single pattern parser (`parse_pat`) — shared with `case` arms —
+  is the one place patterns are parsed (ADR-0050 §2: one parser).
+  """
+  def parse_pats(str) do
+    case Rian.Lexer.expr_tokens(str) do
+      [] -> []
+      tokens -> parse_pats(tokens, [])
+    end
+  end
+
+  defp parse_pats(tokens, acc) do
+    {p, tokens} = parse_pat(tokens)
+
+    case tokens do
+      [] -> Enum.reverse([p | acc])
+      [{:comma} | rest] -> parse_pats(rest, [p | acc])
+      other -> raise ArgumentError, "trailing tokens in pattern list: #{inspect(other)}"
+    end
+  end
+
+  @doc """
   Parse a function body — a block of `;`-separated statements with a final
   value expression (a single `:= expr` body is the one-statement case). Always
   returns a `{:block, stmts}` node; the emitter unwraps a single expression.
@@ -305,6 +327,7 @@ defmodule Rian.Pratt do
 
   # token-level pattern parser (arm heads): wildcard, integer, atom, tuple, var, constructor
   defp parse_pat([{:id, "_"} | rest]), do: {:wild, rest}
+  defp parse_pat([{:op, "-"}, {:num, n} | rest]), do: {{:lit, -String.to_integer(n)}, rest}
   defp parse_pat([{:num, n} | rest]), do: {{:lit, String.to_integer(n)}, rest}
   defp parse_pat([{:op, ":"}, {:id, name} | rest]), do: {{:atom, name}, rest}
   defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
