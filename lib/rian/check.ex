@@ -474,6 +474,22 @@ defmodule Rian.Check do
          do: check_error_set(f, eset)
   end
 
+  @doc """
+  Check one typed binding's RHS against its declared type (ADR-0034 §1) — the
+  same bidirectional rule the function-body gate applies, exposed for surfaces
+  (the REPL) to enforce a top-level `name Type := expr`. `rhs` is the surface or
+  core RHS expression. Returns `:ok` (well-typed, or unprovable) or
+  `{:error, message}` on a proven clash blamed at the binding site.
+  """
+  @spec check_bind(String.t(), String.t(), term(), map(), map()) ::
+          :ok | {:error, String.t()}
+  def check_bind(name, ann, rhs, env \\ %{}, ic \\ %{}) do
+    case bind_mismatch(name, ann, rhs, env, ic) do
+      nil -> :ok
+      {:error, _} = err -> err
+    end
+  end
+
   # ADR-0034 §1 — typed bindings. `x T := e` checks `e` against the declared type
   # `T`: a numeric *literal* adopts `T` (bidirectional checking — the literal takes
   # the declared width), while any already-typed RHS must *unify exactly* with `T`,

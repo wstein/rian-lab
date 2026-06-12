@@ -275,10 +275,17 @@ defmodule Rian.Repl do
 
   defp eval_stmt(s, input) do
     case safe_parse_body(input) do
-      {:ok, {:block, [{:bind, name, rhs}]}} -> eval_bind(s, input, name, rhs)
-      {:ok, {:block, [{:typed_bind, name, ann, _rhs}]}} -> bind_with_type(s, input, name, ann)
-      {:ok, _block} -> eval_expr(s, input)
-      {:error, message} -> {{:error, message}, s}
+      {:ok, {:block, [{:bind, name, rhs}]}} ->
+        eval_bind(s, input, name, rhs)
+
+      {:ok, {:block, [{:typed_bind, name, ann, rhs}]}} ->
+        eval_typed_bind(s, input, name, ann, rhs)
+
+      {:ok, _block} ->
+        eval_expr(s, input)
+
+      {:error, message} ->
+        {{:error, message}, s}
     end
   end
 
@@ -286,6 +293,20 @@ defmodule Rian.Repl do
     ic = session_ic(s)
     type = safe_infer(rhs, bind_env(s.binds, ic), ic)
     bind_with_type(s, input, name, type)
+  end
+
+  # A typed binding (`x Int32 := 66`, ADR-0034 §1) is enforced at the binding site
+  # before it runs — the same bidirectional rule the function-body gate applies:
+  # a numeric literal adopts the declared width, an already-typed value must
+  # unify, and a proven clash is reported without advancing the session.
+  defp eval_typed_bind(s, input, name, ann, rhs) do
+    ic = session_ic(s)
+    env = bind_env(s.binds, ic)
+
+    case Check.check_bind(name, ann, rhs, env, ic) do
+      {:error, message} -> {{:error, message}, s}
+      :ok -> bind_with_type(s, input, name, ann)
+    end
   end
 
   # A typed binding displays at its declared type (ADR-0034 §1); an untyped one

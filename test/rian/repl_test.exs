@@ -92,6 +92,42 @@ defmodule Rian.ReplTest do
     end
   end
 
+  describe "typed bindings (ADR-0034 §1)" do
+    test "a numeric literal adopts the declared width, displayed at that type" do
+      assert {{:bound, "x", 66, "Int32"}, s} = eval(Repl.new(), "x Int32 := 66")
+      # the adopted type is visible to a later expression
+      assert {{:value, 67, _}, _} = eval(s, "x + 1")
+    end
+
+    test "a float literal adopts a float-width annotation" do
+      assert {{:bound, "f", 6.5, "Float32"}, _} = eval(Repl.new(), "f Float32 := 6.5")
+    end
+
+    test "a literal whose annotation is not a matching width is a binding-site error" do
+      assert {{:error, msg}, s} = eval(Repl.new(), "x Bool := 66")
+      assert msg =~ "declared `Bool`"
+      assert msg =~ "Int64"
+      # the failed binding does not advance the session
+      assert {{:error, _}, ^s} = eval(s, "x")
+    end
+
+    test "an integer literal does not adopt a float annotation" do
+      assert {{:error, _}, _} = eval(Repl.new(), "x Float64 := 66")
+    end
+
+    test "an already-typed value must unify exactly with the annotation" do
+      s = Repl.new()
+      {{:bound, "x", 66, "Int32"}, s} = eval(s, "x Int32 := 66")
+      assert {{:bound, "y", 66, "Int32"}, s} = eval(s, "y Int32 := x")
+      assert {{:error, msg}, _} = eval(s, "z Int64 := x")
+      assert msg =~ "declared `Int64`"
+    end
+
+    test "untyped bindings are unaffected" do
+      assert {{:bound, "x", 66, "Int64"}, _} = eval(Repl.new(), "x := 66")
+    end
+  end
+
   describe "errors leave the session unchanged" do
     test "a parse error is reported and the session is untouched" do
       s = Repl.new()
