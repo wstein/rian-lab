@@ -214,6 +214,56 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "doc comments (ADR-0051)" do
+    @docs """
+    @moduledoc "A tiny module."
+    mod M do
+      @typedoc "A colour."
+      pub type Color := Red | Green
+
+      @doc "Double a number."
+      pub def double(n Int64) Int64 := n * 2
+    end
+    """
+
+    test "@moduledoc/@typedoc/@doc attach to the IR (heredoc + single-line)" do
+      %{mods: [m]} =
+        Decl.parse("""
+        @moduledoc \"\"\"
+        Multi-line
+        module doc.
+        \"\"\"
+        mod M do
+          @doc "one liner"
+          pub def f(n Int64) Int64 := n
+        end
+        """)
+
+      assert m.doc == "Multi-line\nmodule doc."
+      assert hd(m.funcs).doc == "one liner"
+    end
+
+    test "docs lower to @moduledoc/@typedoc/@doc on the BEAM" do
+      [{"M", out}] = Decl.compile(@docs)
+      assert out.elixir =~ ~s(@moduledoc "A tiny module.")
+      assert out.elixir =~ ~s(@typedoc "A colour.")
+      assert out.elixir =~ ~s(@doc "Double a number.")
+    end
+
+    test "docs lower to rustdoc `//!` / `///`" do
+      [{"M", out}] = Decl.compile(@docs)
+      assert out.rust =~ "//! A tiny module."
+      assert out.rust =~ "/// A colour."
+      assert out.rust =~ "/// Double a number."
+    end
+
+    test "an unknown annotation is rejected" do
+      assert_raise Decl.Error, ~r/unsupported annotation `@bogus`/, fn ->
+        Decl.parse(~s|@bogus "x"\ndef f(n Int64) Int64 := n|)
+      end
+    end
+  end
+
   describe "prelude: Option (ADR-0047 §3 — no nil)" do
     test "Some/None are built-in — usable with no `type Option` declaration" do
       [{"wrap", out}] = Decl.compile("def wrap(x Int64) Option := Some(x)")

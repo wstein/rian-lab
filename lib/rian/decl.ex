@@ -36,6 +36,9 @@ defmodule Rian.Decl do
       accessor (BEAM) / a `const` (Rust); references resolve per target.
     * `use Path` / `use Path.(name, …)` — module-scoped imports; lower to
       `alias`/`import` (BEAM) and `use …;`/`use …::{…};` (Rust).
+    * `@moduledoc`/`@doc`/`@typedoc "…"` doc comments (ADR-0051, heredoc-capable)
+      attach to the following declaration and lower to `@moduledoc`/`@doc` (BEAM)
+      / rustdoc `//!`/`///` (Rust).
 
   ## Not yet supported
 
@@ -64,7 +67,7 @@ defmodule Rian.Decl do
     if prog.uses != [], do: raise(Error, "`use` must appear inside a `mod`")
 
     mods =
-      for {:mod, name, inner} <- decls do
+      for {:mod, name, inner, doc} <- decls do
         # top-level aliases are visible inside a module; module-local aliases add to them
         scoped = Map.merge(aliases, collect_aliases(inner))
         p = assemble(inner, scoped)
@@ -75,7 +78,8 @@ defmodule Rian.Decl do
           types: p.types,
           structs: p.structs,
           consts: p.consts,
-          funcs: p.funcs
+          funcs: p.funcs,
+          doc: doc
         }
       end
 
@@ -100,15 +104,15 @@ defmodule Rian.Decl do
       |> Enum.map(&subst_func(&1, aliases))
 
     types =
-      for({:type, t, pub?} <- decls, do: parse_type(t, pub?))
+      for({:type, t, pub?, doc} <- decls, do: parse_type(t, pub?, doc))
       |> Enum.map(&subst_type(&1, aliases))
 
     structs =
-      for({:struct, s, pub?} <- decls, do: parse_struct(s, pub?))
+      for({:struct, s, pub?, doc} <- decls, do: parse_struct(s, pub?, doc))
       |> Enum.map(&subst_struct(&1, aliases))
 
     consts =
-      for({:const, c, pub?} <- decls, do: parse_const(c, pub?))
+      for({:const, c, pub?, doc} <- decls, do: parse_const(c, pub?, doc))
       |> Enum.map(&subst_const(&1, aliases))
 
     uses = for {:use, u} <- decls, do: parse_use(u)
@@ -187,6 +191,20 @@ defmodule Rian.Decl do
     [decl | split_decls(rest)]
   end
 
+  # `@doc`/`@moduledoc`/`@typedoc "…"` attaches Markdown to the next declaration
+  # (ADR-0051). Any other `@name` annotation is not yet supported.
+  defp take_decl([{:annot, a}, {:str, doc} | rest]) when a in ~w(doc moduledoc typedoc) do
+    {decl, rest} = take_decl(skip_nl(rest))
+    {attach_doc(decl, doc), rest}
+  end
+
+  defp take_decl([{:annot, a} | _]),
+    do:
+      raise(
+        Error,
+        "unsupported annotation `@#{a}` (expected `@doc`/`@moduledoc`/`@typedoc \"…\"`)"
+      )
+
   # `pub` exports the declaration that follows it (def / type / struct).
   defp take_decl([{:kw, "pub"} | rest]) do
     {decl, rest} = take_decl(rest)
@@ -195,12 +213,12 @@ defmodule Rian.Decl do
 
   defp take_decl([{:kw, "type"} | rest]) do
     {toks, rest} = take_type(rest, [])
-    {{:type, Lexer.detokenize(toks), false}, rest}
+    {{:type, Lexer.detokenize(toks), false, nil}, rest}
   end
 
   defp take_decl([{:kw, "struct"} | rest]) do
     {toks, rest} = take_type(rest, [])
-    {{:struct, Lexer.detokenize(toks), false}, rest}
+    {{:struct, Lexer.detokenize(toks), false, nil}, rest}
   end
 
   defp take_decl([{:kw, "alias"} | rest]) do
@@ -210,7 +228,7 @@ defmodule Rian.Decl do
 
   defp take_decl([{:kw, "const"} | rest]) do
     {toks, rest} = take_type(rest, [])
-    {{:const, Lexer.detokenize(toks), false}, rest}
+    {{:const, Lexer.detokenize(toks), false, nil}, rest}
   end
 
   defp take_decl([{:kw, "use"} | rest]) do
@@ -228,7 +246,7 @@ defmodule Rian.Decl do
   # bare `end` that has no matching `do`).
   defp take_decl([{:kw, "mod"}, {:id, name}, {:kw, "do"} | rest]) do
     {inner, rest} = take_mod_body(rest, [])
-    {{:mod, name, inner}, rest}
+    {{:mod, name, inner, nil}, rest}
   end
 
   defp take_decl([{:kw, "mod"} | _]),
@@ -252,13 +270,24 @@ defmodule Rian.Decl do
     take_mod_body(rest, [decl | acc])
   end
 
-  defp mark_pub({:type, s, _}), do: {:type, s, true}
-  defp mark_pub({:struct, s, _}), do: {:struct, s, true}
-  defp mark_pub({:const, s, _}), do: {:const, s, true}
+  defp mark_pub({:type, s, _, doc}), do: {:type, s, true, doc}
+  defp mark_pub({:struct, s, _, doc}), do: {:struct, s, true, doc}
+  defp mark_pub({:const, s, _, doc}), do: {:const, s, true, doc}
   defp mark_pub({:def, raw}), do: {:def, Map.put(raw, :pub, true)}
 
   defp mark_pub(_other),
     do: raise(Error, "`pub` may only precede `def` / `type` / `struct` / `const`")
+
+  # attach a doc string to the declaration that follows the `@doc`/… annotation
+  defp attach_doc({:type, s, pub, _}, doc), do: {:type, s, pub, doc}
+  defp attach_doc({:struct, s, pub, _}, doc), do: {:struct, s, pub, doc}
+  defp attach_doc({:const, s, pub, _}, doc), do: {:const, s, pub, doc}
+  defp attach_doc({:mod, n, inner, _}, doc), do: {:mod, n, inner, doc}
+  defp attach_doc({:def, raw}, doc), do: {:def, Map.put(raw, :doc, doc)}
+  defp attach_doc(other, _doc), do: other
+
+  defp skip_nl([{:nl} | rest]), do: skip_nl(rest)
+  defp skip_nl(tokens), do: tokens
 
   # A `type` runs to the newline that begins the next declaration (variant lines
   # beginning with `|` are continuations) or the enclosing module's `end`.
@@ -274,6 +303,7 @@ defmodule Rian.Decl do
 
   # A declaration ends where the next one begins, or at the enclosing `mod`'s `end`.
   defp decl_boundary?([{:kw, "end"} | _]), do: true
+  defp decl_boundary?([{:annot, _} | _]), do: true
   defp decl_boundary?(toks), do: decl_kw?(toks)
 
   defp decl_kw?([{:kw, k} | _]), do: k in ~w(type def struct alias mod pub const macro use import)
@@ -380,13 +410,14 @@ defmodule Rian.Decl do
   defp block_seps([t | r], d, w, acc), do: block_seps(r, d, w, [t | acc])
 
   # ── `type` declarations ────────────────────────────────────────────────
-  defp parse_type(rest, pub?) do
+  defp parse_type(rest, pub?, doc) do
     case split_once(rest, ":=") do
       {left, right} ->
         %Type{
           name: strip_type_params(left),
           variants: right |> split_top("|") |> Enum.map(&variant/1),
-          pub?: pub?
+          pub?: pub?,
+          doc: doc
         }
 
       :none ->
@@ -399,27 +430,27 @@ defmodule Rian.Decl do
   # ── `struct` declarations ──────────────────────────────────────────────
   # `struct Name(field Type, …)` — a product type: one constructor named after
   # the type, with labeled fields (a bare `struct Name` is a zero-field record).
-  defp parse_struct(text, pub?) do
+  defp parse_struct(text, pub?, doc) do
     case extract_parens(text) do
       {name, inside, ""} ->
-        %Struct{name: String.trim(name), fields: fields(inside), pub?: pub?}
+        %Struct{name: String.trim(name), fields: fields(inside), pub?: pub?, doc: doc}
 
       {_, _, rest} ->
         raise Error, "trailing tokens after struct `#{text}`: #{rest}"
 
       :none ->
-        %Struct{name: String.trim(text), fields: [], pub?: pub?}
+        %Struct{name: String.trim(text), fields: [], pub?: pub?, doc: doc}
     end
   end
 
   # ── `const` declarations ───────────────────────────────────────────────
   # `const NAME Type := value` — a named compile-time constant (juxtaposed type,
   # like a parameter without a capability).
-  defp parse_const(text, pub?) do
+  defp parse_const(text, pub?, doc) do
     case split_once(text, ":=") do
       {decl, value} ->
         case decl |> collapse_parens() |> String.split(~r/\s+/, trim: true) do
-          [name, type] -> %Const{name: name, type: type, value: value, pub?: pub?}
+          [name, type] -> %Const{name: name, type: type, value: value, pub?: pub?, doc: doc}
           _ -> raise Error, "const needs `NAME Type := value`: #{text}"
         end
 
@@ -507,7 +538,8 @@ defmodule Rian.Decl do
       ret: req_ret(sig),
       clauses: Enum.map(clauses, &clause(&1, length(params))),
       pub?: sig[:pub] == true,
-      tvars: sig[:tvars] || []
+      tvars: sig[:tvars] || [],
+      doc: sig[:doc]
     }
   end
 
@@ -521,7 +553,8 @@ defmodule Rian.Decl do
       ret: req_ret(d),
       clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}],
       pub?: d[:pub] == true,
-      tvars: d[:tvars] || []
+      tvars: d[:tvars] || [],
+      doc: d[:doc]
     }
   end
 

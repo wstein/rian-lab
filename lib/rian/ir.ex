@@ -39,7 +39,7 @@ defmodule Rian.IR do
   defmodule Type do
     @moduledoc "A sum-type declaration (`type Name := …`). `pub?` marks it exported from a `mod`."
     @enforce_keys [:name]
-    defstruct name: nil, variants: [], pub?: false
+    defstruct name: nil, variants: [], pub?: false, doc: nil
   end
 
   defmodule Struct do
@@ -50,7 +50,7 @@ defmodule Rian.IR do
     built with constructor-call syntax (`Name(v1, v2)`).
     """
     @enforce_keys [:name]
-    defstruct name: nil, fields: [], pub?: false
+    defstruct name: nil, fields: [], pub?: false, doc: nil
   end
 
   defmodule Const do
@@ -60,7 +60,7 @@ defmodule Rian.IR do
     accessor on the BEAM (`def`/`defp`) and a `const` on Rust; `pub?` exports it.
     """
     @enforce_keys [:name, :type, :value]
-    defstruct name: nil, type: nil, value: nil, pub?: false
+    defstruct name: nil, type: nil, value: nil, pub?: false, doc: nil
   end
 
   defmodule Use do
@@ -81,7 +81,7 @@ defmodule Rian.IR do
     `mod` on Rust; `pub?` items are exported (`def`/`pub fn`), the rest private.
     """
     @enforce_keys [:name]
-    defstruct name: nil, uses: [], types: [], structs: [], consts: [], funcs: []
+    defstruct name: nil, uses: [], types: [], structs: [], consts: [], funcs: [], doc: nil
   end
 
   defmodule Param do
@@ -103,6 +103,6 @@ defmodule Rian.IR do
     empty for a non-generic function.
     """
     @enforce_keys [:name, :params, :ret, :clauses]
-    defstruct name: nil, params: [], ret: nil, clauses: [], pub?: false, tvars: []
+    defstruct name: nil, params: [], ret: nil, clauses: [], pub?: false, tvars: [], doc: nil
   end
 end

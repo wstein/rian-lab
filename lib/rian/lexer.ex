@@ -61,6 +61,7 @@ defmodule Rian.Lexer do
   defp tok_str({:str, s}, _), do: ~s("#{s}")
   defp tok_str({:op, o}, _), do: o
   defp tok_str({:kw, k}, _), do: k
+  defp tok_str({:annot, a}, _), do: "@" <> a
   defp tok_str({:lparen}, _), do: "("
   defp tok_str({:rparen}, _), do: ")"
   defp tok_str({:lbracket}, _), do: "["
@@ -90,8 +91,20 @@ defmodule Rian.Lexer do
       String.starts_with?(str, "%{") ->
         lex(advance(str, 2), [{:mapopen} | acc])
 
+      # `@name` — the annotation lane (`@doc`/`@moduledoc`/`@typedoc`, `@wire`, …)
+      m = Regex.run(~r/^@([A-Za-z_]\w*)/, str) ->
+        [full, name] = m
+        lex(advance(str, String.length(full)), [{:annot, name} | acc])
+
       (punct = punct(str)) != nil ->
         lex(advance(str, 1), [punct | acc])
+
+      # heredoc `"""…"""` — multi-line string (doc content, ADR-0051); must precede `"`
+      String.starts_with?(str, ~s(""")) ->
+        case String.split(advance(str, 3), ~s("""), parts: 2) do
+          [content, rest] -> lex(rest, [{:str, String.trim(content)} | acc])
+          [_] -> raise ArgumentError, "unterminated heredoc string"
+        end
 
       String.starts_with?(str, "\"") ->
         case String.split(advance(str, 1), "\"", parts: 2) do

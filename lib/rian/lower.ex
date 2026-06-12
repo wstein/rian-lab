@@ -61,6 +61,7 @@ defmodule Rian.Lower do
 
     body =
       [
+        ex_doc(Map.get(m, :doc), "moduledoc"),
         Enum.map_join(Map.get(m, :uses, []), "\n", &ex_use/1),
         Enum.map_join(structs, "\n", &ex_struct/1),
         Enum.map_join(types, "\n", &ex_typespec/1),
@@ -73,6 +74,17 @@ defmodule Rian.Lower do
     "defmodule #{name} do\n#{body}\nend"
   end
 
+  # `@moduledoc`/`@doc`/`@typedoc "…"` — compile-time metadata (ADR-0051); the
+  # content is a Markdown string emitted as a safe Elixir literal. `nil` -> none.
+  defp ex_doc(nil, _attr), do: ""
+  defp ex_doc(doc, attr), do: "@#{attr} #{inspect(doc)}"
+
+  # rustdoc — `///` per item, `//!` for a module; one comment line per doc line
+  defp rs_doc(nil, _prefix), do: ""
+
+  defp rs_doc(doc, prefix),
+    do: doc |> String.split("\n") |> Enum.map_join("\n", &"#{prefix} #{&1}")
+
   defp module_rust(%{name: name, types: types, structs: structs, funcs: funcs} = m) do
     env = build_env(types, structs)
     Enum.each(funcs, &(:ok = check!(&1, env)))
@@ -81,6 +93,7 @@ defmodule Rian.Lower do
 
     body =
       [
+        rs_doc(Map.get(m, :doc), "//!"),
         Enum.map_join(Map.get(m, :uses, []), "\n", &rust_use/1),
         Enum.map_join(structs, "\n\n", &rust_struct/1),
         Enum.map_join(types, "\n\n", &rust_enum/1),
@@ -196,12 +209,18 @@ defmodule Rian.Lower do
   defp elixir_clauses(func, ctx, def_kw) do
     Enum.each(func.params, &Rian.Capability.beam_legal!(&1.cap))
 
-    Enum.map_join(func.clauses, "\n", fn c ->
-      head = "#{def_kw} #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
-      body = c.body |> body_ast(ctx) |> emit(:elixir) |> elem(0)
-      "#{head}#{guard_str(c, :elixir)} do #{body} end"
-    end)
+    clauses =
+      Enum.map_join(func.clauses, "\n", fn c ->
+        head = "#{def_kw} #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
+        body = c.body |> body_ast(ctx) |> emit(:elixir) |> elem(0)
+        "#{head}#{guard_str(c, :elixir)} do #{body} end"
+      end)
+
+    join_doc(ex_doc(Map.get(func, :doc), "doc"), clauses)
   end
+
+  defp join_doc("", body), do: body
+  defp join_doc(doc, body), do: doc <> "\n" <> body
 
   # Parse a body source and run the target-neutral resolution passes the emitter
   # relies on: struct construction, sum-variant construction, constant references.
@@ -403,7 +422,7 @@ defmodule Rian.Lower do
         end
       end)
 
-    "@type #{PL.to_snake(t.name)} :: #{body}"
+    join_doc(ex_doc(Map.get(t, :doc), "typedoc"), "@type #{PL.to_snake(t.name)} :: #{body}")
   end
 
   defp pat_ex(:wild), do: "_"
@@ -454,8 +473,11 @@ defmodule Rian.Lower do
         "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(ast, body)},"
       end)
 
-    "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} {\n" <>
-      "    match #{scrut} {\n#{arms}\n    }\n}"
+    fn_str =
+      "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} {\n" <>
+        "    match #{scrut} {\n#{arms}\n    }\n}"
+
+    join_doc(rs_doc(Map.get(func, :doc), "///"), fn_str)
   end
 
   # `T | E` in return position is sugar for `Result(T, E)` (ADR-0040 §2) — the ok
@@ -508,7 +530,10 @@ defmodule Rian.Lower do
         end
       end)
 
-    "#[derive(Clone, Debug, PartialEq)]\nenum #{t.name} {\n#{variants}\n}"
+    join_doc(
+      rs_doc(Map.get(t, :doc), "///"),
+      "#[derive(Clone, Debug, PartialEq)]\nenum #{t.name} {\n#{variants}\n}"
+    )
   end
 
   defp pat_rs(:wild, _), do: "_"
