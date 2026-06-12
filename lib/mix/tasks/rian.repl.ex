@@ -37,7 +37,8 @@ defmodule Mix.Tasks.Rian.Repl do
 
   Lines beginning with `\\` are surface commands, not Rian (the lexer never
   starts an expression with `\\`, so they can't collide with code): `\\help`,
-  `\\env` (names defined/bound in the session), `\\type EXPR` (infer a type
+  `\\env` (names defined/bound in the session, with function signatures and bind
+  types), `\\type EXPR` (infer a type
   without evaluating), `\\reset` (fresh session), and `\\quit` (exit — the
   portable way out, since in line-editing mode `Ctrl-D` is forward-delete, not
   EOF).
@@ -198,7 +199,7 @@ defmodule Mix.Tasks.Rian.Repl do
         session
 
       {:env, _} ->
-        print(render_env(Repl.info(session)))
+        print(render_env(session))
         session
 
       {:type, ""} ->
@@ -296,7 +297,7 @@ defmodule Mix.Tasks.Rian.Repl do
     String.trim_trailing("""
     Commands (\\-prefixed):
       \\help, \\h, \\?    show this help
-      \\env             names defined and bound in the session
+      \\env             defined names (with signatures) and binds (with types)
       \\type EXPR       infer EXPR's type without evaluating it
       \\reset           start a fresh session
       \\quit, \\q        exit the REPL
@@ -304,12 +305,39 @@ defmodule Mix.Tasks.Rian.Repl do
     """)
   end
 
-  defp render_env(%{defined: [], bound: []}), do: "(empty session)"
+  # `\env` lists what the session knows, each name annotated with its signature
+  # (functions) or type (binds) from `Rian.Repl.describe/1` — the same metadata
+  # the completion hints show.
+  defp render_env(session) do
+    %{defined: defined, bound: bound} = Repl.info(session)
+    %{functions: functions, binds: binds} = Repl.describe(session)
 
-  defp render_env(%{defined: defined, bound: bound}) do
-    [names_line("defined", defined), names_line("bound", bound)]
-    |> Enum.reject(&is_nil/1)
-    |> Enum.join("\n")
+    if defined == [] and bound == [] do
+      "(empty session)"
+    else
+      [
+        names_line("defined", Enum.map(defined, &defined_label(&1, functions))),
+        names_line("bound", Enum.map(bound, &bound_label(&1, binds)))
+      ]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("\n")
+    end
+  end
+
+  defp defined_label(name, functions) do
+    case Map.get(functions, name) do
+      {arity, ret} when is_binary(ret) -> "#{name}/#{arity} : #{ret}"
+      {arity, _} -> "#{name}/#{arity}"
+      # a type/struct/module — not a function, so just the name
+      nil -> name
+    end
+  end
+
+  defp bound_label(name, binds) do
+    case Map.get(binds, name) do
+      type when is_binary(type) -> "#{name} : #{type}"
+      _ -> name
+    end
   end
 
   defp names_line(_label, []), do: nil

@@ -68,10 +68,14 @@ defmodule Mix.Tasks.Rian.ReplTest do
       assert out =~ "\\reset"
     end
 
-    test "\\env shows defined and bound names" do
+    test "\\env shows defined functions with signatures and binds with types" do
       out = session_output("x := 7\ndef sq(n Int64) Int64\ndef sq(n) := n * n\n\n\\env\n")
-      assert out =~ "bound: x"
-      assert out =~ "defined: sq"
+      assert out =~ "defined: sq/1 : Int64"
+      assert out =~ "bound: x : Int64"
+    end
+
+    test "\\env shows a typed binding's declared type" do
+      assert session_output("x Int32 := 66\n\\env\n") =~ "bound: x : Int32"
     end
 
     test "\\env on a fresh session reports it is empty" do
