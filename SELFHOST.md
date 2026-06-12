@@ -62,14 +62,23 @@ construction, and cons-list building all compose and lower correctly.
   `TL|Paren`). Cosmetic, but a self-hosted lexer/codegen would want predictable
   name mangling.
 
-## Ranked verdict (for sequencing)
+## Progress against the verdict
 
-1. **ADR-0042 generics (BEAM-first)** — without it the checker is inert on the
-   exact code self-hosting is made of. Highest leverage. (B4)
-2. **Abstract-forms backend (ADR-0031)** — turn `eval`-of-strings into real,
-   reproducible compilation before self-hosting the compiler. (Maya/Kira)
-3. **Core IR + parser unification** — B1 had to be fixed in *three* places
+1. **ADR-0042 generics (BEAM-first)** — **done (concrete generics).** The checker
+   now infers `Vec(T)`, variant values, and call results, so the lexer's `lex`
+   is genuinely type-checked (a `lex([]) := 0` bug is caught). `forall` binders
+   parse; protocol/impl + structural type-variable unification are the next
+   ADR-0042 increment. (Was B4.)
+2. **Abstract-forms backend (ADR-0031)** — **done (core).** `Rian.Beam` lowers a
+   parsed function group to the **Erlang abstract format** and `:compile.forms`
+   → real loadable `.beam` bytecode (no `eval`, no Elixir-compiler dependency,
+   line-tracked). Proven on `double`, `max2` (multi-clause+guard), and `sum`
+   (cons recursion). **Next increment:** variant/struct construction+patterns
+   (needs the variant→tagged-tuple meta), `String`/`<>`, remote/FFI calls, `with`
+   — currently each raises `Rian.Beam.Unsupported` (never a silent miscompile),
+   so the full lexer (which builds `Token` variants) still uses the Elixir-source
+   path until that lands.
+3. **Core IR + parser unification** — open. B1 had to be fixed in *three* places
    (`Pratt.parse_pat`, `Decl.pattern`, the emitters); that triplication is the
    fork a self-hosted front end would inherit.
-4. **Portable prelude (ADR-0041 #3)** — the gate only when self-hosting targets
-   beyond the BEAM; the bootstrap itself is happy on Elixir-stdlib FFI.
+4. **Portable prelude (ADR-0041 #3)** — open; gates only multi-target self-hosting.
