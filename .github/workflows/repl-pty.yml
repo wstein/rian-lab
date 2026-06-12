@@ -1,0 +1,32 @@
+name: REPL pty smoke
+
+# Manual-only: the interactive REPL's line-editing path (native Tab-completion
+# and cross-session history) needs a real pseudo-terminal, which the default
+# `mix test` job cannot provide. Run this on demand to verify that path on Linux.
+on:
+  workflow_dispatch:
+
+jobs:
+  pty:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Erlang/Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+
+      - name: Fetch deps and compile (test env)
+        env:
+          MIX_ENV: test
+        run: |
+          mix deps.get
+          mix compile
+
+      - name: Native Tab-completion in a pty
+        run: python3 test/manual/pty_completion_check.py
+
+      - name: Cross-session history in a pty
+        run: python3 test/manual/pty_history_check.py

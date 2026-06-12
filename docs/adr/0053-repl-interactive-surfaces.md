@@ -170,6 +170,9 @@ not to function bodies (functions stay closed) — a deliberate, documented boun
   `\quit` is the portable exit; quitting calls `System.stop/0` for a graceful shutdown that restores
   the terminal. When stdin/stdout is not a TTY (a pipe, CI) the REPL falls back to canonical-mode
   reads, where `rlwrap mix rian.repl` (with `--completions` feeding `rlwrap -f`) supplies history and
-  static completion. The TTY path is exercised by a pty harness (`test/manual/pty_completion_check.py`)
-  rather than the ExUnit suite, since CI has no controlling terminal; the completion logic itself is
-  unit-tested via `Rian.Repl.complete/2` and `Mix.Tasks.Rian.Repl.completion_for/2`.
+  static completion. The TTY path is exercised by pty harnesses
+  (`test/manual/pty_completion_check.py`, `test/manual/pty_history_check.py`) rather than the ExUnit
+  suite, since CI has no controlling terminal; the pure logic is unit-tested via `Rian.Repl.complete/2`,
+  `Mix.Tasks.Rian.Repl.completion_for/2`, and `Rian.Repl.History`. The harnesses run on Linux via a
+  manual GitHub Actions job (`.github/workflows/repl-pty.yml`, `workflow_dispatch`) that pins the same
+  OTP 29 / Elixir 1.20 — the supported way to confirm `prim_tty`/terminal-restore parity off macOS.
