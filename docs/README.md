@@ -48,6 +48,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0038](adr/0038-language-server.md) | Language server (LSP): tolerant analysis layer over the compiler library | Accepted (direction) |
 | [0039](adr/0039-failable-bind-arrow.md) | Reassign `<-` to failable-bind/generator; re-spell mutation | Accepted (direction) |
 | [0040](adr/0040-error-handling.md) | Error handling: `Result`, `T \| E` sugar, `with` propagation, error-set composition | Accepted (direction) |
+| [0041](adr/0041-target-model.md) | Target model: per-target representation, observable contracts, module resolution | Accepted (direction) |
 
 ## Specifications
 

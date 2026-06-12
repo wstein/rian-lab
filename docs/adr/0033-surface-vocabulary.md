@@ -90,7 +90,8 @@ rather than `i64` happening to match Rust/WASM. That is exactly the ADR-0032 sta
 
 ## Open items
 
-- **Atom/`Symbol` lowering** to non-atom targets (JVM/Go/JS/WASM) — target-model ADR.
+- ~~**Atom/`Symbol` lowering** to non-atom targets (JVM/Go/JS/WASM).~~ **Resolved by
+  [ADR-0041](0041-target-model.md).**
 - **`<-` intra-family collision** — **resolved by ADR-0039**: `<-` is reassigned to the family
   failable-bind/generator (`with`/`for`); capability-gated mutation is re-spelled. Lands before
   comprehensions/`with`.

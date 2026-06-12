@@ -99,8 +99,9 @@ Two rules follow:
   spells them `Int64`/`Float64`/`String`/`Bool`. Decide the primitive vocabulary against the
   *family*, not against Rust — width-explicit naming stays desirable for cross-target precision;
   the open question is `i64` vs. `Int64`.
-- **Atom lowering** to non-atom targets (JVM/Go/JS/WASM) — interned strings / symbols / enums /
-  `i32` tags. Belongs in a target-model ADR.
+- ~~**Atom lowering** to non-atom targets (JVM/Go/JS/WASM).~~ **Resolved by
+  [ADR-0041](0041-target-model.md):** closed sets → native enum; open `Symbol` → `&'static str` /
+  interned string; deterministic id-interner only for runtime-dynamic symbols.
 - **`<-` intra-family collision** — **resolved by ADR-0039**: `<-` goes to the family
   failable-bind/generator (`pattern <- source` in `with`/`for`); capability-gated mutation is
   re-spelled. This is the collision-test outcome — the family meaning of `<-` wins.

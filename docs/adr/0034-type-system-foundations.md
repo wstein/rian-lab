@@ -139,5 +139,6 @@ narrowing, exactly as Kotlin invalidates a smart-cast on `var` reassignment.
   and the bound spelling (which collides with the `when` *guard* keyword). Its own ADR.
 - **Capabilities × types:** how `val`/`iso`/`ref`/`tag` interact with inference and protocol bounds
   (an `iso` returned from a protocol method, etc.).
-- **Target model for `Symbol` / error-tag representation** on non-atom targets (JVM/Go/JS/WASM) —
-  the remaining target-model item (integer overflow above is now settled).
+- ~~**Target model for `Symbol` / error-tag representation** on non-atom targets (JVM/Go/JS/WASM).~~
+  **Resolved by [ADR-0041](0041-target-model.md):** error tags are closed sums → tagged union per
+  target; `Symbol` lowers closed→enum / open→`&'static str`, equality-only.
