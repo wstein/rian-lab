@@ -46,6 +46,11 @@ compile + run on real BEAM bytecode:
   `Vec(Token)`, builds its own `Expr` sum, and threads `(Expr, Vec(Token))` as a
   `Parse` pair. It exercises higher-order-free recursion, sum construction,
   nested list/variant patterns, and `case` — and hits **no** backend wall.
+- [selfhost_eval.rian](selfhost_eval.rian) — an evaluator that folds the `Expr`
+  sum to an `Int64`, threading a **symbol table** (`Map(String, Int64)`) with
+  `let`-binding and `Var` lookup. The symbol table is the first place that
+  reaches for a map; its empty initial environment `%{}` was the construct that
+  drove the BEAM **map-literal** increment.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

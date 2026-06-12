@@ -102,6 +102,29 @@ defmodule Rian.BeamTest do
                {:sub, {:sub, {:num, 10}, {:num, 3}}, {:num, 2}}
     end
 
+    test "the self-hosting evaluator folds the Expr sum with a map symbol table" do
+      {:ok, ev} = Beam.load(File.read!("examples/rian/selfhost_eval.rian"), :rian_beam_eval)
+
+      {:ok, parser} =
+        Beam.load(File.read!("examples/rian/selfhost_parser.rian"), :rian_beam_eval_parser)
+
+      {:ok, lexer} =
+        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_eval_lexer)
+
+      # full pipeline, all Rian-compiled-to-.beam: lex -> parse -> evaluate
+      assert ev.run(parser.parse(lexer.tokenize("2 + 3 * 4"))) == 14
+
+      # the symbol table: `let x = 10 in let y = 4 in (x + y) * 2` (Expr built
+      # directly — the parser layer has no `Var`/`Let` yet); `run` starts in `%{}`
+      let_expr =
+        {:let, "x", {:num, 10},
+         {:let, "y", {:num, 4}, {:mul, {:add, {:var, "x"}, {:var, "y"}}, {:num, 2}}}}
+
+      assert ev.run(let_expr) == 28
+      # eval against a prebuilt (FFI-keyed) environment
+      assert ev.eval({:mul, {:var, "x"}, {:var, "x"}}, %{"x" => 5}) == 25
+    end
+
     test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
       {:ok, mod} =
         Beam.load(
@@ -226,9 +249,9 @@ defmodule Rian.BeamTest do
         Beam.compile("struct P(x Int64)\ndef o(n Int64) P := P(n)", :rian_beam_bad)
       end
 
-      # a map literal needs `%{…}` map forms (next increment)
+      # bare struct field access (`n.field`) has no abstract-forms lowering yet
       assert_raise Beam.Unsupported, fn ->
-        Beam.compile("def g(n Int64) Int64 := %{a: 1}", :rian_beam_bad2)
+        Beam.compile("def g(n Int64) Int64 := n.field", :rian_beam_bad2)
       end
     end
   end

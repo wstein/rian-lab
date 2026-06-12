@@ -129,3 +129,17 @@ construction, and cons-list building all compose and lower correctly.
    AST with a symbol table) is where `struct`/map literals on BEAM become the
    likely next blocker** — but that is now a prediction to be tested by the next
    spike, not a present wall.
+6. **Self-hosting evaluator spike + maps on BEAM (ADR-0027/0031/0041)** — **the
+   prediction held, and the wall is down.** [`examples/rian/selfhost_eval.rian`](examples/rian/selfhost_eval.rian)
+   is the layer after the parser: it folds the `Expr` sum to an `Int64`,
+   threading a **symbol table** (`Map(String, Int64)`) with `let`-binding and
+   `Var` lookup. Written idiomatically, it hit exactly the predicted wall — the
+   empty starting environment `%{}` raised `Rian.Beam.Unsupported`
+   (`EMap`). That drove the increment: `Rian.Beam` now lowers a **map literal**
+   `%{k: v, …}` to a BEAM map (identifier key `k` → atom `:k`, the Elixir
+   convention); map access/insert already rode the `Map` FFI. With that, the
+   evaluator **compiles and runs**: `let x = 10 in let y = 4 in (x + y) * 2` →
+   `28`, and the full `lex → parse → eval` pipeline (all three Rian modules
+   compiled to `.beam`) gives `2 + 3 * 4` → `14`. Still unlowered (next, if a
+   spike demands them): `struct` declarations, map *update* (`%{m | k: v}`), and
+   map *patterns*.

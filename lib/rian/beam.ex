@@ -35,8 +35,13 @@ defmodule Rian.Beam do
   dispatches the `else` arms (or passes the non-matching value through when there
   is no `else`).
 
+  **Maps (ADR-0041):** a map literal `%{k: v, …}` lowers to a BEAM map (an
+  identifier key `k` is the atom `:k`, the Elixir convention); access/insert ride
+  the `Map` FFI (free remote calls). Enough for a symbol-table / environment.
+
   **Not yet** (raise a clear error, never a silent miscompile): `struct`
-  declarations (need `%Name{}` map forms), named-arg construction, map literals.
+  declarations (need `%Name{}` map forms), named-arg construction, map *update*
+  (`%{m | k: v}`) and map *patterns*.
   """
   alias Rian.{Core, Decl, PatternLower, Pratt}
 
@@ -54,6 +59,7 @@ defmodule Rian.Beam do
     EIf,
     ELambda,
     EList,
+    EMap,
     ENum,
     EStr,
     ETuple,
@@ -161,6 +167,15 @@ defmodule Rian.Beam do
     do: {:op, @ln, erl_op(op), expr_form(l, s), expr_form(r, s)}
 
   defp expr_form(%ETuple{elems: es}, s), do: {:tuple, @ln, Enum.map(es, &expr_form(&1, s))}
+
+  # a map literal `%{k: v, …}` -> a BEAM map; an identifier key `k` is the atom
+  # `:k` (the Elixir convention `%{x: 1}`), matching the text/JS emitters
+  defp expr_form(%EMap{pairs: pairs}, s) do
+    {:map, @ln,
+     Enum.map(pairs, fn {k, v} ->
+       {:map_field_assoc, @ln, {:atom, @ln, String.to_atom(k)}, expr_form(v, s)}
+     end)}
+  end
 
   defp expr_form(%EList{elems: es, tail: tail}, s),
     do: cons(es, core_list_tail(tail), &expr_form(&1, s))
