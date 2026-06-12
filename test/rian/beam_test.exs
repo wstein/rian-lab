@@ -419,6 +419,38 @@ defmodule Rian.BeamTest do
       assert mod.kindof(%{nope: 1}) == "other"
     end
 
+    test "user-defined functions: a Rian interpreter with recursion + mutual recursion" do
+      {:ok, m} = Beam.load(File.read!("examples/rian/selfhost_funcs.rian"), :rian_beam_funcs)
+
+      fact =
+        {:f, ["n"],
+         {:if, {:lt, {:var, "n"}, {:num, 1}}, {:num, 1},
+          {:mul, {:var, "n"}, {:app, "fact", [{:sub, {:var, "n"}, {:num, 1}}]}}}}
+
+      even =
+        {:f, ["n"],
+         {:if, {:lt, {:var, "n"}, {:num, 1}}, {:num, 1},
+          {:app, "odd", [{:sub, {:var, "n"}, {:num, 1}}]}}}
+
+      odd =
+        {:f, ["n"],
+         {:if, {:lt, {:var, "n"}, {:num, 1}}, {:num, 0},
+          {:app, "even", [{:sub, {:var, "n"}, {:num, 1}}]}}}
+
+      add = {:f, ["a", "b"], {:add, {:var, "a"}, {:var, "b"}}}
+      fs = %{"fact" => fact, "even" => even, "odd" => odd, "add" => add}
+      ev = fn e -> m.evalx(e, %{}, fs) end
+
+      # self-recursion
+      assert ev.({:app, "fact", [{:num, 5}]}) == 120
+      assert ev.({:app, "fact", [{:num, 10}]}) == 3_628_800
+      # mutual recursion
+      assert ev.({:app, "even", [{:num, 10}]}) == 1
+      assert ev.({:app, "odd", [{:num, 7}]}) == 1
+      # multi-argument call
+      assert ev.({:app, "add", [{:num, 3}, {:num, 4}]}) == 7
+    end
+
     test "a construct outside the core raises a clear Unsupported (never a miscompile)" do
       # the `in` membership operator has no simple Erlang operator form yet (it
       # needs `lists:member`); it raises rather than silently miscompiling

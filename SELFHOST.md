@@ -248,8 +248,19 @@ real Rian module is shaped. Each declaration desugars to a `let` wrapping the
 rest, so the existing fold/codegen/VM handle it unchanged:
 `run("def a = 2; def b = 3; a * b + a") = 8`. Declarations and inner `let`s
 compose, and (being still arithmetic + binding) the whole thing lowers to JS and
-runs under node too. (User-defined *functions* — `def f(x) := …` with call
-frames — are the next, larger language step; they need CALL/RET in the VM.)
+runs under node too.
+
+**User-defined functions land via interpretation.** [`examples/rian/selfhost_funcs.rian`](examples/rian/selfhost_funcs.rian)
+is a tree-walking interpreter whose program is a **function table**
+(`name → Fun` of params + body) plus an `Expr`. A call evaluates its arguments
+in the caller's environment, binds them to the callee's params in a *fresh*
+environment, and evaluates the body with the table still in scope — so self- and
+mutual recursion work: `evalx(App("fact", [Num 5])) = 120`, `even`/`odd`. It runs
+on **BEAM and under node** (it leans on maps, variants, `case`/clauses, and
+recursion — all multi-target). This proves first-class user functions over the
+existing IR machinery; a *compiled* CALL/RET stack VM (return addresses, frame
+pointer) is the further step. (`evalx`, not `eval` — `eval` is a reserved
+function name in a JS module.)
 
 ## Module system — a compiler is many modules
 

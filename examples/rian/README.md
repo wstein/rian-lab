@@ -91,6 +91,12 @@ compile + run on real BEAM bytecode:
   pattern-matches another's data without re-declaring the type. Load with
   `Rian.Beam.load_program/1`.
 
+- [selfhost_funcs.rian](selfhost_funcs.rian) — **user-defined functions +
+  recursion.** A tree-walking interpreter whose program is a function table
+  (`name → Fun` of params + body) plus an `Expr`; a call binds its arguments in a
+  fresh environment and recurses, so self- and mutual recursion work
+  (`fact(5) = 120`, `even`/`odd`). Runs on BEAM and under node.
+
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
 ### Function body forms
