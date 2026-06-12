@@ -419,6 +419,16 @@ defmodule Rian.BeamTest do
       assert mod.kindof(%{nope: 1}) == "other"
     end
 
+    test "a portable `List` library written in Rian (cons recursion, no FFI; ADR-0047)" do
+      {:ok, m} = Beam.load(File.read!("examples/rian/selfhost_listlib.rian"), :rian_beam_listlib)
+
+      # collection ops written in Rian over cons — no `:lists`/host FFI
+      assert m.reverse([1, 2, 3]) == [3, 2, 1]
+      assert m.append([1, 2], [3, 4]) == [1, 2, 3, 4]
+      assert m.length([1, 2, 3]) == 3
+      assert m.sum([1, 2, 3, 4]) == 10
+    end
+
     test "user-defined functions: a Rian interpreter with recursion + mutual recursion" do
       {:ok, m} = Beam.load(File.read!("examples/rian/selfhost_funcs.rian"), :rian_beam_funcs)
 

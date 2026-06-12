@@ -1,0 +1,37 @@
+# ===========================================================================
+# PORTABLE PRELUDE (ADR-0047 §2) — a `List` library, written in Rian
+# ===========================================================================
+# Goal: the right way to retire per-emitter FFI stopgaps. Collection operations
+# the spikes reached for via host FFI (`:lists.reverse`, …) are instead written
+# **in Rian** over cons recursion — so they need no per-target special-casing and
+# lower to every backend through the same machinery.
+#
+#   reverse([1, 2, 3])      = [3, 2, 1]
+#   append([1, 2], [3, 4])  = [1, 2, 3, 4]
+#   length([1, 2, 3])       = 3
+#
+# `Map`/`String` genuinely bottom out in per-target *primitives* (a hashed map, a
+# UTF-8 buffer) and need the primitive-layer design; `List` does not — it is just
+# cons + recursion, portable as-is. Evidence for SELFHOST.md.
+# ---------------------------------------------------------------------------
+
+mod ListLib do
+  # reverse via an accumulator (tail-recursive)
+  pub def reverse(xs Vec(T)) Vec(T) forall T := rev_onto(xs, [])
+
+  def rev_onto(xs Vec(T), acc Vec(T)) Vec(T) forall T
+  def rev_onto([], acc) := acc
+  def rev_onto([h | t], acc) := rev_onto(t, [h | acc])
+
+  pub def length(xs Vec(T)) Int64 forall T
+  pub def length([]) := 0
+  pub def length([_ | t]) := 1 + length(t)
+
+  pub def append(xs Vec(T), ys Vec(T)) Vec(T) forall T
+  pub def append([], ys) := ys
+  pub def append([h | t], ys) := [h | append(t, ys)]
+
+  pub def sum(xs Vec(Int64)) Int64
+  pub def sum([]) := 0
+  pub def sum([h | t]) := h + sum(t)
+end

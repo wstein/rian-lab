@@ -96,6 +96,11 @@ compile + run on real BEAM bytecode:
   (`name → Fun` of params + body) plus an `Expr`; a call binds its arguments in a
   fresh environment and recurses, so self- and mutual recursion work
   (`fact(5) = 120`, `even`/`odd`). Runs on BEAM and under node.
+- [selfhost_listlib.rian](selfhost_listlib.rian) — **a portable `List` library
+  (ADR-0047 §2)** — `reverse`/`append`/`length`/`sum` written in Rian over cons
+  recursion, **no host FFI** — so it lowers to every backend through the same
+  machinery (verified on BEAM and node). The right way to retire per-emitter FFI
+  stopgaps; `Map`/`String` still need the per-target primitive layer.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

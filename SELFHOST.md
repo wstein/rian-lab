@@ -308,6 +308,18 @@ So the complete self-hosting compiler runs on **two targets** (BEAM + JavaScript
 from one IR. The FFI mappings are a stopgap; the portable prelude (ADR-0047 §2)
 should own `Map`/`String`/`List` so they are not per-emitter special cases.
 
+**`List` is portable as pure Rian.** [`examples/rian/selfhost_listlib.rian`](examples/rian/selfhost_listlib.rian)
+writes `reverse`/`append`/`length`/`sum` over cons recursion with **no host
+FFI**, so they lower to every backend through the existing machinery — verified
+identical on BEAM and node (`reverse([1,2,3]) = [3,2,1]`). This is the ADR-0047
+§2 approach done right for lists: a program calls `ListLib.reverse` instead of
+`:lists.reverse`, and nothing is per-emitter. `Map` and `String` are *not* like
+this — they bottom out in real per-target primitives (a hashed map, a UTF-8
+buffer), so they still need the primitive-layer design (a small set of
+`__prim_*` operations each emitter lowers, with the portable ops written in Rian
+over them). That primitive layer is the remaining, design-level portable-prelude
+work; `List` shows the shape it takes.
+
 **Rust gets cons.** A Rian `Vec(T)` param lowers to a `&[T]` slice, so cons
 patterns become **Rust slice patterns** — `[h | t]` → `[h, t @ ..]` — matched
 directly (match ergonomics give `h: &T`, `t: &[T]`), and cons *construction*
