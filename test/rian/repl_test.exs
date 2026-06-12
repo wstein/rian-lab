@@ -93,16 +93,15 @@ defmodule Rian.ReplTest do
   end
 
   describe "errors leave the session unchanged" do
-    test "an unsupported construct is a clear error, never a silent miscompile" do
-      s = Repl.new()
-      # bare struct field access has no abstract-forms lowering yet (maps now do)
-      assert {{:error, message}, ^s} = eval(s, "a.field")
-      assert message =~ "EDot" or message =~ "not yet supported" or message != ""
-    end
-
-    test "a parse error is reported" do
+    test "a parse error is reported and the session is untouched" do
       s = Repl.new()
       assert {{:error, _message}, ^s} = eval(s, "1 +")
+    end
+
+    test "a runtime error is reported and the session is untouched" do
+      s = Repl.new()
+      assert {{:error, message}, ^s} = eval(s, "1 + true")
+      assert message != ""
     end
   end
 
@@ -117,7 +116,7 @@ defmodule Rian.ReplTest do
         {_, s} = eval(s, "x + f(x)")
         # error paths
         {_, s} = eval(s, "1 +")
-        {_, _} = eval(s, "a.field")
+        {_, _} = eval(s, "1 + true")
         s
       end
 

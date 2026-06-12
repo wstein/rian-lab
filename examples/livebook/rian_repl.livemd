@@ -1,0 +1,102 @@
+# Rian REPL inside Livebook
+
+```elixir
+Mix.install([
+  {:rian_lab, path: ".."}
+])
+```
+
+## The compiling REPL is reusable from any surface
+
+`Rian.Repl` (ADR-0053) is a composable read → eval → print core. Every entry is
+parsed, type-checked, lowered to BEAM abstract forms, loaded, and run, so what
+evaluates here passes the exact same gate as `mix rian.repl`. The engine is
+also documented to perform **no IO** — `eval/2` never writes to stdout, stderr,
+or a logger — so it composes with Livebook's rendering without fighting it.
+
+This notebook demonstrates the three patterns a Rian-curious Livebook author
+will reach for:
+
+1. one-shot eval for inline value display
+2. session-threaded eval for stateful exploration
+3. defining types/functions and calling them across cells
+
+A purpose-built `Kino.SmartCell` would replace the `IO.puts` calls below with a
+proper UI; this notebook deliberately drives the engine directly to make the
+ADR-0053 contract — *the engine the surfaces share* — visible.
+
+## One-shot eval
+
+```elixir
+alias Rian.Repl
+
+{result, _} = Repl.eval(Repl.new(), "1 + 2 * 3")
+Repl.render(result)
+```
+
+Equivalent to typing `1 + 2 * 3` at `mix rian.repl`. The render uses
+the inferred type from the compile gate — note `: Int64` is real, not
+shoehorned post-hoc.
+
+## A threaded session — bindings persist across cells
+
+A session value carries the accumulated declarations and `:=` bindings.
+Returning it from a cell lets the next cell continue the session.
+
+```elixir
+session = Repl.new()
+
+{r1, session} = Repl.eval(session, "x := 10")
+{r2, session} = Repl.eval(session, "y := 4")
+{r3, session} = Repl.eval(session, "x * y + 2")
+
+Enum.map([r1, r2, r3], &Repl.render/1) |> Enum.join("\n")
+```
+
+The session is opaque (`Rian.Repl.t/0`); it's the same value the `mix rian.repl`
+loop carries between prompts.
+
+## Declarations and generic functions
+
+The Phase-1 generic-return inference (ADR-0042) means a `forall T` function
+called with a concrete argument prints its instantiated type, not bare.
+
+```elixir
+session = Repl.new()
+
+{_, session} = Repl.eval(session, "def id(x T) T forall T\ndef id(x) := x")
+{result, _} = Repl.eval(session, "id(42)")
+
+Repl.render(result)
+```
+
+The output reads `42 : Int64`, not `42` — the compile-time `T` was concretized
+to the argument's `Int64`.
+
+## Errors are typed results, not raised exceptions
+
+`eval/2` always returns `{result, session'}`; the session advances only on
+success. An unsupported construct or a parse error produces a `{:error, msg}`
+without taking the surface (this Livebook cell) down with it.
+
+```elixir
+{r1, s} = Repl.eval(Repl.new(), "1 +")
+{r2, ^s} = Repl.eval(s, "1 + true")
+{r3, ^s} = Repl.eval(s, "1 + 1")
+
+Enum.map([r1, r2, r3], &Repl.render/1)
+```
+
+`s` is the same session before and after each error — a parse error and a
+runtime arithmetic error both produce typed `{:error, msg}` results, and
+neither advances the session. A typo doesn't pollute the rest of the
+notebook.
+
+## Next: a `Kino.SmartCell` companion
+
+Wrapping the above in a `Kino.SmartCell` — input editor, output area,
+session persistence across cell evaluations, syntax-highlighted output —
+belongs in a dedicated `kino_rian` companion package so it can iterate on
+its JS/UX without dragging `:kino` into this repo's runtime deps. The
+engine contract this notebook relies on (no-IO, ADR-0053) is what makes
+that package straightforward to build.

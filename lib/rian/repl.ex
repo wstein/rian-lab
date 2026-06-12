@@ -34,7 +34,9 @@ defmodule Rian.Repl do
   never logs. All output happens in the print phase (`render/1`), which returns
   a string — so any surface (the `mix rian.repl` loop, a Livebook smart-cell,
   the web playground) drives the engine without conflicting with the surface's
-  own IO model. The no-IO property is asserted by `Rian.ReplTest`.
+  own IO model. The no-IO property is asserted by `Rian.ReplTest`. See
+  [`examples/livebook/rian_repl.livemd`](../../examples/livebook/rian_repl.livemd)
+  for a worked Livebook notebook that drives the engine directly.
 
   ## Scope
 
