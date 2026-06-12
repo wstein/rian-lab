@@ -138,10 +138,29 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "the self-hosting parser lowers to JS and parses under node (cons-recursive)" do
+      js = JS.compile(File.read!("examples/rian/selfhost_parser.rian"))
+
+      # token arrays use the variant convention: TNum(5) -> ["TNum", 5n], TPlus -> ["TPlus"]
+      toks =
+        ~s|[["TNum",1n],["TPlus"],["TNum",2n],["TStar"],["TLParen"],["TNum",3n],["TMinus"],["TNum",4n],["TRParen"]]|
+
+      # 1 + 2 * (3 - 4)  ->  Add(Num 1, Mul(Num 2, Sub(Num 3, Num 4)))
+      expected = ~s|["Add",["Num","1"],["Mul",["Num","2"],["Sub",["Num","3"],["Num","4"]]]]|
+
+      case node_eval(
+             js,
+             "JSON.stringify(parse(#{toks}), (k,v)=>typeof v==='bigint'?v.toString():v)"
+           ) do
+        :no_node -> :ok
+        out -> assert out == expected
+      end
+    end
+
     test "constructs outside this increment raise a clear Unsupported" do
-      # list construction has no JS lowering yet (variants now do)
+      # string literals have no JS lowering yet (lists/case/variants now do)
       assert_raise JS.Unsupported, fn ->
-        JS.compile("def xs(n Int64) Vec(Int64) := [1, 2, 3]")
+        JS.compile(~s|def greet(n Int64) String := "hi"|)
       end
     end
   end

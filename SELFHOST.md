@@ -268,6 +268,16 @@ The BEAM path drove these spikes, but the typed core IR is shared, so a
 - **JavaScript** — `Rian.JS` (ADR-0049) now lowers **sum variants**: construction `Ctor(a, …)` → a tagged array `["Ctor", a, …]`, with clause patterns that check the tag and recurse into fields. The optimizer **runs under node**: `fold` of `(2 + 3) * 4` → `["Num", 20]`, `x * 1 + 0` → `["Var", "x"]`.
 
 This validates the ADR-0050 thesis on real self-hosting code: one IR, three back
-ends, zero forks. The *cons-recursive* spikes (lexer/parser/codegen/VM) remain
-BEAM-only on Rust (a portable `Vec`/slice prelude, ADR-0047 §2, is the gate) and
-need lists/`case`/strings in the JS emitter — the next multi-target increments.
+ends, zero forks.
+
+**JS reaches the parser.** The ECMAScript emitter now also lowers **lists**
+(→ arrays, cons `[h | t]` → `[h, ...t]`, closed/cons clause patterns via
+`length`/`slice`) and **`case`** (→ an IIFE if-chain over the arm patterns). So
+the *cons-recursive* **parser** spike — `case`, nested variant + list patterns,
+recursion, no FFI/maps — now lowers to JS and **runs under node**: the token
+stream for `1 + 2 * (3 - 4)` parses to
+`["Add", ["Num", 1], ["Mul", ["Num", 2], ["Sub", ["Num", 3], ["Num", 4]]]]`,
+correct precedence. Still JS-blocked: the **lexer** (FFI `String.to_charlist`)
+and **codegen/VM** (maps for the slot store, strings) — JS maps/strings are the
+next increments. On **Rust**, the cons-recursive layers remain BEAM-only until a
+portable `Vec`/slice prelude (ADR-0047 §2) lands.

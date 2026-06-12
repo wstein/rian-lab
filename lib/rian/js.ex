@@ -17,11 +17,13 @@ defmodule Rian.JS do
 
   Functions (single/multi-clause) over `Int64`/`Float64`/`Bool`; variables;
   unary/binary operators; `if`; local calls; tuples (→ JS arrays); `when`
-  guards; and **sum variants** — construction `Ctor(a, …)` → a tagged array
+  guards; **sum variants** — construction `Ctor(a, …)` → a tagged array
   `["Ctor", a, …]` (nullary → `["Ctor"]`), with **clause patterns** that check
-  the tag and recurse into fields (nested + literal patterns supported). **Not
-  yet** (raise `Rian.JS.Unsupported`): struct construction/patterns,
-  atoms/`Symbol`, lists, `case`/`with`, lambdas/captures, strings, FFI.
+  the tag and recurse into fields (nested + literal patterns supported);
+  **lists** (→ JS arrays, cons `[h | t]` → `[h, ...t]`, with closed/cons clause
+  patterns via `length`/`slice`); and **`case`** (→ an IIFE if-chain over the
+  arm patterns). **Not yet** (raise `Rian.JS.Unsupported`): struct
+  construction/patterns, atoms/`Symbol`, `with`, lambdas/captures, strings, FFI.
   """
   alias Rian.{Core, Decl, Pratt}
 
@@ -29,12 +31,15 @@ defmodule Rian.JS do
     EBin,
     EBlock,
     ECall,
+    ECase,
     EId,
     EIf,
+    EList,
     ENum,
     ETuple,
     EUnary,
     PCtor,
+    PList,
     PLit,
     PVar,
     PWild
@@ -113,10 +118,44 @@ defmodule Rian.JS do
     {["#{acc}[0] === #{inspect(ctor)}" | ts], bs}
   end
 
+  # a list is a JS array; a closed pattern fixes the length, a cons pattern
+  # `[h, … | tail]` requires at least the listed elements and binds the rest via
+  # `slice`
+  defp pat_match(%PList{elems: es, tail: :close}, acc) do
+    {ts, bs} = match_elems(es, acc)
+    {["#{acc}.length === #{length(es)}" | ts], bs}
+  end
+
+  defp pat_match(%PList{elems: es, tail: tail}, acc) do
+    n = length(es)
+    {ts, bs} = match_elems(es, acc)
+    {tt, tb} = pat_match(tail, "#{acc}.slice(#{n})")
+    {["#{acc}.length >= #{n}" | ts ++ tt], bs ++ tb}
+  end
+
   defp pat_match(other, _acc),
     do: raise(Unsupported, "ecmascript: clause pattern #{inspect(other)}")
 
+  defp match_elems(es, acc) do
+    es
+    |> Enum.with_index()
+    |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
+      {t, b} = pat_match(p, "#{acc}[#{i}]")
+      {ts ++ t, bs ++ b}
+    end)
+  end
+
   defp bind_lines(binds), do: Enum.map(binds, fn {n, a} -> "const #{n} = #{a};" end)
+
+  # one `case` arm against the bound scrutinee `_s`: `if (tests) { binds; return … }`
+  defp case_arm_js({pat, guard, body}) do
+    {tests, binds} = pat_match(pat, "_s")
+    inner = Enum.join(bind_lines(binds) ++ [arm_return(body, guard)], " ")
+    if tests == [], do: inner, else: "if (#{Enum.join(tests, " && ")}) { #{inner} }"
+  end
+
+  defp arm_return(body, nil), do: "return #{branch_js(body)};"
+  defp arm_return(body, g), do: "if (#{expr_js(g)}) { return #{branch_js(body)}; }"
 
   # a clause body parses to a block: emit `let`s then `return` the final value
   defp clause_return(src) do
@@ -150,6 +189,21 @@ defmodule Rian.JS do
   defp expr_js(%EUnary{op: "not", arg: x}), do: "!#{expr_js(x)}"
   defp expr_js(%EBin{op: op, left: l, right: r}), do: "(#{expr_js(l)} #{js_op(op)} #{expr_js(r)})"
   defp expr_js(%ETuple{elems: es}), do: "[#{Enum.map_join(es, ", ", &expr_js/1)}]"
+
+  # a list is a JS array; a cons tail spreads (`[h | t]` -> `[h, ...t]`)
+  defp expr_js(%EList{elems: es, tail: :close}),
+    do: "[#{Enum.map_join(es, ", ", &expr_js/1)}]"
+
+  defp expr_js(%EList{elems: es, tail: tail}),
+    do: "[#{Enum.join(Enum.map(es, &expr_js/1) ++ ["...#{expr_js(tail)}"], ", ")}]"
+
+  # `case scrut do pat -> body … end` -> an IIFE: bind the scrutinee, then an
+  # if-chain of `pat_match` tests; the first matching arm `return`s its body
+  defp expr_js(%ECase{scrut: scrut, arms: arms}) do
+    arms_js = Enum.map_join(arms, " ", &case_arm_js/1)
+
+    "(() => { const _s = #{expr_js(scrut)}; #{arms_js} throw new Error(\"case: no clause matched\"); })()"
+  end
 
   # a PascalCase call is sum-variant construction -> a tagged array
   # `["Ctor", arg0, …]`; a lowercase call is a function call
