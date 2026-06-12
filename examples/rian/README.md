@@ -68,6 +68,9 @@ compile + run on real BEAM bytecode:
   nodes by shape with nested variant and literal-in-variant patterns
   (`Add(Num(a), Num(b))`, `Mul(_, Num(0))`) — and hits **no** wall. Slotting it
   before codegen shrinks the emitted program (`(2 + 3) * 4` → a single `Push 20`).
+  Being variant-only, it is **tri-target**: it lowers to BEAM (runs), Rust (an
+  idiomatic `enum` + `match`), and JavaScript (runs under node) — one IR, three
+  back ends (ADR-0050).
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

@@ -16,9 +16,11 @@ defmodule Rian.JS do
   ## Scope (this increment)
 
   Functions (single/multi-clause) over `Int64`/`Float64`/`Bool`; variables;
-  unary/binary operators; `if`; literal/var/wildcard clause patterns; `when`
-  guards; local calls; tuples (→ JS arrays). **Not yet** (raise
-  `Rian.JS.Unsupported`): sum-variant / struct construction + their patterns,
+  unary/binary operators; `if`; local calls; tuples (→ JS arrays); `when`
+  guards; and **sum variants** — construction `Ctor(a, …)` → a tagged array
+  `["Ctor", a, …]` (nullary → `["Ctor"]`), with **clause patterns** that check
+  the tag and recurse into fields (nested + literal patterns supported). **Not
+  yet** (raise `Rian.JS.Unsupported`): struct construction/patterns,
   atoms/`Symbol`, lists, `case`/`with`, lambdas/captures, strings, FFI.
   """
   alias Rian.{Core, Decl, Pratt}
@@ -32,6 +34,7 @@ defmodule Rian.JS do
     ENum,
     ETuple,
     EUnary,
+    PCtor,
     PLit,
     PVar,
     PWild
@@ -61,48 +64,59 @@ defmodule Rian.JS do
     "#{export}function #{name}(#{params}) {\n#{body}\n  throw new Error(\"#{name}: no clause matched\");\n}"
   end
 
-  # `{ <binds>  <guarded return> }` — bindings precede the test so a `when` guard
-  # (written in the pattern's variable names) can reference them
+  # `{ if (<structural tests>) { <binds> <guarded return> } }` — the binds live
+  # *inside* the structural test so a nested field access (`a0[1][1]`) only runs
+  # once the shape is known; a `when` guard, written in the bound names, follows.
   defp clause_js(%{pats: pats, body: body, guard: guard}) do
-    core_pats = Enum.map(pats, &Core.from_pat/1)
-    binds = bind_lines(pats_binds(core_pats))
-    tests = pats_tests(core_pats) ++ guard_tests(guard)
-    ret = clause_return(body)
+    {tests, binds} =
+      pats
+      |> Enum.map(&Core.from_pat/1)
+      |> Enum.with_index()
+      |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
+        {t, b} = pat_match(p, "a#{i}")
+        {ts ++ t, bs ++ b}
+      end)
+
+    inner = bind_lines(binds) ++ [guarded_return(body, guard)]
+    body_str = Enum.join(inner, " ")
 
     guarded =
       case tests do
-        [] -> ret
-        _ -> "if (#{Enum.join(tests, " && ")}) { #{ret} }"
+        [] -> body_str
+        _ -> "if (#{Enum.join(tests, " && ")}) { #{body_str} }"
       end
 
-    "  { #{Enum.join(binds ++ [guarded], " ")} }"
+    "  { #{guarded} }"
   end
 
-  # var pattern at arg i -> {name, "ai"}; literal/wild contribute no binding
-  defp pats_binds(core_pats) do
-    core_pats
-    |> Enum.with_index()
-    |> Enum.flat_map(fn
-      {%PVar{name: n}, i} -> [{n, "a#{i}"}]
-      {_, _} -> []
-    end)
+  defp guarded_return(body, nil), do: clause_return(body)
+
+  defp guarded_return(body, g),
+    do: "if (#{expr_js(Core.from_expr(Pratt.parse(g)))}) { #{clause_return(body)} }"
+
+  # Match `pat` against the JS access path `acc` -> `{tests, binds}`. A sum
+  # variant is a tagged array `["Ctor", arg0, …]` (ADR-0049), so a constructor
+  # pattern checks the tag and recurses into each positional field.
+  defp pat_match(%PWild{}, _acc), do: {[], []}
+  defp pat_match(%PVar{name: n}, acc), do: {[], [{n, acc}]}
+  defp pat_match(%PLit{value: v}, acc), do: {["#{acc} === #{lit_js(v)}"], []}
+
+  defp pat_match(%PCtor{ctor: ctor, args: args}, acc) do
+    {ts, bs} =
+      args
+      |> Enum.with_index()
+      |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
+        {t, b} = pat_match(p, "#{acc}[#{i + 1}]")
+        {ts ++ t, bs ++ b}
+      end)
+
+    {["#{acc}[0] === #{inspect(ctor)}" | ts], bs}
   end
+
+  defp pat_match(other, _acc),
+    do: raise(Unsupported, "ecmascript: clause pattern #{inspect(other)}")
 
   defp bind_lines(binds), do: Enum.map(binds, fn {n, a} -> "const #{n} = #{a};" end)
-
-  defp pats_tests(core_pats) do
-    core_pats
-    |> Enum.with_index()
-    |> Enum.flat_map(fn
-      {%PLit{value: v}, i} -> ["a#{i} === #{lit_js(v)}"]
-      {%PWild{}, _} -> []
-      {%PVar{}, _} -> []
-      {other, _} -> raise(Unsupported, "ecmascript: clause pattern #{inspect(other)}")
-    end)
-  end
-
-  defp guard_tests(nil), do: []
-  defp guard_tests(g), do: ["(#{expr_js(Core.from_expr(Pratt.parse(g)))})"]
 
   # a clause body parses to a block: emit `let`s then `return` the final value
   defp clause_return(src) do
@@ -127,10 +141,9 @@ defmodule Rian.JS do
   defp expr_js(%ENum{text: n}), do: num_js(n)
   defp expr_js(%EId{name: b}) when b in ~w(true false), do: b
 
+  # a bare PascalCase id is a nullary sum variant -> a one-element tagged array
   defp expr_js(%EId{name: x}) do
-    if pascal?(x),
-      do: raise(Unsupported, "ecmascript: variant/struct construction `#{x}`"),
-      else: x
+    if pascal?(x), do: "[#{inspect(x)}]", else: x
   end
 
   defp expr_js(%EUnary{op: "-", arg: x}), do: "-#{expr_js(x)}"
@@ -138,9 +151,14 @@ defmodule Rian.JS do
   defp expr_js(%EBin{op: op, left: l, right: r}), do: "(#{expr_js(l)} #{js_op(op)} #{expr_js(r)})"
   defp expr_js(%ETuple{elems: es}), do: "[#{Enum.map_join(es, ", ", &expr_js/1)}]"
 
+  # a PascalCase call is sum-variant construction -> a tagged array
+  # `["Ctor", arg0, …]`; a lowercase call is a function call
   defp expr_js(%ECall{fun: %EId{name: f}, args: args}) do
-    if pascal?(f), do: raise(Unsupported, "ecmascript: variant/struct construction `#{f}`")
-    "#{f}(#{Enum.map_join(args, ", ", &expr_js/1)})"
+    if pascal?(f) do
+      "[#{Enum.join([inspect(f) | Enum.map(args, &expr_js/1)], ", ")}]"
+    else
+      "#{f}(#{Enum.map_join(args, ", ", &expr_js/1)})"
+    end
   end
 
   defp expr_js(%EIf{cond: c, then: t, else: e}),

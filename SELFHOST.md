@@ -213,3 +213,19 @@ closed: clause heads and `case` arms can destructure structs and maps by shape,
 not just by field access. Remaining ergonomic gaps (positional struct
 construction, map update `%{m | k: v}`) are small, self-contained, and still
 unforced by the pipeline.
+
+## Multi-target (ADR-0049 / ADR-0050)
+
+The BEAM path drove these spikes, but the typed core IR is shared, so a
+*sum-based* spike can lower to other targets without a new fork. The **optimizer**
+(`selfhost_opt.rian`, variants + nested patterns, no lists/FFI) now lowers to
+**three targets**:
+
+- **BEAM** — abstract forms, verified running (`fold` of `(2 + 3) * 4` → `Num(20)`).
+- **Rust** — `Rian.Lower` emits an idiomatic `enum Expr { … }` + `fn fold(e: &Expr) -> Expr { match e { … } }` with nested/literal patterns. (The textual emitter does not yet insert clones/derefs, so a borrow-checking ownership pass is future work; the structure is faithful.)
+- **JavaScript** — `Rian.JS` (ADR-0049) now lowers **sum variants**: construction `Ctor(a, …)` → a tagged array `["Ctor", a, …]`, with clause patterns that check the tag and recurse into fields. The optimizer **runs under node**: `fold` of `(2 + 3) * 4` → `["Num", 20]`, `x * 1 + 0` → `["Var", "x"]`.
+
+This validates the ADR-0050 thesis on real self-hosting code: one IR, three back
+ends, zero forks. The *cons-recursive* spikes (lexer/parser/codegen/VM) remain
+BEAM-only on Rust (a portable `Vec`/slice prelude, ADR-0047 §2, is the gate) and
+need lists/`case`/strings in the JS emitter — the next multi-target increments.
