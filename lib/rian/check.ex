@@ -25,12 +25,12 @@ defmodule Rian.Check do
 
   **Concrete generics (ADR-0042, BEAM-first)** are inferred: a list literal is
   `Vec(T)`, a variant value/constructor-call carries its sum type, and a call
-  carries the callee's declared return type — so the checker actually verifies
-  list/recursive/constructor-shaped code (the self-hosting spike's evidence) by
-  string-equal unification of concrete parametric types. `forall T` binders are
-  parsed; a generic return type (mentioning a type variable) is checked
-  *conservatively* (no structural type-variable unification yet) and protocol
-  bounds are not yet enforced.
+  carries the callee's declared return type — *instantiated* from the call's
+  argument types when the return is generic. `def id(x T) T forall T` called
+  with `id(5)` infers `Int64`, and `def head(xs Vec(T)) T forall T` called with
+  `head([1, 2, 3])` infers `Int64` — so HOF-driven code prints precise types
+  instead of bare values. Function-typed parameters (`Fn(A, B)`) and protocol
+  bounds still contribute no bindings (a later pass).
 
   **Function types (ADR-0042, higher-order).** A function type is spelled
   `Fn(A1, …, An, R)` — the argument types followed by the return (last element).
@@ -107,9 +107,11 @@ defmodule Rian.Check do
 
   # ── inference ──────────────────────────────────────────────────────────
   # `ic` is the static inference context (a map): `:tdefs` (ctor -> field types,
-  # for flow narrowing), `:funs` (function name -> declared return type), and
-  # `:ctors` (ctor -> its sum-type name, so a variant value infers its type).
-  # `%{}` disables all three. `env` is the per-scope variable map.
+  # for flow narrowing), `:funs` (function name -> declared return type),
+  # `:fsigs` (function name -> `%{params, ret, tvars}` for generic
+  # instantiation), and `:ctors` (ctor -> its sum-type name, so a variant value
+  # infers its type). `%{}` disables them all. `env` is the per-scope variable
+  # map.
   @doc """
   Infer the type of an expression under `env` (name -> type); `:unknown` when
   unsure. Accepts the **typed core IR** (`Rian.Core`); a surface tuple is
@@ -161,10 +163,12 @@ defmodule Rian.Check do
   # a call through a function-typed *variable* (a parameter / bound name) infers
   # the function's return type; a call to a constructor infers its sum type; a
   # call to a known named function infers that function's declared return type
-  def infer(%ECall{fun: %EId{name: f}}, env, ic) do
+  # (concretized from the call's argument types when the return is generic —
+  # `def id(x T) T forall T` called with `id(5)` infers `Int64`, ADR-0042)
+  def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)
-      true -> ctor_type(ic, f) || called_ret(ic, f)
+      true -> ctor_type(ic, f) || called_ret_with(ic, f, as, env)
     end
   end
 
@@ -284,16 +288,71 @@ defmodule Rian.Check do
 
   defp ctor_type(ic, name), do: Map.get(Map.get(ic, :ctors, %{}), name)
 
-  # a named function's declared return type — but a *generic* return (one that
-  # mentions an un-instantiated type variable, e.g. `Vec(U)` from a `forall`
-  # function) infers `:unknown`: we don't instantiate generics, so pinning it to
-  # the literal `Vec(U)` would wrongly contradict a concrete caller (conservative)
+  # a named function's declared return type. When the function has `forall`
+  # type variables (`fsigs[f]` is present), try to *instantiate* the return
+  # from the call's argument types; if some tvar can't be pinned, fall back to
+  # `:unknown` (conservative). Otherwise return the declared ret directly —
+  # except for a generic ret with no signature available, which is still
+  # `:unknown` because pinning it to the literal `Vec(U)` would wrongly
+  # contradict a concrete caller.
+  defp called_ret_with(ic, f, args_ast, env) do
+    case Map.get(Map.get(ic, :fsigs, %{}), f) do
+      %{tvars: [_ | _]} = sig ->
+        arg_types = Enum.map(args_ast, &infer(&1, env, ic))
+        instantiate_ret(sig, arg_types)
+
+      _ ->
+        called_ret(ic, f)
+    end
+  end
+
   defp called_ret(ic, f) do
     case Map.get(Map.get(ic, :funs, %{}), f) do
       nil -> :unknown
       ret -> if has_tvar?(ret), do: :unknown, else: ret
     end
   end
+
+  # Instantiate a generic return: unify each (declared-param-type, inferred-arg-
+  # type) pair to bind tvars, then substitute them in `ret`. A tvar that can't
+  # be pinned (no informative arg) leaves the call type as `:unknown` — sound,
+  # never a lie. Function-typed params (`Fn(...)`) contribute no bindings here
+  # (a real piece of work for a later pass); concrete params are also inert,
+  # which is correct (they can only confirm, not instantiate, the tvars).
+  defp instantiate_ret(%{params: ps, ret: ret, tvars: tvars}, arg_types) do
+    subs =
+      ps
+      |> Enum.zip(arg_types)
+      |> Enum.reduce(%{}, fn {p, a}, acc -> bind_tvar(p, a, tvars, acc) end)
+
+    if Enum.all?(tvars, &Map.has_key?(subs, &1)) do
+      Enum.reduce(subs, ret, fn {tv, ty}, r -> Regex.replace(~r/\b#{tv}\b/, r, ty) end)
+    else
+      :unknown
+    end
+  end
+
+  # Unify a parameter's declared type string with the inferred argument type
+  # to extract `tvar -> concrete` bindings. Handles bare tvars (`T`) and
+  # `Vec(T)`/structural matches; ignores conflicts (first binding wins).
+  defp bind_tvar(_p, :unknown, _tvars, acc), do: acc
+
+  defp bind_tvar(p, a, tvars, acc) when is_binary(p) and is_binary(a) do
+    cond do
+      p in tvars ->
+        Map.put_new(acc, p, a)
+
+      String.starts_with?(p, "Vec(") and String.starts_with?(a, "Vec(") ->
+        bind_tvar(inner_of(p), inner_of(a), tvars, acc)
+
+      true ->
+        acc
+    end
+  end
+
+  defp bind_tvar(_p, _a, _tvars, acc), do: acc
+
+  defp inner_of("Vec(" <> rest), do: String.trim_trailing(rest, ")")
 
   # does a type string mention a standalone type variable (a single capital,
   # optionally one digit) — `U`, `Vec(U)`, `Fn(T, U)` yes; `Int64`, `Vec(Int64)` no
@@ -573,7 +632,7 @@ defmodule Rian.Check do
   threads session declarations into expression typing — can reuse the same
   context-building rules as `check_program/1` without re-running the checker.
   """
-  @spec program_ic(map()) :: %{tdefs: map(), funs: map(), ctors: map()}
+  @spec program_ic(map()) :: %{tdefs: map(), funs: map(), fsigs: map(), ctors: map()}
   def program_ic(%{} = prog) do
     types = all_types(prog)
 
@@ -583,7 +642,21 @@ defmodule Rian.Check do
     %{
       tdefs: type_table(types),
       funs: Map.new(all_funcs, fn f -> {f.name, f.ret} end),
+      fsigs: Map.new(all_funcs, fn f -> {f.name, fsig(f)} end),
       ctors: ctor_types(types, prog)
+    }
+  end
+
+  # The parts of a function signature `instantiate_ret/2` needs: parameter type
+  # strings (in order), the declared return, and the function's `forall` type
+  # variables. Stored alongside `:funs` so the simpler `name -> ret` map remains
+  # the public surface for non-generic call inference (and the public test
+  # contract — see `Check.infer/3`'s `ic` shape).
+  defp fsig(f) do
+    %{
+      params: Enum.map(f.params, & &1.type),
+      ret: f.ret,
+      tvars: f.tvars
     }
   end
 

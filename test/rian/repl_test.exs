@@ -50,6 +50,14 @@ defmodule Rian.ReplTest do
       assert {{:value, :one, "Bit"}, _} = eval(s, "One")
     end
 
+    test "a generic function's return concretizes to the call's argument type" do
+      s = Repl.new()
+      {{:defined, ["id"]}, s} = eval(s, "def id(x T) T forall T\ndef id(x) := x")
+      # `forall T` no longer collapses to bare `:unknown` at the prompt —
+      # `id(5)` reads its `T` from the argument's `Int64` (ADR-0042).
+      assert {{:value, 5, "Int64"}, _} = eval(s, "id(5)")
+    end
+
     test "redefines a function (shadowing, not duplication)" do
       s = Repl.new()
       {{:defined, ["f"]}, s} = eval(s, "def f(n Int64) Int64\ndef f(n) := n + 1")
