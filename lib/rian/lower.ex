@@ -409,6 +409,11 @@ defmodule Rian.Lower do
   defp pat_ex({:lit, v}), do: to_string(v)
   defp pat_ex({:atom, a}), do: ":" <> a
   defp pat_ex({:tuple, ps}), do: "{#{Enum.map_join(ps, ", ", &pat_ex/1)}}"
+  defp pat_ex({:list, ps, :close}), do: "[#{Enum.map_join(ps, ", ", &pat_ex/1)}]"
+
+  defp pat_ex({:list, ps, {:tail, t}}),
+    do: "[#{Enum.map_join(ps, ", ", &pat_ex/1)} | #{pat_ex(t)}]"
+
   defp pat_ex({:ctor, name, []}), do: ":" <> Atom.to_string(PL.to_snake(name))
 
   defp pat_ex({:ctor, name, args}),
@@ -511,6 +516,10 @@ defmodule Rian.Lower do
   defp pat_rs({:tuple, [{:atom, "error"}, p]}, m), do: "Err(#{pat_rs(p, m)})"
   defp pat_rs({:tuple, ps}, m), do: "(#{Enum.map_join(ps, ", ", &pat_rs(&1, m))})"
   defp pat_rs({:atom, a}, _), do: raise("Erlang atom pattern is BEAM-only: :#{a}")
+  defp pat_rs({:list, ps, :close}, m), do: "[#{Enum.map_join(ps, ", ", &pat_rs(&1, m))}]"
+
+  defp pat_rs({:list, _, {:tail, _}}, _),
+    do: raise("cons-list pattern is BEAM-only (no idiomatic Vec cons)")
 
   defp pat_rs({:ctor, name, []}, meta) do
     info = Map.fetch!(meta, PL.to_snake(name))

@@ -309,6 +309,7 @@ defmodule Rian.Pratt do
   defp parse_pat([{:op, ":"}, {:id, name} | rest]), do: {{:atom, name}, rest}
   defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
   defp parse_pat([{:lbrace} | rest]), do: parse_pat_tuple(rest, [])
+  defp parse_pat([{:lbracket} | rest]), do: parse_pat_list(rest, [])
 
   defp parse_pat([{:id, name} | rest]) do
     if pascal?(name) do
@@ -336,6 +337,29 @@ defmodule Rian.Pratt do
       [{:comma} | rest] -> parse_pat_tuple(rest, [p | acc])
       [{:rbrace} | rest] -> {{:tuple, Enum.reverse([p | acc])}, rest}
       other -> raise ArgumentError, "bad tuple pattern: #{inspect(other)}"
+    end
+  end
+
+  # list pattern `[p1, …]` (closed) or `[p1, … | tail]` (cons tail)
+  defp parse_pat_list([{:rbracket} | rest], acc), do: {{:list, Enum.reverse(acc), :close}, rest}
+
+  defp parse_pat_list(tokens, acc) do
+    {p, tokens} = parse_pat(tokens)
+
+    case tokens do
+      [{:comma} | rest] ->
+        parse_pat_list(rest, [p | acc])
+
+      [{:rbracket} | rest] ->
+        {{:list, Enum.reverse([p | acc]), :close}, rest}
+
+      [{:op, "|"} | rest] ->
+        {tail, rest} = parse_pat(rest)
+        rest = expect_rbracket(rest)
+        {{:list, Enum.reverse([p | acc]), {:tail, tail}}, rest}
+
+      other ->
+        raise ArgumentError, "bad list pattern: #{inspect(other)}"
     end
   end
 
@@ -495,6 +519,11 @@ defmodule Rian.Pratt do
   defp sexpr_pat({:lit, v}), do: to_string(v)
   defp sexpr_pat({:atom, a}), do: ":" <> a
   defp sexpr_pat({:tuple, ps}), do: "{#{Enum.map_join(ps, ", ", &sexpr_pat/1)}}"
+  defp sexpr_pat({:list, ps, :close}), do: "[#{Enum.map_join(ps, ", ", &sexpr_pat/1)}]"
+
+  defp sexpr_pat({:list, ps, {:tail, t}}),
+    do: "[#{Enum.map_join(ps, ", ", &sexpr_pat/1)} | #{sexpr_pat(t)}]"
+
   defp sexpr_pat({:var, x}), do: x
   defp sexpr_pat({:ctor, n, []}), do: n
   defp sexpr_pat({:ctor, n, args}), do: "#{n}(#{Enum.map_join(args, ", ", &sexpr_pat/1)})"

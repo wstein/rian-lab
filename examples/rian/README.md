@@ -36,6 +36,11 @@ idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
 Suggested reading order is numeric; 04 is the one to linger on — it is what
 distinguishes Rian from "Elixir with different keywords."
 
+Outside the numbered tour, [selfhost_lexer.rian](selfhost_lexer.rian) is a
+**self-hosting spike** — a real arithmetic lexer written in Rian (its own `Token`
+sum, list-pattern recursion) that compiles and runs on the BEAM. See
+[SELFHOST.md](../../SELFHOST.md) for the blocker ledger it produced.
+
 ### Function body forms
 
 A `def` body is one of two shapes (no semantic difference — both yield a value

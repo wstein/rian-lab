@@ -559,6 +559,7 @@ defmodule Rian.Decl do
     cond do
       s == "_" -> :wild
       Regex.match?(~r/^-?\d+$/, s) -> {:lit, String.to_integer(s)}
+      String.starts_with?(s, "[") -> list_pattern(s)
       String.starts_with?(s, "{") -> tuple_pattern(s)
       match?(["", name] when name != "", String.split(s, ":", parts: 2)) -> atom_pattern(s)
       match?({_, _, _}, extract_parens(s)) -> ctor_pattern(s)
@@ -573,6 +574,20 @@ defmodule Rian.Decl do
     inner = s |> String.trim() |> String.trim_leading("{") |> String.trim_trailing("}")
     {:tuple, inner |> split_top(",") |> Enum.map(&pattern/1)}
   end
+
+  # `[p1, …]` (closed) or `[p1, … | tail]` (cons tail)
+  defp list_pattern(s) do
+    inner = s |> String.trim() |> String.trim_leading("[") |> String.trim_trailing("]")
+
+    case split_top(inner, "|") do
+      [] -> {:list, [], :close}
+      [elems] -> {:list, elem_pats(elems), :close}
+      [elems, tail] -> {:list, elem_pats(elems), {:tail, pattern(tail)}}
+      _ -> raise Error, "bad list pattern `#{s}`"
+    end
+  end
+
+  defp elem_pats(s), do: s |> split_top(",") |> Enum.map(&pattern/1)
 
   defp atom_pattern(s), do: {:atom, s |> String.trim_leading(":") |> String.trim()}
 
@@ -615,8 +630,8 @@ defmodule Rian.Decl do
       |> Enum.reduce({[], {"", 0}}, fn ch, {parts, {cur, depth}} ->
         cond do
           ch == sep and depth == 0 -> {[cur | parts], {"", 0}}
-          ch in ["(", "{"] -> {parts, {cur <> ch, depth + 1}}
-          ch in [")", "}"] -> {parts, {cur <> ch, depth - 1}}
+          ch in ["(", "{", "["] -> {parts, {cur <> ch, depth + 1}}
+          ch in [")", "}", "]"] -> {parts, {cur <> ch, depth - 1}}
           true -> {parts, {cur <> ch, depth}}
         end
       end)

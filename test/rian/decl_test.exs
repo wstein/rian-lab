@@ -328,6 +328,50 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "list patterns (B1 / self-hosting spike)" do
+    test "cons recursion in clause heads runs on the BEAM" do
+      [{"sum", out}] =
+        Decl.compile_beam("""
+        def sum(xs List(Int64)) Int64
+        def sum([]) := 0
+        def sum([h | t]) := h + sum(t)
+        """)
+
+      assert out.elixir =~ "def sum([]) do 0 end"
+      assert out.elixir =~ "def sum([h | t]) do h + sum(t) end"
+      Code.eval_string("defmodule SumT do\n#{out.elixir}\nend")
+      assert SumT.sum([1, 2, 3, 4]) == 10
+    end
+
+    test "a fixed-length list pattern lowers to a Rust slice pattern" do
+      [{"pair", out}] =
+        Decl.compile("""
+        def pair(xs List(Int64)) Int64
+        def pair([a, b]) := a + b
+        def pair(_) := 0
+        """)
+
+      assert out.elixir =~ "def pair([a, b]) do a + b end"
+      assert out.rust =~ "[a, b] =>"
+    end
+
+    test "a `case` over a list lowers and runs" do
+      [{"head0", out}] =
+        Decl.compile_beam("""
+        def head0(xs List(Int64)) Int64
+          case xs do
+            [] -> 0
+            [h | _] -> h
+          end
+        end
+        """)
+
+      Code.eval_string("defmodule HeadT do\n#{out.elixir}\nend")
+      assert HeadT.head0([7, 8]) == 7
+      assert HeadT.head0([]) == 0
+    end
+  end
+
   describe "sum-variant construction in bodies" do
     test "positional and nullary variant construction lower and run" do
       results =
