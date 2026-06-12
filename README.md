@@ -39,6 +39,20 @@ The front-end is **target-agnostic**: the parser, exhaustiveness engine, pattern
 lowering, and operator table all sit above the emitter, so the BEAM and Rust
 backends share one core.
 
+## Compiling a `.rian` file
+
+```sh
+mix rian.compile examples/area.rian                       # emit Elixir + Rust
+mix rian.compile examples/rian/05_modules.rian --rust     # Rust only
+mix rian.compile examples/rian/08_lambdas_collections.rian --beam  # BEAM only (allows Erlang FFI)
+```
+
+`--beam` lowers to the BEAM target only (permitting Erlang FFI such as
+`:lists.sum/1`, which has no Rust form); `--elixir`/`--rust` narrow the displayed
+target of a both-target compile. The task exits non-zero on a parse,
+exhaustiveness, or type-check error. From code the entry points are
+`Rian.Decl.compile/1` (both targets) and `Rian.Decl.compile_beam/1`.
+
 ## Layout
 
 | Path | Contents |
