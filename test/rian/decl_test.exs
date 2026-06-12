@@ -184,6 +184,36 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "alias declarations (transparent synonyms)" do
+    test "an alias is substituted out of every type position (transitively)" do
+      %{funcs: [f]} =
+        Decl.parse("""
+        alias Id := Int64
+        alias Count := Id
+
+        def add(x Id, y Count) Id := x + y
+        """)
+
+      assert f.params == [
+               %Param{name: "x", type: "Int64", cap: :val},
+               %Param{name: "y", type: "Int64", cap: :val}
+             ]
+
+      assert f.ret == "Int64"
+    end
+
+    test "an alias inside a compound type resolves and lowers" do
+      [{"first", out}] =
+        Decl.compile("""
+        alias Id := Int64
+        def first(xs val Vec(Id), d Id) Id := head(xs)
+        """)
+
+      # Vec(Id) -> Vec(Int64) -> &[i64], and the bare `Id` params/ret -> i64
+      assert out.rust =~ "fn first(xs: &[i64], d: i64) -> i64"
+    end
+  end
+
   describe "the exhaustiveness gate fires on parsed source" do
     test "a missing variant clause is refused at lowering" do
       src = """

@@ -24,10 +24,12 @@ defmodule Rian.Decl do
         `def max2(a Int64, b Int64) Int64` then `def max2(a, b) when a >= b := a`
     * `:=` one-liner bodies **and** multiline `… end` **block bodies**, including
       `case … do … end` expressions, string literals, and `when` guards.
+    * `alias Name := Type` — transparent synonyms, resolved by substituting the
+      name out of every type position (introduces no runtime form).
 
   ## Not yet supported
 
-  `mod`/`struct`/`alias` declarations. Each raises `Rian.Decl.Error`.
+  `mod`/`struct` declarations. Each raises `Rian.Decl.Error`.
   """
   alias Rian.{Lexer, Lower}
   alias Rian.IR.{Clause, Field, Func, Param, Type, Variant}
@@ -43,6 +45,11 @@ defmodule Rian.Decl do
   def parse(src) do
     decls = src |> Lexer.tokenize() |> split_decls()
 
+    # `alias Name := Type` is a transparent synonym: resolve it by substituting
+    # the name out of every type position in the IR, so it never reaches the
+    # emitter (ADR-0033 / types-match: aliases introduce no runtime form).
+    aliases = Map.new(for {:alias, t} <- decls, do: parse_alias(t))
+
     funcs =
       decls
       |> Enum.flat_map(fn
@@ -51,8 +58,46 @@ defmodule Rian.Decl do
       end)
       |> Enum.chunk_by(& &1.name)
       |> Enum.map(&build_func/1)
+      |> Enum.map(&subst_func(&1, aliases))
 
-    %{types: for({:type, t} <- decls, do: parse_type(t)), funcs: funcs}
+    types = for({:type, t} <- decls, do: parse_type(t)) |> Enum.map(&subst_type(&1, aliases))
+    %{types: types, funcs: funcs}
+  end
+
+  defp parse_alias(text) do
+    case split_once(text, ":=") do
+      {name, type} -> {strip_type_params(name), type}
+      :none -> raise Error, "alias needs `:=`: #{text}"
+    end
+  end
+
+  # whole-word substitution of every alias name in a type string (transitive)
+  defp subst_type_str(type, aliases) do
+    resolved =
+      Enum.reduce(aliases, type, fn {name, val}, acc ->
+        Regex.replace(~r/\b#{Regex.escape(name)}\b/, acc, val)
+      end)
+
+    if resolved == type, do: resolved, else: subst_type_str(resolved, aliases)
+  end
+
+  defp subst_func(%Func{params: ps, ret: ret} = f, aliases) do
+    params =
+      Enum.map(ps, fn %Param{} = p -> %Param{p | type: subst_type_str(p.type, aliases)} end)
+
+    %Func{f | params: params, ret: subst_type_str(ret, aliases)}
+  end
+
+  defp subst_type(%Type{variants: vs} = t, aliases) do
+    %Type{t | variants: Enum.map(vs, &subst_variant(&1, aliases))}
+  end
+
+  defp subst_variant(%Variant{fields: fs} = v, aliases) do
+    %Variant{
+      v
+      | fields:
+          Enum.map(fs, fn %Field{} = fl -> %Field{fl | type: subst_type_str(fl.type, aliases)} end)
+    }
   end
 
   @doc "Parse and lower every function to both targets: `[{name, %{elixir, rust}}]`."
@@ -81,8 +126,13 @@ defmodule Rian.Decl do
     [{:def, raw} | split_decls(rest)]
   end
 
+  defp split_decls([{:kw, "alias"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    [{:alias, Lexer.detokenize(toks)} | split_decls(rest)]
+  end
+
   defp split_decls([{:kw, kw} | _]),
-    do: raise(Error, "unsupported declaration `#{kw}` (supported: `type` / `def`)")
+    do: raise(Error, "unsupported declaration `#{kw}` (supported: `type` / `def` / `alias`)")
 
   defp split_decls([tok | _]), do: raise(Error, "expected a declaration, got #{inspect(tok)}")
 
@@ -187,6 +237,10 @@ defmodule Rian.Decl do
 
   defp strip_type_params(name), do: name |> String.split("(", parts: 2) |> hd() |> String.trim()
 
+  # Detokenized type strings space their parens/commas (`Vec ( Int64 )`); collapse
+  # them back so a parenthesized type is one whitespace-split token (`Vec(Int64)`).
+  defp collapse_parens(s), do: Regex.replace(~r/\s*([(),])\s*/, s, "\\1")
+
   defp variant(v) do
     case extract_parens(v) do
       {ctor, inside, ""} -> %Variant{ctor: String.trim(ctor), fields: fields(inside)}
@@ -203,7 +257,10 @@ defmodule Rian.Decl do
   end
 
   defp field(f) do
-    case f |> String.split(~r/\s+/, trim: true) |> Enum.reject(&(&1 in @caps)) do
+    case f
+         |> collapse_parens()
+         |> String.split(~r/\s+/, trim: true)
+         |> Enum.reject(&(&1 in @caps)) do
       [type] -> %Field{type: type}
       [label, type] -> %Field{label: label, type: type}
       _ -> raise Error, "bad field `#{f}`"
@@ -280,7 +337,11 @@ defmodule Rian.Decl do
   end
 
   defp param(p) do
-    {caps, rest} = p |> String.split(~r/\s+/, trim: true) |> Enum.split_with(&(&1 in @caps))
+    {caps, rest} =
+      p
+      |> collapse_parens()
+      |> String.split(~r/\s+/, trim: true)
+      |> Enum.split_with(&(&1 in @caps))
 
     cap =
       case caps do
