@@ -42,6 +42,7 @@ The component test suites pass; cross-pass integration is thin. Treat the
 | [0035](adr/0035-no-hidden-control-flow.md) | No hidden control flow (errors are values; no exceptions) | Accepted |
 | [0036](adr/0036-range-subrange-types.md) | Range (subrange) types: finite ordinal subtypes over `Int64`/`Char` | Accepted (direction) |
 | [0037](adr/0037-binary-wire-format-records.md) | Binary wire-format records: `@wire` structs with derived `decode`/`encode` | Accepted (direction) |
+| [0038](adr/0038-language-server.md) | Language server (LSP): tolerant analysis layer over the compiler library | Accepted (direction) |
 
 ## Specifications
 
