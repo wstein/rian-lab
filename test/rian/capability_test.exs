@@ -37,7 +37,7 @@ defmodule Rian.CapabilityTest do
 
   describe "BEAM linearity (use-once)" do
     test "iso used once is fine" do
-      assert C.lin_check(%{"f" => :iso}, Pratt.parse("use(f)")) == :ok
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("read(f)")) == :ok
     end
 
     test "iso used twice is an error naming the binding and count" do
@@ -80,7 +80,7 @@ defmodule Rian.CapabilityTest do
     end
 
     test "if is branch-aware: an iso moved once per arm is consumed once" do
-      assert C.lin_check(%{"f" => :iso}, Pratt.parse("if c do use(f) else drop(f) end")) == :ok
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("if c do read(f) else drop(f) end")) == :ok
     end
 
     test "if still flags an iso used twice within a single arm" do

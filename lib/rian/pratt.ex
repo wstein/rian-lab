@@ -4,104 +4,24 @@ defmodule Rian.Pratt do
   self-hosting constructs: lambdas `(x) -> e`, `if c do .. else .. end`,
   blocks (`name := e; .. ; final`), and list/map literals.
   The operator-precedence core is unchanged (validated by rian_pratt_test.exs).
+
+  Tokenization is delegated to `Rian.Lexer` (the shared tokenizer); this module
+  consumes its newline-free `expr_tokens/1` stream.
   """
 
   defmodule NonAssocError do
     defexception [:message]
   end
 
-  @multi ["->", ":=", "|>", "<>", "<-", "<=", ">=", "==", "!="]
-  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&"]
-  @words ~w(and or not in rem div)
-  @ctrl ~w(if do else end)
   @infix ~w(+ - * / rem div <> in |> < <= > >= == != and or <-)
 
   def parse(str) do
-    {ast, rest} = parse_expr(tokenize(str), 0)
+    {ast, rest} = parse_expr(Rian.Lexer.expr_tokens(str), 0)
     if rest != [], do: raise(ArgumentError, "trailing tokens: #{inspect(rest)}")
     ast
   end
 
   def parse_sexpr(str), do: sexpr(parse(str))
-
-  defp advance(s, n), do: elem(String.split_at(s, n), 1)
-  defp tokenize(str), do: do_tok(str, [])
-
-  # Normalize a numeric lexeme so it is a valid literal on BOTH targets: an
-  # exponent with no decimal point (`1e9`) is invalid Elixir, so inject `.0`
-  # before the exponent marker (`1.0e9`). Plain ints/floats and `_` separators
-  # pass through unchanged (already valid in Elixir and Rust alike).
-  defp norm_num(lexeme) do
-    if String.match?(lexeme, ~r/[eE]/) and not String.contains?(lexeme, ".") do
-      String.replace(lexeme, ~r/[eE]/, ".0e", global: false)
-    else
-      lexeme
-    end
-  end
-
-  defp do_tok(str, acc) do
-    s = String.trim_leading(str)
-
-    cond do
-      s == "" ->
-        Enum.reverse(acc)
-
-      String.starts_with?(s, "%{") ->
-        do_tok(advance(s, 2), [{:mapopen} | acc])
-
-      String.starts_with?(s, "(") ->
-        do_tok(advance(s, 1), [{:lparen} | acc])
-
-      String.starts_with?(s, ")") ->
-        do_tok(advance(s, 1), [{:rparen} | acc])
-
-      String.starts_with?(s, "[") ->
-        do_tok(advance(s, 1), [{:lbracket} | acc])
-
-      String.starts_with?(s, "]") ->
-        do_tok(advance(s, 1), [{:rbracket} | acc])
-
-      String.starts_with?(s, "}") ->
-        do_tok(advance(s, 1), [{:rbrace} | acc])
-
-      String.starts_with?(s, ",") ->
-        do_tok(advance(s, 1), [{:comma} | acc])
-
-      String.starts_with?(s, ";") ->
-        do_tok(advance(s, 1), [{:semi} | acc])
-
-      String.starts_with?(s, "\"") ->
-        case String.split(advance(s, 1), "\"", parts: 2) do
-          [content, rest] -> do_tok(rest, [{:str, content} | acc])
-          [_] -> raise ArgumentError, "unterminated string literal"
-        end
-
-      op = Enum.find(@multi, &String.starts_with?(s, &1)) ->
-        do_tok(advance(s, String.length(op)), [{:op, op} | acc])
-
-      op = Enum.find(@single, &String.starts_with?(s, &1)) ->
-        do_tok(advance(s, 1), [{:op, op} | acc])
-
-      m = Regex.run(~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/, s) ->
-        lexeme = hd(m)
-        do_tok(advance(s, String.length(lexeme)), [{:num, norm_num(lexeme)} | acc])
-
-      m = Regex.run(~r/^[A-Za-z_]\w*/, s) ->
-        w = hd(m)
-
-        tok =
-          cond do
-            w in @words -> {:op, w}
-            w in @ctrl -> {:kw, w}
-            true -> {:id, w}
-          end
-
-        do_tok(advance(s, String.length(w)), [tok | acc])
-
-      true ->
-        raise ArgumentError, "cannot scan: #{inspect(s)}"
-    end
-  end
 
   defp opinfo(op) do
     cond do

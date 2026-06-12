@@ -92,7 +92,7 @@ defmodule Rian.ExamplesTest do
     end
 
     test "linearity is branch-aware: an iso moved once per if-arm is consumed once" do
-      assert Capability.lin_check(%{"f" => :iso}, Pratt.parse("if c do use(f) else drop(f) end")) ==
+      assert Capability.lin_check(%{"f" => :iso}, Pratt.parse("if c do read(f) else drop(f) end")) ==
                :ok
     end
   end
