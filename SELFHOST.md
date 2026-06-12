@@ -86,10 +86,14 @@ construction, and cons-list building all compose and lower correctly.
    emitters consume it** (§1): `Rian.Beam` (Erlang forms), and `Rian.Lower`'s
    Elixir (`pat_ex`) and Rust (`pat_rs`) paths — surface → `Core.from_pat` →
    core → target. The pattern side now reads *one* representation (parser
-   unified in §2; emitters unified here). **Remaining (incremental, §5):** the
-   *expression* catalogue + its emitters; the exhaustiveness normalizer
-   (`PatternLower`, which keeps its documented surface contract for now); the
-   checker filling node `type`s.
+   unified in §2; emitters unified here). The **expression catalogue** exists
+   too, and a **third emitter — ECMAScript (`Rian.JS`, ADR-0049 Tier 1) — is
+   built directly on the core** (`Core.from_expr`/`from_pat`), validating the
+   ADR-0050 thesis in practice (a new backend with no new fork; runs under
+   node). **Remaining (incremental, §5):** migrate `Rian.Lower`'s precedence-aware
+   expression `emit/2` onto the core (entangled with the Rust pattern-meta
+   baking — wants the §3 types-on-nodes work first); the exhaustiveness
+   normalizer (`PatternLower`); the checker filling node `type`s.
 4. **Portable prelude (ADR-0041 #3 / ADR-0047)** — **mechanism + first member
    landed.** `Rian.Prelude` injects built-in types into the checker /
    exhaustiveness env / lowering meta without a user declaration and without
