@@ -157,10 +157,25 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "the WHOLE calc compiler lowers to JS and runs end-to-end under node" do
+      js = JS.compile(File.read!("examples/rian/selfhost_calc.rian"))
+
+      # lexer (FFI) + parser + optimizer + codegen (maps) + VM, all in JS
+      assert node_eval(js, "run(\"2 + 3 * 4\").toString()") in [:no_node, "14"]
+      assert node_eval(js, "run(\"1 + 2 * (3 - 4)\").toString()") in [:no_node, "-1"]
+      # `let`/variables from source survive the round-trip too
+      assert node_eval(js, "run(\"let x = 5 in x + 1\").toString()") in [:no_node, "6"]
+
+      assert node_eval(js, "run(\"let x = 1 in (let x = 2 in x) + x\").toString()") in [
+               :no_node,
+               "3"
+             ]
+    end
+
     test "constructs outside this increment raise a clear Unsupported" do
-      # string literals have no JS lowering yet (lists/case/variants now do)
+      # atom/`Symbol` literals have no JS lowering yet (strings/lists/maps now do)
       assert_raise JS.Unsupported, fn ->
-        JS.compile(~s|def greet(n Int64) String := "hi"|)
+        JS.compile("def tag(n Int64) Bool := :ok")
       end
     end
   end

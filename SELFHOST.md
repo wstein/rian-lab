@@ -270,14 +270,22 @@ The BEAM path drove these spikes, but the typed core IR is shared, so a
 This validates the ADR-0050 thesis on real self-hosting code: one IR, three back
 ends, zero forks.
 
-**JS reaches the parser.** The ECMAScript emitter now also lowers **lists**
+**The whole calc compiler runs under node.** The ECMAScript emitter grew lists
 (→ arrays, cons `[h | t]` → `[h, ...t]`, closed/cons clause patterns via
-`length`/`slice`) and **`case`** (→ an IIFE if-chain over the arm patterns). So
-the *cons-recursive* **parser** spike — `case`, nested variant + list patterns,
-recursion, no FFI/maps — now lowers to JS and **runs under node**: the token
-stream for `1 + 2 * (3 - 4)` parses to
-`["Add", ["Num", 1], ["Mul", ["Num", 2], ["Sub", ["Num", 3], ["Num", 4]]]]`,
-correct precedence. Still JS-blocked: the **lexer** (FFI `String.to_charlist`)
-and **codegen/VM** (maps for the slot store, strings) — JS maps/strings are the
-next increments. On **Rust**, the cons-recursive layers remain BEAM-only until a
-portable `Vec`/slice prelude (ADR-0047 §2) lands.
+`length`/`slice`), `case` (→ an IIFE if-chain), strings (`<>` → `+`), maps
+(`%{k: v}` → a JS object), and the handful of stdlib calls the spikes lean on,
+mapped to portable JS (`Map.get`/`Map.put` immutable, `String.to_charlist`,
+`List.to_string`, `:lists.reverse`). With those, **`selfhost_calc.rian` lowers to
+JS in full** — lexer (FFI), parser, optimizer, codegen (slot map), VM — and runs
+under node:
+
+```text
+run("2 + 3 * 4")        = 14     run("let x = 5 in x + 1")               = 6
+run("1 + 2 * (3 - 4)")  = -1     run("let x = 1 in (let x = 2 in x) + x") = 3
+```
+
+So the complete self-hosting compiler runs on **two targets** (BEAM + JavaScript)
+from one IR. The FFI mappings are a stopgap; the portable prelude (ADR-0047 §2)
+should own `Map`/`String`/`List` so they are not per-emitter special cases. On
+**Rust**, the cons-recursive layers remain BEAM-only until a portable `Vec`/slice
+prelude lands.

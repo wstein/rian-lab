@@ -21,21 +21,29 @@ defmodule Rian.JS do
   `["Ctor", a, …]` (nullary → `["Ctor"]`), with **clause patterns** that check
   the tag and recurse into fields (nested + literal patterns supported);
   **lists** (→ JS arrays, cons `[h | t]` → `[h, ...t]`, with closed/cons clause
-  patterns via `length`/`slice`); and **`case`** (→ an IIFE if-chain over the
-  arm patterns). **Not yet** (raise `Rian.JS.Unsupported`): struct
-  construction/patterns, atoms/`Symbol`, `with`, lambdas/captures, strings, FFI.
+  patterns via `length`/`slice`); **`case`** (→ an IIFE if-chain over the arm
+  patterns); **strings** (`<>` → `+`); **maps** (`%{k: v}` → a JS object); and a
+  small set of **stdlib calls** the self-hosting spikes lean on, mapped to
+  portable JS (`Map.get`/`Map.put` immutable, `String.to_charlist`,
+  `List.to_string`, `:lists.reverse`) — a stopgap until the portable prelude
+  (ADR-0047) owns them. **Not yet** (raise `Rian.JS.Unsupported`): struct
+  construction/patterns, atoms/`Symbol`, `with`, lambdas/captures, general FFI.
   """
   alias Rian.{Core, Decl, Pratt}
 
   alias Rian.Core.{
+    EAtom,
     EBin,
     EBlock,
     ECall,
     ECase,
+    EDot,
     EId,
     EIf,
     EList,
+    EMap,
     ENum,
+    EStr,
     ETuple,
     EUnary,
     PCtor,
@@ -178,6 +186,8 @@ defmodule Rian.JS do
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_js(%ENum{text: n}), do: num_js(n)
+  # a Rian `String` is a JS string; `<>` concatenation is `+` (see js_op)
+  defp expr_js(%EStr{value: s}), do: inspect(s)
   defp expr_js(%EId{name: b}) when b in ~w(true false), do: b
 
   # a bare PascalCase id is a nullary sum variant -> a one-element tagged array
@@ -196,6 +206,28 @@ defmodule Rian.JS do
 
   defp expr_js(%EList{elems: es, tail: tail}),
     do: "[#{Enum.join(Enum.map(es, &expr_js/1) ++ ["...#{expr_js(tail)}"], ", ")}]"
+
+  # a map literal `%{k: v, …}` is a JS object (identifier keys -> string keys)
+  defp expr_js(%EMap{pairs: pairs}),
+    do: "{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{expr_js(v)}" end)}}"
+
+  # the handful of stdlib calls the self-hosting spikes use, mapped to portable
+  # JS (a stopgap until the portable prelude, ADR-0047, owns these):
+  #   Map.get/put (immutable), String.to_charlist, List.to_string, :lists.reverse
+  defp expr_js(%ECall{fun: %EDot{head: %EId{name: "Map"}, name: "get"}, args: [m, k]}),
+    do: "#{paren(m)}[#{expr_js(k)}]"
+
+  defp expr_js(%ECall{fun: %EDot{head: %EId{name: "Map"}, name: "put"}, args: [m, k, v]}),
+    do: "{...#{paren(m)}, [#{expr_js(k)}]: #{expr_js(v)}}"
+
+  defp expr_js(%ECall{fun: %EDot{head: %EId{name: "String"}, name: "to_charlist"}, args: [s]}),
+    do: "[...#{paren(s)}].map(c => BigInt(c.codePointAt(0)))"
+
+  defp expr_js(%ECall{fun: %EDot{head: %EId{name: "List"}, name: "to_string"}, args: [xs]}),
+    do: "#{paren(xs)}.map(c => String.fromCodePoint(Number(c))).join(\"\")"
+
+  defp expr_js(%ECall{fun: %EDot{head: %EAtom{name: "lists"}, name: "reverse"}, args: [xs]}),
+    do: "#{paren(xs)}.slice().reverse()"
 
   # `case scrut do pat -> body … end` -> an IIFE: bind the scrutinee, then an
   # if-chain of `pat_match` tests; the first matching arm `return`s its body
@@ -240,9 +272,13 @@ defmodule Rian.JS do
   defp js_op("and"), do: "&&"
   defp js_op("or"), do: "||"
   defp js_op(op) when op in ~w(+ - * < <= > >= %), do: op
+  defp js_op("<>"), do: "+"
   defp js_op("div"), do: "/"
   defp js_op("rem"), do: "%"
   defp js_op(op), do: raise(Unsupported, "ecmascript: operator `#{op}`")
+
+  # parenthesise an operand of a postfix `[…]` / `.method()` so precedence holds
+  defp paren(e), do: "(#{expr_js(e)})"
 
   defp pascal?(s), do: String.match?(s, ~r/^[A-Z]/)
 end
