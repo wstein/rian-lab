@@ -39,7 +39,7 @@ a <- 55
 | **Match construct** | `case x do  pat [when guard] -> body  …  _ -> body  end`; `match` retired | **Elixir** `case`/`do`/`->`. This *renames* Rian's existing `match` (types-match §5) to `case` — the construct is otherwise unchanged: `do … end`, `pattern [when guard] -> body` arms, `_` catch-all, implicit-block bodies, static exhaustiveness, first-match. Keeps `->` (consistent with Rian lambdas) and, decisively, keeps `when` free as the guard keyword. |
 | **Primitive type names** | `Int64`, `Int32`, `Float64`, `Float32`, `String`, `Bool`, `Symbol` | Crystal vocabulary (PascalCase). Width-explicit is kept for cross-target precision; only the *spelling* moves from Rust's `i64` to Crystal's `Int64`. Resolves ADR-0032's open item. |
 | **Binding** | `name [Type] := expr` (type optional, juxtaposed) | `:=` retained — single-assignment is a real Rian distinction from `<-`. |
-| **Mutation** | `name <- expr` | Retained — capability-gated mutation (expressions spec). |
+| **Mutation** | `name <- expr` → **re-spelled, see ADR-0039** | The `<-` token is reassigned to the family failable-bind/generator (`with`/`for`); capability-gated mutation moves to a new spelling (semantics unchanged). Decision-lock 2026-06-12. |
 
 ### Guards keep `when` — resolved by the Elixir `case` form
 
@@ -91,5 +91,6 @@ rather than `i64` happening to match Rust/WASM. That is exactly the ADR-0032 sta
 ## Open items
 
 - **Atom/`Symbol` lowering** to non-atom targets (JVM/Go/JS/WASM) — target-model ADR.
-- **`<-` intra-family collision** (Elixir generators/`with`) — unchanged from ADR-0032; resolve
-  before comprehensions/`with` land.
+- **`<-` intra-family collision** — **resolved by ADR-0039**: `<-` is reassigned to the family
+  failable-bind/generator (`with`/`for`); capability-gated mutation is re-spelled. Lands before
+  comprehensions/`with`.

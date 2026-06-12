@@ -116,6 +116,14 @@ on the `@type` spec and first-match clauses; no shim needed.
   in `Exhaustiveness` are implementable and testable now against hand-built IR; (b) spec + example
   rewrites land now as authoritative surface (this ADR + [02_types_match.rian](../../examples/rian/02_types_match.rian));
   (c) `range`/`Char`-literal **parsing** lands with the declaration parser.
+- **Subrange types are the promoted overflow-safety idiom** (decision-lock 2026-06-12). Per the
+  ADR-0035 scope clarification (native-per-target integer semantics), bounding a quantity with a
+  `range` type — checked construction, `Name | RangeError`, no panic — is *the* in-domain-by-
+  construction tool. "We promote Pascal types" is the overflow strategy, not a stylistic preference.
+- **`unreachable!()` is the sole sanctioned trap.** The Rust exhaustiveness shim emits
+  `unreachable!()` — **never** `unreachable_unchecked()` (soundness over a micro-optimization) — on a
+  value the Rian gate proved impossible. It is documented as the *only* `panic!` Rian emits; a
+  property test must assert the arm is never reached (Samir).
 
 ## Open items
 

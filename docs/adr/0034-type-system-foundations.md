@@ -3,6 +3,7 @@
 **Status:** Accepted (direction) · implementation gated on the declaration parser (ADR-0031 Stage 0.1)
 **Refs:** ADR-0030 (comptime), ADR-0032 (family / concept-borrowing), ADR-0033 (vocabulary), ADR-0035 (no hidden control flow)
 **Owners:** Arthur Pendelton (inference) · Elena Rostova (polymorphism) · Maya Lin (multi-target) · Samir Patel (rigor) · Rachel Okafor (PM)
+**Amended 2026-06-12 (decision-lock review):** structural-unions, inference-algorithm, error-set-composition, and integer-overflow open items are **resolved** (see §1, §4, and Open items). The §2 propagation form is decided (`with`) and split into **ADR-0039** (`<-` reassignment) + **ADR-0040** (error handling). §3 (protocol-bounded generics) remains open and gets its own ADR.
 
 ## Context
 
@@ -33,6 +34,12 @@ terms is the algorithmic heart, and Prolog is its home). This also unifies two t
 does: **pattern matching is one-way unification at runtime; inference is unification at compile
 time** — one idea, two phases.
 
+**Checking strategy: bidirectional** (decision-lock 2026-06-12, resolving the inference-algorithm
+open item). Mandatory public signatures (below) are *checked against*; private / `:=` / lambda
+holes are *inferred*. Unification stays the solver; bidirectional is the strategy over it — chosen
+for better error localization (blame at the checking site, not at a downstream unification failure)
+and clean interaction with protocol bounds (§3).
+
 Inference is **local, with the signature boundary explicit** (the infer-local / declare-public line
 from the defaults and return-inference debates):
 
@@ -42,8 +49,12 @@ from the defaults and return-inference debates):
   caller because there is no exported inferred type.
 
 **Integer-literal width:** a bare integer literal defaults to **`Int64`** (ADR-0033 vocabulary);
-other widths require an annotation (`n Int32`). Cross-target overflow/precision semantics (BEAM
-bignums vs. fixed-width Rust/WASM) is a **target-model** open item, not settled here.
+other widths require an annotation (`n Int32`). **Overflow/precision is native-per-target**
+(decision-lock 2026-06-12): `Int*` types declare representation *intent* / minimum precision, **not
+a portable overflow contract**; each target uses its native integer semantics (BEAM bignum promotion;
+Rust panic-debug/wrap-release; JVM/Go wrap; JS `BigInt`); Rian does not simulate one runtime on
+another. Subrange types (ADR-0036) are the promoted in-domain safety idiom; bit-identical
+cross-target arithmetic is an opt-in library. See the ADR-0035 scope clarification.
 
 ### 2. Errors are values, typed as error sets (Zig)
 
@@ -74,6 +85,11 @@ After a `case` arm or a guard narrows a union/`Option`/result, the binding's typ
 that branch** — no re-annotation, no re-match. This is a property of the checker, not a separate
 feature; it rides along with pillars 1–2.
 
+Narrowing is **robust under Rian's single-assignment `:=`**: a `:=` binding cannot be reassigned, so
+a narrowing established in a branch cannot be silently invalidated by later mutation — the Kotlin
+smart-cast failure mode does not occur. A `<~`-mutable binding (ADR-0039) *does* invalidate
+narrowing, exactly as Kotlin invalidates a smart-cast on `var` reassignment.
+
 ### Folded-in rules
 
 - **Open-type exhaustiveness (from ADR-0033):** `case` on an open type (`Symbol`, `Int64`,
@@ -103,13 +119,25 @@ feature; it rides along with pillars 1–2.
 
 ## Open items
 
-- **Structural unions (Crystal) vs. nominal sums.** Rian has nominal sealed sums; Crystal-style
-  `Int64 | String` structural unions overlap them. Decide which is canonical (and how flow
-  narrowing treats each) — Chloe's dissent from the concept review.
-- **Inference algorithm specifics:** classic HM vs. bidirectional checking (the latter pairs better
-  with mandatory signatures and gives better error locations).
-- **Error-set composition:** how a caller's inferred set unions its callees' sets; declared vs.
-  inferred boundaries.
+**Resolved in the 2026-06-12 decision-lock review:**
+
+- **Structural unions vs. nominal sums → nominal is canonical.** Untagged structural unions are
+  *not* a general user-facing type former. `T | E` in **return position** is sugar for the tagged
+  `Result(T, E)` / error-set union (§2, ADR-0040); `|` is **not** general union syntax. Flow
+  narrowing (§4) narrows the *nominal* variants. (Closes Chloe's dissent.)
+- **Inference algorithm → bidirectional** over a unification solver (§1).
+- **Error-set composition → infer-local / declare-public union** (full surface in ADR-0040):
+  private functions infer `E = ⋃ propagated callees' sets − handled`; `pub` functions declare `E`
+  explicitly and the body's inferred set must be ⊆ the declared set.
+- **Integer overflow → native-per-target** (no cross-target simulation): `Int*` declares
+  representation intent / minimum precision, not a portable overflow contract; subrange types
+  (ADR-0036) are the in-domain safety idiom; deeper compat is an opt-in library. See §1 and ADR-0035.
+
+**Still open:**
+
+- **Protocol/generics surface** (§3) — type-variable introduction site, `protocol` declaration form,
+  and the bound spelling (which collides with the `when` *guard* keyword). Its own ADR.
 - **Capabilities × types:** how `val`/`iso`/`ref`/`tag` interact with inference and protocol bounds
   (an `iso` returned from a protocol method, etc.).
-- **Target model for `Symbol`/error tags and integer overflow** on non-BEAM targets.
+- **Target model for `Symbol` / error-tag representation** on non-atom targets (JVM/Go/JS/WASM) —
+  the remaining target-model item (integer overflow above is now settled).

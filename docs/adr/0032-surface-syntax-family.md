@@ -101,8 +101,8 @@ Two rules follow:
   the open question is `i64` vs. `Int64`.
 - **Atom lowering** to non-atom targets (JVM/Go/JS/WASM) — interned strings / symbols / enums /
   `i32` tags. Belongs in a target-model ADR.
-- **`<-` intra-family collision.** Elixir spells generator/`with` clauses `pattern <- source`; if
-  Rian adds comprehensions or a `with`-form, `<-` (currently mutation) collides *within* the
-  family. Resolve before either lands.
+- **`<-` intra-family collision** — **resolved by ADR-0039**: `<-` goes to the family
+  failable-bind/generator (`pattern <- source` in `with`/`for`); capability-gated mutation is
+  re-spelled. This is the collision-test outcome — the family meaning of `<-` wins.
 - **Reserve trailing `?`** as a predicate-name affordance (`empty?`) once the lexer is taught to
   treat `?` as a name character rather than an operator.

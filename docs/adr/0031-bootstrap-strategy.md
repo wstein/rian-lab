@@ -112,3 +112,8 @@ alongside the parser work.
 - Decide the interim cutover point from Elixir-source emission to abstract forms (likely once
   the module emitter is stable and pattern/guard lowering is exercised on real files).
 - Mix compiler + rebar3 plugin packaging (ADR-0026) can land alongside Stage 0.3.
+- **Non-BEAM concurrency is an unfilled gap, now named** (decision-lock 2026-06-12). Non-BEAM
+  targets (Rust/Go/JS/WASM) get the *sequential core* only — there is no concurrency story for them.
+  This is a deliberate deferral, not a decision: *if* structured concurrency is ever added there it
+  must be lexically explicit (Occam-style scoped parallelism, no detached tasks) to satisfy ADR-0035,
+  never Go-style implicit `go`. OTP/actors stay BEAM-only; no CSP/Oz-dataflow in the core.

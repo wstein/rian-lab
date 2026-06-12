@@ -32,6 +32,20 @@ Rian adopts **No Hidden Control Flow** as a standing design principle. Concretel
 The litmus test for any future feature: **can a reader predict where control goes and what
 allocates, from the source alone?** If not, it does not enter the portable core.
 
+### Scope: overflow and platform-native behavior (decision-lock 2026-06-12)
+
+"No hidden control flow" governs **Rian's own constructs** (`case`, `with`, operators-as-written)
+and the program's **in-domain** semantics. It does **not** require masking a target's native
+behavior on **out-of-domain** values. Integer overflow is the canonical case: an *edge case correct
+code stays clear of*, not a control-flow feature. Each target therefore uses its **native integer
+semantics** (BEAM promotes to bignum; Rust panics-debug/wraps-release; JVM/Go wrap; JS uses
+`BigInt`) — Rian does **not** simulate one runtime on another. The discipline this still imposes is
+twofold: (1) the cross-target divergence must be **documented, never silent**, and (2) the language
+must provide first-class tools to **stay in-domain** — subrange types (ADR-0036) as the promoted
+idiom, plus explicit `checked_*` / `saturating_*`. Bit-identical cross-target arithmetic is an
+**opt-in library**, not a core guarantee. (A Rust `panic!` on a proven-impossible value — e.g. the
+ADR-0036 `unreachable!()` shim — is loud, not hidden, and is the sole sanctioned trap.)
+
 ## Rationale
 
 - This is the discipline behind Rian's *existing* best ideas — the exhaustiveness gate, explicit
@@ -63,3 +77,6 @@ allocates, from the source alone?** If not, it does not enter the portable core.
 - **`@partial` on the BEAM** — exact diagnostic (generated raising clause vs. `FunctionClauseError`).
 - **Allocation visibility** — how explicit it must be on Rust/WASM at the surface vs. inferred from
   capabilities; settle with the target-model ADR.
+- **Non-BEAM concurrency** — a named gap (see ADR-0031): the non-BEAM targets get the *sequential
+  core* only. *If* structured concurrency is ever added there it must be lexically explicit
+  (Occam-style scoped parallelism, no detached tasks); OTP/actors stay BEAM-only, no CSP/dataflow.
