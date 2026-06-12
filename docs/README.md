@@ -37,6 +37,7 @@ The component test suites pass; cross-pass integration is thin. Treat the
 | [0030](adr/0030-macros.md) | Macros: declarative, hygienic, pattern→template (+ comptime) | Accepted; implemented |
 | [0031](adr/0031-bootstrap-strategy.md) | Bootstrap: reuse the Elixir *runtime*, not the *compiler* | Accepted |
 | [0032](adr/0032-surface-syntax-family.md) | Surface syntax belongs to the Elixir/Ruby/Crystal family | Accepted |
+| [0033](adr/0033-surface-vocabulary.md) | Surface vocabulary: `def`, juxtaposed types, `case`/`when`, Crystal primitives | Accepted |
 
 ## Specifications
 
