@@ -1,0 +1,6 @@
+# A real Rian source file, compiled by Rian.Decl (Stage 0.1).
+type Shape := Circle(radius Float64) | Square(side Float64)
+
+def area(s val Shape) Float64
+def area(Circle(r)) := pi * r * r
+def area(Square(s)) := s * s

@@ -10,11 +10,14 @@ the *same source* to two targets:
 
 > **Status: proof-of-concept.** The lowering passes, exhaustiveness gate,
 > capability model, and hygienic macros are implemented and tested at the
-> component level. There is **no lexer or declaration parser yet** — passes are
-> currently driven by hand-built IR, not by parsing `.rian` source files. The
-> single highest-leverage next step is the declaration parser (see
-> [ADR-0031](docs/adr/0031-bootstrap-strategy.md)). See
-> [docs/README.md](docs/README.md) for an honest status map.
+> component level. A **Stage 0.1 declaration parser** ([`Rian.Decl`](lib/rian/decl.ex),
+> [ADR-0031](docs/adr/0031-bootstrap-strategy.md)) now compiles real
+> single-parameter `.rian` files end-to-end — `type` declarations and `def`
+> functions parse to the pipeline IR, lower to Elixir + Rust, and run (try
+> `mix run examples/decl_run.exs`). Still hand-built IR / not yet parsed:
+> multi-parameter functions, `case`/block bodies, string literals, and
+> `mod`/`struct`/`alias`. See [docs/README.md](docs/README.md) for an honest
+> status map.
 
 ## Pipeline
 
@@ -46,6 +49,7 @@ backends share one core.
 
 | Module | Responsibility |
 | --- | --- |
+| [`Rian.Decl`](lib/rian/decl.ex) | Stage 0.1 declaration parser: `.rian` source → pipeline IR |
 | [`Rian.Pratt`](lib/rian/pratt.ex) | Precedence-climbing expression parser |
 | [`Rian.Exhaustiveness`](lib/rian/exhaustiveness.ex) | Maranget usefulness algorithm — the emission gate |
 | [`Rian.PatternLower`](lib/rian/pattern_lower.ex) | Surface patterns → checker IR |

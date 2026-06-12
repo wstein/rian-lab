@@ -19,7 +19,7 @@ the normative behaviour the implementation must match).
 | Capability → Rust sig + BEAM linearity | Implemented (partial) | [capability.ex](../lib/rian/capability.ex) |
 | End-to-end lowering (Elixir + Rust) | Implemented | [lower.ex](../lib/rian/lower.ex) |
 | Hygienic macros + pure comptime | Implemented | [macro.ex](../lib/rian/macro.ex), [comptime.ex](../lib/rian/comptime.ex) |
-| **Lexer + declaration parser** | **Not started** | the gate to a "functioning language" (ADR-0031) |
+| Lexer + declaration parser | **Stage 0.1 (MVP)** | [decl.ex](../lib/rian/decl.ex) — single-param `type`/`def` parse + lower + run end-to-end ([decl_run.exs](../examples/decl_run.exs)) |
 | Real type checker | **Not started** | passes are "typecheck-shape" only; FFI is `dynamic` |
 | Erlang abstract-forms backend | Not started | interim backend emits Elixir/text source |
 

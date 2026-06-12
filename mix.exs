@@ -54,7 +54,7 @@ defmodule RianLab.MixProject do
         Examples: ["examples/rian/README.md"]
       ],
       groups_for_modules: [
-        "Front-end": [Rian.Pratt],
+        "Front-end": [Rian.Decl, Rian.Pratt],
         "Checking & lowering": [
           Rian.Exhaustiveness,
           Rian.PatternLower,
