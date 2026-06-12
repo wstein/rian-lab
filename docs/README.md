@@ -60,6 +60,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0050](adr/0050-typed-core-ir.md) | One typed core IR: single contract, sealed-sum nodes, emitters as pure consumers | Accepted (direction) |
 | [0051](adr/0051-doc-comments.md) | Doc comments: `@moduledoc`/`@doc`/`@typedoc` → EEP-48/rustdoc/JSDoc; documented self-hosting from day one | Accepted (direction) |
 | [0052](adr/0052-documentation-site.md) | Documentation site: Astro/Starlight portal + native per-target API reference | Accepted (direction) |
+| [0053](adr/0053-repl-interactive-surfaces.md) | REPL & interactive surfaces: a compiling, connected REPL; one eval engine, many surfaces | Accepted (direction) |
 
 ## Specifications
 

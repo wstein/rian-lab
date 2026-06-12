@@ -33,7 +33,9 @@ The public `rian-lang` portal (guides, language reference, the by-example tour, 
 - Built-in **search, versioning, i18n**, modern DX.
 - **MDX enables an in-browser Rian playground** — compile Rian → JS *in the browser* via the Tier-1
   **ECMAScript** target (ADR-0049). "Edit this example, see it run" on the language's own site is the
-  differentiator, and it exists *only because* ECMAScript is Tier 1.
+  differentiator, and it exists *only because* ECMAScript is Tier 1. The playground is one of the
+  interactive surfaces over the shared eval engine of [ADR-0053](0053-repl-interactive-surfaces.md)
+  (REPL · Livebook · Jupyter · playground) — so it cannot drift from the real compiler.
 
 ### 2. API reference → native per target, linked from the portal
 

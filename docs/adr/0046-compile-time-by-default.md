@@ -43,7 +43,8 @@ security story and is **not** target-conditioned.
 Monomorphization, closed-set→enum lowering, opaque-type erasure, static dispatch, and constant folding
 are **aggressive on Rust/WASM** and **conservative on the BEAM** — because the BEAM is a *dynamic*
 runtime (late binding, runtime polymorphism, **hot code upgrade**), and over-eager cross-module
-specialization **fights** hot-reload and the REPL-driven workflow BEAM users expect. This is the
+specialization **fights** hot-reload and the REPL-driven workflow BEAM users expect (the connected
+REPL of [ADR-0053](0053-repl-interactive-surfaces.md) is the cash-in). This is the
 ADR-0041 "same source, two idiomatic shapes" pattern, applied to *when* work is done: the surface is
 one program; each target specializes as far as its idiom allows, no further.
 
