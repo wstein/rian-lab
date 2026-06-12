@@ -140,6 +140,21 @@ construction, and cons-list building all compose and lower correctly.
    convention); map access/insert already rode the `Map` FFI. With that, the
    evaluator **compiles and runs**: `let x = 10 in let y = 4 in (x + y) * 2` →
    `28`, and the full `lex → parse → eval` pipeline (all three Rian modules
-   compiled to `.beam`) gives `2 + 3 * 4` → `14`. Still unlowered (next, if a
-   spike demands them): `struct` declarations, map *update* (`%{m | k: v}`), and
-   map *patterns*.
+   compiled to `.beam`) gives `2 + 3 * 4` → `14`.
+7. **Self-hosting type-checker spike + structs on BEAM (ADR-0027/0031/0043)** —
+   **the prediction held again; structs are down.**
+   [`examples/rian/selfhost_check.rian`](examples/rian/selfhost_check.rian) is
+   the layer after the evaluator: it infers a `Ty` (`TInt`/`TBool`) for the
+   `Expr` language under a typing environment and reports a **structured type
+   error** via `struct Mismatch(op, expected, got)`. Written idiomatically it hit
+   exactly the predicted wall — the `struct` declaration raised
+   `Rian.Beam.Unsupported`. That drove the increment: a `struct` declaration is
+   now **erased**, a struct *value* is a tagged map — named construction
+   `Name(field: v, …)` builds a map keyed by field-name atoms (+ `__struct__`),
+   and field access `value.field` reads it via `maps:get/2` (no field schema
+   threaded). The checker now **compiles and runs**: it types `1 + 2` → `Int`,
+   `1 < 2` → `Bool`, and reports `1 + true` → *type error in add: expected Int,
+   got Bool* — the `Mismatch` struct round-tripping through field access. **Four
+   layers (lexer → parser → evaluator → type-checker) now compile to real `.beam`
+   and run.** Still unlowered (next, if a spike demands them): *positional*
+   struct construction, map/struct *patterns*, and map *update* (`%{m | k: v}`).

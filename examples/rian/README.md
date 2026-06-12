@@ -51,6 +51,11 @@ compile + run on real BEAM bytecode:
   `let`-binding and `Var` lookup. The symbol table is the first place that
   reaches for a map; its empty initial environment `%{}` was the construct that
   drove the BEAM **map-literal** increment.
+- [selfhost_check.rian](selfhost_check.rian) — a type-checker pass that infers a
+  `Ty` (`TInt`/`TBool`) for the `Expr` language, reporting a **structured type
+  error** via a `struct Mismatch(op, expected, got)`. The diagnostic record is
+  the first place a checker wants a `struct`; it drove the BEAM **struct**
+  increment (a struct value is a tagged map, read by field access).
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

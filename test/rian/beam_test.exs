@@ -125,6 +125,28 @@ defmodule Rian.BeamTest do
       assert ev.eval({:mul, {:var, "x"}, {:var, "x"}}, %{"x" => 5}) == 25
     end
 
+    test "the self-hosting type-checker reports structured errors via a struct record" do
+      {:ok, chk} = Beam.load(File.read!("examples/rian/selfhost_check.rian"), :rian_beam_check)
+
+      describe = fn e -> chk.describe(chk.check(e)) end
+
+      # well-typed expressions infer a type
+      assert describe.({:add, {:num, 1}, {:num, 2}}) == "Int"
+      assert describe.({:lt, {:num, 1}, {:num, 2}}) == "Bool"
+      assert describe.({:let, "x", {:num, 5}, {:add, {:var, "x"}, {:num, 1}}}) == "Int"
+
+      # ill-typed expressions produce a `Mismatch` struct, read back by field
+      # access (`m.op` / `m.expected` / `m.got`) — the struct round-trips
+      assert describe.({:add, {:num, 1}, {:bln, true}}) ==
+               "type error in add: expected Int, got Bool"
+
+      assert describe.({:if, {:num, 1}, {:num, 0}, {:num, 1}}) ==
+               "type error in if-cond: expected Bool, got Int"
+
+      assert describe.({:if, {:lt, {:num, 1}, {:num, 2}}, {:num, 10}, {:bln, true}}) ==
+               "type error in if-branch: expected Int, got Bool"
+    end
+
     test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
       {:ok, mod} =
         Beam.load(
@@ -244,14 +266,10 @@ defmodule Rian.BeamTest do
     end
 
     test "a construct outside the core raises a clear Unsupported (never a miscompile)" do
-      # struct declarations need %Name{} map forms (next increment)
-      assert_raise Beam.Unsupported, ~r/struct/, fn ->
-        Beam.compile("struct P(x Int64)\ndef o(n Int64) P := P(n)", :rian_beam_bad)
-      end
-
-      # bare struct field access (`n.field`) has no abstract-forms lowering yet
-      assert_raise Beam.Unsupported, fn ->
-        Beam.compile("def g(n Int64) Int64 := n.field", :rian_beam_bad2)
+      # the `in` membership operator has no simple Erlang operator form yet (it
+      # needs `lists:member`); it raises rather than silently miscompiling
+      assert_raise Beam.Unsupported, ~r/operator `in`/, fn ->
+        Beam.compile("def g(x Int64, ys Vec(Int64)) Bool := x in ys", :rian_beam_bad)
       end
     end
   end

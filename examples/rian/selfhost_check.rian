@@ -1,0 +1,106 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — a Rian type-checker pass, written in Rian
+# ===========================================================================
+# Goal (ADR-0027/0031): the layer after the evaluator. Walk an `Expr` sum and
+# infer a type (`Ty`) under a typing environment, reporting a **structured type
+# error** when the program is ill-typed. The diagnostic is the first place a
+# real checker reaches for a `struct` (a record of named fields) rather than a
+# sum — cf. `Rian.Check.Error`. Evidence for SELFHOST.md.
+#
+# Language checked:  integers, booleans, variables, `+` (Int×Int→Int),
+# `<` (Int×Int→Bool), `if` (Bool cond, branches of one type), and `let`.
+# ---------------------------------------------------------------------------
+
+mod SelfhostCheck do
+  type Expr := Num(Int64)
+             | Bln(Bool)
+             | Var(String)
+             | Add(Expr, Expr)
+             | Lt(Expr, Expr)
+             | If(Expr, Expr, Expr)
+             | Let(String, Expr, Expr)
+
+  # The two types this language has.
+  type Ty := TInt | TBool
+
+  # A structured type error — a record with named fields (the `struct` the
+  # checker wants: an operation, the type it expected, and the type it got).
+  struct Mismatch(op String, expected Ty, got Ty)
+
+  # The result of checking one expression: a type, or a structured mismatch.
+  type Check := Ok(Ty) | Bad(Mismatch)
+
+  pub def check(e Expr) Check := infer(e, %{})
+
+  # Infer the type of `e` under `env` (variable name -> type), short-circuiting
+  # on the first mismatch found in a sub-expression.
+  def infer(e Expr, env Map(String, Ty)) Check
+  def infer(Num(_), _) := Ok(TInt)
+  def infer(Bln(_), _) := Ok(TBool)
+  def infer(Var(name), env) := Ok(Map.get(env, name))
+  def infer(Add(a, b), env) := binop("add", a, b, env, TInt)
+  def infer(Lt(a, b), env) := binop("lt", a, b, env, TBool)
+
+  def infer(Let(name, rhs, body), env)
+    case infer(rhs, env) do
+      Bad(m) -> Bad(m)
+      Ok(t) -> infer(body, Map.put(env, name, t))
+    end
+  end
+
+  def infer(If(c, t, e), env)
+    case infer(c, env) do
+      Bad(m) -> Bad(m)
+      Ok(TBool) -> branches(t, e, env)
+      Ok(got) -> Bad(Mismatch(op: "if-cond", expected: TBool, got: got))
+    end
+  end
+
+  # Both operands of `+`/`<` must be `TInt`; `result` is the type the op yields.
+  def binop(op String, a Expr, b Expr, env Map(String, Ty), result Ty) Check
+  def binop(op, a, b, env, result)
+    case infer(a, env) do
+      Bad(m) -> Bad(m)
+      Ok(ta) ->
+        case infer(b, env) do
+          Bad(m) -> Bad(m)
+          Ok(tb) -> both_int(op, ta, tb, result)
+        end
+    end
+  end
+
+  def both_int(op String, ta Ty, tb Ty, result Ty) Check
+  def both_int(_, TInt, TInt, result) := Ok(result)
+  def both_int(op, TInt, got, _) := Bad(Mismatch(op: op, expected: TInt, got: got))
+  def both_int(op, got, _, _) := Bad(Mismatch(op: op, expected: TInt, got: got))
+
+  # The two arms of an `if` must agree on a type.
+  def branches(t Expr, e Expr, env Map(String, Ty)) Check
+  def branches(t, e, env)
+    case infer(t, env) do
+      Bad(m) -> Bad(m)
+      Ok(tt) ->
+        case infer(e, env) do
+          Bad(m) -> Bad(m)
+          Ok(te) -> unify_branches(tt, te)
+        end
+    end
+  end
+
+  def unify_branches(tt Ty, te Ty) Check
+  def unify_branches(TInt, TInt) := Ok(TInt)
+  def unify_branches(TBool, TBool) := Ok(TBool)
+  def unify_branches(tt, te) := Bad(Mismatch(op: "if-branch", expected: tt, got: te))
+
+  # Render a result — the success type, or the error, reading the `Mismatch`
+  # struct's fields by name (`m.op` / `m.expected` / `m.got`).
+  pub def describe(Check) String
+  pub def describe(Ok(t)) := ty_name(t)
+  pub def describe(Bad(m))
+    "type error in " <> m.op <> ": expected " <> ty_name(m.expected) <> ", got " <> ty_name(m.got)
+  end
+
+  def ty_name(Ty) String
+  def ty_name(TInt) := "Int"
+  def ty_name(TBool) := "Bool"
+end

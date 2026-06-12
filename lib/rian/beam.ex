@@ -39,9 +39,14 @@ defmodule Rian.Beam do
   identifier key `k` is the atom `:k`, the Elixir convention); access/insert ride
   the `Map` FFI (free remote calls). Enough for a symbol-table / environment.
 
-  **Not yet** (raise a clear error, never a silent miscompile): `struct`
-  declarations (need `%Name{}` map forms), named-arg construction, map *update*
-  (`%{m | k: v}`) and map *patterns*.
+  **Structs (ADR-0043):** a `struct` declaration is erased; a struct *value* is a
+  tagged map. Named construction `Name(field: v, …)` builds a map keyed by
+  field-name atoms plus `__struct__ => :name`; field access `value.field` reads
+  it via `maps:get/2` — no field schema is threaded.
+
+  **Not yet** (raise a clear error, never a silent miscompile): *positional*
+  struct construction (named `Name(f: v)` works), map *update* (`%{m | k: v}`)
+  and map / struct *patterns*.
   """
   alias Rian.{Core, Decl, PatternLower, Pratt}
 
@@ -57,6 +62,7 @@ defmodule Rian.Beam do
     EDot,
     EId,
     EIf,
+    ELabel,
     ELambda,
     EList,
     EMap,
@@ -88,10 +94,9 @@ defmodule Rian.Beam do
   def compile(src, module) when is_atom(module) do
     prog = Decl.parse(src)
 
-    if prog.structs != [] or Enum.any?(prog.mods, &(&1.structs != [])) do
-      raise Unsupported, "abstract-forms: `struct` declarations not yet supported"
-    end
-
+    # `struct` declarations contribute no forms — a struct value is a tagged map
+    # (built by named construction `Name(f: v)`, read by field access), so the
+    # declaration itself is erased; only its constructions/accesses emit.
     funcs = funcs_of(prog)
 
     forms =
@@ -188,6 +193,19 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EDot{head: %EAtom{name: m}, name: fun}, args: args}, s),
     do: remote_call(String.to_atom(m), fun, args, s)
 
+  # named construction `Name(field: v, …)` builds a **struct**: a map keyed by
+  # field-name atoms plus a `__struct__` tag (the snake-cased name). Field access
+  # reads it by name, so no field schema is threaded (ADR-0041 / ADR-0043).
+  defp expr_form(%ECall{fun: %EId{name: f}, args: [%ELabel{} | _] = labels}, s) do
+    fields =
+      Enum.map(labels, fn %ELabel{name: k, expr: v} ->
+        {:map_field_assoc, @ln, {:atom, @ln, String.to_atom(k)}, expr_form(v, s)}
+      end)
+
+    {:map, @ln,
+     [{:map_field_assoc, @ln, {:atom, @ln, :__struct__}, {:atom, @ln, tag(f)}} | fields]}
+  end
+
   # a PascalCase call is sum-variant construction -> a tagged tuple `{tag, args…}`
   # (labels erased, positional); a lowercase call is either a *variable*
   # application (the name is a fun-valued binding) or a local function call
@@ -262,6 +280,12 @@ defmodule Rian.Beam do
   # value passes through as the `with`'s result)
   defp expr_form(%EWith{clauses: clauses, body: body, els: els}, s),
     do: with_form(clauses, body, els, s, 0)
+
+  # struct field access `value.field` -> `maps:get(field, value)` (a struct is a
+  # map keyed by field-name atoms); the ECall/EDot remote-call clauses above
+  # already claimed module-qualified calls, so a bare `EDot` here is field access
+  defp expr_form(%EDot{head: head, name: field}, s),
+    do: remote_call(:maps, "get", [%EAtom{name: field}, head], s)
 
   defp expr_form(other, _s),
     do: raise(Unsupported, "abstract-forms: expression #{inspect(other)}")
