@@ -33,7 +33,7 @@ tension** — they are different layers and are sequenced independently.
 
 | Strategy | Rating | Rationale |
 |---|---|---|
-| Fork Elixir compiler (modify lexer/grammar) | **1/5** | Rian's distinctive semantics — `:=` single-assignment, `<-` capability-gated mutation, mandatory signature capabilities, closed exhaustive sums, dataflow vars, non-Elixir macros — are absent from Elixir's AST and must be rebuilt regardless; meanwhile you inherit a grammar that fights them, stay permanently downstream of Elixir releases, and inherit `quote`/`unquote` (the rejected macro model). |
+| Fork Elixir compiler (modify lexer/grammar) | **1/5** | Rian's distinctive semantics — `:=` single-assignment variables, `<-` capability-gated mutation, mandatory signature capabilities, closed exhaustive sums, non-Elixir macros — are absent from Elixir's AST and must be rebuilt regardless; meanwhile you inherit a grammar that fights them, stay permanently downstream of Elixir releases, and inherit `quote`/`unquote` (the rejected macro model). |
 | "Adapt" Elixir's yecc parser | **2/5** | Changing binding semantics, operators, and `fn name(params) RetType` heads is a grammar rewrite of an LALR `.yrl` — *more* work than extending our existing Pratt parser, with none of Rian's type/capability machinery for free. |
 | Transpile Rian → Elixir source (as the destination) | **3/5** | Fastest to end-to-end working, but textual IR is fragile, slow per-module, and inherits Elixir's macro/hygiene model; acceptable only as a temporary accelerator, not the final backend. |
 | **Host in Elixir; emit Elixir source now → swap to abstract forms later** | **5/5** | Functioning language immediately; the backend swap is invisible to the language; honors ADR-0026 on its own schedule. |
@@ -55,7 +55,10 @@ tension** — they are different layers and are sequenced independently.
 
 ## What we DO reuse from Elixir (maximally)
 
-- **Runtime:** the BEAM, OTP behaviours, supervision, processes.
+- **Runtime:** the BEAM, OTP behaviours, supervision, processes. **Concurrency is OTP/actors** —
+  Rian does not add CSP (Go), coroutines (Kotlin), or Oz-style dataflow concurrency; `:=` is a
+  single-assignment *variable*, not a blocking dataflow primitive. Non-BEAM targets get the
+  sequential core; concurrency stays BEAM-native.
 - **Ecosystem:** Hex, Mix/rebar3 integration, EEP-48 docs, dialyzer specs (per ADR-0026).
 - **Stdlib via FFI:** `:lists`, `:maps`, `String`, `Enum`, … are callable for free (ADR-0027).
 - **Execution today:** we already emit Elixir source and run it on the BEAM in every test.

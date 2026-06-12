@@ -38,6 +38,8 @@ The component test suites pass; cross-pass integration is thin. Treat the
 | [0031](adr/0031-bootstrap-strategy.md) | Bootstrap: reuse the Elixir *runtime*, not the *compiler* | Accepted |
 | [0032](adr/0032-surface-syntax-family.md) | Surface syntax belongs to the Elixir/Ruby/Crystal family | Accepted |
 | [0033](adr/0033-surface-vocabulary.md) | Surface vocabulary: `def`, juxtaposed types, `case`/`when`, Crystal primitives | Accepted |
+| [0034](adr/0034-type-system-foundations.md) | Type system: unification, error sets, protocol bounds, flow narrowing | Accepted (direction) |
+| [0035](adr/0035-no-hidden-control-flow.md) | No hidden control flow (errors are values; no exceptions) | Accepted |
 
 ## Specifications
 
@@ -58,6 +60,8 @@ The component test suites pass; cross-pass integration is thin. Treat the
 
 1. **Direction** — ADR-0026, ADR-0027, ADR-0031, ADR-0032 (ecosystem, self-hosting,
    bootstrap, and the surface-syntax family that governs every later syntax decision).
+   Then the design spine: ADR-0033 (vocabulary), ADR-0034 (type-system foundations —
+   the artifact every recent debate converges on), ADR-0035 (no hidden control flow).
 2. **Surface language** — `expressions` → `types-match` → `clauses-guards` → `modules`.
 3. **Semantics & lowering** — `pattern-lowering` → `exhaustiveness` → `capability-lowering`
    → `end-to-end-lowering`.
