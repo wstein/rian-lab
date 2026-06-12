@@ -53,6 +53,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0043](adr/0043-opaque-types.md) | Opaque types: module-scoped nominal distinctness over a base, zero-cost | Accepted (direction) |
 | [0044](adr/0044-otp-behaviours.md) | OTP behaviours: `@behaviour` annotation, checked callbacks, threaded state (BEAM-only) | Accepted (direction) |
 | [0045](adr/0045-formatter.md) | Formatter: one canonical zero-config style, comment-preserving, deterministic | Accepted (direction) |
+| [0046](adr/0046-compile-time-by-default.md) | Compile-Time by Default: universal compile-time checks; per-target specialization; semantic-only optimization | Accepted |
 
 ## Specifications
 

@@ -1,6 +1,6 @@
 # ADR-0035 — No Hidden Control Flow
 
-**Status:** Accepted · **Refs:** ADR-0032 (concept-borrowing), ADR-0034 (type-system foundations)
+**Status:** Accepted · **Positive complement:** [ADR-0046](0046-compile-time-by-default.md) (Compile-Time by Default — *what can be settled before it runs, is*) · **Refs:** ADR-0032 (concept-borrowing), ADR-0034 (type-system foundations)
 **Owners:** Julian Vance (grammar) · Maya Lin (multi-target) · Samir Patel (rigor)
 **Borrows the *discipline* of:** Zig (no hidden control flow), Go / V (one obvious way)
 
