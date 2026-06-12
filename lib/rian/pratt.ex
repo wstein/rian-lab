@@ -11,7 +11,7 @@ defmodule Rian.Pratt do
   end
 
   @multi ["->", ":=", "|>", "<>", "<-", "<=", ">=", "==", "!="]
-  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "?", "&"]
+  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&"]
   @words ~w(and or not in rem div)
   @ctrl ~w(if do else end)
   @infix ~w(+ - * / rem div <> in |> < <= > >= == != and or <-)
@@ -229,9 +229,6 @@ defmodule Rian.Pratt do
     parse_postfix({:call, node, args}, rest)
   end
 
-  # `?` — postfix error/Option propagation (binds as tightly as call/`.`)
-  defp parse_postfix(node, [{:op, "?"} | rest]), do: parse_postfix({:try, node}, rest)
-
   defp parse_postfix(node, tokens), do: {node, tokens}
 
   defp parse_args([{:rparen} | rest]), do: {[], rest}
@@ -381,7 +378,6 @@ defmodule Rian.Pratt do
   defp sexpr({:unary, op, x}), do: "(#{op} #{sexpr(x)})"
   defp sexpr({:atom, a}), do: ":" <> a
   defp sexpr({:dot, o, n}), do: "(. #{sexpr(o)} #{n})"
-  defp sexpr({:try, x}), do: "(? #{sexpr(x)})"
   defp sexpr({:cap_arg, n}), do: "&#{n}"
   defp sexpr({:capture, b}), do: "(& #{sexpr(b)})"
   defp sexpr({:capture_named, p, a}), do: "(&/ #{sexpr(p)} #{a})"
