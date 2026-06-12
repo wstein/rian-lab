@@ -131,6 +131,18 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "parse_body (function bodies: block-or-expression)" do
+    test "a single expression becomes a one-statement block" do
+      assert Pratt.parse_body("a + b") == {:block, [{:expr, {:bin, "+", {:id, "a"}, {:id, "b"}}}]}
+    end
+
+    test "a `;`-separated block parses to bindings + a final expression" do
+      assert Pratt.parse_body("x := 2 ; x + 1") ==
+               {:block,
+                [{:bind, "x", {:num, "2"}}, {:expr, {:bin, "+", {:id, "x"}, {:num, "1"}}}]}
+    end
+  end
+
   describe "string literals" do
     test "a string literal lexes and round-trips" do
       assert p("\"zero\"") == "\"zero\""

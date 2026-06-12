@@ -23,6 +23,17 @@ defmodule Rian.Pratt do
 
   def parse_sexpr(str), do: sexpr(parse(str))
 
+  @doc """
+  Parse a function body — a block of `;`-separated statements with a final
+  value expression (a single `:= expr` body is the one-statement case). Always
+  returns a `{:block, stmts}` node; the emitter unwraps a single expression.
+  """
+  def parse_body(str) do
+    {block, rest} = parse_block(Rian.Lexer.expr_tokens(str))
+    if rest != [], do: raise(ArgumentError, "trailing tokens in body: #{inspect(rest)}")
+    block
+  end
+
   defp opinfo(op) do
     cond do
       op in ~w(* / rem div) -> {3, :left}

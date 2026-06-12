@@ -7,25 +7,30 @@ defmodule Rian.Decl do
   consumes (`Rian.Lower.compile/2`), then drives it. Surface follows ADR-0033:
   `def`, juxtaposed types, Crystal primitive names, `:=` bodies.
 
-  ## Supported (MVP)
+  ## Implementation
+
+  Token-driven recursive descent over `Rian.Lexer.tokenize/1`: `do`/`end`/`;`
+  and significant `{:nl}` tokens drive declaration boundaries and block bodies,
+  so block bodies — which the earlier line-joining MVP could not parse — work.
+  Token *ranges* (params, patterns, bodies) are detokenized and handed to the
+  string content helpers below; bodies are re-parsed by `Rian.Pratt.parse_body/1`.
+
+  ## Supported
 
     * `type Name := Ctor(field Type, …) | Ctor2 | …` — sum declarations.
     * `def` functions, single- or multi-parameter:
       * single typed clause — `def add(x Int64, y Int64) Int64 := x + y`
       * bodiless signature + pattern clauses —
         `def max2(a Int64, b Int64) Int64` then `def max2(a, b) when a >= b := a`
-    * `:=` bodies (single expressions parsed by `Rian.Pratt`), including string
-      literals and `when` guards.
-
-  Multi-line type/def declarations are joined (a line that does not start a
-  declaration continues the previous one).
+    * `:=` one-liner bodies **and** multiline `… end` **block bodies**,
+      including string literals and `when` guards.
 
   ## Not yet supported
 
-  `do … end` block and `case` expression bodies, and `mod`/`struct`/`alias`
-  declarations. Each raises `Rian.Decl.Error`.
+  `case` expression bodies, and `mod`/`struct`/`alias` declarations. Each raises
+  `Rian.Decl.Error`.
   """
-  alias Rian.Lower
+  alias Rian.{Lexer, Lower}
 
   defmodule Error do
     defexception [:message]
@@ -36,8 +41,18 @@ defmodule Rian.Decl do
   # ── Public API ─────────────────────────────────────────────────────────
   @doc "Parse source into `%{types: [...], funcs: [...]}` (pipeline IR)."
   def parse(src) do
-    decls = src |> logical_decls() |> Enum.map(&classify/1)
-    %{types: for({:type, t} <- decls, do: parse_type(t)), funcs: build_funcs(decls)}
+    decls = src |> Lexer.tokenize() |> split_decls()
+
+    funcs =
+      decls
+      |> Enum.flat_map(fn
+        {:def, raw} -> [raw]
+        _ -> []
+      end)
+      |> Enum.chunk_by(& &1.name)
+      |> Enum.map(&build_func/1)
+
+    %{types: for({:type, t} <- decls, do: parse_type(t)), funcs: funcs}
   end
 
   @doc "Parse and lower every function to both targets: `[{name, %{elixir, rust}}]`."
@@ -52,37 +67,97 @@ defmodule Rian.Decl do
     Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f)} end)
   end
 
-  # ── Lines -> logical declarations ──────────────────────────────────────
-  defp logical_decls(src) do
-    src
-    |> String.split("\n")
-    |> Enum.map(&(&1 |> strip_comment() |> String.trim()))
-    |> Enum.reject(&(&1 == ""))
-    |> Enum.reduce([], fn line, acc ->
-      cond do
-        starts_decl?(line) -> [line | acc]
-        acc == [] -> raise Error, "continuation before any declaration: #{line}"
-        true -> [hd(acc) <> " " <> line | tl(acc)]
-      end
-    end)
-    |> Enum.reverse()
+  # ── Tokens -> declarations (recursive descent) ─────────────────────────
+  defp split_decls([]), do: []
+  defp split_decls([{:nl} | rest]), do: split_decls(rest)
+
+  defp split_decls([{:kw, "type"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    [{:type, Lexer.detokenize(toks)} | split_decls(rest)]
   end
 
-  defp strip_comment(line), do: line |> String.split("#", parts: 2) |> hd()
+  defp split_decls([{:kw, "def"} | rest]) do
+    {raw, rest} = take_def(rest)
+    [{:def, raw} | split_decls(rest)]
+  end
 
-  # Every known declaration keyword starts a new declaration, so an unsupported
-  # one (`struct`/`mod`/…) is classified and rejected with a clear message rather
-  # than silently glued onto the previous declaration as a continuation line.
-  @decl_kws ~w(type def struct alias mod const macro use import)
-  defp starts_decl?(line), do: Enum.any?(@decl_kws, &String.starts_with?(line, &1 <> " "))
+  defp split_decls([{:kw, kw} | _]),
+    do: raise(Error, "unsupported declaration `#{kw}` (supported: `type` / `def`)")
 
-  defp classify(line) do
-    case String.split(line, " ", parts: 2) do
-      ["type", rest] -> {:type, rest}
-      ["def", rest] -> {:def, rest}
-      [kw | _] -> raise Error, "unsupported declaration `#{kw}` (MVP: `type` / `def`)"
+  defp split_decls([tok | _]), do: raise(Error, "expected a declaration, got #{inspect(tok)}")
+
+  # A `type` runs to the newline that begins the next declaration (variant lines
+  # beginning with `|` are continuations).
+  defp take_type([], acc), do: {Enum.reverse(acc), []}
+
+  defp take_type([{:nl} | rest], acc) do
+    if rest == [] or decl_kw?(rest), do: {Enum.reverse(acc), rest}, else: take_type(rest, acc)
+  end
+
+  defp take_type([t | rest], acc), do: take_type(rest, [t | acc])
+
+  defp decl_kw?([{:kw, k} | _]), do: k in ~w(type def struct alias mod pub const macro use import)
+  defp decl_kw?(_), do: false
+
+  # `def name(params) <head>` then a body: `:= expr` (to newline), a block
+  # (`<nl> stmts end`), or nothing (a bodiless signature).
+  defp take_def([{:id, name} | rest]) do
+    {param_toks, rest} = balanced_parens(rest)
+    take_head(name, Lexer.detokenize(param_toks), rest, [])
+  end
+
+  defp take_def(other),
+    do: raise(Error, "expected a function name after `def`: #{inspect(other)}")
+
+  defp take_head(name, params, [{:op, ":="} | rest], head) do
+    {body_toks, rest} = take_line(rest, [])
+    {def_raw(name, params, head, Lexer.detokenize(body_toks)), rest}
+  end
+
+  defp take_head(name, params, [{:nl} | rest], head) do
+    if rest == [] or decl_kw?(rest) do
+      {def_raw(name, params, head, nil), rest}
+    else
+      {block_toks, rest} = take_block(rest, 1, [])
+      {def_raw(name, params, head, Lexer.detokenize(block_toks, ";")), rest}
     end
   end
+
+  defp take_head(name, params, [], head), do: {def_raw(name, params, head, nil), []}
+  defp take_head(name, params, [t | rest], head), do: take_head(name, params, rest, [t | head])
+
+  defp def_raw(name, params, head_rev, body) do
+    {ret, guard} = parse_head(Lexer.detokenize(Enum.reverse(head_rev)))
+    %{name: name, params: params, ret: ret, guard: guard, body: body}
+  end
+
+  defp take_line([], acc), do: {Enum.reverse(acc), []}
+  defp take_line([{:nl} | rest], acc), do: {Enum.reverse(acc), rest}
+  defp take_line([t | rest], acc), do: take_line(rest, [t | acc])
+
+  # Collect a block body up to the `end` that closes it; `do` (from nested
+  # `if`/`case`) deepens, `end` un-deepens, depth 1's `end` closes the body.
+  defp take_block([{:kw, "do"} = t | rest], depth, acc),
+    do: take_block(rest, depth + 1, [t | acc])
+
+  defp take_block([{:kw, "end"} | rest], 1, acc), do: {Enum.reverse(acc), rest}
+
+  defp take_block([{:kw, "end"} = t | rest], depth, acc),
+    do: take_block(rest, depth - 1, [t | acc])
+
+  defp take_block([t | rest], depth, acc), do: take_block(rest, depth, [t | acc])
+  defp take_block([], _depth, _acc), do: raise(Error, "block body not closed by `end`")
+
+  defp balanced_parens([{:lparen} | rest]), do: take_parens(rest, 0, [])
+
+  defp balanced_parens(other),
+    do: raise(Error, "expected `(` after the function name: #{inspect(other)}")
+
+  defp take_parens([{:rparen} | rest], 0, acc), do: {Enum.reverse(acc), rest}
+  defp take_parens([{:lparen} = t | rest], d, acc), do: take_parens(rest, d + 1, [t | acc])
+  defp take_parens([{:rparen} = t | rest], d, acc), do: take_parens(rest, d - 1, [t | acc])
+  defp take_parens([t | rest], d, acc), do: take_parens(rest, d, [t | acc])
+  defp take_parens([], _, _), do: raise(Error, "unbalanced `(` in the parameter list")
 
   # ── `type` declarations ────────────────────────────────────────────────
   defp parse_type(rest) do
@@ -123,34 +198,7 @@ defmodule Rian.Decl do
     end
   end
 
-  # ── `def` declarations -> grouped functions ────────────────────────────
-  defp build_funcs(decls) do
-    decls
-    |> Enum.flat_map(fn
-      {:def, d} -> [parse_def(d)]
-      _ -> []
-    end)
-    |> Enum.chunk_by(& &1.name)
-    |> Enum.map(&build_func/1)
-  end
-
-  defp parse_def(d) do
-    {name, params, rest} =
-      case extract_parens(d) do
-        {n, inside, rest} -> {String.trim(n), String.trim(inside), rest}
-        :none -> raise Error, "def needs a parameter list: #{d}"
-      end
-
-    {head, body} =
-      case split_once(rest, ":=") do
-        {h, b} -> {h, b}
-        :none -> {String.trim(rest), nil}
-      end
-
-    {ret, guard} = parse_head(head)
-    %{name: name, params: params, ret: ret, guard: guard, body: body}
-  end
-
+  # ── `def` raw maps -> grouped functions ────────────────────────────────
   defp parse_head(head) do
     cond do
       head == "" ->

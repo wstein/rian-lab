@@ -63,6 +63,11 @@ defmodule Rian.LexerTest do
     end
   end
 
+  test "detokenize renders a re-lexable string; `{:nl}` becomes the chosen separator" do
+    assert Lexer.detokenize(Lexer.tokenize("a + b")) == "a + b"
+    assert Lexer.detokenize(Lexer.tokenize("a := 2\nb"), ";") == "a := 2 ; b"
+  end
+
   test "unterminated string is a lex error" do
     assert_raise ArgumentError, ~r/unterminated/, fn -> Lexer.tokenize(~s("oops)) end
   end

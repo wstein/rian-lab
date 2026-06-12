@@ -107,6 +107,36 @@ defmodule Rian.DeclTest do
       assert EvalFromSource.eval(:zero) == 0
     end
 
+    test "multiline block bodies lower and run (the token parser's headline)" do
+      [{"step", out}] =
+        Decl.compile("""
+        def step(n Int64) Int64
+          a := n * 2
+          a + 1
+        end
+        """)
+
+      assert out.elixir =~ "def step(n) do a = n * 2; a + 1 end"
+      # a multi-statement block is braced inside the Rust match arm
+      assert out.rust =~ "n => { let a = n * 2; a + 1 },"
+
+      Code.eval_string("defmodule StepFromSource do\n#{out.elixir}\nend")
+      assert StepFromSource.step(3) == 7
+    end
+
+    test "a block body containing an `if` expression lowers and runs" do
+      [{"clamp", out}] =
+        Decl.compile("""
+        def clamp(n Int64) Int64
+          if n < 0 do 0 else n end
+        end
+        """)
+
+      Code.eval_string("defmodule ClampFromSource do\n#{out.elixir}\nend")
+      assert ClampFromSource.clamp(-5) == 0
+      assert ClampFromSource.clamp(7) == 7
+    end
+
     test "string bodies and guards lower and run (classify-style)" do
       [{"classify", out}] =
         Decl.compile("""

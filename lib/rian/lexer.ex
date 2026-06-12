@@ -44,6 +44,33 @@ defmodule Rian.Lexer do
   @doc "Newline-free token stream for the expression grammar (`Rian.Pratt`)."
   def expr_tokens(src), do: src |> lex([]) |> Enum.reject(&(&1 == {:nl}))
 
+  @doc """
+  Render a token list back to a source string (space-joined; re-lexable).
+
+  `nl_as` is the string a `{:nl}` becomes — `";"` turns a block's newline
+  statement-separators into the `;` the block grammar expects, `" "` joins a
+  continued declaration onto one line.
+  """
+  def detokenize(tokens, nl_as \\ " ") do
+    tokens |> Enum.map_join(" ", &tok_str(&1, nl_as))
+  end
+
+  defp tok_str({:nl}, nl_as), do: nl_as
+  defp tok_str({:id, x}, _), do: x
+  defp tok_str({:num, n}, _), do: n
+  defp tok_str({:str, s}, _), do: ~s("#{s}")
+  defp tok_str({:op, o}, _), do: o
+  defp tok_str({:kw, k}, _), do: k
+  defp tok_str({:lparen}, _), do: "("
+  defp tok_str({:rparen}, _), do: ")"
+  defp tok_str({:lbracket}, _), do: "["
+  defp tok_str({:rbracket}, _), do: "]"
+  defp tok_str({:lbrace}, _), do: "{"
+  defp tok_str({:rbrace}, _), do: "}"
+  defp tok_str({:mapopen}, _), do: "%{"
+  defp tok_str({:comma}, _), do: ","
+  defp tok_str({:semi}, _), do: ";"
+
   defp advance(s, n), do: elem(String.split_at(s, n), 1)
 
   defp lex(str, acc) do

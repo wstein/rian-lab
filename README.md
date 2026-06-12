@@ -11,13 +11,14 @@ the *same source* to two targets:
 > **Status: proof-of-concept.** The lowering passes, exhaustiveness gate,
 > capability model, and hygienic macros are implemented and tested at the
 > component level. A **Stage 0.1 declaration parser** ([`Rian.Decl`](lib/rian/decl.ex),
-> [ADR-0031](docs/adr/0031-bootstrap-strategy.md)) now compiles real
-> single-parameter `.rian` files end-to-end — `type` declarations and `def`
-> functions parse to the pipeline IR, lower to Elixir + Rust, and run (try
-> `mix run examples/decl_run.exs`). Still hand-built IR / not yet parsed:
-> multi-parameter functions, `case`/block bodies, string literals, and
-> `mod`/`struct`/`alias`. See [docs/README.md](docs/README.md) for an honest
-> status map.
+> [ADR-0031](docs/adr/0031-bootstrap-strategy.md)) — token-driven recursive
+> descent over a real lexer ([`Rian.Lexer`](lib/rian/lexer.ex)) — now compiles
+> real `.rian` files end-to-end: `type` declarations and single- or
+> multi-parameter `def` functions, with `:=` one-liner **and** multiline `… end`
+> block bodies (string literals + `when` guards), parse to the pipeline IR, lower
+> to Elixir + Rust, and run (try `mix run examples/decl_run.exs`). Not yet
+> parsed: `case` expression bodies and `mod`/`struct`/`alias`. See
+> [docs/README.md](docs/README.md) for an honest status map.
 
 ## Pipeline
 

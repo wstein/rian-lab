@@ -10,7 +10,7 @@ idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
 > [ADR-0031](../../docs/adr/0031-bootstrap-strategy.md)) now compiles the
 > `type` + `def` subset of this surface end-to-end — parse → Elixir + Rust → run
 > (`mix run examples/decl_run.exs`). These tour files reach **beyond** that MVP
-> (`mod`, `struct`, `alias`, `case`/block bodies, macros, `extern`), so they stay
+> (`mod`, `struct`, `alias`, `case` bodies, macros, `extern`), so they stay
 > **illustrative** until the parser broadens; the verified passes are also
 > exercised through the hand-built-IR drivers in the
 > [project README](../../README.md). See the

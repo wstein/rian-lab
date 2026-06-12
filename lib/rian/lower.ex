@@ -83,7 +83,8 @@ defmodule Rian.Lower do
     clauses =
       Enum.map_join(func.clauses, "\n", fn c ->
         head = "def #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
-        "#{head}#{guard_str(c, :elixir)} do #{emit(Pratt.parse(c.body), :elixir) |> elem(0)} end"
+        body = emit(Pratt.parse_body(c.body), :elixir) |> elem(0)
+        "#{head}#{guard_str(c, :elixir)} do #{body} end"
       end)
 
     typespecs <> "\n" <> clauses
@@ -100,6 +101,11 @@ defmodule Rian.Lower do
 
   defp guard_kw(:elixir), do: " when "
   defp guard_kw(:rust), do: " if "
+
+  # A Rust match arm needs braces around a multi-statement block body; a single
+  # expression (the `:= expr` case) is emitted bare.
+  defp rust_arm_body({:block, [_, _ | _]}, s), do: "{ #{s} }"
+  defp rust_arm_body(_, s), do: s
 
   # ── `&` capture support ────────────────────────────────────────────────
   # Highest placeholder index in an anonymous-capture body → the closure arity
@@ -167,7 +173,9 @@ defmodule Rian.Lower do
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
         pat = tuple_or_one(c.pats, &pat_rs(&1, meta))
-        "        #{pat}#{guard_str(c, :rust)} => #{emit(Pratt.parse(c.body), :rust) |> elem(0)},"
+        body_ast = Pratt.parse_body(c.body)
+        body = emit(body_ast, :rust) |> elem(0)
+        "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(body_ast, body)},"
       end)
 
     fn_str =
