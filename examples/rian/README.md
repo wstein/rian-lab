@@ -79,7 +79,11 @@ compile + run on real BEAM bytecode:
   It also parses **`let`-bindings and variables** from source — the lexer scans
   identifiers and the `let`/`in` keywords, the parser builds `Let`/`Var`, and the
   codegen allocates slots: `run("let x = 5 in x + 1") → 6`, with correct lexical
-  shadowing.
+  shadowing. It also parses top-level **`def` declarations** — a program is a run
+  of `def name = expr;` declarations then a result, desugared to nested `let`s:
+  `run("def a = 2; def b = 3; a * b + a") → 8`. The whole pipeline also **lowers
+  to JavaScript and runs under node** (`Rian.JS.compile`), so the calc runs on
+  two targets.
 - [selfhost_modules.rian](selfhost_modules.rian) — **the same calc split across
   many modules.** `mod CalcLex` / `CalcParse` / `CalcGen` / `Calc` each compile
   to their own BEAM module (`Elixir.CalcLex`, …); the driver `Calc.run` calls

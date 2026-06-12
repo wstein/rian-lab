@@ -16,7 +16,7 @@ mod SelfhostCalc do
   # ── tokens ────────────────────────────────────────────────────────────
   type Token := TNum(Int64)
               | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
-              | TIdent(String) | TLet | TIn | TEq
+              | TIdent(String) | TLet | TIn | TEq | TDef | TSemi
 
   # ── the expression tree (the parser builds the arithmetic subset; the
   #    optimizer/codegen also handle variables and `let`) ─────────────────
@@ -51,6 +51,7 @@ mod SelfhostCalc do
   def lex([40 | rest]) := [TLParen | lex(rest)]
   def lex([41 | rest]) := [TRParen | lex(rest)]
   def lex([61 | rest]) := [TEq | lex(rest)]
+  def lex([59 | rest]) := [TSemi | lex(rest)]
   def lex([c | rest]) when c >= 48 and c <= 57 := lex_num([c | rest], 0)
   def lex([c | rest]) when c >= 97 and c <= 122 := lex_ident([c | rest], [])
   def lex([_ | rest]) := lex(rest)
@@ -69,11 +70,22 @@ mod SelfhostCalc do
   def keyword(s String) Token
   def keyword("let") := TLet
   def keyword("in") := TIn
+  def keyword("def") := TDef
   def keyword(s) := TIdent(s)
 
   # ── parser:  precedence climbing over `+ - * /` with parentheses ───────
-  pub def parse(ts Vec(Token)) Expr
-  pub def parse(ts)
+  pub def parse(ts Vec(Token)) Expr := parse_program(ts)
+
+  # a program is a run of `def name = <rhs>;` declarations followed by a result
+  # expression; each declaration desugars to a `let` wrapping the rest (so the
+  # existing fold/codegen/VM handle it unchanged — declarations are nested lets)
+  def parse_program(ts Vec(Token)) Expr
+  def parse_program([TDef, TIdent(name), TEq | rest])
+    case parse_expr(rest) do
+      P(rhs, [TSemi | rest2]) -> Let(name, rhs, parse_program(rest2))
+    end
+  end
+  def parse_program(ts)
     case parse_expr(ts) do
       P(e, _) -> e
     end

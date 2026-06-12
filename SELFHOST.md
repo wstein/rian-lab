@@ -242,6 +242,15 @@ means accumulating codepoints and `List.to_string`-ing them (BEAM FFI) — the s
 class of crutch the lexer already used; a portable `String` builder is the
 multi-target fix.
 
+The surface then gained top-level **`def` declarations** — a program is a run of
+`def name = expr;` declarations followed by a result expression, exactly how a
+real Rian module is shaped. Each declaration desugars to a `let` wrapping the
+rest, so the existing fold/codegen/VM handle it unchanged:
+`run("def a = 2; def b = 3; a * b + a") = 8`. Declarations and inner `let`s
+compose, and (being still arithmetic + binding) the whole thing lowers to JS and
+runs under node too. (User-defined *functions* — `def f(x) := …` with call
+frames — are the next, larger language step; they need CALL/RET in the VM.)
+
 ## Module system — a compiler is many modules
 
 A real compiler is split across files; [`examples/rian/selfhost_modules.rian`](examples/rian/selfhost_modules.rian)

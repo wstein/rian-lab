@@ -251,6 +251,18 @@ defmodule Rian.BeamTest do
       assert calc.run("let x = 1 in (let x = 2 in x) + x") == 3
     end
 
+    test "the calc parses top-level `def` declarations (a program is decls + a result)" do
+      {:ok, calc} = Beam.load(File.read!("examples/rian/selfhost_calc.rian"), :rian_beam_calc_def)
+
+      # `def name = expr;` declarations desugar to nested lets, reusing the pipeline
+      assert calc.run("def a = 2; def b = 3; a * b + a") == 8
+      assert calc.run("def x = 10; def y = x + 5; y * 2") == 30
+      # declarations and an inner `let` compose
+      assert calc.run("def base = 100; let t = 1 in base + t") == 101
+      # a bare expression (no declarations) still works
+      assert calc.run("2 + 3 * 4") == 14
+    end
+
     test "higher-order: a `&name/arity` capture applied through a fun-typed param (ADR-0042)" do
       {:ok, mod} =
         Beam.load(
