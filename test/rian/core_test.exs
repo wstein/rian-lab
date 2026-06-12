@@ -3,6 +3,7 @@ defmodule Rian.CoreTest do
 
   alias Rian.Core
   alias Rian.Core.{PAtom, PCtor, PList, PLit, PTuple, PVar, PWild}
+  alias Rian.Core.{EBin, EBlock, ECall, EId, EIf, ENum, ETuple}
 
   describe "from_pat/1 — surface tuple → typed core pattern (ADR-0050)" do
     test "every leaf pattern kind translates" do
@@ -29,6 +30,33 @@ defmodule Rian.CoreTest do
     test "core nodes carry a nil `type` until the checker fills it (ADR-0050 §3)" do
       assert %PVar{type: nil} = Core.from_pat({:var, "x"})
       assert %PCtor{type: nil} = Core.from_pat({:ctor, "None", []})
+    end
+  end
+
+  describe "from_expr/1 — surface tuple → typed core expression (ADR-0050)" do
+    test "leaf and operator expressions translate recursively" do
+      assert Core.from_expr({:num, "42"}) == %ENum{text: "42"}
+
+      assert Core.from_expr({:bin, "+", {:id, "a"}, {:num, "1"}}) ==
+               %EBin{op: "+", left: %EId{name: "a"}, right: %ENum{text: "1"}}
+
+      assert Core.from_expr({:call, {:id, "f"}, [{:id, "x"}]}) ==
+               %ECall{fun: %EId{name: "f"}, args: [%EId{name: "x"}]}
+
+      assert Core.from_expr({:tuple, [{:atom, "ok"}, {:id, "v"}]}) ==
+               %ETuple{elems: [%Core.EAtom{name: "ok"}, %EId{name: "v"}]}
+    end
+
+    test "block / if translate, with statement and branch nodes" do
+      assert Core.from_expr({:block, [{:bind, "a", {:num, "1"}}, {:expr, {:id, "a"}}]}) ==
+               %EBlock{stmts: [{:bind, "a", %ENum{text: "1"}}, {:expr, %EId{name: "a"}}]}
+
+      assert %EIf{cond: %EId{name: "c"}, then: %EBlock{}, else: %EBlock{}} =
+               Core.from_expr({:if, {:id, "c"}, {:block, []}, {:block, []}})
+    end
+
+    test "an expression node carries a nil `type` until the checker fills it" do
+      assert %ENum{type: nil} = Core.from_expr({:num, "1"})
     end
   end
 end
