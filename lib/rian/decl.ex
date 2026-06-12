@@ -28,13 +28,16 @@ defmodule Rian.Decl do
       name out of every type position (introduces no runtime form).
     * `struct Name(field Type, …)` — product types; lower to `defstruct` (BEAM) /
       `struct {…}` (Rust) and are built with `Name(v1, v2)` constructor calls.
+    * `mod Name do … end` — modules grouping types/structs/defs; lower to a
+      `defmodule` (BEAM) / `mod` (Rust). `pub` exports a `def`/`type`/`struct`
+      (`def`/`pub fn`); unmarked items are private (`defp`/`fn`).
 
   ## Not yet supported
 
-  `mod` declarations. They raise `Rian.Decl.Error`.
+  Inside a `mod`, `const` and `use` (imports) raise `Rian.Decl.Error`.
   """
   alias Rian.{Lexer, Lower}
-  alias Rian.IR.{Clause, Field, Func, Param, Struct, Type, Variant}
+  alias Rian.IR.{Clause, Field, Func, Mod, Param, Struct, Type, Variant}
 
   defmodule Error do
     defexception [:message]
@@ -43,15 +46,30 @@ defmodule Rian.Decl do
   @caps ~w(val iso ref tag)
 
   # ── Public API ─────────────────────────────────────────────────────────
-  @doc "Parse source into `%{types: [...], funcs: [...]}` (pipeline IR)."
+  @doc "Parse source into `%{types: [...], structs: [...], funcs: [...], mods: [...]}` (pipeline IR)."
   def parse(src) do
     decls = src |> Lexer.tokenize() |> split_decls()
+    aliases = collect_aliases(decls)
+    prog = assemble(decls, aliases)
 
-    # `alias Name := Type` is a transparent synonym: resolve it by substituting
-    # the name out of every type position in the IR, so it never reaches the
-    # emitter (ADR-0033 / types-match: aliases introduce no runtime form).
-    aliases = Map.new(for {:alias, t} <- decls, do: parse_alias(t))
+    mods =
+      for {:mod, name, inner} <- decls do
+        # top-level aliases are visible inside a module; module-local aliases add to them
+        scoped = Map.merge(aliases, collect_aliases(inner))
+        p = assemble(inner, scoped)
+        %Mod{name: name, types: p.types, structs: p.structs, funcs: p.funcs}
+      end
 
+    Map.put(prog, :mods, mods)
+  end
+
+  # `alias Name := Type` is a transparent synonym: collect the name->type map so
+  # the name can be substituted out of every type position (ADR-0033 / types-match:
+  # aliases introduce no runtime form).
+  defp collect_aliases(decls), do: Map.new(for {:alias, t} <- decls, do: parse_alias(t))
+
+  # One scope's declarations (top level, or one module's body) -> typed IR.
+  defp assemble(decls, aliases) do
     funcs =
       decls
       |> Enum.flat_map(fn
@@ -62,10 +80,13 @@ defmodule Rian.Decl do
       |> Enum.map(&build_func/1)
       |> Enum.map(&subst_func(&1, aliases))
 
-    types = for({:type, t} <- decls, do: parse_type(t)) |> Enum.map(&subst_type(&1, aliases))
+    types =
+      for({:type, t, pub?} <- decls, do: parse_type(t, pub?))
+      |> Enum.map(&subst_type(&1, aliases))
 
     structs =
-      for({:struct, s} <- decls, do: parse_struct(s)) |> Enum.map(&subst_struct(&1, aliases))
+      for({:struct, s, pub?} <- decls, do: parse_struct(s, pub?))
+      |> Enum.map(&subst_struct(&1, aliases))
 
     %{types: types, structs: structs, funcs: funcs}
   end
@@ -110,60 +131,110 @@ defmodule Rian.Decl do
     Enum.map(fs, fn %Field{} = fl -> %Field{fl | type: subst_type_str(fl.type, aliases)} end)
   end
 
-  @doc "Parse and lower every function to both targets: `[{name, %{elixir, rust}}]`."
+  @doc """
+  Parse and lower to both targets: `[{name, %{elixir, rust}}]`. Top-level
+  functions lower one entry each; a `mod` lowers to one entry (its module text)
+  keyed by the module name.
+  """
   def compile(src) do
-    %{types: types, structs: structs, funcs: funcs} = parse(src)
-    Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f, structs)} end)
+    %{types: types, structs: structs, funcs: funcs, mods: mods} = parse(src)
+    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f, structs)} end)
+    funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module(m)} end)
   end
 
   @doc "Parse and lower to the BEAM target only (FFI / BEAM-only bodies)."
   def compile_beam(src) do
-    %{types: types, structs: structs, funcs: funcs} = parse(src)
-    Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs)} end)
+    %{types: types, structs: structs, funcs: funcs, mods: mods} = parse(src)
+    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs)} end)
+    funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m)} end)
   end
 
   # ── Tokens -> declarations (recursive descent) ─────────────────────────
+  # Parse a flat declaration list, one declaration at a time, until the tokens
+  # run out (top level) or the enclosing `mod`'s `end` is reached.
   defp split_decls([]), do: []
   defp split_decls([{:nl} | rest]), do: split_decls(rest)
 
-  defp split_decls([{:kw, "type"} | rest]) do
-    {toks, rest} = take_type(rest, [])
-    [{:type, Lexer.detokenize(toks)} | split_decls(rest)]
+  defp split_decls(tokens) do
+    {decl, rest} = take_decl(tokens)
+    [decl | split_decls(rest)]
   end
 
-  defp split_decls([{:kw, "def"} | rest]) do
+  # `pub` exports the declaration that follows it (def / type / struct).
+  defp take_decl([{:kw, "pub"} | rest]) do
+    {decl, rest} = take_decl(rest)
+    {mark_pub(decl), rest}
+  end
+
+  defp take_decl([{:kw, "type"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    {{:type, Lexer.detokenize(toks), false}, rest}
+  end
+
+  defp take_decl([{:kw, "struct"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    {{:struct, Lexer.detokenize(toks), false}, rest}
+  end
+
+  defp take_decl([{:kw, "alias"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    {{:alias, Lexer.detokenize(toks)}, rest}
+  end
+
+  defp take_decl([{:kw, "def"} | rest]) do
     {raw, rest} = take_def(rest)
-    [{:def, raw} | split_decls(rest)]
+    {{:def, raw}, rest}
   end
 
-  defp split_decls([{:kw, "alias"} | rest]) do
-    {toks, rest} = take_type(rest, [])
-    [{:alias, Lexer.detokenize(toks)} | split_decls(rest)]
+  # `mod Name do <declarations> end` — parse the body declaration-by-declaration
+  # (a `do`/`end` depth count cannot be used: function block bodies close with a
+  # bare `end` that has no matching `do`).
+  defp take_decl([{:kw, "mod"}, {:id, name}, {:kw, "do"} | rest]) do
+    {inner, rest} = take_mod_body(rest, [])
+    {{:mod, name, inner}, rest}
   end
 
-  defp split_decls([{:kw, "struct"} | rest]) do
-    {toks, rest} = take_type(rest, [])
-    [{:struct, Lexer.detokenize(toks)} | split_decls(rest)]
-  end
+  defp take_decl([{:kw, "mod"} | _]),
+    do: raise(Error, "expected `mod Name do … end`")
 
-  defp split_decls([{:kw, kw} | _]),
+  defp take_decl([{:kw, kw} | _]),
     do:
       raise(
         Error,
-        "unsupported declaration `#{kw}` (supported: `type` / `struct` / `def` / `alias`)"
+        "unsupported declaration `#{kw}` (supported: `mod` / `type` / `struct` / `def` / `alias`, optionally `pub`)"
       )
 
-  defp split_decls([tok | _]), do: raise(Error, "expected a declaration, got #{inspect(tok)}")
+  defp take_decl([tok | _]), do: raise(Error, "expected a declaration, got #{inspect(tok)}")
+
+  defp take_mod_body([{:nl} | rest], acc), do: take_mod_body(rest, acc)
+  defp take_mod_body([{:kw, "end"} | rest], acc), do: {Enum.reverse(acc), rest}
+  defp take_mod_body([], _acc), do: raise(Error, "`mod` body not closed by `end`")
+
+  defp take_mod_body(tokens, acc) do
+    {decl, rest} = take_decl(tokens)
+    take_mod_body(rest, [decl | acc])
+  end
+
+  defp mark_pub({:type, s, _}), do: {:type, s, true}
+  defp mark_pub({:struct, s, _}), do: {:struct, s, true}
+  defp mark_pub({:def, raw}), do: {:def, Map.put(raw, :pub, true)}
+  defp mark_pub(_other), do: raise(Error, "`pub` may only precede `def` / `type` / `struct`")
 
   # A `type` runs to the newline that begins the next declaration (variant lines
-  # beginning with `|` are continuations).
+  # beginning with `|` are continuations) or the enclosing module's `end`.
   defp take_type([], acc), do: {Enum.reverse(acc), []}
 
   defp take_type([{:nl} | rest], acc) do
-    if rest == [] or decl_kw?(rest), do: {Enum.reverse(acc), rest}, else: take_type(rest, acc)
+    if rest == [] or decl_boundary?(rest),
+      do: {Enum.reverse(acc), rest},
+      else: take_type(rest, acc)
   end
 
   defp take_type([t | rest], acc), do: take_type(rest, [t | acc])
+
+  # A declaration ends where the next one begins, or at the enclosing `mod`'s `end`.
+  defp decl_boundary?([{:kw, "end"} | _]), do: true
+  defp decl_boundary?(toks), do: decl_kw?(toks)
 
   defp decl_kw?([{:kw, k} | _]), do: k in ~w(type def struct alias mod pub const macro use import)
   defp decl_kw?(_), do: false
@@ -184,7 +255,7 @@ defmodule Rian.Decl do
   end
 
   defp take_head(name, params, [{:nl} | rest], head) do
-    if rest == [] or decl_kw?(rest) do
+    if rest == [] or decl_boundary?(rest) do
       {def_raw(name, params, head, nil), rest}
     else
       {block_toks, rest} = take_block(rest, 1, [])
@@ -197,7 +268,7 @@ defmodule Rian.Decl do
 
   defp def_raw(name, params, head_rev, body) do
     {ret, guard} = parse_head(Lexer.detokenize(Enum.reverse(head_rev)))
-    %{name: name, params: params, ret: ret, guard: guard, body: body}
+    %{name: name, params: params, ret: ret, guard: guard, body: body, pub: false}
   end
 
   defp take_line([], acc), do: {Enum.reverse(acc), []}
@@ -241,12 +312,13 @@ defmodule Rian.Decl do
   defp block_seps([t | r], d, acc), do: block_seps(r, d, [t | acc])
 
   # ── `type` declarations ────────────────────────────────────────────────
-  defp parse_type(rest) do
+  defp parse_type(rest, pub?) do
     case split_once(rest, ":=") do
       {left, right} ->
         %Type{
           name: strip_type_params(left),
-          variants: right |> split_top("|") |> Enum.map(&variant/1)
+          variants: right |> split_top("|") |> Enum.map(&variant/1),
+          pub?: pub?
         }
 
       :none ->
@@ -259,11 +331,16 @@ defmodule Rian.Decl do
   # ── `struct` declarations ──────────────────────────────────────────────
   # `struct Name(field Type, …)` — a product type: one constructor named after
   # the type, with labeled fields (a bare `struct Name` is a zero-field record).
-  defp parse_struct(text) do
+  defp parse_struct(text, pub?) do
     case extract_parens(text) do
-      {name, inside, ""} -> %Struct{name: String.trim(name), fields: fields(inside)}
-      {_, _, rest} -> raise Error, "trailing tokens after struct `#{text}`: #{rest}"
-      :none -> %Struct{name: String.trim(text), fields: []}
+      {name, inside, ""} ->
+        %Struct{name: String.trim(name), fields: fields(inside), pub?: pub?}
+
+      {_, _, rest} ->
+        raise Error, "trailing tokens after struct `#{text}`: #{rest}"
+
+      :none ->
+        %Struct{name: String.trim(text), fields: [], pub?: pub?}
     end
   end
 
@@ -314,7 +391,8 @@ defmodule Rian.Decl do
     end
   end
 
-  # multi-clause: bodiless signature followed by >=1 pattern clauses
+  # multi-clause: bodiless signature followed by >=1 pattern clauses. `pub` (if
+  # any) sits on the signature; the clause defs that follow are not re-marked.
   defp build_func([%{body: nil} = sig | [_ | _] = clauses]) do
     params = parse_params(sig.params)
 
@@ -322,7 +400,8 @@ defmodule Rian.Decl do
       name: sig.name,
       params: params,
       ret: req_ret(sig),
-      clauses: Enum.map(clauses, &clause(&1, length(params)))
+      clauses: Enum.map(clauses, &clause(&1, length(params))),
+      pub?: sig[:pub] == true
     }
   end
 
@@ -334,7 +413,8 @@ defmodule Rian.Decl do
       name: d.name,
       params: params,
       ret: req_ret(d),
-      clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}]
+      clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}],
+      pub?: d[:pub] == true
     }
   end
 

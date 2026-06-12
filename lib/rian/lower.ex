@@ -41,6 +41,57 @@ defmodule Rian.Lower do
     %{elixir: to_elixir(func, types, structs, build_struct_meta(structs))}
   end
 
+  @doc """
+  Compile a whole `%Rian.IR.Mod{}` to both targets: a `defmodule` (BEAM) and a
+  `mod` (Rust), with its types/structs emitted once and each function wrapped at
+  its declared visibility (`pub?` -> `def`/`pub fn`, else `defp`/private `fn`).
+  """
+  def compile_module(%Rian.IR.Mod{} = m) do
+    %{elixir: module_elixir(m), rust: module_rust(m)}
+  end
+
+  @doc "Compile a module to the BEAM target only."
+  def compile_module_beam(%Rian.IR.Mod{} = m), do: %{elixir: module_elixir(m)}
+
+  defp module_elixir(%{name: name, types: types, structs: structs, funcs: funcs}) do
+    env = build_env(types, structs)
+    Enum.each(funcs, &(:ok = check!(&1, env)))
+    smeta = build_struct_meta(structs)
+
+    body =
+      [
+        Enum.map_join(structs, "\n", &ex_struct/1),
+        Enum.map_join(types, "\n", &ex_typespec/1),
+        Enum.map_join(
+          funcs,
+          "\n",
+          &elixir_clauses(&1, smeta, if(&1.pub?, do: "def", else: "defp"))
+        )
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n")
+
+    "defmodule #{name} do\n#{body}\nend"
+  end
+
+  defp module_rust(%{name: name, types: types, structs: structs, funcs: funcs}) do
+    env = build_env(types, structs)
+    Enum.each(funcs, &(:ok = check!(&1, env)))
+    meta = build_meta(types)
+    smeta = build_struct_meta(structs)
+
+    body =
+      [
+        Enum.map_join(structs, "\n\n", &rust_struct/1),
+        Enum.map_join(types, "\n\n", &rust_enum/1),
+        Enum.map_join(funcs, "\n\n", &rust_fn(&1, meta, smeta, if(&1.pub?, do: "pub ", else: "")))
+      ]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n")
+
+    "mod #{PL.to_snake(name)} {\n#{body}\n}"
+  end
+
   defp build_env(types, structs) do
     env =
       Enum.reduce(types, E.base_env(), fn t, env ->
@@ -95,21 +146,26 @@ defmodule Rian.Lower do
 
   # ── Elixir backend ─────────────────────────────────────────────────────
   def to_elixir(func, types, structs \\ [], smeta \\ %{}) do
-    Enum.each(func.params, &Rian.Capability.beam_legal!(&1.cap))
     typespecs = Enum.map_join(types, "\n", &ex_typespec/1)
     struct_defs = Enum.map_join(structs, "\n", &ex_struct/1)
 
-    clauses =
-      Enum.map_join(func.clauses, "\n", fn c ->
-        head = "def #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
-        body_ast = c.body |> Pratt.parse_body() |> resolve_structs(smeta)
-        body = emit(body_ast, :elixir) |> elem(0)
-        "#{head}#{guard_str(c, :elixir)} do #{body} end"
-      end)
-
-    [struct_defs, typespecs, clauses]
+    [struct_defs, typespecs, elixir_clauses(func, smeta, "def")]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n")
+  end
+
+  # The `def`/`defp` clauses of one function (no type/struct preamble). `def_kw`
+  # selects the visibility keyword (top-level is always `def`; inside a `mod` a
+  # private function is `defp`).
+  defp elixir_clauses(func, smeta, def_kw) do
+    Enum.each(func.params, &Rian.Capability.beam_legal!(&1.cap))
+
+    Enum.map_join(func.clauses, "\n", fn c ->
+      head = "#{def_kw} #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
+      body_ast = c.body |> Pratt.parse_body() |> resolve_structs(smeta)
+      body = emit(body_ast, :elixir) |> elem(0)
+      "#{head}#{guard_str(c, :elixir)} do #{body} end"
+    end)
   end
 
   # `struct Point(x Float64, y Float64)` -> a nested module carrying `defstruct`,
@@ -224,6 +280,13 @@ defmodule Rian.Lower do
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
     struct_defs = Enum.map_join(structs, "\n\n", &rust_struct/1)
 
+    [struct_defs, enums, rust_fn(func, meta, smeta, "")]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  # One Rust `fn` (no type/struct preamble). `vis` is `""` or `"pub "`.
+  defp rust_fn(func, meta, smeta, vis) do
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
         "#{p.name}: #{Rian.Capability.rust_param(p.cap, p.type)}"
@@ -246,11 +309,8 @@ defmodule Rian.Lower do
         "        #{pat}#{guard_str(c, :rust)} => #{rust_arm_body(body_ast, body)},"
       end)
 
-    fn_str =
-      "fn #{func.name}(#{param_decls}) -> #{prim_rust(func.ret)} {\n" <>
-        "    match #{scrut} {\n#{arms}\n    }\n}"
-
-    [struct_defs, enums, fn_str] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+    "#{vis}fn #{func.name}(#{param_decls}) -> #{prim_rust(func.ret)} {\n" <>
+      "    match #{scrut} {\n#{arms}\n    }\n}"
   end
 
   defp rust_struct(s) do

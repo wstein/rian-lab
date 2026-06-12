@@ -3,7 +3,7 @@ defmodule Rian.DeclTest do
   use ExUnit.Case, async: false
 
   alias Rian.Decl
-  alias Rian.IR.{Clause, Field, Param, Struct, Type, Variant}
+  alias Rian.IR.{Clause, Field, Func, Param, Struct, Type, Variant}
 
   describe "parsing -> core IR (Rian.IR structs)" do
     test "a `type` sum with labeled fields" do
@@ -316,10 +316,68 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "mod declarations (modules with pub visibility)" do
+    @mod """
+    mod Geometry do
+      pub type Shape := Circle(radius Float64) | Square(side Float64)
+
+      pub def area(Shape) Float64
+      pub def area(Circle(r)) := 3.14159265 * r * r
+      pub def area(Square(s)) := s * s
+
+      def square(x Float64) Float64 := x * x
+    end
+    """
+
+    test "a mod parses into a %Mod{} carrying its types and funcs, with pub flags" do
+      %{mods: [m], funcs: []} = Decl.parse(@mod)
+
+      assert m.name == "Geometry"
+      assert [%Type{name: "Shape", pub?: true}] = m.types
+      assert [%Func{name: "area", pub?: true}, %Func{name: "square", pub?: false}] = m.funcs
+    end
+
+    test "a mod lowers to defmodule / Rust mod, exporting pub items and hiding the rest" do
+      [{"Geometry", out}] = Decl.compile(@mod)
+
+      assert out.elixir =~ "defmodule Geometry do"
+      assert out.elixir =~ "def area("
+      # the private helper is `defp`
+      assert out.elixir =~ "defp square(x) do x * x end"
+      assert out.rust =~ "mod geometry {"
+      assert out.rust =~ "pub fn area("
+      assert out.rust =~ "fn square(x: f64) -> f64"
+      refute out.rust =~ "pub fn square"
+    end
+
+    test "the emitted module runs on the BEAM" do
+      [{"Geometry", out}] = Decl.compile(@mod)
+      Code.eval_string(out.elixir)
+      assert_in_delta Geometry.area({:circle, 2.0}), 3.14159265 * 4, 1.0e-6
+      assert Geometry.area({:square, 3.0}) == 9.0
+    end
+
+    test "top-level functions and a module coexist in one compilation" do
+      results =
+        Decl.compile("""
+        def double(n Int64) Int64 := n * 2
+
+        mod M do
+          pub def triple(n Int64) Int64 := n * 3
+        end
+        """)
+
+      assert {"double", _} = List.keyfind(results, "double", 0)
+      assert {"M", mout} = List.keyfind(results, "M", 0)
+      assert mout.elixir =~ "defmodule M do"
+      assert mout.elixir =~ "def triple(n) do n * 3 end"
+    end
+  end
+
   describe "honest limits raise Rian.Decl.Error" do
     test "unsupported declaration keywords are rejected" do
-      assert_raise Decl.Error, ~r/unsupported declaration/, fn ->
-        Decl.parse("mod Geometry do def f(n Int64) Int64 := n end")
+      assert_raise Decl.Error, ~r/unsupported declaration `const`/, fn ->
+        Decl.parse("const TAU Float64 := 6.28")
       end
     end
   end

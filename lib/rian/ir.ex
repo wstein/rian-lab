@@ -31,9 +31,9 @@ defmodule Rian.IR do
   end
 
   defmodule Type do
-    @moduledoc "A sum-type declaration (`type Name := …`)."
+    @moduledoc "A sum-type declaration (`type Name := …`). `pub?` marks it exported from a `mod`."
     @enforce_keys [:name]
-    defstruct name: nil, variants: []
+    defstruct name: nil, variants: [], pub?: false
   end
 
   defmodule Struct do
@@ -44,7 +44,17 @@ defmodule Rian.IR do
     built with constructor-call syntax (`Name(v1, v2)`).
     """
     @enforce_keys [:name]
-    defstruct name: nil, fields: []
+    defstruct name: nil, fields: [], pub?: false
+  end
+
+  defmodule Mod do
+    @moduledoc """
+    A module (`mod Name do … end`) — a namespace grouping `types`, `structs`, and
+    `funcs`. Lowers to a `defmodule` on the BEAM and a `mod` on Rust; `pub?` items
+    are exported (`def`/`pub fn`), the rest are private (`defp`/`fn`).
+    """
+    @enforce_keys [:name]
+    defstruct name: nil, types: [], structs: [], funcs: []
   end
 
   defmodule Param do
@@ -60,8 +70,8 @@ defmodule Rian.IR do
   end
 
   defmodule Func do
-    @moduledoc "A function: `name`, `params`, return type `ret`, and `clauses`."
+    @moduledoc "A function: `name`, `params`, return type `ret`, `clauses`; `pub?` marks it exported from a `mod`."
     @enforce_keys [:name, :params, :ret, :clauses]
-    defstruct name: nil, params: [], ret: nil, clauses: []
+    defstruct name: nil, params: [], ret: nil, clauses: [], pub?: false
   end
 end
