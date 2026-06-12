@@ -1,0 +1,77 @@
+# ===========================================================================
+# 11 — Binary wire formats: `@wire` structs with derived decode/encode
+# ===========================================================================
+# Character: a `@wire` annotation turns an ordinary `struct` into a byte-exact
+# serializer. The compiler DERIVES a symmetric codec for BOTH targets — on the
+# BEAM it is idiomatic bitstring matching (`<<field::size>>`), on Rust it is
+# generated `byteorder`-style reads/writes. The in-memory record is unchanged;
+# only the BYTES are described here, so target memory layout is never exposed.
+# This is Rian's answer to "packed records" — serialization, not RAM layout.
+#
+# v1 is BYTE-ALIGNED (sub-byte `Bits(n)` fields are deferred). Endianness is the
+# annotation's argument; `big_endian` is network/file default.
+#
+# Spec: ADR-0037 (binary wire-format records)
+# ---------------------------------------------------------------------------
+
+# Decoding is partial (bytes may be malformed) — so it yields a value OR this
+# sealed error set (ADR-0034/0035: errors are values, never exceptions).
+type DecodeError :=
+    Truncated(needed UInt64, got UInt64)   # not enough bytes
+  | TrailingBytes(extra UInt64)            # strict decode left bytes over
+  | BadLength(field Symbol)                # a length field exceeds the input
+
+# A length-prefixed message. Fields lay out in declaration order:
+#   magic  4 bytes (UInt32, big-endian)
+#   flags  1 byte
+#   len    2 bytes  — the length of `body`
+#   body   `len` bytes — `Bytes(len)` reads a prior numeric field
+# `Bytes(len)` is the dominant length-prefixed case; a trailing unsized `Bytes`
+# (greedy remainder) is allowed only as the FINAL field.
+@wire(big_endian)
+struct Message(magic UInt32, flags UInt8, len UInt16, body Bytes(len))
+
+# `decode` is STRICT — it must consume the whole input; leftover bytes are a
+# `TrailingBytes` error. Because `DecodeError` is a sealed sum, the `case` over
+# the result is exhaustive with NO `_` arm.
+def describe(packet val Bytes) String
+def describe(packet)
+  case Message.decode(packet) do
+    Message(magic: m, flags: _, len: l, body: _) -> "msg " <> to_str(m) <> " (" <> to_str(l) <> "B)"
+    Truncated(needed: n, got: g)                 -> "short: need " <> to_str(n) <> ", got " <> to_str(g)
+    TrailingBytes(extra: e)                       -> "overrun by " <> to_str(e) <> "B"
+    BadLength(field: f)                           -> "bad length in " <> to_str(f)
+  end
+end
+
+# `encode` is TOTAL — every well-typed wire value has a valid byte image, so it
+# cannot fail and carries no error type. (Asymmetry by design: partial decode,
+# total encode.)
+def roundtrip(m val Message) Bytes := m.encode()
+
+# Composition: a `@wire` struct may nest another. Here a fixed 4-byte header
+# precedes a length-prefixed payload — both are byte-aligned, so the derived
+# codec recurses with no special cases.
+@wire(big_endian)
+struct Frame(version UInt8, kind UInt8, reserved UInt16, payload Message)
+
+# Streaming: `decode_prefix` returns the value PLUS the unconsumed tail, so a
+# byte stream can be peeled one frame at a time. (Contrast strict `decode`,
+# which rejects any trailing bytes.)
+def first_frame(stream val Bytes) Frame | DecodeError
+def first_frame(stream)
+  case Frame.decode_prefix(stream) do
+    {frame, _rest} -> frame
+    Truncated(needed: n, got: g) -> Truncated(needed: n, got: g)
+    TrailingBytes(extra: e)      -> TrailingBytes(extra: e)
+    BadLength(field: f)          -> BadLength(field: f)
+  end
+end
+
+# Notes / boundaries (ADR-0037 open items):
+#   * Sub-byte fields (`Bits(4)`), per-field endianness, counted arrays
+#     (`Vec(T, count: n)`), on-the-wire tagged unions, and checksum/computed
+#     fields are deferred to follow-up decisions.
+#   * Field types are restricted to the wire-serializable set (fixed-width
+#     ints, floats, Bool, Bytes, nested `@wire`); anything else is a compile
+#     error — a `@wire` struct cannot carry a function or an open map.

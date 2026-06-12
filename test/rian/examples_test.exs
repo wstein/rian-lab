@@ -77,6 +77,13 @@ defmodule Rian.ExamplesTest do
       folded = Comptime.fold(Pratt.parse("comptime(2 + 3 * 4)"))
       assert Lower.emit_ast(folded, :elixir) == "14"
     end
+
+    test "wire codec call + concat lower (11_wire_formats)" do
+      # `@wire`/`Bytes(len)` declarations await the parser (ADR-0037), but the
+      # codec call site and its result handling are ordinary expressions today.
+      assert Lower.emit_expr("m.encode()", :elixir) == "m.encode()"
+      assert Lower.emit_expr("\"msg \" <> to_str(m)", :elixir) == "\"msg \" <> to_str(m)"
+    end
   end
 
   describe "capability claims from 04_capabilities hold against the checker" do
