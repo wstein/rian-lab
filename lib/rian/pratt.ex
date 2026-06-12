@@ -333,10 +333,19 @@ defmodule Rian.Pratt do
   defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
   defp parse_pat([{:lbrace} | rest]), do: parse_pat_tuple(rest, [])
   defp parse_pat([{:lbracket} | rest]), do: parse_pat_list(rest, [])
+  # map pattern `%{k: p, …}` — matches any map carrying those keys (ADR-0043)
+  defp parse_pat([{:mapopen} | rest]), do: parse_pat_map(rest, [])
 
   defp parse_pat([{:id, name} | rest]) do
     if pascal?(name) do
       case rest do
+        # named fields -> a struct pattern `Name(field: p, …)` (symmetric with
+        # construction); positional args -> a sum-variant pattern `Name(p, …)`
+        [{:lparen}, {:id, _}, {:op, ":"} | _] ->
+          [{:lparen} | r] = rest
+          {fields, r} = parse_pat_fields(r, [])
+          {{:struct, name, fields}, r}
+
         [{:lparen} | r] ->
           {args, r} = parse_pat_args(r, [])
           {{:ctor, name, args}, r}
@@ -350,6 +359,38 @@ defmodule Rian.Pratt do
   end
 
   defp parse_pat(other), do: raise(ArgumentError, "unsupported pattern: #{inspect(other)}")
+
+  # map pattern body: `k: p` pairs until the closing `}` (the `%{` opener is
+  # already consumed); keys are identifiers (atom-style, like map literals)
+  defp parse_pat_map([{:rbrace} | rest], acc), do: {{:map, Enum.reverse(acc)}, rest}
+
+  defp parse_pat_map([{:id, k}, {:op, ":"} | rest], acc) do
+    {p, rest} = parse_pat(rest)
+
+    case rest do
+      [{:comma} | r] -> parse_pat_map(r, [{k, p} | acc])
+      [{:rbrace} | r] -> {{:map, Enum.reverse([{k, p} | acc])}, r}
+      other -> raise ArgumentError, "bad map pattern: #{inspect(other)}"
+    end
+  end
+
+  defp parse_pat_map(other, _acc), do: raise(ArgumentError, "bad map pattern: #{inspect(other)}")
+
+  # struct pattern fields: `field: p` pairs until the closing `)`
+  defp parse_pat_fields([{:rparen} | rest], acc), do: {Enum.reverse(acc), rest}
+
+  defp parse_pat_fields([{:id, k}, {:op, ":"} | rest], acc) do
+    {p, rest} = parse_pat(rest)
+
+    case rest do
+      [{:comma} | r] -> parse_pat_fields(r, [{k, p} | acc])
+      [{:rparen} | r] -> {Enum.reverse([{k, p} | acc]), r}
+      other -> raise ArgumentError, "bad struct pattern: #{inspect(other)}"
+    end
+  end
+
+  defp parse_pat_fields(other, _acc),
+    do: raise(ArgumentError, "bad struct pattern fields: #{inspect(other)}")
 
   defp parse_pat_tuple([{:rbrace} | rest], acc), do: {{:tuple, Enum.reverse(acc)}, rest}
 

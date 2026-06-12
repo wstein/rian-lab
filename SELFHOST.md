@@ -194,13 +194,17 @@ source-to-value pipeline. The spike method drove exactly the increments the code
 *demanded* (maps for the evaluator's symbol table; structs for the checker's
 diagnostic record) and nothing it didn't.
 
-The one prediction that never fired — **struct/map *patterns*** — is the honest
+The one prediction that never fired — **struct/map *patterns*** — was the honest
 boundary of "self-hosting-complete for idiomatic Rian": Rian is sum-oriented, so
 ASTs and IRs are matched with *variant* patterns (supported) and structs are read
-by *field access* (supported), never matched by shape. Struct/map patterns are
-also a **parser-first** gap — `Rian.Pratt.parse_pat` has no surface for `%{…}` /
-`Name{…}` patterns — so they would be a two-part increment (parser + abstract
-forms) undertaken only when a spike genuinely needs a struct-shaped IR matched by
-pattern. None of the six layers did. Remaining ergonomic gaps (positional struct
-construction, map update `%{m | k: v}`) are small, self-contained, and likewise
+by *field access* (supported), never matched by shape. No spike forced them.
+
+**They have since been built anyway (parser + abstract forms).** `Rian.Pratt`
+now parses a struct pattern `Name(field: p, …)` (symmetric with construction) and
+a map pattern `%{k: p, …}`, and `Rian.Beam` lowers them to Erlang map patterns —
+a struct pattern requires `__struct__ := :name` plus its named fields, a map
+pattern matches any map carrying the listed keys. So the last pattern gap is
+closed: clause heads and `case` arms can destructure structs and maps by shape,
+not just by field access. Remaining ergonomic gaps (positional struct
+construction, map update `%{m | k: v}`) are small, self-contained, and still
 unforced by the pipeline.

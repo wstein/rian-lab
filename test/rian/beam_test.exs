@@ -303,6 +303,44 @@ defmodule Rian.BeamTest do
       assert mod.opt(0) == {:error, :bad}
     end
 
+    test "struct patterns destructure a struct value by named field (ADR-0043)" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          struct Point(x Int64, y Int64)
+          pub def mk(a Int64, b Int64) Point := Point(x: a, y: b)
+          pub def fst(p val Point) Int64
+          pub def fst(Point(x: v)) := v
+          pub def swap(p val Point) Point
+          pub def swap(Point(x: a, y: b)) := Point(x: b, y: a)
+          """,
+          :rian_beam_struct_pat
+        )
+
+      pt = mod.mk(3, 7)
+      assert pt == %{__struct__: :point, x: 3, y: 7}
+      # a struct pattern matches the tagged map and binds the named field
+      assert mod.fst(pt) == 3
+      assert mod.swap(pt) == %{__struct__: :point, x: 7, y: 3}
+    end
+
+    test "map patterns dispatch clauses on present keys (ADR-0043)" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          pub def kindof(m val Int64) String
+          pub def kindof(%{tag: :num}) := "number"
+          pub def kindof(%{tag: :str}) := "string"
+          pub def kindof(_) := "other"
+          """,
+          :rian_beam_map_pat
+        )
+
+      assert mod.kindof(%{tag: :num, val: 5}) == "number"
+      assert mod.kindof(%{tag: :str}) == "string"
+      assert mod.kindof(%{nope: 1}) == "other"
+    end
+
     test "a construct outside the core raises a clear Unsupported (never a miscompile)" do
       # the `in` membership operator has no simple Erlang operator form yet (it
       # needs `lists:member`); it raises rather than silently miscompiling

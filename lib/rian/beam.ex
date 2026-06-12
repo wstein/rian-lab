@@ -42,11 +42,13 @@ defmodule Rian.Beam do
   **Structs (ADR-0043):** a `struct` declaration is erased; a struct *value* is a
   tagged map. Named construction `Name(field: v, …)` builds a map keyed by
   field-name atoms plus `__struct__ => :name`; field access `value.field` reads
-  it via `maps:get/2` — no field schema is threaded.
+  it via `maps:get/2` — no field schema is threaded. A struct *pattern*
+  `Name(field: p, …)` matches that tagged map (requiring `__struct__ := :name`
+  plus the named fields), and a map *pattern* `%{k: p, …}` matches any map
+  carrying those keys.
 
   **Not yet** (raise a clear error, never a silent miscompile): *positional*
-  struct construction (named `Name(f: v)` works), map *update* (`%{m | k: v}`)
-  and map / struct *patterns*.
+  struct construction (named `Name(f: v)` works) and map *update* (`%{m | k: v}`).
   """
   alias Rian.{Core, Decl, PatternLower, Pratt}
 
@@ -382,7 +384,22 @@ defmodule Rian.Beam do
   defp pat_form(%Core.PCtor{ctor: name, args: args}),
     do: {:tuple, @ln, [{:atom, @ln, tag(name)} | Enum.map(args, &pat_form/1)]}
 
+  # a struct pattern `Name(field: p, …)` matches the tagged map a struct value is:
+  # it requires `__struct__ := :name` plus each named field (other fields ignored)
+  defp pat_form(%Core.PStruct{name: name, fields: fields}) do
+    head = {:map_field_exact, @ln, {:atom, @ln, :__struct__}, {:atom, @ln, tag(name)}}
+    {:map, @ln, [head | Enum.map(fields, &map_field_pat/1)]}
+  end
+
+  # a map pattern `%{k: p, …}` matches any map carrying those keys
+  defp pat_form(%Core.PMap{pairs: pairs}),
+    do: {:map, @ln, Enum.map(pairs, &map_field_pat/1)}
+
   defp pat_form(other), do: raise(Unsupported, "abstract-forms: pattern #{inspect(other)}")
+
+  # one `key := pattern` field of a map/struct pattern (the key is an atom)
+  defp map_field_pat({k, p}),
+    do: {:map_field_exact, @ln, {:atom, @ln, String.to_atom(k)}, pat_form(p)}
 
   defp core_list_tail(:close), do: {nil, @ln}
   defp core_list_tail(tail), do: tail

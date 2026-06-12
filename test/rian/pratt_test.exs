@@ -189,4 +189,20 @@ defmodule Rian.PrattTest do
       assert_raise ArgumentError, fn -> Pratt.parse("Geometry::area(x)") end
     end
   end
+
+  describe "struct & map patterns (ADR-0043)" do
+    test "a struct pattern `Name(field: p)` parses with its named fields" do
+      assert Pratt.parse_pats("Point(x: a, y: b)") ==
+               [{:struct, "Point", [{"x", {:var, "a"}}, {"y", {:var, "b"}}]}]
+    end
+
+    test "positional args stay a sum-variant (ctor) pattern, not a struct" do
+      assert Pratt.parse_pats("Some(n)") == [{:ctor, "Some", [{:var, "n"}]}]
+    end
+
+    test "a map pattern `%{k: p}` parses; nested patterns are allowed" do
+      assert Pratt.parse_pats("%{tag: :num, val: v}") ==
+               [{:map, [{"tag", {:atom, "num"}}, {"val", {:var, "v"}}]}]
+    end
+  end
 end
