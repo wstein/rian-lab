@@ -30,9 +30,13 @@ defmodule Rian.Beam do
   binary — enough for a parser/compiler to carry identifiers, keywords, and
   error text (the lexer spike had to dodge this with integer codepoints).
 
+  **Error handling (ADR-0039):** `with p <- e … do body else arms end` desugars
+  to a right-nested `case` — each clause matches its pattern, a catch-all
+  dispatches the `else` arms (or passes the non-matching value through when there
+  is no `else`).
+
   **Not yet** (raise a clear error, never a silent miscompile): `struct`
-  declarations (need `%Name{}` map forms), named-arg construction, `with`,
-  map literals.
+  declarations (need `%Name{}` map forms), named-arg construction, map literals.
   """
   alias Rian.{Core, Decl, PatternLower, Pratt}
 
@@ -53,7 +57,8 @@ defmodule Rian.Beam do
     ENum,
     EStr,
     ETuple,
-    EUnary
+    EUnary,
+    EWith
   }
 
   @ln 1
@@ -236,8 +241,41 @@ defmodule Rian.Beam do
   # a block in expression position becomes an Erlang `begin … end`
   defp expr_form(%EBlock{} = b, s), do: {:block, @ln, block_forms(b, s)}
 
+  # `with p1 <- e1; …; pn <- en do body else arms end` (ADR-0039) desugars to a
+  # right-nested `case`: each clause matches its pattern, and a catch-all binds
+  # the non-matching value to dispatch the `else` arms (or, with no `else`, the
+  # value passes through as the `with`'s result)
+  defp expr_form(%EWith{clauses: clauses, body: body, els: els}, s),
+    do: with_form(clauses, body, els, s, 0)
+
   defp expr_form(other, _s),
     do: raise(Unsupported, "abstract-forms: expression #{inspect(other)}")
+
+  # the happy path: no clauses left, evaluate the `with` body
+  defp with_form([], body, _els, s, _d), do: {:block, @ln, body_seq(body, s)}
+
+  defp with_form([{pat, expr} | rest], body, els, s, d) do
+    inner = pat_vars(pat, s)
+    catch_var = "_with#{d}"
+
+    {:case, @ln, expr_form(expr, s),
+     [
+       {:clause, @ln, [pat_form(pat)], [], [with_form(rest, body, els, inner, d + 1)]},
+       {:clause, @ln, [var_form(catch_var)], [], [else_dispatch(els, catch_var, s)]}
+     ]}
+  end
+
+  # with no `else`, a non-matching clause value is the `with`'s result; otherwise
+  # it is matched against the `else` arms (case-style)
+  defp else_dispatch([], catch_var, _s), do: var_form(catch_var)
+
+  defp else_dispatch(els, catch_var, s) do
+    {:case, @ln, var_form(catch_var),
+     Enum.map(els, fn {pat, g, body} ->
+       arm = pat_vars(pat, s)
+       {:clause, @ln, [pat_form(pat)], guard_form(g, arm), body_seq(body, arm)}
+     end)}
+  end
 
   # a fun body that may be a single expression or a block
   defp body_seq(%EBlock{} = b, s), do: block_forms(b, s)

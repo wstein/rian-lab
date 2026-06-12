@@ -168,6 +168,41 @@ defmodule Rian.BeamTest do
       assert mod.kind("other") == 0
     end
 
+    test "`with` desugars to nested case: happy path, else-handled failures, passthrough (ADR-0039)" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def parse(n Int64) Int64 | E
+          def parse(0) := {:error, Bad}
+          def parse(n) := {:ok, n}
+
+          def chain(a Int64, b Int64) Int64
+            with {:ok, x} <- parse(a),
+                 {:ok, y} <- parse(b) do
+              {:ok, x + y}
+            else
+              {:error, e} -> {:error, e}
+            end
+          end
+
+          def opt(a Int64) Int64
+            with {:ok, x} <- parse(a) do
+              {:ok, x}
+            end
+          end
+          """,
+          :rian_beam_with
+        )
+
+      assert mod.chain(2, 3) == {:ok, 5}
+      # a failure in either clause position is routed to the `else`
+      assert mod.chain(0, 3) == {:error, :bad}
+      assert mod.chain(2, 0) == {:error, :bad}
+      # no `else`: the happy path, and a non-matching value passes through
+      assert mod.opt(7) == {:ok, 7}
+      assert mod.opt(0) == {:error, :bad}
+    end
+
     test "a construct outside the core raises a clear Unsupported (never a miscompile)" do
       # struct declarations need %Name{} map forms (next increment)
       assert_raise Beam.Unsupported, ~r/struct/, fn ->
