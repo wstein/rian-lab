@@ -207,6 +207,29 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "annotate/3 — types on nodes (ADR-0050 §3)" do
+    alias Rian.Core
+
+    test "leaf and operator nodes carry their inferred type" do
+      typed = Check.annotate(Pratt.parse("a + 1"), %{"a" => "Int64"})
+
+      assert %Core.EBin{
+               type: "Int64",
+               left: %Core.EId{name: "a", type: "Int64"},
+               right: %Core.ENum{text: "1", type: "Int64"}
+             } = typed
+    end
+
+    test "a block threads its bindings and is typed by its final value" do
+      typed = Check.annotate(Pratt.parse_body("n := 2; n * n"), %{})
+      assert %Core.EBlock{type: "Int64"} = typed
+    end
+
+    test "a node inference cannot pin down is `:unknown`, not crashing" do
+      assert %Core.ECall{type: :unknown} = Check.annotate(Pratt.parse("g(x)"))
+    end
+  end
+
   describe "the type gate fires at compile time" do
     test "Decl.compile refuses a proven return-type mismatch" do
       assert_raise Check.Error, ~r/declared return type is `Bool`/, fn ->

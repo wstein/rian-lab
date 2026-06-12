@@ -38,7 +38,7 @@ defmodule Rian.Check do
   are a `:mismatch`.
   """
   alias Rian.{Core, Pratt}
-  alias Rian.Core.{EBin, EBlock, ECall, ECase, EId, EIf, EList, ENum, EStr, EUnary, EWith}
+  alias Rian.Core.{EBin, EBlock, ECall, ECase, EId, EIf, EList, ENum, EStr, ETuple, EUnary, EWith}
   alias Rian.Core.{PCtor, PVar}
   alias Rian.IR.Func
 
@@ -131,6 +131,79 @@ defmodule Rian.Check do
   # not tracked yet -> they infer `:unknown`, keeping the checker conservative)
   def infer(%EWith{body: body}, env, ic), do: infer(body, env, ic)
   def infer(_other, _env, _ic), do: :unknown
+
+  # ── annotation (ADR-0050 §3: fill each node's inferred `type`) ──────────
+  @doc """
+  Return the core expression with every node's `type` field filled with its
+  inferred type, threading `env` through `case`/`block` exactly as `infer` does.
+  The type value at each node is `infer/3` (one source of truth — no second set
+  of type rules), so an emitter can read representation choices off `node.type`
+  (ADR-0041/0043/0046). Nodes inference can't pin down keep `type: nil`.
+  """
+  def annotate(ast, env \\ %{}, ic \\ %{})
+  def annotate(ast, env, ic) when is_tuple(ast), do: annotate(Core.from_expr(ast), env, ic)
+
+  def annotate(%t{} = n, env, ic) when t in [ENum, EStr, EId],
+    do: %{n | type: infer(n, env, ic)}
+
+  def annotate(%EUnary{arg: a} = n, env, ic),
+    do: %{n | arg: annotate(a, env, ic), type: infer(n, env, ic)}
+
+  def annotate(%EBin{left: l, right: r} = n, env, ic),
+    do: %{n | left: annotate(l, env, ic), right: annotate(r, env, ic), type: infer(n, env, ic)}
+
+  def annotate(%ECall{fun: f, args: as} = n, env, ic),
+    do: %{n | fun: annotate(f, env, ic), args: ann_each(as, env, ic), type: infer(n, env, ic)}
+
+  def annotate(%ETuple{elems: es} = n, env, ic),
+    do: %{n | elems: ann_each(es, env, ic), type: infer(n, env, ic)}
+
+  def annotate(%EList{elems: es, tail: tl} = n, env, ic) do
+    tail = if tl == :close, do: :close, else: annotate(tl, env, ic)
+    %{n | elems: ann_each(es, env, ic), tail: tail, type: infer(n, env, ic)}
+  end
+
+  def annotate(%EIf{cond: c, then: t, else: e} = n, env, ic) do
+    %{
+      n
+      | cond: annotate(c, env, ic),
+        then: annotate(t, env, ic),
+        else: annotate(e, env, ic),
+        type: infer(n, env, ic)
+    }
+  end
+
+  def annotate(%EBlock{stmts: stmts} = n, env, ic),
+    do: %{n | stmts: ann_stmts(stmts, env, ic), type: infer(n, env, ic)}
+
+  def annotate(%ECase{scrut: s, arms: arms} = n, env, ic) do
+    st = infer(s, env, ic)
+
+    arms =
+      Enum.map(arms, fn {pat, g, body} ->
+        e = narrow(pat, st, ic, env)
+        {pat, g && annotate(g, e, ic), annotate(body, e, ic)}
+      end)
+
+    %{n | scrut: annotate(s, env, ic), arms: arms, type: infer(n, env, ic)}
+  end
+
+  def annotate(%EWith{body: body} = n, env, ic),
+    do: %{n | body: annotate(body, env, ic), type: infer(n, env, ic)}
+
+  def annotate(node, _env, _ic), do: node
+
+  defp ann_each(nodes, env, ic), do: Enum.map(nodes, &annotate(&1, env, ic))
+
+  defp ann_stmts([], _env, _ic), do: []
+
+  defp ann_stmts([{:bind, x, e} | rest], env, ic),
+    do: [
+      {:bind, x, annotate(e, env, ic)} | ann_stmts(rest, Map.put(env, x, infer(e, env, ic)), ic)
+    ]
+
+  defp ann_stmts([{:expr, e} | rest], env, ic),
+    do: [{:expr, annotate(e, env, ic)} | ann_stmts(rest, env, ic)]
 
   defp ctor_type(ic, name), do: Map.get(Map.get(ic, :ctors, %{}), name)
 
