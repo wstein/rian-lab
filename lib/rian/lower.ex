@@ -339,10 +339,29 @@ defmodule Rian.Lower do
      end)}
   end
 
+  defp resolve_rust_pats({:with, clauses, body, els}, meta) do
+    {:with,
+     Enum.map(clauses, fn {pt, e} -> {{:rpat, pat_rs(pt, meta)}, resolve_rust_pats(e, meta)} end),
+     resolve_rust_pats(body, meta),
+     Enum.map(els, fn {pt, g, b} ->
+       {{:rpat, pat_rs(pt, meta)}, g && resolve_rust_pats(g, meta), resolve_rust_pats(b, meta)}
+     end)}
+  end
+
   defp resolve_rust_pats(node, meta), do: Rian.Macro.map_node(node, &resolve_rust_pats(&1, meta))
 
   defp rpat({:rpat, s}), do: s
   defp rpat(pat), do: pat_rs(pat, %{})
+
+  # Rust `with` lowering: a right-nested `match` chain. Each clause matches its
+  # ok-pattern and continues, or falls through to the `else` arms (or yields the
+  # non-matching value `__w` when there is no `else`) — the `?`-expansion.
+  defp with_chain_rs([], body, _else_rs), do: "{ #{body} }"
+
+  defp with_chain_rs([{pt, e} | rest], body, else_rs) do
+    fallback = if else_rs == "", do: "__w => __w,", else: "__w => match __w { #{else_rs} },"
+    "match #{p(e, 0, :rust)} { #{rpat(pt)} => #{with_chain_rs(rest, body, else_rs)} #{fallback} }"
+  end
 
   # ── `&` capture support ────────────────────────────────────────────────
   # Highest placeholder index in an anonymous-capture body → the closure arity
@@ -598,6 +617,33 @@ defmodule Rian.Lower do
       end)
 
     {"match #{p(scrut, 0, :rust)} { #{body} }", 0}
+  end
+
+  # with expression — Elixir native `with`/`else`; Rust nested `match` chain that
+  # short-circuits to the `else` arms (or yields the non-matching value).
+  defp emit({:with, clauses, body, els}, :elixir) do
+    cs =
+      Enum.map_join(clauses, ", ", fn {pt, e} -> "#{pat_ex(pt)} <- #{p(e, 0, :elixir)}" end)
+
+    else_str =
+      if els == [],
+        do: "",
+        else:
+          " else " <>
+            Enum.map_join(els, "; ", fn {pt, g, b} ->
+              "#{pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
+            end)
+
+    {"with #{cs} do #{emit_block(body, :elixir)}#{else_str} end", 0}
+  end
+
+  defp emit({:with, clauses, body, els}, :rust) do
+    else_rs =
+      Enum.map_join(els, " ", fn {pt, g, b} ->
+        "#{rpat(pt)}#{case_guard(g, :rust)} => #{p(b, 0, :rust)},"
+      end)
+
+    {with_chain_rs(clauses, emit_block(body, :rust), else_rs), 0}
   end
 
   # list / map literals

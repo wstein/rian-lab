@@ -214,6 +214,65 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "with expressions (ADR-0040 propagation)" do
+    @with_src """
+    mod Wth do
+      def parse(n Int64) R
+        case n do
+          0 -> {:error, 99}
+          _ -> {:ok, n}
+        end
+      end
+
+      pub def add(a Int64, b Int64) R
+        with {:ok, x} <- parse(a),
+             {:ok, y} <- parse(b) do
+          {:ok, x + y}
+        else
+          {:error, e} -> {:error, e}
+        end
+      end
+    end
+    """
+
+    test "with lowers to native Elixir `with`/`else` and a Rust match chain" do
+      [{"Wth", out}] = Decl.compile(@with_src)
+
+      assert out.elixir =~ "with {:ok, x} <- parse(a), {:ok, y} <- parse(b) do"
+      assert out.elixir =~ "else {:error, e} -> {:error, e} end"
+      # Rust: nested match short-circuiting to the else arm
+      assert out.rust =~ "match parse(a) { Ok(x) =>"
+      assert out.rust =~ "__w => match __w { Err(e) => Err(e), }"
+    end
+
+    test "with propagation runs on the BEAM (happy path and short-circuit)" do
+      [{"Wth", out}] = Decl.compile(@with_src)
+      Code.eval_string(out.elixir)
+      assert Wth.add(2, 3) == {:ok, 5}
+      assert Wth.add(0, 3) == {:error, 99}
+      assert Wth.add(2, 0) == {:error, 99}
+    end
+
+    test "with no `else` propagates the non-matching value unchanged" do
+      [{"prop", out}] =
+        Decl.compile("""
+        def prop(r R) R
+          with {:ok, v} <- r do
+            {:ok, v + 1}
+          end
+        end
+        """)
+
+      assert out.elixir =~ "with {:ok, v} <- r do {:ok, v + 1} end"
+      refute out.elixir =~ "else"
+      assert out.rust =~ "__w => __w,"
+
+      Code.eval_string("defmodule PropT do\n#{out.elixir}\nend")
+      assert PropT.prop({:ok, 41}) == {:ok, 42}
+      assert PropT.prop({:error, :nope}) == {:error, :nope}
+    end
+  end
+
   describe "tuples and atoms (the Result surface, ADR-0040)" do
     test "tuple construction lowers to a BEAM tuple / Rust tuple and runs" do
       [{"pair", out}] = Decl.compile("def pair(a Int64, b Int64) Pair := {a, b}")

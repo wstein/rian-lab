@@ -23,6 +23,18 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "with / tuples (ADR-0040 surface)" do
+    test "tuple literal and `{:ok, _}` parse" do
+      assert p("{1, 2}") == "{1 2}"
+      assert p("{:ok, x}") == "{:ok x}"
+    end
+
+    test "with clauses + else parse" do
+      assert p("with {:ok, x} <- f(a) do x else {:error, e} -> e end") ==
+               "(with (<- {:ok, x} (call f a)) (block x) (else ({:error, e} -> e)))"
+    end
+  end
+
   describe "arithmetic precedence & associativity" do
     test "* binds tighter than +" do
       assert p("a + b * c") == "(+ a (* b c))"

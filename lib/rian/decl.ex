@@ -342,14 +342,22 @@ defmodule Rian.Decl do
   # Detokenize a block body: a newline at block level (depth 0) separates
   # statements (`;`); a newline inside a nested `do … end` (a `case`/`if`) is
   # insignificant (those arms self-delimit), so it becomes whitespace.
-  defp detok_block(tokens), do: tokens |> block_seps(0, []) |> Lexer.detokenize()
+  defp detok_block(tokens), do: tokens |> block_seps(0, 0, []) |> Lexer.detokenize()
 
-  defp block_seps([], _d, acc), do: Enum.reverse(acc)
-  defp block_seps([{:kw, "do"} = t | r], d, acc), do: block_seps(r, d + 1, [t | acc])
-  defp block_seps([{:kw, "end"} = t | r], d, acc), do: block_seps(r, d - 1, [t | acc])
-  defp block_seps([{:nl} | r], 0, acc), do: block_seps(r, 0, [{:semi} | acc])
-  defp block_seps([{:nl} | r], d, acc), do: block_seps(r, d, acc)
-  defp block_seps([t | r], d, acc), do: block_seps(r, d, [t | acc])
+  # `w` counts open `with`-headers: between `with` and its `do`, newlines separate
+  # comma-joined clauses, not statements, so they stay insignificant (the `do`
+  # that closes a header transitions it into the with-body depth).
+  defp block_seps([], _d, _w, acc), do: Enum.reverse(acc)
+  defp block_seps([{:kw, "with"} = t | r], d, w, acc), do: block_seps(r, d, w + 1, [t | acc])
+
+  defp block_seps([{:kw, "do"} = t | r], d, w, acc) when w > 0,
+    do: block_seps(r, d + 1, w - 1, [t | acc])
+
+  defp block_seps([{:kw, "do"} = t | r], d, w, acc), do: block_seps(r, d + 1, w, [t | acc])
+  defp block_seps([{:kw, "end"} = t | r], d, w, acc), do: block_seps(r, d - 1, w, [t | acc])
+  defp block_seps([{:nl} | r], 0, 0, acc), do: block_seps(r, 0, 0, [{:semi} | acc])
+  defp block_seps([{:nl} | r], d, w, acc), do: block_seps(r, d, w, acc)
+  defp block_seps([t | r], d, w, acc), do: block_seps(r, d, w, [t | acc])
 
   # ── `type` declarations ────────────────────────────────────────────────
   defp parse_type(rest, pub?) do

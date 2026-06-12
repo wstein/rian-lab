@@ -51,6 +51,11 @@ defmodule Rian.Macro do
   def map_node({:case, s, arms}, f),
     do: {:case, f.(s), Enum.map(arms, fn {p, g, b} -> {p, g && f.(g), f.(b)} end)}
 
+  def map_node({:with, clauses, body, els}, f) do
+    {:with, Enum.map(clauses, fn {p, e} -> {p, f.(e)} end), f.(body),
+     Enum.map(els, fn {p, g, b} -> {p, g && f.(g), f.(b)} end)}
+  end
+
   def map_node({:block, stmts}, f) do
     {:block,
      Enum.map(stmts, fn

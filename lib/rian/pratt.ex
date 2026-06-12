@@ -139,6 +139,7 @@ defmodule Rian.Pratt do
 
   defp parse_primary([{:kw, "if"} | rest]), do: parse_if(rest)
   defp parse_primary([{:kw, "case"} | rest]), do: parse_case(rest)
+  defp parse_primary([{:kw, "with"} | rest]), do: parse_with(rest)
   defp parse_primary([{:lbracket} | rest]), do: parse_list(rest, [])
   defp parse_primary([{:mapopen} | rest]), do: parse_map(rest, [])
   defp parse_primary([{:lbrace} | rest]), do: parse_tuple(rest, [])
@@ -245,6 +246,36 @@ defmodule Rian.Pratt do
 
     tokens = expect_kw(tokens, "end")
     {{:if, cnd, then_b, else_b}, tokens}
+  end
+
+  # `with pat <- expr, … do body [else arms] end` (ADR-0040). Each `pat <- expr`
+  # is a failable bind (ADR-0039); a non-match short-circuits to `else` (or, with
+  # no `else`, propagates the non-matching value).
+  defp parse_with(tokens) do
+    {clauses, tokens} = parse_with_clauses(tokens, [])
+    tokens = expect_kw(tokens, "do")
+    {body, tokens} = parse_block(tokens)
+
+    {else_arms, tokens} =
+      case tokens do
+        [{:kw, "else"} | r] -> parse_arms(r, [])
+        _ -> {[], tokens}
+      end
+
+    tokens = expect_kw(tokens, "end")
+    {{:with, clauses, body, else_arms}, tokens}
+  end
+
+  defp parse_with_clauses(tokens, acc) do
+    {pat, tokens} = parse_pat(tokens)
+    tokens = expect_op(tokens, "<-")
+    {expr, tokens} = parse_expr(tokens, 0)
+    acc = [{pat, expr} | acc]
+
+    case tokens do
+      [{:comma} | rest] -> parse_with_clauses(rest, acc)
+      _ -> {Enum.reverse(acc), tokens}
+    end
   end
 
   # `case scrut do pattern [when guard] -> body … end` (Elixir form, ADR-0033).
@@ -430,6 +461,18 @@ defmodule Rian.Pratt do
   defp sexpr({:case, s, arms}),
     do:
       "(case #{sexpr(s)}#{Enum.map_join(arms, "", fn {p, _g, b} -> " (#{sexpr_pat(p)} -> #{sexpr(b)})" end)})"
+
+  defp sexpr({:with, clauses, body, els}) do
+    cs = Enum.map_join(clauses, " ", fn {p, e} -> "(<- #{sexpr_pat(p)} #{sexpr(e)})" end)
+
+    e =
+      if els == [],
+        do: "",
+        else:
+          " (else#{Enum.map_join(els, "", fn {p, _g, b} -> " (#{sexpr_pat(p)} -> #{sexpr(b)})" end)})"
+
+    "(with #{cs} #{sexpr(body)}#{e})"
+  end
 
   defp sexpr({:block, stmts}),
     do: "(block#{Enum.map_join(stmts, "", fn s -> " " <> sexpr_stmt(s) end)})"

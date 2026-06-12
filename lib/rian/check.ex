@@ -84,6 +84,9 @@ defmodule Rian.Check do
   end
 
   def infer({:block, stmts}, env, td), do: infer_block(stmts, env, td, :unknown)
+  # a `with` yields its do-block value on the happy path (clause-bound vars are
+  # not tracked yet -> they infer `:unknown`, keeping the checker conservative)
+  def infer({:with, _clauses, body, _els}, env, td), do: infer(body, env, td)
   def infer(_other, _env, _td), do: :unknown
 
   defp infer_block([], _env, _td, value), do: value
