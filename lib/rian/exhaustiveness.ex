@@ -24,6 +24,11 @@ defmodule Rian.Exhaustiveness do
       %{arity: %{ctor_id => arity},
         type_of: %{ctor_id => type_name},
         ctors:  %{type_name => {:finite, [ctor_id]} | :infinite}}
+
+  A `range` type (ADR-0036) registers its `{:lit, v}` members as a `{:finite, …}`
+  signature via `add_range/4`, so a `case` covering the whole interval is
+  exhaustive. Unregistered literals have no `type_of` entry and stay infinite —
+  a bare `Int64`/`Char`/`String` still requires a `_` arm.
   """
 
   # ── Environment helpers ────────────────────────────────────────────────
@@ -52,15 +57,30 @@ defmodule Rian.Exhaustiveness do
     %{env | arity: arity, type_of: typeof, ctors: Map.put(env.ctors, type_name, {:finite, ids})}
   end
 
+  @doc """
+  Register a finite ordinal `range` type (ADR-0036): the inclusive interval
+  `lo..hi` over an ordinal base (`Int64`/`Char` — pass `Char` bounds as
+  codepoints). Its members are the `{:lit, v}` constructors, so a `case` that
+  covers the whole interval is exhaustive — unlike a bare `Int64`, whose
+  signature stays infinite and still demands a `_`.
+  """
+  def add_range(env, type_name, lo, hi) when lo <= hi do
+    members = for v <- lo..hi, do: {:lit, v}
+    typeof = Enum.reduce(members, env.type_of, fn m, acc -> Map.put(acc, m, type_name) end)
+    %{env | type_of: typeof, ctors: Map.put(env.ctors, type_name, {:finite, members})}
+  end
+
   defp arity(_env, {:tuple, n}), do: n
   defp arity(_env, {:lit, _}), do: 0
   defp arity(env, c), do: Map.get(env.arity, c, 0)
 
   # {:complete, all_ctors} when the head constructors cover the whole type,
-  # otherwise :incomplete (also for empty / infinite signatures).
+  # otherwise :incomplete (also for empty / infinite signatures). A `{:lit, v}`
+  # head is looked up like any other constructor: members of a registered
+  # `range` type (ADR-0036) resolve to a finite signature; an unregistered
+  # literal has no type, so it falls through to the infinite-primitive case.
   defp signature(_env, []), do: :incomplete
   defp signature(_env, [{:tuple, _} = t | _]), do: {:complete, [t]}
-  defp signature(_env, [{:lit, _} | _]), do: :incomplete
 
   defp signature(env, [c | _] = present) do
     case env.ctors[env.type_of[c]] do
@@ -156,7 +176,6 @@ defmodule Rian.Exhaustiveness do
   end
 
   defp missing_head(_env, []), do: :wild
-  defp missing_head(_env, [{:lit, _} | _]), do: :wild
 
   defp missing_head(env, [c | _] = present) do
     case env.ctors[env.type_of[c]] do

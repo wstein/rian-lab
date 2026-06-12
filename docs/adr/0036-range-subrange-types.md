@@ -72,12 +72,14 @@ scope** (ADR-0032/03-clauses): you match a `Digit` by its literal members or `_`
 
 #### Completeness checking, bounded
 
-Naive enumeration is fine for small ranges but not for `0..1_000_000`. The signature is therefore
-checked by **endpoint/interval coverage**, not member expansion: the arms' literals (and any `_`)
-are folded into covered sub-intervals and compared against `[lo, hi]`. This is the *one* piece of
-"range arithmetic" §4 wanted to avoid — and it is admitted **only for `range` types**, where it is
-finite and decidable, never for open primitives. Implementation may cap naive enumeration (e.g.
-≤ 256 members) and fall back to interval coverage above that.
+The reference implementation (`add_range/4`) **enumerates** the interval's `{:lit, v}` members and
+reuses the existing finite-signature subset check — correct, and ample for the small ordinal ranges
+Rian targets (`Digit`, `Letter`, a byte). For very large intervals (`0..1_000_000`) the planned
+refinement is **endpoint/interval coverage**: fold the arms' literals (and any `_`) into covered
+sub-intervals and compare against `[lo, hi]`. That is the *one* piece of "range arithmetic" §4
+wanted to avoid — admitted **only for `range` types**, where it is finite and decidable, never for
+open primitives. It is a performance optimization, not a correctness gap, and is tracked in the
+exhaustiveness spec §7.
 
 ## Lowering (verified-on-paper; to be re-asserted in tests)
 

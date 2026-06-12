@@ -13,6 +13,8 @@ defmodule Rian.ExhaustivenessTest do
   defp env_option, do: E.add_type(E.base_env(), :option, [{:some, 1}, {:none, 0}])
   defp env_shape, do: E.add_type(E.base_env(), :shape, [{:circle, 1}, {:square, 1}])
   defp env_tree, do: E.add_type(E.base_env(), :tree, [{:leaf, 0}, {:node, 3}])
+  defp env_bit, do: E.add_range(E.base_env(), :bit, 0, 1)
+  defp env_digit, do: E.add_range(E.base_env(), :digit, 0, 9)
 
   describe "exhaustiveness — finite types" do
     test "bool: both literals are exhaustive" do
@@ -89,6 +91,44 @@ defmodule Rian.ExhaustivenessTest do
     test "literals plus wildcard ARE exhaustive" do
       r = E.analyze([arm([lit(0)]), arm([lit(1)]), arm([w()])], 1, E.base_env())
       assert r.exhaustive?
+    end
+  end
+
+  describe "range types are finite — full interval coverage is exhaustive (ADR-0036)" do
+    test "Bit (0..1): covering both members is exhaustive with no wildcard" do
+      r = E.analyze([arm([lit(0)]), arm([lit(1)])], 1, env_bit())
+      assert r.exhaustive?
+      assert r.missing == nil
+    end
+
+    test "Bit (0..1): missing `1` -> witness `1`" do
+      r = E.analyze([arm([lit(0)])], 1, env_bit())
+      refute r.exhaustive?
+      assert E.render(r.missing) == "1"
+    end
+
+    test "Digit (0..9): covering every member is exhaustive" do
+      arms = for v <- 0..9, do: arm([lit(v)])
+      assert E.analyze(arms, 1, env_digit()).exhaustive?
+    end
+
+    test "Digit (0..9): a hole in the interval is reported with the missing member" do
+      arms = for v <- 0..9, v != 5, do: arm([lit(v)])
+      r = E.analyze(arms, 1, env_digit())
+      refute r.exhaustive?
+      assert E.render(r.missing) == "5"
+    end
+
+    test "a wildcard arm after full interval coverage is unreachable" do
+      arms = [arm([lit(0)]), arm([lit(1)]), arm([w()])]
+      assert E.analyze(arms, 1, env_bit()).unreachable == [2]
+    end
+
+    test "same literal value stays infinite when NOT a range member" do
+      # `0`/`1` in the base env are bare Int64 literals — still need a wildcard.
+      r = E.analyze([arm([lit(0)]), arm([lit(1)])], 1, E.base_env())
+      refute r.exhaustive?
+      assert E.render(r.missing) == "_"
     end
   end
 
