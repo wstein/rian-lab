@@ -399,10 +399,45 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "const declarations (module constants)" do
+    @consts """
+    mod Scaling do
+      pub const TAU Float64 := 6.28318530
+      const SCALE Float64 := 2.0
+
+      pub def scaled(r Float64) Float64 := TAU * r * SCALE
+    end
+    """
+
+    test "consts lower to accessors / Rust const, and references resolve per target" do
+      [{"Scaling", out}] = Decl.compile(@consts)
+
+      assert out.elixir =~ "def tau() do 6.28318530 end"
+      assert out.elixir =~ "defp scale() do 2.0 end"
+      assert out.elixir =~ "def scaled(r) do tau() * r * scale() end"
+
+      assert out.rust =~ "pub const TAU: f64 = 6.28318530;"
+      assert out.rust =~ "const SCALE: f64 = 2.0;"
+      assert out.rust =~ "TAU * r * SCALE"
+    end
+
+    test "a module with constants runs on the BEAM" do
+      [{"Scaling", out}] = Decl.compile(@consts)
+      Code.eval_string(out.elixir)
+      assert_in_delta Scaling.scaled(3.0), 6.28318530 * 3.0 * 2.0, 1.0e-9
+    end
+
+    test "a top-level const (no enclosing module) is rejected" do
+      assert_raise Decl.Error, ~r/`const` must appear inside a `mod`/, fn ->
+        Decl.parse("const TAU Float64 := 6.28")
+      end
+    end
+  end
+
   describe "honest limits raise Rian.Decl.Error" do
     test "unsupported declaration keywords are rejected" do
-      assert_raise Decl.Error, ~r/unsupported declaration `const`/, fn ->
-        Decl.parse("const TAU Float64 := 6.28")
+      assert_raise Decl.Error, ~r/unsupported declaration `use`/, fn ->
+        Decl.parse("use Math")
       end
     end
   end

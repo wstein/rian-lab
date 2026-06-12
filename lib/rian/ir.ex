@@ -47,14 +47,24 @@ defmodule Rian.IR do
     defstruct name: nil, fields: [], pub?: false
   end
 
+  defmodule Const do
+    @moduledoc """
+    A named compile-time constant (`const NAME Type := value`). `value` is the
+    body source (parsed on lowering, like a function body). Lowers to a 0-arity
+    accessor on the BEAM (`def`/`defp`) and a `const` on Rust; `pub?` exports it.
+    """
+    @enforce_keys [:name, :type, :value]
+    defstruct name: nil, type: nil, value: nil, pub?: false
+  end
+
   defmodule Mod do
     @moduledoc """
-    A module (`mod Name do … end`) — a namespace grouping `types`, `structs`, and
-    `funcs`. Lowers to a `defmodule` on the BEAM and a `mod` on Rust; `pub?` items
-    are exported (`def`/`pub fn`), the rest are private (`defp`/`fn`).
+    A module (`mod Name do … end`) — a namespace grouping `types`, `structs`,
+    `consts`, and `funcs`. Lowers to a `defmodule` on the BEAM and a `mod` on
+    Rust; `pub?` items are exported (`def`/`pub fn`), the rest private (`defp`/`fn`).
     """
     @enforce_keys [:name]
-    defstruct name: nil, types: [], structs: [], funcs: []
+    defstruct name: nil, types: [], structs: [], consts: [], funcs: []
   end
 
   defmodule Param do

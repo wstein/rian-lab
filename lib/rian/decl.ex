@@ -29,16 +29,19 @@ defmodule Rian.Decl do
     * `struct Name(field Type, …)` — product types; lower to `defstruct` (BEAM) /
       `struct {…}` (Rust) and are built with positional `Name(v1, v2)` or named
       `Name(field: v, …)` constructor calls.
-    * `mod Name do … end` — modules grouping types/structs/defs; lower to a
-      `defmodule` (BEAM) / `mod` (Rust). `pub` exports a `def`/`type`/`struct`
-      (`def`/`pub fn`); unmarked items are private (`defp`/`fn`).
+    * `mod Name do … end` — modules grouping types/structs/consts/defs; lower to
+      a `defmodule` (BEAM) / `mod` (Rust). `pub` exports a `def`/`type`/`struct`/
+      `const` (`def`/`pub fn`/`pub const`); unmarked items are private.
+    * `const NAME Type := value` — module-scoped constants; lower to a 0-arity
+      accessor (BEAM) / a `const` (Rust); references resolve per target.
 
   ## Not yet supported
 
-  Inside a `mod`, `const` and `use` (imports) raise `Rian.Decl.Error`.
+  `use` (imports) raises `Rian.Decl.Error`; a top-level `const` (outside any
+  `mod`) is rejected.
   """
   alias Rian.{Check, Lexer, Lower}
-  alias Rian.IR.{Clause, Field, Func, Mod, Param, Struct, Type, Variant}
+  alias Rian.IR.{Clause, Const, Field, Func, Mod, Param, Struct, Type, Variant}
 
   defmodule Error do
     defexception [:message]
@@ -53,15 +56,26 @@ defmodule Rian.Decl do
     aliases = collect_aliases(decls)
     prog = assemble(decls, aliases)
 
+    # A top-level constant has no enclosing module to hold its accessor — `const`
+    # is module-scoped (ADR-0033 / modules: items live in a `mod`).
+    if prog.consts != [], do: raise(Error, "`const` must appear inside a `mod`")
+
     mods =
       for {:mod, name, inner} <- decls do
         # top-level aliases are visible inside a module; module-local aliases add to them
         scoped = Map.merge(aliases, collect_aliases(inner))
         p = assemble(inner, scoped)
-        %Mod{name: name, types: p.types, structs: p.structs, funcs: p.funcs}
+
+        %Mod{
+          name: name,
+          types: p.types,
+          structs: p.structs,
+          consts: p.consts,
+          funcs: p.funcs
+        }
       end
 
-    Map.put(prog, :mods, mods)
+    prog |> Map.delete(:consts) |> Map.put(:mods, mods)
   end
 
   # `alias Name := Type` is a transparent synonym: collect the name->type map so
@@ -89,7 +103,11 @@ defmodule Rian.Decl do
       for({:struct, s, pub?} <- decls, do: parse_struct(s, pub?))
       |> Enum.map(&subst_struct(&1, aliases))
 
-    %{types: types, structs: structs, funcs: funcs}
+    consts =
+      for({:const, c, pub?} <- decls, do: parse_const(c, pub?))
+      |> Enum.map(&subst_const(&1, aliases))
+
+    %{types: types, structs: structs, consts: consts, funcs: funcs}
   end
 
   defp parse_alias(text) do
@@ -184,6 +202,11 @@ defmodule Rian.Decl do
     {{:alias, Lexer.detokenize(toks)}, rest}
   end
 
+  defp take_decl([{:kw, "const"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    {{:const, Lexer.detokenize(toks), false}, rest}
+  end
+
   defp take_decl([{:kw, "def"} | rest]) do
     {raw, rest} = take_def(rest)
     {{:def, raw}, rest}
@@ -220,8 +243,11 @@ defmodule Rian.Decl do
 
   defp mark_pub({:type, s, _}), do: {:type, s, true}
   defp mark_pub({:struct, s, _}), do: {:struct, s, true}
+  defp mark_pub({:const, s, _}), do: {:const, s, true}
   defp mark_pub({:def, raw}), do: {:def, Map.put(raw, :pub, true)}
-  defp mark_pub(_other), do: raise(Error, "`pub` may only precede `def` / `type` / `struct`")
+
+  defp mark_pub(_other),
+    do: raise(Error, "`pub` may only precede `def` / `type` / `struct` / `const`")
 
   # A `type` runs to the newline that begins the next declaration (variant lines
   # beginning with `|` are continuations) or the enclosing module's `end`.
@@ -346,6 +372,24 @@ defmodule Rian.Decl do
         %Struct{name: String.trim(text), fields: [], pub?: pub?}
     end
   end
+
+  # ── `const` declarations ───────────────────────────────────────────────
+  # `const NAME Type := value` — a named compile-time constant (juxtaposed type,
+  # like a parameter without a capability).
+  defp parse_const(text, pub?) do
+    case split_once(text, ":=") do
+      {decl, value} ->
+        case decl |> collapse_parens() |> String.split(~r/\s+/, trim: true) do
+          [name, type] -> %Const{name: name, type: type, value: value, pub?: pub?}
+          _ -> raise Error, "const needs `NAME Type := value`: #{text}"
+        end
+
+      :none ->
+        raise Error, "const needs `:=`: #{text}"
+    end
+  end
+
+  defp subst_const(%Const{type: t} = c, aliases), do: %Const{c | type: subst_type_str(t, aliases)}
 
   # Detokenized type strings space their parens/commas (`Vec ( Int64 )`); collapse
   # them back so a parenthesized type is one whitespace-split token (`Vec(Int64)`).
