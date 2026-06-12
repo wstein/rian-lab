@@ -372,5 +372,7 @@ bespoke integrations.
 - **Cross-file invalidation** strategy when batch hits its wall (Arthur) — coarse (whole workspace) vs.
   dependency-tracked.
 - **Expansion fuel limits** — concrete time/memory/depth defaults for the sandbox (Marcus).
-- **Formatter ownership** — is there a canonical Rian formatting style yet to back `lsp/formatting`?
+- ~~**Formatter ownership** — is there a canonical Rian formatting style yet to back `lsp/formatting`?~~
+  **Resolved by [ADR-0045](0045-formatter.md):** one canonical zero-config style; `lsp/formatting`
+  delegates to the `rian fmt` formatter (the canonical owner), which needs a comment-preserving CST.
 - **Structural-union hover** (the ADR-0034 open item) — how Tier 2 hover renders narrowed/union types.

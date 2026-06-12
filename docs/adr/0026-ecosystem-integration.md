@@ -87,5 +87,7 @@ The BEAM provides Core Erlang precisely so languages interoperate without forkin
   first" step above) is their prettyprint — so it costs nothing extra. Core Erlang's only edge is
   codegen regularity; revisit *only* if nested-pattern/guard codegen against abstract forms proves
   painful. Cutover sequencing is in [ADR-0031](0031-bootstrap-strategy.md) (open items).
-- Behaviour syntax in Rian surface (how a Rian module declares `gen_server`).
+- ~~Behaviour syntax in Rian surface (how a Rian module declares `gen_server`).~~ **Resolved by
+  [ADR-0044](0044-otp-behaviours.md):** `@behaviour(gen_server)` annotation on a `mod`, callbacks as
+  checked `def`s, state type threaded; BEAM-only.
 - Hex metadata mapping (app name, version, deps) from a Rian manifest.
