@@ -71,8 +71,9 @@ defmodule Rian.ReplTest do
   describe "errors leave the session unchanged" do
     test "an unsupported construct is a clear error, never a silent miscompile" do
       s = Repl.new()
-      assert {{:error, message}, ^s} = eval(s, "\"a string\"")
-      assert message =~ "String" or message =~ "not yet supported" or message != ""
+      # a map literal has no abstract-forms lowering yet (strings now do)
+      assert {{:error, message}, ^s} = eval(s, "%{a: 1}")
+      assert message =~ "EMap" or message =~ "not yet supported" or message != ""
     end
 
     test "a parse error is reported" do

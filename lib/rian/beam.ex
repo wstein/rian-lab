@@ -24,9 +24,15 @@ defmodule Rian.Beam do
   parameter or a binding) emits a variable application `Var(Args)` — distinct
   from a local function call `name(Args)` — so map/fold-shaped code runs.
 
+  **Strings (ADR-0041):** a `String` literal lowers to the BEAM binary of its
+  UTF-8 bytes (an Elixir string is a binary), `<>` to binary concatenation
+  (`<<L::binary, R::binary>>`), and a string-literal *pattern* to the matching
+  binary — enough for a parser/compiler to carry identifiers, keywords, and
+  error text (the lexer spike had to dodge this with integer codepoints).
+
   **Not yet** (raise a clear error, never a silent miscompile): `struct`
-  declarations (need `%Name{}` map forms), named-arg construction, `String`
-  literals/`<>`, `with`.
+  declarations (need `%Name{}` map forms), named-arg construction, `with`,
+  map literals.
   """
   alias Rian.{Core, Decl, PatternLower, Pratt}
 
@@ -45,6 +51,7 @@ defmodule Rian.Beam do
     ELambda,
     EList,
     ENum,
+    EStr,
     ETuple,
     EUnary
   }
@@ -129,6 +136,8 @@ defmodule Rian.Beam do
   # bindings + lambda/capture parameters), used to tell a fun-valued variable
   # application apart from a local function call.
   defp expr_form(%ENum{text: n}, _s), do: num_form(n)
+  # a Rian `String` is a BEAM binary (Elixir string) — the literal's UTF-8 bytes
+  defp expr_form(%EStr{value: s}, _s), do: str_form(s)
   defp expr_form(%EId{name: b}, _s) when b in ~w(true false), do: {:atom, @ln, String.to_atom(b)}
   # a bare PascalCase id is a nullary sum-variant value -> its snake atom tag
   defp expr_form(%EId{name: x}, _s),
@@ -137,6 +146,11 @@ defmodule Rian.Beam do
   defp expr_form(%EAtom{name: a}, _s), do: {:atom, @ln, String.to_atom(a)}
   defp expr_form(%EUnary{op: "-", arg: x}, s), do: {:op, @ln, :-, expr_form(x, s)}
   defp expr_form(%EUnary{op: "not", arg: x}, s), do: {:op, @ln, :not, expr_form(x, s)}
+
+  # `<>` is binary (String) concatenation, not an arithmetic operator: build a
+  # binary that appends both operands as whole binaries (`<<L::binary, R::binary>>`)
+  defp expr_form(%EBin{op: "<>", left: l, right: r}, s),
+    do: {:bin, @ln, [bin_seg(expr_form(l, s)), bin_seg(expr_form(r, s))]}
 
   defp expr_form(%EBin{op: op, left: l, right: r}, s),
     do: {:op, @ln, erl_op(op), expr_form(l, s), expr_form(r, s)}
@@ -277,6 +291,8 @@ defmodule Rian.Beam do
   defp pat_form(%Core.PWild{}), do: {:var, @ln, :_}
   defp pat_form(%Core.PVar{name: x}), do: var_form(x)
   defp pat_form(%Core.PLit{value: v}) when is_integer(v), do: {:integer, @ln, v}
+  # a string-literal pattern matches the same binary the literal constructs
+  defp pat_form(%Core.PLit{value: v}) when is_binary(v), do: str_form(v)
   defp pat_form(%Core.PAtom{name: a}), do: {:atom, @ln, String.to_atom(a)}
   defp pat_form(%Core.PTuple{elems: ps}), do: {:tuple, @ln, Enum.map(ps, &pat_form/1)}
 
@@ -305,6 +321,16 @@ defmodule Rian.Beam do
       do: {:float, @ln, String.to_float(n)},
       else: {:integer, @ln, String.to_integer(n)}
   end
+
+  # a Rian `String` literal -> the BEAM binary of its UTF-8 bytes (an Elixir
+  # string is a UTF-8 binary); `:erlang.binary_to_list/1` yields those raw bytes
+  defp str_form(s),
+    do:
+      {:bin, @ln,
+       [{:bin_element, @ln, {:string, @ln, :erlang.binary_to_list(s)}, :default, :default}]}
+
+  # a whole-binary segment for `<>` concatenation (`X::binary`)
+  defp bin_seg(form), do: {:bin_element, @ln, form, :default, [:binary]}
 
   # Rian's snake_case binding -> a legal Erlang variable (leading-cap, `_` kept).
   defp var_form("_"), do: {:var, @ln, :_}

@@ -139,15 +139,44 @@ defmodule Rian.BeamTest do
       assert mod.twice(21) == 42
     end
 
+    test "strings: a literal is a binary, `<>` concatenates, unicode round-trips (ADR-0041)" do
+      {:ok, mod} =
+        Beam.load(
+          ~s|def greet(name String) String := "hi, " <> name <> "!"\ndef u(n Int64) String := "café→λ"|,
+          :rian_beam_str
+        )
+
+      assert mod.greet("Rian") == "hi, Rian!"
+      assert is_binary(mod.greet("Rian"))
+      assert mod.u(0) == "café→λ"
+    end
+
+    test "strings: a string-literal pattern dispatches clauses (keyword-matching shape)" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def kind(tok String) Int64
+          def kind("def") := 1
+          def kind("end") := 2
+          def kind(_)     := 0
+          """,
+          :rian_beam_str_pat
+        )
+
+      assert mod.kind("def") == 1
+      assert mod.kind("end") == 2
+      assert mod.kind("other") == 0
+    end
+
     test "a construct outside the core raises a clear Unsupported (never a miscompile)" do
       # struct declarations need %Name{} map forms (next increment)
       assert_raise Beam.Unsupported, ~r/struct/, fn ->
         Beam.compile("struct P(x Int64)\ndef o(n Int64) P := P(n)", :rian_beam_bad)
       end
 
-      # String `<>` concatenation is not in this increment
+      # a map literal needs `%{…}` map forms (next increment)
       assert_raise Beam.Unsupported, fn ->
-        Beam.compile("def g(a String, b String) String := a <> b", :rian_beam_bad2)
+        Beam.compile("def g(n Int64) Int64 := %{a: 1}", :rian_beam_bad2)
       end
     end
   end
