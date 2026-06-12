@@ -258,20 +258,20 @@ defmodule Rian.Check do
   # ── function checking ──────────────────────────────────────────────────
   @doc """
   Check one function. `ic` is the inference context (`:tdefs`/`:funs`/`:ctors`);
-  `tsets` maps an error-set type name to its tags (ADR-0040 §4). Returns `:ok` or
-  `{:error, message}`. Two checks run:
+  `eset` is the error-set context (`:tsets` name->tags, `:table` the call-graph
+  fixpoint). Returns `:ok` or `{:error, message}`. Two checks run:
 
     * **return type** — no clause body's inferred concrete type may *contradict*
       the declared return type (now including parametric `Vec(T)` and a body's
       sum-variant / function-call result, ADR-0042 — concrete generics);
-    * **error set** — when the return type is `T | E` (a `Result`), every error
-      tag the body constructs (`{:error, Tag}`) must be in the declared set `E`
-      (over-declaration is allowed; ADR-0040 §4).
+    * **error set** — when the return type is `T | E`, the function's *produced*
+      set — directly-built `{:error, Tag}` ∪ propagated callee sets — must be a
+      subset of `E` (over-declaration allowed; ADR-0040 §4).
   """
-  def check_func(func, ic \\ %{}, tsets \\ %{})
+  def check_func(func, ic \\ %{}, eset \\ %{tsets: %{}, table: %{}})
 
-  def check_func(%Func{} = f, ic, tsets) do
-    with :ok <- check_return(f, ic), do: check_error_set(f, tsets)
+  def check_func(%Func{} = f, ic, eset) do
+    with :ok <- check_return(f, ic), do: check_error_set(f, eset)
   end
 
   defp check_return(%Func{name: name, params: ps, ret: ret, tvars: tvars, clauses: clauses}, ic) do
@@ -299,21 +299,19 @@ defmodule Rian.Check do
   defp generic_ret?(_ret, []), do: false
   defp generic_ret?(ret, tvars), do: Enum.any?(tvars, &Regex.match?(~r/\b#{&1}\b/, ret))
 
-  # ADR-0040 §4: a `T | E` return type declares the error set `E`; every error
-  # the body actually constructs must be in it (the body's set ⊆ the declared
-  # set — over-declaration is fine). Non-`Result` returns are unconstrained here.
-  defp check_error_set(%Func{ret: ret} = f, tsets) do
-    case String.split(ret, "|") |> Enum.map(&String.trim/1) do
-      [ok_t, err_t] when ok_t != "" ->
-        declared = MapSet.new(Map.get(tsets, err_t, [err_t]))
+  # ADR-0040 §4: a `T | E` return type declares the error set `E`; the function's
+  # *produced* set — the tags it builds directly **plus** the error sets it
+  # propagates from callees (a `with`-clause source whose error isn't handled by
+  # an `else`) — must be a subset of `E`. The propagated part is read from `table`
+  # (the call-graph fixpoint, `solve_error_sets/2`). Non-`Result` returns are
+  # unconstrained here.
+  defp check_error_set(%Func{ret: ret} = f, %{tsets: tsets, table: table}) do
+    case declared_set(ret, tsets) do
+      nil ->
+        :ok
 
-        produced =
-          f.clauses
-          |> Enum.flat_map(fn c -> c.body |> Pratt.parse_body() |> error_tags() end)
-          |> Enum.reject(&is_nil/1)
-          |> MapSet.new()
-
-        case MapSet.difference(produced, declared) |> MapSet.to_list() do
+      {err_t, declared} ->
+        case MapSet.difference(produced_set(f, table), declared) |> MapSet.to_list() do
           [] ->
             :ok
 
@@ -321,10 +319,66 @@ defmodule Rian.Check do
             {:error,
              "`#{f.name}`: returns error(s) #{inspect(extra)} not in its declared set `#{err_t}`"}
         end
-
-      _ ->
-        :ok
     end
+  end
+
+  defp check_error_set(_f, _eset), do: :ok
+
+  # `T | E` -> `{E, MapSet of E's tags}` (a named `E` expands to its variants); else nil.
+  defp declared_set(ret, tsets) do
+    case String.split(ret, "|") |> Enum.map(&String.trim/1) do
+      [ok_t, err_t] when ok_t != "" -> {err_t, MapSet.new(Map.get(tsets, err_t, [err_t]))}
+      _ -> nil
+    end
+  end
+
+  # the tags a function actually produces: directly-built `{:error, Tag}` ∪ the
+  # error sets of the callees whose errors it propagates (from `table`)
+  defp produced_set(f, table) do
+    propagated =
+      f
+      |> propagated_callees()
+      |> Enum.reduce(MapSet.new(), fn c, acc ->
+        MapSet.union(acc, Map.get(table, c, MapSet.new()))
+      end)
+
+    MapSet.union(direct_tags(f), propagated)
+  end
+
+  defp direct_tags(f) do
+    f.clauses
+    |> Enum.flat_map(fn c -> c.body |> Pratt.parse_body() |> error_tags() end)
+    |> Enum.reject(&is_nil/1)
+    |> MapSet.new()
+  end
+
+  defp propagated_callees(f),
+    do: f.clauses |> Enum.flat_map(fn c -> c.body |> Pratt.parse_body() |> with_callees() end)
+
+  # Solve every function's error set by call-graph fixpoint: a function with a
+  # declared `E` exposes exactly `E` (the contract boundary); an unannotated one
+  # infers `direct ∪ ⋃ callee-set`, iterated until stable (sets only grow).
+  defp solve_error_sets(funcs, tsets) do
+    facts =
+      Map.new(funcs, fn f ->
+        declared = with({_e, set} <- declared_set(f.ret, tsets), do: set, else: (_ -> nil))
+        {f.name, %{direct: direct_tags(f), callees: propagated_callees(f), declared: declared}}
+      end)
+
+    fixpoint(facts, Map.new(facts, fn {n, fc} -> {n, fc.declared || fc.direct} end))
+  end
+
+  defp fixpoint(facts, table) do
+    next =
+      Map.new(facts, fn
+        {n, %{declared: d}} when not is_nil(d) ->
+          {n, d}
+
+        {n, %{direct: direct, callees: callees}} ->
+          {n, Enum.reduce(callees, direct, &MapSet.union(&2, Map.get(table, &1, MapSet.new())))}
+      end)
+
+    if next == table, do: table, else: fixpoint(facts, next)
   end
 
   # Collect the tag names of every `{:error, Tag}` constructed in an expression.
@@ -332,6 +386,23 @@ defmodule Rian.Check do
   defp error_tags(t) when is_tuple(t), do: t |> Tuple.to_list() |> Enum.flat_map(&error_tags/1)
   defp error_tags(l) when is_list(l), do: Enum.flat_map(l, &error_tags/1)
   defp error_tags(_), do: []
+
+  # Names of functions whose errors propagate: a `with`-clause source `f(…)` when
+  # the `with` has NO `else` (an `else` is taken to handle the clause errors —
+  # conservative; a re-raising `else` only under-approximates, never over-).
+  defp with_callees({:with, clauses, body, []}) do
+    Enum.flat_map(clauses, fn {_p, src} -> call_name(src) end) ++
+      with_callees(body) ++ Enum.flat_map(clauses, fn {_p, s} -> with_callees(s) end)
+  end
+
+  defp with_callees(t) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.flat_map(&with_callees/1)
+
+  defp with_callees(l) when is_list(l), do: Enum.flat_map(l, &with_callees/1)
+  defp with_callees(_), do: []
+
+  defp call_name({:call, {:id, n}, _}), do: [n]
+  defp call_name(_), do: []
 
   # An error tag is a PascalCase constructor (`NotFound`, `DivByZero(…)`). A
   # lowercase identifier in error position is a *bound variable* re-propagating an
@@ -371,7 +442,8 @@ defmodule Rian.Check do
     }
 
     tsets = error_sets(types)
-    Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, tsets), do: nil end)
+    eset = %{tsets: tsets, table: solve_error_sets(all_funcs, tsets)}
+    Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, eset), do: nil end)
   end
 
   # ctor name -> the sum type it builds (so a variant value/call infers its type);

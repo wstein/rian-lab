@@ -159,6 +159,53 @@ defmodule Rian.CheckTest do
     test "a non-Result return type is unconstrained by the error-set check" do
       assert Check.check("def g(n Int64) Int64 := n + 1") == :ok
     end
+
+    test "a propagated callee's error set is inferred into the caller's produced set" do
+      # `outer` constructs no error itself; it `with`-propagates `inner`'s `A`,
+      # which must therefore appear in `outer`'s declared set.
+      assert Check.check("""
+             type E := A | B
+             def inner(n Int64) Int64 | E := {:error, A}
+             def outer(n Int64) Int64 | E
+               with {:ok, x} <- inner(n) do
+                 {:ok, x}
+               end
+             end
+             """) == :ok
+    end
+
+    test "an under-declared caller is rejected for a propagated callee error" do
+      assert {:error, msg} =
+               Check.check("""
+               type E := A | B
+               def inner(n Int64) Int64 | A := {:error, A}
+               def outer(n Int64) Int64 | B
+                 with {:ok, x} <- inner(n) do
+                   {:ok, x}
+                 end
+               end
+               """)
+
+      assert msg =~ "outer"
+      assert msg =~ "A"
+      assert msg =~ "declared set `B`"
+    end
+
+    test "a with-else that handles the failure under-approximates (no propagation)" do
+      # The `else` clause consumes `inner`'s `A` and re-emits only `B`, so
+      # `outer` produces `{B}` ⊆ its declared `{B}`.
+      assert Check.check("""
+             type E := A | B
+             def inner(n Int64) Int64 | A := {:error, A}
+             def outer(n Int64) Int64 | B
+               with {:ok, x} <- inner(n) do
+                 {:ok, x}
+               else
+                 {:error, _} -> {:error, B}
+               end
+             end
+             """) == :ok
+    end
   end
 
   describe "parametric / generic inference (ADR-0042, BEAM-first)" do
