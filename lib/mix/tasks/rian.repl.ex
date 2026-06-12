@@ -130,6 +130,9 @@ defmodule Mix.Tasks.Rian.Repl do
   # group as its group leader, so `IO.gets` there gets edlin + completion).
   defp start_line_editing_reader do
     ensure_completion_table()
+    # Persist line history across sessions: the editing group seeds edlin from
+    # Rian.Repl.History.load/0 and appends each line via add/1 (ADR-0053).
+    :application.set_env(:kernel, :shell_history, Rian.Repl.History)
     parent = self()
 
     case :user_drv.start_shell(%{initial_shell: {__MODULE__, :reader_spawn, [parent]}}) do
