@@ -14,11 +14,11 @@ mod SelfhostLexer do
   # The lexer's own typed token stream — a sealed sum (ADR-0034).
   type Token := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
 
-  pub def tokenize(src String) List(Token) := lex(String.to_charlist(src))
+  pub def tokenize(src String) Vec(Token) := lex(String.to_charlist(src))
 
   # Recurse over the codepoint list. Specific byte clauses first; the final
   # `[_ | rest]` makes the match total (unknown bytes are skipped).
-  def lex(cs List(Int64)) List(Token)
+  def lex(cs Vec(Int64)) Vec(Token)
   def lex([]) := []
   def lex([c | rest]) when c == 32 := lex(rest)
   def lex([43 | rest]) := [TPlus | lex(rest)]
@@ -31,7 +31,7 @@ mod SelfhostLexer do
   def lex([_ | rest]) := lex(rest)
 
   # Accumulate a run of digits into one `TNum`, then resume lexing the rest.
-  def lex_num(cs List(Int64), acc Int64) List(Token)
+  def lex_num(cs Vec(Int64), acc Int64) Vec(Token)
   def lex_num([c | rest], acc) when c >= 48 and c <= 57 := lex_num(rest, acc * 10 + c - 48)
   def lex_num(cs, acc) := [TNum(acc) | lex(cs)]
 end

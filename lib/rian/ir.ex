@@ -91,8 +91,12 @@ defmodule Rian.IR do
   end
 
   defmodule Func do
-    @moduledoc "A function: `name`, `params`, return type `ret`, `clauses`; `pub?` marks it exported from a `mod`."
+    @moduledoc """
+    A function: `name`, `params`, return type `ret`, `clauses`. `pub?` marks it
+    exported from a `mod`. `tvars` are the `forall` type-variable names (ADR-0042),
+    empty for a non-generic function.
+    """
     @enforce_keys [:name, :params, :ret, :clauses]
-    defstruct name: nil, params: [], ret: nil, clauses: [], pub?: false
+    defstruct name: nil, params: [], ret: nil, clauses: [], pub?: false, tvars: []
   end
 end

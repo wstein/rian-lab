@@ -307,8 +307,28 @@ defmodule Rian.Decl do
   defp take_head(name, params, [t | rest], head), do: take_head(name, params, rest, [t | head])
 
   defp def_raw(name, params, head_rev, body) do
-    {ret, guard} = parse_head(Lexer.detokenize(Enum.reverse(head_rev)))
-    %{name: name, params: params, ret: ret, guard: guard, body: body, pub: false}
+    {head, tvars} = split_forall(Lexer.detokenize(Enum.reverse(head_rev)))
+    {ret, guard} = parse_head(head)
+    # normalize parenthesized type spacing (`Vec ( Int64 )` -> `Vec(Int64)`) so the
+    # declared return type matches inferred parametric types (ADR-0042 checking)
+    ret = ret && collapse_parens(ret)
+    %{name: name, params: params, ret: ret, guard: guard, body: body, pub: false, tvars: tvars}
+  end
+
+  # `Ret forall T, U: Bound` — split off the `forall` binder list (ADR-0042). The
+  # bound after `:` is parsed-and-dropped for now (bounds are not yet enforced).
+  defp split_forall(head) do
+    case String.split(head, " forall ", parts: 2) do
+      [ret] -> {ret, []}
+      [ret, binders] -> {ret, tvar_names(binders)}
+    end
+  end
+
+  defp tvar_names(binders) do
+    binders
+    |> split_top(",")
+    |> Enum.map(fn b -> b |> String.split(":", parts: 2) |> hd() |> String.trim() end)
+    |> Enum.reject(&(&1 == ""))
   end
 
   defp take_line([], acc), do: {Enum.reverse(acc), []}
@@ -486,7 +506,8 @@ defmodule Rian.Decl do
       params: params,
       ret: req_ret(sig),
       clauses: Enum.map(clauses, &clause(&1, length(params))),
-      pub?: sig[:pub] == true
+      pub?: sig[:pub] == true,
+      tvars: sig[:tvars] || []
     }
   end
 
@@ -499,7 +520,8 @@ defmodule Rian.Decl do
       params: params,
       ret: req_ret(d),
       clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}],
-      pub?: d[:pub] == true
+      pub?: d[:pub] == true,
+      tvars: d[:tvars] || []
     }
   end
 

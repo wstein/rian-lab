@@ -161,6 +161,52 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "parametric / generic inference (ADR-0042, BEAM-first)" do
+    test "a list literal infers Vec(elem); a wrong declared list type is caught" do
+      assert Check.check("def xs(n Int64) Vec(Int64) := [1, 2, 3]") == :ok
+      assert {:error, msg} = Check.check("def xs(n Int64) Vec(Bool) := [1, 2, 3]")
+      assert msg =~ "Vec(Int64)"
+      assert msg =~ "Vec(Bool)"
+    end
+
+    test "a variant value infers its sum type" do
+      assert Check.check("type Color := Red | Green\ndef pick(b Bool) Color := Red") == :ok
+
+      assert {:error, msg} =
+               Check.check("type Color := Red | Green\ndef pick(b Bool) Int64 := Red")
+
+      assert msg =~ "Color"
+    end
+
+    test "a call infers the callee's declared return type" do
+      assert {:error, msg} =
+               Check.check("def one(n Int64) Int64 := 1\ndef g(n Int64) Bool := one(n)")
+
+      assert msg =~ "Int64"
+      assert msg =~ "Bool"
+    end
+
+    test "cons of a variant and a recursive call checks as Vec(T) — the lexer shape" do
+      assert Check.check("""
+             type Tok := A
+             def lex(xs Vec(Int64)) Vec(Tok)
+             def lex([]) := []
+             def lex([_ | r]) := [A | lex(r)]
+             """) == :ok
+    end
+
+    test "a `forall` binder makes the function generic (parsed; checked conservatively)" do
+      %{funcs: [f]} = Rian.Decl.parse("def id(x T) T forall T := x")
+      assert f.tvars == ["T"]
+      assert Check.check("def id(x T) T forall T := x") == :ok
+    end
+
+    test "a `forall` bound parses the variable (bound dropped for now)" do
+      %{funcs: [f]} = Rian.Decl.parse("def srt(xs Vec(T)) Vec(T) forall T: Comparable := xs")
+      assert f.tvars == ["T"]
+    end
+  end
+
   describe "the type gate fires at compile time" do
     test "Decl.compile refuses a proven return-type mismatch" do
       assert_raise Check.Error, ~r/declared return type is `Bool`/, fn ->

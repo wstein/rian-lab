@@ -332,7 +332,7 @@ defmodule Rian.DeclTest do
     test "cons recursion in clause heads runs on the BEAM" do
       [{"sum", out}] =
         Decl.compile_beam("""
-        def sum(xs List(Int64)) Int64
+        def sum(xs Vec(Int64)) Int64
         def sum([]) := 0
         def sum([h | t]) := h + sum(t)
         """)
@@ -346,7 +346,7 @@ defmodule Rian.DeclTest do
     test "a fixed-length list pattern lowers to a Rust slice pattern" do
       [{"pair", out}] =
         Decl.compile("""
-        def pair(xs List(Int64)) Int64
+        def pair(xs Vec(Int64)) Int64
         def pair([a, b]) := a + b
         def pair(_) := 0
         """)
@@ -358,7 +358,7 @@ defmodule Rian.DeclTest do
     test "a `case` over a list lowers and runs" do
       [{"head0", out}] =
         Decl.compile_beam("""
-        def head0(xs List(Int64)) Int64
+        def head0(xs Vec(Int64)) Int64
           case xs do
             [] -> 0
             [h | _] -> h

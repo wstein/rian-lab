@@ -16,7 +16,7 @@ essential ones, work around the rest (and record the cost).
 | B1 | **List patterns** `[]` / `[h \| t]` in `case` and clause heads | **fatal** | **fixed** | No list recursion without them. `PatternLower` already modelled `{:list,…}`; only the surface parsers + emitters lacked it. |
 | B2 | **Char literals** `'a'` won't lex | high (ergonomics) | worked around | Lexer can't scan `'`. Spike uses integer codepoints (`43` for `'+'`) — readable-but-noisy. Real fix: a `Char` token (ADR-0036). |
 | B3 | cons-list **on Rust** is BEAM-only (construction *and* now patterns) | medium | by design | A cons-recursion lexer is BEAM-only on Rust; the portable form needs a `Vec`/slice prelude (ADR-0041 #3). Recorded, not fixed. |
-| B4 | **No parametric types** — the checker can't represent `List(Token)`/`List(Int64)` | **high** | open | Direct evidence for ADR-0042. See "Checker observations" — the checker is *inert* over the lexer's core. |
+| B4 | **No parametric types** — the checker can't represent `Vec(Token)`/`Vec(Int64)` | **high** | open | Direct evidence for ADR-0042. See "Checker observations" — the checker is *inert* over the lexer's core. |
 | B5 | **No portable collections** — `String→chars`, list ops, cons all BEAM-only | high (multi-target) | open | The lexer cannot lower to Rust at all. A portable prelude (ADR-0041 #3) is the gate for multi-target self-hosting; irrelevant to the BEAM bootstrap. |
 
 ## Crutches used (measured, per the spike's honesty rule)
@@ -38,8 +38,8 @@ construction, and cons-list building all compose and lower correctly.
 - **The checker is inert over the lexer's core (B4).** Every list-returning body
   (`[]`, `[TPlus | lex(rest)]`, `lex_num(...)`) infers `:unknown`, because the
   checker has no parametric/list type — so it cannot verify `lex` returns a
-  `List(Token)`. It *would* catch a crude `lex([]) := 0` (literal `0` is `Int64`,
-  contradicting the declared `List(Token)`), but anything list- or call-shaped
+  `Vec(Token)`. It *would* catch a crude `lex([]) := 0` (literal `0` is `Int64`,
+  contradicting the declared `Vec(Token)`), but anything list- or call-shaped
   passes unexamined. For a language whose pitch is "compile-time checks are the
   spine" (ADR-0046 §1), the checker adds ~no value to realistic recursive code
   until generics + list inference land. **This is the single strongest piece of

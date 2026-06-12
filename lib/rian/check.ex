@@ -21,8 +21,16 @@ defmodule Rian.Check do
   constructed error tags (`{:error, Tag}`) must be a *subset* of `E`
   (over-declaration is allowed). A named `E` expands to its variant tags.
   *Not yet:* inferring a private function's set from its propagated callees (the
-  `with`-composition half of §4). Protocol bounds (pillar 3, ADR-0042) await
-  implementation of the `forall`/`protocol` surface.
+  `with`-composition half of §4).
+
+  **Concrete generics (ADR-0042, BEAM-first)** are inferred: a list literal is
+  `Vec(T)`, a variant value/constructor-call carries its sum type, and a call
+  carries the callee's declared return type — so the checker actually verifies
+  list/recursive/constructor-shaped code (the self-hosting spike's evidence) by
+  string-equal unification of concrete parametric types. `forall T` binders are
+  parsed; a generic return type (mentioning a type variable) is checked
+  *conservatively* (no structural type-variable unification yet) and protocol
+  bounds are not yet enforced.
 
   Types here are the Crystal-family primitive names (`Int64`/`Float64`/`String`/
   `Bool`, ADR-0033) plus `:unknown`. `unify/2` is the kernel: equal types unify
@@ -49,79 +57,112 @@ defmodule Rian.Check do
   def unify(_, _), do: :mismatch
 
   # ── inference ──────────────────────────────────────────────────────────
-  # `tdefs` is the constructor table `ctor_name => [field_type]`, used for flow
-  # narrowing (ADR-0034 pillar 4): a `case`/clause pattern refines its bound
-  # variables to the matched variant's field types. `%{}` disables narrowing.
+  # `ic` is the static inference context (a map): `:tdefs` (ctor -> field types,
+  # for flow narrowing), `:funs` (function name -> declared return type), and
+  # `:ctors` (ctor -> its sum-type name, so a variant value infers its type).
+  # `%{}` disables all three. `env` is the per-scope variable map.
   @doc "Infer the type of an expression AST under `env` (name -> type); `:unknown` when unsure."
-  def infer(ast, env \\ %{}, tdefs \\ %{})
+  def infer(ast, env \\ %{}, ic \\ %{})
 
-  def infer({:num, n}, _env, _td),
+  def infer({:num, n}, _env, _ic),
     do: if(String.contains?(n, ".") or String.match?(n, ~r/[eE]/), do: "Float64", else: "Int64")
 
-  def infer({:str, _}, _env, _td), do: "String"
-  def infer({:id, b}, _env, _td) when b in ~w(true false), do: "Bool"
-  def infer({:id, x}, env, _td), do: Map.get(env, x, :unknown)
-  def infer({:unary, "-", x}, env, td), do: infer(x, env, td)
-  def infer({:unary, "not", _}, _env, _td), do: "Bool"
+  def infer({:str, _}, _env, _ic), do: "String"
+  def infer({:id, b}, _env, _ic) when b in ~w(true false), do: "Bool"
+  # a name resolves to a bound var, else a nullary variant constructor, else unknown
+  def infer({:id, x}, env, ic), do: Map.get(env, x) || ctor_type(ic, x) || :unknown
+  def infer({:unary, "-", x}, env, ic), do: infer(x, env, ic)
+  def infer({:unary, "not", _}, _env, _ic), do: "Bool"
 
-  def infer({:bin, op, l, r}, env, td) do
+  def infer({:bin, op, l, r}, env, ic) do
     cond do
       op in @bool_ops -> "Bool"
       op == "<>" -> "String"
       op == "/" -> "Float64"
       op in @int_ops -> "Int64"
-      op in @arith -> conservative(unify(infer(l, env, td), infer(r, env, td)))
+      op in @arith -> conservative(unify(infer(l, env, ic), infer(r, env, ic)))
       true -> :unknown
     end
   end
 
-  def infer({:if, _c, then_arm, else_arm}, env, td),
-    do: conservative(unify(infer(then_arm, env, td), infer(else_arm, env, td)))
+  # a call to a constructor infers its sum type; a call to a known function infers
+  # that function's declared return type; otherwise unknown
+  def infer({:call, {:id, f}, _args}, _env, ic),
+    do: ctor_type(ic, f) || Map.get(Map.get(ic, :funs, %{}), f) || :unknown
+
+  def infer({:if, _c, then_arm, else_arm}, env, ic),
+    do: conservative(unify(infer(then_arm, env, ic), infer(else_arm, env, ic)))
 
   # `case` — flow narrowing: each arm body is inferred under an env where the
   # arm pattern's bindings are refined against the scrutinee's type. The case's
   # type is the unification of all arm bodies (conservative on mismatch).
-  def infer({:case, scrut, arms}, env, td) do
-    st = infer(scrut, env, td)
+  def infer({:case, scrut, arms}, env, ic) do
+    st = infer(scrut, env, ic)
 
     arms
-    |> Enum.map(fn {pat, _guard, body} -> infer(body, narrow(pat, st, td, env), td) end)
+    |> Enum.map(fn {pat, _guard, body} -> infer(body, narrow(pat, st, ic, env), ic) end)
     |> Enum.reduce(:unknown, fn t, acc -> conservative(unify(acc, t)) end)
   end
 
-  def infer({:block, stmts}, env, td), do: infer_block(stmts, env, td, :unknown)
-  # a `with` yields its do-block value on the happy path (clause-bound vars are
-  # not tracked yet -> they infer `:unknown`, keeping the checker conservative)
-  def infer({:with, _clauses, body, _els}, env, td), do: infer(body, env, td)
-  def infer(_other, _env, _td), do: :unknown
+  # a list literal infers `Vec(T)` (the family list type) when its elements — and
+  # any cons tail — agree on a concrete element type `T`; else `:unknown`
+  def infer({:list_lit, elems, tail}, env, ic) do
+    elem_t =
+      elems
+      |> Enum.map(&infer(&1, env, ic))
+      |> Enum.reduce(:unknown, &conservative(unify(&1, &2)))
 
-  defp infer_block([], _env, _td, value), do: value
-
-  defp infer_block([{:bind, n, e} | rest], env, td, _value) do
-    t = infer(e, env, td)
-    infer_block(rest, Map.put(env, n, t), td, t)
+    case {elem_t, list_elem(infer_tail(tail, env, ic))} do
+      {t, te} when te == :unknown or te == t -> list_of(conservative(t))
+      _ -> :unknown
+    end
   end
 
-  defp infer_block([{:expr, e} | rest], env, td, _value),
-    do: infer_block(rest, env, td, infer(e, env, td))
+  def infer({:block, stmts}, env, ic), do: infer_block(stmts, env, ic, :unknown)
+  # a `with` yields its do-block value on the happy path (clause-bound vars are
+  # not tracked yet -> they infer `:unknown`, keeping the checker conservative)
+  def infer({:with, _clauses, body, _els}, env, ic), do: infer(body, env, ic)
+  def infer(_other, _env, _ic), do: :unknown
+
+  defp ctor_type(ic, name), do: Map.get(Map.get(ic, :ctors, %{}), name)
+
+  defp infer_tail(nil, _env, _ic), do: :unknown
+  defp infer_tail({:tail, e}, env, ic), do: infer(e, env, ic)
+
+  # `Vec(T)` string helpers (types are strings; concrete generics unify by ==).
+  defp list_of(:unknown), do: :unknown
+  defp list_of(t), do: "Vec(#{t})"
+
+  defp list_elem("Vec(" <> rest), do: String.trim_trailing(rest, ")")
+  defp list_elem(_), do: :unknown
+
+  defp infer_block([], _env, _ic, value), do: value
+
+  defp infer_block([{:bind, n, e} | rest], env, ic, _value) do
+    t = infer(e, env, ic)
+    infer_block(rest, Map.put(env, n, t), ic, t)
+  end
+
+  defp infer_block([{:expr, e} | rest], env, ic, _value),
+    do: infer_block(rest, env, ic, infer(e, env, ic))
 
   # Narrow one pattern against the type it matches, binding its variables.
   # A `{:var}` takes the matched type directly; a constructor pattern looks up
   # its field types and narrows each argument pattern in turn (recursively).
   # Unknown constructor or no `tdefs` -> field variables stay `:unknown`.
-  defp narrow({:var, name}, type, _td, env), do: Map.put(env, name, type)
+  defp narrow({:var, name}, type, _ic, env), do: Map.put(env, name, type)
 
-  defp narrow({:ctor, ctor, args}, _type, td, env) do
-    field_types = Map.get(td, ctor, [])
+  defp narrow({:ctor, ctor, args}, _type, ic, env) do
+    field_types = Map.get(Map.get(ic, :tdefs, %{}), ctor, [])
 
     args
     |> Enum.with_index()
     |> Enum.reduce(env, fn {p, i}, env ->
-      narrow(p, Enum.at(field_types, i, :unknown), td, env)
+      narrow(p, Enum.at(field_types, i, :unknown), ic, env)
     end)
   end
 
-  defp narrow(_pat, _type, _td, env), do: env
+  defp narrow(_pat, _type, _ic, env), do: env
 
   # a mismatch deep in arithmetic stays conservative (we do not model coercion
   # fully yet) rather than rejecting; only the body-vs-return check rejects
@@ -130,36 +171,47 @@ defmodule Rian.Check do
 
   # ── function checking ──────────────────────────────────────────────────
   @doc """
-  Check one function. `tdefs` enables flow narrowing; `tsets` maps an error-set
-  type name to its tags (for the ADR-0040 §4 declared-⊆ check). Returns `:ok` or
+  Check one function. `ic` is the inference context (`:tdefs`/`:funs`/`:ctors`);
+  `tsets` maps an error-set type name to its tags (ADR-0040 §4). Returns `:ok` or
   `{:error, message}`. Two checks run:
 
     * **return type** — no clause body's inferred concrete type may *contradict*
-      the declared return type;
+      the declared return type (now including parametric `Vec(T)` and a body's
+      sum-variant / function-call result, ADR-0042 — concrete generics);
     * **error set** — when the return type is `T | E` (a `Result`), every error
       tag the body constructs (`{:error, Tag}`) must be in the declared set `E`
       (over-declaration is allowed; ADR-0040 §4).
   """
-  def check_func(func, tdefs \\ %{}, tsets \\ %{})
+  def check_func(func, ic \\ %{}, tsets \\ %{})
 
-  def check_func(%Func{} = f, tdefs, tsets) do
-    with :ok <- check_return(f, tdefs), do: check_error_set(f, tsets)
+  def check_func(%Func{} = f, ic, tsets) do
+    with :ok <- check_return(f, ic), do: check_error_set(f, tsets)
   end
 
-  defp check_return(%Func{name: name, params: ps, ret: ret, clauses: clauses}, tdefs) do
-    Enum.find_value(clauses, :ok, fn c ->
-      body_t = infer(Pratt.parse_body(c.body), clause_env(c.pats, ps, tdefs), tdefs)
+  defp check_return(%Func{name: name, params: ps, ret: ret, tvars: tvars, clauses: clauses}, ic) do
+    # A return type mentioning a `forall` type variable is generic; we don't yet
+    # unify type variables structurally, so such a function is checked
+    # conservatively (its body is not contradicted). Concrete returns are checked.
+    if generic_ret?(ret, tvars) do
+      :ok
+    else
+      Enum.find_value(clauses, :ok, fn c ->
+        body_t = infer(Pratt.parse_body(c.body), clause_env(c.pats, ps, ic), ic)
 
-      case unify(body_t, ret) do
-        :mismatch ->
-          {:error,
-           "`#{name}`: body has type `#{body_t}` but the declared return type is `#{ret}`"}
+        case unify(body_t, ret) do
+          :mismatch ->
+            {:error,
+             "`#{name}`: body has type `#{body_t}` but the declared return type is `#{ret}`"}
 
-        _ ->
-          nil
-      end
-    end)
+          _ ->
+            nil
+        end
+      end)
+    end
   end
+
+  defp generic_ret?(_ret, []), do: false
+  defp generic_ret?(ret, tvars), do: Enum.any?(tvars, &Regex.match?(~r/\b#{&1}\b/, ret))
 
   # ADR-0040 §4: a `T | E` return type declares the error set `E`; every error
   # the body actually constructs must be in it (the body's set ⊆ the declared
@@ -207,10 +259,10 @@ defmodule Rian.Check do
   # Bind names introduced by the clause head, narrowing constructor patterns
   # against their parameter type (flow narrowing applies to clause heads too —
   # a clause head is a one-arm `case` on the parameters).
-  defp clause_env(pats, params, tdefs) do
+  defp clause_env(pats, params, ic) do
     pats
     |> Enum.zip(params)
-    |> Enum.reduce(%{}, fn {pat, param}, env -> narrow(pat, param.type, tdefs, env) end)
+    |> Enum.reduce(%{}, fn {pat, param}, env -> narrow(pat, param.type, ic, env) end)
   end
 
   @doc "Parse source and check every function; returns `:ok` or the first `{:error, message}`."
@@ -222,13 +274,26 @@ defmodule Rian.Check do
   """
   def check_program(%{funcs: funcs} = prog) do
     types = all_types(prog)
-    tdefs = type_table(types)
-    tsets = error_sets(types)
-    mod_funcs = for m <- Map.get(prog, :mods, []), f <- m.funcs, do: f
+    all_funcs = funcs ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
 
-    Enum.find_value(funcs ++ mod_funcs, :ok, fn f ->
-      with :ok <- check_func(f, tdefs, tsets), do: nil
-    end)
+    ic = %{
+      tdefs: type_table(types),
+      funs: Map.new(all_funcs, fn f -> {f.name, f.ret} end),
+      ctors: ctor_types(types, prog)
+    }
+
+    tsets = error_sets(types)
+    Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, tsets), do: nil end)
+  end
+
+  # ctor name -> the sum type it builds (so a variant value/call infers its type);
+  # struct names map to themselves (a struct constructor builds its own type).
+  defp ctor_types(types, prog) do
+    structs =
+      Map.get(prog, :structs, []) ++ for(m <- Map.get(prog, :mods, []), s <- m.structs, do: s)
+
+    from_variants = for t <- types, v <- t.variants, into: %{}, do: {v.ctor, t.name}
+    Enum.reduce(structs, from_variants, fn s, acc -> Map.put(acc, s.name, s.name) end)
   end
 
   defp all_types(prog),
