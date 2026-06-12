@@ -68,7 +68,7 @@ IO.puts("\n===== BEAM LINEARITY (use-once) =====")
 env = %{"f" => :iso}
 
 cases = [
-  {"use(f)", "iso used once"},
+  {"read(f)", "iso used once"},
   {"pair(f, f)", "iso used twice"},
   {"len(xs)", "(xs is val) — n/a"}
 ]

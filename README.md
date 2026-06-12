@@ -17,7 +17,7 @@ the *same source* to two targets:
 > multi-parameter `def` functions, with `:=` one-liner **and** multiline `… end`
 > block bodies (string literals + `when` guards), parse to the pipeline IR, lower
 > to Elixir + Rust, and run (try `mix run examples/decl_run.exs`). Not yet
-> parsed: `case` expression bodies and `mod`/`struct`/`alias`. See
+> parsed: `mod`/`struct`/`alias`. See
 > [docs/README.md](docs/README.md) for an honest status map.
 
 ## Pipeline
