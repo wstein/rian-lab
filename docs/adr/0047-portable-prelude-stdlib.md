@@ -91,7 +91,7 @@ next design thread).
 |---|---|
 | Three tiers (prelude / stdlib / BEAM-FFI), portable tiers BEAM-independent | 5/5 |
 | Hybrid: per-target primitive layer + stdlib in Rian; native delegation where hot | 5/5 |
-| **No `nil`; `Option(T) = Some(T) | None`** (principled family divergence) | 5/5 |
+| **No `nil`; `Option(T) = Some(T) \| None`** (principled family divergence) | 5/5 |
 | Small prelude (types + operators + core protocols); stdlib qualified | 4/5 |
 | `Map` order unspecified by default + explicit ordered variants; conformance matrix | 4/5 |
 | Pure prelude, effectful stdlib; full effects model deferred | 4/5 |
@@ -115,8 +115,9 @@ next design thread).
 - **Prelude/stdlib contents** — the actual module/function catalogue (`List`, `Map`, `Set`, `String`,
   `Iter`, `Result`, `Option`, …), filled incrementally; unimplemented = not-yet-available, never a
   silent stub.
-- **Effects/IO model** — the pure/effectful boundary is set here; the effect system (how IO, randomness,
-  time, and other effects are typed and lowered per target) is a **separate ADR**.
+- ~~**Effects/IO model**~~ — **Resolved by [ADR-0048](0048-effect-tracking.md):** effects are *tracked*
+  (fine-grained, inferred, `pub`-declared) but performed *ambiently* — no object-capability threading;
+  `pure = empty effect set`; uniform compile-time discipline, runtime-erased, native-per-target IO.
 - **Collection representation per target** (ADR-0041) — `Vec`/`Map`/`Set` to BEAM lists/maps vs Rust
   `Vec`/`HashMap` vs JS arrays/Maps; capability interaction (`iso`/`ref`).
 - **`Iterable` protocol surface** — the iteration protocol the stdlib is written against (lazy vs eager;
