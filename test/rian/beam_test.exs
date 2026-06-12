@@ -77,7 +77,7 @@ defmodule Rian.BeamTest do
       assert mod.eval(:zero) == 0
     end
 
-    test "the full self-hosting lexer compiles to real bytecode (variants + FFI + recursion)" do
+    test "the full self-hosting lexer compiles to real bytecode (variants + recursion, FFI-free)" do
       {:ok, mod} =
         Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_lexer)
 
@@ -417,6 +417,24 @@ defmodule Rian.BeamTest do
       assert mod.kindof(%{tag: :num, val: 5}) == "number"
       assert mod.kindof(%{tag: :str}) == "string"
       assert mod.kindof(%{nope: 1}) == "other"
+    end
+
+    test "a portable `Str` over the `__prim_str_*` primitive layer (ADR-0047 §2)" do
+      {:ok, m} = Beam.load(File.read!("examples/rian/prelude_str.rian"), :rian_beam_str_lib)
+
+      assert m.chars("ab") == ~c"ab"
+      assert m.from_chars([104, 105]) == "hi"
+      assert m.concat("foo", "bar") == "foobar"
+      # composite (Rian) — codepoint length, counting multibyte chars once
+      assert m.length("héllo") == 5
+    end
+
+    test "the self-hosting lexer is FFI-free: `__prim_str_chars`, runs on BEAM" do
+      {:ok, m} =
+        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_lex_ffifree)
+
+      # behaviour unchanged from the `String.to_charlist` version
+      assert m.tokenize("1 + 2") == [{:t_num, 1}, :t_plus, {:t_num, 2}]
     end
 
     test "a portable `Dict` over the `__prim_map_*` primitive layer (ADR-0047 §2)" do

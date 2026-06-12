@@ -240,6 +240,17 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_map_has"}, args: [m, k]}, s),
     do: remote_call(:maps, "is_key", [k, m], s)
 
+  # `String` primitives — a BEAM string is a UTF-8 binary; codepoints round-trip
+  # through `String.to_charlist`/`List.to_string`, concat is binary append
+  defp expr_form(%ECall{fun: %EId{name: "__prim_str_chars"}, args: [s_]}, s),
+    do: remote_call(:"Elixir.String", "to_charlist", [s_], s)
+
+  defp expr_form(%ECall{fun: %EId{name: "__prim_str_from_chars"}, args: [cs]}, s),
+    do: remote_call(:"Elixir.List", "to_string", [cs], s)
+
+  defp expr_form(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, s),
+    do: {:bin, @ln, [bin_seg(expr_form(a, s)), bin_seg(expr_form(b, s))]}
+
   # named construction `Name(field: v, …)` builds a **struct**: a map keyed by
   # field-name atoms plus a `__struct__` tag (the snake-cased name). Field access
   # reads it by name, so no field schema is threaded (ADR-0041 / ADR-0043).

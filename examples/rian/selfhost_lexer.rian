@@ -6,15 +6,18 @@
 # patterns, and running on the BEAM. Evidence for SELFHOST.md, not a demo.
 #
 # Crutches measured here:
-#   * `String.to_charlist` is Elixir FFI (BEAM-only) — no portable String→chars yet.
 #   * char comparisons use integer codepoints (`43` = '+') — no `Char` literal yet.
+#
+# `String -> codepoints` goes through the **portable prelude primitive**
+# `__prim_str_chars` (ADR-0047 §2), not host FFI — so the lexer source carries no
+# BEAM-only call and lowers to every backend through the same machinery.
 # ---------------------------------------------------------------------------
 
 mod SelfhostLexer do
   # The lexer's own typed token stream — a sealed sum (ADR-0034).
   type Token := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
 
-  pub def tokenize(src String) Vec(Token) := lex(String.to_charlist(src))
+  pub def tokenize(src String) Vec(Token) := lex(__prim_str_chars(src))
 
   # Recurse over the codepoint list. Specific byte clauses first; the final
   # `[_ | rest]` makes the match total (unknown bytes are skipped).

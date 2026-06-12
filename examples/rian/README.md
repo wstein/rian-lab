@@ -107,6 +107,12 @@ compile + run on real BEAM bytecode:
   is lowered natively by each backend, and the useful composite ops (`get_or`,
   `inc`) are written **once in Rian** over them. `inc`/`get_or` run on BEAM and
   under node; only the four primitives are per-target.
+- [prelude_str.rian](prelude_str.rian) — **a portable `Str` over `__prim_str_*`
+  (ADR-0047 §2).** `chars`/`from_chars`/`concat` forward to per-target primitives
+  (BEAM `String.to_charlist`/`List.to_string`/binary-append; JS codepoints/`+`;
+  Rust `chars()`/`collect()`/`format!`) — all three lower and run. With it,
+  [selfhost_lexer.rian](selfhost_lexer.rian) uses `__prim_str_chars` instead of
+  host FFI, so its source is portable (it now runs on BEAM **and** under node).
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

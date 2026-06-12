@@ -777,6 +777,19 @@ defmodule Rian.Lower do
 
   defp emit(%EDot{head: head, name: n}, :rust), do: {p(head, 12, :rust) <> "::#{n}", 12}
 
+  # `String` primitives on Rust (ADR-0047 §2): a `String` is `&str`, codepoints
+  # are `i64`; these mirror the BEAM/JS lowerings so portable `Str` ops compose.
+  defp emit(%ECall{fun: %EId{name: "__prim_str_chars"}, args: [s]}, :rust),
+    do: {"#{p(s, 12, :rust)}.chars().map(|c| c as i64).collect::<Vec<i64>>()", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_str_from_chars"}, args: [cs]}, :rust),
+    do:
+      {"#{p(cs, 12, :rust)}.iter().map(|c| char::from_u32(*c as u32).unwrap()).collect::<String>()",
+       12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, :rust),
+    do: {"format!(\"{}{}\", #{p(a, 0, :rust)}, #{p(b, 0, :rust)})", 12}
+
   defp emit(%ECall{fun: f, args: args}, t),
     do: {p(f, 12, t) <> "(" <> Enum.map_join(args, ", ", &p(&1, 0, t)) <> ")", 12}
 

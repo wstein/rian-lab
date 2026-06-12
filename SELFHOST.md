@@ -326,9 +326,25 @@ are written **once in Rian** over those primitives, not per-emitter, and run
 identically on BEAM and under node (`inc`-counters `a=2, b=1`;
 `get_or(absent, 99) = 99`). The per-target code is confined to four primitives;
 everything above is portable — the ADR-0047 §2 shape, demonstrated end to end.
-`String` is the same story with a different primitive (a UTF-8 buffer:
-`__prim_str_concat`/`__prim_str_chars`/…) and is the natural next member; the
-*pattern* is now established, not just sketched.
+**`String` now has its primitive layer too.** [`examples/rian/prelude_str.rian`](examples/rian/prelude_str.rian)
+defines a portable `Str` over `__prim_str_chars`/`__prim_str_from_chars`/
+`__prim_str_concat` — lowered to `String.to_charlist`/`List.to_string`/binary-
+append on the BEAM, codepoints/`+` in JS, and `chars()`/`collect()`/`format!`
+on Rust (all three compile and run: `chars("ab") = [97,98]`, `concat`, etc.).
+`length` is a composite written in Rian. Crucially, **the lexer is now FFI-free**:
+`selfhost_lexer.rian`'s `tokenize` uses `__prim_str_chars(src)` instead of
+`String.to_charlist`, so its source carries no host call — it runs on BEAM and
+under node from one portable definition.
+
+So both collection members (`Map`, `String`) follow the ADR-0047 §2 shape:
+per-target code confined to a handful of `__prim_*`, everything above portable.
+The one Rust gap they share is the **call-site borrow**: a composite that passes
+an *owned* result (a `Vec`/`String` from a primitive or constructor) into a
+`&[T]`/`&str` parameter — `Str.length(s) := count(chars(s))`, or the lexer's
+`lex(__prim_str_chars(src))` — needs an inserted `&` that the textual emitter
+can't place without callee signatures. That `&`-insertion (a small borrow pass
+over a per-module signature table) is the consolidated remaining Rust item; with
+it, `Str.length`, the lexer, and the parser→VM call chains would all lower.
 
 **Rust gets cons.** A Rian `Vec(T)` param lowers to a `&[T]` slice, so cons
 patterns become **Rust slice patterns** — `[h | t]` → `[h, t @ ..]` — matched

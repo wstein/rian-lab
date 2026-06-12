@@ -225,6 +225,16 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_map_has"}, args: [m, k]}),
     do: "Object.hasOwn(#{paren(m)}, #{expr_js(k)})"
 
+  # `String` primitives — codepoints are BigInt (Int64); concat is `+`
+  defp expr_js(%ECall{fun: %EId{name: "__prim_str_chars"}, args: [s]}),
+    do: "[...#{paren(s)}].map(c => BigInt(c.codePointAt(0)))"
+
+  defp expr_js(%ECall{fun: %EId{name: "__prim_str_from_chars"}, args: [cs]}),
+    do: "#{paren(cs)}.map(c => String.fromCodePoint(Number(c))).join(\"\")"
+
+  defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
+    do: "(#{expr_js(a)} + #{expr_js(b)})"
+
   # the handful of stdlib calls the self-hosting spikes use, mapped to portable
   # JS (a stopgap until the portable prelude, ADR-0047, owns these):
   #   Map.get/put (immutable), String.to_charlist, List.to_string, :lists.reverse
