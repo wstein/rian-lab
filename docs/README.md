@@ -40,6 +40,7 @@ The component test suites pass; cross-pass integration is thin. Treat the
 | [0033](adr/0033-surface-vocabulary.md) | Surface vocabulary: `def`, juxtaposed types, `case`/`when`, Crystal primitives | Accepted |
 | [0034](adr/0034-type-system-foundations.md) | Type system: unification, error sets, protocol bounds, flow narrowing | Accepted (direction) |
 | [0035](adr/0035-no-hidden-control-flow.md) | No hidden control flow (errors are values; no exceptions) | Accepted |
+| [0036](adr/0036-range-subrange-types.md) | Range (subrange) types: finite ordinal subtypes over `Int64`/`Char` | Accepted (direction) |
 
 ## Specifications
 
