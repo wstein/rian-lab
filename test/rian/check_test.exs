@@ -256,6 +256,49 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "function types & higher-order inference (ADR-0042)" do
+    test "a lambda infers an arrow type `Fn(args.., body)`; un-annotated args are `_`" do
+      assert Check.infer(Pratt.parse("(x) -> x and false")) == "Fn(_,Bool)"
+      assert Check.infer(Pratt.parse("(x) -> x + 1")) == "Fn(_,Int64)"
+    end
+
+    test "Fn types unify structurally — wildcard slots reconcile, real clashes don't" do
+      assert Check.unify("Fn(_,Int64)", "Fn(Int64,Int64)") == "Fn(Int64,Int64)"
+      assert Check.unify("Fn(_,Int64)", "Fn(Int64,Bool)") == :mismatch
+      # differing arity never unifies
+      assert Check.unify("Fn(Int64,Bool)", "Fn(Int64)") == :mismatch
+    end
+
+    test "applying a function-typed parameter infers the function's return type" do
+      assert Check.check("def app(f Fn(Int64, Bool)) Bool := f(2)") == :ok
+
+      assert {:error, msg} = Check.check("def app(f Fn(Int64, Bool)) Int64 := f(2)")
+      assert msg =~ "type `Bool`"
+      assert msg =~ "declared return type is `Int64`"
+    end
+
+    test "a returned lambda is checked against the declared Fn return type" do
+      assert Check.check("def mk(n Int64) Fn(Int64, Int64) := (x) -> x + 1") == :ok
+
+      assert {:error, msg} = Check.check("def mk(n Int64) Fn(Int64, Bool) := (x) -> x + 1")
+      assert msg =~ "Fn(_,Int64)"
+      assert msg =~ "Fn(Int64,Bool)"
+    end
+
+    test "`&name/arity` captures a known function as `Fn(_ × arity, return)`" do
+      assert Check.infer(Pratt.parse("&dbl/1"), %{}, %{funs: %{"dbl" => "Int64"}}) ==
+               "Fn(_,Int64)"
+    end
+
+    test "the ADR-0042 higher-order `map` signature parses and checks (Fn param + Vec)" do
+      src = "def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U := []"
+      assert Check.check(src) == :ok
+
+      %{funcs: [f]} = Rian.Decl.parse(src)
+      assert [%{name: "f", type: "Fn(T,U)"}, %{name: "xs", type: "Vec(T)"}] = f.params
+    end
+  end
+
   describe "annotate/3 — types on nodes (ADR-0050 §3)" do
     alias Rian.Core
 

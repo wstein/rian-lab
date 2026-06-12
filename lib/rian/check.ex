@@ -32,6 +32,17 @@ defmodule Rian.Check do
   *conservatively* (no structural type-variable unification yet) and protocol
   bounds are not yet enforced.
 
+  **Function types (ADR-0042, higher-order).** A function type is spelled
+  `Fn(A1, …, An, R)` — the argument types followed by the return (last element).
+  A lambda `(x) -> e` infers `Fn(_, e_t)` (un-annotated args are the `_` wildcard
+  slot); `&name/arity` captures a known function as `Fn(_ × arity, return)`;
+  applying a function-typed *parameter* (`f(x)` where `f Fn(…, R)`) infers `R`.
+  `Fn(…)` types unify **structurally** — same arity, componentwise — so an
+  inferred `Fn(_, Int64)` reconciles with a declared `Fn(Int64, Int64)` while a
+  real clash (`Fn(_, Int64)` vs `Fn(Int64, Bool)`) is a `:mismatch`. This is the
+  self-hosting gate: a compiler-in-Rian is map/fold-shaped, and these are now
+  typed rather than `:unknown`.
+
   Types here are the Crystal-family primitive names (`Int64`/`Float64`/`String`/
   `Bool`, ADR-0033) plus `:unknown`. `unify/2` is the kernel: equal types unify
   to themselves, `:unknown` unifies with anything, two differing concrete types
@@ -39,6 +50,7 @@ defmodule Rian.Check do
   """
   alias Rian.{Core, Pratt}
   alias Rian.Core.{EBin, EBlock, ECall, ECase, EId, EIf, EList, ENum, EStr, ETuple, EUnary, EWith}
+  alias Rian.Core.{ECaptureNamed, ELambda}
   alias Rian.Core.{PCtor, PVar}
   alias Rian.IR.Func
 
@@ -52,11 +64,46 @@ defmodule Rian.Check do
   @arith ~w(+ - *)
 
   # ── unification kernel ─────────────────────────────────────────────────
-  @doc "Unify two types: equal -> itself; `:unknown` -> the other; differ -> `:mismatch`."
+  @doc """
+  Unify two types: equal -> itself; `:unknown` -> the other; differ -> `:mismatch`.
+  Function types `Fn(A.., R)` (ADR-0042) unify *structurally* — same arity and
+  componentwise-unifiable args+return — so an inferred lambda type with unknown
+  argument slots (`Fn(_, Int64)`) still unifies against a declared `Fn(Int64, Int64)`.
+  """
   def unify(t, t), do: t
   def unify(:unknown, t), do: t
   def unify(t, :unknown), do: t
+  def unify("Fn(" <> _ = a, "Fn(" <> _ = b), do: unify_fn(a, b)
   def unify(_, _), do: :mismatch
+
+  # Componentwise unify two `Fn(...)` strings; `:mismatch` on differing arity or
+  # any irreconcilable component. A `_`/`:unknown`/type-variable slot is a wildcard.
+  defp unify_fn(a, b) do
+    pa = fn_parts(a)
+    pb = fn_parts(b)
+
+    if length(pa) == length(pb) do
+      parts = Enum.zip(pa, pb) |> Enum.map(fn {x, y} -> comp_unify(x, y) end)
+      if :mismatch in parts, do: :mismatch, else: "Fn(#{Enum.join(parts, ",")})"
+    else
+      :mismatch
+    end
+  end
+
+  defp comp_unify(x, x), do: x
+
+  defp comp_unify(x, y) do
+    cond do
+      wildcard?(x) -> y
+      wildcard?(y) -> x
+      fn_type?(x) and fn_type?(y) -> unify_fn(x, y)
+      true -> :mismatch
+    end
+  end
+
+  defp wildcard?("_"), do: true
+  defp wildcard?(t) when is_binary(t), do: tvar?(t)
+  defp wildcard?(_), do: false
 
   # ── inference ──────────────────────────────────────────────────────────
   # `ic` is the static inference context (a map): `:tdefs` (ctor -> field types,
@@ -93,10 +140,40 @@ defmodule Rian.Check do
     end
   end
 
-  # a call to a constructor infers its sum type; a call to a known function infers
-  # that function's declared return type; otherwise unknown
-  def infer(%ECall{fun: %EId{name: f}}, _env, ic),
-    do: ctor_type(ic, f) || Map.get(Map.get(ic, :funs, %{}), f) || :unknown
+  # a lambda `(a, b) -> body` infers the arrow type `Fn(a_t.., body_t)`: each
+  # annotated param contributes its type (an un-annotated one is the `_` wildcard),
+  # and the body is inferred under those bindings (ADR-0042 higher-order inference)
+  def infer(%ELambda{params: ps, body: body}, env, ic) do
+    lenv = Enum.reduce(ps, env, fn {n, t}, e -> Map.put(e, n, t || :unknown) end)
+    args = Enum.map(ps, fn {_n, t} -> t || :unknown end)
+    build_fn(args, infer(body, lenv, ic))
+  end
+
+  # `&name/arity` captures a named function as a value: its type is
+  # `Fn(_ × arity, declared-return)` when the target is a known local function
+  def infer(%ECaptureNamed{path: %EId{name: n}, arity: a}, _env, ic) do
+    case Map.get(Map.get(ic, :funs, %{}), n) do
+      nil -> :unknown
+      ret -> build_fn(List.duplicate(:unknown, a), ret)
+    end
+  end
+
+  # a call through a function-typed *variable* (a parameter / bound name) infers
+  # the function's return type; a call to a constructor infers its sum type; a
+  # call to a known named function infers that function's declared return type
+  def infer(%ECall{fun: %EId{name: f}}, env, ic) do
+    cond do
+      fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)
+      true -> ctor_type(ic, f) || Map.get(Map.get(ic, :funs, %{}), f) || :unknown
+    end
+  end
+
+  # a call to any other callable (a lambda result, a returned function) infers
+  # its return type when the callee is known to be a function, else `:unknown`
+  def infer(%ECall{fun: fun}, env, ic) do
+    ft = infer(fun, env, ic)
+    if fn_type?(ft), do: fn_ret(ft), else: :unknown
+  end
 
   def infer(%EIf{then: t, else: e}, env, ic),
     do: conservative(unify(infer(t, env, ic), infer(e, env, ic)))
@@ -216,6 +293,41 @@ defmodule Rian.Check do
 
   defp list_elem("Vec(" <> rest), do: String.trim_trailing(rest, ")")
   defp list_elem(_), do: :unknown
+
+  # `Fn(A1,..,An,R)` function-type string helpers (ADR-0042). The components are
+  # the argument types followed by the return type (the last element is the
+  # return); a `_` component is an unknown slot. Types remain strings.
+  defp fn_type?("Fn(" <> _), do: true
+  defp fn_type?(_), do: false
+
+  defp fn_parts("Fn(" <> rest), do: rest |> String.trim_trailing(")") |> split_top_commas()
+
+  # the return type (last component); `_` reads back as `:unknown`
+  defp fn_ret(ft), do: ft |> fn_parts() |> List.last() |> deplaceholder()
+
+  defp deplaceholder("_"), do: :unknown
+  defp deplaceholder(t), do: concretize(t)
+
+  # build `Fn(args.., ret)` from inferred component types (`:unknown` -> `_`)
+  defp build_fn(args, ret), do: "Fn(#{Enum.map_join(args ++ [ret], ",", &comp_str/1)})"
+  defp comp_str(:unknown), do: "_"
+  defp comp_str(t), do: to_string(t)
+
+  # split a type string on top-level commas, respecting nested `(`/`)` (so a
+  # nested `Fn(Int64,Int64)` argument is one component, not two)
+  defp split_top_commas(s) do
+    {parts, cur, _} =
+      s
+      |> String.graphemes()
+      |> Enum.reduce({[], "", 0}, fn
+        ",", {parts, cur, 0} -> {[cur | parts], "", 0}
+        "(", {parts, cur, d} -> {parts, cur <> "(", d + 1}
+        ")", {parts, cur, d} -> {parts, cur <> ")", d - 1}
+        ch, {parts, cur, d} -> {parts, cur <> ch, d}
+      end)
+
+    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1)
+  end
 
   defp infer_block([], _env, _ic, value), do: value
 
