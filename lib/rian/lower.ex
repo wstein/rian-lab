@@ -17,6 +17,8 @@ defmodule Rian.Lower do
                clauses: [%{pats: [{:ctor, "Circle", [{:var, "r"}]}], body: "pi * r * r"},
                          %{pats: [{:ctor, "Square", [{:var, "s"}]}], body: "s * s"}]}
   """
+  alias Rian.Core
+  alias Rian.Core.{PAtom, PCtor, PList, PLit, PTuple, PVar, PWild}
   alias Rian.Exhaustiveness, as: E
   alias Rian.PatternLower, as: PL
   alias Rian.Pratt
@@ -211,7 +213,7 @@ defmodule Rian.Lower do
 
     clauses =
       Enum.map_join(func.clauses, "\n", fn c ->
-        head = "#{def_kw} #{func.name}(#{Enum.map_join(c.pats, ", ", &pat_ex/1)})"
+        head = "#{def_kw} #{func.name}(#{Enum.map_join(c.pats, ", ", &core_pat_ex/1)})"
         body = c.body |> body_ast(ctx) |> emit(:elixir) |> elem(0)
         "#{head}#{guard_str(c, :elixir)} do #{body} end"
       end)
@@ -357,23 +359,26 @@ defmodule Rian.Lower do
   defp resolve_rust_pats({:case, scrut, arms}, meta) do
     {:case, resolve_rust_pats(scrut, meta),
      Enum.map(arms, fn {pt, g, b} ->
-       {{:rpat, pat_rs(pt, meta)}, g && resolve_rust_pats(g, meta), resolve_rust_pats(b, meta)}
+       {{:rpat, core_pat_rs(pt, meta)}, g && resolve_rust_pats(g, meta),
+        resolve_rust_pats(b, meta)}
      end)}
   end
 
   defp resolve_rust_pats({:with, clauses, body, els}, meta) do
     {:with,
-     Enum.map(clauses, fn {pt, e} -> {{:rpat, pat_rs(pt, meta)}, resolve_rust_pats(e, meta)} end),
-     resolve_rust_pats(body, meta),
+     Enum.map(clauses, fn {pt, e} ->
+       {{:rpat, core_pat_rs(pt, meta)}, resolve_rust_pats(e, meta)}
+     end), resolve_rust_pats(body, meta),
      Enum.map(els, fn {pt, g, b} ->
-       {{:rpat, pat_rs(pt, meta)}, g && resolve_rust_pats(g, meta), resolve_rust_pats(b, meta)}
+       {{:rpat, core_pat_rs(pt, meta)}, g && resolve_rust_pats(g, meta),
+        resolve_rust_pats(b, meta)}
      end)}
   end
 
   defp resolve_rust_pats(node, meta), do: Rian.Macro.map_node(node, &resolve_rust_pats(&1, meta))
 
   defp rpat({:rpat, s}), do: s
-  defp rpat(pat), do: pat_rs(pat, %{})
+  defp rpat(pat), do: core_pat_rs(pat, %{})
 
   # Rust `with` lowering: a right-nested `match` chain. Each clause matches its
   # ok-pattern and continues, or falls through to the `else` arms (or yields the
@@ -425,20 +430,23 @@ defmodule Rian.Lower do
     join_doc(ex_doc(Map.get(t, :doc), "typedoc"), "@type #{PL.to_snake(t.name)} :: #{body}")
   end
 
-  defp pat_ex(:wild), do: "_"
-  defp pat_ex({:var, x}), do: x
-  defp pat_ex({:lit, v}) when is_binary(v), do: inspect(v)
-  defp pat_ex({:lit, v}), do: to_string(v)
-  defp pat_ex({:atom, a}), do: ":" <> a
-  defp pat_ex({:tuple, ps}), do: "{#{Enum.map_join(ps, ", ", &pat_ex/1)}}"
-  defp pat_ex({:list, ps, :close}), do: "[#{Enum.map_join(ps, ", ", &pat_ex/1)}]"
+  # surface pattern -> typed core IR -> Elixir (ADR-0050: emitter consumes the core)
+  defp core_pat_ex(surface), do: pat_ex(Core.from_pat(surface))
 
-  defp pat_ex({:list, ps, {:tail, t}}),
+  defp pat_ex(%PWild{}), do: "_"
+  defp pat_ex(%PVar{name: x}), do: x
+  defp pat_ex(%PLit{value: v}) when is_binary(v), do: inspect(v)
+  defp pat_ex(%PLit{value: v}), do: to_string(v)
+  defp pat_ex(%PAtom{name: a}), do: ":" <> a
+  defp pat_ex(%PTuple{elems: ps}), do: "{#{Enum.map_join(ps, ", ", &pat_ex/1)}}"
+  defp pat_ex(%PList{elems: ps, tail: :close}), do: "[#{Enum.map_join(ps, ", ", &pat_ex/1)}]"
+
+  defp pat_ex(%PList{elems: ps, tail: t}),
     do: "[#{Enum.map_join(ps, ", ", &pat_ex/1)} | #{pat_ex(t)}]"
 
-  defp pat_ex({:ctor, name, []}), do: ":" <> Atom.to_string(PL.to_snake(name))
+  defp pat_ex(%PCtor{ctor: name, args: []}), do: ":" <> Atom.to_string(PL.to_snake(name))
 
-  defp pat_ex({:ctor, name, args}),
+  defp pat_ex(%PCtor{ctor: name, args: args}),
     do: "{:#{PL.to_snake(name)}, #{Enum.map_join(args, ", ", &pat_ex/1)}}"
 
   # ── Rust backend ───────────────────────────────────────────────────────
@@ -464,7 +472,7 @@ defmodule Rian.Lower do
 
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
-        pat = tuple_or_one(c.pats, &pat_rs(&1, ctx.meta))
+        pat = tuple_or_one(c.pats, &core_pat_rs(&1, ctx.meta))
         # Resolve construction (struct + variant), constant references, and `case`
         # patterns into the body IR here, where the meta is available — so the
         # recursive emitter needs no ambient context (the IR carries it).
@@ -536,25 +544,30 @@ defmodule Rian.Lower do
     )
   end
 
-  defp pat_rs(:wild, _), do: "_"
-  defp pat_rs({:var, x}, _), do: x
-  defp pat_rs({:lit, v}, _) when is_binary(v), do: inspect(v)
-  defp pat_rs({:lit, v}, _), do: to_string(v)
-  defp pat_rs({:tuple, [{:atom, "ok"}, p]}, m), do: "Ok(#{pat_rs(p, m)})"
-  defp pat_rs({:tuple, [{:atom, "error"}, p]}, m), do: "Err(#{pat_rs(p, m)})"
-  defp pat_rs({:tuple, ps}, m), do: "(#{Enum.map_join(ps, ", ", &pat_rs(&1, m))})"
-  defp pat_rs({:atom, a}, _), do: raise("Erlang atom pattern is BEAM-only: :#{a}")
-  defp pat_rs({:list, ps, :close}, m), do: "[#{Enum.map_join(ps, ", ", &pat_rs(&1, m))}]"
+  # surface pattern -> typed core IR -> Rust (ADR-0050: emitter consumes the core)
+  defp core_pat_rs(surface, meta), do: pat_rs(Core.from_pat(surface), meta)
 
-  defp pat_rs({:list, _, {:tail, _}}, _),
+  defp pat_rs(%PWild{}, _), do: "_"
+  defp pat_rs(%PVar{name: x}, _), do: x
+  defp pat_rs(%PLit{value: v}, _) when is_binary(v), do: inspect(v)
+  defp pat_rs(%PLit{value: v}, _), do: to_string(v)
+  defp pat_rs(%PTuple{elems: [%PAtom{name: "ok"}, p]}, m), do: "Ok(#{pat_rs(p, m)})"
+  defp pat_rs(%PTuple{elems: [%PAtom{name: "error"}, p]}, m), do: "Err(#{pat_rs(p, m)})"
+  defp pat_rs(%PTuple{elems: ps}, m), do: "(#{Enum.map_join(ps, ", ", &pat_rs(&1, m))})"
+  defp pat_rs(%PAtom{name: a}, _), do: raise("Erlang atom pattern is BEAM-only: :#{a}")
+
+  defp pat_rs(%PList{elems: ps, tail: :close}, m),
+    do: "[#{Enum.map_join(ps, ", ", &pat_rs(&1, m))}]"
+
+  defp pat_rs(%PList{tail: t}, _) when t != :close,
     do: raise("cons-list pattern is BEAM-only (no idiomatic Vec cons)")
 
-  defp pat_rs({:ctor, name, []}, meta) do
+  defp pat_rs(%PCtor{ctor: name, args: []}, meta) do
     info = Map.fetch!(meta, PL.to_snake(name))
     "#{info.enum}::#{info.ctor}"
   end
 
-  defp pat_rs({:ctor, name, args}, meta) do
+  defp pat_rs(%PCtor{ctor: name, args: args}, meta) do
     info = Map.fetch!(meta, PL.to_snake(name))
 
     if info.named do
@@ -664,7 +677,7 @@ defmodule Rian.Lower do
   defp emit({:case, scrut, arms}, :elixir) do
     body =
       Enum.map_join(arms, "; ", fn {pt, g, b} ->
-        "#{pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
+        "#{core_pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
       end)
 
     {"case #{p(scrut, 0, :elixir)} do #{body} end", 0}
@@ -683,7 +696,7 @@ defmodule Rian.Lower do
   # short-circuits to the `else` arms (or yields the non-matching value).
   defp emit({:with, clauses, body, els}, :elixir) do
     cs =
-      Enum.map_join(clauses, ", ", fn {pt, e} -> "#{pat_ex(pt)} <- #{p(e, 0, :elixir)}" end)
+      Enum.map_join(clauses, ", ", fn {pt, e} -> "#{core_pat_ex(pt)} <- #{p(e, 0, :elixir)}" end)
 
     else_str =
       if els == [],
@@ -691,7 +704,7 @@ defmodule Rian.Lower do
         else:
           " else " <>
             Enum.map_join(els, "; ", fn {pt, g, b} ->
-              "#{pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
+              "#{core_pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
             end)
 
     {"with #{cs} do #{emit_block(body, :elixir)}#{else_str} end", 0}

@@ -81,13 +81,15 @@ construction, and cons-list building all compose and lower correctly.
 3. **Core IR + parser unification (ADR-0050)** — **parser fork closed; typed
    core IR begun.** (a) The duplicate `Decl.pattern` string parser is gone —
    clause heads and `case` arms share the one `Rian.Pratt.parse_pat` (§2). (b)
-   `Rian.Core` now defines the **typed core *pattern* IR** (sealed-sum structs,
-   each carrying a `type` field per §3) + `from_pat/1`, and the abstract-forms
-   emitter (`Rian.Beam`) **consumes the core** (§1) — surface → core → Erlang
-   form. **Remaining (incremental, §5):** the expression catalogue; migrating
-   the other emitters (`Rian.Lower` Elixir/Rust) and the exhaustiveness
-   normalizer onto the core; the checker filling node `type`s. Done before the
-   three new emitters (ADR-0049).
+   `Rian.Core` defines the **typed core *pattern* IR** (sealed-sum structs, each
+   carrying a `type` field per §3) + `from_pat/1`, and **all three pattern
+   emitters consume it** (§1): `Rian.Beam` (Erlang forms), and `Rian.Lower`'s
+   Elixir (`pat_ex`) and Rust (`pat_rs`) paths — surface → `Core.from_pat` →
+   core → target. The pattern side now reads *one* representation (parser
+   unified in §2; emitters unified here). **Remaining (incremental, §5):** the
+   *expression* catalogue + its emitters; the exhaustiveness normalizer
+   (`PatternLower`, which keeps its documented surface contract for now); the
+   checker filling node `type`s.
 4. **Portable prelude (ADR-0041 #3 / ADR-0047)** — **mechanism + first member
    landed.** `Rian.Prelude` injects built-in types into the checker /
    exhaustiveness env / lowering meta without a user declaration and without
