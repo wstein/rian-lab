@@ -156,8 +156,18 @@ defmodule Rian.FeaturesTest do
       assert rust =~ "count(&"
     end
 
+    test "a type named in a `pub` fn's signature is emitted `pub` (cross-module usable)" do
+      rust =
+        File.read!("examples/rian/selfhost_lexer.rian")
+        |> Rian.Decl.compile()
+        |> Enum.map_join("\n", fn {_, %{rust: r}} -> r end)
+
+      # `pub fn tokenize(...) -> Vec<Token>` forces `Token` to be a `pub enum`
+      assert rust =~ "pub enum Token"
+    end
+
     @tag :rust
-    test "the FFI-free lexer lowers to Rust and runs under rustc (cons + guards + build)" do
+    test "the FFI-free lexer lowers to Rust and runs under rustc — called cross-module" do
       case System.find_executable("rustc") do
         nil ->
           :ok
@@ -171,17 +181,11 @@ defmodule Rian.FeaturesTest do
           dir = System.tmp_dir!()
           src = Path.join(dir, "rian_lex_#{System.unique_integer([:positive])}.rs")
           bin = String.trim_trailing(src, ".rs")
-          # a token-count helper inside the mod avoids naming the (private) Token
-          runner =
-            String.replace_suffix(
-              rust,
-              "}",
-              "  pub fn ntok(s: &str) -> usize { tokenize(s).len() }\n}"
-            )
 
+          # the pub enum + pub fn means external code can name `Token` and call it
           File.write!(
             src,
-            "#![allow(dead_code)]\n#{runner}\nfn main() { println!(\"{}\", selfhost_lexer::ntok(\"12 + 3 * 4\")); }"
+            "#![allow(dead_code)]\n#{rust}\nfn main() { let ts: Vec<selfhost_lexer::Token> = selfhost_lexer::tokenize(\"12 + 3 * 4\"); println!(\"{}\", ts.len()); }"
           )
 
           {_, 0} = System.cmd(rustc, ["--edition", "2021", src, "-o", bin])

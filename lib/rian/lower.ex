@@ -134,12 +134,17 @@ defmodule Rian.Lower do
     sigs = Map.new(funcs, fn f -> {f.name, f} end)
     ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts), sigs)
 
+    # a type/struct must be `pub` if it is exported (`pub type`) OR named in a
+    # `pub` function's signature — Rust forbids a public fn exposing a private type
+    needed = pub_sig_type_names(funcs)
+    vis = fn name, own? -> if own? or MapSet.member?(needed, name), do: "pub ", else: "" end
+
     body =
       [
         rs_doc(Map.get(m, :doc), "//!"),
         Enum.map_join(Map.get(m, :uses, []), "\n", &rust_use/1),
-        Enum.map_join(structs, "\n\n", &rust_struct/1),
-        Enum.map_join(types, "\n\n", &rust_enum/1),
+        Enum.map_join(structs, "\n\n", &rust_struct(&1, vis.(&1.name, &1.pub?))),
+        Enum.map_join(types, "\n\n", &rust_enum(&1, vis.(&1.name, &1.pub?))),
         Enum.map_join(consts, "\n", &rust_const(&1, ctx)),
         Enum.map_join(funcs, "\n\n", &rust_fn(&1, ctx, if(&1.pub?, do: "pub ", else: "")))
       ]
@@ -150,6 +155,20 @@ defmodule Rian.Lower do
   end
 
   defp const_set(consts), do: MapSet.new(consts, & &1.name)
+
+  # type/struct names mentioned in any `pub` function's param or return types
+  # (the PascalCase identifiers in those type strings)
+  defp pub_sig_type_names(funcs) do
+    for f <- funcs,
+        f.pub?,
+        ts <- [f.ret | Enum.map(f.params, & &1.type)],
+        name <- type_idents(ts),
+        into: MapSet.new(),
+        do: name
+  end
+
+  defp type_idents(nil), do: []
+  defp type_idents(ts), do: Regex.scan(~r/[A-Z]\w*/, ts) |> Enum.map(&hd/1)
 
   # `use Path` -> `alias Path` (qualified); `use Path.(a, b)` -> `import Path`
   # (selective; name-level `only:` selectivity awaits cross-module arities).
@@ -717,15 +736,17 @@ defmodule Rian.Lower do
     end
   end
 
-  defp rust_struct(s) do
-    fields = Enum.map_join(s.fields, ", ", fn f -> "#{f.label}: #{prim_rust(f.type)}" end)
-    "#[derive(Clone, Debug, PartialEq)]\nstruct #{s.name} { #{fields} }"
+  defp rust_struct(s, vis \\ "") do
+    # a `pub` struct exposes its fields too (so cross-module field access works)
+    fvis = if vis == "", do: "", else: "pub "
+    fields = Enum.map_join(s.fields, ", ", fn f -> "#{fvis}#{f.label}: #{prim_rust(f.type)}" end)
+    "#[derive(Clone, Debug, PartialEq)]\n#{vis}struct #{s.name} { #{fields} }"
   end
 
   defp tuple_or_one([one], f), do: f.(one)
   defp tuple_or_one(many, f), do: "(" <> Enum.map_join(many, ", ", f) <> ")"
 
-  defp rust_enum(t) do
+  defp rust_enum(t, vis \\ "") do
     variants =
       Enum.map_join(t.variants, "\n", fn v ->
         named = v.fields != [] and Enum.all?(v.fields, &Map.get(&1, :label))
@@ -746,7 +767,7 @@ defmodule Rian.Lower do
 
     join_doc(
       rs_doc(Map.get(t, :doc), "///"),
-      "#[derive(Clone, Debug, PartialEq)]\nenum #{t.name} {\n#{variants}\n}"
+      "#[derive(Clone, Debug, PartialEq)]\n#{vis}enum #{t.name} {\n#{variants}\n}"
     )
   end
 

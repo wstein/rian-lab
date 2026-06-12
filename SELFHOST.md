@@ -349,10 +349,13 @@ a list or compared in the body is owned — the **FFI-free lexer now lowers to R
 and runs under rustc**: `tokenize("12 + 3 * 4")` yields 5 tokens, through cons
 patterns, guard derefs (`*c >= 48`), and fresh-head construction. So the
 self-hosting **lexer runs on all three targets** (BEAM, JS, Rust), and `Str` (incl.
-the `length` composite) lowers fully. The remaining Rust niceties are small:
-`type` declarations emit a private `enum`, so a `pub` function returning one warns
-across the module boundary (a `pub enum` for types used in a `pub` signature), and
-the partial **parser** still needs total clauses (Rust enforces exhaustiveness).
+the `length` composite) lowers fully. The lexer is also **callable cross-module**
+on Rust now: a type named in a `pub` function's signature is emitted `pub` (a
+`pub enum` / `pub struct`, fields public too), so `pub fn tokenize(…) ->
+Vec<Token>` no longer exposes a private `Token` — external code can name
+`selfhost_lexer::Token` and call `tokenize`. The one Rust item still open is the
+partial **parser**: it needs total clauses (Rust enforces exhaustiveness; the
+gate is the same one Rian enforces — by design, not an emitter bug).
 
 **Rust gets cons.** A Rian `Vec(T)` param lowers to a `&[T]` slice, so cons
 patterns become **Rust slice patterns** — `[h | t]` → `[h, t @ ..]` — matched
