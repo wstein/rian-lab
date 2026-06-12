@@ -339,9 +339,18 @@ rebound to owned values (`let h = h.clone(); let t = t.to_vec();`). With that,
 [3,2,1]`). So `val` handles reduce/build (zero-copy slices), `iso` handles
 return/rebuild (owned).
 
-Two edges remain on Rust, both real follow-ups: **guards on borrowed binders**
-need `*`-deref (`when c == 32` over a `&i64`), which blocks the guard-heavy
-**lexer**; and the cons-recursive **parser** is gated out of the dual-target
-path by **exhaustiveness** (it is deliberately partial — `parse_factor` doesn't
-cover every token), not by ownership. The lexer's `String`/`:lists` FFI also has
-no Rust mapping yet.
+**Guards over borrowed binders now deref.** A binder bound inside a slice/list
+element is a `&T` borrow (match ergonomics), so a guard comparing it needs `*`.
+The Rust emitter now derefs those binders in guards: `when c == 32` over a
+`&i64` lowers to `if *c == 32`, and `when c >= 48 and c <= 57` to
+`if *c >= 48 && *c <= 57`. Guard-heavy cons functions compile + run under rustc
+(`count_spaces([32,1,32,2]) = 2`). (Arithmetic on a `&T` in the *body* already
+works via the `forward_ref` `Add`/etc. impls, so only guards needed the deref.)
+
+Two edges still stand on Rust, both genuine (not emitter bugs): a deliberately
+**partial** function (e.g. the spike `parse_factor`, which doesn't cover every
+token) **cannot** lower to a Rust `match`, because Rust requires exhaustive
+matches — totality is enforced, by design; the fix is total clauses, not an
+emitter change. And the **lexer**'s `String.to_charlist`/`:lists` FFI has no
+Rust mapping (a portable `String`/`List` prelude is the path — `List` is already
+pure-Rian; `String` needs the primitive layer below).

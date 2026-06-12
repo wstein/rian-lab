@@ -149,6 +149,46 @@ defmodule Rian.FeaturesTest do
       assert rust =~ "([], ys) => ys,"
     end
 
+    @guarded_src """
+    mod Counter do
+      pub def count_spaces(cs Vec(Int64)) Int64
+      pub def count_spaces([]) := 0
+      pub def count_spaces([c | t]) when c == 32 := 1 + count_spaces(t)
+      pub def count_spaces([_ | t]) := count_spaces(t)
+    end
+    """
+
+    test "a guard over a borrowed cons binder is dereffed (`*c`) on Rust" do
+      [{_, %{rust: rust}}] = Rian.Decl.compile(@guarded_src)
+      # `c` is `&i64` under the slice match -> the guard derefs it
+      assert rust =~ "[c, t @ ..] if *c == 32 =>"
+    end
+
+    @tag :rust
+    test "the guarded cons function compiles and runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          [{_, %{rust: rust}}] = Rian.Decl.compile(@guarded_src)
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_grd_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            rust <> "\nfn main() { println!(\"{}\", counter::count_spaces(&[32,1,32,2])); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-O", "--edition", "2021", src, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "2"
+      end
+    end
+
     @tag :rust
     test "the `iso Vec` list-returning Rust compiles and runs under rustc" do
       case System.find_executable("rustc") do

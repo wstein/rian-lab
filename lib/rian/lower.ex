@@ -381,15 +381,28 @@ defmodule Rian.Lower do
 
   # Optional clause guard: `nil` or a Rian guard-expression string. Lowers to
   # `when …` on Elixir and `if …` on Rust (clauses-guards §5).
-  defp guard_str(c, target) do
+  defp guard_str(c, target, deref \\ []) do
     case Map.get(c, :guard) do
       g when is_binary(g) ->
-        guard_kw(target) <> (emit(Core.from_expr(Pratt.parse(g)), target) |> elem(0))
+        # On Rust, a binder bound inside a slice/list element is a `&T` borrow
+        # (match ergonomics); a guard comparing it (`*c == 32`) must deref it.
+        ast = Pratt.parse(g) |> deref_ids(deref)
+        guard_kw(target) <> (emit(Core.from_expr(ast), target) |> elem(0))
 
       _ ->
         ""
     end
   end
+
+  # rename `{:id, n}` -> `{:id, "*n"}` for each `n` in `names` (Rust guard deref)
+  defp deref_ids(ast, []), do: ast
+  defp deref_ids({:id, n}, names), do: if(n in names, do: {:id, "*" <> n}, else: {:id, n})
+
+  defp deref_ids(t, names) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.map(&deref_ids(&1, names)) |> List.to_tuple()
+
+  defp deref_ids(l, names) when is_list(l), do: Enum.map(l, &deref_ids(&1, names))
+  defp deref_ids(other, _names), do: other
 
   defp guard_kw(:elixir), do: " when "
   defp guard_kw(:rust), do: " if "
@@ -541,7 +554,10 @@ defmodule Rian.Lower do
             do: rust_arm_body(ast, body),
             else: "{ #{Enum.join(rebinds, " ")} #{body} }"
 
-        "        #{pat}#{guard_str(c, :rust)} => #{arm},"
+        # binders bound inside a list/slice element are `&T` — a guard over them
+        # must deref (`*c`); the arm body's arithmetic works on `&T` directly
+        deref = Enum.flat_map(c.pats, fn p -> slice_elem_vars(Core.from_pat(p)) end)
+        "        #{pat}#{guard_str(c, :rust, deref)} => #{arm},"
       end)
 
     fn_str =
@@ -598,6 +614,20 @@ defmodule Rian.Lower do
 
   defp tail_rebind(%PVar{name: n}), do: ["let #{n} = #{n}.to_vec();"]
   defp tail_rebind(_), do: []
+
+  # variables bound inside the *element* positions of a list pattern — under a
+  # slice match they are `&T` borrows, so a guard comparing them needs `*`
+  defp slice_elem_vars(%PList{elems: ps}), do: Enum.flat_map(ps, &all_pat_vars/1)
+  defp slice_elem_vars(_), do: []
+
+  defp all_pat_vars(%PVar{name: n}), do: [n]
+  defp all_pat_vars(%PCtor{args: a}), do: Enum.flat_map(a, &all_pat_vars/1)
+  defp all_pat_vars(%PTuple{elems: e}), do: Enum.flat_map(e, &all_pat_vars/1)
+
+  defp all_pat_vars(%PList{elems: ps, tail: t}),
+    do: Enum.flat_map(ps, &all_pat_vars/1) ++ all_pat_vars(t)
+
+  defp all_pat_vars(_), do: []
 
   # `T | E` in return position is sugar for `Result(T, E)` (ADR-0040 §2) — the ok
   # type then the (single, possibly-named) error set. It lowers to Rust
