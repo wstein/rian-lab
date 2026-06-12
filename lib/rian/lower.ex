@@ -62,6 +62,7 @@ defmodule Rian.Lower do
 
     body =
       [
+        Enum.map_join(Map.get(m, :uses, []), "\n", &ex_use/1),
         Enum.map_join(structs, "\n", &ex_struct/1),
         Enum.map_join(types, "\n", &ex_typespec/1),
         Enum.map_join(consts, "\n", &ex_const(&1, smeta, cset)),
@@ -87,6 +88,7 @@ defmodule Rian.Lower do
 
     body =
       [
+        Enum.map_join(Map.get(m, :uses, []), "\n", &rust_use/1),
         Enum.map_join(structs, "\n\n", &rust_struct/1),
         Enum.map_join(types, "\n\n", &rust_enum/1),
         Enum.map_join(consts, "\n", &rust_const(&1, meta, smeta, cset)),
@@ -103,6 +105,17 @@ defmodule Rian.Lower do
   end
 
   defp const_set(consts), do: MapSet.new(consts, & &1.name)
+
+  # `use Path` -> `alias Path` (qualified); `use Path.(a, b)` -> `import Path`
+  # (selective; name-level `only:` selectivity awaits cross-module arities).
+  defp ex_use(%{path: path, names: []}), do: "alias #{path}"
+  defp ex_use(%{path: path}), do: "import #{path}"
+
+  # `use Path` -> `use a::b::c;`; `use Path.(a, b)` -> `use a::b::c::{a, b};`.
+  defp rust_use(%{path: path, names: names}) do
+    rp = path |> String.split(".") |> Enum.map_join("::", &to_string(PL.to_snake(&1)))
+    if names == [], do: "use #{rp};", else: "use #{rp}::{#{Enum.join(names, ", ")}};"
+  end
 
   # `const NAME Type := value` -> a 0-arity accessor on the BEAM (`def`/`defp`).
   defp ex_const(c, smeta, cset) do

@@ -434,10 +434,51 @@ defmodule Rian.DeclTest do
     end
   end
 
+  describe "use imports (module-scoped)" do
+    test "qualified and selective imports lower to alias/import and Rust use" do
+      [{"Geo", out}] =
+        Decl.compile("""
+        mod Geo do
+          use Math
+          use Std.(Vec, sqrt)
+
+          pub def root(x Float64) Float64 := sqrt(x)
+        end
+        """)
+
+      assert out.elixir =~ "alias Math"
+      assert out.elixir =~ "import Std"
+      assert out.rust =~ "use math;"
+      assert out.rust =~ "use std::{Vec, sqrt};"
+      # a name from a selective import is emitted bare; the import resolves it
+      assert out.rust =~ "sqrt(x)"
+    end
+
+    test "an imported module's qualified call runs on the BEAM" do
+      [{"Shout", out}] =
+        Decl.compile("""
+        mod Shout do
+          use String
+          pub def yell(s String) String := String.upcase(s)
+        end
+        """)
+
+      assert out.elixir =~ "alias String"
+      Code.eval_string(out.elixir)
+      assert Shout.yell("hi") == "HI"
+    end
+
+    test "a top-level use (no enclosing module) is rejected" do
+      assert_raise Decl.Error, ~r/`use` must appear inside a `mod`/, fn ->
+        Decl.parse("use Math")
+      end
+    end
+  end
+
   describe "honest limits raise Rian.Decl.Error" do
     test "unsupported declaration keywords are rejected" do
-      assert_raise Decl.Error, ~r/unsupported declaration `use`/, fn ->
-        Decl.parse("use Math")
+      assert_raise Decl.Error, ~r/unsupported declaration `macro`/, fn ->
+        Decl.parse("macro m() := 1")
       end
     end
   end

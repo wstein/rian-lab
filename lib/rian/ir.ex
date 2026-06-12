@@ -57,14 +57,25 @@ defmodule Rian.IR do
     defstruct name: nil, type: nil, value: nil, pub?: false
   end
 
+  defmodule Use do
+    @moduledoc """
+    An import inside a module. `use Path` is **qualified** (`names: []`) — it
+    brings the module into scope, references stay qualified (`Math.pi`). `use
+    Path.(a, b)` is **selective** — the listed `names` are usable unqualified.
+    Lowers to `alias`/`import` (BEAM) and `use …;`/`use …::{…};` (Rust).
+    """
+    @enforce_keys [:path]
+    defstruct path: nil, names: []
+  end
+
   defmodule Mod do
     @moduledoc """
-    A module (`mod Name do … end`) — a namespace grouping `types`, `structs`,
-    `consts`, and `funcs`. Lowers to a `defmodule` on the BEAM and a `mod` on
-    Rust; `pub?` items are exported (`def`/`pub fn`), the rest private (`defp`/`fn`).
+    A module (`mod Name do … end`) — a namespace grouping `uses`, `types`,
+    `structs`, `consts`, and `funcs`. Lowers to a `defmodule` on the BEAM and a
+    `mod` on Rust; `pub?` items are exported (`def`/`pub fn`), the rest private.
     """
     @enforce_keys [:name]
-    defstruct name: nil, types: [], structs: [], consts: [], funcs: []
+    defstruct name: nil, uses: [], types: [], structs: [], consts: [], funcs: []
   end
 
   defmodule Param do

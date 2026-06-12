@@ -34,14 +34,16 @@ defmodule Rian.Decl do
       `const` (`def`/`pub fn`/`pub const`); unmarked items are private.
     * `const NAME Type := value` — module-scoped constants; lower to a 0-arity
       accessor (BEAM) / a `const` (Rust); references resolve per target.
+    * `use Path` / `use Path.(name, …)` — module-scoped imports; lower to
+      `alias`/`import` (BEAM) and `use …;`/`use …::{…};` (Rust).
 
   ## Not yet supported
 
-  `use` (imports) raises `Rian.Decl.Error`; a top-level `const` (outside any
-  `mod`) is rejected.
+  A top-level `const`/`use` (outside any `mod`) is rejected. `macro` and other
+  reserved keywords raise `Rian.Decl.Error`.
   """
   alias Rian.{Check, Lexer, Lower}
-  alias Rian.IR.{Clause, Const, Field, Func, Mod, Param, Struct, Type, Variant}
+  alias Rian.IR.{Clause, Const, Field, Func, Mod, Param, Struct, Type, Use, Variant}
 
   defmodule Error do
     defexception [:message]
@@ -56,9 +58,10 @@ defmodule Rian.Decl do
     aliases = collect_aliases(decls)
     prog = assemble(decls, aliases)
 
-    # A top-level constant has no enclosing module to hold its accessor — `const`
-    # is module-scoped (ADR-0033 / modules: items live in a `mod`).
+    # `const` and `use` are module-scoped: a top-level one has no enclosing module
+    # to hold its accessor / import (ADR-0033 / modules: items live in a `mod`).
     if prog.consts != [], do: raise(Error, "`const` must appear inside a `mod`")
+    if prog.uses != [], do: raise(Error, "`use` must appear inside a `mod`")
 
     mods =
       for {:mod, name, inner} <- decls do
@@ -68,6 +71,7 @@ defmodule Rian.Decl do
 
         %Mod{
           name: name,
+          uses: p.uses,
           types: p.types,
           structs: p.structs,
           consts: p.consts,
@@ -75,7 +79,7 @@ defmodule Rian.Decl do
         }
       end
 
-    prog |> Map.delete(:consts) |> Map.put(:mods, mods)
+    prog |> Map.drop([:consts, :uses]) |> Map.put(:mods, mods)
   end
 
   # `alias Name := Type` is a transparent synonym: collect the name->type map so
@@ -107,7 +111,9 @@ defmodule Rian.Decl do
       for({:const, c, pub?} <- decls, do: parse_const(c, pub?))
       |> Enum.map(&subst_const(&1, aliases))
 
-    %{types: types, structs: structs, consts: consts, funcs: funcs}
+    uses = for {:use, u} <- decls, do: parse_use(u)
+
+    %{types: types, structs: structs, consts: consts, uses: uses, funcs: funcs}
   end
 
   defp parse_alias(text) do
@@ -205,6 +211,11 @@ defmodule Rian.Decl do
   defp take_decl([{:kw, "const"} | rest]) do
     {toks, rest} = take_type(rest, [])
     {{:const, Lexer.detokenize(toks), false}, rest}
+  end
+
+  defp take_decl([{:kw, "use"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    {{:use, Lexer.detokenize(toks)}, rest}
   end
 
   defp take_decl([{:kw, "def"} | rest]) do
@@ -390,6 +401,25 @@ defmodule Rian.Decl do
   end
 
   defp subst_const(%Const{type: t} = c, aliases), do: %Const{c | type: subst_type_str(t, aliases)}
+
+  # ── `use` imports ──────────────────────────────────────────────────────
+  # `use Path` (qualified) or `use Path.(name, …)` (selective). Detokenized
+  # strings space their dots/parens; normalize both before splitting.
+  defp parse_use(text) do
+    s = text |> collapse_parens() |> String.replace(~r/\s*\.\s*/, ".")
+
+    case extract_parens(s) do
+      {path, inside, ""} ->
+        names = inside |> split_top(",")
+        %Use{path: String.trim_trailing(path, "."), names: names}
+
+      {_, _, rest} ->
+        raise Error, "trailing tokens after use `#{text}`: #{rest}"
+
+      :none ->
+        %Use{path: s, names: []}
+    end
+  end
 
   # Detokenized type strings space their parens/commas (`Vec ( Int64 )`); collapse
   # them back so a parenthesized type is one whitespace-split token (`Vec(Int64)`).
