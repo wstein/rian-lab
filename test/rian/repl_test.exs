@@ -154,6 +154,59 @@ defmodule Rian.ReplTest do
     end)
   end
 
+  describe "info/1 — session introspection" do
+    test "a fresh session is empty" do
+      assert Repl.info(Repl.new()) == %{defined: [], bound: []}
+    end
+
+    test "reports defined names and bound names in order" do
+      s = Repl.new()
+      {_, s} = eval(s, "def sq(n Int64) Int64\ndef sq(n) := n * n")
+      {_, s} = eval(s, "x := 5")
+      {_, s} = eval(s, "y := 9")
+      assert Repl.info(s) == %{defined: ["sq"], bound: ["x", "y"]}
+    end
+
+    test "a sum type's name shows under defined" do
+      s = Repl.new()
+      {_, s} = eval(s, "type Bit := Zero | One")
+      assert %{defined: defined} = Repl.info(s)
+      assert "Bit" in defined
+    end
+
+    test "a redefinition and a rebind each appear once" do
+      s = Repl.new()
+      {_, s} = eval(s, "x := 1")
+      {_, s} = eval(s, "x := 2")
+      assert Repl.info(s) == %{defined: [], bound: ["x"]}
+    end
+  end
+
+  describe "type_of/2 — type without evaluation" do
+    test "infers an expression's type" do
+      assert Repl.type_of(Repl.new(), "1 + 2") == "Int64"
+    end
+
+    test "uses the session's bindings" do
+      s = Repl.new()
+      {_, s} = eval(s, "x := 10")
+      assert Repl.type_of(s, "x + 1") == "Int64"
+    end
+
+    test "returns nil when no type can be inferred" do
+      assert Repl.type_of(Repl.new(), "f(1)") == nil
+    end
+
+    test "performs no IO and does not run the expression" do
+      s = Repl.new()
+      run = fn -> Repl.type_of(s, "1 + 1") end
+      assert capture_io(run) == ""
+      assert capture_io(:stderr, run) == ""
+      # Purely a read: the same session still answers the same way.
+      assert Repl.type_of(s, "1 + 1") == "Int64"
+    end
+  end
+
   describe "render/1 (the print phase)" do
     test "formats each result kind" do
       assert Repl.render({:value, 2, "Int64"}) == "2 : Int64"

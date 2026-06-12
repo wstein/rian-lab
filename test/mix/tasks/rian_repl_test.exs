@@ -59,4 +59,52 @@ defmodule Mix.Tasks.Rian.ReplTest do
       assert out =~ "4 : Int64"
     end
   end
+
+  describe "meta-commands" do
+    test "\\help lists the commands" do
+      out = session_output("\\help\n")
+      assert out =~ "\\env"
+      assert out =~ "\\type"
+      assert out =~ "\\reset"
+    end
+
+    test "\\env shows defined and bound names" do
+      out = session_output("x := 7\ndef sq(n Int64) Int64\ndef sq(n) := n * n\n\n\\env\n")
+      assert out =~ "bound: x"
+      assert out =~ "defined: sq"
+    end
+
+    test "\\env on a fresh session reports it is empty" do
+      assert session_output("\\env\n") =~ "(empty session)"
+    end
+
+    test "\\type infers a type without evaluating" do
+      assert session_output("\\type 1 + 2\n") =~ "1 + 2 : Int64"
+    end
+
+    test "\\type uses the session bindings" do
+      assert session_output("x := 10\n\\type x + 1\n") =~ "x + 1 : Int64"
+    end
+
+    test "\\reset clears the session" do
+      out = session_output("x := 5\n\\reset\n\\env\n")
+      assert out =~ "session reset"
+      assert out =~ "(empty session)"
+    end
+
+    test "an unknown backslash command is reported, not evaluated as Rian" do
+      out = session_output("\\nope\n")
+      assert out =~ "unknown command"
+      refute out =~ "cannot scan"
+    end
+  end
+
+  describe "--completions" do
+    test "prints the language vocabulary and meta-commands for rlwrap" do
+      out = capture_io(fn -> Task.run(["--completions"]) end)
+      assert out =~ "def"
+      assert out =~ "\\help"
+      assert out =~ "\\type"
+    end
+  end
 end

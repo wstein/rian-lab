@@ -116,6 +116,34 @@ defmodule Rian.Repl do
   def render({:defined, names}), do: "defined " <> Enum.join(names, ", ")
   def render({:error, message}), do: "error: " <> message
 
+  @doc """
+  The names a session currently knows — its `defined` units (functions, sum
+  types, …) and its `bound` top-level `:=` names, each in definition order and
+  deduplicated (a redefinition or rebind appears once). Surface introspection
+  behind a `\\env` command; performs no IO and does not change the session.
+  """
+  @spec info(t()) :: %{defined: [String.t()], bound: [String.t()]}
+  def info(%Session{units: units, binds: binds}) do
+    %{
+      defined: units |> Enum.flat_map(fn {names, _} -> names end) |> Enum.uniq(),
+      bound: Enum.map(binds, fn {name, _} -> name end)
+    }
+  end
+
+  @doc """
+  Infer the type of `input` against `session` **without evaluating it** — the
+  type-only path behind a surface's `\\type` command. Runs only the checker
+  (parse + infer over the session's declarations and bindings), never the
+  compile/load/apply pipeline, so it performs no IO and does not advance the
+  session. Returns the inferred type string, or `nil` when no type can be
+  inferred (an unknown or malformed form).
+  """
+  @spec type_of(t(), String.t()) :: String.t() | nil
+  def type_of(%Session{} = s, input) do
+    ic = session_ic(s)
+    safe_infer_input(input, bind_env(s.binds, ic), ic)
+  end
+
   # ── declarations ────────────────────────────────────────────────────────
 
   defp eval_decl(s, input) do

@@ -92,6 +92,29 @@ runtime arithmetic error both produce typed `{:error, msg}` results, and
 neither advances the session. A typo doesn't pollute the rest of the
 notebook.
 
+## Introspection without evaluation
+
+Two engine functions let a surface inspect a session without running anything —
+the same calls the `mix rian.repl` loop exposes as the `\type EXPR` and `\env`
+meta-commands. Both are no-IO and leave the session untouched, so a smart-cell
+can use them for type hints or an environment panel.
+
+```elixir
+session = Repl.new()
+{_, session} = Repl.eval(session, "def sq(n Int64) Int64\ndef sq(n) := n * n")
+{_, session} = Repl.eval(session, "x := 9")
+
+%{
+  type_of: Repl.type_of(session, "x + 1"),
+  info: Repl.info(session)
+}
+```
+
+`type_of/2` runs only the type checker — `"x + 1"` reports `"Int64"` without
+evaluating it — and `info/1` returns the names the session currently knows
+(`%{defined: ["sq"], bound: ["x"]}`). Neither compiles or runs code, so they're
+safe to call on every keystroke.
+
 ## Next: a `Kino.SmartCell` companion
 
 Wrapping the above in a `Kino.SmartCell` — input editor, output area,

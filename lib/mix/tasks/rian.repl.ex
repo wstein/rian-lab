@@ -8,6 +8,32 @@ defmodule Mix.Tasks.Rian.Repl do
 
       mix rian.repl                 # interactive
       mix rian.repl --eval "EXPR"   # evaluate one entry and exit
+      mix rian.repl --completions   # print the completion word list (for rlwrap)
+
+  ## Line editing & history
+
+  `mix` launches the VM with `-noshell`, so the native Erlang line editor
+  (history, arrow-key recall) is not available — `mix rian.repl` reads through
+  the terminal's canonical mode (basic backspace only). For full readline
+  editing, history, and reverse-search, wrap the REPL with
+  [`rlwrap`](https://github.com/hanslub42/rlwrap):
+
+      rlwrap mix rian.repl
+
+  Tab-completion of the language vocabulary works by feeding `rlwrap` the static
+  word list this task can print:
+
+      rlwrap -f <(mix rian.repl --completions) mix rian.repl
+
+  If the REPL is ever driven from an IO server that *does* support line editing,
+  it enables history automatically and the banner says so.
+
+  ## Meta-commands
+
+  Lines beginning with `\\` are surface commands, not Rian (the lexer never
+  starts an expression with `\\`, so they can't collide with code): `\\help`,
+  `\\env` (names defined/bound in the session), `\\type EXPR` (infer a type
+  without evaluating), and `\\reset` (fresh session).
 
   ## Entries
 
@@ -40,20 +66,27 @@ defmodule Mix.Tasks.Rian.Repl do
 
   @impl Mix.Task
   def run(args) do
-    {opts, argv, invalid} = OptionParser.parse(args, strict: [eval: :string])
+    {opts, argv, invalid} =
+      OptionParser.parse(args, strict: [eval: :string, completions: :boolean])
 
     if invalid != [],
       do: Mix.raise("unknown option(s): #{inspect(Enum.map(invalid, &elem(&1, 0)))}")
 
-    if argv != [], do: Mix.raise("usage: mix rian.repl [--eval \"EXPR\"]")
+    if argv != [], do: Mix.raise("usage: mix rian.repl [--eval \"EXPR\" | --completions]")
 
-    # Ensure the project (and Rian.*) is compiled before we call into it.
-    Mix.Task.run("compile")
-
-    case opts[:eval] do
-      nil -> interactive()
-      src -> eval_once(src)
+    cond do
+      # A static word list for `rlwrap -f` — see the rlwrap note in the moduledoc.
+      # No compile needed: the list is the language's fixed vocabulary.
+      opts[:completions] -> dump_completions()
+      # Ensure the project (and Rian.*) is compiled before we call into it.
+      opts[:eval] -> with_compiled(fn -> eval_once(opts[:eval]) end)
+      true -> with_compiled(&interactive/0)
     end
+  end
+
+  defp with_compiled(fun) do
+    Mix.Task.run("compile")
+    fun.()
   end
 
   defp eval_once(src) do
@@ -62,8 +95,20 @@ defmodule Mix.Tasks.Rian.Repl do
   end
 
   defp interactive do
-    IO.puts(banner())
+    editing? = enable_line_editing()
+    IO.puts(banner(editing?))
     loop(Repl.new())
+  end
+
+  # Try to turn on the native line editor + history. Under a plain `mix` task the
+  # VM runs `-noshell` (no `user_drv`), so this returns `{:error, :enotsup}` and we
+  # fall back to canonical-mode input — `rlwrap mix rian.repl` adds history there.
+  defp enable_line_editing do
+    :io.setopts(:standard_io, [{:line_editing, true}, {:line_history, true}]) == :ok
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
   end
 
   @doc """
@@ -72,25 +117,76 @@ defmodule Mix.Tasks.Rian.Repl do
   """
   @spec loop(Repl.t()) :: :ok
   def loop(session) do
-    IO.write(prompt())
-
     case read_entry() do
       :eof ->
         IO.write("\n")
         :ok
 
       {:entry, text} ->
+        loop(handle_entry(text, session))
+    end
+  end
+
+  # Dispatch one entry: a `\\`-prefixed meta-command, or Rian to evaluate.
+  # Returns the next session (a command may reset it; eval advances it).
+  defp handle_entry(text, session) do
+    case command(text) do
+      :none ->
         {result, session} = Repl.eval(session, text)
         print(Repl.render(result))
-        loop(session)
+        session
+
+      {:help, _} ->
+        print(help_text())
+        session
+
+      {:env, _} ->
+        print(render_env(Repl.info(session)))
+        session
+
+      {:type, ""} ->
+        print("usage: \\type EXPR")
+        session
+
+      {:type, expr} ->
+        print(render_type(Repl.type_of(session, expr), expr))
+        session
+
+      {:reset, _} ->
+        print("session reset")
+        Repl.new()
+
+      {:unknown, cmd} ->
+        print("unknown command: #{cmd} (try \\help)")
+        session
+    end
+  end
+
+  # A surface meta-command is a line whose first token starts with `\\` — a
+  # prefix the Rian lexer can never begin an expression with (atoms are `:name`,
+  # not `\\name`), so commands never collide with code.
+  defp command(text) do
+    case String.split(String.trim(text), ~r/\s+/, parts: 2) do
+      ["\\help"] -> {:help, ""}
+      ["\\h"] -> {:help, ""}
+      ["\\?"] -> {:help, ""}
+      ["\\env"] -> {:env, ""}
+      ["\\reset"] -> {:reset, ""}
+      ["\\type", expr] -> {:type, expr}
+      ["\\type"] -> {:type, ""}
+      ["\\" <> _ = cmd | _] -> {:unknown, cmd}
+      _ -> :none
     end
   end
 
   # Accumulate input lines into one entry. An expression/`:=` line submits as
   # soon as it is complete (balanced `do`/`end`); a declaration or an open block
-  # accumulates until a blank line.
+  # accumulates until a blank line. The prompt is passed to `IO.gets/1` (not
+  # written separately) so a line editor — native or `rlwrap` — owns the line.
   defp read_entry(buffer \\ "") do
-    case IO.read(:line) do
+    prompt = if buffer == "", do: prompt(), else: continuation_prompt()
+
+    case IO.gets(prompt) do
       :eof -> if blank?(buffer), do: :eof, else: {:entry, buffer}
       {:error, _reason} -> :eof
       line when is_binary(line) -> accumulate(buffer, line)
@@ -106,12 +202,7 @@ defmodule Mix.Tasks.Rian.Repl do
   end
 
   defp continue(buffer) do
-    if submit_on_enter?(buffer) do
-      {:entry, buffer}
-    else
-      IO.write(continuation_prompt())
-      read_entry(buffer)
-    end
+    if submit_on_enter?(buffer), do: {:entry, buffer}, else: read_entry(buffer)
   end
 
   # An entry submits on Enter when it is neither a (continuable) declaration nor
@@ -137,8 +228,52 @@ defmodule Mix.Tasks.Rian.Repl do
   defp prompt, do: "rian> "
   defp continuation_prompt, do: "...> "
 
-  defp banner do
+  defp help_text do
+    String.trim_trailing("""
+    Commands (\\-prefixed):
+      \\help, \\h, \\?    show this help
+      \\env             names defined and bound in the session
+      \\type EXPR       infer EXPR's type without evaluating it
+      \\reset           start a fresh session
+    Everything else is Rian: expressions evaluate on Enter; finish a definition with a blank line.
+    """)
+  end
+
+  defp render_env(%{defined: [], bound: []}), do: "(empty session)"
+
+  defp render_env(%{defined: defined, bound: bound}) do
+    [names_line("defined", defined), names_line("bound", bound)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp names_line(_label, []), do: nil
+  defp names_line(label, names), do: "#{label}: #{Enum.join(names, ", ")}"
+
+  defp render_type(nil, expr), do: "#{String.trim(expr)} : ?  (type not inferred)"
+  defp render_type(type, expr), do: "#{String.trim(expr)} : #{type}"
+
+  # One candidate per line for `rlwrap -f` static completion. The session's own
+  # names aren't known ahead of time; this is the fixed language vocabulary plus
+  # the meta-commands.
+  defp dump_completions do
+    keywords = ~w(if do else end case when struct alias mod pub const macro use with and or not in rem div)
+    commands = ["\\help", "\\env", "\\type", "\\reset"]
+
+    (@decl_keywords ++ keywords ++ commands)
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.each(&IO.puts/1)
+  end
+
+  defp banner(editing?) do
+    edit_hint =
+      if editing?,
+        do: "Line editing + history are on.",
+        else: "For history/editing, run `rlwrap mix rian.repl`."
+
     "Rian REPL — compiling REPL (ADR-0053). " <>
-      "Expressions evaluate on Enter; finish a definition with a blank line. Ctrl-D to exit."
+      "Expressions evaluate on Enter; finish a definition with a blank line. " <>
+      "\\help for commands; Ctrl-D to exit. " <> edit_hint
   end
 end
