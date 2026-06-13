@@ -108,6 +108,17 @@ lowering and made *honest per declared target* instead of discovered at emit tim
 - **Honesty pass:** reconcile `examples/rian/README.md` / `SELFHOST.md` multi-target claims with
   `mix rian.targets` output.
 
+### CI default scope (2026-06-13 design review)
+
+A review asked for the `--require` gate to be **opt-out** (on by default everywhere). We **scoped it**
+instead: a blanket default-on gate would flag every concurrency/FFI-adjacent function as a "failure",
+but those are `:ex`-only *by design* (ADR-0057) — correct code, not a portability bug. So CI gates
+**default-on for the shared core** (`examples/rian/prelude_*.rian`, and any `@targets`-declared module
+— a declared promise must hold) and **opt-in for BEAM-pinned application code**. Writing unportable
+code stays an intentional, documented act (omit the `@targets` annotation) instead of the gate crying
+wolf over code never meant to be portable. Wired in `.github/workflows/ci.yml` as a
+`mix rian.targets --require ex,rs,js` step over the prelude files (all green as of this change).
+
 ## Open items
 
 - **Cross-module reach threading:** v1 treats a Rian `OtherMod.fun(…)` call as portable rather than
