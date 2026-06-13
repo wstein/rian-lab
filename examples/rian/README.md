@@ -32,6 +32,7 @@ idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
 | [10_function_forms.rian](10_function_forms.rian) | Every function body form — `:=` one-liner, multiline **block body** (`… end`), multi-clause groups mixing both, and lambdas |
 | [11_wire_formats.rian](11_wire_formats.rian) | Binary wire formats — `@wire` structs deriving byte-exact `decode`/`encode` (length-prefixed, nested, streaming), erroring as values |
 | [12_error_handling.rian](12_error_handling.rian) | Errors as values — sealed error sets, the `T \| E` Result sugar, `{:ok,_}`/`{:error,_}`, and `with`/`else` propagation (compiles end-to-end) |
+| [13_protocols.rian](13_protocols.rian) | Protocols & impls (ADR-0042) — `protocol`/`impl … for …`, first-argument dispatch, the orphan-rule coherence checks; primitive-type impls compile to a guarded BEAM dispatcher and run |
 
 Suggested reading order is numeric; 04 is the one to linger on — it is what
 distinguishes Rian from "Elixir with different keywords."

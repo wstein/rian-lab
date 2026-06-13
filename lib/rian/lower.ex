@@ -241,6 +241,10 @@ defmodule Rian.Lower do
   end
 
   # Exhaustiveness GATE — emission only proceeds if the match is total & has no dead clauses.
+  # A synthetic protocol dispatcher (ADR-0042 §3/§6) is exempt: protocol dispatch
+  # is open by design (no case-arms, no totality requirement), unlike a user match.
+  defp check!(%{synthetic: true}, _env), do: :ok
+
   defp check!(func, env) do
     arity = length(hd(func.clauses).pats)
 

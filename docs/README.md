@@ -51,7 +51,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0039](adr/0039-failable-bind-arrow.md) | Reassign `<-` to failable-bind/generator; re-spell mutation | Accepted (direction) |
 | [0040](adr/0040-error-handling.md) | Error handling: `Result`, `T \| E` sugar, `with` propagation, error-set composition | Accepted (direction) |
 | [0041](adr/0041-target-model.md) | Target model: per-target representation, observable contracts, module resolution | Accepted (direction) |
-| [0042](adr/0042-protocol-bounded-generics.md) | Protocol-bounded generics: `forall` binders, `protocol`/`impl`, coherence, dispatch | Accepted (direction) |
+| [0042](adr/0042-protocol-bounded-generics.md) | Protocol-bounded generics: `forall` binders, `protocol`/`impl`, coherence, dispatch | Accepted; §3/§5 MVP implemented (primitive-type impls, BEAM) |
 | [0043](adr/0043-opaque-types.md) | Opaque types: module-scoped nominal distinctness over a base, zero-cost | Accepted (direction) |
 | [0044](adr/0044-otp-behaviours.md) | OTP behaviours: `@behaviour` annotation, checked callbacks, threaded state (BEAM-only) | ~~Accepted~~ **Superseded by 0057** |
 | [0045](adr/0045-formatter.md) | Formatter: one canonical zero-config style, comment-preserving, deterministic | Accepted (direction) |
@@ -131,9 +131,11 @@ macros/`comptime`, FFI) and cites the spec it follows.
 These are the highest-priority items distilled from the specs' own "open items"
 sections; they are tracked here so the corpus has one place to look:
 
-- **Protocol-bounded generics** (ADR-0042 part 2) — `protocol`/`impl` with `Eq`/`Show`/`Ord`.
-  Concrete generics infer (`Vec(T)`), but bounds contribute nothing yet; this gates a non-toy
-  test framework and a portable stdlib beyond `List`/`Dict`/`Str`. The current critical path.
+- **Protocol-bounded generics** (ADR-0042 part 2) — **MVP landed**: `protocol`/`impl` parse,
+  desugar to a guarded BEAM dispatcher ([protocol.ex](../lib/rian/protocol.ex)), run, and are
+  coherence-checked. *Still open:* impls over non-primitive (sum) types, the generic
+  `forall T: Bound` call path (bounds parsed-and-dropped), dynamic dispatch, and the Rust/JS
+  lowerings — these still gate a portable stdlib beyond `List`/`Dict`/`Str`.
 - **JS emitter completeness** (ADR-0049) — `struct`/`with`/lambdas/FFI still raise `Unsupported`
   ([js.ex](../lib/rian/js.ex)); a browser playground that runs the compiler client-side needs them.
 - **Two-Elixir-emitter consolidation** — the Erlang abstract-forms backend ([beam.ex](../lib/rian/beam.ex))

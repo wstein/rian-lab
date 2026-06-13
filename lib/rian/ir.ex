@@ -119,9 +119,19 @@ defmodule Rian.IR do
     @moduledoc """
     A function: `name`, `params`, return type `ret`, `clauses`. `pub?` marks it
     exported from a `mod`. `tvars` are the `forall` type-variable names (ADR-0042),
-    empty for a non-generic function.
+    empty for a non-generic function. `synthetic` marks a compiler-generated
+    function — currently the `protocol` dispatcher (ADR-0042 §3/§6), which is
+    **exempt from the exhaustiveness gate**: protocol dispatch is open by design
+    (no case-arms, no totality requirement), unlike a user `case`.
     """
     @enforce_keys [:name, :params, :ret, :clauses]
-    defstruct name: nil, params: [], ret: nil, clauses: [], pub?: false, tvars: [], doc: nil
+    defstruct name: nil,
+              params: [],
+              ret: nil,
+              clauses: [],
+              pub?: false,
+              tvars: [],
+              doc: nil,
+              synthetic: false
   end
 end

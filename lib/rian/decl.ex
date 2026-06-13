@@ -39,6 +39,9 @@ defmodule Rian.Decl do
     * `@moduledoc`/`@doc`/`@typedoc "…"` doc comments (ADR-0051, heredoc-capable)
       attach to the following declaration and lower to `@moduledoc`/`@doc` (BEAM)
       / rustdoc `//!`/`///` (Rust).
+    * `protocol Name do … end` / `impl Protocol for Type do … end` (ADR-0042 §3)
+      — desugar to a guarded dispatcher + mangled impl functions via
+      `Rian.Protocol`; coherence-checked. MVP: primitive-type impls, BEAM.
 
   ## Not yet supported
 
@@ -119,12 +122,14 @@ defmodule Rian.Decl do
 
   # One scope's declarations (top level, or one module's body) -> typed IR.
   defp assemble(decls, aliases) do
-    funcs =
-      decls
-      |> Enum.flat_map(fn
+    user_defs =
+      Enum.flat_map(decls, fn
         {:def, raw} -> [raw]
         _ -> []
       end)
+
+    funcs =
+      (user_defs ++ protocol_defs(decls))
       |> Enum.chunk_by(& &1.name)
       |> Enum.map(&build_func/1)
       |> Enum.map(&subst_func(&1, aliases))
@@ -146,6 +151,24 @@ defmodule Rian.Decl do
     uses = for {:use, u} <- decls, do: parse_use(u)
 
     %{types: types, ranges: ranges, structs: structs, consts: consts, uses: uses, funcs: funcs}
+  end
+
+  # `protocol`/`impl` (ADR-0042 §3) desugar to ordinary raw `def` maps — a
+  # guarded dispatcher per protocol method plus one mangled function per impl
+  # method — so they flow through `build_func` like any other function. Coherence
+  # is enforced by `Rian.Protocol.expand/2`.
+  defp protocol_defs(decls) do
+    protocols =
+      for {:protocol, name, inner, _doc} <- decls, into: %{} do
+        {name, for({:def, raw} <- inner, do: raw)}
+      end
+
+    impls =
+      for {:impl, proto, type, inner, _doc} <- decls do
+        {proto, type, for({:def, raw} <- inner, do: raw)}
+      end
+
+    if protocols == %{} and impls == [], do: [], else: Rian.Protocol.expand(protocols, impls)
   end
 
   defp parse_alias(text) do
@@ -330,6 +353,26 @@ defmodule Rian.Decl do
   defp take_decl([{:kw, "mod"} | _]),
     do: raise(Error, "expected `mod Name do … end`")
 
+  # `protocol Name do <def heads> end` (ADR-0042 §3) — method signatures, no
+  # bodies; reuses the `mod` body collector (each line is a bodiless `def`).
+  defp take_decl([{:kw, "protocol"}, {:id, name}, {:kw, "do"} | rest]) do
+    {inner, rest} = take_mod_body(rest, [])
+    {{:protocol, name, inner, nil}, rest}
+  end
+
+  defp take_decl([{:kw, "protocol"} | _]),
+    do: raise(Error, "expected `protocol Name do … end`")
+
+  # `impl Protocol for Type do <defs> end` (ADR-0042 §3). `for` is in declaration
+  # position here (an `{:id, "for"}` token), never the comprehension `for`.
+  defp take_decl([{:kw, "impl"}, {:id, proto}, {:id, "for"}, {:id, type}, {:kw, "do"} | rest]) do
+    {inner, rest} = take_mod_body(rest, [])
+    {{:impl, proto, type, inner, nil}, rest}
+  end
+
+  defp take_decl([{:kw, "impl"} | _]),
+    do: raise(Error, "expected `impl Protocol for Type do … end`")
+
   defp take_decl([{:kw, kw} | _]),
     do:
       raise(
@@ -386,7 +429,9 @@ defmodule Rian.Decl do
   defp decl_boundary?([{:annot, _} | _]), do: true
   defp decl_boundary?(toks), do: decl_kw?(toks)
 
-  defp decl_kw?([{:kw, k} | _]), do: k in ~w(type def struct alias mod pub const macro use import)
+  defp decl_kw?([{:kw, k} | _]),
+    do: k in ~w(type def struct alias mod pub const macro use import protocol impl)
+
   defp decl_kw?(_), do: false
 
   # `def name(params) <head>` then a body: `:= expr` (to newline), a block
@@ -619,7 +664,8 @@ defmodule Rian.Decl do
       clauses: Enum.map(clauses, &clause(&1, length(params))),
       pub?: sig[:pub] == true,
       tvars: sig[:tvars] || [],
-      doc: sig[:doc]
+      doc: sig[:doc],
+      synthetic: sig[:synthetic] == true
     }
   end
 
@@ -634,7 +680,8 @@ defmodule Rian.Decl do
       clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}],
       pub?: d[:pub] == true,
       tvars: d[:tvars] || [],
-      doc: d[:doc]
+      doc: d[:doc],
+      synthetic: d[:synthetic] == true
     }
   end
 

@@ -1,0 +1,56 @@
+# ===========================================================================
+# 13 — Protocols & impls: bounded, opted-in, totality-safe (ADR-0042 part 2)
+# ===========================================================================
+# Character: a `protocol` names method *signatures*; an `impl P for T` supplies
+# them for one concrete type. Dispatch is on the FIRST argument (the Elixir-
+# protocol convention) and **static where the type is known** — on the BEAM the
+# dispatcher is a guarded `def`, selecting the impl by the receiver's runtime
+# type. Protocols add NO case-arms and touch NO exhaustiveness (ADR-0042 §6):
+# dispatch is a separate mechanism from `case`.
+#
+# Coherence (the Rust orphan rule, ADR-0042 §5): exactly one impl per
+# (protocol, type) — duplicate impls, method-set mismatches, and two impl types
+# sharing a runtime guard are all rejected at compile time.
+#
+# MVP slice: impls are over PRIMITIVE types (Int64 / Bool / String / Float64 /
+# Char); sum-type tag dispatch, the generic `forall T: Bound` call path, and the
+# Rust/JS lowerings are deferred (BEAM-first).
+#
+# ADRs: 0042 (protocols/generics) · 0035 (no hidden control flow) · 0033 (vocab)
+# ---------------------------------------------------------------------------
+
+# `Show` — a one-method protocol; `Self` is the implementing type.
+protocol Show do
+  def show(self Self) String
+end
+
+# Each impl supplies the body for one type. The parameter types come from the
+# protocol signature (`Self` -> the impl type), so the impl writes just names.
+impl Show for Bool do
+  def show(b) := if b do "true" else "false" end
+end
+
+impl Show for Int64 do
+  def show(n) := "an integer"
+end
+
+impl Show for String do
+  def show(s) := s
+end
+
+# A two-argument protocol dispatches on its first argument.
+protocol Eq do
+  def eq(a Self, b Self) Bool
+end
+
+impl Eq for Int64 do
+  def eq(a, b) := a == b
+end
+
+impl Eq for Bool do
+  def eq(a, b) := a == b
+end
+
+# `show(true)` -> "true" · `show(42)` -> "an integer" · `eq(3, 3)` -> true.
+# The `show`/`eq` dispatchers and the `impl_show_bool_show`, `impl_eq_int64_eq`,
+# … impl functions all compile to one BEAM module and run.
