@@ -232,10 +232,27 @@ token-for-token across the corpus (`test/rian/fixpoint_test.exs`), and a
 deliberately wrong projection is *caught* — the diff has teeth, it is not
 vacuously green.
 
-This is the verification step the **real-lexer port** (the next self-hosting
-move) plugs into: as the Rian lexer grows toward the full Rian token vocabulary,
-widen the corpus and projection and the harness keeps proving agreement — turning
-each ported slice into a regression test rather than a fresh demo.
+This is the verification step the **real-lexer port** plugs into: as the Rian
+lexer grows toward the full Rian token vocabulary, widen the corpus and
+projection and the harness keeps proving agreement — turning each ported slice
+into a regression test rather than a fresh demo.
+
+### Real-lexer port — slice 1: identifiers + keywords
+
+[`examples/rian/selfhost_lexer_v2.rian`](examples/rian/selfhost_lexer_v2.rian)
+begins the port of the *real* `Rian.Lexer` (not the arithmetic toy). Slice 1
+adds **identifiers and keywords** on top of numbers/operators/parens — newly
+writable because `Char` is now a real ordinal type (ADR-0036): the scanner
+classifies bytes with `Char` comparisons (`c >= 'a' and c <= 'z'`, inlined in
+`when` guards since BEAM guards can't call user functions), folds digit runs
+with ordinal arithmetic (`acc * 10 + c - '0'`), accumulates a name as a
+`Vec(Char)` and `__prim_str_from_chars`-es it, and decides keyword-vs-identifier
+by string-literal clause heads. It compiles to real `.beam` and **agrees with
+`Rian.Lexer.expr_tokens/1`** over a corpus of identifiers, keywords, integers,
+operators, and parens (the slice-1 fixpoint test). Direct evidence that the
+`Char`/range work unblocked the port. Next slices: strings, floats/`_`
+separators, the full operator set, and significant newlines — each widening the
+corpus.
 
 ## The whole compiler as one Rian artifact
 

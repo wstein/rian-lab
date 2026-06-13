@@ -54,4 +54,43 @@ defmodule Rian.FixpointTest do
       assert {:op, "-"} in got
     end
   end
+
+  # ── lexer port, slice 1: identifiers + keywords (selfhost_lexer_v2.rian) ──
+  # v2 keeps its own `Tok` sum; its parens are `TLP`/`TRP` (`:tlp`/`:trp`), distinct
+  # from the toy lexer's `:tl_paren`/`:tr_paren`, so project them here.
+  defp project_v2({:t_id, s}), do: {:id, s}
+  defp project_v2({:t_kw, s}), do: {:kw, s}
+  defp project_v2(:tlp), do: {:lparen}
+  defp project_v2(:trp), do: {:rparen}
+  defp project_v2(other), do: project(other)
+
+  # within slice-1's vocabulary: integers, identifiers, the five keywords v2
+  # classifies, the four operators, parens, and spaces
+  @corpus_v2 [
+    "foo",
+    "x_1",
+    "if x do y end",
+    "12 * (x_1 + foo)",
+    "a + b - c",
+    "def f",
+    "x1 * y2 / z3",
+    "  spaced  out  ",
+    "ifx else end"
+  ]
+
+  describe "lexer port slice 1 — identifiers + keywords agree with the reference" do
+    setup do
+      mod =
+        Fixpoint.load_lexer(
+          File.read!("examples/rian/selfhost_lexer_v2.rian"),
+          :rian_fixpoint_lexer_v2
+        )
+
+      {:ok, mod: mod}
+    end
+
+    test "the v2 Rian lexer agrees with Rian.Lexer over the slice-1 corpus", %{mod: mod} do
+      assert Fixpoint.check(mod, @corpus_v2, &project_v2/1) == :ok
+    end
+  end
 end

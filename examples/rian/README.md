@@ -41,6 +41,10 @@ compile + run on real BEAM bytecode:
 
 - [selfhost_lexer.rian](selfhost_lexer.rian) — a real arithmetic lexer (its own
   `Token` sum, list-pattern recursion).
+- [selfhost_lexer_v2.rian](selfhost_lexer_v2.rian) — porting the *real*
+  `Rian.Lexer` to Rian (slice 1): adds **identifiers and keywords** on top of
+  numbers/operators/parens, using `Char` comparisons and ordinal arithmetic
+  (ADR-0036). Checked against the reference lexer by `Rian.Fixpoint`.
 - [selfhost_parser.rian](selfhost_parser.rian) — a precedence-climbing
   expression parser (a slice of `Rian.Pratt`) that consumes the lexer's
   `Vec(Token)`, builds its own `Expr` sum, and threads `(Expr, Vec(Token))` as a
