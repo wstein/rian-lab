@@ -119,7 +119,7 @@ defmodule Rian.Reach do
   `rian: [targets: […]]`, else `nil` (no default gate).
   """
   def build_default do
-    Application.get_env(:rian_lab, :rian_targets) || mix_default()
+    validate_default(Application.get_env(:rian_lab, :rian_targets) || mix_default())
   end
 
   defp mix_default do
@@ -127,6 +127,30 @@ defmodule Rian.Reach do
       get_in(Mix.Project.config(), [:rian, :targets])
     end
   end
+
+  # the build-default runs on every compile (`gate!/1`); validate it against the
+  # same closed vocabulary the `@targets` annotation checks, so a typo or wrong
+  # type (`["ex"]`, `:foo`) fails with a clear message rather than silently
+  # mis-gating every module with confusing "missing" violations.
+  defp validate_default(nil), do: nil
+
+  defp validate_default(ts) when is_list(ts) do
+    case ts -- @targets do
+      [] ->
+        ts
+
+      bad ->
+        raise Error,
+              "invalid build-default target(s) #{inspect(bad)}; known: #{inspect(@targets)}"
+    end
+  end
+
+  defp validate_default(other),
+    do:
+      raise(
+        Error,
+        "build-default targets must be a list of #{inspect(@targets)}, got: #{inspect(other)}"
+      )
 
   defp contract_message(violations) do
     lines =

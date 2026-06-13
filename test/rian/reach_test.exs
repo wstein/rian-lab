@@ -174,5 +174,38 @@ defmodule Rian.ReachTest do
         Application.delete_env(:rian_lab, :rian_targets)
       end
     end
+
+    test "build_default/0 validates the configured set against the target vocabulary" do
+      # a typo or wrong type must fail clearly, not silently mis-gate every module
+      Application.put_env(:rian_lab, :rian_targets, [:ex, :foo])
+
+      try do
+        assert_raise Reach.Error, ~r/invalid build-default target\(s\) \[:foo\]/, fn ->
+          Reach.build_default()
+        end
+      after
+        Application.delete_env(:rian_lab, :rian_targets)
+      end
+
+      # a list of the wrong element type is still a vocabulary error
+      Application.put_env(:rian_lab, :rian_targets, ["ex"])
+
+      try do
+        assert_raise Reach.Error, ~r/invalid build-default target/, fn ->
+          Reach.build_default()
+        end
+      after
+        Application.delete_env(:rian_lab, :rian_targets)
+      end
+
+      # a non-list value is rejected with the type message
+      Application.put_env(:rian_lab, :rian_targets, :ex)
+
+      try do
+        assert_raise Reach.Error, ~r/must be a list of/, fn -> Reach.build_default() end
+      after
+        Application.delete_env(:rian_lab, :rian_targets)
+      end
+    end
   end
 end
