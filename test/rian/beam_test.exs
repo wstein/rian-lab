@@ -620,6 +620,91 @@ defmodule Rian.BeamTest do
         Beam.compile("def g(x Int64, ys Vec(Int64)) Bool := x in ys", :rian_beam_bad)
       end
     end
+
+    test "boolean literals and the `not`/`or`/`!=` operators lower and run" do
+      {:ok, mod} =
+        Beam.load(
+          "def f(a Bool, b Bool) Bool := not a or (b != true)",
+          :rian_beam_bool_ops
+        )
+
+      assert mod.f(false, false) == true
+      assert mod.f(true, true) == false
+    end
+
+    test "unary minus, `rem`, and float `/` lower to the right Erlang ops" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def g(a Int64, b Int64) Int64 := -a + (a rem b)
+          def d(a Float64, b Float64) Float64 := a / b
+          """,
+          :rian_beam_arith_ops
+        )
+
+      # -7 + (7 rem 5) = -7 + 2 = -5
+      assert mod.g(7, 5) == -5
+      assert mod.d(7.0, 2.0) == 3.5
+    end
+
+    test "a map literal in a body becomes a native BEAM map (atom keys)" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def mk(n Int64) Int64
+          def mk(_) := __prim_map_get(%{tag: 5}, :tag)
+          """,
+          :rian_beam_map_lit
+        )
+
+      # the wildcard clause head (`_`) and the `%{tag: 5}` literal both exercise
+      # uncovered paths; the map round-trips through `__prim_map_get`
+      assert mod.mk(0) == 5
+    end
+
+    test "an immediately-applied lambda lowers to a call on a fun expression" do
+      {:ok, mod} =
+        Beam.load("def f(x Int64) Int64 := ((y) -> y + 1)(x)", :rian_beam_iife)
+
+      assert mod.f(41) == 42
+    end
+
+    test "remote `&Mod.fun/arity` captures are Erlang fun references (Elixir module + Erlang atom)" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def elixir_cap() Fn(String, Int64) := &String.length/1
+          def erlang_cap() Fn(Int64, Vec(Int64)) := &:lists.duplicate/1
+          """,
+          :rian_beam_mod_cap
+        )
+
+      # PascalCase head -> `Elixir.String`; an Erlang-atom head -> the bare atom
+      assert mod.elixir_cap().("hello") == 5
+      assert is_function(mod.erlang_cap(), 1)
+    end
+
+    test "`&(…)` anonymous captures count placeholders through tuple/list/dot/call bodies" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          struct P(x Int64)
+          def g(n Int64) Int64 := n + 1
+          def as_tuple() Fn(Int64, Int64) := &({&1, &2})
+          def as_list() Fn(Int64, Int64)  := &([&1, &2])
+          def as_cons() Fn(Int64, Int64)  := &([&1 | &2])
+          def via_dot() Fn(P, Int64)       := &(&1.x)
+          def via_call() Fn(Int64, Int64)  := &(g(&1))
+          """,
+          :rian_beam_cap_arity
+        )
+
+      assert mod.as_tuple().(1, 2) == {1, 2}
+      assert mod.as_list().(1, 2) == [1, 2]
+      assert mod.as_cons().(1, [2]) == [1, 2]
+      assert mod.via_dot().(%{__struct__: :p, x: 9}) == 9
+      assert mod.via_call().(5) == 6
+    end
   end
 
   describe "Stage 0.5 — Dialyzer-checkable `-spec`/`-type` attributes" do

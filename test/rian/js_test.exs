@@ -309,4 +309,118 @@ defmodule Rian.JSTest do
       assert node_eval(js, "kind(99n)") in [:no_node, "int"]
     end
   end
+
+  describe "patterns: empty list, cons, tuples (ADR-0049/0050)" do
+    test "the empty-list clause and a cons clause lower to length tests + slice" do
+      js =
+        JS.compile("""
+        def sum(xs Vec(Int64)) Int64
+        def sum([]) := 0
+        def sum([h | t]) := h + sum(t)
+        """)
+
+      # closed [] -> exact length; cons [h | t] -> length >= 1, head index, slice tail
+      assert js =~ "if (a0.length === 0)"
+      assert js =~ "if (a0.length >= 1)"
+      assert js =~ "const h = a0[0];"
+      assert js =~ "const t = a0.slice(1);"
+
+      assert node_eval(js, "sum([1n,2n,3n,4n])") in [:no_node, "10"]
+      assert node_eval(js, "sum([])") in [:no_node, "0"]
+    end
+
+    test "a tuple literal lowers to a JS array; unary minus negates in place" do
+      js = JS.compile("def pair(n Int64) Tup := {-n, n}")
+      assert js =~ "return [-n, n];"
+
+      assert node_eval(js, "JSON.stringify(pair(5n).map(String))") in [
+               :no_node,
+               ~s|["-5","5"]|
+             ]
+    end
+
+    test "a map literal lowers to a JS object (identifier keys -> object keys)" do
+      js = JS.compile("def m() Map := %{a: 1, b: 2}")
+      assert js =~ "return {a: 1n, b: 2n};"
+
+      assert node_eval(js, "JSON.stringify(m(), (k,v)=>typeof v==='bigint'?v.toString():v)") in [
+               :no_node,
+               ~s|{"a":"1","b":"2"}|
+             ]
+    end
+  end
+
+  describe "block bodies, guards, and branches (ADR-0050)" do
+    test "a multi-statement body emits lets and expr-statements then returns a value" do
+      # `;`-separated statements: a bind (`let`), an expr statement, a returned value
+      js = JS.compile("def f(n Int64) Int64 := x := n + 1; g(x); x * 2")
+      assert js =~ "let x = (n + 1n);"
+      assert js =~ "g(x);"
+      assert js =~ "return (x * 2n);"
+    end
+
+    test "a block whose last statement is a bind returns the bound value" do
+      # stmt_return({:bind, …}) — the final `x := …` yields its rhs as the return
+      js = JS.compile("def f(n Int64) Int64 := y := n - 1; x := n + 1")
+      assert js =~ "let y = (n - 1n);"
+      assert js =~ "return (n + 1n);"
+      assert node_eval(js, "f(4n)") in [:no_node, "5"]
+    end
+
+    test "a guarded `case` arm wraps the return in an `if`" do
+      js =
+        JS.compile("""
+        def classify(n Int64) String
+        def classify(n) do
+          case n do
+            x when x > 0 -> "pos"
+            _ -> "other"
+          end
+        end
+        """)
+
+      # arm_return with a guard -> `if (g) { return …; }`; the unguarded arm falls through
+      assert js =~ ~s|if ((x > 0n)) { return "pos"; }|
+      assert js =~ ~s|return "other";|
+
+      assert node_eval(js, "classify(5n)") in [:no_node, "pos"]
+      assert node_eval(js, "classify(-1n)") in [:no_node, "other"]
+    end
+
+    test "a multi-statement `if` branch lowers to an IIFE; an empty branch is `undefined`" do
+      iife = JS.compile("def f(n Int64) Int64 := if n > 0 do y := n + 1; y else 0 end")
+      assert iife =~ "(() => { let y = (n + 1n); return y; })()"
+      assert node_eval(iife, "f(4n)") in [:no_node, "5"]
+
+      empty = JS.compile("def g(b Bool) Int64 := if b do else 2 end")
+      assert empty =~ "(b ? undefined : 2n)"
+      assert node_eval(empty, "String(g(false))") in [:no_node, "2"]
+    end
+
+    test "a Float64 literal passes through as a native JS number (no BigInt suffix)" do
+      js = JS.compile("def f(x Float64) Float64 := x + 1.5")
+      assert js =~ "(x + 1.5)"
+      refute js =~ "1.5n"
+      assert node_eval(js, "f(2.5)") in [:no_node, "4"]
+    end
+  end
+
+  describe "operators map to their JS equivalents (js_op)" do
+    test "!=, or, <>, rem lower to their JS operators" do
+      assert JS.compile("def f(a Int64, b Int64) Bool := a != b") =~ "(a !== b)"
+      assert JS.compile("def f(a Bool, b Bool) Bool := a or b") =~ "(a || b)"
+      assert JS.compile("def f(a String, b String) String := a <> b") =~ "(a + b)"
+      assert JS.compile("def f(a Int64, b Int64) Int64 := a rem b") =~ "(a % b)"
+    end
+
+    test "a bare boolean literal and `not` lower to JS booleans/negation" do
+      bool = JS.compile("def t() Bool := true")
+      assert bool =~ "return true;"
+      assert node_eval(bool, "t()") in [:no_node, "true"]
+
+      neg = JS.compile("def f(b Bool) Bool := not b")
+      assert neg =~ "return !b;"
+      assert node_eval(neg, "f(false)") in [:no_node, "true"]
+    end
+  end
 end

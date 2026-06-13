@@ -1,0 +1,77 @@
+defmodule Rian.ComptimeTest do
+  use ExUnit.Case, async: true
+
+  alias Rian.{Comptime, Pratt}
+
+  defp fold(src), do: Comptime.fold(Pratt.parse(src))
+
+  describe "pure comptime folding (ADR-0009/0030)" do
+    test "integer / float / underscore literals fold to a numeric node" do
+      assert fold("comptime(42)") == {:num, "42"}
+      assert fold("comptime(1_000)") == {:num, "1000"}
+      assert fold("comptime(3.14)") == {:num, "3.14"}
+    end
+
+    test "arithmetic folds (precedence preserved)" do
+      assert fold("comptime(2 + 3 * 4)") == {:num, "14"}
+      assert fold("comptime(10 - 3)") == {:num, "7"}
+      assert fold("comptime(-5)") == {:num, "-5"}
+      # `/` is float division
+      assert fold("comptime(6 / 2)") == {:num, "3.0"}
+    end
+
+    test "integer `div`/`rem` fold" do
+      assert fold("comptime(7 div 2)") == {:num, "3"}
+      assert fold("comptime(7 rem 2)") == {:num, "1"}
+    end
+
+    test "comparisons and `not` fold to a boolean id" do
+      assert fold("comptime(1 < 2)") == {:id, "true"}
+      assert fold("comptime(2 <= 2)") == {:id, "true"}
+      assert fold("comptime(3 > 10)") == {:id, "false"}
+      assert fold("comptime(5 >= 5)") == {:id, "true"}
+      assert fold("comptime(1 == 1)") == {:id, "true"}
+      assert fold("comptime(1 != 2)") == {:id, "true"}
+      assert fold("comptime(not (1 < 2))") == {:id, "false"}
+    end
+
+    test "folds a comptime block nested inside a larger expression" do
+      assert fold("1 + comptime(2 * 3)") == {:bin, "+", {:num, "1"}, {:num, "6"}}
+    end
+
+    test "a non-comptime expression is returned unchanged" do
+      assert fold("a + b") == {:bin, "+", {:id, "a"}, {:id, "b"}}
+    end
+  end
+
+  describe "the sandbox refuses non-constant / effectful nodes" do
+    test "division by zero (float and integer) is refused" do
+      assert_raise RuntimeError, ~r/division by zero/, fn -> fold("comptime(1 / 0)") end
+      assert_raise RuntimeError, ~r/division by zero/, fn -> fold("comptime(1 div 0)") end
+    end
+
+    test "`div`/`rem` require integer operands" do
+      assert_raise RuntimeError, ~r/require integer operands/, fn ->
+        fold("comptime(7.0 div 2)")
+      end
+    end
+
+    test "an operator with no comptime meaning is refused" do
+      assert_raise RuntimeError, ~r/operator `<>` not allowed/, fn -> fold("comptime(1 <> 2)") end
+    end
+
+    test "`not` on a non-boolean is refused" do
+      assert_raise RuntimeError, ~r/`not` expects a boolean/, fn -> fold("comptime(not 5)") end
+    end
+
+    test "calls, identifiers, and field/FFI access are refused" do
+      assert_raise RuntimeError, ~r/calls are not allowed/, fn -> fold("comptime(f(1))") end
+      assert_raise RuntimeError, ~r/not a compile-time constant/, fn -> fold("comptime(x)") end
+      assert_raise RuntimeError, ~r/not allowed in comptime/, fn -> fold("comptime(a.b)") end
+    end
+
+    test "an otherwise-unsupported node is refused" do
+      assert_raise RuntimeError, ~r/unsupported in comptime/, fn -> fold("comptime([1, 2])") end
+    end
+  end
+end

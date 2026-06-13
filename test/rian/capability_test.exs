@@ -121,6 +121,57 @@ defmodule Rian.CapabilityTest do
     end
   end
 
+  describe "Rust lowering — tag, the Int53 scalar, and generic nominals" do
+    test "tag borrows the owned form (&Owned), like a shared reference" do
+      assert C.rust_param(:tag, "Shape") == "&Shape"
+      assert C.rust_param(:tag, "Vec(Float64)") == "&Vec<f64>"
+    end
+
+    test "Int53 (the JS-safe integer) lowers to i64 on the Rust target" do
+      # `val Int53` is Copy, so it passes by value through rust_name -> rust_scalar
+      assert C.rust_param(:val, "Int53") == "i64"
+    end
+
+    test "a generic nominal lowers each top-level argument, nesting parens" do
+      # split_top_level must respect nested parens and split only on the outer
+      # comma: `Wrap(Vec(Int64), Bool)` -> `Wrap<Vec<i64>, bool>`
+      assert C.owned("Wrap(Vec(Int64), Bool)") == "Wrap<Vec<i64>, bool>"
+    end
+  end
+
+  describe "BEAM linearity over remaining node shapes" do
+    test "string / char / atom literals consume nothing" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse(~s|g("x", f)|)) == :ok
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("g('A', f)")) == :ok
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("g(:k, f)")) == :ok
+    end
+
+    test "a unary operator counts its operand" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("eq(not f, f)")) == {:error, [{"f", 2}]}
+    end
+
+    test "a named capture (&f/1) counts the captured path" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("pair(&f/1, f)")) == {:error, [{"f", 2}]}
+    end
+
+    test "a list tail (`[h | t]`) is counted alongside the elements" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("[f | f]")) == {:error, [{"f", 2}]}
+    end
+
+    test "a typed-bind block statement binds and shadows the name" do
+      assert C.lin_check(%{"f" => :iso}, Pratt.parse("if true do x Int64 := f; x else 0 end")) ==
+               :ok
+    end
+
+    test "case literal patterns bind nothing; variable patterns shadow within the arm" do
+      assert C.lin_check(
+               %{"f" => :iso},
+               Pratt.parse("case s do\n0 -> drop(f)\ny -> g(y, f)\nend")
+             ) ==
+               :ok
+    end
+  end
+
   describe "BEAM legality" do
     test "ref is rejected on the BEAM target" do
       assert_raise RuntimeError, ~r/`ref` is not permitted on the BEAM/, fn ->

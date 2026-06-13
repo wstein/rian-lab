@@ -243,4 +243,277 @@ defmodule Rian.PrattTest do
                [{:map, [{"tag", {:atom, "num"}}, {"val", {:var, "v"}}]}]
     end
   end
+
+  describe "malformed input raises (expression parser)" do
+    test "trailing tokens after a parenthesized expression: missing `)`" do
+      assert_raise ArgumentError, ~r/expected `\)`/, fn -> Pratt.parse("(a b") end
+    end
+
+    test "a call argument not followed by `,` or `)`" do
+      assert_raise ArgumentError, ~r/expected `,` or `\)`/, fn -> Pratt.parse("f(a b)") end
+    end
+
+    test "a list literal element not followed by `,`, `|`, or `]`" do
+      assert_raise ArgumentError, ~r/bad list/, fn -> Pratt.parse("[1 2]") end
+    end
+
+    test "a tuple literal element not followed by `,` or `}`" do
+      assert_raise ArgumentError, ~r/bad tuple/, fn -> Pratt.parse("{1 2}") end
+    end
+
+    test "a map literal pair not followed by `,` or `}`" do
+      assert_raise ArgumentError, ~r/bad map/, fn -> Pratt.parse("%{a: 1 b: 2}") end
+    end
+
+    test "a list literal with a cons tail must close with `]`" do
+      assert_raise ArgumentError, ~r/expected `\]`/, fn -> Pratt.parse("[a | b c]") end
+    end
+
+    test "an anonymous capture must close with `)`" do
+      assert_raise ArgumentError, ~r/expected `\)`/, fn -> Pratt.parse("&(a b)") end
+    end
+  end
+
+  describe "malformed input raises (lambda / params)" do
+    test "more than the matched lambda params is rejected" do
+      assert_raise ArgumentError, ~r/bad lambda params/, fn -> Pratt.parse("(x y z) -> x") end
+    end
+  end
+
+  describe "malformed input raises (function captures)" do
+    test "a named capture needs an integer arity after `/`" do
+      assert_raise ArgumentError, ~r/expected an integer arity after `\/`/, fn ->
+        Pratt.parse("&f/x")
+      end
+    end
+
+    test "a capture path must start with a name or `:atom`" do
+      assert_raise ArgumentError, ~r/bad capture path/, fn -> Pratt.parse("&+/2") end
+    end
+  end
+
+  describe "malformed input raises (statement bodies)" do
+    test "trailing tokens in a body after the final expression raise" do
+      # two ids `a b` parse as one expression `a` followed by a stray `b`, which
+      # has no statement form, so it surfaces as a trailing-token error.
+      assert_raise ArgumentError, ~r/trailing tokens in body/, fn -> Pratt.parse_body("a b") end
+    end
+  end
+
+  describe "malformed input raises (`expect_*` helpers)" do
+    test "an `if` without `do` reports the expected keyword" do
+      assert_raise ArgumentError, ~r/expected `do`/, fn -> Pratt.parse("if c x end") end
+    end
+
+    test "a `case` arm without `->` reports the expected operator" do
+      assert_raise ArgumentError, ~r/expected `->`/, fn -> Pratt.parse("case x do _ x end") end
+    end
+  end
+
+  describe "malformed input raises (pattern parser)" do
+    test "trailing tokens after a pattern in a pattern list" do
+      assert_raise ArgumentError, ~r/trailing tokens in pattern list/, fn ->
+        Pratt.parse_pats("a b")
+      end
+    end
+
+    test "a token that begins no pattern is unsupported" do
+      assert_raise ArgumentError, ~r/unsupported pattern/, fn -> Pratt.parse_pats("+") end
+    end
+
+    test "a map pattern pair not followed by `,` or `}`" do
+      assert_raise ArgumentError, ~r/bad map pattern/, fn -> Pratt.parse_pats("%{a: 1 b: 2}") end
+    end
+
+    test "a map pattern key must be an identifier followed by `:`" do
+      assert_raise ArgumentError, ~r/bad map pattern/, fn -> Pratt.parse_pats("%{1}") end
+    end
+
+    test "a struct pattern field not followed by `,` or `)`" do
+      assert_raise ArgumentError, ~r/bad struct pattern/, fn ->
+        Pratt.parse_pats("Point(x: a y: b)")
+      end
+    end
+
+    test "a struct pattern with a non-field token raises" do
+      assert_raise ArgumentError, ~r/bad struct pattern fields/, fn ->
+        Pratt.parse_pats("Point(x: a, 1)")
+      end
+    end
+
+    test "a tuple pattern element not followed by `,` or `}`" do
+      assert_raise ArgumentError, ~r/bad tuple pattern/, fn -> Pratt.parse_pats("{a b}") end
+    end
+
+    test "a list pattern element not followed by `,`, `|`, or `]`" do
+      assert_raise ArgumentError, ~r/bad list pattern/, fn -> Pratt.parse_pats("[a b]") end
+    end
+
+    test "a positional ctor pattern arg not followed by `,` or `)`" do
+      assert_raise ArgumentError, ~r/expected `,` or `\)` in pattern/, fn ->
+        Pratt.parse_pats("Some(a b)")
+      end
+    end
+  end
+
+  describe "function captures (s-expr round-trip)" do
+    test "a `&:mod.fun/arity` capture parses with an atom-rooted dotted path" do
+      assert Pratt.parse_sexpr("&:erlang.length/1") == "(&/ (. :erlang length) 1)"
+    end
+
+    test "a `&N` placeholder and an anonymous `&( … )` capture parse" do
+      assert Pratt.parse_sexpr("&1") == "&1"
+      assert Pratt.parse_sexpr("&(a + b)") == "(& (+ a b))"
+    end
+  end
+
+  describe "lambdas (s-expr printer)" do
+    test "an empty-parameter lambda parses" do
+      assert Pratt.parse_sexpr("() -> 1") == "(lambda () 1)"
+    end
+
+    test "a multi-parameter lambda renders its parameter names" do
+      assert Pratt.parse_sexpr("(x, y) -> x + y") == "(lambda (x y) (+ x y))"
+    end
+
+    test "a typed lambda parameter `(x Int)` keeps the bare name in the printer" do
+      assert Pratt.parse_sexpr("(x Int) -> x") == "(lambda (x) x)"
+    end
+
+    test "nested parentheses are not mistaken for a lambda header" do
+      assert Pratt.parse_sexpr("((a + b))") == "(+ a b)"
+    end
+  end
+
+  describe "if / blocks (s-expr printer)" do
+    test "an `if` with both branches renders nested blocks" do
+      assert Pratt.parse_sexpr("if c do a else b end") == "(if c (block a) (block b))"
+    end
+
+    test "an `if` without `else` renders an empty else block" do
+      assert Pratt.parse_sexpr("if c do a end") == "(if c (block a) (block))"
+    end
+
+    test "a `;`-separated block stops cleanly at `else`" do
+      assert Pratt.parse_sexpr("if c do a; b else d end") == "(if c (block a b) (block d))"
+    end
+
+    test "a block renders bind and expression statements" do
+      assert Pratt.parse_sexpr("if c do x := 1; x else 0 end") ==
+               "(if c (block (:= x 1) x) (block 0))"
+    end
+  end
+
+  describe "case (s-expr printer covers pattern + guard rendering)" do
+    test "a single-arm case renders" do
+      assert Pratt.parse_sexpr("case x do _ -> 1 end") == "(case x (_ -> 1))"
+    end
+
+    test "a `when` guard is parsed (and elided by the printer)" do
+      assert Pratt.parse_sexpr("case x do n when n > 0 -> 1 _ -> 0 end") ==
+               "(case x (n -> 1) (_ -> 0))"
+    end
+
+    test "string, list (closed & cons), and nullary-ctor patterns render" do
+      assert Pratt.parse_sexpr(~s|case x do "hi" -> 1 _ -> 0 end|) ==
+               "(case x (\"hi\" -> 1) (_ -> 0))"
+
+      assert Pratt.parse_sexpr("case x do [a, b] -> 1 _ -> 0 end") ==
+               "(case x ([a, b] -> 1) (_ -> 0))"
+
+      assert Pratt.parse_sexpr("case x do [a | b] -> 1 _ -> 0 end") ==
+               "(case x ([a | b] -> 1) (_ -> 0))"
+
+      assert Pratt.parse_sexpr("case x do None -> 1 _ -> 0 end") ==
+               "(case x (None -> 1) (_ -> 0))"
+    end
+  end
+
+  describe "literals & collections (s-expr printer)" do
+    test "a labeled call argument renders as `name: value`" do
+      assert Pratt.parse_sexpr("f(n: 1)") == "(call f n: 1)"
+    end
+
+    test "list literals with and without a cons tail render" do
+      assert Pratt.parse_sexpr("[1, 2]") == "[1 2]"
+      assert Pratt.parse_sexpr("[a | b]") == "[a | b]"
+    end
+
+    test "a map literal renders its `key: value` pairs" do
+      assert Pratt.parse_sexpr("%{a: 1, b: 2}") == "%{a: 1 b: 2}"
+    end
+  end
+
+  describe "empty pattern list" do
+    test "parsing an empty string yields no patterns" do
+      assert Pratt.parse_pats("") == []
+    end
+  end
+
+  describe "empty and multi-element collections / patterns" do
+    test "empty literals parse to empty nodes" do
+      assert Pratt.parse_sexpr("[]") == "[]"
+      assert Pratt.parse_sexpr("{}") == "{}"
+      assert Pratt.parse_sexpr("%{}") == "%{}"
+    end
+
+    test "a comma-separated pattern list parses each pattern" do
+      assert Pratt.parse_pats("a, b") == [{:var, "a"}, {:var, "b"}]
+    end
+
+    test "empty and multi-element collection patterns parse" do
+      assert Pratt.parse_pats("[]") == [{:list, [], :close}]
+      assert Pratt.parse_pats("{}") == [{:tuple, []}]
+      assert Pratt.parse_pats("%{}") == [{:map, []}]
+      assert Pratt.parse_pats("[a, b]") == [{:list, [{:var, "a"}, {:var, "b"}], :close}]
+      assert Pratt.parse_pats("{a, b}") == [{:tuple, [{:var, "a"}, {:var, "b"}]}]
+    end
+
+    test "a multi-argument ctor pattern and an empty-args ctor pattern parse" do
+      assert Pratt.parse_pats("Pair(a, b)") ==
+               [{:ctor, "Pair", [{:var, "a"}, {:var, "b"}]}]
+
+      assert Pratt.parse_pats("None()") == [{:ctor, "None", []}]
+    end
+
+    test "a list cons-tail pattern parses" do
+      assert Pratt.parse_pats("[h | t]") == [{:list, [{:var, "h"}], {:tail, {:var, "t"}}}]
+    end
+
+    test "a negative-integer literal pattern parses" do
+      assert Pratt.parse_pats("-1") == [{:lit, -1}]
+    end
+  end
+
+  describe "with: multiple clauses and the no-else form" do
+    test "comma-separated `with` clauses parse" do
+      assert Pratt.parse_sexpr("with a <- f(x), b <- g(y) do a end") ==
+               "(with (<- a (call f x)) (<- b (call g y)) (block a))"
+    end
+
+    test "a `with` without an `else` omits the else group" do
+      assert Pratt.parse_sexpr("with {:ok, x} <- f(a) do x end") ==
+               "(with (<- {:ok, x} (call f a)) (block x))"
+    end
+  end
+
+  describe "unexpected leading token" do
+    test "a token that begins no primary expression raises" do
+      assert_raise ArgumentError, ~r/unexpected token/, fn -> Pratt.parse(")") end
+    end
+  end
+
+  describe "block statement boundaries" do
+    test "an empty body is an empty block (statements stop on no tokens)" do
+      assert Pratt.parse_body("") == {:block, []}
+    end
+
+    test "a trailing `;` leaves the block at its last statement" do
+      assert Pratt.parse_body("x := 1 ;") == {:block, [{:bind, "x", {:num, "1"}}]}
+    end
+
+    test "a then-branch block stops at `else` (statements stop on a keyword)" do
+      assert Pratt.parse_sexpr("if c do a; b else d end") == "(if c (block a b) (block d))"
+    end
+  end
 end

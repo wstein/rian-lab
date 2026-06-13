@@ -144,4 +144,348 @@ defmodule Rian.LowerTest do
       assert apply(HoGenTest, :apply_twice, [&(&1 + 1), 5]) == 7
     end
   end
+
+  # ─────────────────────────────────────────────────────────────────────────
+  # Added coverage: per-node emit/2 clauses and the higher-level entry points.
+  # ─────────────────────────────────────────────────────────────────────────
+
+  alias Rian.{Decl, Pratt}
+
+  describe "single-node expression emission" do
+    test "dotted access lowers to `head::name` on Rust" do
+      assert Lower.emit_expr("M.x", :rust) == "m::x"
+    end
+
+    test "unary minus on both targets" do
+      assert Lower.emit_expr("-x", :rust) == "-x"
+      assert Lower.emit_expr("-x", :elixir) == "-x"
+    end
+
+    test "`rem` is a function on Elixir, `%` on Rust" do
+      assert Lower.emit_expr("a rem b", :elixir) == "rem(a, b)"
+      assert Lower.emit_expr("a rem b", :rust) == "a % b"
+    end
+
+    test "`or` maps to `||` on Rust" do
+      assert Lower.emit_expr("a or b", :rust) == "a || b"
+    end
+
+    test "an Erlang atom literal is BEAM-only — Rust raises, Elixir keeps it" do
+      assert Lower.emit_expr(":foo", :elixir) == ":foo"
+
+      assert_raise RuntimeError, ~r/Erlang atom is BEAM-only/, fn ->
+        Lower.emit_expr(":foo", :rust)
+      end
+    end
+  end
+
+  describe "`&` capture arity over each node kind (Rust closure params)" do
+    test "dot, unary, if, call, and list bodies all count placeholders" do
+      assert Lower.emit_expr("&(&1.x)", :rust) == "|a1| a1::x"
+      assert Lower.emit_expr("&(-&1)", :rust) == "|a1| -a1"
+      assert Lower.emit_expr("&(if &1 do 1 else 2 end)", :rust) == "|a1| if a1 { 1 } else { 2 }"
+      assert Lower.emit_expr("&(f(&1, &2))", :rust) == "|a1, a2| f(a1, a2)"
+      assert Lower.emit_expr("&([&1, &2])", :rust) == "|a1, a2| vec![a1, a2]"
+    end
+
+    test "a map body's placeholder is counted before the BEAM-only raise" do
+      # cap_arity over %EMap{} runs (string interpolation evaluates it first),
+      # then the map-literal emit raises — exercising the EMap cap_arity clause.
+      assert_raise RuntimeError, ~r/map literals are BEAM-only/, fn ->
+        Lower.emit_expr("&(%{a: &1})", :rust)
+      end
+    end
+
+    test "a nullary named capture yields an empty closure parameter list" do
+      assert Lower.emit_expr("&foo/0", :rust) == "|| foo()"
+    end
+  end
+
+  describe "Rust char literals (ADR-0036)" do
+    test "escaped specials are emitted with their Rust escape" do
+      assert Lower.emit_expr("'\\n'", :rust) == "'\\n'"
+      assert Lower.emit_expr("'\\t'", :rust) == "'\\t'"
+      assert Lower.emit_expr("'\\r'", :rust) == "'\\r'"
+      assert Lower.emit_expr("'\\\\'", :rust) == "'\\\\'"
+      # the NUL and single-quote codepoints (built as AST — they don't lex cleanly)
+      assert Lower.emit_ast({:char, 0}, :rust) == "'\\0'"
+      assert Lower.emit_ast({:char, ?'}, :rust) == "'\\''"
+    end
+  end
+
+  describe "block emission (typed binds + empty blocks)" do
+    test "a typed `:=` bind inside a block erases its annotation per target" do
+      ast = Pratt.parse_body("n Int64 := 1 ; n")
+      assert Lower.emit_ast(ast, :elixir) == "n = 1; n"
+      assert Lower.emit_ast(ast, :rust) == "let n = 1; n"
+    end
+
+    test "an empty block is `nil` on Elixir, `()` on Rust" do
+      assert Lower.emit_ast(Pratt.parse_body("if c do else 1 end"), :elixir) ==
+               "if c do nil else 1 end"
+
+      assert Lower.emit_ast(Pratt.parse_body("if c do 1 else end"), :rust) ==
+               "if c { 1 } else { () }"
+    end
+  end
+
+  describe "case arm with a `when` guard" do
+    test "guard lowers to `when` on Elixir and `if` on Rust" do
+      ast = Pratt.parse_body("case x do\n  n when n > 0 -> 1\n  _ -> 0\nend")
+      assert Lower.emit_ast(ast, :elixir) == "case x do n when n > 0 -> 1; _ -> 0 end"
+      assert Lower.emit_ast(ast, :rust) == "match x { n if n > 0 => 1, _ => 0, }"
+    end
+  end
+
+  describe "module compilation (compile_module / compile_module_beam)" do
+    defp geo_mod do
+      Decl.parse("""
+      mod Geo do
+        struct Point(x Int64, y Int64)
+        pub def mk(a Int64, b Int64) Point := Point(x: a, y: b)
+      end
+      """).mods
+      |> hd()
+    end
+
+    test "compile_module emits a defmodule and a Rust mod with a pub struct" do
+      out = Lower.compile_module(geo_mod())
+      assert out.elixir =~ "defmodule Geo do"
+      assert out.elixir =~ "defmodule Point do defstruct [:x, :y] end"
+      assert out.rust =~ "mod geo {"
+      assert out.rust =~ "pub struct Point { pub x: i64, pub y: i64 }"
+      assert out.rust =~ "Point { x: a, y: b }"
+    end
+
+    test "compile_module_beam emits only the Elixir view" do
+      out = Lower.compile_module_beam(geo_mod())
+      assert Map.keys(out) == [:elixir]
+      assert out.elixir =~ "def mk(a, b) do %Point{x: a, y: b} end"
+    end
+  end
+
+  describe "compile_elixir/4 (Elixir-only entry)" do
+    test "emits only the Elixir clauses + typespec" do
+      out = Lower.compile_elixir(types(), area())
+      assert Map.keys(out) == [:elixir]
+      assert out.elixir =~ "def area({:circle, r}) do :math.pi() * r * r end"
+      assert out.elixir =~ "@type shape :: {:circle, float()}"
+    end
+  end
+
+  describe "Rust call-site borrow insertion (ADR-0047)" do
+    test "an owned String/Vec arg to a borrowing param gets a `&`" do
+      str_mod =
+        Decl.parse("""
+        mod S do
+          pub def use_it(s val String) Int64 := 0
+          pub def caller(a val String, b val String) Int64 := use_it(__prim_str_concat(a, b))
+        end
+        """).mods
+        |> hd()
+
+      rust = Lower.compile_module(str_mod).rust
+      # __prim_str_concat produces an owned String -> borrowed into the &str param
+      assert rust =~ "use_it(&format!(\"{}{}\", a, b))"
+
+      vec_mod =
+        Decl.parse("""
+        mod V do
+          pub def make() Vec(Int64) := [1, 2]
+          pub def take(xs val Vec(Int64)) Int64 := 0
+          pub def caller2() Int64 := take(make())
+        end
+        """).mods
+        |> hd()
+
+      # a call returning Vec(...) is owned -> borrowed into the &[T] param
+      assert Lower.compile_module(vec_mod).rust =~ "take(&make())"
+
+      from_chars_mod =
+        Decl.parse("""
+        mod C do
+          pub def use_it(s val String) Int64 := 0
+          pub def caller(cs val Vec(Char)) Int64 := use_it(__prim_str_from_chars(cs))
+        end
+        """).mods
+        |> hd()
+
+      # __prim_str_from_chars produces an owned String -> borrowed into &str
+      assert Lower.compile_module(from_chars_mod).rust =~ "use_it(&cs.iter().collect::<String>())"
+
+      string_ret_mod =
+        Decl.parse("""
+        mod R do
+          pub def make() String := "x"
+          pub def take(s val String) Int64 := 0
+          pub def caller2() Int64 := take(make())
+        end
+        """).mods
+        |> hd()
+
+      # a call whose return type is `String` is owned -> borrowed into &str
+      assert Lower.compile_module(string_ret_mod).rust =~ "take(&make())"
+    end
+  end
+
+  describe "Rust protocol lowering (ADR-0061)" do
+    test "a `&self`-only method over a sum type emits a trait + impl" do
+      p =
+        Decl.parse("""
+        protocol Show do
+          def show(self Self) String
+        end
+        type Color := Red | Green
+        impl Show for Color do
+          def show(c) := "color"
+        end
+        """)
+
+      rust = Lower.rust_protocols(p.protocols, p.impl_decls, p.types, p.structs)
+      assert rust =~ "enum Color {"
+      assert rust =~ "trait RianShow {"
+      assert rust =~ "fn show(&self) -> String;"
+      assert rust =~ "impl RianShow for Color {"
+      assert rust =~ "let c = self;"
+    end
+
+    test "a binary method over a struct impl borrows its extra Self/typed params" do
+      p =
+        Decl.parse("""
+        protocol Eq do
+          def eq(self Self, other Self) Bool
+          def tag(self Self, n Int64) Int64
+        end
+        struct Box(v Int64)
+        impl Eq for Box do
+          def eq(a, b) := true
+          def tag(a, n) := n
+        end
+        """)
+
+      rust = Lower.rust_protocols(p.protocols, p.impl_decls, p.types, p.structs)
+      # the struct the impl targets is emitted alongside (impl-type filter)
+      assert rust =~ "struct Box { v: i64 }"
+      # an extra `Self` param -> `&Box`; a primitive param keeps its borrowed type
+      assert rust =~ "fn eq(&self, b: &Box) -> bool"
+      assert rust =~ "fn tag(&self, n: i64) -> i64"
+    end
+  end
+
+  describe "rust_program (whole-program assembly)" do
+    test "emits every non-dispatch function once" do
+      prog =
+        Decl.parse("""
+        def inc(n Int64) Int64 := n + 1
+        def dbl(n Int64) Int64 := n * 2
+        """)
+
+      rust = Lower.rust_program(prog)
+      assert rust =~ "fn inc(n: i64) -> i64"
+      assert rust =~ "fn dbl(n: i64) -> i64"
+    end
+  end
+
+  describe "Rust pattern-emission edge cases" do
+    test "a string-literal clause head lowers to a `&str` match arm" do
+      rust =
+        Decl.compile("""
+        def kind(t String) Int64
+        def kind("def") := 1
+        def kind(_) := 0
+        """)
+        |> Enum.map_join("\n", fn {_, o} -> o.rust end)
+
+      assert rust =~ ~s|"def" => 1,|
+    end
+
+    test "a cons pattern with a wildcard tail uses `[h, ..]`" do
+      rust =
+        Decl.compile("""
+        def head(xs Vec(Int64)) Int64
+        def head([h | _]) := h
+        def head([]) := 0
+        """)
+        |> Enum.map_join("\n", fn {_, o} -> o.rust end)
+
+      assert rust =~ "[h, ..] =>"
+      assert rust =~ "[] => 0,"
+    end
+
+    test "a tuple-inside-cons binder is deref'd in the guard (list in guard too)" do
+      rust =
+        Decl.compile("""
+        def f(xs Vec(Int64)) Bool
+        def f([c | _]) when c == hd([c]) := true
+        def f(_) := false
+        """)
+        |> Enum.map_join("\n", fn {_, o} -> o.rust end)
+
+      # the slice-element binder `c` is a `&T`, so the guard deref's it (`*c`),
+      # and the list literal `[c]` in the guard is walked by `deref_ids`
+      assert rust =~ "if *c == hd(vec![*c])"
+    end
+
+    test "an Erlang atom pattern raises on Rust (BEAM-only)" do
+      func = %{
+        name: "h",
+        params: [%{name: "x", type: "Symbol", cap: :val}],
+        ret: "Int64",
+        clauses: [
+          %{pats: [{:atom, "foo"}], body: "1"},
+          %{pats: [{:var, "x"}], body: "0"}
+        ]
+      }
+
+      assert_raise RuntimeError, ~r/Erlang atom pattern is BEAM-only/, fn ->
+        Lower.to_rust(func, [], %{})
+      end
+    end
+  end
+
+  describe "construction with a mix of positional and named fields is rejected" do
+    test "a variant constructor mix raises" do
+      types = [
+        %{
+          name: "P",
+          variants: [
+            %{ctor: "Pt", fields: [%{label: "x", type: "Int64"}, %{label: "y", type: "Int64"}]}
+          ]
+        }
+      ]
+
+      func = %{name: "f", params: [], ret: "P", clauses: [%{pats: [], body: "Pt(1, y: 2)"}]}
+
+      assert_raise RuntimeError, ~r/variant Pt: mix of positional and named/, fn ->
+        Lower.compile(types, func)
+      end
+    end
+
+    test "a struct constructor mix raises" do
+      structs = [
+        %{name: "Q", fields: [%{label: "x", type: "Int64"}, %{label: "y", type: "Int64"}]}
+      ]
+
+      func = %{name: "g", params: [], ret: "Q", clauses: [%{pats: [], body: "Q(1, y: 2)"}]}
+
+      assert_raise RuntimeError, ~r/struct Q: mix of positional and named/, fn ->
+        Lower.compile([], func, structs)
+      end
+    end
+  end
+
+  describe "Char reaches the Elixir typespec path (prim_ex)" do
+    test "a Char-typed variant field types as `char()`" do
+      ctypes = [%{name: "Tok", variants: [%{ctor: "Ch", fields: [%{label: "c", type: "Char"}]}]}]
+
+      func = %{
+        name: "g",
+        params: [%{name: "t", type: "Tok", cap: :val}],
+        ret: "Int64",
+        clauses: [%{pats: [{:ctor, "Ch", [{:var, "c"}]}], body: "c"}]
+      }
+
+      assert Lower.to_elixir(func, ctypes) =~ "@type tok :: {:ch, char()}"
+    end
+  end
 end

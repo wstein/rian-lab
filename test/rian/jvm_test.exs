@@ -107,4 +107,152 @@ defmodule Rian.JVMTest do
       end
     end
   end
+  
+  describe "clause heads: guards, char patterns, and unsupported patterns" do
+    test "a `when` guard lowers to a guarded `if (cond) { return .. }`" do
+      kt =
+        JVM.compile("""
+        def classify(n Int64) Int64
+        def classify(n) when n > 0 := 1
+        def classify(n) := 0
+        """)
+
+      # the guard becomes an inner `if (..) { return .. }` (jvm.ex:149); the
+      # binding for the guarded clause is emitted alongside it (jvm.ex:155/174)
+      assert kt =~ "if ((n > 0L)) { return 1L }"
+      assert kt =~ "val n = a0;"
+    end
+
+    test "a char-literal pattern in a clause head matches on the codepoint" do
+      kt =
+        JVM.compile("""
+        def kind(c Char) Int64
+        def kind('a') := 1
+        def kind(c) := 0
+        """)
+
+      # 'a' is codepoint 97, matched as a `Long` (jvm.ex:157)
+      assert kt =~ "if (a0 == 97L) { return 1L }"
+
+      case kotlin_run(kt, ~s|println(kind(97L)); println(kind(98L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "1\n0"
+      end
+    end
+
+    test "an unsupported clause pattern (a list pattern) raises" do
+      assert_raise JVM.Unsupported, fn ->
+        JVM.compile("""
+        def head(xs Vec(Int64)) Int64
+        def head([x]) := x
+        def head(xs) := 0
+        """)
+      end
+    end
+  end
+
+  describe "literal and unary expressions" do
+    test "a char-literal expression emits a `Long` codepoint" do
+      kt = JVM.compile("def z(n Char) Char := 'z'")
+      # 'z' is codepoint 122 (jvm.ex:199)
+      assert kt =~ "return 122L"
+    end
+
+    test "a string-literal expression emits a quoted Kotlin string" do
+      kt = JVM.compile(~s|def greet(n Int64) String := "hi"|)
+      # (jvm.ex:200)
+      assert kt =~ ~s|return "hi"|
+    end
+
+    test "boolean literals pass through as `true`/`false`" do
+      kt = JVM.compile("def yes(n Int64) Bool := true")
+      # (jvm.ex:201)
+      assert kt =~ "return true"
+    end
+
+    test "unary negation emits `-x`" do
+      kt = JVM.compile("def neg(x Int64) Int64 := -x")
+      # (jvm.ex:204)
+      assert kt =~ "return -x"
+    end
+
+    test "logical `not` emits `!x`" do
+      kt = JVM.compile("def flip(x Bool) Bool := not x")
+      # (jvm.ex:205)
+      assert kt =~ "return !x"
+    end
+  end
+
+  describe "if-expressions and blocks" do
+    test "an if-expression with a block then-branch emits `run { .. }`" do
+      kt = JVM.compile("def step(n Int64) Int64 := if n > 0 do a := n * 2; a + 1 else 0 end")
+
+      # the if-expression itself (jvm.ex:216), a multi-statement block branch
+      # (jvm.ex:221 -> block_value -> stmt_kt :bind jvm.ex:190 + stmt_value jvm.ex:193),
+      # and a bare-expression else-branch (jvm.ex:222)
+      assert kt =~ "if ((n > 0L)) run { val a = (n * 2L); (a + 1L) } else 0L"
+
+      case kotlin_run(kt, ~s|println(step(3L)); println(step(-1L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "7\n0"
+      end
+    end
+
+    test "a single-expression if-branch needs no `run` wrapper" do
+      kt = JVM.compile("def sign(n Int64) Int64 := if n >= 0 do 1 else -1 end")
+      # both branches are single-expr blocks (jvm.ex:220)
+      assert kt =~ "if ((n >= 0L)) 1L else -1L"
+    end
+
+    test "a typed bind inside a block emits a `val`" do
+      kt = JVM.compile("def st(n Int64) Int64 := if n > 0 do a Int64 := 100; n + a else 0 end")
+      # the typed_bind statement (jvm.ex:191)
+      assert kt =~ "run { val a = 100L; (n + a) }"
+    end
+
+    test "a statement-expression inside a block is emitted then discarded" do
+      kt = JVM.compile("def se(n Int64) Int64 := if n > 0 do n + 1; n * 2 else 0 end")
+      # a bare-expr statement (jvm.ex:192), with the final expr as the value (jvm.ex:193)
+      assert kt =~ "run { (n + 1L); (n * 2L) }"
+    end
+  end
+
+  describe "operators" do
+    test "comparison, equality, logical, concat and rem map to Kotlin operators" do
+      kt =
+        JVM.compile("""
+        def both(a Int64, b Int64) Bool := (a == b) and (a != b) or (a < b)
+        """)
+
+      # ==, !=, and->&&, or->|| (jvm.ex:233-236)
+      assert kt =~ "(((a == b) && (a != b)) || (a < b))"
+    end
+
+    test "string `<>` lowers to Kotlin `+`" do
+      kt = JVM.compile(~s|def cat(a String, b String) String := a <> b|)
+      # (jvm.ex:237)
+      assert kt =~ "return (a + b)"
+    end
+
+    test "`rem` lowers to Kotlin `%`" do
+      kt = JVM.compile("def md(a Int64, b Int64) Int64 := a rem b")
+      # (jvm.ex:240)
+      assert kt =~ "return (a % b)"
+    end
+
+    test "an operator outside the Tier-2 subset raises" do
+      assert_raise JVM.Unsupported, fn ->
+        JVM.compile("def pipe(a Int64) Int64 := a |> id")
+      end
+    end
+  end
+
+  describe "type lowering" do
+    test "an unknown (lowercase) type annotation raises" do
+      # a lowercase, non-builtin type reaches the fall-through (jvm.ex:256)
+      assert_raise JVM.Unsupported, fn ->
+        JVM.compile("def lc(n Int64) widget := 0")
+      end
+    end
+  end
 end

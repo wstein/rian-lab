@@ -3,7 +3,7 @@ defmodule Rian.CheckTest do
   # (compiler/code server); concurrent module compilation races otherwise.
   use ExUnit.Case, async: false
 
-  alias Rian.{Check, Pratt}
+  alias Rian.{Check, Core, Pratt}
 
   describe "unification kernel" do
     test "equal unifies; unknown unifies with anything; differing concretes mismatch" do
@@ -586,6 +586,244 @@ defmodule Rian.CheckTest do
     test "list literal elements join to the LUB element type" do
       assert Check.infer(Pratt.parse_body("[a, b]"), %{"a" => "Int32", "b" => "Int64"}) ==
                "Vec(Int64)"
+    end
+  end
+
+  describe "inference — unary, fallthroughs & nested callables" do
+    test "a unary negation of a literal infers the literal's type" do
+      assert Check.infer(Pratt.parse("-5")) == "Int64"
+      assert Check.infer(Pratt.parse("-3.5")) == "Float64"
+    end
+
+    test "`not e` infers Bool regardless of its argument" do
+      assert Check.infer(Pratt.parse("not x")) == "Bool"
+    end
+
+    test "an unhandled binary operator infers :unknown (conservative fallthrough)" do
+      # `|>` and `<~` parse as infix but are neither arithmetic, comparison,
+      # concat, nor division — they fall through `infer(%EBin{})` to `:unknown`.
+      assert Check.infer(Pratt.parse("a |> b")) == :unknown
+      assert Check.infer(Pratt.parse("a <~ b")) == :unknown
+    end
+
+    test "capturing an unknown function infers :unknown" do
+      assert Check.infer(Pratt.parse("&nope/1"), %{}, %{funs: %{}}) == :unknown
+    end
+
+    test "an if expression unifies its two arm types" do
+      assert Check.infer(Pratt.parse("if c do 1 else 2 end")) == "Int64"
+      # differing concrete arms are conservative, not an error
+      assert Check.infer(Pratt.parse("if c do 1 else true end")) == :unknown
+    end
+
+    test "a cons-tail list whose head and tail element types disagree is :unknown" do
+      # head infers Int64, tail is Vec(Bool) -> element Bool -> no agreement
+      assert Check.infer(Pratt.parse_body("[a | rest]"), %{
+               "a" => "Int64",
+               "rest" => "Vec(Bool)"
+             }) == :unknown
+
+      # a matching head/tail does infer Vec(T)
+      assert Check.infer(Pratt.parse_body("[a | rest]"), %{
+               "a" => "Int64",
+               "rest" => "Vec(Int64)"
+             }) == "Vec(Int64)"
+    end
+
+    test "applying a function-typed param whose return slot is `_` infers :unknown (passes)" do
+      # `f Fn(Int64, _)` applied as `f(2)` -> the `_` return reads back as
+      # `:unknown`, which never contradicts the declared `Int64`.
+      assert Check.check("def app(f Fn(Int64, _)) Int64 := f(2)") == :ok
+    end
+  end
+
+  describe "structural Fn unification with nested parens" do
+    test "a nested `Fn(...)` argument is one component under the paren-aware splitter" do
+      assert Check.unify("Fn(Fn(Int64,Int64),Bool)", "Fn(Fn(Int64,Int64),Bool)") ==
+               "Fn(Fn(Int64,Int64),Bool)"
+
+      # a wildcard in the nested position reconciles with a concrete nested Fn
+      assert Check.unify("Fn(_,Bool)", "Fn(Fn(Int64,Int64),Bool)") ==
+               "Fn(Fn(Int64,Int64),Bool)"
+    end
+  end
+
+  describe "generic-return instantiation (ADR-0042)" do
+    test "a fully-pinned generic return is substituted to the concrete arg type" do
+      ic = %{
+        funs: %{"id" => "T"},
+        fsigs: %{"id" => %{params: ["T"], ret: "T", tvars: ["T"]}}
+      }
+
+      assert Check.infer(Pratt.parse("id(5)"), %{}, ic) == "Int64"
+      # an un-pinnable tvar (no informative argument) stays :unknown
+      assert Check.infer(Pratt.parse("id(x)"), %{}, ic) == :unknown
+    end
+
+    test "a `Vec(T)` parameter pins T from a list argument's element type" do
+      ic = %{
+        funs: %{"head" => "T"},
+        fsigs: %{"head" => %{params: ["Vec(T)"], ret: "T", tvars: ["T"]}}
+      }
+
+      assert Check.infer(Pratt.parse("head([1, 2, 3])"), %{}, ic) == "Int64"
+    end
+  end
+
+  describe "annotate/3 — additional nodes (ADR-0050 §3)" do
+    test "a string leaf carries its inferred type" do
+      assert %Core.EStr{type: "String"} = Check.annotate(Pratt.parse(~s|"hi"|))
+    end
+
+    test "a unary node annotates its argument and carries its type" do
+      typed = Check.annotate(Pratt.parse("-5"))
+      assert %Core.EUnary{type: "Int64", arg: %Core.ENum{type: "Int64"}} = typed
+    end
+
+    test "a tuple annotates each element; the tuple itself is :unknown" do
+      typed = Check.annotate(Pratt.parse("{1, 2}"))
+
+      assert %Core.ETuple{
+               type: :unknown,
+               elems: [%Core.ENum{type: "Int64"}, %Core.ENum{type: "Int64"}]
+             } = typed
+    end
+
+    test "a cons-tail list annotates head and tail and is typed Vec(T)" do
+      typed = Check.annotate(Pratt.parse("[a | rest]"), %{"a" => "Int64", "rest" => "Vec(Int64)"})
+
+      assert %Core.EList{
+               type: "Vec(Int64)",
+               elems: [%Core.EId{name: "a", type: "Int64"}],
+               tail: %Core.EId{name: "rest", type: "Vec(Int64)"}
+             } = typed
+    end
+
+    test "an if expression annotates cond/then/else and is typed by its arm unification" do
+      typed = Check.annotate(Pratt.parse("if c do 1 else 2 end"))
+
+      assert %Core.EIf{
+               type: "Int64",
+               then: %Core.EBlock{type: "Int64"},
+               else: %Core.EBlock{type: "Int64"}
+             } = typed
+    end
+
+    test "a case expression narrows each arm, annotates its guard and body, and unifies" do
+      prog = Rian.Decl.parse("type Shape := Circle(radius Float64) | Square(side Float64)")
+      ic = Check.program_ic(prog)
+      src = "case s do\n Circle(r) when r > 0.0 -> r\n Square(x) -> x\n end"
+
+      typed = Check.annotate(Pratt.parse(src), %{"s" => "Shape"}, ic)
+
+      assert %Core.ECase{type: "Float64"} = typed
+      # the first arm's guard is annotated under the narrowed env (`r` is Float64)
+      [{_pat, guard, body} | _] = typed.arms
+      assert %Core.EBin{type: "Bool"} = guard
+      assert %Core.EId{name: "r", type: "Float64"} = body
+    end
+
+    test "a `with` expression annotates its body and is typed by it" do
+      typed = Check.annotate(Pratt.parse("with {:ok, x} <- f(n) do 1 end"))
+      assert %Core.EWith{type: "Int64"} = typed
+    end
+
+    test "a node annotate has no rule for is returned unchanged" do
+      # a bare atom node has no annotate clause -> falls to the default passthrough
+      node = Rian.Core.from_expr(Pratt.parse(":sym"))
+      assert Check.annotate(node) == node
+    end
+  end
+
+  describe "check_func/1,2 and a non-Result eset (entry points)" do
+    test "check_func/2 (default eset) checks a return-type mismatch directly" do
+      %{funcs: [f]} = Rian.Decl.parse("def f(n Int64) Bool := n + 1")
+      ic = Check.program_ic(Rian.Decl.parse("def f(n Int64) Bool := n + 1"))
+      assert {:error, msg} = Check.check_func(f, ic)
+      assert msg =~ "declared return type is `Bool`"
+    end
+
+    test "check_func/1 (all defaults) passes a well-typed function" do
+      %{funcs: [f]} = Rian.Decl.parse("def double(n Int64) Int64 := n * 2")
+      assert Check.check_func(f) == :ok
+    end
+  end
+
+  describe "error-set composition — transitive & constructor tags (ADR-0040 §4)" do
+    test "an error set propagates transitively through a chain of with-callees" do
+      # inner produces A; mid propagates inner; outer propagates mid — the union
+      # over callees in the call-graph fixpoint must carry A all the way to outer.
+      assert Check.check("""
+             type E := A | B
+             def inner(n Int64) Int64 | E := {:error, A}
+             def mid(n Int64) Int64 | E
+               with {:ok, x} <- inner(n) do
+                 {:ok, x}
+               end
+             end
+             def outer(n Int64) Int64 | E
+               with {:ok, x} <- mid(n) do
+                 {:ok, x}
+               end
+             end
+             """) == :ok
+    end
+
+    test "a constructor-call error tag (`DivByZero(x)`) is named for the set check" do
+      assert Check.check("def f(n Int64) Int64 | DivByZero := {:error, DivByZero(n)}") == :ok
+
+      assert {:error, msg} =
+               Check.check("def f(n Int64) Int64 | NotFound := {:error, DivByZero(n)}")
+
+      assert msg =~ "DivByZero"
+      assert msg =~ "declared set `NotFound`"
+    end
+
+    test "a with-clause source that is not a call propagates no callee set" do
+      # the `<-` source `n` is a bare variable, not a `f(...)` call, so `call_name`
+      # contributes nothing and the function produces an empty error set.
+      assert Check.check("""
+             def f(n Int64) Int64 | NotFound
+               with {:ok, x} <- n do
+                 {:ok, x}
+               end
+             end
+             """) == :ok
+    end
+
+    test "an unannotated intermediary's set is the union of its propagated callees" do
+      # `helper` has a non-Result return, so the fixpoint must INFER its set as the
+      # union over its callees (`inner`'s `A`) rather than reading a declared one.
+      assert Check.check("""
+             type E := A | B
+             def inner(n Int64) Int64 | E := {:error, A}
+             def helper(n Int64) Int64
+               with {:ok, x} <- inner(n) do
+                 {:ok, x}
+               end
+             end
+             def outer(n Int64) Int64 | E
+               with {:ok, x} <- helper(n) do
+                 {:ok, x}
+               end
+             end
+             """) == :ok
+    end
+
+    test "check_func/3 with a non-`%{tsets,table}` eset skips the error-set check" do
+      # the default `check_error_set/2` clause: an eset that is not the expected
+      # context map leaves the error-set check a no-op (return type still checked).
+      %{funcs: [f]} = Rian.Decl.parse("def f(n Int64) Int64 | NotFound := {:error, Anything}")
+      ic = Check.program_ic(Rian.Decl.parse("def f(n Int64) Int64 | NotFound := {:error, X}"))
+      assert Check.check_func(f, ic, %{}) == :ok
+    end
+  end
+
+  describe "flow narrowing against an unknown scrutinee" do
+    test "a bare-variable case arm over an unknown scrutinee narrows to :unknown" do
+      # the scrutinee `s` is :unknown, so narrowing the arm's `PVar` runs
+      # `concretize(:unknown)` (the non-binary passthrough) and the body is :unknown.
+      assert Check.infer(Pratt.parse_body("case s do\n x -> x\n end"), %{}) == :unknown
     end
   end
 end

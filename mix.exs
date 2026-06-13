@@ -15,6 +15,7 @@ defmodule RianLab.MixProject do
       # where ExDoc is available, never in `:prod` (where `%ExDoc.Autolink{}` is an
       # undefined struct). Docs build in `:dev` (`mix docs`); the suite is `:test`.
       elixirc_paths: elixirc_paths(Mix.env()),
+      test_coverage: test_coverage(),
       deps: deps(),
       name: "RianLab",
       description:
@@ -36,6 +37,18 @@ defmodule RianLab.MixProject do
   # only in `:dev`/`:test`, where ExDoc is a dependency. `:prod` builds `lib/` alone.
   defp elixirc_paths(:prod), do: ["lib"]
   defp elixirc_paths(_), do: ["lib", "dev"]
+
+  # `mix test --cover` (built-in) gate. Excluded from the denominator:
+  #   * `Rian.DocFormatter*` — the dev-only ExDoc/Starlight doc formatter (it
+  #     drives ExDoc, exercised by `mix docs`, not unit-tested);
+  #   * `Mix.Tasks.Rian.*` — CLI entry points (thin `Mix.shell` wrappers over the
+  #     library code, which *is* covered).
+  defp test_coverage do
+    [
+      summary: [threshold: 95],
+      ignore_modules: [~r/^Rian\.DocFormatter/, ~r/^Mix\.Tasks\./]
+    ]
+  end
 
   defp deps do
     [

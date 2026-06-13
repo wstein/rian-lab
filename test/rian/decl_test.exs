@@ -3,7 +3,7 @@ defmodule Rian.DeclTest do
   use ExUnit.Case, async: false
 
   alias Rian.Decl
-  alias Rian.IR.{Clause, Field, Func, Param, Struct, Type, Variant}
+  alias Rian.IR.{Clause, Const, Field, Func, Param, Struct, Type, Variant}
 
   describe "parsing -> core IR (Rian.IR structs)" do
     test "a `type` sum with labeled fields" do
@@ -806,6 +806,183 @@ defmodule Rian.DeclTest do
       prog = Decl.parse("macro sq(x) := x * x\ndef area(n Int64) Int64 := sq(n)")
       assert [%{name: "area"}] = prog.funcs
       assert [%{body: {:block, _}}] = hd(prog.funcs).clauses
+    end
+  end
+
+  # ── Coverage: malformed declarations that the parser must reject ───────────
+  describe "malformed alias declarations are rejected" do
+    test "an `alias` with no `:=` is rejected" do
+      assert_raise Decl.Error, ~r/alias needs `:=`/, fn ->
+        Decl.parse("alias Id\ndef f(n Int64) Int64 := n")
+      end
+    end
+  end
+
+  describe "malformed declaration heads are rejected" do
+    test "`mod` without `Name do` is rejected" do
+      assert_raise Decl.Error, ~r/expected `mod Name do … end`/, fn ->
+        Decl.parse("mod M")
+      end
+    end
+
+    test "a token that is not a declaration head is rejected" do
+      assert_raise Decl.Error, ~r/expected a declaration, got/, fn ->
+        Decl.parse("42")
+      end
+    end
+
+    test "an unclosed `mod` body is rejected" do
+      assert_raise Decl.Error, ~r/`mod` body not closed by `end`/, fn ->
+        Decl.parse("mod M do\n  type X := A")
+      end
+    end
+
+    test "`pub` before something other than def/type/struct/const is rejected" do
+      assert_raise Decl.Error,
+                   ~r/`pub` may only precede `def` \/ `type` \/ `struct` \/ `const`/,
+                   fn ->
+                     Decl.parse("mod M do\n  pub use Math\nend")
+                   end
+    end
+  end
+
+  describe "malformed `def` heads / signatures are rejected" do
+    test "`def` not followed by a function name is rejected" do
+      assert_raise Decl.Error, ~r/expected a function name after `def`/, fn ->
+        Decl.parse("def 42() Int64 := 1")
+      end
+    end
+
+    test "a block body never closed by `end` is rejected" do
+      assert_raise Decl.Error, ~r/block body not closed by `end`/, fn ->
+        Decl.parse("def f(n Int64) Int64\n  n + 1")
+      end
+    end
+
+    test "a `def` with no `(` after the name is rejected" do
+      assert_raise Decl.Error, ~r/expected `\(` after the function name/, fn ->
+        Decl.parse("def f n Int64 := n")
+      end
+    end
+
+    test "an unbalanced `(` in the parameter list is rejected" do
+      assert_raise Decl.Error, ~r/unbalanced `\(` in the parameter list/, fn ->
+        Decl.parse("def f(n Int64 := n")
+      end
+    end
+
+    test "a signature with no following clauses is rejected" do
+      assert_raise Decl.Error, ~r/function `f` has a signature but no clauses/, fn ->
+        Decl.parse("def f(n Int64) Int64")
+      end
+    end
+
+    test "two bodied clauses that cannot be grouped are rejected" do
+      assert_raise Decl.Error, ~r/cannot group clauses of `f`/, fn ->
+        Decl.parse("def f(n Int64) Int64 := n\ndef f(n Int64) Int64 := n")
+      end
+    end
+
+    test "a pattern clause with no body is rejected" do
+      assert_raise Decl.Error, ~r/clause of `f` has no body/, fn ->
+        Decl.parse("def f(n Int64) Int64\ndef f(n)\ndef f(x) := x")
+      end
+    end
+
+    test "multiple capabilities on a parameter are rejected" do
+      assert_raise Decl.Error, ~r/multiple capabilities on/, fn ->
+        Decl.parse("def f(x val iso Int64) Int64 := x")
+      end
+    end
+
+    test "a malformed parameter (more than name + type) is rejected" do
+      assert_raise Decl.Error, ~r/bad parameter/, fn ->
+        Decl.parse("def f(a b c Int64) Int64 := a")
+      end
+    end
+
+    test "a function with a body but no return type is rejected" do
+      assert_raise Decl.Error, ~r/function `f` needs a return type/, fn ->
+        Decl.parse("def f(n Int64) := n")
+      end
+    end
+  end
+
+  describe "malformed type / struct / const / use / variant / field are rejected" do
+    test "a `type` with no `:=` is rejected" do
+      assert_raise Decl.Error, ~r/type declaration needs `:=`/, fn ->
+        Decl.parse("type X")
+      end
+    end
+
+    test "trailing tokens after a struct declaration are rejected" do
+      assert_raise Decl.Error, ~r/trailing tokens after struct/, fn ->
+        Decl.parse("struct P(x Int64) extra")
+      end
+    end
+
+    test "a `const` whose declaration is not `NAME Type` is rejected" do
+      assert_raise Decl.Error, ~r/const needs `NAME Type := value`/, fn ->
+        Decl.parse("mod M do\n  const X := 1\nend")
+      end
+    end
+
+    test "a `const` with no `:=` is rejected" do
+      assert_raise Decl.Error, ~r/const needs `:=`/, fn ->
+        Decl.parse("mod M do\n  const X Int64\nend")
+      end
+    end
+
+    test "trailing tokens after a `use` selective import are rejected" do
+      assert_raise Decl.Error, ~r/trailing tokens after use/, fn ->
+        Decl.parse("mod M do\n  use Std.(a) extra\nend")
+      end
+    end
+
+    test "trailing tokens after a variant are rejected" do
+      assert_raise Decl.Error, ~r/trailing tokens after variant/, fn ->
+        Decl.parse("type X := A(x Int64) junk")
+      end
+    end
+
+    test "a field that is neither `Type` nor `label Type` is rejected" do
+      assert_raise Decl.Error, ~r/bad field/, fn ->
+        Decl.parse("struct P(a b c)")
+      end
+    end
+  end
+
+  describe "coverage: valid declarations exercising pub / doc / empty / guard branches" do
+    test "`pub struct` sets the export flag" do
+      %{structs: [s]} = Decl.parse("pub struct Point(x Int64)")
+      assert %Struct{name: "Point", pub?: true} = s
+    end
+
+    test "a doc comment attaches to a struct / const" do
+      %{structs: [s]} = Decl.parse(~s|@typedoc "str"\nstruct Point(x Int64)|)
+      assert s.doc == "str"
+
+      %{mods: [m]} = Decl.parse(~s|mod M do\n  @doc "c"\n  const X Int64 := 1\nend|)
+      assert [%Const{name: "X", doc: "c"}] = m.consts
+    end
+
+    test "a bare `struct Name` and `struct Name()` parse to a zero-field record" do
+      assert %{structs: [%Struct{name: "Empty", fields: []}]} = Decl.parse("struct Empty")
+      assert %{structs: [%Struct{name: "Empty", fields: []}]} = Decl.parse("struct Empty()")
+    end
+
+    test "a signature head carrying ` when ` parses (split2 / guard branch)" do
+      %{funcs: [f]} =
+        Decl.parse("def f(n Int64) Int64 when n > 0\ndef f(n) := n")
+
+      assert f.name == "f"
+      assert f.ret == "Int64"
+    end
+
+    test "an unclosed `(` in a struct field list runs match_paren to the end" do
+      # extract_parens opens on `(`, match_paren consumes to end with no close
+      assert %{structs: [%Struct{name: "P", fields: [%Field{label: "x", type: "Int64"}]}]} =
+               Decl.parse("struct P(x Int64")
     end
   end
 end

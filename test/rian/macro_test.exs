@@ -129,4 +129,119 @@ defmodule Rian.MacroTest do
       refute match?(nil, Macro.expand(@penv, Pratt.parse("square(m + 1)"), portable: true))
     end
   end
+
+  # Each template below carries a block binder `t` (so freshen has a binder to
+  # rename), placed inside the node kind under test. After expansion `t` must be
+  # gensym-renamed (`t__h<n>`) consistently everywhere it occurs, while the
+  # caller's identifiers and macro params are untouched.
+  defp expand1(name, params, template, call) do
+    env = Macro.build_env([%{name: name, params: params, template: template}])
+    Macro.expand(env, Pratt.parse(call))
+  end
+
+  describe "hygiene over every AST node kind (collect_binders/rename, ADR-0030)" do
+    test "lambda: param + body are renamed (collect_binders/rename lambda)" do
+      out = expand1("m", ["x"], "(u) -> u + t", "m(99)")
+      # The only template-local binder is the lambda param `u`, which must be
+      # renamed in both the param list and the body; free `t` stays free.
+      assert {:lambda, [{u, nil}], {:bin, "+", {:id, u}, {:id, "t"}}} = out
+      assert u =~ ~r/^u__h\d+$/
+    end
+
+    test "call: function position + every argument are walked and renamed" do
+      out = expand1("m", ["x"], "if true do t := 1; g(t, t + 2) else 0 end", "m(99)")
+
+      assert {:if, _, {:block, [{:bind, t, _}, {:expr, callnode}]}, _} = out
+      assert t =~ ~r/^t__h\d+$/
+
+      assert {:call, {:id, "g"}, [{:id, ^t}, {:bin, "+", {:id, ^t}, {:num, "2"}}]} =
+               callnode
+    end
+
+    test "dot: object position is renamed, field name preserved" do
+      out = expand1("m", ["x"], "if true do t := 1; t.fld else 0 end", "m(99)")
+      assert {:if, _, {:block, [{:bind, t, _}, {:expr, {:dot, {:id, t}, "fld"}}]}, _} = out
+      assert t =~ ~r/^t__h\d+$/
+    end
+
+    test "capture: anonymous `&(...)` body is walked and renamed" do
+      out = expand1("m", ["x"], "if true do t := 1; &(t + 1) else 0 end", "m(99)")
+
+      assert {:if, _, {:block, [{:bind, t, _}, {:expr, cap}]}, _} = out
+      assert {:capture, {:bin, "+", {:id, ^t}, {:num, "1"}}} = cap
+      assert t =~ ~r/^t__h\d+$/
+    end
+
+    test "capture_named: path is walked (arity preserved)" do
+      out = expand1("m", ["x"], "if true do t := 1; &t/2 else 0 end", "m(99)")
+
+      assert {:if, _, {:block, [{:bind, t, _}, {:expr, cap}]}, _} = out
+      assert {:capture_named, {:id, ^t}, 2} = cap
+      assert t =~ ~r/^t__h\d+$/
+    end
+
+    test "case: scrutinee, guard and arm body are all renamed" do
+      out =
+        expand1(
+          "m",
+          ["x"],
+          "if true do t := 1; case t do y when y -> t end else 0 end",
+          "m(99)"
+        )
+
+      assert {:if, _, {:block, [{:bind, t, _}, {:expr, casenode}]}, _} = out
+      assert t =~ ~r/^t__h\d+$/
+      # scrutinee + arm body renamed; guard expr is walked (here a pattern var
+      # `y`, not a collected binder, so left as-is).
+      assert {:case, {:id, ^t}, [{{:var, "y"}, {:id, "y"}, {:id, ^t}}]} = casenode
+    end
+
+    test "case: guard = nil branch is handled (g && rename(g) short-circuits)" do
+      out =
+        expand1("m", ["x"], "if true do t := 1; case t do y -> t end else 0 end", "m(99)")
+
+      assert {:if, _, {:block, [{:bind, _t, _}, {:expr, casenode}]}, _} = out
+      assert {:case, {:id, t}, [{{:var, "y"}, nil, {:id, t}}]} = casenode
+      assert t =~ ~r/^t__h\d+$/
+    end
+
+    test "list_lit with cons tail: elements + tail renamed" do
+      out =
+        expand1("m", ["x"], "if true do t := 1; [t, t + 2 | t] else 0 end", "m(99)")
+
+      assert {:if, _, {:block, [{:bind, t, _}, {:expr, list}]}, _} = out
+      assert t =~ ~r/^t__h\d+$/
+
+      assert {:list_lit, [{:id, ^t}, {:bin, "+", {:id, ^t}, {:num, "2"}}], {:tail, {:id, ^t}}} =
+               list
+    end
+
+    test "list_lit without tail: nil-tail branch is handled" do
+      out = expand1("m", ["x"], "if true do t := 1; [t, t] else 0 end", "m(99)")
+      assert {:if, _, {:block, [{:bind, t, _}, {:expr, list}]}, _} = out
+      assert {:list_lit, [{:id, ^t}, {:id, ^t}], nil} = list
+      assert t =~ ~r/^t__h\d+$/
+    end
+
+    test "map_lit: every value is walked and renamed, keys preserved" do
+      out =
+        expand1("m", ["x"], "if true do t := 1; %{a: t, b: t + 1} else 0 end", "m(99)")
+
+      assert {:if, _, {:block, [{:bind, t, _}, {:expr, mapnode}]}, _} = out
+      assert t =~ ~r/^t__h\d+$/
+
+      assert {:map_lit, [{"a", {:id, ^t}}, {"b", {:bin, "+", {:id, ^t}, {:num, "1"}}}]} =
+               mapnode
+    end
+  end
+
+  describe "@max_depth runaway backstop (ADR-0030)" do
+    test "a self-referential macro raises \"macro expansion too deep\"" do
+      env = Macro.build_env([%{name: "loopy", params: ["x"], template: "loopy(x)"}])
+
+      assert_raise RuntimeError, ~r/macro expansion too deep/, fn ->
+        Macro.expand(env, Pratt.parse("loopy(1)"))
+      end
+    end
+  end
 end
