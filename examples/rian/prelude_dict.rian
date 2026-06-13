@@ -3,25 +3,28 @@
 # ===========================================================================
 # Unlike `List` (pure cons, portable as-is), a `Map` bottoms out in a real
 # per-target primitive — a BEAM map, a JS object, a Rust `HashMap`. The portable
-# answer is a thin **primitive layer**: a small set of `__prim_map_*` calls that
+# answer is a thin **primitive layer**: a small set of `Prim.map_*` calls that
 # *each backend lowers natively*, with all the useful, COMPOSITE operations
 # written once in Rian over them. The per-target code is confined to the
 # primitives; everything above is portable.
 #
-#   __prim_map_new()        BEAM #{}            JS {}            (Rust HashMap…)
-#   __prim_map_get(m, k)    :maps.get(k, m)     m[k]
-#   __prim_map_put(m, k, v) :maps.put(k, v, m)  {...m, [k]: v}
-#   __prim_map_has(m, k)    :maps.is_key(k, m)  Object.hasOwn(m, k)
+#   Prim.map_new()        BEAM #{}            JS {}            (Rust HashMap…)
+#   Prim.map_get(m, k)    :maps.get(k, m)     m[k]
+#   Prim.map_put(m, k, v) :maps.put(k, v, m)  {...m, [k]: v}
+#   Prim.map_has(m, k)    :maps.is_key(k, m)  Object.hasOwn(m, k)
+#
+# `Prim` is the **target-internal** namespace — unstable and backend-specific;
+# user code reaches `Dict.get/2` etc. instead.
 #
 #   get_or(inc(empty(), "x"), "x", 0)  =  1
 # ---------------------------------------------------------------------------
 
 mod Dict do
   # ── the portable surface (forwards to the per-target primitives) ────────
-  pub def empty() Map(K, V) forall K, V := __prim_map_new()
-  pub def get(m Map(K, V), k K) V forall K, V := __prim_map_get(m, k)
-  pub def put(m Map(K, V), k K, v V) Map(K, V) forall K, V := __prim_map_put(m, k, v)
-  pub def has(m Map(K, V), k K) Bool forall K, V := __prim_map_has(m, k)
+  pub def empty() Map(K, V) forall K, V := Prim.map_new()
+  pub def get(m Map(K, V), k K) V forall K, V := Prim.map_get(m, k)
+  pub def put(m Map(K, V), k K, v V) Map(K, V) forall K, V := Prim.map_put(m, k, v)
+  pub def has(m Map(K, V), k K) Bool forall K, V := Prim.map_has(m, k)
 
   # ── composite ops — written ONCE in Rian, portable to every backend ─────
   # look up `k`, or return `d` if absent

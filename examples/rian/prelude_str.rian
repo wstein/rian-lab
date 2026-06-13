@@ -1,14 +1,17 @@
 # ===========================================================================
 # PORTABLE PRELUDE (ADR-0047 §2) — `Str`, written in Rian over primitives
 # ===========================================================================
-# Like `Map`, a `String` bottoms out in a per-target primitive — a BEAM UTF-8
+# Like `Dict`, a `String` bottoms out in a per-target primitive — a BEAM UTF-8
 # binary, a JS string, a Rust `String`/`&str`. The same primitive-layer pattern
-# applies: a small set of `__prim_str_*` calls each backend lowers natively, with
+# applies: a small set of `Prim.str_*` calls each backend lowers natively, with
 # the useful operations written once in Rian over them.
 #
-#   __prim_str_chars(s)        the `Char`s of s  (BEAM String.to_charlist | JS [...s] | Rust s.chars())
-#   __prim_str_from_chars(cs)  s from a `Vec(Char)`
-#   __prim_str_concat(a, b)    a <> b
+#   Prim.str_chars(s)        the `Char`s of s  (BEAM String.to_charlist | JS [...s] | Rust s.chars())
+#   Prim.str_from_chars(cs)  s from a `Vec(Char)`
+#   Prim.str_concat(a, b)    a <> b
+#
+# `Prim` is the **target-internal** namespace (this layer is unstable and
+# backend-specific); user code reaches for `Str.chars/1` etc. instead.
 #
 # `chars` yields a `Vec(Char)` (ADR-0036) — a codepoint integer on BEAM/JS, a
 # native `char` on Rust. `chars("ab") = ['a', 'b']` · `length("héllo") = 5`.
@@ -16,13 +19,13 @@
 
 mod Str do
   # ── the portable surface (forwards to the per-target primitives) ────────
-  pub def chars(s String) Vec(Char) := __prim_str_chars(s)
-  pub def from_chars(cs Vec(Char)) String := __prim_str_from_chars(cs)
-  pub def concat(a String, b String) String := __prim_str_concat(a, b)
+  pub def chars(s String) Vec(Char) := Prim.str_chars(s)
+  pub def from_chars(cs Vec(Char)) String := Prim.str_from_chars(cs)
+  pub def concat(a String, b String) String := Prim.str_concat(a, b)
 
   # ── composite ops — written ONCE in Rian, portable to every backend ─────
   # length in codepoints: count the char list (cons recursion, no host FFI)
-  pub def length(s String) Int64 := count(__prim_str_chars(s))
+  pub def length(s String) Int64 := count(Prim.str_chars(s))
 
   def count(cs Vec(Char)) Int64
   def count([]) := 0

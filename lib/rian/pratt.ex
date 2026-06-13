@@ -20,7 +20,7 @@ defmodule Rian.Pratt do
   def parse(str) do
     {ast, rest} = parse_expr(Rian.Lexer.expr_tokens(str), 0)
     if rest != [], do: raise(ArgumentError, "trailing tokens: #{inspect(rest)}")
-    ast
+    Rian.Prim.normalize(ast)
   end
 
   def parse_sexpr(str), do: sexpr(parse(str))
@@ -55,7 +55,7 @@ defmodule Rian.Pratt do
   def parse_body(str) do
     {block, rest} = parse_block(Rian.Lexer.expr_tokens(str))
     if rest != [], do: raise(ArgumentError, "trailing tokens in body: #{inspect(rest)}")
-    block
+    Rian.Prim.normalize(block)
   end
 
   defp opinfo(op) do

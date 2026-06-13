@@ -6,13 +6,14 @@
 # or wraps (release). That divergence is documented, never silent — but when you
 # need a SINGLE deterministic answer across every backend, reach for these ops.
 #
-# Each bottoms out in a `__prim_*` the backend lowers to its own 64-bit-domain
+# Each bottoms out in a `Prim.*` the backend lowers to its own 64-bit-domain
 # projection (Rust's native `i64::{wrapping,saturating,checked}_add`; a bignum
-# project on BEAM/JS):
+# project on BEAM/JS). `Prim` is the **target-internal** namespace — unstable
+# and backend-specific; user code reaches `Int.checked_add/2` etc. instead:
 #
-#   __prim_wrapping_add(a, b)    two's-complement wrap into [−2⁶³, 2⁶³)
-#   __prim_saturating_add(a, b)  clamp to the Int64 min/max
-#   __prim_checked_add(a, b)     `Some(sum)` if it fits, else `None`
+#   Prim.wrapping_add(a, b)    two's-complement wrap into [−2⁶³, 2⁶³)
+#   Prim.saturating_add(a, b)  clamp to the Int64 min/max
+#   Prim.checked_add(a, b)     `Some(sum)` if it fits, else `None`
 #
 # PREFER A SUBRANGE FIRST (ADR-0036). If a value is bounded by construction —
 # `type Digit := 0..9`, `Digit.of(n) : Digit | RangeError` — the bound lives in
@@ -23,12 +24,12 @@
 
 mod Int do
   # wrap on overflow (2's complement) — deterministic, total, may lose magnitude
-  pub def wrapping_add(a Int64, b Int64) Int64 := __prim_wrapping_add(a, b)
+  pub def wrapping_add(a Int64, b Int64) Int64 := Prim.wrapping_add(a, b)
 
   # clamp on overflow to the representable extreme — deterministic, total
-  pub def saturating_add(a Int64, b Int64) Int64 := __prim_saturating_add(a, b)
+  pub def saturating_add(a Int64, b Int64) Int64 := Prim.saturating_add(a, b)
 
   # surface overflow in the type: `Some(sum)` when it fits, `None` when it would
   # overflow — the caller must handle both arms (no hidden control flow, ADR-0035)
-  pub def checked_add(a Int64, b Int64) Option(Int64) := __prim_checked_add(a, b)
+  pub def checked_add(a Int64, b Int64) Option(Int64) := Prim.checked_add(a, b)
 end
