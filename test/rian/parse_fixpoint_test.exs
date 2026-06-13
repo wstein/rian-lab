@@ -26,6 +26,7 @@ defmodule Rian.ParseFixpointTest do
   defp inject({:op, o}), do: {:t_op, o}
   defp inject({:lparen}), do: :tlp
   defp inject({:rparen}), do: :trp
+  defp inject({:comma}), do: :t_comma
 
   defp toks(src), do: src |> Lexer.expr_tokens() |> Enum.map(&inject/1)
 
@@ -56,7 +57,21 @@ defmodule Rian.ParseFixpointTest do
     "a <> b <> c",
     "x rem y div z",
     "n * n + 1 < limit and ok",
-    "a <= b and c >= d or e"
+    "a <= b and c >= d or e",
+    # prefix operators and function calls
+    "-x",
+    "not a",
+    "-a + b",
+    "a + -b * c",
+    "not a and b",
+    "f(x)",
+    "f(x, y)",
+    "g()",
+    "f(x, y) + 1",
+    "h(a + b, c * d)",
+    "f(g(x), y)",
+    "-f(x)",
+    "1 + f(2, 3) * g(4)"
   ]
 
   describe "self-hosting parser fixpoint (ADR-0027/0031) — Rian parser vs Rian.Pratt" do
@@ -99,6 +114,36 @@ defmodule Rian.ParseFixpointTest do
          %{mod: mod} do
       assert mod.parse(toks("a <> b <> c")) ==
                {:bin, "<>", {:id, "a"}, {:bin, "<>", {:id, "b"}, {:id, "c"}}}
+    end
+
+    test "prefix `-` binds tighter than `+`: `-a + b` ⇒ `(-a) + b`", %{mod: mod} do
+      assert mod.parse(toks("-a + b")) ==
+               {:bin, "+", {:unary, "-", {:id, "a"}}, {:id, "b"}}
+    end
+
+    test "a call's arguments are full expressions: `f(a + b, c)`", %{mod: mod} do
+      assert mod.parse(toks("f(a + b, c)")) ==
+               {:call, {:id, "f"}, [{:bin, "+", {:id, "a"}, {:id, "b"}}, {:id, "c"}]}
+    end
+  end
+
+  # Stage 2 of the bootstrap ladder (ADR-0063): the Rian-written front-end's output
+  # is consumed by the **real Elixir backend** (`Rian.Lower`) and actually runs —
+  # "Rian front-end + reused backend = working program." (Calls to bound functions
+  # are exercised by the fixpoint above; here we run arithmetic/unary so emission is
+  # unambiguous.)
+  describe "Stage 2 — the Rian front-end feeds the real backend and runs" do
+    test "a Rian-parsed expression compiles through Rian.Lower and executes", %{mod: mod} do
+      run = fn src, binds ->
+        ast = mod.parse(toks(src))
+        {value, _} = Code.eval_string(Rian.Lower.emit_ast(ast, :elixir), binds)
+        value
+      end
+
+      assert run.("(2 + 3) * 4", []) == 20
+      assert run.("a + b * c", a: 2, b: 3, c: 4) == 14
+      assert run.("-a + b", a: 5, b: 1) == -4
+      assert run.("a * b - c * d", a: 2, b: 3, c: 4, d: 5) == -14
     end
   end
 end

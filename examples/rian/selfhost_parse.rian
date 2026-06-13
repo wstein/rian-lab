@@ -1,38 +1,35 @@
 # ===========================================================================
-# SELF-HOSTING — porting Rian.Pratt to Rian, fixpoint-locked (rung 2, widened)
+# SELF-HOSTING — porting Rian.Pratt to Rian, fixpoint-locked (Stage 2 front-end)
 # ===========================================================================
 # The parser's output is diffed against the reference `Rian.Pratt.parse` over a
-# corpus (test/rian/parse_fixpoint_test.exs) — the parser analog of the lexer
-# fixpoint. The diff needs NO projection: the AST constructors lower to Pratt's
-# exact surface tuples — Num(s)->{:num,s}, Id(s)->{:id,s}, Bin(op,l,r)->
-# {:bin,op,l,r} — so `parse(tokens)` term-EQUALS `Rian.Pratt.parse(source)`.
+# corpus (test/rian/parse_fixpoint_test.exs). The diff needs NO projection: the
+# AST constructors lower to Pratt's exact surface tuples —
+#     Num(s)->{:num,s}  Id(s)->{:id,s}  Bin(op,l,r)->{:bin,op,l,r}
+#     Unary(op,x)->{:unary,op,x}        Call(f,args)->{:call,f,args}
+# — so `parse(tokens)` term-EQUALS `Rian.Pratt.parse(source)`. This is the
+# Stage-2 front-end (ADR-0063): its output is consumed by the real Elixir backend
+# (`Rian.Lower`/`Rian.Core`) to actually run — proven in the parse fixpoint test.
 #
-# This widens the first slice (which hardcoded `+ - * /` in two levels) to the
-# FULL binary-operator precedence table via **precedence climbing** — the same
-# algorithm `Rian.Pratt` uses, with the same binding powers (`opinfo`/`bp`):
+# Grammar (Rian.Pratt's binding powers; precedence climbing):
+#   expr    := prefix (binop expr)*          binop levels per Rian.Pratt.opinfo
+#   prefix  := ('-' | 'not') prefix@110 | primary
+#   primary := Num | Id | '(' expr ')'  then postfix
+#   postfix := '(' args ')'                  function call
 #
-#   level  3  * / rem div     (left)        base = (13 - level) * 10
-#   level  4  + -             (left)        left/none: lbp=base,  rbp=base+1
-#   level  5  <>              (right)       right:     lbp=base+1, rbp=base
-#   level  8  < <= > >=       (none)
-#   level  9  == !=           (none)
-#   level 10  and             (left)
-#   level 11  or              (left)
-#
-# BEAM guards cannot call user functions, so every precedence decision is made in
-# the body (an `if` over `lbp(op)`), never in a guard. Atoms are Num / Id /
-# parenthesized expressions. Prefix operators, calls, pipes, and the non-assoc
-# *raise* (Pratt rejects `a < b < c`) are later slices — the corpus stays within
-# this grammar (each non-assoc operator used at most once per level).
+# Out of slice (later): labeled args (`k: v`), `.field`, `&` captures, `if`/`case`/
+# `with`, lists/maps/tuples, and Pratt's non-assoc *raise* (`a < b < c`).
 # ---------------------------------------------------------------------------
 
 mod SelfhostParse do
-  type Tok := TNum(String) | TId(String) | TOp(String) | TLP | TRP
+  type Tok := TNum(String) | TId(String) | TOp(String) | TLP | TRP | TComma
 
   # constructor names chosen so the lowered term matches Rian.Pratt's tuples.
-  type Expr := Num(String) | Id(String) | Bin(String, Expr, Expr) | EErr
+  type Expr :=
+      Num(String) | Id(String) | Bin(String, Expr, Expr)
+    | Unary(String, Expr) | Call(Expr, Vec(Expr)) | EErr
 
   type Parse := P(Expr, Vec(Tok))
+  type Args := AP(Vec(Expr), Vec(Tok))
 
   pub def parse(ts Vec(Tok)) Expr
   pub def parse(ts)
@@ -41,17 +38,16 @@ mod SelfhostParse do
     end
   end
 
-  # parse an expression whose operators all bind at least as tight as `min_bp`.
+  # an expression whose operators all bind at least as tight as `min_bp`.
   def parse_bp(min_bp Int64, ts Vec(Tok)) Parse
   def parse_bp(min_bp, ts)
-    case parse_atom(ts) do
+    case parse_prefix(ts) do
       P(lhs, rest) -> climb(min_bp, lhs, rest)
     end
   end
 
   # while the next token is a binary operator whose left binding power is >=
-  # min_bp, consume it and fold; the right-hand side is parsed at `rbp(op)` (so
-  # left-assoc stops at the same level, right-assoc re-enters it).
+  # min_bp, consume it and fold; the RHS is parsed at `rbp(op)`.
   def climb(min_bp Int64, lhs Expr, ts Vec(Tok)) Parse
   def climb(min_bp, lhs, [TOp(op) | rest])
     if lbp(op) >= min_bp do
@@ -64,28 +60,65 @@ mod SelfhostParse do
   end
   def climb(min_bp, lhs, ts) := P(lhs, ts)
 
-  # atom := Num | Id | '(' expr ')'  — anything else (or a missing `)`) is a
-  # total `EErr` (the reference raises; the corpus is well-formed).
-  def parse_atom(ts Vec(Tok)) Parse
-  def parse_atom([TNum(n) | rest]) := P(Num(n), rest)
-  def parse_atom([TId(x) | rest]) := P(Id(x), rest)
-  def parse_atom([TLP | rest])
+  # prefix := ('-' | 'not') prefix | primary  — unary operands bind at 110
+  # (tighter than any binary op), matching Rian.Pratt.parse_prefix.
+  def parse_prefix(ts Vec(Tok)) Parse
+  def parse_prefix([TOp("-") | rest])
+    case parse_bp(110, rest) do
+      P(x, rest2) -> P(Unary("-", x), rest2)
+    end
+  end
+  def parse_prefix([TOp("not") | rest])
+    case parse_bp(110, rest) do
+      P(x, rest2) -> P(Unary("not", x), rest2)
+    end
+  end
+  def parse_prefix(ts) := parse_primary(ts)
+
+  # primary := Num | Id | '(' expr ')'  then postfix (calls)
+  def parse_primary(ts Vec(Tok)) Parse
+  def parse_primary([TNum(n) | rest]) := parse_postfix(Num(n), rest)
+  def parse_primary([TId(x) | rest]) := parse_postfix(Id(x), rest)
+  def parse_primary([TLP | rest])
     case parse_bp(0, rest) do
-      P(e, [TRP | rest2]) -> P(e, rest2)
+      P(e, [TRP | rest2]) -> parse_postfix(e, rest2)
       P(_, other) -> P(EErr, other)
     end
   end
-  def parse_atom(ts) := P(EErr, ts)
+  def parse_primary(ts) := P(EErr, ts)
+
+  # postfix := '(' args ')'  — a function call `node(args)`.
+  def parse_postfix(node Expr, ts Vec(Tok)) Parse
+  def parse_postfix(node, [TLP | rest])
+    case parse_args(rest) do
+      AP(args, rest2) -> parse_postfix(Call(node, args), rest2)
+    end
+  end
+  def parse_postfix(node, ts) := P(node, ts)
+
+  # args := ε | expr (',' expr)*
+  def parse_args(ts Vec(Tok)) Args
+  def parse_args([TRP | rest]) := AP([], rest)
+  def parse_args(ts)
+    case parse_bp(0, ts) do
+      P(a, rest) -> finish_arg(a, rest)
+    end
+  end
+
+  def finish_arg(a Expr, ts Vec(Tok)) Args
+  def finish_arg(a, [TComma | rest])
+    case parse_args(rest) do
+      AP(more, rest2) -> AP([a | more], rest2)
+    end
+  end
+  def finish_arg(a, [TRP | rest]) := AP([a], rest)
+  def finish_arg(a, ts) := AP([a], ts)
 
   # ── binding powers (mirror Rian.Pratt.bp) ────────────────────────────────
-  # left binding power: where the operator sits when deciding to bind leftward.
   def lbp(op String) Int64 := bp_base(level(op)) + left_off(op)
-  # right binding power: the min_bp the right operand is parsed at.
   def rbp(op String) Int64 := bp_base(level(op)) + right_off(op)
-
   def bp_base(lvl Int64) Int64 := (13 - lvl) * 10
 
-  # only `<>` is right-associative among the operators in this slice.
   def left_off(op String) Int64
   def left_off("<>") := 1
   def left_off(op) := 0
@@ -95,8 +128,7 @@ mod SelfhostParse do
   def right_off(op) := 1
 
   # operator precedence level (lower binds tighter); an unknown token gets a level
-  # so loose that `lbp(op) >= min_bp` is always false — climbing stops, the token
-  # is left unconsumed (never a binary fold).
+  # so loose that climbing always stops (the token is left unconsumed).
   def level(op String) Int64
   def level("*") := 3
   def level("/") := 3

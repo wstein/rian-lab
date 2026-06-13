@@ -325,17 +325,24 @@ over time. The proof is a four-stage ladder:
   sources; the rest use heredoc doc-comments, and the lexer cannot yet lex *its own*
   source (char escapes `'\n'`) — the documented frontier.
   See [`test/rian/selfhost_fixedpoint_test.exs`](test/rian/selfhost_fixedpoint_test.exs).
-- **Stage 2 — front-end self-host** (future): the Rian front-end produces the *same
-  Core IR* the Elixir front-end builds, then the existing backend compiles it — the
-  first genuinely self-hosted compile. Gated on the parser→IR port + the portable
-  stdlib breadth (ADR-0047).
-- **Stage 3 — bootstrap fixed point** (future): the whole compiler in Rian; compile
-  its source with the Elixir host → v1, compile with v1 → v2, assert **v1 == v2**
-  (bit-identical `.beam`). The canonical terminus.
+- **Stage 2 — front-end self-host** (**partial — the expression front-end self-hosts**):
+  the Rian-written parser (full binary precedence table + prefix `-`/`not` + function
+  calls) produces an AST that **term-equals `Rian.Pratt.parse`**, and that output is
+  consumed by the **real Elixir backend** (`Rian.Lower`/`Rian.Core`) to **actually run**
+  — `(2 + 3) * 4` → `20`, `a + b * c` (a=2,b=3,c=4) → `14`, proven in
+  [`parse_fixpoint_test.exs`](test/rian/parse_fixpoint_test.exs). This is "Rian
+  front-end + reused backend = working program" for expressions. **Remaining:**
+  declaration parsing (`Rian.Decl` → Core IR for `def`/`type`/`mod`) and the portable
+  `Enum`/`Map`/`String` stdlib breadth (ADR-0047) — the gate on the *full* front-end.
+- **Stage 3 — bootstrap fixed point** (future; **determinism prerequisite verified**):
+  the whole compiler in Rian; compile its source with the Elixir host → v1, compile
+  with v1 → v2, assert **v1 == v2** (bit-identical `.beam`). The canonical terminus.
+  Its precondition already holds — `Rian.Beam` emits **byte-identical** bytecode on
+  recompilation (the optimizer/parser/module sources round-trip identically).
 
-**Next:** widen the parser slice (calls, comparisons, pipes, then patterns) toward
-`Rian.Decl` coverage and Stage 2; port the `Enum`/`Map`/`String` stdlib breadth the
-real front-end needs. Remaining lexer gaps (heredocs `"""`, string-body escapes,
+**Next:** the *full* Stage 2 — port `Rian.Decl`'s declaration parsing in Rian
+(producing the Core IR, diffed against `Rian.Decl.parse`) and the stdlib breadth the
+real front-end leans on. Remaining lexer gaps (heredocs `"""`, string-body escapes,
 `\u{…}` char escapes — which block self-lexing) are small and unforced by Stage 2.
 
 ## The whole compiler as one Rian artifact

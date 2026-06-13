@@ -74,4 +74,19 @@ defmodule Rian.SelfhostFixedpointTest do
       assert length(got) > 500
     end
   end
+
+  # Stage 3 prerequisite (ADR-0063 §"Open items"): a bit-identical bootstrap fixed
+  # point (compile the compiler with itself, twice, and get the same bytes) is only
+  # possible if emission is **deterministic**. Verify `Rian.Beam` already is — the
+  # same source compiles to byte-identical bytecode on every run.
+  describe "Stage 3 prerequisite — deterministic emission (ADR-0063)" do
+    test "Rian.Beam emits byte-identical bytecode on recompilation" do
+      for f <- ~w(selfhost_opt.rian selfhost_modules.rian selfhost_parse.rian) do
+        src = File.read!(Path.join(["examples", "rian", f]))
+
+        assert Beam.compile_program(src) == Beam.compile_program(src),
+               "Rian.Beam emission is nondeterministic for #{f} — blocks a bit-identical bootstrap"
+      end
+    end
+  end
 end
