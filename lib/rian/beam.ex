@@ -61,6 +61,7 @@ defmodule Rian.Beam do
     ECapture,
     ECaptureNamed,
     ECase,
+    EChar,
     EDot,
     EId,
     EIf,
@@ -190,6 +191,8 @@ defmodule Rian.Beam do
   defp expr_form(%ENum{text: n}, _s), do: num_form(n)
   # a Rian `String` is a BEAM binary (Elixir string) — the literal's UTF-8 bytes
   defp expr_form(%EStr{value: s}, _s), do: str_form(s)
+  # a `Char` is its codepoint integer on the BEAM (charlists are integer lists)
+  defp expr_form(%EChar{value: cp}, _s), do: {:integer, @ln, cp}
   defp expr_form(%EId{name: b}, _s) when b in ~w(true false), do: {:atom, @ln, String.to_atom(b)}
   # a bare PascalCase id is a nullary sum-variant value -> its snake atom tag
   defp expr_form(%EId{name: x}, _s),
@@ -253,6 +256,10 @@ defmodule Rian.Beam do
 
   defp expr_form(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, s),
     do: {:bin, @ln, [bin_seg(expr_form(a, s)), bin_seg(expr_form(b, s))]}
+
+  # a `Char`'s codepoint — identity on the BEAM, where a `Char` *is* its integer
+  defp expr_form(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}, s),
+    do: expr_form(c, s)
 
   # named construction `Name(field: v, …)` builds a **struct**: a map keyed by
   # field-name atoms plus a `__struct__` tag (the snake-cased name). Field access
@@ -429,6 +436,7 @@ defmodule Rian.Beam do
   # ── pattern forms (consume the typed core IR, Rian.Core) ───────────────
   defp pat_form(%Core.PWild{}), do: {:var, @ln, :_}
   defp pat_form(%Core.PVar{name: x}), do: var_form(x)
+  defp pat_form(%Core.PChar{value: cp}), do: {:integer, @ln, cp}
   defp pat_form(%Core.PLit{value: v}) when is_integer(v), do: {:integer, @ln, v}
   # a string-literal pattern matches the same binary the literal constructs
   defp pat_form(%Core.PLit{value: v}) when is_binary(v), do: str_form(v)

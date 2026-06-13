@@ -137,15 +137,20 @@ on the `@type` spec and first-match clauses; no shim needed.
 - ~~**`Char` literal vs Elixir charlist.**~~ **Resolved 2026-06-12:** `'…'` delimits **exactly one
   `Char`** (Crystal); a multi-codepoint single-quoted literal (`'AB'`) is a **lex error** (use a
   `"…"` `String`) — Rian has **no charlists**. Escapes `'\n'`, `'\''`, `'\\'`, `'\u{1F600}'`.
-- **Implementation note (Char literal lands — codepoint on every target).** The `Char` *literal*
-  is implemented: `Rian.Lexer` scans `'…'` (the escapes above, single codepoint enforced) and
-  `Rian.Pratt` desugars it to its **codepoint integer** in both expression and pattern position.
-  It lowers to that integer on **all** targets — *reconciling* the earlier "`?A` on BEAM / native
-  Rust `char`" split: the portable string prelude (ADR-0047 §2) settled on **codepoint-`i64`**
-  (`__prim_str_chars` yields `Vec<i64>` on Rust, BigInt codepoints in JS, a charlist on the BEAM),
-  so a literal that composes with those comparisons must be the same codepoint integer. The
-  distinct `Char` *type* (and its native-Rust-`char` representation + `'A'..'Z'` ranges) builds on
-  this literal and remains future work; until then a `Char` literal infers as `Int64`.
+- **Implementation note (`Char` type lands — native per target).** The `Char` literal **and the
+  distinct `Char` type** are implemented. `Rian.Lexer` scans `'…'` (the escapes above, single
+  codepoint enforced); `Rian.Pratt` parses it to a distinct `{:char, cp}` expression / `{:char_lit,
+  cp}` pattern node (`Rian.Core.EChar` / `PChar`), and the checker types it **`Char`** — distinct
+  from `Int64`. Lowering is **native per target** (decision-lock 2026-06-13): a codepoint integer on
+  the BEAM (charlists are integer lists) and a **BigInt** codepoint in JS, but a native **`char`** on
+  Rust (`__prim_str_chars : Vec(Char)` → `Vec<char>`; `Rian.Capability` lowers `Char` → `char`, a
+  `Copy` scalar). Ordinal comparison (`==`, `<`, `>=`) works directly on every target (Rust `char`
+  is `Ord`+`Eq`). **Arithmetic does not widen implicitly** (ADR-0035 — no hidden coercion): use
+  `__prim_char_code(c) : Int64` for the explicit `Char` → codepoint conversion (identity on BEAM/JS,
+  `char as i64` on Rust). The self-hosting lexer now reads `lex(cs Vec(Char))` with `when c == '+'`
+  / `['(' | rest]` and `acc * 10 + __prim_char_code(c) - __prim_char_code('0')`, lowering and running
+  on all three targets. **Still future:** `range` *construction* over `Char` (`'A'..'Z'`) — the
+  ordinal-base machinery (ADR-0036 above) builds on this `Char` type.
 - ~~**Range arithmetic & coercion.**~~ **Resolved 2026-06-12: arithmetic widens to base.**
   `Digit + Digit : Int64` — *not* `Digit`, because `9 + 9 = 18 ∉ 0..9`; any in-bounds wrap or hidden
   `RangeError` on `+` would be hidden control flow (ADR-0035). Re-narrow explicitly with `Digit.of(18)`

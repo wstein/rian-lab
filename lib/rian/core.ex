@@ -45,6 +45,17 @@ defmodule Rian.Core do
     defstruct [:value, type: nil]
   end
 
+  defmodule PChar do
+    @moduledoc """
+    A `Char` literal pattern (ADR-0036), carrying its integer codepoint
+    `value`. Matches a codepoint integer on the BEAM/JS and a native `char` on
+    Rust; for exhaustiveness it is the same `{:lit, codepoint}` constructor as
+    an integer literal.
+    """
+    @enforce_keys [:value]
+    defstruct [:value, type: nil]
+  end
+
   defmodule PAtom do
     @moduledoc "An atom pattern (`:ok`)."
     @enforce_keys [:name]
@@ -99,6 +110,16 @@ defmodule Rian.Core do
 
   defmodule EStr do
     @moduledoc "A string literal."
+    @enforce_keys [:value]
+    defstruct [:value, type: nil]
+  end
+
+  defmodule EChar do
+    @moduledoc """
+    A `Char` literal (ADR-0036), carrying its Unicode `value` (an integer
+    codepoint). Lowers to a codepoint integer on the BEAM/JS and a native
+    `char` on Rust; typed `Char` by the checker.
+    """
     @enforce_keys [:value]
     defstruct [:value, type: nil]
   end
@@ -229,6 +250,7 @@ defmodule Rian.Core do
   @doc "Translate a surface expression (the `Rian.Pratt` tuple AST) into the typed core."
   def from_expr({:num, n}), do: %ENum{text: n}
   def from_expr({:str, s}), do: %EStr{value: s}
+  def from_expr({:char, cp}), do: %EChar{value: cp}
   def from_expr({:id, x}), do: %EId{name: x}
   def from_expr({:atom, a}), do: %EAtom{name: a}
   def from_expr({:unary, op, x}), do: %EUnary{op: op, arg: from_expr(x)}
@@ -296,6 +318,7 @@ defmodule Rian.Core do
   def from_pat(:wild), do: %PWild{}
   def from_pat({:var, name}), do: %PVar{name: name}
   def from_pat({:lit, value}), do: %PLit{value: value}
+  def from_pat({:char_lit, cp}), do: %PChar{value: cp}
   def from_pat({:atom, name}), do: %PAtom{name: name}
   def from_pat({:tuple, ps}), do: %PTuple{elems: Enum.map(ps, &from_pat/1)}
   def from_pat({:ctor, ctor, args}), do: %PCtor{ctor: ctor, args: Enum.map(args, &from_pat/1)}

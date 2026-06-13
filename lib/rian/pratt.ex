@@ -183,9 +183,9 @@ defmodule Rian.Pratt do
   defp parse_primary([{:op, ":"}, {:id, name} | rest]), do: parse_postfix({:atom, name}, rest)
   defp parse_primary([{:str, s} | rest]), do: parse_postfix({:str, s}, rest)
   defp parse_primary([{:num, n} | rest]), do: parse_postfix({:num, n}, rest)
-  # a `Char` literal desugars to its codepoint integer (ADR-0036) — the codepoint
-  # representation `__prim_str_chars` uses on every target, so `c == 'A'` composes
-  defp parse_primary([{:char, cp} | rest]), do: parse_postfix({:num, Integer.to_string(cp)}, rest)
+  # a `Char` literal (ADR-0036) — a distinct node typed `Char` by the checker,
+  # lowered to a codepoint integer on BEAM/JS and a native `char` on Rust
+  defp parse_primary([{:char, cp} | rest]), do: parse_postfix({:char, cp}, rest)
   defp parse_primary([{:id, x} | rest]), do: parse_postfix({:id, x}, rest)
   defp parse_primary(other), do: raise(ArgumentError, "unexpected token: #{inspect(other)}")
 
@@ -332,8 +332,9 @@ defmodule Rian.Pratt do
   defp parse_pat([{:id, "_"} | rest]), do: {:wild, rest}
   defp parse_pat([{:op, "-"}, {:num, n} | rest]), do: {{:lit, -String.to_integer(n)}, rest}
   defp parse_pat([{:num, n} | rest]), do: {{:lit, String.to_integer(n)}, rest}
-  # a `Char` literal pattern matches its codepoint integer (ADR-0036)
-  defp parse_pat([{:char, cp} | rest]), do: {{:lit, cp}, rest}
+  # a `Char` literal pattern (ADR-0036) — a distinct node so a clause head can
+  # match a `Char` by value (codepoint on BEAM/JS, native `char` on Rust)
+  defp parse_pat([{:char, cp} | rest]), do: {{:char_lit, cp}, rest}
   defp parse_pat([{:op, ":"}, {:id, name} | rest]), do: {{:atom, name}, rest}
   defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
   defp parse_pat([{:lbrace} | rest]), do: parse_pat_tuple(rest, [])
@@ -577,6 +578,7 @@ defmodule Rian.Pratt do
 
   defp sexpr({:num, n}), do: n
   defp sexpr({:str, s}), do: "\"#{s}\""
+  defp sexpr({:char, cp}), do: "?#{cp}"
   defp sexpr({:id, x}), do: x
   defp sexpr({:bin, op, l, r}), do: "(#{op} #{sexpr(l)} #{sexpr(r)})"
   defp sexpr({:unary, op, x}), do: "(#{op} #{sexpr(x)})"
@@ -632,6 +634,7 @@ defmodule Rian.Pratt do
   defp sexpr_pat(:wild), do: "_"
   defp sexpr_pat({:lit, v}) when is_binary(v), do: "\"#{v}\""
   defp sexpr_pat({:lit, v}), do: to_string(v)
+  defp sexpr_pat({:char_lit, cp}), do: "?#{cp}"
   defp sexpr_pat({:atom, a}), do: ":" <> a
   defp sexpr_pat({:tuple, ps}), do: "{#{Enum.map_join(ps, ", ", &sexpr_pat/1)}}"
   defp sexpr_pat({:list, ps, :close}), do: "[#{Enum.map_join(ps, ", ", &sexpr_pat/1)}]"

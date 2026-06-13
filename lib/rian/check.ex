@@ -49,7 +49,23 @@ defmodule Rian.Check do
   are a `:mismatch`.
   """
   alias Rian.{Core, Pratt}
-  alias Rian.Core.{EBin, EBlock, ECall, ECase, EId, EIf, EList, ENum, EStr, ETuple, EUnary, EWith}
+
+  alias Rian.Core.{
+    EBin,
+    EBlock,
+    ECall,
+    ECase,
+    EChar,
+    EId,
+    EIf,
+    EList,
+    ENum,
+    EStr,
+    ETuple,
+    EUnary,
+    EWith
+  }
+
   alias Rian.Core.{ECaptureNamed, ELambda}
   alias Rian.Core.{PCtor, PVar}
   alias Rian.IR.Func
@@ -125,6 +141,9 @@ defmodule Rian.Check do
     do: if(String.contains?(n, ".") or String.match?(n, ~r/[eE]/), do: "Float64", else: "Int64")
 
   def infer(%EStr{}, _env, _ic), do: "String"
+  # a `Char` literal is the `Char` primitive (ADR-0036); to use its codepoint in
+  # arithmetic, convert explicitly with `__prim_char_code(c) : Int64`
+  def infer(%EChar{}, _env, _ic), do: "Char"
   def infer(%EId{name: b}, _env, _ic) when b in ~w(true false), do: "Bool"
   # a name resolves to a bound var, else a nullary variant constructor, else unknown
   def infer(%EId{name: x}, env, ic), do: Map.get(env, x) || ctor_type(ic, x) || :unknown
@@ -165,6 +184,10 @@ defmodule Rian.Check do
   # call to a known named function infers that function's declared return type
   # (concretized from the call's argument types when the return is generic —
   # `def id(x T) T forall T` called with `id(5)` infers `Int64`, ADR-0042)
+  # `__prim_char_code(c) : Int64` — a `Char`'s codepoint as an integer, the
+  # explicit Char→Int conversion for arithmetic (ADR-0036, no hidden widening)
+  def infer(%ECall{fun: %EId{name: "__prim_char_code"}, args: [_]}, _env, _ic), do: "Int64"
+
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)
@@ -224,7 +247,7 @@ defmodule Rian.Check do
   def annotate(ast, env \\ %{}, ic \\ %{})
   def annotate(ast, env, ic) when is_tuple(ast), do: annotate(Core.from_expr(ast), env, ic)
 
-  def annotate(%t{} = n, env, ic) when t in [ENum, EStr, EId],
+  def annotate(%t{} = n, env, ic) when t in [ENum, EStr, EChar, EId],
     do: %{n | type: infer(n, env, ic)}
 
   def annotate(%EUnary{arg: a} = n, env, ic),

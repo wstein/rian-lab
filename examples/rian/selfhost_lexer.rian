@@ -5,12 +5,13 @@
 # typing its OWN data (the `Token` sum), recursing over a list with `[h | t]`
 # patterns, and running on the BEAM. Evidence for SELFHOST.md, not a demo.
 #
-# Char literals (ADR-0036): clauses match `'+'`/`'('`/`'0'` directly — each
-# desugars to its codepoint integer (`'+'` = 43), the representation
-# `__prim_str_chars` yields on every target — so the comparisons stay over
-# `Int64` codepoints while reading like characters. (Former B2 crutch removed.)
+# Char literals (ADR-0036): clauses match `'+'`/`'('`/`'0'` directly — `Char` is
+# a distinct type, lowered native per target (codepoint integer on BEAM, BigInt
+# in JS, native `char` on Rust). Ordinal comparisons (`==`/`>=`/`<=`) work on
+# every target; codepoint arithmetic is an explicit `__prim_char_code(c) : Int64`
+# (no hidden widening). (Former B2 crutch removed.)
 #
-# `String -> codepoints` goes through the **portable prelude primitive**
+# `String -> Vec(Char)` goes through the **portable prelude primitive**
 # `__prim_str_chars` (ADR-0047 §2), not host FFI — so the lexer source carries no
 # BEAM-only call and lowers to every backend through the same machinery.
 # ---------------------------------------------------------------------------
@@ -21,9 +22,10 @@ mod SelfhostLexer do
 
   pub def tokenize(src String) Vec(Token) := lex(__prim_str_chars(src))
 
-  # Recurse over the codepoint list. Specific char clauses first; the final
-  # `[_ | rest]` makes the match total (unknown bytes are skipped).
-  def lex(cs Vec(Int64)) Vec(Token)
+  # Recurse over the `Char` list. Specific char clauses first; the final
+  # `[_ | rest]` makes the match total (unknown chars are skipped). Char
+  # comparisons (`==`, `>=`, `<=`) are ordinal and work on every target.
+  def lex(cs Vec(Char)) Vec(Token)
   def lex([]) := []
   def lex([c | rest]) when c == ' ' := lex(rest)
   def lex(['+' | rest]) := [TPlus | lex(rest)]
@@ -36,7 +38,9 @@ mod SelfhostLexer do
   def lex([_ | rest]) := lex(rest)
 
   # Accumulate a run of digits into one `TNum`, then resume lexing the rest.
-  def lex_num(cs Vec(Int64), acc Int64) Vec(Token)
-  def lex_num([c | rest], acc) when c >= '0' and c <= '9' := lex_num(rest, acc * 10 + c - '0')
+  # `__prim_char_code(c) : Int64` is the explicit `Char` → codepoint conversion
+  # (ADR-0036 — arithmetic widens to the base, no hidden coercion).
+  def lex_num(cs Vec(Char), acc Int64) Vec(Token)
+  def lex_num([c | rest], acc) when c >= '0' and c <= '9' := lex_num(rest, acc * 10 + __prim_char_code(c) - __prim_char_code('0'))
   def lex_num(cs, acc) := [TNum(acc) | lex(cs)]
 end

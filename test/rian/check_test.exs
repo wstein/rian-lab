@@ -147,6 +147,27 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "Char type (ADR-0036)" do
+    test "a char literal is the `Char` primitive, distinct from `Int64`" do
+      assert Check.infer(Pratt.parse_body("'A'")) == "Char"
+      assert Check.infer(Pratt.parse_body("65")) == "Int64"
+    end
+
+    test "`__prim_char_code` converts a Char to its Int64 codepoint" do
+      assert Check.infer(Pratt.parse_body("__prim_char_code('0')")) == "Int64"
+    end
+
+    test "a typed binding may declare `Char`" do
+      assert Check.check("def f(n Int64) Int64 := c Char := 'A' ; n") == :ok
+      assert Check.infer(Pratt.parse_body("c Char := 'A' ; c")) == "Char"
+    end
+
+    test "a `Char`-returning function with a char-literal body checks" do
+      assert Check.check("def first() Char := 'A'") == :ok
+      assert {:error, _} = Check.check("def first() Char := 65")
+    end
+  end
+
   describe "flow narrowing (ADR-0034 pillar 4)" do
     @shape "type Shape := Circle(radius Float64) | Square(side Float64)\n"
 

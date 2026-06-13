@@ -60,6 +60,8 @@ defmodule Rian.PatternLower do
   def lower(%Core.PAs{pat: p}, env), do: lower(p, env)
   def lower(%Core.PPin{}, _env), do: {:wild, true}
   def lower(%Core.PLit{value: v}, _env), do: {{:ctor, {:lit, v}, []}, false}
+  # a `Char` literal pattern is its codepoint literal for exhaustiveness (ADR-0036)
+  def lower(%Core.PChar{value: cp}, _env), do: {{:ctor, {:lit, cp}, []}, false}
   # an atom (`:ok`) is a nullary literal constructor over the open atom universe
   def lower(%Core.PAtom{name: a}, _env), do: {{:ctor, {:lit, String.to_atom(a)}, []}, false}
 

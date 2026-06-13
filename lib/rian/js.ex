@@ -42,6 +42,7 @@ defmodule Rian.JS do
     EBlock,
     ECall,
     ECase,
+    EChar,
     EDot,
     EId,
     EIf,
@@ -51,6 +52,7 @@ defmodule Rian.JS do
     EStr,
     ETuple,
     EUnary,
+    PChar,
     PCtor,
     PList,
     PLit,
@@ -129,6 +131,8 @@ defmodule Rian.JS do
   defp pat_match(%PWild{}, _acc), do: {[], []}
   defp pat_match(%PVar{name: n}, acc), do: {[], [{n, acc}]}
   defp pat_match(%PLit{value: v}, acc), do: {["#{acc} === #{lit_js(v)}"], []}
+  # a `Char` is its codepoint as a BigInt — `__prim_str_chars` yields BigInt codepoints
+  defp pat_match(%PChar{value: cp}, acc), do: {["#{acc} === #{cp}n"], []}
 
   defp pat_match(%PCtor{ctor: ctor, args: args}, acc) do
     {ts, bs} =
@@ -205,6 +209,8 @@ defmodule Rian.JS do
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_js(%ENum{text: n}), do: num_js(n)
+  # a `Char` is its codepoint as a BigInt — matches `__prim_str_chars`'s codepoints
+  defp expr_js(%EChar{value: cp}), do: "#{cp}n"
   # a Rian `String` is a JS string; `<>` concatenation is `+` (see js_op)
   defp expr_js(%EStr{value: s}), do: inspect(s)
   defp expr_js(%EId{name: b}) when b in ~w(true false), do: b
@@ -250,6 +256,9 @@ defmodule Rian.JS do
 
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_from_chars"}, args: [cs]}),
     do: "#{paren(cs)}.map(c => String.fromCodePoint(Number(c))).join(\"\")"
+
+  # a `Char`'s codepoint — identity in JS, where a `Char` is a BigInt codepoint
+  defp expr_js(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}), do: expr_js(c)
 
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
     do: "(#{expr_js(a)} + #{expr_js(b)})"

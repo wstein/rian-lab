@@ -203,15 +203,18 @@ defmodule Rian.PrattTest do
     end
   end
 
-  describe "char literals (ADR-0036) — desugar to codepoint integers" do
-    test "in expression position a char literal becomes its codepoint" do
+  describe "char literals (ADR-0036) — a distinct `Char` node" do
+    test "in expression position a char literal is a `{:char, codepoint}` node" do
       assert Pratt.parse_body("c == '0'") ==
-               {:block, [expr: {:bin, "==", {:id, "c"}, {:num, "48"}}]}
+               {:block, [expr: {:bin, "==", {:id, "c"}, {:char, 48}}]}
     end
 
-    test "in pattern position a char literal matches its codepoint" do
-      assert Pratt.parse_pats("'+'") == [{:lit, 43}]
-      assert Pratt.parse_pats("['(' | rest]") == [{:list, [lit: 40], {:tail, {:var, "rest"}}}]
+    test "in pattern position a char literal is a `{:char_lit, codepoint}` node" do
+      assert Pratt.parse_pats("'+'") == [{:char_lit, 43}]
+
+      assert Pratt.parse_pats("['(' | rest]") == [
+               {:list, [char_lit: 40], {:tail, {:var, "rest"}}}
+             ]
     end
   end
 

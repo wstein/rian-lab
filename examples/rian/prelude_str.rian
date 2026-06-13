@@ -6,24 +6,25 @@
 # applies: a small set of `__prim_str_*` calls each backend lowers natively, with
 # the useful operations written once in Rian over them.
 #
-#   __prim_str_chars(s)        codepoints of s   (BEAM String.to_charlist | JS [...s] | Rust s.chars())
-#   __prim_str_from_chars(cs)  s from codepoints
+#   __prim_str_chars(s)        the `Char`s of s  (BEAM String.to_charlist | JS [...s] | Rust s.chars())
+#   __prim_str_from_chars(cs)  s from a `Vec(Char)`
 #   __prim_str_concat(a, b)    a <> b
 #
-#   chars("ab") = [97, 98]   ·   length("héllo") = 5   ·   concat("foo","bar") = "foobar"
+# `chars` yields a `Vec(Char)` (ADR-0036) — a codepoint integer on BEAM/JS, a
+# native `char` on Rust. `chars("ab") = ['a', 'b']` · `length("héllo") = 5`.
 # ---------------------------------------------------------------------------
 
 mod Str do
   # ── the portable surface (forwards to the per-target primitives) ────────
-  pub def chars(s String) Vec(Int64) := __prim_str_chars(s)
-  pub def from_chars(cs Vec(Int64)) String := __prim_str_from_chars(cs)
+  pub def chars(s String) Vec(Char) := __prim_str_chars(s)
+  pub def from_chars(cs Vec(Char)) String := __prim_str_from_chars(cs)
   pub def concat(a String, b String) String := __prim_str_concat(a, b)
 
   # ── composite ops — written ONCE in Rian, portable to every backend ─────
   # length in codepoints: count the char list (cons recursion, no host FFI)
   pub def length(s String) Int64 := count(__prim_str_chars(s))
 
-  def count(cs Vec(Int64)) Int64
+  def count(cs Vec(Char)) Int64
   def count([]) := 0
   def count([_ | t]) := 1 + count(t)
 end

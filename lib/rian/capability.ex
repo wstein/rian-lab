@@ -104,6 +104,7 @@ defmodule Rian.Capability do
   defp count_uses({:id, x}, bound), do: if(MapSet.member?(bound, x), do: %{}, else: %{x => 1})
   defp count_uses({:num, _}, _bound), do: %{}
   defp count_uses({:str, _}, _bound), do: %{}
+  defp count_uses({:char, _}, _bound), do: %{}
   defp count_uses({:atom, _}, _bound), do: %{}
   defp count_uses({:dot, head, _name}, bound), do: count_uses(head, bound)
   defp count_uses({:cap_arg, _}, _bound), do: %{}

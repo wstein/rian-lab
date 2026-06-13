@@ -41,6 +41,7 @@ defmodule Rian.Lower do
     ECapture,
     ECaptureNamed,
     ECase,
+    EChar,
     EConstRef,
     EDot,
     EId,
@@ -580,6 +581,8 @@ defmodule Rian.Lower do
   defp pat_ex(%PVar{name: x}), do: x
   defp pat_ex(%PLit{value: v}) when is_binary(v), do: inspect(v)
   defp pat_ex(%PLit{value: v}), do: to_string(v)
+  # a `Char` is its codepoint integer on the BEAM/Elixir text target (ADR-0036)
+  defp pat_ex(%Core.PChar{value: cp}), do: to_string(cp)
   defp pat_ex(%PAtom{name: a}), do: ":" <> a
   defp pat_ex(%PTuple{elems: ps}), do: "{#{Enum.map_join(ps, ", ", &pat_ex/1)}}"
   defp pat_ex(%PList{elems: ps, tail: :close}), do: "[#{Enum.map_join(ps, ", ", &pat_ex/1)}]"
@@ -778,6 +781,8 @@ defmodule Rian.Lower do
   defp pat_rs(%PVar{name: x}, _), do: x
   defp pat_rs(%PLit{value: v}, _) when is_binary(v), do: inspect(v)
   defp pat_rs(%PLit{value: v}, _), do: to_string(v)
+  # a `Char` literal pattern is a native Rust `char` literal (ADR-0036)
+  defp pat_rs(%Core.PChar{value: cp}, _), do: rust_char_lit(cp)
   defp pat_rs(%PTuple{elems: [%PAtom{name: "ok"}, p]}, m), do: "Ok(#{pat_rs(p, m)})"
   defp pat_rs(%PTuple{elems: [%PAtom{name: "error"}, p]}, m), do: "Err(#{pat_rs(p, m)})"
   defp pat_rs(%PTuple{elems: ps}, m), do: "(#{Enum.map_join(ps, ", ", &pat_rs(&1, m))})"
@@ -814,6 +819,16 @@ defmodule Rian.Lower do
     end
   end
 
+  # a Unicode codepoint as a Rust `char` literal, escaping the specials; any
+  # other codepoint is emitted as its UTF-8 character (Rust source is UTF-8).
+  defp rust_char_lit(?\n), do: "'\\n'"
+  defp rust_char_lit(?\t), do: "'\\t'"
+  defp rust_char_lit(?\r), do: "'\\r'"
+  defp rust_char_lit(0), do: "'\\0'"
+  defp rust_char_lit(?\\), do: "'\\\\'"
+  defp rust_char_lit(?'), do: "'\\''"
+  defp rust_char_lit(cp), do: "'" <> <<cp::utf8>> <> "'"
+
   # the cons-tail of a Rust slice pattern: `t @ ..` binds the rest as `&[T]`
   defp rest_pat_rs(%PVar{name: n}), do: "#{n} @ .."
   defp rest_pat_rs(%PWild{}), do: ".."
@@ -837,6 +852,10 @@ defmodule Rian.Lower do
   defp emit(%ENum{text: n}, _t), do: {n, 12}
   # string literal — same surface on both targets (Rust yields `&str`)
   defp emit(%EStr{value: s}, _t), do: {"\"#{s}\"", 12}
+  # a `Char` (ADR-0036): a codepoint integer on the BEAM text target, a native
+  # `char` literal on Rust. Convert to an integer with `__prim_char_code/1`.
+  defp emit(%EChar{value: cp}, :elixir), do: {Integer.to_string(cp), 12}
+  defp emit(%EChar{value: cp}, :rust), do: {rust_char_lit(cp), 12}
   defp emit(%EId{name: "pi"}, :elixir), do: {":math.pi()", 12}
   defp emit(%EId{name: "pi"}, :rust), do: {"std::f64::consts::PI", 12}
   defp emit(%EId{name: x}, _t), do: {x, 12}
@@ -864,14 +883,21 @@ defmodule Rian.Lower do
   defp emit(%EDot{head: head, name: n}, :rust), do: {p(head, 12, :rust) <> "::#{n}", 12}
 
   # `String` primitives on Rust (ADR-0047 §2): a `String` is `&str`, codepoints
-  # are `i64`; these mirror the BEAM/JS lowerings so portable `Str` ops compose.
+  # are native `char` (ADR-0036 — `Char` lowers to Rust `char`); these mirror the
+  # BEAM/JS lowerings so portable `Str` ops compose.
   defp emit(%ECall{fun: %EId{name: "__prim_str_chars"}, args: [s]}, :rust),
-    do: {"#{p(s, 12, :rust)}.chars().map(|c| c as i64).collect::<Vec<i64>>()", 12}
+    do: {"#{p(s, 12, :rust)}.chars().collect::<Vec<char>>()", 12}
 
   defp emit(%ECall{fun: %EId{name: "__prim_str_from_chars"}, args: [cs]}, :rust),
-    do:
-      {"#{p(cs, 12, :rust)}.iter().map(|c| char::from_u32(*c as u32).unwrap()).collect::<String>()",
-       12}
+    do: {"#{p(cs, 12, :rust)}.iter().collect::<String>()", 12}
+
+  # a `Char`'s codepoint as an integer — the explicit Char→Int conversion
+  # (ADR-0036); `char as i64` is the native widening on Rust.
+  defp emit(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}, :rust),
+    do: {"(#{p(c, 12, :rust)} as i64)", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}, :elixir),
+    do: {p(c, 12, :elixir), 12}
 
   defp emit(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, :rust),
     do: {"format!(\"{}{}\", #{p(a, 0, :rust)}, #{p(b, 0, :rust)})", 12}
