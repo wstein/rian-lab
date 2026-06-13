@@ -124,7 +124,9 @@ defmodule Rian.IR do
     @moduledoc """
     A function: `name`, `params`, return type `ret`, `clauses`. `pub?` marks it
     exported from a `mod`. `tvars` are the `forall` type-variable names (ADR-0042),
-    empty for a non-generic function. `synthetic` marks a compiler-generated
+    empty for a non-generic function; `bounds` maps a `tvar` to its protocol
+    bounds (`forall T: Eq + Ord` -> `%{"T" => ["Eq", "Ord"]}`, ADR-0042 §2).
+    `synthetic` marks a compiler-generated
     function — currently the `protocol` dispatcher (ADR-0042 §3/§6), which is
     **exempt from the exhaustiveness gate**: protocol dispatch is open by design
     (no case-arms, no totality requirement), unlike a user `case`. `test?` marks
@@ -138,6 +140,7 @@ defmodule Rian.IR do
               clauses: [],
               pub?: false,
               tvars: [],
+              bounds: %{},
               doc: nil,
               synthetic: false,
               test?: false

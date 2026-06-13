@@ -2,7 +2,7 @@ defmodule Rian.ProtocolTest do
   # async: false — loads compiled modules into the VM.
   use ExUnit.Case, async: false
 
-  alias Rian.{Beam, Decl}
+  alias Rian.{Beam, Check, Decl}
   alias Rian.Protocol.Error, as: CoherenceError
 
   defp load(src, mod) do
@@ -288,6 +288,67 @@ defmodule Rian.ProtocolTest do
 
       assert m.kind(m.origin()) == "point"
       assert m.kind(7) == "int"
+    end
+  end
+
+  describe "forall T: Bound enforcement (ADR-0042 §2)" do
+    @base """
+    protocol Eq do
+      def eq(a Self, b Self) Bool
+    end
+
+    impl Eq for Int64 do
+      def eq(a, b) := a == b
+    end
+
+    def same(x T, y T) Bool forall T: Eq := eq(x, y)
+    """
+
+    test "the bound is parsed onto the function" do
+      f = Decl.parse(@base).funcs |> Enum.find(&(&1.name == "same"))
+      assert f.bounds == %{"T" => ["Eq"]}
+    end
+
+    test "calling a bounded generic with a type that has the impl passes" do
+      assert [_ | _] =
+               Decl.compile(@base <> "\ndef go(a Int64, b Int64) Bool := same(a, b)\n")
+    end
+
+    test "calling a bounded generic with a type lacking the impl is a proven error" do
+      assert_raise Check.Error, ~r/`same` requires `T: Eq`.*no `impl Eq for Bool`/, fn ->
+        Decl.compile(@base <> "\ndef go(a Bool, b Bool) Bool := same(a, b)\n")
+      end
+    end
+
+    test "an un-pinned (still-generic) call stays conservative — no rejection" do
+      # `relay` forwards to `same` with its own tvar `U` (no Eq bound); the call's
+      # `T` instantiates to `U`, which is not concrete, so the gate does not fire.
+      src = @base <> "\ndef relay(x U, y U) Bool forall U := same(x, y)\n"
+      assert [_ | _] = Decl.compile(src)
+    end
+
+    test "multiple bounds: a type missing one of them is rejected" do
+      src = """
+      protocol Eq do
+        def eq(a Self, b Self) Bool
+      end
+
+      protocol Ord do
+        def lt(a Self, b Self) Bool
+      end
+
+      impl Eq for Int64 do
+        def eq(a, b) := a == b
+      end
+
+      def sorted(x T, y T) Bool forall T: Eq + Ord := eq(x, y)
+
+      def go(a Int64, b Int64) Bool := sorted(a, b)
+      """
+
+      assert_raise Check.Error, ~r/requires `T: Ord`.*no `impl Ord for Int64`/, fn ->
+        Decl.compile(src)
+      end
     end
   end
 end

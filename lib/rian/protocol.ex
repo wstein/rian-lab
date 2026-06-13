@@ -131,21 +131,27 @@ defmodule Rian.Protocol do
         }
       end
 
-    # a bodiless signature heads the multi-clause group; `Self` is listed as a
-    # type variable so the return-type gate treats a `Self`-mentioning return as
-    # generic (the dispatcher is polymorphic in the receiver).
-    sig_map = %{
-      name: sig.name,
-      params: dispatcher_params(sig.params, vars),
-      ret: sig.ret,
-      guard: nil,
-      body: nil,
-      pub: true,
-      tvars: ["Self" | sig[:tvars] || []],
-      synthetic: true
-    }
+    # a protocol with no impls emits no dispatcher (a bodiless signature with no
+    # clauses is not a function) — it may still be named in a `forall T: P` bound.
+    if clauses == [] do
+      []
+    else
+      # a bodiless signature heads the multi-clause group; `Self` is listed as a
+      # type variable so the return-type gate treats a `Self`-mentioning return as
+      # generic (the dispatcher is polymorphic in the receiver).
+      sig_map = %{
+        name: sig.name,
+        params: dispatcher_params(sig.params, vars),
+        ret: sig.ret,
+        guard: nil,
+        body: nil,
+        pub: true,
+        tvars: ["Self" | sig[:tvars] || []],
+        synthetic: true
+      }
 
-    [sig_map | clauses]
+      [sig_map | clauses]
+    end
   end
 
   # the dispatcher signature keeps the protocol's parameter *types* but renames

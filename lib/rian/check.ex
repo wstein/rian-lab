@@ -538,8 +538,88 @@ defmodule Rian.Check do
   def check_func(%Func{} = f, ic, eset) do
     with :ok <- check_return(f, ic),
          :ok <- check_binds(f, ic),
+         :ok <- check_bounds(f, ic),
          do: check_error_set(f, eset)
   end
+
+  # ADR-0042 §2 — protocol bounds. At each call to a bounded generic, instantiate
+  # the callee's type variables from the argument types; when a bound `T: P`
+  # instantiates `T` to a *concrete* type `A` with no `impl P for A`, that is a
+  # proven violation. An `:unknown` (un-pinned) instantiation never rejects —
+  # like the rest of the checker, the gate reports only what it can prove.
+  defp check_bounds(%Func{params: ps, clauses: clauses}, ic) do
+    fbounds = Map.get(ic, :fbounds, %{})
+
+    if fbounds == %{} do
+      :ok
+    else
+      Enum.find_value(clauses, :ok, fn c ->
+        env = clause_env(c.pats, ps, ic)
+        scan_bound_calls(Pratt.parse_body(c.body), env, ic, fbounds) || :ok
+      end)
+    end
+  end
+
+  # walk the (surface tuple) body for call sites, checking any that target a
+  # bounded generic; returns the first `{:error, msg}` or `nil`.
+  defp scan_bound_calls({:call, {:id, g}, args} = node, env, ic, fbounds) do
+    call_bound_error(g, args, env, ic, fbounds) || walk_children(node, env, ic, fbounds)
+  end
+
+  defp scan_bound_calls(node, env, ic, fbounds) when is_tuple(node),
+    do: walk_children(node, env, ic, fbounds)
+
+  defp scan_bound_calls(list, env, ic, fbounds) when is_list(list),
+    do: Enum.find_value(list, nil, &scan_bound_calls(&1, env, ic, fbounds))
+
+  defp scan_bound_calls(_other, _env, _ic, _fbounds), do: nil
+
+  defp walk_children(node, env, ic, fbounds) when is_tuple(node),
+    do: node |> Tuple.to_list() |> Enum.find_value(nil, &scan_bound_calls(&1, env, ic, fbounds))
+
+  # check one call against the callee's bounds, if it is a bounded generic
+  defp call_bound_error(g, args, env, ic, fbounds) do
+    case Map.get(fbounds, g) do
+      nil ->
+        nil
+
+      %{params: ps, tvars: tvars, bounds: bounds} ->
+        arg_types = Enum.map(args, &infer(&1, env, ic))
+
+        subs =
+          Enum.reduce(Enum.zip(ps, arg_types), %{}, fn {p, a}, acc ->
+            bind_tvar(p, a, tvars, acc)
+          end)
+
+        first_bound_violation(g, bounds, subs, ic)
+    end
+  end
+
+  defp first_bound_violation(g, bounds, subs, ic) do
+    impls = Map.get(ic, :impls, %{})
+
+    Enum.find_value(bounds, nil, fn {tvar, protos} ->
+      case Map.get(subs, tvar) do
+        nil -> nil
+        ty -> if concrete_type?(ty), do: missing_impl(g, tvar, ty, protos, impls), else: nil
+      end
+    end)
+  end
+
+  defp missing_impl(g, tvar, ty, protos, impls) do
+    Enum.find_value(protos, nil, fn p ->
+      unless MapSet.member?(Map.get(impls, p, MapSet.new()), ty) do
+        {:error,
+         "`#{g}` requires `#{tvar}: #{p}`, but `#{ty}` has no `impl #{p} for #{ty}` (ADR-0042 §2)"}
+      end
+    end)
+  end
+
+  # a type the bound check can act on: a known concrete type, not `:unknown` and
+  # not still a type variable (an un-pinned generic) — those stay conservative.
+  defp concrete_type?(:unknown), do: false
+  defp concrete_type?(t) when is_binary(t), do: not has_tvar?(t)
+  defp concrete_type?(_), do: false
 
   # ADR-0034 §1 — typed bindings. `x T := e` checks `e` against the declared type
   # `T`: a numeric *literal* adopts `T` (bidirectional checking — the literal takes
@@ -974,7 +1054,9 @@ defmodule Rian.Check do
           funs: map(),
           fsigs: map(),
           ctors: map(),
-          ranges: map()
+          ranges: map(),
+          impls: map(),
+          fbounds: map()
         }
   def program_ic(%{} = prog) do
     types = all_types(prog)
@@ -987,8 +1069,27 @@ defmodule Rian.Check do
       funs: Map.new(all_funcs, fn f -> {f.name, f.ret} end),
       fsigs: Map.new(all_funcs, fn f -> {f.name, fsig(f)} end),
       ctors: ctor_types(types, prog),
-      ranges: range_table(prog)
+      ranges: range_table(prog),
+      impls: impl_table(prog),
+      fbounds: fbound_table(all_funcs)
     }
+  end
+
+  # protocol name -> the set of types that `impl` it (ADR-0042 §2), from the
+  # program's preserved `impls` facts.
+  defp impl_table(prog) do
+    Map.get(prog, :impls, [])
+    |> Enum.reduce(%{}, fn {proto, type}, acc ->
+      Map.update(acc, proto, MapSet.new([type]), &MapSet.put(&1, type))
+    end)
+  end
+
+  # bounded generics only: function name -> %{params, tvars, bounds}, consulted at
+  # call sites to instantiate a tvar and check its protocol bound.
+  defp fbound_table(funcs) do
+    for f <- funcs, f.bounds != %{}, into: %{} do
+      {f.name, %{params: Enum.map(f.params, & &1.type), tvars: f.tvars, bounds: f.bounds}}
+    end
   end
 
   # `range Name := lo..hi` (ADR-0036) records, keyed by name -> %{base, lo, hi}.

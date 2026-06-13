@@ -41,7 +41,8 @@ defmodule Rian.Decl do
       / rustdoc `//!`/`///` (Rust).
     * `protocol Name do … end` / `impl Protocol for Type do … end` (ADR-0042 §3)
       — desugar to a guarded dispatcher + mangled impl functions via
-      `Rian.Protocol`; coherence-checked. MVP: primitive-type impls, BEAM.
+      `Rian.Protocol`; coherence-checked. Dispatch over primitive / sum / struct
+      types (BEAM). `forall T: Bound` bounds are parsed and enforced by the checker.
 
   ## Not yet supported
 
@@ -98,7 +99,25 @@ defmodule Rian.Decl do
         }
       end
 
-    prog |> Map.drop([:consts, :uses]) |> Map.put(:mods, mods)
+    prog
+    |> Map.drop([:consts, :uses])
+    |> Map.put(:mods, mods)
+    |> Map.put(:impls, all_impls(decls))
+  end
+
+  # `(protocol, type)` pairs for every `impl` in the program (top-level and inside
+  # any `mod`) — the impl table the checker consults to enforce `forall T: Bound`
+  # (ADR-0042 §2). The desugaring in `protocol_defs/3` discards the impls; this
+  # keeps the membership facts the bound check needs.
+  defp all_impls(decls) do
+    top = for {:impl, proto, type, _inner, _doc} <- decls, do: {proto, type}
+
+    nested =
+      for {:mod, _n, inner, _d, _t} <- decls,
+          {:impl, proto, type, _i, _dd} <- inner,
+          do: {proto, type}
+
+    top ++ nested
   end
 
   # `alias Name := Type` is a transparent synonym: collect the name->type map so
@@ -515,28 +534,58 @@ defmodule Rian.Decl do
   defp take_head(name, params, [t | rest], head), do: take_head(name, params, rest, [t | head])
 
   defp def_raw(name, params, head_rev, body) do
-    {head, tvars} = split_forall(Lexer.detokenize(Enum.reverse(head_rev)))
+    {head, tvars, bounds} = split_forall(Lexer.detokenize(Enum.reverse(head_rev)))
     {ret, guard} = parse_head(head)
     # normalize parenthesized type spacing (`Vec ( Int64 )` -> `Vec(Int64)`) so the
     # declared return type matches inferred parametric types (ADR-0042 checking)
     ret = ret && collapse_parens(ret)
-    %{name: name, params: params, ret: ret, guard: guard, body: body, pub: false, tvars: tvars}
+
+    %{
+      name: name,
+      params: params,
+      ret: ret,
+      guard: guard,
+      body: body,
+      pub: false,
+      tvars: tvars,
+      bounds: bounds
+    }
   end
 
-  # `Ret forall T, U: Bound` — split off the `forall` binder list (ADR-0042). The
-  # bound after `:` is parsed-and-dropped for now (bounds are not yet enforced).
+  # `Ret forall T, U: Bound + Other` — split off the `forall` binder list
+  # (ADR-0042). Returns `{ret, tvar_names, %{tvar => [protocol_bounds]}}`; a tvar
+  # with no `:` bound is absent from the bounds map (it has no constraints).
   defp split_forall(head) do
     case String.split(head, " forall ", parts: 2) do
-      [ret] -> {ret, []}
-      [ret, binders] -> {ret, tvar_names(binders)}
+      [ret] ->
+        {ret, [], %{}}
+
+      [ret, binders] ->
+        parsed = parse_binders(binders)
+        bounds = for {n, bs} <- parsed, bs != [], into: %{}, do: {n, bs}
+        {ret, Enum.map(parsed, &elem(&1, 0)), bounds}
     end
   end
 
-  defp tvar_names(binders) do
+  # one `forall` binder `T` or `T: Eq + Ord` -> `{tvar, [protocols]}`
+  defp parse_binders(binders) do
     binders
     |> split_top(",")
-    |> Enum.map(fn b -> b |> String.split(":", parts: 2) |> hd() |> String.trim() end)
-    |> Enum.reject(&(&1 == ""))
+    |> Enum.map(&parse_binder/1)
+    |> Enum.reject(fn {n, _} -> n == "" end)
+  end
+
+  defp parse_binder(b) do
+    case String.split(b, ":", parts: 2) do
+      [name] ->
+        {String.trim(name), []}
+
+      [name, bounds] ->
+        protos =
+          bounds |> String.split("+") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+        {String.trim(name), protos}
+    end
   end
 
   defp take_line([], acc), do: {Enum.reverse(acc), []}
@@ -717,6 +766,7 @@ defmodule Rian.Decl do
       clauses: Enum.map(clauses, &clause(&1, length(params))),
       pub?: sig[:pub] == true,
       tvars: sig[:tvars] || [],
+      bounds: sig[:bounds] || %{},
       doc: sig[:doc],
       synthetic: sig[:synthetic] == true,
       test?: sig[:test] == true
@@ -734,6 +784,7 @@ defmodule Rian.Decl do
       clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}],
       pub?: d[:pub] == true,
       tvars: d[:tvars] || [],
+      bounds: d[:bounds] || %{},
       doc: d[:doc],
       synthetic: d[:synthetic] == true,
       test?: d[:test] == true

@@ -51,6 +51,16 @@ impl Eq for Bool do
   def eq(a, b) := a == b
 end
 
+# A BOUNDED generic (ADR-0042 §2): `forall T: Eq` means "T has an `Eq` impl". The
+# compiler ENFORCES it at the call site — `members(xs, x)` below type-checks only
+# because `Int64` has `impl Eq`. Calling it with a type that lacks `Eq` is a
+# compile error (`requires T: Eq, but … has no impl Eq for …`). Bounds add no
+# case-arms and touch no exhaustiveness (ADR-0042 §6).
+def equal3(a T, b T, c T) Bool forall T: Eq := eq(a, b) and eq(b, c)
+
+# `equal3(1, 1, 1)` type-checks (Int64: Eq) and runs to `true`.
+def all_one() Bool := equal3(1, 1, 1)
+
 # Dispatch also works over a SUM type — by the runtime constructor tag. This is
 # the shape the compiler's own data takes (`Token`, `Expr`), so a real `Show`
 # can be written over it.
