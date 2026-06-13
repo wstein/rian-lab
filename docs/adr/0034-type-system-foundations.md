@@ -56,6 +56,13 @@ Rust panic-debug/wrap-release; JVM/Go wrap; JS `BigInt`); Rian does not simulate
 another. Subrange types (ADR-0036) are the promoted in-domain safety idiom; bit-identical
 cross-target arithmetic is an opt-in library. See the ADR-0035 scope clarification.
 
+> **⚠ Superseded by [ADR-0064](0064-portable-numeric-contract.md) (P2, 2026-06-14).** The design
+> review judged "width is intent, not a portable contract" to contradict the portability thesis.
+> Integers now have **portable contracts**: `Int` (arbitrary precision — the new default literal
+> type, identical everywhere) and fixed-width `Int8…64`/`UInt*` (defined two's-complement wrap,
+> identical everywhere). The per-target difference is *representation cost*, not behaviour — and the
+> BEAM masking cost (~15×, measured) is why `Int` is the default and fixed-width is opt-in.
+
 **Typed bindings — implemented.** A block binding may carry the annotation between the name and
 `:=` (`x Int32 := 66`). Per the bidirectional strategy above, the declared type is the expected
 type *pushed down* into the value:

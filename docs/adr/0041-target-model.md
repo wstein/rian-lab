@@ -18,6 +18,11 @@ another, deeper compatibility via libraries.** This ADR generalizes that stance 
 representation questions. It does **not** enumerate the full BEAM-stdlib→target mapping catalogue
 (an incremental table); it fixes the *model*.
 
+> **⚠ The integer application of this stance is superseded by [ADR-0064](0064-portable-numeric-contract.md)
+> (P2).** "Native-per-target integer semantics" was judged a portability bug for *integers* specifically:
+> they now have portable contracts — `Int` (arbitrary precision) + fixed-width wrap. The model here still
+> governs `Symbol`/atoms/allocation/concurrency; only the integer clause moved.
+
 ## Decision
 
 ### 1. `Symbol` lowers per-target; closed sets are zero-cost (the range/error-set cut, third instance)

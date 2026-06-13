@@ -34,6 +34,12 @@ allocates, from the source alone?** If not, it does not enter the portable core.
 
 ### Scope: overflow and platform-native behavior (decision-lock 2026-06-12)
 
+> **⚠ Superseded for integers by [ADR-0064](0064-portable-numeric-contract.md) (P2, 2026-06-14):**
+> "each target uses its native integer semantics / Rian does not simulate one runtime on another" no
+> longer holds for integers — `Int` (arbitrary precision) and fixed-width (defined wrap) now have
+> *portable* contracts. The no-hidden-control-flow principle itself is unchanged; only the
+> integer-overflow scope clarification below is retired.
+
 "No hidden control flow" governs **Rian's own constructs** (`case`, `with`, operators-as-written)
 and the program's **in-domain** semantics. It does **not** require masking a target's native
 behavior on **out-of-domain** values. Integer overflow is the canonical case: an *edge case correct
