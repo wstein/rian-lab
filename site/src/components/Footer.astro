@@ -1,0 +1,38 @@
+---
+// Override Starlight's Footer: render the default (prev/next pager, etc.),
+// then append the ExDoc attribution BELOW it.
+import Default from "@astrojs/starlight/components/Footer.astro";
+import meta from "../generated/meta.mjs";
+
+const langs = {
+  elixir: ["Elixir programming language", "https://elixir-lang.org"],
+  erlang: ["Erlang programming language", "https://erlang.org"],
+};
+const [langName, langUrl] = langs[meta.proglang] ?? langs.elixir;
+---
+
+<Default><slot /></Default>
+
+{
+  meta.exdocVersion && (
+    <p class="exdoc-attribution">
+      Built using{" "}
+      <a href="https://github.com/elixir-lang/ex_doc" target="_blank" rel="noopener">
+        ExDoc
+      </a>{" "}
+      (v{meta.exdocVersion}) for the{" "}
+      <a href={langUrl} target="_blank" rel="noopener">
+        {langName}
+      </a>
+      .
+    </p>
+  )
+}
+
+<style>
+  .exdoc-attribution {
+    margin-top: 1.5rem;
+    font-size: var(--sl-text-xs);
+    color: var(--sl-color-gray-3);
+  }
+</style>

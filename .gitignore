@@ -33,5 +33,11 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 rian_lab-*.tar
 
-# Ignore the site directory where ExDoc generates documentation.
-/site/
+# The Starlight docs app (rian_lab/site) is source and IS committed.
+# Ignore only its generated/installed artifacts — these are recreated by
+# `mix docs` + `npm run build` (prebuild sync), so they must not be committed.
+/site/node_modules/
+/site/dist/
+/site/.astro/
+/site/src/content/docs/
+/site/src/generated/

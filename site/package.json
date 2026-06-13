@@ -1,0 +1,17 @@
+{
+  "name": "rian-lab-docs",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "sync": "node scripts/sync.mjs",
+    "predev": "npm run sync",
+    "prebuild": "npm run sync",
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview"
+  },
+  "dependencies": {
+    "astro": "latest",
+    "@astrojs/starlight": "latest"
+  }
+}
