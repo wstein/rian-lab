@@ -1,6 +1,6 @@
 # ADR-0058 — Configurable target environments; reachability-gated portability
 
-**Status:** Accepted (direction) · **partially implemented** (the reachability analysis, the `mix rian.targets --require` gate, **and the in-source `@targets(…)` module annotation + its compile-time contract gate** — `Rian.Reach.gate!/1`, enforced in `Decl.compile`/`compile_beam` and `Beam.compile`/`compile_program` — are shipped; the `mix.exs` build default is open)
+**Status:** Accepted (direction) · **partially implemented** (the reachability analysis, the `mix rian.targets --require` gate, **and the in-source `@targets(…)` module annotation + its compile-time contract gate** — `Rian.Reach.gate!/1`, enforced in `Decl.compile`/`compile_beam` and `Beam.compile`/`compile_program` — are shipped; **the build default is shipped too** — `Rian.Reach.build_default/0` reads the `:rian_lab` app env `:rian_targets` (else `mix.exs` `rian: [targets: […]]`), and a module with no `@targets` falls back to it, so an unannotated module is gated by the build's required set. Fully implemented)
 **Refs:** ADR-0031 (sequential-core boundary), ADR-0041 §2 (unmapped BEAM call = compile error, never a silent stub), ADR-0047 (portable prelude `__prim_*`), ADR-0048 (effect tracking — the lattice this generalizes to), ADR-0049 (backend target roadmap / tiers), ADR-0057 (concurrency & OTP are native-per-target)
 **Owners:** Maya Lin (emitters/build) · Samir Patel (gate rigor) · Kira Neri (honesty/determinism) · Arthur Pendelton (analysis lattice) · Elena Rostova (interop seam) · Liam Davis (ergonomics) · Rachel Okafor (PM)
 
@@ -34,8 +34,9 @@ grows only when an emitter lands (Kira: no over-claims in the type system itself
   library author gets feedback without a downstream build flipping a flag (Samir). Parsed onto
   `IR.Mod.targets`; gated by `Rian.Reach.gate!/1` at compile time (a `pub` function failing to reach
   a declared target is a `Rian.Reach.Error`). A module with no annotation is not gated.
-- **Build default (open):** `mix.exs` `rian: [targets: […]]` — supplies the required set for modules
-  that don't declare one.
+- **Build default (shipped):** `mix.exs` `rian: [targets: […]]` (or the `:rian_lab` app env
+  `:rian_targets`) — supplies the required set for modules that don't declare one
+  (`Rian.Reach.build_default/0`).
 
 **Checking vs emitting are separated (Kira's rule):** the **declared set is what gets *checked***
 (the promise); the **build set is what gets *emitted*** (the deployment). A module promising `:rs` is

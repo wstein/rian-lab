@@ -69,7 +69,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0055](adr/0055-capabilities-through-dispatch-and-opaque.md) | Capabilities through dynamic dispatch & opaque types: capability on the protocol method receiver (survives `dyn` erasure); opaque-over-struct presents the join of field capabilities | Accepted (direction) |
 | [0056](adr/0056-comptime-target-conditional.md) | `comptime if target`: proven-equivalent (or type-visible) sequential target conditional, else hard error. Motivation thinned — concurrency is native-per-target (ADR-0031), so the fracture it addressed isn't shared Rian source | **Proposed (dormant)** |
 | [0057](adr/0057-concurrency-and-otp-are-native-per-target.md) | Concurrency & OTP are native-per-target: Rian source is sequential logic + tests; gen_servers/tasks/workers are written in the host's native language and call shared Rian functions. Supersedes 0044 | Accepted (direction) |
-| [0058](adr/0058-configurable-target-environments.md) | Configurable target environments (`:ex`/`:rs`/`:js`), reachability-gated: `Rian.Reach` computes per-function reach via a call-graph fixpoint; `mix rian.targets [--require …]` reports and gates by need; the in-source `@targets(…)` module contract is gated by `Rian.Reach.gate!`. Concurrency-FFI is a fallout | Accepted; `@targets` + gate implemented (build default open) |
+| [0058](adr/0058-configurable-target-environments.md) | Configurable target environments (`:ex`/`:rs`/`:js`), reachability-gated: `Rian.Reach` computes per-function reach via a call-graph fixpoint; `mix rian.targets [--require …]` reports and gates by need; the in-source `@targets(…)` module contract is gated by `Rian.Reach.gate!`, and an unannotated module falls back to the **build default** (`mix.exs` `rian: [targets: …]` / app env). Concurrency-FFI is a fallout | Accepted; implemented |
 | [0059](adr/0059-join-lattice-lub.md) | Join lattice (LUB) for `if`/`case`/list-element types: `Check.join/2` is the least-upper-bound over the `num_widens?` order (numeric + same-constructor covariant `Vec`/`Option`); `:unknown` absorbing, gaps explicit. Closes the strict-`unify` join asymmetry | Accepted; implemented |
 | [0060](adr/0060-testing-spec-by-example.md) | Testing: three tiers (properties/fixpoint · executable spec-by-example/doctests · `describe`/`it`+matchers); assertions are values not exceptions (ADR-0035); doctests land first, matchers wait on protocols; **Gherkin rejected** (second grammar, prose↔stepdef drift, audience mismatch) | Accepted (direction) |
 | [0061](adr/0061-multi-target-protocol-lowering.md) | Multi-target protocol/generics lowering: dispatch is **native-per-target** (runtime guarded dispatcher on BEAM/JS, static `trait`+monomorphization on Rust); bounds are one portable static check + a real Rust trait bound; **coherence is target-set-relative** (ADR-0058) — the runtime-discriminator rule binds only `:ex`/`:js`, the orphan rule is adopted universally | Proposed (design) |
@@ -154,8 +154,8 @@ sections; they are tracked here so the corpus has one place to look:
   open; the drift tax is now confined to an opt-in debug surface.
 - **Declarative `@targets(…)` annotation** (ADR-0058) — **shipped**: a `@targets(ex, rs, js)` module
   contract is parsed onto `IR.Mod.targets` and gated at compile time by `Rian.Reach.gate!` (every
-  `pub` function must reach the declared set). *Still open:* the `mix.exs` build-default target set
-  for unannotated modules.
+  `pub` function must reach the declared set); an unannotated module falls back to the **build
+  default** (`Rian.Reach.build_default/0` — `mix.exs` `rian: [targets: …]` or the app env).
 - **Self-hosting Stage 1** — port the real compiler modules to Rian, each diffed against the
   reference by [fixpoint.ex](../lib/rian/fixpoint.ex). The lexer port is at slice 2; the next
   slices (string/char/float literals, brackets, `@annot`) are blocked on portable string/regex

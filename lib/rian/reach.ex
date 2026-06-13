@@ -76,19 +76,22 @@ defmodule Rian.Reach do
 
   @doc """
   Check every `mod`'s `@targets(…)` contract (ADR-0058 §2): each `pub` function
-  in a module that declares a target set must *reach* every target in it.
-  Modules with no contract (`targets: nil`) are not gated — constraints are
-  selected by need. Returns `:ok` or `{:error, message}`.
+  in a module that declares a target set must *reach* every target in it. A
+  module with no contract (`targets: nil`) falls back to the **build default**
+  (`default`, ADR-0058 §2 — `mix.exs` `rian: [targets: […]]`); when that is also
+  nil the module is not gated — constraints are selected by need. Returns `:ok`
+  or `{:error, message}`.
   """
-  def check_contracts(prog) do
+  def check_contracts(prog, default \\ nil) do
     reach = analyze(prog)
 
     violations =
       for mod <- Map.get(prog, :mods, []),
-          mod.targets != nil,
+          required = mod.targets || default,
+          required != nil,
           f <- mod.funcs,
           f.pub?,
-          missing = mod.targets -- MapSet.to_list(reach[f.name][:reach] || MapSet.new(@targets)),
+          missing = required -- MapSet.to_list(reach[f.name][:reach] || MapSet.new(@targets)),
           missing != [] do
         {mod.name, f.name, Enum.sort(missing)}
       end
@@ -100,10 +103,28 @@ defmodule Rian.Reach do
   end
 
   @doc "Raise `Rian.Reach.Error` on any unmet `@targets(…)` contract, else `:ok`."
-  def gate!(prog) do
-    case check_contracts(prog) do
+  def gate!(prog), do: gate!(prog, build_default())
+
+  @doc "Gate against an explicit build-default target set (`nil` = none)."
+  def gate!(prog, default) do
+    case check_contracts(prog, default) do
       :ok -> :ok
       {:error, msg} -> raise Error, msg
+    end
+  end
+
+  @doc """
+  The build-default target set (ADR-0058 §2) for modules that declare no
+  `@targets`: the `:rian_lab` app env `:rian_targets`, else `mix.exs`'s
+  `rian: [targets: […]]`, else `nil` (no default gate).
+  """
+  def build_default do
+    Application.get_env(:rian_lab, :rian_targets) || mix_default()
+  end
+
+  defp mix_default do
+    if Code.ensure_loaded?(Mix.Project) and Mix.Project.get() do
+      get_in(Mix.Project.config(), [:rian, :targets])
     end
   end
 

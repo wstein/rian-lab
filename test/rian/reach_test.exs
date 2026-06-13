@@ -138,4 +138,41 @@ defmodule Rian.ReachTest do
   test "the closed target vocabulary is ex/rs/js" do
     assert Enum.sort(Reach.targets()) == [:ex, :js, :rs]
   end
+
+  describe "build-default target set (ADR-0058 §2)" do
+    @ffi """
+    mod M do
+      pub def total(xs val Vec(Int64)) Int64 := :lists.sum(xs)
+    end
+    """
+
+    test "a nil-`@targets` module is not gated without a build default" do
+      assert Reach.check_contracts(Rian.Decl.parse(@ffi), nil) == :ok
+    end
+
+    test "the build default gates a nil-`@targets` module that can't reach it" do
+      assert {:error, msg} = Reach.check_contracts(Rian.Decl.parse(@ffi), [:ex, :rs, :js])
+      assert msg =~ "M.total cannot reach [:js, :rs]"
+    end
+
+    test "an `:ex` build default passes (the FFI reaches the BEAM)" do
+      assert Reach.check_contracts(Rian.Decl.parse(@ffi), [:ex]) == :ok
+    end
+
+    test "an explicit `@targets` overrides the build default" do
+      # the module declares `@targets(ex)`, so a stricter build default is ignored
+      src = "@targets(ex)\n" <> @ffi
+      assert Reach.check_contracts(Rian.Decl.parse(src), [:ex, :rs, :js]) == :ok
+    end
+
+    test "build_default/0 reads the :rian_lab app env" do
+      Application.put_env(:rian_lab, :rian_targets, [:ex, :rs])
+
+      try do
+        assert Reach.build_default() == [:ex, :rs]
+      after
+        Application.delete_env(:rian_lab, :rian_targets)
+      end
+    end
+  end
 end
