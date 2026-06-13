@@ -50,11 +50,14 @@ value-flow — *more* principled than the exception-based BDD it borrows from, n
 
 ### 3. Tests lower once to each target's idiomatic xUnit, reach-gated
 
-A `test_*` / `it` definition lowers to ExUnit (BEAM), `cargo test` (Rust), and `node:test` (JS) — the
-once-tested-everywhere payoff (ADR-0057). It runs on exactly the targets the function under test
-reaches (`Rian.Reach`, ADR-0058). Discovery in v0 is the **`test_` prefix convention** (no new
-surface); a `@test` annotation is the nicer future form, once the annotation parser accepts more
-than `@doc`/`@moduledoc`/`@typedoc`.
+A `@test def` lowers to ExUnit (BEAM), Rust `#[test]`, and `node:test` (JS) — the
+once-tested-everywhere payoff (ADR-0057). **Shipped:** all three harnesses —
+`Rian.Test.exunit/1` (BEAM), `Rian.Test.rust/1` (`rustc --test`-verified), and
+`Rian.Test.js/1` (`node --test`-verified); one `@test` surface, three native
+xUnits. Discovery is the **`@test` annotation** (the annotation parser was
+extended past `@doc`/`@moduledoc`/`@typedoc`). *Refinement:* reach-gating each
+test to exactly the targets its function-under-test reaches (`Rian.Reach`,
+ADR-0058) is not yet wired — the harness emits for the requested target.
 
 ### 4. Any spec DSL is **internal** — built from Rian's own surface (ADR-0030/0032)
 

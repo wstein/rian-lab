@@ -4,9 +4,9 @@
 # Character: ADR-0057 says Rian source is *sequential logic + tests*. A test is
 # an ordinary `@test def` — a zero-arity function returning `Bool` (`true` =
 # pass) — so it compiles through the SAME pipeline as production code and runs on
-# the target. `Rian.Test` bridges each `@test` to the host's xUnit framework
-# (ExUnit on the BEAM; `#[test]` / Vitest per target are the same surface,
-# deferred).
+# the target. `Rian.Test` bridges each `@test` to each host's xUnit framework —
+# ExUnit on the BEAM, Rust `#[test]` (`Rian.Test.rust/1`, `rustc --test`), and
+# `node:test` (`Rian.Test.js/1`, `node --test`): one surface, three harnesses.
 #
 # Tests are portable sequential logic by construction — they touch no
 # concurrency — which is exactly why they are the natural first thing to dogfood

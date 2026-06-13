@@ -26,6 +26,13 @@ defmodule Rian.Test do
 
       Rian.Test.run(File.read!("examples/rian/14_test_framework.rian"))
       #=> [{"one_plus_one", :pass}, {"bad", {:fail, false}}]
+
+  ## Per-target harness (ADR-0060 §3)
+
+  `rust/1` and `js/1` lower the *same* `@test def`s to each target's idiomatic
+  xUnit — Rust `#[test]` (run by `rustc --test`) and `node:test` (`node --test`).
+  A `@test` is an ordinary `Bool` function, so it lowers like any other code; the
+  harness only adds the per-target test wrapper that asserts it returns `true`.
   """
   alias Rian.{Beam, Decl}
 
@@ -59,6 +66,41 @@ defmodule Rian.Test do
 
   @doc "A stable module atom derived from the source (for one-off runs)."
   def default_mod(src), do: :"rian_test_#{:erlang.phash2(src)}"
+
+  @doc """
+  Lower `src` to a **Rust** test module (ADR-0060 §3): the functions plus a
+  `#[test]` wrapper per `@test` asserting it returns `true`. Compile/run with
+  `rustc --test`.
+  """
+  def rust(src) do
+    fns =
+      Decl.compile(src)
+      |> Enum.map(fn {_n, o} -> o[:rust] end)
+      |> Enum.reject(&is_nil/1)
+      |> Enum.join("\n\n")
+
+    wrappers =
+      Enum.map_join(tests(src), "\n", fn n ->
+        "#[test]\nfn rian_test_#{n}() { assert!(#{n}()); }"
+      end)
+
+    [fns, wrappers] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+  end
+
+  @doc """
+  Lower `src` to a **JS** test module (ADR-0060 §3): the functions plus a
+  `node:test` case per `@test` asserting it returns `true`. Run with `node --test`.
+  """
+  def js(src) do
+    header = ~s|import { test } from "node:test";\nimport assert from "node:assert";\n|
+
+    wrappers =
+      Enum.map_join(tests(src), "\n", fn n ->
+        ~s|test(#{inspect(n)}, () => assert.strictEqual(#{n}(), true));|
+      end)
+
+    header <> "\n" <> Rian.JS.compile(src) <> "\n\n" <> wrappers
+  end
 
   @doc """
   Define one ExUnit `test` per `@test` in the `.rian` file at `path` (read at

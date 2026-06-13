@@ -48,4 +48,60 @@ defmodule Rian.TestRunnerTest do
       assert RT.tests(src) == ["t"]
     end
   end
+
+  describe "per-target test harness (ADR-0060 §3)" do
+    @src File.read!("examples/rian/14_test_framework.rian")
+
+    test "Rust harness emits a #[test] wrapper per @test asserting it returns true" do
+      rust = RT.rust(@src)
+      assert rust =~ "fn double_zero() -> i64" or rust =~ "fn double(n: i64)"
+      assert rust =~ "#[test]\nfn rian_test_double_zero() { assert!(double_zero()); }"
+      assert rust =~ "#[test]\nfn rian_test_fib_recurses() { assert!(fib_recurses()); }"
+    end
+
+    test "JS harness emits a node:test case per @test" do
+      js = RT.js(@src)
+      assert js =~ ~s|import { test } from "node:test"|
+      assert js =~ ~s|test("double_zero", () => assert.strictEqual(double_zero(), true))|
+    end
+
+    @tag :rust
+    test "the Rust test module compiles and passes under `rustc --test`" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_th_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+          File.write!(src, RT.rust(@src))
+
+          {_, 0} =
+            System.cmd(rustc, ["--test", "-A", "warnings", "--edition", "2021", src, "-o", bin])
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert out =~ "5 passed"
+      end
+    end
+
+    @tag :js
+    test "the JS test module passes under `node --test`" do
+      case System.find_executable("node") do
+        nil ->
+          :ok
+
+        node ->
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_th_#{System.unique_integer([:positive])}.mjs")
+          File.write!(path, RT.js(@src))
+          {out, code} = System.cmd(node, ["--test", path])
+          File.rm(path)
+          assert code == 0
+          assert out =~ "pass 5"
+      end
+    end
+  end
 end
