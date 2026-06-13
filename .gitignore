@@ -33,6 +33,9 @@ erl_crash.dump
 # Ignore package tarball (built via "mix hex.build").
 rian_lab-*.tar
 
+# Ignore the lockfile for Bun
+bun.lock
+
 # The Starlight docs app (rian_lab/site) is source and IS committed.
 # Ignore only its generated/installed artifacts — these are recreated by
 # `mix docs` + `npm run build` (prebuild sync), so they must not be committed.
@@ -41,3 +44,4 @@ rian_lab-*.tar
 /site/.astro/
 /site/src/content/docs/
 /site/src/generated/
+
