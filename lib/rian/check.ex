@@ -763,6 +763,13 @@ defmodule Rian.Check do
     end
   end
 
+  # function types are NOT covariantly joined: argument positions are
+  # *contravariant*, so widening an arg (`Fn(Int32,R) ⊔ Fn(Int64,R) → Fn(Int64,R)`)
+  # would let a caller pass an `Int64` the `Int32` arm cannot accept — unsound.
+  # Differing `Fn`s join to `:unknown` (equal ones are caught by `join(t, t)`).
+  defp parametric_join("Fn(" <> _, _), do: :unknown
+  defp parametric_join(_, "Fn(" <> _), do: :unknown
+
   # same-constructor covariant join: `Vec(A) ⊔ Vec(B) = Vec(A⊔B)`,
   # `Option(A) ⊔ Option(B) = Option(A⊔B)`, componentwise for any `Name(args)`.
   # Different constructors / non-parametric differing types ⇒ `:unknown` — the

@@ -103,6 +103,14 @@ Likewise two **different nominal sums** (`Shape ⊔ Color`) have no join →
 `:unknown`. The lattice only climbs *within* a numeric tower, an error set, or a
 shared type constructor.
 
+**Function types are excluded from the covariant rule.** `Fn(A, R)` matches the
+`Name(args)` shape, but a function's **argument positions are contravariant**: a
+covariant `Fn(Int32, R) ⊔ Fn(Int64, R) = Fn(Int64, R)` would let a caller pass an
+`Int64` the `Int32` arm cannot accept — unsound. So differing `Fn`s join to
+`:unknown` (equal ones pass through `join(t, t)`). A properly variance-aware join
+(meet the args, join the return) is possible but deferred — the conservative
+`:unknown` never over-claims.
+
 ## Consequences
 
 - **More precise `if`/`case`/list types**, exactly where a binding already

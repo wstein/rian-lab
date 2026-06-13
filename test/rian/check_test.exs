@@ -567,6 +567,13 @@ defmodule Rian.CheckTest do
       assert Check.join("Vec(Int64)", "Vec(Float64)") == :unknown
     end
 
+    test "function types are not covariantly joined (args are contravariant)" do
+      # widening the arg would be unsound — a caller could pass an Int64 to the
+      # Int32 arm; differing `Fn`s join to :unknown, equal ones pass through
+      assert Check.join("Fn(Int32,Bool)", "Fn(Int64,Bool)") == :unknown
+      assert Check.join("Fn(Int64,Bool)", "Fn(Int64,Bool)") == "Fn(Int64,Bool)"
+    end
+
     test "if-arm join is precise where a binding would widen (the closed asymmetry)" do
       # both arms numeric, differing width -> the if infers the LUB, not :unknown
       assert Check.infer(Pratt.parse_body("if c do x else y end"), %{
