@@ -132,6 +132,13 @@ defmodule Rian.IR do
     (no case-arms, no totality requirement), unlike a user `case`. `test?` marks
     a `@test def` (ADR-0057) — a zero-arity `Bool` function the test runner
     (`Rian.Test`) executes and bridges to the host's xUnit framework.
+
+    `dispatch: :runtime` marks a function that is the **BEAM/JS runtime-dispatch
+    desugaring** of a `protocol` (the guarded dispatcher and the mangled `impl_*`
+    methods, ADR-0061 §1). The BEAM backend emits them; the Rust and JS emitters
+    **skip** them and generate their own dispatch from the protocol IR
+    (`prog.protocols`/`prog.impl_decls`) — Rust as traits, JS as its own
+    dispatcher.
     """
     @enforce_keys [:name, :params, :ret, :clauses]
     defstruct name: nil,
@@ -143,6 +150,7 @@ defmodule Rian.IR do
               bounds: %{},
               doc: nil,
               synthetic: false,
-              test?: false
+              test?: false,
+              dispatch: nil
   end
 end

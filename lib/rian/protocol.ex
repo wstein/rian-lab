@@ -127,7 +127,8 @@ defmodule Rian.Protocol do
           guard: guard_for!(type, proto, reg),
           body: "#{mangle(proto, type, sig.name)}(#{argv})",
           pub: false,
-          tvars: []
+          tvars: [],
+          dispatch: :runtime
         }
       end
 
@@ -147,7 +148,8 @@ defmodule Rian.Protocol do
         body: nil,
         pub: true,
         tvars: ["Self" | sig[:tvars] || []],
-        synthetic: true
+        synthetic: true,
+        dispatch: :runtime
       }
 
       [sig_map | clauses]
@@ -191,7 +193,8 @@ defmodule Rian.Protocol do
         guard: m.guard,
         body: m.body,
         pub: false,
-        tvars: []
+        tvars: [],
+        dispatch: :runtime
       }
     end)
   end

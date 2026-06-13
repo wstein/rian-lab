@@ -67,7 +67,10 @@ defmodule Rian.JS do
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
   def compile(src) do
     prog = Decl.parse(src)
-    funcs = funcs_of(prog)
+    # the BEAM runtime-dispatch desugaring (guarded dispatcher + `impl_*` funcs)
+    # is not the JS shape — JS generates its own dispatcher from the protocol IR
+    # (ADR-0061 §3, landed in a later slice). Skip those funcs here.
+    funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :runtime))
     Enum.map_join(funcs, "\n\n", &function_js/1)
   end
 

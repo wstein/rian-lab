@@ -103,6 +103,45 @@ defmodule Rian.Decl do
     |> Map.drop([:consts, :uses])
     |> Map.put(:mods, mods)
     |> Map.put(:impls, all_impls(decls))
+    |> Map.put(:protocols, all_protocols(decls))
+    |> Map.put(:impl_decls, all_impl_decls(decls))
+  end
+
+  # Structured `protocol`/`impl` IR preserved for the Rust/JS emitters (ADR-0061):
+  # the BEAM desugar (`protocol_defs/3`) discards them, but Rust reads protocols as
+  # traits and JS generates its own dispatcher, so both need the original shapes.
+  defp all_protocols(decls) do
+    in_scope(decls, fn d ->
+      for {:protocol, name, inner, _doc} <- d, do: protocol_struct(name, inner)
+    end)
+  end
+
+  defp protocol_struct(name, inner) do
+    methods = for {:def, raw} <- inner, do: %{name: raw.name, params: raw.params, ret: raw.ret}
+    %{name: name, methods: methods}
+  end
+
+  defp all_impl_decls(decls) do
+    in_scope(decls, fn d ->
+      for {:impl, proto, type, inner, _doc} <- d, do: impl_struct(proto, type, inner)
+    end)
+  end
+
+  defp impl_struct(proto, type, inner) do
+    methods =
+      for {:def, raw} <- inner,
+          do: %{name: raw.name, params: raw.params, body: raw.body, guard: raw.guard}
+
+    %{proto: proto, type: type, methods: methods}
+  end
+
+  # apply `f` to the top-level decls and to each module's inner decls, concatenating
+  defp in_scope(decls, f) do
+    f.(decls) ++
+      Enum.flat_map(decls, fn
+        {:mod, _n, inner, _d, _t} -> f.(inner)
+        _ -> []
+      end)
   end
 
   # `(protocol, type)` pairs for every `impl` in the program (top-level and inside
@@ -286,7 +325,17 @@ defmodule Rian.Decl do
 
     :ok = Check.gate!(prog)
     :ok = Rian.Reach.gate!(prog)
-    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f, structs, ranges)} end)
+
+    funs =
+      Enum.map(funcs, fn f ->
+        out = Lower.compile(types, f, structs, ranges)
+        # a protocol's BEAM/JS runtime dispatcher is not the Rust shape (Rust gets
+        # traits, ADR-0061 §1/§2) — drop its Rust text; the Elixir debug view keeps
+        # it as a faithful picture of the BEAM artifact.
+        out = if f.dispatch == :runtime, do: Map.delete(out, :rust), else: out
+        {f.name, out}
+      end)
+
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module(m)} end)
   end
 
@@ -769,7 +818,8 @@ defmodule Rian.Decl do
       bounds: sig[:bounds] || %{},
       doc: sig[:doc],
       synthetic: sig[:synthetic] == true,
-      test?: sig[:test] == true
+      test?: sig[:test] == true,
+      dispatch: sig[:dispatch]
     }
   end
 
@@ -787,7 +837,8 @@ defmodule Rian.Decl do
       bounds: d[:bounds] || %{},
       doc: d[:doc],
       synthetic: d[:synthetic] == true,
-      test?: d[:test] == true
+      test?: d[:test] == true,
+      dispatch: d[:dispatch]
     }
   end
 
