@@ -1,0 +1,35 @@
+# ===========================================================================
+# 16 — Doctests: documentation that cannot drift (ADR-0060 tier B)
+# ===========================================================================
+# Character: an example in a `@doc` heredoc, written as `expr #=> expected`, is
+# executed by `Rian.Doctest` — both sides are real Rian, evaluated the same way,
+# and a drifted example fails the build. This kills the stale-example bug-class
+# (the `pi`-"undefined" / backend-"not started" drift) at its source: a doc claim
+# is only as true as the doctest that proves it.
+#
+# Assertions are values, not exceptions (ADR-0035): a doctest pair is a value
+# equality, mapped to the host xUnit by the harness.
+#
+# ADRs: 0060 (testing strategy) · 0051 (doc comments / heredocs) · 0035 (no exceptions)
+# ---------------------------------------------------------------------------
+
+@doc """
+Double an integer.
+
+    double(0)  #=> 0
+    double(21) #=> 42
+    double(-5) #=> 0 - 10
+"""
+def double(n Int64) Int64 := n * 2
+
+@doc """
+The n-th Fibonacci number (naive).
+
+    fib(0)  #=> 0
+    fib(1)  #=> 1
+    fib(10) #=> 55
+"""
+def fib(n Int64) Int64
+def fib(0) := 0
+def fib(1) := 1
+def fib(n) := fib(n - 1) + fib(n - 2)

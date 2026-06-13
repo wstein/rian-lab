@@ -1,6 +1,6 @@
 # ADR-0060 — Testing strategy: executable spec-by-example, value-returning assertions; Gherkin rejected
 
-**Status:** Accepted (direction) · **doctests/spec-by-example tier specified, to land first**; the `describe`/`it` + matcher layer is **deferred behind protocol-bounded generics (ADR-0042 pt 2)**; the property/fixpoint tier is **partly shipped** (`Rian.Fixpoint`, the exhaustiveness gate)
+**Status:** Accepted (direction) · **tier B doctest runner shipped (MVP)** — `Rian.Doctest` executes `expr #=> expected` examples in `@doc` heredocs on the BEAM (both sides real Rian; a drifted example fails the build), with `Rian.Doctest.exunit/1` surfacing each as an ExUnit case; the `describe`/`it` + matcher layer is **deferred behind protocol-bounded generics (ADR-0042 pt 2)**; the property/fixpoint tier is **partly shipped** (`Rian.Fixpoint`, the exhaustiveness gate)
 **Refs:** ADR-0035 (no hidden control flow — errors are values; assertions return outcomes, never throw), ADR-0032 (one surface family — no second grammar), ADR-0030 (declarative/hygienic macros — an internal spec DSL, not injection), ADR-0051 (doc comments / heredocs — the doctest host), ADR-0042 (protocol-bounded generics — matchers need `Eq`/`Show`/`Ord`), ADR-0047 (portable prelude — `Test` is portable Rian), ADR-0052 (documentation site — renders proven-current specs), ADR-0057 (portable sequential logic **and tests** across targets), ADR-0027/0031 (self-hosting; `Rian.Fixpoint`)
 **Owners:** Liam Davis (ergonomics/DX) · Samir Patel (rigor) · Maya Lin (multi-target/cost) · Kira Neri (honesty/determinism) · Arthur Pendelton (no-exceptions fit) · Elena Rostova (protocols) · Chloe Bennett (surface) · Rachel Okafor (PM)
 
@@ -103,10 +103,10 @@ Recorded so the question stops recurring. A natural-language `.feature` layer is
 
 ## Open items
 
-- **Doctest runner.** Extract and execute fenced examples from `@doc`/`@moduledoc` heredocs and
-  `docs/spec/*.md`; assert results on the BEAM path first (then per-target via the harness). The
-  format for stating an expected result (an ExUnit-doctest-style `iex>`/`#=>` marker vs a structured
-  block) is undecided.
+- **Doctest runner.** *MVP shipped* ([`Rian.Doctest`](../../lib/rian/doctest.ex)): the `#=>` marker
+  was chosen (`expr #=> expected`, both real Rian, compared by value on the BEAM). *Still open:*
+  doctests on **module-internal** functions (the MVP handles top-level `@doc`s), extraction from
+  `docs/spec/*.md` fences, and the per-target (Rust/JS) harness.
 - **Tour-as-regression.** Each `examples/rian/*.rian` already compiles; assert its documented
   outputs in CI (the `Rian.Fixpoint` pattern, generalised).
 - **`@test` annotation** vs the `test_` prefix convention — needs the annotation parser extended
