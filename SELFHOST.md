@@ -303,11 +303,34 @@ for these ops), identifiers, integer literals, parentheses. The method is proven
 later slices widen the grammar+corpus (calls, comparisons, pipes, then patterns and
 `Rian.Decl`'s declaration forms), each a regression test rather than a fresh demo.
 
-**Next:** widen the parser slice toward full `Rian.Pratt`/`Rian.Decl` coverage, then
-decide the **bootstrap boundary** (rung 3) and stand up the **bootstrap fixed-point**
-(rung 4) — compile the Rian-written front-end with the Elixir-hosted compiler, then
-with itself, and assert the two agree. Remaining lexer gaps (heredocs `"""`,
-string-body escapes, `\u{…}` char escapes) are small and unforced by the corpus.
+### Bootstrap plan + the fixed-point ladder (rungs 3-4, ADR-0063)
+
+The boundary and the finish line are now **defined** (ADR-0063): the minimal viable
+self-hosted compiler is a **Rian front-end (lexer+parser → the same Core IR) feeding
+the existing Elixir checker + `Rian.Beam` emitter**, with the boundary marching down
+over time. The proof is a four-stage ladder:
+
+- **Stage 0 — equivalence** (done): each ported stage matches the reference on a
+  corpus (the lexer + parser fixpoints above).
+- **Stage 1 — self-application** (done for the lexer): the Rian-written lexer
+  tokenizes **real toolchain source** — the self-hosting pipeline (including the
+  Rian *parser's* own source), the portable preludes, and tour modules — and agrees
+  with `Rian.Lexer.tokenize/1` token-for-token. It matches **27 of the 33** `.rian`
+  sources; the rest use heredoc doc-comments, and the lexer cannot yet lex *its own*
+  source (char escapes `'\n'`) — the documented frontier.
+  See [`test/rian/selfhost_fixedpoint_test.exs`](test/rian/selfhost_fixedpoint_test.exs).
+- **Stage 2 — front-end self-host** (future): the Rian front-end produces the *same
+  Core IR* the Elixir front-end builds, then the existing backend compiles it — the
+  first genuinely self-hosted compile. Gated on the parser→IR port + the portable
+  stdlib breadth (ADR-0047).
+- **Stage 3 — bootstrap fixed point** (future): the whole compiler in Rian; compile
+  its source with the Elixir host → v1, compile with v1 → v2, assert **v1 == v2**
+  (bit-identical `.beam`). The canonical terminus.
+
+**Next:** widen the parser slice (calls, comparisons, pipes, then patterns) toward
+`Rian.Decl` coverage and Stage 2; port the `Enum`/`Map`/`String` stdlib breadth the
+real front-end needs. Remaining lexer gaps (heredocs `"""`, string-body escapes,
+`\u{…}` char escapes — which block self-lexing) are small and unforced by Stage 2.
 
 ## The whole compiler as one Rian artifact
 
