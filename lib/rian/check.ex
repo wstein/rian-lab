@@ -452,9 +452,13 @@ defmodule Rian.Check do
   end
 
   # a typed binding binds `n` at its *declared* type (ADR-0034 §1); enforcement
-  # that the value fits the annotation is the gate's job (`check_binds/2`).
-  defp infer_block([{:typed_bind, n, t, _e} | rest], env, ic, _value),
-    do: infer_block(rest, Map.put(env, n, t), ic, t)
+  # that the value fits the annotation is the gate's job (`check_binds/2`). A
+  # `range` annotation resolves to its base (representation, not newtype; ADR-0036)
+  # so the binding unifies as its ordinal base downstream.
+  defp infer_block([{:typed_bind, n, t, _e} | rest], env, ic, _value) do
+    rt = resolve_range(t, ic)
+    infer_block(rest, Map.put(env, n, rt), ic, rt)
+  end
 
   defp infer_block([{:expr, e} | rest], env, ic, _value),
     do: infer_block(rest, env, ic, infer(e, env, ic))
@@ -546,7 +550,7 @@ defmodule Rian.Check do
 
   defp check_bind_stmts([{:typed_bind, name, ann, e} | rest], env, ic) do
     case bind_mismatch(name, ann, e, env, ic) do
-      nil -> check_bind_stmts(rest, Map.put(env, name, ann), ic)
+      nil -> check_bind_stmts(rest, Map.put(env, name, resolve_range(ann, ic)), ic)
       err -> err
     end
   end
@@ -563,6 +567,9 @@ defmodule Rian.Check do
     ce = Core.from_expr(e)
 
     cond do
+      range = Map.get(Map.get(ic, :ranges, %{}), ann) ->
+        range_bind(name, ann, range, ce, env, ic)
+
       literal_adopts?(ce, ann) ->
         nil
 
@@ -574,6 +581,57 @@ defmodule Rian.Check do
           else: {:error, "`#{name}`: binding declared `#{ann}` but its value has type `#{t}`"}
     end
   end
+
+  # A binding declared at a `range` type (ADR-0036). A *literal* of the matching
+  # ordinal kind is checked **in-bounds at compile time** (`d Digit := 7` for
+  # `0..9` passes; `:= 12` is a proven error). A non-literal value is allowed when
+  # it is assignable to the base (representation-transparent) — but its bound is
+  # not statically proven, so a runtime value should go through `Name.of(n)`,
+  # which returns `Name | RangeError`.
+  defp range_bind(name, ann, %{base: base, lo: lo, hi: hi}, ce, env, ic) do
+    case literal_ordinal(ce, base) do
+      {:ok, v} when v >= lo and v <= hi ->
+        nil
+
+      {:ok, v} ->
+        {:error, "`#{name}`: literal #{v} is outside range `#{ann}` (#{lo}..#{hi})"}
+
+      {:kind_mismatch, got} ->
+        {:error, "`#{name}`: range `#{ann}` is over `#{base}`, but the literal is a `#{got}`"}
+
+      :not_literal ->
+        t = infer(ce, env, ic)
+
+        if assignable?(resolve_range(t, ic), base),
+          do: nil,
+          else:
+            {:error,
+             "`#{name}`: value of type `#{t}` is not assignable to range `#{ann}` " <>
+               "(base `#{base}`); use `#{ann}.of(n)` for a runtime value"}
+    end
+  end
+
+  # the compile-time ordinal of a literal against a range's base, or why not:
+  # an integer literal for an `Int64` base / a `Char` literal for a `Char` base;
+  # `:kind_mismatch` when the literal is the wrong ordinal kind; `:not_literal`
+  # for any non-literal RHS.
+  defp literal_ordinal(%ENum{text: n}, "Int64") do
+    if int_literal?(n),
+      do: {:ok, n |> String.replace("_", "") |> String.to_integer()},
+      else: :not_literal
+  end
+
+  defp literal_ordinal(%EUnary{op: "-", arg: %ENum{} = a}, "Int64") do
+    case literal_ordinal(a, "Int64") do
+      {:ok, v} -> {:ok, -v}
+      other -> other
+    end
+  end
+
+  defp literal_ordinal(%EChar{value: cp}, "Char"), do: {:ok, cp}
+  defp literal_ordinal(%ENum{}, "Char"), do: {:kind_mismatch, "Int64"}
+  defp literal_ordinal(%EChar{}, "Int64"), do: {:kind_mismatch, "Char"}
+  defp literal_ordinal(_e, _base), do: :not_literal
 
   # A bare numeric literal adopts a *same-kind* numeric annotation (ADR-0034 §1):
   # an integer literal takes any `Int*`/`UInt*` width; a float literal takes any
@@ -807,7 +865,13 @@ defmodule Rian.Check do
   threads session declarations into expression typing — can reuse the same
   context-building rules as `check_program/1` without re-running the checker.
   """
-  @spec program_ic(map()) :: %{tdefs: map(), funs: map(), fsigs: map(), ctors: map()}
+  @spec program_ic(map()) :: %{
+          tdefs: map(),
+          funs: map(),
+          fsigs: map(),
+          ctors: map(),
+          ranges: map()
+        }
   def program_ic(%{} = prog) do
     types = all_types(prog)
 
@@ -818,8 +882,28 @@ defmodule Rian.Check do
       tdefs: type_table(types),
       funs: Map.new(all_funcs, fn f -> {f.name, f.ret} end),
       fsigs: Map.new(all_funcs, fn f -> {f.name, fsig(f)} end),
-      ctors: ctor_types(types, prog)
+      ctors: ctor_types(types, prog),
+      ranges: range_table(prog)
     }
+  end
+
+  # `range Name := lo..hi` (ADR-0036) records, keyed by name -> %{base, lo, hi}.
+  # A range is *representation, not newtype*: its base (`Int64`/`Char`) is what it
+  # unifies as; the `lo..hi` bound is what a literal binding is checked against.
+  defp range_table(prog) do
+    ranges =
+      Map.get(prog, :ranges, []) ++
+        for(m <- Map.get(prog, :mods, []), r <- Map.get(m, :ranges, []), do: r)
+
+    Map.new(ranges, fn r -> {r.name, %{base: r.base, lo: r.lo, hi: r.hi}} end)
+  end
+
+  # a range name resolves to its base type; any other type is unchanged
+  defp resolve_range(t, ic) do
+    case Map.get(Map.get(ic, :ranges, %{}), t) do
+      %{base: base} -> base
+      _ -> t
+    end
   end
 
   # The parts of a function signature `instantiate_ret/2` needs: parameter type

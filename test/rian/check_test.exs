@@ -176,6 +176,54 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "range types (ADR-0036) — literal in-bounds binding checks" do
+    test "an in-bounds integer literal binds, and the range unifies as its base" do
+      # 7 ∈ 0..9, and `Digit` resolves to its `Int64` base so the block returns Int64
+      assert Check.check("""
+             range Digit := 0..9
+             def f() Int64 := d Digit := 7 ; d
+             """) == :ok
+
+      # inclusive boundaries
+      assert Check.check("range Digit := 0..9\ndef f() Int64 := d Digit := 0 ; d") == :ok
+      assert Check.check("range Digit := 0..9\ndef f() Int64 := d Digit := 9 ; d") == :ok
+    end
+
+    test "an out-of-bounds literal is a proven compile error naming the interval" do
+      assert {:error, msg} =
+               Check.check("range Digit := 0..9\ndef f() Int64 := d Digit := 12 ; d")
+
+      assert msg =~ "literal 12 is outside range `Digit` (0..9)"
+    end
+
+    test "a `Char`-based range checks the codepoint of a char literal" do
+      assert Check.check("range Up := 'A'..'Z'\ndef f() Int64 := c Up := 'M' ; 0") == :ok
+
+      assert {:error, msg} =
+               Check.check("range Dig := '0'..'9'\ndef f() Int64 := c Dig := 'x' ; 0")
+
+      assert msg =~ "outside range `Dig`"
+    end
+
+    test "the literal's ordinal kind must match the range base" do
+      assert {:error, msg} =
+               Check.check("range Up := 'A'..'Z'\ndef f() Int64 := c Up := 7 ; 0")
+
+      assert msg =~ "range `Up` is over `Char`"
+    end
+
+    test "negative intervals are supported" do
+      assert Check.check("range S := -5..5\ndef f() Int64 := d S := -3 ; d") == :ok
+      assert {:error, _} = Check.check("range S := -5..5\ndef f() Int64 := d S := -9 ; d")
+    end
+
+    test "a non-literal base-compatible value is allowed (representation-transparent)" do
+      # the bound is not statically provable for a runtime value; it is transparent
+      # to its base (use `Name.of(n)` when a runtime bound check is wanted)
+      assert Check.check("range Digit := 0..9\ndef f(n Int64) Int64 := d Digit := n ; d") == :ok
+    end
+  end
+
   describe "flow narrowing (ADR-0034 pillar 4)" do
     @shape "type Shape := Circle(radius Float64) | Square(side Float64)\n"
 
