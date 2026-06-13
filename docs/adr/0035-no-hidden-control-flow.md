@@ -40,10 +40,15 @@ behavior on **out-of-domain** values. Integer overflow is the canonical case: an
 code stays clear of*, not a control-flow feature. Each target therefore uses its **native integer
 semantics** (BEAM promotes to bignum; Rust panics-debug/wraps-release; JVM/Go wrap; JS uses
 `BigInt`) — Rian does **not** simulate one runtime on another. The discipline this still imposes is
-twofold: (1) the cross-target divergence must be **documented, never silent**, and (2) the language
-must provide first-class tools to **stay in-domain** — subrange types (ADR-0036) as the promoted
-idiom, plus explicit `checked_*` / `saturating_*`. Bit-identical cross-target arithmetic is an
-**opt-in library**, not a core guarantee. (A Rust `panic!` on a proven-impossible value — e.g. the
+twofold: (1) the cross-target divergence must be **documented, never silent** (now recorded on the
+numeric primitives in ADR-0033), and (2) the language must provide first-class tools to **stay
+in-domain** — subrange types (ADR-0036) as the promoted idiom, plus explicit overflow ops. As of
+2026-06-13 those ops are **shipped**: `Int.checked_add` (→ `Option(Int64)`, overflow surfaced in the
+type), `Int.saturating_add` (clamp), and `Int.wrapping_add` (two's-complement) — a portable `mod Int`
+over per-target primitives (each backend's native `i64` op on Rust; a bignum/`BigInt` projection on
+BEAM/JS), see [prelude_int.rian](../../examples/rian/prelude_int.rian) (ADR-0047 §2). `sub`/`mul`
+follow the identical pattern. Bit-identical cross-target arithmetic is therefore an **opt-in
+library** call, not a core guarantee. (A Rust `panic!` on a proven-impossible value — e.g. the
 ADR-0036 `unreachable!()` shim — is loud, not hidden, and is the sole sanctioned trap.)
 
 ## Rationale

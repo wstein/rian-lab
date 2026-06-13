@@ -71,6 +71,27 @@ proposal to migrate guards to `if` is **dropped** — the construct choice disso
 Source spelling decouples from the targets: `Int64` is *Rian's* name and **maps** to each backend,
 rather than `i64` happening to match Rust/WASM. That is exactly the ADR-0032 stance.
 
+### Numeric overflow is target-native — documented, never silent
+
+The width-explicit integers (`Int8`…`Int128`, `UInt8`…`UInt128`) name a Rian *domain*, not a
+guaranteed cross-target overflow rule. **Bare `+`/`-`/`*` use each target's native integer
+semantics** (the ADR-0034 decision-lock, scoped in by ADR-0035): the BEAM and JS promote past the
+declared width (bignum / `BigInt`), while Rust's `i64` panics in debug and wraps in release. This
+divergence is a *documented* property of every numeric primitive, not a silent surprise — and Rian
+gives two first-class ways to avoid relying on it:
+
+- **Prefer a subrange (ADR-0036).** When a value's bound is known, put it in the type —
+  `type Digit := 0..9`, `Digit.of(n) : Digit | RangeError`. The compiler proves the bound; no
+  runtime overflow question arises. This is the promoted idiom.
+- **Otherwise, request a deterministic rule explicitly.** For genuinely-unbounded `Int64`
+  arithmetic, `Int.checked_add` (→ `Option(Int64)`, overflow in the type), `Int.saturating_add`
+  (clamp), and `Int.wrapping_add` (two's-complement) give one answer on every backend
+  ([prelude_int.rian](../../examples/rian/prelude_int.rian), ADR-0035, ADR-0047 §2).
+
+`Int53` is the related ECMAScript carve-out: a native JS `number` is exact only to 2⁵³, so `Int53`
+names the JS-safe integer domain (`i64` on BEAM/Rust, native `number` in JS) — choose it over
+`Int64` when a value must round-trip through JavaScript without `BigInt`.
+
 ## Consequences
 
 - **Exhaustiveness on open types.** `Symbol`, `Int64`, `String` are open universes, so a `case` on
