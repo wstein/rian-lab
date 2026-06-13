@@ -31,6 +31,11 @@ defmodule Rian.Reach do
 
   alias Rian.{Core, Pratt}
 
+  defmodule Error do
+    @moduledoc "Raised when a `@targets(…)` module contract is not met (ADR-0058 §2)."
+    defexception [:message]
+  end
+
   @targets [:ex, :rs, :js]
 
   # Erlang modules that are concurrency/process/state (ex-only AND native-per-target)
@@ -67,6 +72,48 @@ defmodule Rian.Reach do
     Map.new(facts, fn {n, fc} ->
       {n, %{reach: Map.fetch!(reach, n), blockers: Enum.reverse(fc.blockers)}}
     end)
+  end
+
+  @doc """
+  Check every `mod`'s `@targets(…)` contract (ADR-0058 §2): each `pub` function
+  in a module that declares a target set must *reach* every target in it.
+  Modules with no contract (`targets: nil`) are not gated — constraints are
+  selected by need. Returns `:ok` or `{:error, message}`.
+  """
+  def check_contracts(prog) do
+    reach = analyze(prog)
+
+    violations =
+      for mod <- Map.get(prog, :mods, []),
+          mod.targets != nil,
+          f <- mod.funcs,
+          f.pub?,
+          missing = mod.targets -- MapSet.to_list(reach[f.name][:reach] || MapSet.new(@targets)),
+          missing != [] do
+        {mod.name, f.name, Enum.sort(missing)}
+      end
+
+    case violations do
+      [] -> :ok
+      vs -> {:error, contract_message(vs)}
+    end
+  end
+
+  @doc "Raise `Rian.Reach.Error` on any unmet `@targets(…)` contract, else `:ok`."
+  def gate!(prog) do
+    case check_contracts(prog) do
+      :ok -> :ok
+      {:error, msg} -> raise Error, msg
+    end
+  end
+
+  defp contract_message(violations) do
+    lines =
+      Enum.map_join(violations, "\n", fn {mod, fun, missing} ->
+        "  #{mod}.#{fun} cannot reach #{inspect(missing)} required by `@targets`"
+      end)
+
+    "module `@targets` contract not met (ADR-0058 §2):\n" <> lines
   end
 
   # reach(f) = local(f) ∩ ⋂ reach(callee) — monotone-decreasing, runs to a fixpoint

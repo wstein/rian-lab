@@ -91,6 +91,10 @@ defmodule Rian.IR do
     A module (`mod Name do … end`) — a namespace grouping `uses`, `types`,
     `structs`, `consts`, and `funcs`. Lowers to a `defmodule` on the BEAM and a
     `mod` on Rust; `pub?` items are exported (`def`/`pub fn`), the rest private.
+
+    `targets` is the `@targets(…)` contract (ADR-0058 §2): a list of required
+    target environments (`:ex`/`:rs`/`:js`) every `pub` function must reach, or
+    `nil` for no contract (no gate — constraints are selected by need).
     """
     @enforce_keys [:name]
     defstruct name: nil,
@@ -100,7 +104,8 @@ defmodule Rian.IR do
               structs: [],
               consts: [],
               funcs: [],
-              doc: nil
+              doc: nil,
+              targets: nil
   end
 
   defmodule Param do

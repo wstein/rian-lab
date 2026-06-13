@@ -68,7 +68,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0055](adr/0055-capabilities-through-dispatch-and-opaque.md) | Capabilities through dynamic dispatch & opaque types: capability on the protocol method receiver (survives `dyn` erasure); opaque-over-struct presents the join of field capabilities | Accepted (direction) |
 | [0056](adr/0056-comptime-target-conditional.md) | `comptime if target`: proven-equivalent (or type-visible) sequential target conditional, else hard error. Motivation thinned — concurrency is native-per-target (ADR-0031), so the fracture it addressed isn't shared Rian source | **Proposed (dormant)** |
 | [0057](adr/0057-concurrency-and-otp-are-native-per-target.md) | Concurrency & OTP are native-per-target: Rian source is sequential logic + tests; gen_servers/tasks/workers are written in the host's native language and call shared Rian functions. Supersedes 0044 | Accepted (direction) |
-| [0058](adr/0058-configurable-target-environments.md) | Configurable target environments (`:ex`/`:rs`/`:js`), reachability-gated: `Rian.Reach` computes per-function reach via a call-graph fixpoint; `mix rian.targets [--require …]` reports and gates by need. Concurrency-FFI is a fallout | Accepted; partially implemented |
+| [0058](adr/0058-configurable-target-environments.md) | Configurable target environments (`:ex`/`:rs`/`:js`), reachability-gated: `Rian.Reach` computes per-function reach via a call-graph fixpoint; `mix rian.targets [--require …]` reports and gates by need; the in-source `@targets(…)` module contract is gated by `Rian.Reach.gate!`. Concurrency-FFI is a fallout | Accepted; `@targets` + gate implemented (build default open) |
 | [0059](adr/0059-join-lattice-lub.md) | Join lattice (LUB) for `if`/`case`/list-element types: `Check.join/2` is the least-upper-bound over the `num_widens?` order (numeric + same-constructor covariant `Vec`/`Option`); `:unknown` absorbing, gaps explicit. Closes the strict-`unify` join asymmetry | Accepted; implemented |
 | [0060](adr/0060-testing-spec-by-example.md) | Testing: three tiers (properties/fixpoint · executable spec-by-example/doctests · `describe`/`it`+matchers); assertions are values not exceptions (ADR-0035); doctests land first, matchers wait on protocols; **Gherkin rejected** (second grammar, prose↔stepdef drift, audience mismatch) | Accepted (direction) |
 
@@ -146,9 +146,10 @@ sections; they are tracked here so the corpus has one place to look:
   compiles BEAM to real bytecode via `Rian.Beam`. The text emitter still walks the surface tree
   rather than the typed core IR, so *collapsing* it onto the IR (the full ADR-0050 endpoint) remains
   open; the drift tax is now confined to an opt-in debug surface.
-- **Declarative `@targets(…)` annotation** (ADR-0058) — reachability is inferred + gated by
-  `mix rian.targets --require`, but the in-source annotation is unbuilt; "portable" is a derived
-  property, not yet a declaration.
+- **Declarative `@targets(…)` annotation** (ADR-0058) — **shipped**: a `@targets(ex, rs, js)` module
+  contract is parsed onto `IR.Mod.targets` and gated at compile time by `Rian.Reach.gate!` (every
+  `pub` function must reach the declared set). *Still open:* the `mix.exs` build-default target set
+  for unannotated modules.
 - **Self-hosting Stage 1** — port the real compiler modules to Rian, each diffed against the
   reference by [fixpoint.ex](../lib/rian/fixpoint.ex). The lexer port is at slice 2; the next
   slices (string/char/float literals, brackets, `@annot`) are blocked on portable string/regex

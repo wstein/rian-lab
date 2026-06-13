@@ -1,6 +1,6 @@
 # ADR-0058 — Configurable target environments; reachability-gated portability
 
-**Status:** Accepted (direction) · **partially implemented** (the reachability analysis + the `mix rian.targets --require` gate are shipped; the in-source `@targets` annotation and the `mix.exs` build default are open)
+**Status:** Accepted (direction) · **partially implemented** (the reachability analysis, the `mix rian.targets --require` gate, **and the in-source `@targets(…)` module annotation + its compile-time contract gate** — `Rian.Reach.gate!/1`, enforced in `Decl.compile`/`compile_beam` and `Beam.compile`/`compile_program` — are shipped; the `mix.exs` build default is open)
 **Refs:** ADR-0031 (sequential-core boundary), ADR-0041 §2 (unmapped BEAM call = compile error, never a silent stub), ADR-0047 (portable prelude `__prim_*`), ADR-0048 (effect tracking — the lattice this generalizes to), ADR-0049 (backend target roadmap / tiers), ADR-0057 (concurrency & OTP are native-per-target)
 **Owners:** Maya Lin (emitters/build) · Samir Patel (gate rigor) · Kira Neri (honesty/determinism) · Arthur Pendelton (analysis lattice) · Elena Rostova (interop seam) · Liam Davis (ergonomics) · Rachel Okafor (PM)
 
@@ -29,9 +29,11 @@ grows only when an emitter lands (Kira: no over-claims in the type system itself
 
 - **CLI (shipped):** `mix rian.targets FILE --require ex,rs,js` — the listed targets become a
   required set; the task exits non-zero on any function that cannot reach all of them.
-- **Module promise (open):** `@targets(ex, rs, js)` on a `mod` — a hard contract for *every `pub`
+- **Module promise (shipped):** `@targets(ex, rs, js)` on a `mod` — a hard contract for *every `pub`
   function* in that module, any subset of the vocabulary. The unit that *is* portable says so, so a
-  library author gets feedback without a downstream build flipping a flag (Samir).
+  library author gets feedback without a downstream build flipping a flag (Samir). Parsed onto
+  `IR.Mod.targets`; gated by `Rian.Reach.gate!/1` at compile time (a `pub` function failing to reach
+  a declared target is a `Rian.Reach.Error`). A module with no annotation is not gated.
 - **Build default (open):** `mix.exs` `rian: [targets: […]]` — supplies the required set for modules
   that don't declare one.
 

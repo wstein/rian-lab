@@ -63,10 +63,32 @@ defmodule Mix.Tasks.Rian.Targets do
         if missing == [], do: failed, else: [{name, missing} | failed]
       end)
 
+    report_contracts(prog)
     finish(required, Enum.reverse(failures))
   rescue
     e in [Rian.Decl.Error, Rian.Check.Error, ArgumentError, RuntimeError] ->
       Mix.raise("#{file}: #{Exception.message(e)}")
+  end
+
+  # In-source `@targets(…)` module contracts (ADR-0058 §2) are gated regardless
+  # of `--require`: a declared promise must hold.
+  defp report_contracts(prog) do
+    contracted = Enum.filter(Map.get(prog, :mods, []), &(&1.targets != nil))
+
+    Enum.each(contracted, fn m ->
+      Mix.shell().info(
+        "\n  module `#{m.name}` declares `@targets(#{Enum.join(m.targets, ", ")})`"
+      )
+    end)
+
+    case Rian.Reach.check_contracts(prog) do
+      :ok ->
+        if contracted != [], do: Mix.shell().info("  all `@targets` contracts hold ✓")
+
+      {:error, msg} ->
+        Mix.shell().error("\n#{msg}")
+        Mix.raise("`@targets` contract gate failed")
+    end
   end
 
   defp finish([], _failures), do: :ok

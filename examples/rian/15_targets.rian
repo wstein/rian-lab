@@ -1,0 +1,37 @@
+# ===========================================================================
+# 15 — Portability as a declaration: `@targets(…)` (ADR-0058)
+# ===========================================================================
+# Character: portability is not one bit — it is a configurable *set of target
+# environments*, selected by need (ADR-0058 §2). A module states the contract it
+# promises with `@targets(…)`; the compiler then GATES it: every `pub` function
+# must *reach* every listed target (`Rian.Reach`), or compilation fails. A module
+# with no `@targets` is not gated — constraints are selected by need, including
+# the need for none while prototyping.
+#
+#   @targets(ex, rs, js)   -> every pub fn must be fully portable
+#   @targets(ex)           -> BEAM-only is allowed (host FFI is fine)
+#   (no annotation)        -> no gate (pure analysis via `mix rian.targets`)
+#
+# Reachability propagates along the call graph: a pub function is at most as
+# portable as the least-portable function it calls.
+#
+# ADRs: 0058 (configurable target environments) · 0057 (concurrency native-per-target)
+# ---------------------------------------------------------------------------
+
+# A fully-portable module: pure sequential logic, reaches every target. The
+# `@targets(ex, rs, js)` contract holds, so this compiles.
+@targets(ex, rs, js)
+mod Geometry do
+  pub def square(n Int64) Int64 := n * n
+
+  pub def area_of_rect(w Int64, h Int64) Int64 := w * h
+end
+
+# A BEAM-only module: it uses Erlang FFI (`:erlang.system_time/0`), which is
+# ex-only by design (ADR-0057). Declaring `@targets(ex)` makes that promise
+# explicit and the gate passes. Declaring `@targets(ex, rs, js)` here would be a
+# compile error — the contract would name targets the FFI cannot reach.
+@targets(ex)
+mod Clock do
+  pub def now() Int64 := :erlang.system_time()
+end

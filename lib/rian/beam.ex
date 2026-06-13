@@ -104,6 +104,7 @@ defmodule Rian.Beam do
     # (built by named construction `Name(f: v)`, read by field access), so the
     # declaration itself is erased; only its constructions/accesses emit.
     prog = Decl.parse(src)
+    :ok = Rian.Reach.gate!(prog)
     beam_for(module, funcs_of(prog), ranges_of(prog))
   end
 
@@ -115,6 +116,7 @@ defmodule Rian.Beam do
   """
   def compile_program(src) do
     prog = Decl.parse(src)
+    :ok = Rian.Reach.gate!(prog)
     top = Map.get(prog, :ranges, [])
 
     prog

@@ -70,7 +70,7 @@ defmodule Rian.Decl do
     if prog.uses != [], do: raise(Error, "`use` must appear inside a `mod`")
 
     mods =
-      for {:mod, name, inner, doc} <- decls do
+      for {:mod, name, inner, doc, targets} <- decls do
         # `Prim` is the reserved intrinsic namespace (ADR-0047 §2): a `Prim.x(…)`
         # call rewrites to the `__prim_x` intrinsic, so a user `mod Prim` would be
         # shadowed (its calls hijacked). Reject it outright rather than miscompile.
@@ -93,7 +93,8 @@ defmodule Rian.Decl do
           structs: p.structs,
           consts: p.consts,
           funcs: p.funcs,
-          doc: doc
+          doc: doc,
+          targets: targets
         }
       end
 
@@ -262,6 +263,7 @@ defmodule Rian.Decl do
       prog = parse(src)
 
     :ok = Check.gate!(prog)
+    :ok = Rian.Reach.gate!(prog)
     funs = Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f, structs, ranges)} end)
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module(m)} end)
   end
@@ -272,6 +274,7 @@ defmodule Rian.Decl do
       prog = parse(src)
 
     :ok = Check.gate!(prog)
+    :ok = Rian.Reach.gate!(prog)
     funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs, ranges)} end)
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m)} end)
   end
@@ -300,6 +303,18 @@ defmodule Rian.Decl do
     {decl, rest} = take_decl(skip_nl(rest))
     {mark_test(decl), rest}
   end
+
+  # `@targets(ex, rs, js) mod … ` — the module's portability contract (ADR-0058
+  # §2): every `pub` function in the module must reach the listed targets.
+  defp take_decl([{:annot, "targets"}, {:lparen} | rest]) do
+    {tgt_toks, rest} = take_parens(rest, 0, [])
+    targets = parse_targets(tgt_toks)
+    {decl, rest} = take_decl(skip_nl(rest))
+    {attach_targets(decl, targets), rest}
+  end
+
+  defp take_decl([{:annot, "targets"} | _]),
+    do: raise(Error, "expected `@targets(ex, rs, js)`")
 
   defp take_decl([{:annot, a} | _]),
     do:
@@ -354,7 +369,7 @@ defmodule Rian.Decl do
   # bare `end` that has no matching `do`).
   defp take_decl([{:kw, "mod"}, {:id, name}, {:kw, "do"} | rest]) do
     {inner, rest} = take_mod_body(rest, [])
-    {{:mod, name, inner, nil}, rest}
+    {{:mod, name, inner, nil, nil}, rest}
   end
 
   defp take_decl([{:kw, "mod"} | _]),
@@ -410,12 +425,37 @@ defmodule Rian.Decl do
   defp mark_test({:def, raw}), do: {:def, Map.put(raw, :test, true)}
   defp mark_test(_other), do: raise(Error, "`@test` may only precede a `def`")
 
+  defp attach_targets({:mod, n, inner, doc, _}, targets), do: {:mod, n, inner, doc, targets}
+  defp attach_targets(_other, _t), do: raise(Error, "`@targets(…)` may only precede a `mod`")
+
+  # `@targets(ex, rs, js)` token list -> a deduped list of target atoms, each
+  # validated against the closed target vocabulary (ADR-0058 §1).
+  defp parse_targets(toks) do
+    targets =
+      for {:id, t} <- toks do
+        atom = String.to_atom(t)
+
+        unless atom in Rian.Reach.targets() do
+          raise(
+            Error,
+            "unknown target `#{t}` in `@targets`; known: #{inspect(Rian.Reach.targets())}"
+          )
+        end
+
+        atom
+      end
+
+    if targets == [],
+      do: raise(Error, "`@targets(…)` needs at least one target"),
+      else: Enum.uniq(targets)
+  end
+
   # attach a doc string to the declaration that follows the `@doc`/… annotation
   defp attach_doc({:type, s, pub, _}, doc), do: {:type, s, pub, doc}
   defp attach_doc({:range, s, pub, _}, doc), do: {:range, s, pub, doc}
   defp attach_doc({:struct, s, pub, _}, doc), do: {:struct, s, pub, doc}
   defp attach_doc({:const, s, pub, _}, doc), do: {:const, s, pub, doc}
-  defp attach_doc({:mod, n, inner, _}, doc), do: {:mod, n, inner, doc}
+  defp attach_doc({:mod, n, inner, _, t}, doc), do: {:mod, n, inner, doc, t}
   defp attach_doc({:def, raw}, doc), do: {:def, Map.put(raw, :doc, doc)}
   defp attach_doc(other, _doc), do: other
 
