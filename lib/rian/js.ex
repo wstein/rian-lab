@@ -36,9 +36,11 @@ defmodule Rian.JS do
   first argument's runtime shape (`typeof` for primitives, the tagged-array head
   for sums), mirroring the BEAM strategy with JS-native guards; the `impl_*`
   methods lower as plain functions, and bounded generics are plain functions
-  (the bound was checked statically and is erased). **Not yet** (raise
-  `Rian.JS.Unsupported`): struct construction/patterns and struct protocol
-  dispatch, atoms/`Symbol`, `with`, lambdas/captures, general FFI.
+  (the bound was checked statically and is erased). **Structs**: named
+  construction `Name(f: v, …)` → a `__struct__`-tagged object `{__struct__:
+  "Name", f: v}`, with field access `p.f` and struct clause patterns; struct
+  protocol dispatch tests `a0.__struct__ === "Name"`. **Not yet** (raise
+  `Rian.JS.Unsupported`): atoms/`Symbol`, `with`, lambdas/captures, general FFI.
   """
   alias Rian.{Core, Decl, Pratt}
 
@@ -56,12 +58,15 @@ defmodule Rian.JS do
     EMap,
     ENum,
     EStr,
+    EStruct,
+    ELabel,
     ETuple,
     EUnary,
     PChar,
     PCtor,
     PList,
     PLit,
+    PStruct,
     PVar,
     PWild
   }
@@ -90,7 +95,7 @@ defmodule Rian.JS do
   # mirrors the BEAM strategy — select the impl by the first argument's runtime
   # shape — but with JS-native guards (`typeof`, tagged-array head).
   defp protocol_dispatchers_js(prog) do
-    sum_ctors = sum_ctor_map(prog)
+    reg = %{sums: sum_ctor_map(prog), structs: struct_name_set(prog)}
     protocols = Map.get(prog, :protocols, [])
     impl_decls = Map.get(prog, :impl_decls, [])
 
@@ -100,21 +105,21 @@ defmodule Rian.JS do
 
         case impl_types do
           [] -> acc
-          types -> [dispatcher_js(p.name, m, types, sum_ctors) | acc]
+          types -> [dispatcher_js(p.name, m, types, reg) | acc]
         end
     end
     |> Enum.reverse()
     |> Enum.join("\n\n")
   end
 
-  defp dispatcher_js(proto, method, impl_types, sum_ctors) do
+  defp dispatcher_js(proto, method, impl_types, reg) do
     arity = method.params |> split_top_commas() |> length()
     params = Enum.map_join(0..(arity - 1)//1, ", ", &"a#{&1}")
     args = params
 
     clauses =
       Enum.map_join(impl_types, "\n", fn type ->
-        "  if (#{js_guard!(type, proto, sum_ctors)}) return #{mangle(proto, type, method.name)}(#{args});"
+        "  if (#{js_guard!(type, proto, reg)}) return #{mangle(proto, type, method.name)}(#{args});"
       end)
 
     "export function #{method.name}(#{params}) {\n#{clauses}\n  throw new Error(\"#{method.name}: no protocol impl\");\n}"
@@ -124,7 +129,7 @@ defmodule Rian.JS do
     do: "impl_#{String.downcase(proto)}_#{String.downcase(type)}_#{method}"
 
   # JS guard selecting the impl for `type` by the first argument's runtime shape.
-  defp js_guard!(type, proto, sum_ctors) do
+  defp js_guard!(type, proto, reg) do
     cond do
       type == "Bool" ->
         ~s(typeof a0 === "boolean")
@@ -141,15 +146,25 @@ defmodule Rian.JS do
       String.match?(type, ~r/^Float\d*$/) ->
         ~s(typeof a0 === "number")
 
-      ctors = sum_ctors[type] ->
+      ctors = reg.sums[type] ->
         sum_guard_js(ctors)
+
+      MapSet.member?(reg.structs, type) ->
+        ~s(typeof a0 === "object" && a0 !== null && a0.__struct__ === #{inspect(type)})
 
       true ->
         raise(
           Unsupported,
-          "JS protocol dispatch for `impl #{proto} for #{type}` (only primitive and sum types are supported on JS; restrict the module with `@targets`)"
+          "JS protocol dispatch for `impl #{proto} for #{type}` (no runtime discriminator for `#{type}`; restrict the module with `@targets`)"
         )
     end
+  end
+
+  defp struct_name_set(prog) do
+    structs =
+      Map.get(prog, :structs, []) ++ for(m <- Map.get(prog, :mods, []), s <- m.structs, do: s)
+
+    MapSet.new(structs, & &1.name)
   end
 
   # a sum value is a tagged array `["Ctor", …]` (this module's representation)
@@ -268,6 +283,18 @@ defmodule Rian.JS do
     {ts, bs} = match_elems(es, acc)
     {tt, tb} = pat_match(tail, "#{acc}.slice(#{n})")
     {["#{acc}.length >= #{n}" | ts ++ tt], bs ++ tb}
+  end
+
+  # a struct is a JS object `{__struct__: "Name", field: …}`; the pattern checks
+  # the tag and binds each named field by property access.
+  defp pat_match(%PStruct{name: name, fields: fields}, acc) do
+    {ts, bs} =
+      Enum.reduce(fields, {[], []}, fn {f, p}, {ts, bs} ->
+        {t, b} = pat_match(p, "#{acc}.#{f}")
+        {ts ++ t, bs ++ b}
+      end)
+
+    {["#{acc}.__struct__ === #{inspect(to_string(name))}" | ts], bs}
   end
 
   defp pat_match(other, _acc),
@@ -415,8 +442,14 @@ defmodule Rian.JS do
     "(() => { const _s = #{expr_js(scrut)}; #{arms_js} throw new Error(\"case: no clause matched\"); })()"
   end
 
-  # a PascalCase call is sum-variant construction -> a tagged array
-  # `["Ctor", arg0, …]`; a lowercase call is a function call
+  # named construction `Name(field: v, …)` (labeled args) -> a `__struct__`-tagged
+  # object; a positional PascalCase call -> a sum-variant tagged array
+  # `["Ctor", arg0, …]`; a lowercase call -> a function call
+  defp expr_js(%ECall{fun: %EId{name: f}, args: [%ELabel{} | _] = args}) do
+    fields = Enum.map_join(args, ", ", fn %ELabel{name: l, expr: e} -> "#{l}: #{expr_js(e)}" end)
+    "{ __struct__: #{inspect(f)}, #{fields} }"
+  end
+
   defp expr_js(%ECall{fun: %EId{name: f}, args: args}) do
     if pascal?(f) do
       "[#{Enum.join([inspect(f) | Enum.map(args, &expr_js/1)], ", ")}]"
@@ -427,6 +460,17 @@ defmodule Rian.JS do
 
   defp expr_js(%EIf{cond: c, then: t, else: e}),
     do: "(#{expr_js(c)} ? #{branch_js(t)} : #{branch_js(e)})"
+
+  # struct construction `Name(field: v, …)` -> a JS object tagged with
+  # `__struct__` (so field access and protocol dispatch work uniformly)
+  defp expr_js(%EStruct{name: name, pairs: pairs}) do
+    fields = Enum.map_join(pairs, ", ", fn {label, v} -> "#{label}: #{expr_js(v)}" end)
+    "{ __struct__: #{inspect(to_string(name))}#{if fields == "", do: "", else: ", " <> fields} }"
+  end
+
+  # bare field access `value.field` (a remote call `Mod.fun(…)` is handled above
+  # as an `ECall` over an `EDot`, so a standalone `EDot` here is field access)
+  defp expr_js(%EDot{head: head, name: field}), do: "#{expr_js(head)}.#{field}"
 
   defp expr_js(other), do: raise(Unsupported, "ecmascript: expression #{inspect(other)}")
 

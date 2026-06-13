@@ -275,10 +275,16 @@ defmodule Rian.JSTest do
       assert node_eval(js, "maximum([3n,7n,2n,5n], 0n)") in [:no_node, "7"]
     end
 
-    test "a struct impl on JS raises a clear Unsupported (gate it with @targets)" do
-      assert_raise JS.Unsupported, ~r/protocol dispatch/, fn ->
+    test "struct construction, field access, patterns, and dispatch run in node" do
+      js =
         JS.compile("""
         struct Point(x Int64, y Int64)
+
+        def mk(a Int64, b Int64) Point := Point(x: a, y: b)
+        def getx(p Point) Int64 := p.x
+
+        def sumxy(p Point) Int64
+        def sumxy(Point(x: a, y: b)) := a + b
 
         protocol Kind do
           def kind(self Self) String
@@ -287,8 +293,20 @@ defmodule Rian.JSTest do
         impl Kind for Point do
           def kind(p) := "point"
         end
+
+        impl Kind for Int64 do
+          def kind(n) := "int"
+        end
         """)
-      end
+
+      # a struct is a `__struct__`-tagged object
+      assert js =~ ~s({ __struct__: "Point", x: a, y: b })
+      assert js =~ ~s(a0.__struct__ === "Point")
+
+      assert node_eval(js, "getx(mk(7n,8n))") in [:no_node, "7"]
+      assert node_eval(js, "sumxy(mk(3n,4n))") in [:no_node, "7"]
+      assert node_eval(js, "kind(mk(1n,2n))") in [:no_node, "point"]
+      assert node_eval(js, "kind(99n)") in [:no_node, "int"]
     end
   end
 end
