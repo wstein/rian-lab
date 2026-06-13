@@ -1,11 +1,18 @@
 defmodule Rian.Lower do
   @moduledoc """
-  End-to-end backend lowering for a single Rian function. Wires together:
+  End-to-end **text** backend lowering for a single Rian function. Wires together:
     * type env             (Rian.Exhaustiveness)
     * pattern lowering     (Rian.PatternLower)
     * exhaustiveness gate  (Rian.Exhaustiveness.analyze)  -- refuses to emit if it fails
     * expression parsing   (Rian.Pratt)                    -- precedence-aware
-  and emits idiomatic Elixir AND Rust.
+  and emits idiomatic Rust **and** Elixir text.
+
+  > #### The Elixir-text path is a DEBUG/inspection view, not the BEAM execution path
+  > **`Rian.Beam`** (Erlang abstract forms → `:compile.forms` → loadable `.beam`) is
+  > the real BEAM backend. The Elixir *text* this module emits is a pedagogical /
+  > inspection artifact — surfaced only behind `mix rian.compile --show-elixir` and
+  > labelled a debug view — never the run path. **Rust** is the genuine text target
+  > here. (P3, ADR-0031: the abstract-forms pivot retired Elixir-source emission.)
 
   > #### Higher-order application on the Elixir text target
   > Applying a function-*valued variable* (`f(x)` where `f` is a parameter,
