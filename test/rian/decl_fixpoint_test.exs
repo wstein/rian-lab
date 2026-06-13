@@ -34,8 +34,9 @@ defmodule Rian.DeclFixpointTest do
 
   defp front_decls(fe, src), do: fe.parse_program(src |> Lexer.tokenize() |> Enum.map(&inject/1))
 
-  # project the front-end's `Decl` terms onto `Rian.IR` (the body stays a parsed
-  # AST — `Rian.Beam` consumes it via `Pratt.parse_body/1`'s passthrough).
+  # project the front-end's `Decl` terms onto `Rian.IR`. Pattern tuples and body
+  # ASTs already lower to the surface shapes (Wild->:wild, {:ctor,..}, {:bin,..});
+  # only the struct wrappers + multi-clause grouping happen here.
   defp to_type({:d_type, name, vs}) do
     %Type{
       name: name,
@@ -46,18 +47,15 @@ defmodule Rian.DeclFixpointTest do
     }
   end
 
-  defp to_func({:d_func, name, params, ret, body}) do
+  defp param({:par, n, cap, t}), do: %Param{name: n, type: t, cap: String.to_atom(cap)}
+  defp clause(pats, body), do: %Clause{pats: pats, body: {:block, [{:expr, body}]}, guard: nil}
+
+  defp func(name, params, ret, clauses) do
     %Func{
       name: name,
-      params: Enum.map(params, fn {:par, n, t} -> %Param{name: n, type: t, cap: :val} end),
+      params: Enum.map(params, &param/1),
       ret: ret,
-      clauses: [
-        %Clause{
-          pats: Enum.map(params, fn {:par, n, _} -> {:var, n} end),
-          body: {:block, [{:expr, body}]},
-          guard: nil
-        }
-      ],
+      clauses: clauses,
       pub?: false,
       tvars: [],
       bounds: %{},
@@ -68,10 +66,28 @@ defmodule Rian.DeclFixpointTest do
     }
   end
 
+  # group a flat decl list into IR: a `d_sig` absorbs the following `d_clause`s of
+  # the same name (multi-clause); a `d_func` is a single typed clause.
+  defp group([]), do: []
+  defp group([{:d_type, _, _} = t | rest]), do: [to_type(t) | group(rest)]
+
+  defp group([{:d_func, name, params, ret, body} | rest]) do
+    pats = Enum.map(params, fn {:par, n, _, _} -> {:var, n} end)
+    [func(name, params, ret, [clause(pats, body)]) | group(rest)]
+  end
+
+  defp group([{:d_sig, name, params, ret} | rest]) do
+    {cls, rest2} = Enum.split_while(rest, &match?({:d_clause, ^name, _, _}, &1))
+    clauses = Enum.map(cls, fn {:d_clause, _, pats, body} -> clause(pats, body) end)
+    [func(name, params, ret, clauses) | group(rest2)]
+  end
+
   defp to_prog(decls) do
+    ir = group(decls)
+
     %{
-      types: for(d <- decls, match?({:d_type, _, _}, d), do: to_type(d)),
-      funcs: for(d <- decls, match?({:d_func, _, _, _, _}, d), do: to_func(d)),
+      types: Enum.filter(ir, &match?(%Type{}, &1)),
+      funcs: Enum.filter(ir, &match?(%Func{}, &1)),
       structs: [],
       ranges: [],
       mods: []
@@ -89,7 +105,20 @@ defmodule Rian.DeclFixpointTest do
     "def add(a Int64, b Int64) Int64 := a + b",
     "type Expr := Num(Int64) | Add(Expr, Expr) | Zero",
     "def poly(a Int64, b Int64, c Int64) Int64 := a * b + c - a",
-    "type Color := Red | Green\ndef pick(n Int64) Int64 := n * 2 + 1"
+    "type Color := Red | Green\ndef pick(n Int64) Int64 := n * 2 + 1",
+    # capabilities (val/iso/ref)
+    "def consume(x iso Int64, y ref Int64) Int64 := x + y",
+    # multi-clause with clause patterns (ctor / nested literal / var / wildcard)
+    "type E := Num(Int64) | Add(E, E)\n" <>
+      "def fold(e E) E\n" <>
+      "def fold(Num(n)) := Num(n)\n" <>
+      "def fold(Add(Num(0), b)) := b\n" <>
+      "def fold(Add(a, b)) := Add(a, b)\n" <>
+      "def fold(_) := Num(0)",
+    # multi-clause over integers (literal + var clauses)
+    "def classify(n Int64) Int64\n" <>
+      "def classify(0) := 100\n" <>
+      "def classify(n) := n * 2"
   ]
 
   describe "Stage 2 declarations — the Rian front-end builds the same IR as Rian.Decl.parse" do
@@ -134,6 +163,38 @@ defmodule Rian.DeclFixpointTest do
       prog = front_decls(fe, src) |> to_prog()
       {:ok, mod} = Beam.load_ir(prog, :RianStage2Sum)
       assert mod.twice(21) == 42
+    end
+
+    test "a MULTI-CLAUSE pattern-matching function (the dominant Rian form) runs", %{frontend: fe} do
+      # parsed entirely by the Rian front-end: ctor patterns, nested literal, wildcard
+      src = """
+      type E := Num(Int64) | Add(E, E)
+      def simp(e E) E
+      def simp(Add(Num(0), b)) := b
+      def simp(Add(a, b)) := Add(a, b)
+      def simp(e) := e
+      """
+
+      prog = front_decls(fe, src) |> to_prog()
+      {:ok, mod} = Beam.load_ir(prog, :RianStage2Simp)
+
+      # sum values lower to tagged tuples: Num(n) -> {:num, n}, Add(l,r) -> {:add, l, r}
+      assert mod.simp({:add, {:num, 0}, {:num, 9}}) == {:num, 9}
+      assert mod.simp({:add, {:num, 1}, {:num, 2}}) == {:add, {:num, 1}, {:num, 2}}
+      assert mod.simp({:num, 5}) == {:num, 5}
+    end
+
+    test "a multi-clause function over integer literals runs", %{frontend: fe} do
+      src = """
+      def classify(n Int64) Int64
+      def classify(0) := 100
+      def classify(n) := n * 2
+      """
+
+      prog = front_decls(fe, src) |> to_prog()
+      {:ok, mod} = Beam.load_ir(prog, :RianStage2Classify)
+      assert mod.classify(0) == 100
+      assert mod.classify(7) == 14
     end
   end
 end

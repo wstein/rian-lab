@@ -336,10 +336,16 @@ over time. The proof is a four-stage ladder:
   `sq`/`add`/`main` parsed in Rian runs `main(4) = add(sq(4),4) = 20`
   ([`decl_fixpoint_test.exs`](test/rian/decl_fixpoint_test.exs)). That is "Rian
   front-end produces IR → existing backend compiles+runs it," with no Elixir parse in
-  the loop. **Remaining (the long tail of `Rian.Decl`):** multi-clause `def` + clause
-  patterns, capabilities (`val`/`iso`/`ref`), parametric types (`Vec(T)`),
-  `mod`/`struct`/`alias`/`protocol`/generics, and the portable `Enum`/`Map`/`String`
-  stdlib breadth (ADR-0047).
+  the loop. It now also handles **multi-clause `def` with clause patterns** —
+  ctor/nested-literal/var/wildcard, e.g. `def fold(Add(Num(0), b)) := b` — and
+  **capabilities** (`val`/`iso`/`ref`/`tag`), the dominant real-Rian form: a
+  multi-clause `simp` over a sum type parses to IR equal to `Rian.Decl.parse` and
+  **runs** (`simp(Add(Num(0), x)) = x`). The pattern AST lowers straight to Rian.Decl's
+  pattern tuples (`Wild`→`:wild`, `Ctor(c,ps)`→`{:ctor,c,ps}`), so patterns need no
+  projection either. **Remaining (the long tail of `Rian.Decl`):** `when` guards,
+  parametric param types (`Vec(T)`), cons/list/string/char patterns,
+  `mod`/`struct`/`alias`/`protocol`/generics/doc-comments, and the portable
+  `Enum`/`Map`/`String` stdlib breadth (ADR-0047).
 - **Stage 3 — bootstrap fixed point** (future; **determinism prerequisite verified**):
   the whole compiler in Rian; compile its source with the Elixir host → v1, compile
   with v1 → v2, assert **v1 == v2** (bit-identical `.beam`). The canonical terminus.

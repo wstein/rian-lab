@@ -1,24 +1,23 @@
 # ===========================================================================
 # SELF-HOSTING — a Rian DECLARATION front-end, written in Rian (Stage 2)
 # ===========================================================================
-# Beyond expressions (selfhost_parse.rian), this parses the declaration forms a
-# program is made of — `type` sum declarations and `def` functions — into a
-# `Decl` representation. Projected to `Rian.IR` by the test, it (a) matches what
-# `Rian.Decl.parse` builds, and (b) is handed to the real backend
-# (`Rian.Beam.compile_ir/2`) which compiles and RUNS it — the Stage-2 thesis
-# (ADR-0063): a Rian front-end producing IR the existing backend consumes.
+# Parses the declaration forms a program is made of into a `Decl` representation
+# that, projected to `Rian.IR` (the test), matches what `Rian.Decl.parse` builds
+# and is compiled + RUN by the real backend (`Rian.Beam.compile_ir/2`) — the
+# Stage-2 thesis (ADR-0063): a Rian front-end producing IR the existing backend
+# consumes, with no Elixir parse in the loop.
 #
-# Core declaration grammar (token stream = injected `Rian.Lexer.tokenize/1`):
-#   program := (decl NL*)*
-#   decl    := 'type' Id ':=' variants | 'def' Id '(' params ')' Id ':=' expr
-#   variants:= variant ('|' variant)*
-#   variant := Id | Id '(' typelist ')'
-#   params  := ε | (Id Id) (',' Id Id)*          # `name Type`, simple types
-#   expr    := the precedence-climbing expression parser (binops, unary, calls)
+# Forms covered:
+#   type Name := V1 | V2(T, …)                         sum declarations
+#   def name(p [cap] Type, …) Ret := expr              single typed clause
+#   def name(p [cap] Type, …) Ret                      bodiless signature
+#   def name(pat, …) := expr                           pattern clause (multi-clause)
+#   patterns: _  ·  var  ·  Int literal  ·  Ctor(pat, …)  ·  nullary Ctor (nested)
+#   capabilities: val / iso / ref / tag (default val)
 #
-# Out of slice (the long tail of Rian.Decl): multi-clause `def` + clause patterns,
-# capabilities (`val`/`iso`/`ref`), parametric types (`Vec(T)`), block bodies,
-# guards, `mod`/`struct`/`alias`/`const`/`protocol`/`impl`, `forall`, doc-comments.
+# Out of slice (the long tail of Rian.Decl): `when` guards, parametric param types
+# (`Vec(T)`), cons/list/string/char patterns, negative-literal patterns, block
+# bodies, and `mod`/`struct`/`alias`/`const`/`protocol`/`impl`/`forall`/doc-comments.
 # ---------------------------------------------------------------------------
 
 mod SelfhostDecl do
@@ -31,20 +30,32 @@ mod SelfhostDecl do
       Num(String) | Id(String) | Bin(String, Expr, Expr)
     | Unary(String, Expr) | Call(Expr, Vec(Expr)) | EErr
 
-  type Variant := V(String, Vec(String))
-  type Param := Par(String, String)
-  type Decl := DType(String, Vec(Variant)) | DFunc(String, Vec(Param), String, Expr) | DErr
+  # clause PATTERNS — names chosen to lower to Rian.Decl's pattern tuples:
+  #   Wild -> :wild   Var(n) -> {:var,n}   Lit(k) -> {:lit,k}   Ctor(c,ps) -> {:ctor,c,ps}
+  type Pat := Wild | Var(String) | Lit(Int64) | Ctor(String, Vec(Pat))
 
-  # result pairs (single-constructor sums — a value + the unconsumed tokens)
+  type Variant := V(String, Vec(String))
+  type Param := Par(String, String, String)
+  type Decl :=
+      DType(String, Vec(Variant))
+    | DFunc(String, Vec(Param), String, Expr)
+    | DSig(String, Vec(Param), String)
+    | DClause(String, Vec(Pat), Expr)
+    | DErr
+
+  # result pairs (a value + the unconsumed tokens)
   type Parse := P(Expr, Vec(Tok))
   type Args := AP(Vec(Expr), Vec(Tok))
   type DeclRes := DR(Decl, Vec(Tok))
   type VarsRes := VR(Vec(Variant), Vec(Tok))
   type OneVar := OneV(Variant, Vec(Tok))
   type TypeList := TL(Vec(String), Vec(Tok))
-  type ParamRes := PR(Vec(Param), Vec(Tok))
+  type ParamRes := PR(Param, Vec(Tok))
+  type Paren := Paren(Vec(Tok), Vec(Tok))
+  type PatRes := PP(Pat, Vec(Tok))
+  type PatList := PL(Vec(Pat), Vec(Tok))
 
-  # ── program: a sequence of declarations separated by significant newlines ─
+  # ── program: declarations separated by significant newlines ──────────────
   pub def parse_program(ts Vec(Tok)) Vec(Decl)
   pub def parse_program([]) := []
   pub def parse_program([TNL | rest]) := parse_program(rest)
@@ -99,28 +110,96 @@ mod SelfhostDecl do
   def parse_typelist([TId(t), TRP | rest]) := TL([t], rest)
   def parse_typelist(ts) := TL([], ts)
 
-  # ── def Name '(' params ')' Ret ':=' expr ─────────────────────────────────
+  # ── def: split the parenthesized head, then classify by what follows ──────
   def parse_def(ts Vec(Tok)) DeclRes
   def parse_def([TId(name), TLP | rest])
-    case parse_params(rest) do
-      PR(params, [TId(ret), TOp(":=") | rest2]) ->
-        case parse_bp(0, rest2) do
-          P(body, rest3) -> DR(DFunc(name, params, ret, body), rest3)
-        end
-      PR(params, other) -> DR(DErr, other)
+    case take_parens(rest, 0, []) do
+      Paren(inside, after) -> classify_def(name, inside, after)
     end
   end
   def parse_def(ts) := DR(DErr, ts)
 
-  def parse_params(ts Vec(Tok)) ParamRes
-  def parse_params([TRP | rest]) := PR([], rest)
-  def parse_params([TId(pn), TId(pt), TComma | rest])
-    case parse_params(rest) do
-      PR(more, r) -> PR([Par(pn, pt) | more], r)
+  # collect tokens up to the matching `)` (depth 0), returning (inside, rest).
+  def take_parens(ts Vec(Tok), depth Int64, acc Vec(Tok)) Paren
+  def take_parens([TRP | rest], 0, acc) := Paren(rev_tok(acc, []), rest)
+  def take_parens([TRP | rest], depth, acc) := take_parens(rest, depth - 1, [TRP | acc])
+  def take_parens([TLP | rest], depth, acc) := take_parens(rest, depth + 1, [TLP | acc])
+  def take_parens([t | rest], depth, acc) := take_parens(rest, depth, [t | acc])
+  def take_parens([], depth, acc) := Paren(rev_tok(acc, []), [])
+
+  # `(pats) := body` -> a pattern clause; `(params) Ret := body` -> a typed single
+  # clause; `(params) Ret` -> a bodiless signature.
+  def classify_def(name String, inside Vec(Tok), after Vec(Tok)) DeclRes
+  def classify_def(name, inside, [TOp(":=") | body])
+    case parse_bp(0, body) do
+      P(b, rest) -> DR(DClause(name, parse_pats(inside), b), rest)
     end
   end
-  def parse_params([TId(pn), TId(pt), TRP | rest]) := PR([Par(pn, pt)], rest)
-  def parse_params(ts) := PR([], ts)
+  def classify_def(name, inside, [TId(ret), TOp(":=") | body])
+    case parse_bp(0, body) do
+      P(b, rest) -> DR(DFunc(name, parse_params(inside), ret, b), rest)
+    end
+  end
+  def classify_def(name, inside, [TId(ret) | rest]) := DR(DSig(name, parse_params(inside), ret), rest)
+  def classify_def(name, inside, after) := DR(DErr, after)
+
+  # ── parameters: `name [cap] Type` (cap in val/iso/ref/tag, default val) ────
+  def parse_params(ts Vec(Tok)) Vec(Param)
+  def parse_params([]) := []
+  def parse_params(ts)
+    case parse_param(ts) do
+      PR(p, [TComma | rest]) -> [p | parse_params(rest)]
+      PR(p, _) -> [p]
+    end
+  end
+
+  def parse_param(ts Vec(Tok)) ParamRes
+  def parse_param([TId(n), TId("val"), TId(t) | rest]) := PR(Par(n, "val", t), rest)
+  def parse_param([TId(n), TId("iso"), TId(t) | rest]) := PR(Par(n, "iso", t), rest)
+  def parse_param([TId(n), TId("ref"), TId(t) | rest]) := PR(Par(n, "ref", t), rest)
+  def parse_param([TId(n), TId("tag"), TId(t) | rest]) := PR(Par(n, "tag", t), rest)
+  def parse_param([TId(n), TId(t) | rest]) := PR(Par(n, "val", t), rest)
+  def parse_param(ts) := PR(Par("", "val", ""), ts)
+
+  # ── clause patterns ───────────────────────────────────────────────────────
+  def parse_pats(ts Vec(Tok)) Vec(Pat)
+  def parse_pats([]) := []
+  def parse_pats(ts)
+    case parse_pat(ts) do
+      PP(p, [TComma | rest]) -> [p | parse_pats(rest)]
+      PP(p, _) -> [p]
+    end
+  end
+
+  def parse_pat(ts Vec(Tok)) PatRes
+  def parse_pat([TId("_") | rest]) := PP(Wild, rest)
+  def parse_pat([TNum(s) | rest]) := PP(Lit(str_to_int(s)), rest)
+  def parse_pat([TId(ctor), TLP | rest])
+    case parse_patlist(rest) do
+      PL(args, rest2) -> PP(Ctor(ctor, args), rest2)
+    end
+  end
+  def parse_pat([TId(x) | rest])
+    if is_upper(x) do
+      PP(Ctor(x, []), rest)
+    else
+      PP(Var(x), rest)
+    end
+  end
+  def parse_pat(ts) := PP(Wild, ts)
+
+  def parse_patlist(ts Vec(Tok)) PatList
+  def parse_patlist([TRP | rest]) := PL([], rest)
+  def parse_patlist(ts)
+    case parse_pat(ts) do
+      PP(p, [TComma | rest]) ->
+        case parse_patlist(rest) do
+          PL(more, r) -> PL([p | more], r)
+        end
+      PP(p, [TRP | rest]) -> PL([p], rest)
+      PP(p, rest) -> PL([p], rest)
+    end
+  end
 
   # ── expression parser (precedence climbing — mirrors Rian.Pratt) ──────────
   def parse_bp(min_bp Int64, ts Vec(Tok)) Parse
@@ -221,4 +300,21 @@ mod SelfhostDecl do
   def level("and") := 10
   def level("or") := 11
   def level(other) := 100
+
+  # ── small helpers ─────────────────────────────────────────────────────────
+  def is_upper(s String) Bool := upper_first(Prim.str_chars(s))
+
+  def upper_first(cs Vec(Char)) Bool
+  def upper_first([c | _]) := c >= 'A' and c <= 'Z'
+  def upper_first([]) := false
+
+  def str_to_int(s String) Int64 := digits(Prim.str_chars(s), 0)
+
+  def digits(cs Vec(Char), acc Int64) Int64
+  def digits([], acc) := acc
+  def digits([c | rest], acc) := digits(rest, acc * 10 + c - '0')
+
+  def rev_tok(xs Vec(Tok), acc Vec(Tok)) Vec(Tok)
+  def rev_tok([], acc) := acc
+  def rev_tok([x | xs], acc) := rev_tok(xs, [x | acc])
 end
