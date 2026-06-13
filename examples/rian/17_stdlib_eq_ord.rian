@@ -1,0 +1,92 @@
+# ===========================================================================
+# 17 — A portable stdlib slice over `Eq` / `Ord` (ADR-0042 · ADR-0047)
+# ===========================================================================
+# Character: this is the protocol's first real customer. `Eq` and `Ord` are
+# ordinary protocols; the List operations are **bounded generics** written ONCE
+# over them (`forall T: Eq` / `forall T: Ord`) and reused for every type that
+# implements the bound. The compiler ENFORCES the bound at the call site
+# (ADR-0042 §2) and DISPATCHES the protocol method on the value's runtime shape
+# (ADR-0042 §3) — so `sort([3, 1, 2])` type-checks because `Int64` has `Ord`, and
+# `eq`/`lt` resolve to the `Int64` impls at run time.
+#
+# This is portable sequential logic (ADR-0047): the same source reaches every
+# target the impls reach. The `@test`s and `@doc` doctests below run it.
+#
+# ADRs: 0042 (protocols/bounds) · 0047 (portable prelude) · 0057 (logic + tests)
+# ---------------------------------------------------------------------------
+
+# ── the ordering protocols ───────────────────────────────────────────────
+protocol Eq do
+  def eq(a Self, b Self) Bool
+end
+
+impl Eq for Int64 do
+  def eq(a, b) := a == b
+end
+
+impl Eq for String do
+  def eq(a, b) := a == b
+end
+
+impl Eq for Bool do
+  def eq(a, b) := a == b
+end
+
+protocol Ord do
+  def lt(a Self, b Self) Bool
+end
+
+impl Ord for Int64 do
+  def lt(a, b) := a < b
+end
+
+impl Ord for String do
+  def lt(a, b) := a < b
+end
+
+# ── List ops over the bounds (written once, reused per impl) ──────────────
+
+@doc """
+Membership by `Eq` — `forall T: Eq`.
+
+    contains([1, 2, 3], 2)  #=> true
+    contains([1, 2, 3], 9)  #=> false
+    contains([], 1)         #=> false
+"""
+def contains(xs Vec(T), x T) Bool forall T: Eq
+def contains([], x) := false
+def contains([h | t], x) := if eq(h, x) do true else contains(t, x) end
+
+# Ordered insertion — `forall T: Ord`. `[x, h | t]` prepends x and h onto t.
+def insert(xs Vec(T), x T) Vec(T) forall T: Ord
+def insert([], x) := [x]
+def insert([h | t], x) := if lt(x, h) do [x, h | t] else [h | insert(t, x)] end
+
+@doc """
+Insertion sort — `forall T: Ord`.
+
+    sort([3, 1, 2])        #=> [1, 2, 3]
+    sort([5, 4, 3, 2, 1])  #=> [1, 2, 3, 4, 5]
+    sort([])               #=> []
+"""
+def sort(xs Vec(T)) Vec(T) forall T: Ord
+def sort([]) := []
+def sort([h | t]) := insert(sort(t), h)
+
+# Fold to the maximum — `forall T: Ord`, seeded with `acc`.
+def maximum(xs Vec(T), acc T) T forall T: Ord
+def maximum([], acc) := acc
+def maximum([h | t], acc) := if lt(acc, h) do maximum(t, h) else maximum(t, acc) end
+
+# ── tests (ADR-0057): the stack runs end-to-end ───────────────────────────
+@test def contains_finds() Bool := contains([1, 2, 3], 2)
+@test def contains_absent() Bool := not contains([1, 2, 3], 9)
+@test def sort_orders() Bool := eq3(sort([3, 1, 2]), [1, 2, 3])
+@test def sort_idempotent() Bool := eq3(sort(sort([2, 1, 3])), [1, 2, 3])
+@test def maximum_folds() Bool := maximum([3, 7, 2, 5], 0) == 7
+
+# a tiny concrete list-equality helper for the test assertions above
+def eq3(xs Vec(Int64), ys Vec(Int64)) Bool
+def eq3([], []) := true
+def eq3([a | as], [b | bs]) := if a == b do eq3(as, bs) else false end
+def eq3(xs, ys) := false

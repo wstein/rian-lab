@@ -139,8 +139,10 @@ sections; they are tracked here so the corpus has one place to look:
   coherence-checked; dispatch covers **primitive, sum (by constructor tag), and struct** types —
   enough for a real `Eq`/`Show` over the compiler's own data (`Token`, `Expr`). `forall T: Bound`
   is now **enforced at call sites** (a concrete type lacking the required `impl` is a proven error).
-  *Still open:* dynamic dispatch, the Rust/JS lowerings, and the portable stdlib (`Dict`/`List` over
-  `Eq`/`Ord`) that this unblocks.
+  A first **portable stdlib slice** rides it: `contains`/`sort`/`maximum` as bounded generics over
+  `Eq`/`Ord` ([17_stdlib_eq_ord.rian](../examples/rian/17_stdlib_eq_ord.rian)), run by its own
+  `@test`s + doctests. *Still open:* dynamic dispatch, the Rust/JS lowerings, and a `Dict` over `Eq`
+  (needs generic pair types).
 - **JS emitter completeness** (ADR-0049) — `struct`/`with`/lambdas/FFI still raise `Unsupported`
   ([js.ex](../lib/rian/js.ex)); a browser playground that runs the compiler client-side needs them.
 - **Two-Elixir-emitter consolidation** — the Erlang abstract-forms backend ([beam.ex](../lib/rian/beam.ex))
