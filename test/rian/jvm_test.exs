@@ -53,6 +53,22 @@ defmodule Rian.JVMTest do
       end
     end
 
+    test "a `ref` param is lowered to value semantics (sound: return-based surface)" do
+      # `ref` (&mut) has no Kotlin analog; it only ever changed the Rust signature,
+      # so JVM emits an ordinary `val` binding. Reach reports `ref` as reaching :jvm,
+      # so this MUST compile (not raise), and the cap must not leak into the emitted
+      # parameter. Locks the documented value-lowering decision against a future
+      # in-place-mutation primitive silently miscompiling here.
+      kt = JVM.compile("def bump(x ref Int64) Int64 := x + 1")
+      assert kt =~ "fun bump(a0: Long): Long"
+      assert kt =~ "val x = a0"
+
+      case kotlin_run(kt, ~s|println(bump(41L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "42"
+      end
+    end
+
     test "a sum type lowers to a sealed interface + data classes" do
       kt = JVM.compile("type Color := Red | Green | RGB(Int64, Int64, Int64)")
       assert kt =~ "sealed interface Color"

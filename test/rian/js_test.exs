@@ -214,6 +214,22 @@ defmodule Rian.JSTest do
         JS.compile("def tag(n Int64) Bool := :ok")
       end
     end
+
+    test "a `ref` param is lowered to value semantics (sound: return-based surface)" do
+      # `ref` (&mut) has no JS analog; it only ever changed the Rust signature, so
+      # JS emits an ordinary positional binding and the result is correct. Reach
+      # reports `ref` as reaching :js, so this MUST compile (not raise) — and the
+      # cap must not leak into the emitted parameter. Locks the documented decision:
+      # if in-place mutation is ever added, this assertion forces JS to handle it.
+      js = JS.compile("def bump(x ref Int64) Int64 := x + 1")
+      assert js =~ "function bump(a0)"
+      assert js =~ "const x = a0"
+
+      case node_eval(js, "bump(41n)") do
+        :no_node -> :ok
+        out -> assert out == "42"
+      end
+    end
   end
 
   describe "protocol dispatch on JS (ADR-0061 §3)" do

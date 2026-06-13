@@ -242,11 +242,33 @@ defmodule Rian.PrattTest do
       assert Pratt.parse_pats("%{tag: :num, val: v}") ==
                [{:map, [{"tag", {:atom, "num"}}, {"val", {:var, "v"}}]}]
     end
+
+    test "map and struct patterns render in the s-expression debug view" do
+      # Regression: `sexpr_pat` had no `:map`/`:struct` clause, so a `case` arm over
+      # either pattern crashed the debug renderer with a FunctionClauseError.
+      assert Pratt.parse_sexpr("case x do %{a: v} -> v end") ==
+               "(case x (%{a: v} -> v))"
+
+      assert Pratt.parse_sexpr("case p do Point(x: a, y: b) -> a end") ==
+               "(case p (Point(x: a, y: b) -> a))"
+    end
   end
 
   describe "malformed input raises (expression parser)" do
     test "trailing tokens after a parenthesized expression: missing `)`" do
       assert_raise ArgumentError, ~r/expected `\)`/, fn -> Pratt.parse("(a b") end
+    end
+
+    test "the error names the offending token (kind + value), not the raw stream" do
+      # Regression: `expect_*` and `parse_primary` dumped `inspect(toks)` — the whole
+      # remaining stream. The message now points at the first token, e.g.
+      # `expected `)`, got identifier `b``.
+      err = assert_raise(ArgumentError, fn -> Pratt.parse("(a b") end)
+      assert Exception.message(err) =~ "got identifier `b`"
+      refute Exception.message(err) =~ "[{:"
+
+      bad = assert_raise(ArgumentError, fn -> Pratt.parse("def") end)
+      assert Exception.message(bad) =~ "unexpected token: keyword `def`"
     end
 
     test "a call argument not followed by `,` or `)`" do

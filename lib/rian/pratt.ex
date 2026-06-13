@@ -187,7 +187,7 @@ defmodule Rian.Pratt do
 
       case rest do
         [{:rparen} | r2] -> parse_postfix(e, r2)
-        _ -> raise ArgumentError, "expected `)`"
+        _ -> raise ArgumentError, "expected `)`, got #{here(rest)}"
       end
     end
   end
@@ -199,7 +199,7 @@ defmodule Rian.Pratt do
   # lowered to a codepoint integer on BEAM/JS and a native `char` on Rust
   defp parse_primary([{:char, cp} | rest]), do: parse_postfix({:char, cp}, rest)
   defp parse_primary([{:id, x} | rest]), do: parse_postfix({:id, x}, rest)
-  defp parse_primary(other), do: raise(ArgumentError, "unexpected token: #{inspect(other)}")
+  defp parse_primary(other), do: raise(ArgumentError, "unexpected token: #{here(other)}")
 
   defp parse_postfix(node, [{:op, "."}, {:id, name} | rest]),
     do: parse_postfix({:dot, node, name}, rest)
@@ -459,7 +459,7 @@ defmodule Rian.Pratt do
     case tokens do
       [{:comma} | rest] -> parse_pat_args(rest, [p | acc])
       [{:rparen} | rest] -> {Enum.reverse([p | acc]), rest}
-      other -> raise ArgumentError, "expected `,` or `)` in pattern: #{inspect(other)}"
+      other -> raise ArgumentError, "expected `,` or `)` in pattern, got #{here(other)}"
     end
   end
 
@@ -627,13 +627,29 @@ defmodule Rian.Pratt do
   end
 
   defp expect_kw([{:kw, k} | rest], k), do: rest
-  defp expect_kw(toks, k), do: raise(ArgumentError, "expected `#{k}`, got #{inspect(toks)}")
+  defp expect_kw(toks, k), do: raise(ArgumentError, "expected `#{k}`, got #{here(toks)}")
   defp expect_op([{:op, o} | rest], o), do: rest
-  defp expect_op(toks, o), do: raise(ArgumentError, "expected `#{o}`, got #{inspect(toks)}")
+  defp expect_op(toks, o), do: raise(ArgumentError, "expected `#{o}`, got #{here(toks)}")
   defp expect_rbracket([{:rbracket} | rest]), do: rest
-  defp expect_rbracket(toks), do: raise(ArgumentError, "expected `]`, got #{inspect(toks)}")
+  defp expect_rbracket(toks), do: raise(ArgumentError, "expected `]`, got #{here(toks)}")
   defp expect_rparen([{:rparen} | rest]), do: rest
-  defp expect_rparen(toks), do: raise(ArgumentError, "expected `)`, got #{inspect(toks)}")
+  defp expect_rparen(toks), do: raise(ArgumentError, "expected `)`, got #{here(toks)}")
+
+  # Describe the offending position for a parse error: the *first* token's kind and
+  # value (`number \`3\``, `keyword \`def\``, …), not a raw `inspect/1` dump of the
+  # whole remaining token stream — which buried the actual error in noise.
+  defp here([]), do: "end of input"
+  defp here([t | _]), do: tok_desc(t)
+
+  defp tok_desc({:id, x}), do: "identifier `#{x}`"
+  defp tok_desc({:num, n}), do: "number `#{n}`"
+  defp tok_desc({:str, s}), do: ~s(string "#{s}")
+  defp tok_desc({:char, cp}), do: "char `?#{cp}`"
+  defp tok_desc({:op, o}), do: "operator `#{o}`"
+  defp tok_desc({:kw, k}), do: "keyword `#{k}`"
+  defp tok_desc({:atom, a}), do: "atom `:#{a}`"
+  defp tok_desc(t) when is_tuple(t), do: "`#{elem(t, 0)}`"
+  defp tok_desc(t), do: inspect(t)
 
   defp sexpr({:num, n}), do: n
   defp sexpr({:str, s}), do: "\"#{s}\""
@@ -704,4 +720,10 @@ defmodule Rian.Pratt do
   defp sexpr_pat({:var, x}), do: x
   defp sexpr_pat({:ctor, n, []}), do: n
   defp sexpr_pat({:ctor, n, args}), do: "#{n}(#{Enum.map_join(args, ", ", &sexpr_pat/1)})"
+
+  defp sexpr_pat({:map, fields}),
+    do: "%{#{Enum.map_join(fields, ", ", fn {k, p} -> "#{k}: #{sexpr_pat(p)}" end)}}"
+
+  defp sexpr_pat({:struct, n, fields}),
+    do: "#{n}(#{Enum.map_join(fields, ", ", fn {k, p} -> "#{k}: #{sexpr_pat(p)}" end)})"
 end

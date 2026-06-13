@@ -340,9 +340,14 @@ defmodule Rian.Repl do
   # `{:error, _}` result without advancing the session.
   defp reload(s, src) do
     module = module_name(s)
+    # Gate BEFORE purging the prior version: a rejected entry must raise here
+    # without first unloading the session's currently-good module. Purging up front
+    # meant a type error left the session with no loaded module until the next valid
+    # eval rebuilt it (ADR-0053 "no REPL/compile divergence", no advancing the
+    # session on failure).
+    :ok = Check.gate!(Decl.parse(src))
     _ = :code.purge(module)
     _ = :code.delete(module)
-    :ok = Check.gate!(Decl.parse(src))
     {:ok, ^module} = Beam.load(src, module)
     module
   end

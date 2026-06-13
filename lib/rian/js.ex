@@ -41,6 +41,16 @@ defmodule Rian.JS do
   "Name", f: v}`, with field access `p.f` and struct clause patterns; struct
   protocol dispatch tests `a0.__struct__ === "Name"`. **Not yet** (raise
   `Rian.JS.Unsupported`): atoms/`Symbol`, `with`, lambdas/captures, general FFI.
+
+  ## Capabilities
+
+  The portable core is `val`/`iso`/`tag`; `ref` (`&mut`) has no JS analog. It is
+  **intentionally lowered to value semantics** — a `ref` param emits an ordinary
+  positional binding, which is *sound today* because the Rian surface is
+  return-based (no in-place mutation operator), so `ref` only ever changed the Rust
+  signature. If a future in-place-mutation primitive is added, this assumption
+  breaks and `ref` would need real handling here — `test/rian/js_test.exs` locks the
+  current value-lowering so that change can't pass silently.
   """
   alias Rian.{Core, Decl, Pratt}
 
