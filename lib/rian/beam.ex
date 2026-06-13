@@ -9,6 +9,18 @@ defmodule Rian.Beam do
   loads as a real module. This is the bootstrap target: no Elixir-compiler
   dependency, a reproducible artifact, real error locations (line is tracked).
 
+  **Dialyzer contracts (Stage 0.5).** Rian's declared types are not erased into
+  the void: every function emits a `-spec`, and every sum/struct emits a named
+  `-type`, into the module's abstract code (kept in the `.beam` via `:debug_info`)
+  — so the output is **Dialyzer-checkable**. The Rian → Erlang type-form mapping
+  is `Int*`/`UInt*`/`Char` → `integer()`, `Float*` → `float()`, `Bool` →
+  `boolean()`, `String` → `binary()`, `Vec(T)` → `[t()]`, `Fn(A, R)` →
+  `fun((a()) -> r())`, a sum → a named union of tag atoms / tagged tuples, a
+  struct → a named `\#{'__struct__' := tag, …} | {tag, …}`, and a `forall`
+  type-variable or any un-pinnable type → `any()` (sound — never a false
+  contract). So `def area(s Shape) Float64` compiles with
+  `-spec area(shape()) -> float()` and `-type shape() :: …` alongside.
+
   ## Scope (this increment)
 
   The function core plus **sum-variant** construction and patterns, enough to
@@ -105,7 +117,7 @@ defmodule Rian.Beam do
     # declaration itself is erased; only its constructions/accesses emit.
     prog = Decl.parse(src)
     :ok = Rian.Reach.gate!(prog)
-    beam_for(module, funcs_of(prog), ranges_of(prog))
+    beam_for(module, funcs_of(prog), ranges_of(prog), types_of(prog), structs_of(prog))
   end
 
   @doc """
@@ -122,7 +134,15 @@ defmodule Rian.Beam do
     prog
     |> Map.get(:mods, [])
     |> Enum.map(fn m ->
-      {:ok, atom, bin} = beam_for(:"Elixir.#{m.name}", m.funcs, top ++ Map.get(m, :ranges, []))
+      {:ok, atom, bin} =
+        beam_for(
+          :"Elixir.#{m.name}",
+          m.funcs,
+          top ++ Map.get(m, :ranges, []),
+          Map.get(m, :types, []),
+          Map.get(m, :structs, [])
+        )
+
       {atom, bin}
     end)
   end
@@ -142,17 +162,24 @@ defmodule Rian.Beam do
   end
 
   # build one module's `.beam` from its function list. `ranges` (a list of
-  # `%IR.Range{}`) lets `Name.of(n)` construction desugar (ADR-0036).
-  defp beam_for(module, funcs, ranges) do
+  # `%IR.Range{}`) lets `Name.of(n)` construction desugar (ADR-0036). `types` and
+  # `structs` let `-spec` attributes expand sum/struct types (Stage 0.5).
+  defp beam_for(module, funcs, ranges, types, structs) do
     rtable = Rian.Range.table(ranges)
+    tctx = type_ctx(types, ranges, structs)
 
     forms =
       [
         {:attribute, @ln, :module, module},
         {:attribute, @ln, :export, Enum.map(funcs, &{String.to_atom(&1.name), arity(&1)})}
-      ] ++ Enum.map(funcs, &function_form(&1, rtable))
+      ] ++
+        type_attrs(types, structs, tctx) ++
+        Enum.map(funcs, &spec_form(&1, tctx)) ++
+        Enum.map(funcs, &function_form(&1, rtable))
 
-    case :compile.forms(forms, [:return_errors]) do
+    # `:debug_info` retains the abstract code (incl. the `-spec` attributes) in
+    # the `.beam`, so Dialyzer can read the contracts (Stage 0.5).
+    case :compile.forms(forms, [:return_errors, :debug_info]) do
       {:ok, ^module, bin} -> {:ok, module, bin}
       {:ok, ^module, bin, _warnings} -> {:ok, module, bin}
       error -> raise Unsupported, "compile.forms failed: #{inspect(error)}"
@@ -163,6 +190,13 @@ defmodule Rian.Beam do
   defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
   defp funcs_of(%{funcs: funcs}), do: funcs
 
+  # the type/struct declarations in the same scope as `funcs_of/1`
+  defp types_of(%{funcs: [], mods: [m]}), do: Map.get(m, :types, [])
+  defp types_of(prog), do: Map.get(prog, :types, [])
+
+  defp structs_of(%{funcs: [], mods: [m]}), do: Map.get(m, :structs, [])
+  defp structs_of(prog), do: Map.get(prog, :structs, [])
+
   # every `range` in scope (top-level + any module's) — for `Name.of` desugaring
   defp ranges_of(prog),
     do:
@@ -170,6 +204,132 @@ defmodule Rian.Beam do
         for(m <- Map.get(prog, :mods, []), r <- Map.get(m, :ranges, []), do: r)
 
   defp arity(%{clauses: [c | _]}), do: length(c.pats)
+
+  # ── `-spec` attributes (Stage 0.5): Dialyzer-checkable contracts ─────────
+  # The type context for expanding Rian types into Erlang abstract type forms:
+  # sum types (name -> variants), range bases (name -> "Int64"/"Char"), and the
+  # set of struct names (a struct value is a tagged map).
+  defp type_ctx(types, ranges, structs) do
+    %{
+      sums: Map.new(types, &{&1.name, &1.variants}),
+      ranges: Map.new(ranges, &{&1.name, &1.base}),
+      structs: MapSet.new(structs, & &1.name)
+    }
+  end
+
+  # `-type name() :: …` declarations for the scope's sum and struct types, so a
+  # `-spec` can reference `shape()` rather than inline the structure (idiomatic,
+  # Dialyzer-friendly). A type name is its snake-cased tag (`Shape` -> `shape`).
+  defp type_attrs(types, structs, tctx) do
+    Enum.map(types, fn t ->
+      {:attribute, @ln, :type, {tag(t.name), sum_form(t.variants, tctx), []}}
+    end) ++
+      Enum.map(structs, fn s ->
+        {:attribute, @ln, :type, {tag(s.name), struct_form(s, tctx), []}}
+      end)
+  end
+
+  # `-spec name(Arg…) :: Ret` from the declared parameter types and return type.
+  # A function whose declared types we cannot pin down still gets a valid spec
+  # (`any()` per unknown position), so every function is Dialyzer-analyzable.
+  defp spec_form(%{name: name, params: params, ret: ret} = f, tctx) do
+    args = Enum.map(params, &type_form(&1.type, tctx))
+    fun_t = {:type, @ln, :fun, [{:type, @ln, :product, args}, type_form(ret, tctx)]}
+    {:attribute, @ln, :spec, {{String.to_atom(name), arity(f)}, [fun_t]}}
+  end
+
+  # a Rian type string -> an Erlang abstract **type form** (for `-spec`/`-type`).
+  defp type_form(nil, _tctx), do: any_t()
+
+  defp type_form(t, tctx) when is_binary(t) do
+    cond do
+      t == "Bool" -> {:type, @ln, :boolean, []}
+      t == "String" -> {:type, @ln, :binary, []}
+      # `Char` is a codepoint integer on the BEAM (ADR-0036)
+      t == "Char" -> int_t()
+      t == "Int53" or String.match?(t, ~r/^U?Int\d*$/) -> int_t()
+      String.match?(t, ~r/^Float\d*$/) -> {:type, @ln, :float, []}
+      String.starts_with?(t, "Vec(") -> {:type, @ln, :list, [type_form(inner_of(t), tctx)]}
+      String.starts_with?(t, "Fn(") -> fn_form(t, tctx)
+      # `T | E` (error-set sugar / a union) — union of the parts
+      top_level_union?(t) -> union_t(Enum.map(split_top(t, "|"), &type_form(&1, tctx)))
+      Map.has_key?(tctx.ranges, t) -> type_form(tctx.ranges[t], tctx)
+      # a sum / struct value -> a reference to its named `-type` (defined above)
+      Map.has_key?(tctx.sums, t) -> {:user_type, @ln, tag(t), []}
+      MapSet.member?(tctx.structs, t) -> {:user_type, @ln, tag(t), []}
+      # a type variable (`forall T`) or an unknown type -> `any()` (sound)
+      true -> any_t()
+    end
+  end
+
+  # a sum type -> a union of its variants: a nullary variant is its tag atom, a
+  # field-carrying variant a tagged tuple `{tag, Field…}` (mirrors construction).
+  defp sum_form(variants, tctx) do
+    variants
+    |> Enum.map(fn
+      %{ctor: c, fields: []} ->
+        {:atom, @ln, tag(c)}
+
+      %{ctor: c, fields: fs} ->
+        {:type, @ln, :tuple, [{:atom, @ln, tag(c)} | Enum.map(fs, &type_form(&1.type, tctx))]}
+    end)
+    |> union_t()
+  end
+
+  # a struct value is either a `__struct__`-tagged map (named construction
+  # `Name(f: v)`) or a tagged tuple (positional `Name(v1, v2)`); the `-type` is
+  # the union of both representations.
+  defp struct_form(%{name: name, fields: fs}, tctx) do
+    field_assocs =
+      [
+        {:type, @ln, :map_field_exact, [{:atom, @ln, :__struct__}, {:atom, @ln, tag(name)}]}
+        | Enum.map(fs, fn f ->
+            {:type, @ln, :map_field_exact,
+             [{:atom, @ln, String.to_atom(f.label)}, type_form(f.type, tctx)]}
+          end)
+      ]
+
+    map_t = {:type, @ln, :map, field_assocs}
+
+    tuple_t =
+      {:type, @ln, :tuple, [{:atom, @ln, tag(name)} | Enum.map(fs, &type_form(&1.type, tctx))]}
+
+    union_t([map_t, tuple_t])
+  end
+
+  # `Fn(A1, …, An, R)` -> `fun((a1(), …) -> r())`; `Fn(R)` -> `fun(() -> r())`.
+  defp fn_form(t, tctx) do
+    parts = t |> String.trim_leading("Fn(") |> String.trim_trailing(")") |> split_top(",")
+    {args, [ret]} = Enum.split(parts, length(parts) - 1)
+
+    {:type, @ln, :fun,
+     [{:type, @ln, :product, Enum.map(args, &type_form(&1, tctx))}, type_form(ret, tctx)]}
+  end
+
+  defp union_t([one]), do: one
+  defp union_t(forms), do: {:type, @ln, :union, forms}
+
+  defp int_t, do: {:type, @ln, :integer, []}
+  defp any_t, do: {:type, @ln, :any, []}
+
+  defp inner_of("Vec(" <> rest), do: String.trim_trailing(rest, ")")
+
+  defp top_level_union?(t), do: length(split_top(t, "|")) > 1
+
+  # split on a separator at bracket depth 0 (so `Vec(A | B)` / `Fn(A, B)` are atomic)
+  defp split_top(s, sep) do
+    {parts, cur, _} =
+      s
+      |> String.graphemes()
+      |> Enum.reduce({[], "", 0}, fn
+        ch, {ps, cur, 0} when ch == sep -> {[cur | ps], "", 0}
+        "(", {ps, cur, d} -> {ps, cur <> "(", d + 1}
+        ")", {ps, cur, d} -> {ps, cur <> ")", d - 1}
+        ch, {ps, cur, d} -> {ps, cur <> ch, d}
+      end)
+
+    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  end
 
   # ── function / clause forms ─────────────────────────────────────────────
   defp function_form(%{name: name, clauses: clauses}, rtable) do

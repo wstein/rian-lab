@@ -621,4 +621,69 @@ defmodule Rian.BeamTest do
       end
     end
   end
+
+  describe "Stage 0.5 — Dialyzer-checkable `-spec`/`-type` attributes" do
+    # pretty-print the `:type`/`:spec` attributes carried in the `.beam`'s
+    # abstract-code chunk (retained via `:debug_info`), as their `-…` source lines
+    defp attrs(src) do
+      {:ok, _mod, bin} = Beam.compile(src, :"rian_spec_#{System.unique_integer([:positive])}")
+      {:ok, {_, [{:abstract_code, {_, forms}}]}} = :beam_lib.chunks(bin, [:abstract_code])
+
+      for {:attribute, _, kind, _} = f <- forms, kind in [:type, :spec] do
+        f
+        |> :erl_pp.attribute()
+        |> IO.iodata_to_binary()
+        |> String.replace(~r/\s+/, " ")
+        |> String.trim()
+      end
+    end
+
+    test "primitives, Vec, and Fn map to native Erlang type forms" do
+      a =
+        attrs("""
+        def f(n Int64, ok Bool, name String, r Float64) Bool := ok
+        def g(xs Vec(Int64)) Int64 := 0
+        def h(fn1 Fn(Int64, Int64), n Int64) Int64 := fn1(n)
+        """)
+
+      assert "-spec f(integer(), boolean(), binary(), float()) -> boolean()." in a
+      assert "-spec g([integer()]) -> integer()." in a
+      assert "-spec h(fun((integer()) -> integer()), integer()) -> integer()." in a
+    end
+
+    test "a sum type gets a named `-type` (union of tags); specs reference it" do
+      a =
+        attrs("""
+        type Shape := Circle(r Float64) | Square(s Float64) | Unit
+        def area(sh Shape) Float64
+        def area(Circle(r)) := r
+        def area(Square(s)) := s
+        def area(Unit) := 0.0
+        """)
+
+      assert "-type shape() :: {circle, float()} | {square, float()} | unit." in a
+      assert "-spec area(shape()) -> float()." in a
+    end
+
+    test "a struct gets a named `-type` (the `__struct__` map | the positional tuple)" do
+      a =
+        attrs("""
+        struct Point(x Int64, y Int64)
+        def origin() Point := Point(x: 0, y: 0)
+        """)
+
+      assert Enum.any?(
+               a,
+               &(&1 =~ "-type point() ::" and &1 =~ "'__struct__' := point" and
+                   &1 =~ "{point, integer(), integer()}")
+             )
+
+      assert "-spec origin() -> point()." in a
+    end
+
+    test "an un-pinnable type (a `forall` variable) becomes `any()` — every fn is specced" do
+      a = attrs("def id(x T) T forall T := x")
+      assert "-spec id(any()) -> any()." in a
+    end
+  end
 end
