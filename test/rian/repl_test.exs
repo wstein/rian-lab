@@ -4,7 +4,7 @@ defmodule Rian.ReplTest do
 
   import ExUnit.CaptureIO
 
-  alias Rian.Repl
+  alias Rian.{Check, Decl, Repl}
 
   defp eval(session, input), do: Repl.eval(session, input)
 
@@ -143,6 +143,37 @@ defmodule Rian.ReplTest do
       s = Repl.new()
       assert {{:error, message}, ^s} = eval(s, "1 + true")
       assert message != ""
+    end
+  end
+
+  describe "no REPL/compile divergence (ADR-0053)" do
+    # Decl-level programs the batch compiler's gate rejects must also be rejected
+    # at the prompt: the REPL runs the same `Check.gate!` as `Rian.Decl.compile`.
+    @rejected_decls [
+      # a body that proves a different type than the declared return
+      "def f(n Int64) Bool\ndef f(n) := n + 1",
+      # an error constructed outside the declared error set (ADR-0040)
+      "def find(id Int64) User | NotFound := {:error, Timeout}"
+    ]
+
+    for src <- @rejected_decls do
+      test "the compiler and the REPL both reject: #{inspect(src)}" do
+        assert_raise Check.Error, fn -> Decl.compile(unquote(src)) end
+        assert {{:error, _msg}, _} = eval(Repl.new(), unquote(src))
+      end
+    end
+
+    # Statement-level entries (typed binds) are gated through the same path via
+    # the `__repl__` wrapper, so a proven clash is rejected, never run.
+    test "a typed-binding mismatch is rejected at the prompt" do
+      assert {{:error, _}, _} = eval(Repl.new(), "x Bool := 66")
+      assert {{:error, _}, _} = eval(Repl.new(), "x Float64 := 66")
+    end
+
+    test "what the compiler accepts, the REPL accepts" do
+      src = "def g(n Int64) Int64\ndef g(n) := n * 2"
+      assert [_ | _] = Decl.compile(src)
+      assert {{:defined, ["g"]}, _} = eval(Repl.new(), src)
     end
   end
 

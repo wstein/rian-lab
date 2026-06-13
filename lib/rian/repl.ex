@@ -278,8 +278,12 @@ defmodule Rian.Repl do
       {:ok, {:block, [{:bind, name, rhs}]}} ->
         eval_bind(s, input, name, rhs)
 
-      {:ok, {:block, [{:typed_bind, name, ann, rhs}]}} ->
-        eval_typed_bind(s, input, name, ann, rhs)
+      # A typed binding (`x Int32 := 66`, ADR-0034 §1) displays at its declared
+      # type; the binding-site check (literal adopts the width, already-typed
+      # values widen losslessly, a clash is rejected) runs in the gate via
+      # `reload/2`, the same path as every other entry — no separate pre-check.
+      {:ok, {:block, [{:typed_bind, name, ann, _rhs}]}} ->
+        bind_with_type(s, input, name, ann)
 
       {:ok, _block} ->
         eval_expr(s, input)
@@ -293,20 +297,6 @@ defmodule Rian.Repl do
     ic = session_ic(s)
     type = safe_infer(rhs, bind_env(s.binds, ic), ic)
     bind_with_type(s, input, name, type)
-  end
-
-  # A typed binding (`x Int32 := 66`, ADR-0034 §1) is enforced at the binding site
-  # before it runs — the same bidirectional rule the function-body gate applies:
-  # a numeric literal adopts the declared width, an already-typed value must
-  # unify, and a proven clash is reported without advancing the session.
-  defp eval_typed_bind(s, input, name, ann, rhs) do
-    ic = session_ic(s)
-    env = bind_env(s.binds, ic)
-
-    case Check.check_bind(name, ann, rhs, env, ic) do
-      {:error, message} -> {{:error, message}, s}
-      :ok -> bind_with_type(s, input, name, ann)
-    end
   end
 
   # A typed binding displays at its declared type (ADR-0034 §1); an untyped one
@@ -342,10 +332,17 @@ defmodule Rian.Repl do
   # Purge the session's prior module version and load the new source under the
   # same name. One module per session — keeps the atom table and code memory
   # bounded no matter how many entries the session sees.
+  #
+  # The full type/exhaustiveness/error-set gate runs here, before lowering, so
+  # the REPL rejects exactly what `Rian.Decl.compile` rejects — the "no
+  # REPL/compile divergence" guarantee of ADR-0053. `Check.gate!/1` raises
+  # `Check.Error` on a proven mismatch, which the `eval_*` callers turn into an
+  # `{:error, _}` result without advancing the session.
   defp reload(s, src) do
     module = module_name(s)
     _ = :code.purge(module)
     _ = :code.delete(module)
+    :ok = Check.gate!(Decl.parse(src))
     {:ok, ^module} = Beam.load(src, module)
     module
   end

@@ -228,6 +228,13 @@ defmodule Rian.Check do
     if fn_type?(ft), do: fn_ret(ft), else: :unknown
   end
 
+  # Branch/arm *joins* use strict `unify` (not the widening `assignable?` of
+  # bindings/returns): a join of two differing concretes is `conservative/1` →
+  # `:unknown`, never a fabricated widened type. So `Int32`-vs-`Int64` arms infer
+  # `:unknown` even though a binding would widen `Int32` to `Int64`. This boundary
+  # is intentional — a widening join needs a least-upper-bound (and the signed/
+  # unsigned/float LUB gaps of ADR-0034 §1's lattice), which is a future ADR item;
+  # until then joins stay strict rather than guess an LUB.
   def infer(%EIf{then: t, else: e}, env, ic),
     do: conservative(unify(infer(t, env, ic), infer(e, env, ic)))
 
@@ -533,26 +540,11 @@ defmodule Rian.Check do
          do: check_error_set(f, eset)
   end
 
-  @doc """
-  Check one typed binding's RHS against its declared type (ADR-0034 §1) — the
-  same bidirectional rule the function-body gate applies, exposed for surfaces
-  (the REPL) to enforce a top-level `name Type := expr`. `rhs` is the surface or
-  core RHS expression. Returns `:ok` (well-typed, or unprovable) or
-  `{:error, message}` on a proven clash blamed at the binding site.
-  """
-  @spec check_bind(String.t(), String.t(), term(), map(), map()) ::
-          :ok | {:error, String.t()}
-  def check_bind(name, ann, rhs, env \\ %{}, ic \\ %{}) do
-    case bind_mismatch(name, ann, rhs, env, ic) do
-      nil -> :ok
-      {:error, _} = err -> err
-    end
-  end
-
   # ADR-0034 §1 — typed bindings. `x T := e` checks `e` against the declared type
   # `T`: a numeric *literal* adopts `T` (bidirectional checking — the literal takes
-  # the declared width), while any already-typed RHS must *unify exactly* with `T`,
-  # so `x Int32 := someInt64` is a proven mismatch (no implicit narrow/widen). An
+  # the declared width), while any already-typed RHS must be *assignable* to `T`,
+  # i.e. it may **widen losslessly** (`x Int64 := someInt32` ok) but not narrow
+  # (`x Int32 := someInt64` is a proven mismatch) — amended 2026-06-13. An
   # `:unknown` RHS is left unchecked — the gate only reports *provable* clashes.
   defp check_binds(%Func{params: ps, clauses: clauses}, ic) do
     Enum.find_value(clauses, :ok, fn c ->

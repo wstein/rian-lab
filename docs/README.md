@@ -66,6 +66,30 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0057](adr/0057-concurrency-and-otp-are-native-per-target.md) | Concurrency & OTP are native-per-target: Rian source is sequential logic + tests; gen_servers/tasks/workers are written in the host's native language and call shared Rian functions. Supersedes 0044 | Accepted (direction) |
 | [0058](adr/0058-configurable-target-environments.md) | Configurable target environments (`:ex`/`:rs`/`:js`), reachability-gated: `Rian.Reach` computes per-function reach via a call-graph fixpoint; `mix rian.targets [--require …]` reports and gates by need. Concurrency-FFI is a fallout | Accepted; partially implemented |
 
+### Amending a decision-lock
+
+ADRs are decision-locks: an **`Amended <date>`** line records when a locked rule
+changes. Because the codebase treats ADRs as authoritative, an amendment is
+**not done** until it has been propagated. Before considering an amendment
+complete:
+
+1. **Implement** the new rule and update the ADR text with a dated `Amended …`
+   note quoting the new rule.
+2. **Sweep for the superseded wording** — `grep` the tree for the old rule's
+   phrasing (e.g. `no implicit narrow/widen`, `must unify exactly`) and fix every
+   contradicting code comment, moduledoc, and sibling ADR.
+3. **Pin the new behavior with a test**, and where the rule is a cross-surface
+   invariant, an *executable* one — e.g. "what `Decl.compile` rejects, the REPL
+   rejects" ([repl_test.exs](../test/rian/repl_test.exs)) rather than prose like
+   the prose-only form ADR-0053's "the gate runs at the prompt" had before this
+   test existed.
+4. **Check the sibling sites** the rule should reach — a checking rule added at
+   one position (a binding) usually has cousins (returns, branch joins) that must
+   either adopt it or be explicitly documented as intentionally excluded.
+
+This step exists because the 2026-06-13 widening amendment (ADR-0034 §1) initially
+left contradicting comments and an un-propagated join rule within hours.
+
 ## Specifications
 
 | Spec | Scope |

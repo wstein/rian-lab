@@ -472,8 +472,9 @@ defmodule Rian.Pratt do
   # typed binding `x Int32 := 66` / `xs Vec(Int64) := [1, 2, 3]` — a declared type
   # sits between the name and `:=`. It is carried as a `{:typed_bind, name, type,
   # expr}` node so the checker can enforce it (ADR-0034 §1: a numeric literal
-  # *adopts* the declared width; an already-typed RHS must *unify exactly*) and
-  # display the binding at the declared type. Every backend erases the annotation —
+  # *adopts* the declared width; an already-typed RHS must be *assignable* — it may
+  # widen losslessly but not narrow) and display the binding at the declared type.
+  # Every backend erases the annotation —
   # `Int*` is representation intent, not a portable overflow contract (ADR-0034 §1).
   # The type may be parametric (`Vec(Int64)`, `Map(String, Int64)`, nested). A
   # `name type` sequence is otherwise not a valid statement, so when the type
