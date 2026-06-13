@@ -51,6 +51,12 @@ structs, `case`, protocols, and FFI raise `Rian.JVM.Unsupported` (the next incre
 parity, JVM CI stays **non-blocking** until promoted (and `kotlinc`/`java` are absent from the
 Erlang-only CI image, so the run-tests no-op there, like the `node`/`rustc` pattern).
 
+**Artifacts & citizenship** are a separate ladder (**ADR-0062**): rung B — a runnable `.jar` via
+`kotlinc` (`Rian.JVM.to_jar/3`, `mix rian.jar`) — is shipped; rung C — *direct* JVM bytecode (the
+analog of `Rian.Beam`'s abstract forms, via a `java.lang.classfile` helper, ultimately in-process
+once Rian self-hosts on the JVM) plus Java interop — is the path to first-class citizenship and is
+gated on scheduling + the self-hosting roadmap.
+
 ### 3. ECMAScript is emitted directly; PureScript is a reference, not a dependency
 
 The JS target emits **ECMAScript directly from day one**. **PureScript is a *semantic reference only*** —

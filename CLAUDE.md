@@ -26,7 +26,8 @@ mix test --only rust                      # only the rustc-backed tests
 mix format                                # THE linter — no credo/dialyzer in this repo
 mix compile --warnings-as-errors          # warnings are errors; run before every commit
 
-mix rian.compile FILE [--beam|--rust] [--show-elixir]  # BEAM bytecode (Rian.Beam) + Rust; --show-elixir = text debug view
+mix rian.compile FILE [--beam|--rust|--jvm] [--show-elixir]  # BEAM bytecode (Rian.Beam) + Rust + Kotlin/JVM; --show-elixir = text debug view
+mix rian.jar FILE [-o OUT.jar] [--main FUNC]      # runnable JVM .jar via Kotlin+kotlinc (ADR-0049/0062 rung B)
 mix rian.repl                                     # compiling REPL (parse→check→abstract-forms→load→run)
 mix rian.targets FILE [--require ex,rs,js]        # per-function target-reachability report / gate
 mix examples                                      # end-to-end lowering demo

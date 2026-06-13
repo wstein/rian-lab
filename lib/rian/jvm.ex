@@ -71,6 +71,50 @@ defmodule Rian.JVM do
     [type_decls, fn_decls] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
   end
 
+  @doc """
+  Assemble `src` into a JVM `.jar` at `jar_path` by emitting Kotlin (`compile/1`)
+  and invoking `kotlinc -include-runtime`. This is the **rung-B** path (ADR-0062):
+  a real, runnable artifact, but via the host Kotlin compiler — a transpile step,
+  not yet direct bytecode (the rung-C analog of `Rian.Beam`'s abstract forms).
+
+  `opts[:main]` names a **zero-arg** function to wrap in a generated
+  `fun main()` (it prints the result), so the jar is runnable with `java -jar`;
+  without it, a library jar whose top-level functions are callable from the JVM
+  as `<File>Kt.fn(…)`. Returns `{:ok, jar_path}`. Raises `RuntimeError` if
+  `kotlinc` is absent or the emitted Kotlin does not compile (and the emitter
+  itself raises `Rian.JVM.Unsupported` for a not-yet-lowered construct).
+  """
+  def to_jar(src, jar_path, opts \\ []) do
+    kotlinc =
+      System.find_executable("kotlinc") ||
+        raise(
+          RuntimeError,
+          "`kotlinc` not found on PATH — needed to assemble a JVM .jar (ADR-0049 Tier 2)"
+        )
+
+    ktfile = Path.join(System.tmp_dir!(), "rian_jar_#{System.unique_integer([:positive])}.kt")
+    File.write!(ktfile, kotlin_module(src, opts[:main]))
+
+    try do
+      case System.cmd(kotlinc, [ktfile, "-include-runtime", "-d", jar_path],
+             stderr_to_stdout: true
+           ) do
+        {_, 0} -> {:ok, jar_path}
+        {out, code} -> raise(RuntimeError, "kotlinc failed (exit #{code}):\n#{out}")
+      end
+    after
+      File.rm(ktfile)
+    end
+  end
+
+  # the Kotlin compilation unit, optionally with a generated `main` entry point
+  # (kotlinc derives `Main-Class` from a top-level `fun main`, so `-include-runtime`
+  # yields a `java -jar`-runnable fat jar).
+  defp kotlin_module(src, nil), do: compile(src)
+
+  defp kotlin_module(src, main) when is_binary(main),
+    do: compile(src) <> "\n\nfun main() {\n  println(#{main}())\n}\n"
+
   defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
   defp funcs_of(%{funcs: funcs}), do: funcs
 

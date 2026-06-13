@@ -85,4 +85,26 @@ defmodule Rian.JVMTest do
       end
     end
   end
+
+  describe "JVM jar assembly (rung B, ADR-0062)" do
+    test "to_jar produces a runnable jar that runs under java" do
+      case {System.find_executable("kotlinc"), System.find_executable("java")} do
+        {nil, _} ->
+          :ok
+
+        {_, nil} ->
+          :ok
+
+        {_, java} ->
+          jar =
+            Path.join(System.tmp_dir!(), "rian_jartest_#{System.unique_integer([:positive])}.jar")
+
+          {:ok, ^jar} = JVM.to_jar("def answer() Int64 := 6 * 7", jar, main: "answer")
+          assert File.exists?(jar)
+          {out, 0} = System.cmd(java, ["-jar", jar])
+          assert String.trim(out) == "42"
+          File.rm(jar)
+      end
+    end
+  end
 end
