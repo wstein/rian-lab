@@ -148,3 +148,8 @@ alongside the parser work.
   This is a deliberate deferral, not a decision: *if* structured concurrency is ever added there it
   must be lexically explicit (Occam-style scoped parallelism, no detached tasks) to satisfy ADR-0035,
   never Go-style implicit `go`. OTP/actors stay BEAM-only; no CSP/Oz-dataflow in the core.
+  - **Forced file-forking** (a *separate* consequence): a BEAM-flavoured line makes its module
+    BEAM-only, pushing authors to fork `_beam.rian`/`_rust.rian`. **Proposed mitigation —
+    [ADR-0056](0056-comptime-target-conditional.md)** (`comptime if target`, proven-equivalent or
+    type-visible, else hard error). It does **not** lift the concurrency lock above (no synthesized
+    OTP on non-BEAM); it only ends forced-forking for the *legal* cases. Not yet accepted.

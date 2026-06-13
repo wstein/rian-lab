@@ -62,6 +62,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0052](adr/0052-documentation-site.md) | Documentation site: Astro/Starlight portal + native per-target API reference | Accepted (direction) |
 | [0053](adr/0053-repl-interactive-surfaces.md) | REPL & interactive surfaces: a compiling, connected REPL; one eval engine, many surfaces | Accepted (direction) |
 | [0055](adr/0055-capabilities-through-dispatch-and-opaque.md) | Capabilities through dynamic dispatch & opaque types: capability on the protocol method receiver (survives `dyn` erasure); opaque-over-struct presents the join of field capabilities | Accepted (direction) |
+| [0056](adr/0056-comptime-target-conditional.md) | `comptime if target`: proven-equivalent (or type-visible) target conditional, else hard error — ends forced file-forking without silent stubs; reopens the ADR-0031 sequential-core lock | **Proposed (draft)** |
 
 ## Specifications
 
