@@ -1005,6 +1005,14 @@ defmodule Rian.Check do
   defp with_callees(_), do: []
 
   defp call_name({:call, {:id, n}, _}), do: [n]
+  # A module-/protocol-qualified call `M.f(…)` propagates `f`'s error set too: the
+  # call-graph table is keyed by *bare* name (`solve_error_sets` flattens module
+  # funcs), so extracting the method name is consistent with how callees are stored.
+  # A truly external dot-call (`String.upcase`) names no local function -> the
+  # `table` lookup is empty -> harmless no-op (no false propagation). Without this
+  # clause an error routed through a qualified call silently escaped the declared
+  # set (ADR-0040 §4 soundness hole).
+  defp call_name({:call, {:dot, _, n}, _}), do: [n]
   defp call_name(_), do: []
 
   # An error tag is a PascalCase constructor (`NotFound`, `DivByZero(…)`). A

@@ -355,6 +355,44 @@ defmodule Rian.CheckTest do
       assert msg =~ "declared set `B`"
     end
 
+    test "under-declaration through a module-qualified call `M.f()` is also rejected" do
+      # Regression: the call-graph fixpoint followed only bare-name calls
+      # (`inner(n)`); a qualified `M.inner(n)` returned no callee, so its error set
+      # silently escaped `outer`'s declared set — a pub function could under-declare
+      # by routing the propagation through a module-qualified call (ADR-0040 §4
+      # soundness hole). `call_name` now extracts the method name from a dot-call.
+      assert {:error, msg} =
+               Check.check("""
+               type E := A | B
+               mod M do
+                 pub def inner(n Int64) Int64 | A := {:error, A}
+               end
+               def outer(n Int64) Int64 | B
+                 with {:ok, x} <- M.inner(n) do
+                   {:ok, x}
+                 end
+               end
+               """)
+
+      assert msg =~ "outer"
+      assert msg =~ "A"
+      assert msg =~ "declared set `B`"
+    end
+
+    test "an external dot-call to a name with no local function does not over-propagate" do
+      # `String.upcase` names no local function, so the `table` lookup is empty and
+      # nothing is propagated — `caller` produces ∅ ⊆ its declared `{Oops}`. Guards
+      # the dot-call fix against spurious "returns error not in declared set".
+      assert Check.check("""
+             type Oops := Oops
+             def caller(s Str) Str | Oops
+               with {:ok, x} <- String.upcase(s) do
+                 {:ok, x}
+               end
+             end
+             """) == :ok
+    end
+
     test "a with-else that handles the failure under-approximates (no propagation)" do
       # The `else` clause consumes `inner`'s `A` and re-emits only `B`, so
       # `outer` produces `{B}` ⊆ its declared `{B}`.
