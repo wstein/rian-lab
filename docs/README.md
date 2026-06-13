@@ -51,7 +51,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0041](adr/0041-target-model.md) | Target model: per-target representation, observable contracts, module resolution | Accepted (direction) |
 | [0042](adr/0042-protocol-bounded-generics.md) | Protocol-bounded generics: `forall` binders, `protocol`/`impl`, coherence, dispatch | Accepted (direction) |
 | [0043](adr/0043-opaque-types.md) | Opaque types: module-scoped nominal distinctness over a base, zero-cost | Accepted (direction) |
-| [0044](adr/0044-otp-behaviours.md) | OTP behaviours: `@behaviour` annotation, checked callbacks, threaded state (BEAM-only) | Accepted (direction) |
+| [0044](adr/0044-otp-behaviours.md) | OTP behaviours: `@behaviour` annotation, checked callbacks, threaded state (BEAM-only) | ~~Accepted~~ **Superseded by 0057** |
 | [0045](adr/0045-formatter.md) | Formatter: one canonical zero-config style, comment-preserving, deterministic | Accepted (direction) |
 | [0046](adr/0046-compile-time-by-default.md) | Compile-Time by Default: universal compile-time checks; per-target specialization; semantic-only optimization | Accepted |
 | [0047](adr/0047-portable-prelude-stdlib.md) | Portable prelude & stdlib: three tiers, hybrid implementation, `Option` not `nil` | Accepted (direction) |
@@ -63,6 +63,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0053](adr/0053-repl-interactive-surfaces.md) | REPL & interactive surfaces: a compiling, connected REPL; one eval engine, many surfaces | Accepted (direction) |
 | [0055](adr/0055-capabilities-through-dispatch-and-opaque.md) | Capabilities through dynamic dispatch & opaque types: capability on the protocol method receiver (survives `dyn` erasure); opaque-over-struct presents the join of field capabilities | Accepted (direction) |
 | [0056](adr/0056-comptime-target-conditional.md) | `comptime if target`: proven-equivalent (or type-visible) sequential target conditional, else hard error. Motivation thinned — concurrency is native-per-target (ADR-0031), so the fracture it addressed isn't shared Rian source | **Proposed (dormant)** |
+| [0057](adr/0057-concurrency-and-otp-are-native-per-target.md) | Concurrency & OTP are native-per-target: Rian source is sequential logic + tests; gen_servers/tasks/workers are written in the host's native language and call shared Rian functions. Supersedes 0044 | Accepted (direction) |
 
 ## Specifications
 

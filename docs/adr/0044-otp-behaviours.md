@@ -1,6 +1,14 @@
 # ADR-0044 — OTP Behaviours: `@behaviour` annotation, checked callbacks, threaded state (BEAM-only)
 
-**Status:** Accepted (direction) · implementation gated on the declaration parser (ADR-0031 Stage 0.1) and the checker
+> ⚠️ **SUPERSEDED (2026-06-13) by [ADR-0057](0057-concurrency-and-otp-are-native-per-target.md).**
+> The goal clarification — *Rian shares **sequential** logic + tests; concurrency is native-per-target,
+> **including OTP/Elixir*** — moves OTP to the wrong layer for this ADR. OTP behaviours are **not** a
+> Rian surface: you write the `gen_server`/supervisor in **native Elixir/Erlang** and call shared
+> Rian functions from the callbacks. Everything below (`@behaviour` annotation, callback contract
+> registry, state-type threading, BEAM-only behaviour emission) is **withdrawn, not implemented**, and
+> kept only as a historical record.
+
+**Status:** ~~Accepted (direction)~~ **Superseded by ADR-0057** · ~~implementation gated on the declaration parser (ADR-0031 Stage 0.1) and the checker~~
 **Refs:** ADR-0026 (first-class OTP behaviours — closes that open item), ADR-0030 (macros are declarative, *not* `use`/injection), ADR-0031 (concurrency is OTP/actors, BEAM-native; non-BEAM = sequential core), ADR-0034 (typed contracts), ADR-0035 (errors are values; no silent drop), ADR-0041 (target model — BEAM-only features), ADR-0042 (protocols — the kin concept)
 **Owners:** Maya Lin (architecture) · Arthur Pendelton (contract checking) · Elena Rostova (BEAM/state) · Chloe Bennett (parser) · Samir Patel (contract rigor) · Kira Neri (supervision/releases) · Rachel Okafor (PM)
 
