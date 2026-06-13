@@ -29,8 +29,9 @@ defmodule Rian.ParseFixpointTest do
 
   defp toks(src), do: src |> Lexer.expr_tokens() |> Enum.map(&inject/1)
 
-  # Within the slice: identifiers, integer literals, parens, and `+ - * /`
-  # (multiplicative tighter than additive, both left-associative).
+  # Within the slice: identifiers, integer literals, parens, and the full binary
+  # operator precedence table (`* / rem div`, `+ -`, `<>` right-assoc, `< <= > >=`,
+  # `== !=`, `and`, `or`) via precedence climbing — Rian.Pratt's exact levels.
   @corpus [
     "1",
     "x",
@@ -45,7 +46,17 @@ defmodule Rian.ParseFixpointTest do
     "a * (b + c) / d",
     "(((7)))",
     "a / b / c",
-    "x * y + z * w"
+    "x * y + z * w",
+    # widened: comparison / boolean / concat / rem / div
+    "a < b",
+    "a + b == c",
+    "x and y or z",
+    "a or b and c",
+    "a == b and c != d",
+    "a <> b <> c",
+    "x rem y div z",
+    "n * n + 1 < limit and ok",
+    "a <= b and c >= d or e"
   ]
 
   describe "self-hosting parser fixpoint (ADR-0027/0031) — Rian parser vs Rian.Pratt" do
@@ -70,6 +81,24 @@ defmodule Rian.ParseFixpointTest do
     test "left-associativity: `1 - 2 - 3` groups as `(1 - 2) - 3`", %{mod: mod} do
       assert mod.parse(toks("1 - 2 - 3")) ==
                {:bin, "-", {:bin, "-", {:num, "1"}, {:num, "2"}}, {:num, "3"}}
+    end
+
+    test "the full precedence ladder matches Pratt: `*` > `+` > comparison > `and` > `or`",
+         %{mod: mod} do
+      # `and` binds tighter than `or`: a or (b and c)
+      assert mod.parse(toks("a or b and c")) ==
+               {:bin, "or", {:id, "a"}, {:bin, "and", {:id, "b"}, {:id, "c"}}}
+
+      # comparison looser than arithmetic: (a + b) == (c * d)
+      assert mod.parse(toks("a + b == c * d")) ==
+               {:bin, "==", {:bin, "+", {:id, "a"}, {:id, "b"}},
+                {:bin, "*", {:id, "c"}, {:id, "d"}}}
+    end
+
+    test "`<>` is right-associative (Pratt level 5): `a <> b <> c` ⇒ `a <> (b <> c)`",
+         %{mod: mod} do
+      assert mod.parse(toks("a <> b <> c")) ==
+               {:bin, "<>", {:id, "a"}, {:bin, "<>", {:id, "b"}, {:id, "c"}}}
     end
   end
 end

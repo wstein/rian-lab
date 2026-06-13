@@ -298,10 +298,16 @@ reference `Rian.Lexer` tokens into the parser's `Tok` sum (the same stream Pratt
 consumes), and asserts precedence (`1 + 2 * 3` nests `*` under `+`) and
 left-associativity (`1 - 2 - 3` ⇒ `(1 - 2) - 3`) match Pratt exactly.
 
-Slice: `+ - * /` (multiplicative tighter than additive, left-assoc — Pratt's levels
-for these ops), identifiers, integer literals, parentheses. The method is proven;
-later slices widen the grammar+corpus (calls, comparisons, pipes, then patterns and
-`Rian.Decl`'s declaration forms), each a regression test rather than a fresh demo.
+The parser ports **precedence climbing** — the same algorithm `Rian.Pratt` uses,
+with the same binding powers (`opinfo`/`bp`) — so it now covers the **full binary
+operator table**: `* / rem div` (level 3), `+ -` (4), `<>` (5, right-assoc),
+`< <= > >=` (8), `== !=` (9), `and` (10), `or` (11), over identifiers, integer
+literals, and parentheses. (BEAM guards can't call user functions, so every
+precedence decision is made in the body — an `if` over `lbp(op)` — never in a
+guard.) The corpus exercises the ladder (`a or b and c` ⇒ `a or (b and c)`,
+`a + b == c * d`, right-assoc `a <> b <> c`) and matches Pratt term-for-term.
+Prefix operators, calls, pipes, and Pratt's non-assoc *raise* (`a < b < c`) are
+later slices; each widening is a regression test, not a fresh demo.
 
 ### Bootstrap plan + the fixed-point ladder (rungs 3-4, ADR-0063)
 

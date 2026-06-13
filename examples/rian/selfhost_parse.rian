@@ -1,103 +1,117 @@
 # ===========================================================================
-# SELF-HOSTING — porting Rian.Pratt to Rian, fixpoint-locked (rung 2)
+# SELF-HOSTING — porting Rian.Pratt to Rian, fixpoint-locked (rung 2, widened)
 # ===========================================================================
-# The earlier spike (selfhost_parser.rian) parsed arithmetic into its OWN `Expr`
-# sum and only *ran*. This rung makes the port a **checked equivalence**: the
-# parser's output is diffed against the reference `Rian.Pratt.parse` over a
-# corpus (test/rian/parse_fixpoint_test.exs) — the same method as the lexer
-# fixpoint, AST projection instead of token projection.
+# The parser's output is diffed against the reference `Rian.Pratt.parse` over a
+# corpus (test/rian/parse_fixpoint_test.exs) — the parser analog of the lexer
+# fixpoint. The diff needs NO projection: the AST constructors lower to Pratt's
+# exact surface tuples — Num(s)->{:num,s}, Id(s)->{:id,s}, Bin(op,l,r)->
+# {:bin,op,l,r} — so `parse(tokens)` term-EQUALS `Rian.Pratt.parse(source)`.
 #
-# The trick that makes the diff exact: the AST constructors are named so their
-# BEAM lowering IS `Rian.Pratt`'s surface-tuple shape —
-#     Num(s)       -> {:num, s}
-#     Id(s)        -> {:id, s}
-#     Bin(op,l,r)  -> {:bin, op, l, r}
-# so `parse(tokens)` term-EQUALS `Rian.Pratt.parse(source)` with no projection.
-# `EErr` keeps every clause total (the reference raises on a parse error instead;
-# the corpus is well-formed, so `EErr` never appears in a checked run).
+# This widens the first slice (which hardcoded `+ - * /` in two levels) to the
+# FULL binary-operator precedence table via **precedence climbing** — the same
+# algorithm `Rian.Pratt` uses, with the same binding powers (`opinfo`/`bp`):
 #
-# Slice: precedence climbing over `+ - * /` (multiplicative tighter than additive,
-# both left-associative — Rian.Pratt's levels for these ops), identifiers, integer
-# literals, and parentheses. Calls / comparisons / pipes are later slices.
+#   level  3  * / rem div     (left)        base = (13 - level) * 10
+#   level  4  + -             (left)        left/none: lbp=base,  rbp=base+1
+#   level  5  <>              (right)       right:     lbp=base+1, rbp=base
+#   level  8  < <= > >=       (none)
+#   level  9  == !=           (none)
+#   level 10  and             (left)
+#   level 11  or              (left)
 #
-#   add  := mul (('+' | '-') mul)*
-#   mul  := atom (('*' | '/') atom)*
-#   atom := Num | Id | '(' add ')'
+# BEAM guards cannot call user functions, so every precedence decision is made in
+# the body (an `if` over `lbp(op)`), never in a guard. Atoms are Num / Id /
+# parenthesized expressions. Prefix operators, calls, pipes, and the non-assoc
+# *raise* (Pratt rejects `a < b < c`) are later slices — the corpus stays within
+# this grammar (each non-assoc operator used at most once per level).
 # ---------------------------------------------------------------------------
 
 mod SelfhostParse do
-  # The token stream this parser consumes — the reference `Rian.Lexer` tokens,
-  # injected into this sum by the test (`{:num,s}` -> `TNum(s)`, `{:op,o}` ->
-  # `TOp(o)`, `{:lparen}` -> `TLP`, …). `TOp` carries the operator string, so the
-  # parser branches on `TOp("+")` etc.
   type Tok := TNum(String) | TId(String) | TOp(String) | TLP | TRP
 
-  # Output AST — constructor names chosen so the lowered term matches Rian.Pratt.
+  # constructor names chosen so the lowered term matches Rian.Pratt's tuples.
   type Expr := Num(String) | Id(String) | Bin(String, Expr, Expr) | EErr
 
-  # One parse step: the node built so far + the unconsumed tokens (a pair without
-  # tuple types — a single-constructor sum).
   type Parse := P(Expr, Vec(Tok))
 
   pub def parse(ts Vec(Tok)) Expr
   pub def parse(ts)
-    case parse_add(ts) do
+    case parse_bp(0, ts) do
       P(e, _) -> e
     end
   end
 
-  # add := mul (('+' | '-') mul)*  — fold additive operators left to right.
-  def parse_add(ts Vec(Tok)) Parse
-  def parse_add(ts)
-    case parse_mul(ts) do
-      P(left, rest) -> parse_add_tail(left, rest)
-    end
-  end
-
-  def parse_add_tail(left Expr, ts Vec(Tok)) Parse
-  def parse_add_tail(left, [TOp("+") | rest])
-    case parse_mul(rest) do
-      P(right, rest2) -> parse_add_tail(Bin("+", left, right), rest2)
-    end
-  end
-  def parse_add_tail(left, [TOp("-") | rest])
-    case parse_mul(rest) do
-      P(right, rest2) -> parse_add_tail(Bin("-", left, right), rest2)
-    end
-  end
-  def parse_add_tail(left, ts) := P(left, ts)
-
-  # mul := atom (('*' | '/') atom)*  — fold multiplicative operators.
-  def parse_mul(ts Vec(Tok)) Parse
-  def parse_mul(ts)
+  # parse an expression whose operators all bind at least as tight as `min_bp`.
+  def parse_bp(min_bp Int64, ts Vec(Tok)) Parse
+  def parse_bp(min_bp, ts)
     case parse_atom(ts) do
-      P(left, rest) -> parse_mul_tail(left, rest)
+      P(lhs, rest) -> climb(min_bp, lhs, rest)
     end
   end
 
-  def parse_mul_tail(left Expr, ts Vec(Tok)) Parse
-  def parse_mul_tail(left, [TOp("*") | rest])
-    case parse_atom(rest) do
-      P(right, rest2) -> parse_mul_tail(Bin("*", left, right), rest2)
+  # while the next token is a binary operator whose left binding power is >=
+  # min_bp, consume it and fold; the right-hand side is parsed at `rbp(op)` (so
+  # left-assoc stops at the same level, right-assoc re-enters it).
+  def climb(min_bp Int64, lhs Expr, ts Vec(Tok)) Parse
+  def climb(min_bp, lhs, [TOp(op) | rest])
+    if lbp(op) >= min_bp do
+      case parse_bp(rbp(op), rest) do
+        P(rhs, rest2) -> climb(min_bp, Bin(op, lhs, rhs), rest2)
+      end
+    else
+      P(lhs, [TOp(op) | rest])
     end
   end
-  def parse_mul_tail(left, [TOp("/") | rest])
-    case parse_atom(rest) do
-      P(right, rest2) -> parse_mul_tail(Bin("/", left, right), rest2)
-    end
-  end
-  def parse_mul_tail(left, ts) := P(left, ts)
+  def climb(min_bp, lhs, ts) := P(lhs, ts)
 
-  # atom := Num | Id | '(' add ')'  — a literal, a variable, or a parenthesized
-  # subexpression; anything else (or a missing `)`) is a total `EErr`.
+  # atom := Num | Id | '(' expr ')'  — anything else (or a missing `)`) is a
+  # total `EErr` (the reference raises; the corpus is well-formed).
   def parse_atom(ts Vec(Tok)) Parse
   def parse_atom([TNum(n) | rest]) := P(Num(n), rest)
   def parse_atom([TId(x) | rest]) := P(Id(x), rest)
   def parse_atom([TLP | rest])
-    case parse_add(rest) do
+    case parse_bp(0, rest) do
       P(e, [TRP | rest2]) -> P(e, rest2)
       P(_, other) -> P(EErr, other)
     end
   end
   def parse_atom(ts) := P(EErr, ts)
+
+  # ── binding powers (mirror Rian.Pratt.bp) ────────────────────────────────
+  # left binding power: where the operator sits when deciding to bind leftward.
+  def lbp(op String) Int64 := bp_base(level(op)) + left_off(op)
+  # right binding power: the min_bp the right operand is parsed at.
+  def rbp(op String) Int64 := bp_base(level(op)) + right_off(op)
+
+  def bp_base(lvl Int64) Int64 := (13 - lvl) * 10
+
+  # only `<>` is right-associative among the operators in this slice.
+  def left_off(op String) Int64
+  def left_off("<>") := 1
+  def left_off(op) := 0
+
+  def right_off(op String) Int64
+  def right_off("<>") := 0
+  def right_off(op) := 1
+
+  # operator precedence level (lower binds tighter); an unknown token gets a level
+  # so loose that `lbp(op) >= min_bp` is always false — climbing stops, the token
+  # is left unconsumed (never a binary fold).
+  def level(op String) Int64
+  def level("*") := 3
+  def level("/") := 3
+  def level("rem") := 3
+  def level("div") := 3
+  def level("+") := 4
+  def level("-") := 4
+  def level("<>") := 5
+  def level("<") := 8
+  def level("<=") := 8
+  def level(">") := 8
+  def level(">=") := 8
+  def level("==") := 9
+  def level("!=") := 9
+  def level("and") := 10
+  def level("or") := 11
+  def level(other) := 100
 end
