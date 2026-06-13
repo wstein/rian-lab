@@ -7,17 +7,13 @@ defmodule Rian.Lower do
     * expression parsing   (Rian.Pratt)                    -- precedence-aware
   and emits idiomatic Elixir AND Rust.
 
-  > #### Known limitation — higher-order *application* on the Elixir text target {: .warning}
-  > Applying a function-*valued variable* (`f(x)` where `f` is a parameter or a
-  > binding) is emitted as a plain `f(x)` here, which Elixir reads as a *local
-  > function call*, not the variable application it needs (`f.(x)`). Distinguishing
-  > the two requires threading lexical scope through expression emission. The
-  > **Erlang abstract-forms backend (`Rian.Beam`) handles this correctly** and is
-  > the self-hosting bootstrap target, so higher-order execution is proven there;
-  > this text backend's fix is deferred (it is a source-generation demonstration,
-  > off the bootstrap path). Passing a lambda/capture to an FFI HOF
-  > (`Enum.map(xs, (x) -> …)`) is unaffected — the application happens inside the
-  > callee, and the value itself emits correctly.
+  > #### Higher-order application on the Elixir text target
+  > Applying a function-*valued variable* (`f(x)` where `f` is a parameter,
+  > binding, lambda param, or `case`-arm binding) emits the variable application
+  > `f.(x)`, while a local function call stays `f(x)`. The text emitter threads the
+  > in-scope bound-name set (clause heads + `:=` binds + lambda params + `case`
+  > arm patterns) exactly as the Erlang abstract-forms backend (`Rian.Beam`) does,
+  > so the two Elixir paths no longer diverge.
 
   Inputs are the (would-be parser output) data:
 
@@ -304,7 +300,12 @@ defmodule Rian.Lower do
     clauses =
       Enum.map_join(func.clauses, "\n", fn c ->
         head = "#{def_kw} #{func.name}(#{Enum.map_join(c.pats, ", ", &core_pat_ex/1)})"
+        # the clause head's pattern variables are in scope for the body, so a call
+        # to one of them is a variable application (`f.(x)`), not a local call
+        vars = Enum.flat_map(c.pats, fn p -> core_pat_vars(Core.from_pat(p)) end)
+        put_ex_scope(MapSet.new(vars))
         body = c.body |> body_ast(ctx) |> Core.from_expr() |> emit(:elixir) |> elem(0)
+        put_ex_scope(MapSet.new())
         "#{head}#{guard_str(c, :elixir)} do #{body} end"
       end)
 
@@ -1165,6 +1166,39 @@ defmodule Rian.Lower do
     if pr < ctx, do: "(" <> s <> ")", else: s
   end
 
+  # ── Elixir-text scope (for the variable-application distinction) ─────────
+  # On the BEAM/Elixir target, applying a function-*valued variable* (a param or
+  # binding) is `f.(x)`, while a local function call is `f(x)`. We track the set
+  # of in-scope bound names — grown by clause heads, `:=` binds, lambda params,
+  # and `case` arm patterns — exactly as `Rian.Beam` does, so the text view
+  # matches the real BEAM backend (no drift). Carried in the process dict (a
+  # single sequential emitter pass); the Rust target calls closures directly and
+  # never consults it.
+  defp ex_scope, do: Process.get(:rian_ex_scope, MapSet.new())
+  defp put_ex_scope(s), do: Process.put(:rian_ex_scope, s)
+
+  # run `fun` with the scope extended by `names`, restoring the previous scope
+  defp with_ex_scope(names, fun) do
+    prev = ex_scope()
+    put_ex_scope(MapSet.union(prev, MapSet.new(names)))
+    result = fun.()
+    put_ex_scope(prev)
+    result
+  end
+
+  # the variable names a core pattern binds (for scope tracking)
+  defp core_pat_vars(%PVar{name: n}), do: [n]
+  defp core_pat_vars(%PCtor{args: ps}), do: Enum.flat_map(ps, &core_pat_vars/1)
+  defp core_pat_vars(%PTuple{elems: ps}), do: Enum.flat_map(ps, &core_pat_vars/1)
+
+  defp core_pat_vars(%PList{elems: ps, tail: t}),
+    do: Enum.flat_map(ps, &core_pat_vars/1) ++ core_pat_vars(t)
+
+  defp core_pat_vars(%Core.PStruct{fields: fs}),
+    do: Enum.flat_map(fs, fn {_l, p} -> core_pat_vars(p) end)
+
+  defp core_pat_vars(_), do: []
+
   defp emit(%ENum{text: n}, _t), do: {n, 12}
   # string literal — same surface on both targets (Rust yields `&str`)
   defp emit(%EStr{value: s}, _t), do: {"\"#{s}\"", 12}
@@ -1232,6 +1266,13 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_checked_add"}, args: [a, b]}, :rust),
     do: {"#{p(a, 12, :rust)}.checked_add(#{p(b, 0, :rust)})", 12}
 
+  # applying a function-valued variable on Elixir is `f.(x)`, a local call is
+  # `f(x)` — decided by whether `f` is in scope (matches `Rian.Beam`)
+  defp emit(%ECall{fun: %EId{name: f}, args: args}, :elixir) do
+    inner = Enum.map_join(args, ", ", &p(&1, 0, :elixir))
+    if MapSet.member?(ex_scope(), f), do: {"#{f}.(#{inner})", 12}, else: {"#{f}(#{inner})", 12}
+  end
+
   defp emit(%ECall{fun: f, args: args}, t),
     do: {p(f, 12, t) <> "(" <> Enum.map_join(args, ", ", &p(&1, 0, t)) <> ")", 12}
 
@@ -1264,7 +1305,9 @@ defmodule Rian.Lower do
   # lambdas — Elixir anonymous fn, Rust closure
   defp emit(%ELambda{params: params, body: body}, :elixir) do
     ps = Enum.map_join(params, ", ", fn {n, _} -> n end)
-    {"fn #{ps} -> #{p(body, 0, :elixir)} end", 12}
+    names = Enum.map(params, fn {n, _} -> n end)
+    body_str = with_ex_scope(names, fn -> p(body, 0, :elixir) end)
+    {"fn #{ps} -> #{body_str} end", 12}
   end
 
   defp emit(%ELambda{params: params, body: body}, :rust) do
@@ -1285,12 +1328,17 @@ defmodule Rian.Lower do
 
   # case expression — Elixir `case … do … -> … end`; Rust `match … { … => …, }`
   defp emit(%ECase{scrut: scrut, arms: arms}, :elixir) do
+    scrut_str = p(scrut, 0, :elixir)
+
     body =
       Enum.map_join(arms, "; ", fn {pt, g, b} ->
-        "#{pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
+        # the arm pattern's bindings are in scope for its guard and body
+        with_ex_scope(core_pat_vars(pt), fn ->
+          "#{pat_ex(pt)}#{case_guard(g, :elixir)} -> #{p(b, 0, :elixir)}"
+        end)
       end)
 
-    {"case #{p(scrut, 0, :elixir)} do #{body} end", 0}
+    {"case #{scrut_str} do #{body} end", 0}
   end
 
   defp emit(%ECase{scrut: scrut, arms: arms}, :rust) do
@@ -1455,11 +1503,23 @@ defmodule Rian.Lower do
   defp emit_block(%EBlock{stmts: []}, :rust), do: "()"
 
   defp emit_block(%EBlock{stmts: stmts}, :elixir) do
-    Enum.map_join(stmts, "; ", fn
-      {:bind, n, e} -> "#{n} = #{p(e, 0, :elixir)}"
-      {:typed_bind, n, _t, e} -> "#{n} = #{p(e, 0, :elixir)}"
-      {:expr, e} -> p(e, 0, :elixir)
-    end)
+    # each `:=` binding's name enters scope for the statements that follow it, so
+    # a later application of a function-valued binding is `g.(x)` (matches Beam).
+    prev = ex_scope()
+
+    {parts, _} =
+      Enum.map_reduce(stmts, prev, fn stmt, sc ->
+        put_ex_scope(sc)
+
+        case stmt do
+          {:bind, n, e} -> {"#{n} = #{p(e, 0, :elixir)}", MapSet.put(sc, n)}
+          {:typed_bind, n, _t, e} -> {"#{n} = #{p(e, 0, :elixir)}", MapSet.put(sc, n)}
+          {:expr, e} -> {p(e, 0, :elixir), sc}
+        end
+      end)
+
+    put_ex_scope(prev)
+    Enum.join(parts, "; ")
   end
 
   defp emit_block(%EBlock{stmts: stmts}, :rust) do

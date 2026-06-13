@@ -104,4 +104,44 @@ defmodule Rian.LowerTest do
       assert apply(AreaGenTest, :area, [{:square, 3.0}]) == 9.0
     end
   end
+
+  describe "higher-order application on the Elixir text target (no Beam drift)" do
+    defp ex_of(src, name) do
+      {_, %{elixir: e}} = Rian.Decl.compile(src) |> Enum.find(&(elem(&1, 0) == name))
+      e
+    end
+
+    test "a function-valued parameter is applied with `f.(x)`, a local call stays `f(x)`" do
+      src = """
+      def apply_twice(f Fn(Int64, Int64), x Int64) Int64 := f(f(x))
+      def add1(n Int64) Int64 := n + 1
+      def go() Int64 := apply_twice(&add1/1, 5)
+      """
+
+      # the param `f` is in scope -> variable application
+      assert ex_of(src, "apply_twice") =~ "f.(f.(x))"
+      # `apply_twice` is a local function (not in scope) -> local call
+      assert ex_of(src, "go") =~ "apply_twice(&add1/1, 5)"
+    end
+
+    test "a `:=`-bound function value is applied with `g.(x)`" do
+      src = """
+      def add1(n Int64) Int64 := n + 1
+      def run(x Int64) Int64 := g := &add1/1 ; g(x)
+      """
+
+      assert ex_of(src, "run") =~ "g = &add1/1; g.(x)"
+    end
+
+    test "the emitted higher-order Elixir actually runs" do
+      src = """
+      def apply_twice(f Fn(Int64, Int64), x Int64) Int64 := f(f(x))
+      def add1(n Int64) Int64 := n + 1
+      """
+
+      ex = Rian.Decl.compile(src) |> Enum.map_join("\n", fn {_, o} -> o.elixir end)
+      Code.eval_string("defmodule HoGenTest do\n#{ex}\nend")
+      assert apply(HoGenTest, :apply_twice, [&(&1 + 1), 5]) == 7
+    end
+  end
 end

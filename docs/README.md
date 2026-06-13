@@ -147,12 +147,12 @@ sections; they are tracked here so the corpus has one place to look:
   on BEAM/JS. *Still open:* dynamic (`dyn`) dispatch.
 - **JS emitter completeness** (ADR-0049) — `with`/lambdas/atoms/FFI still raise `Unsupported`
   ([js.ex](../lib/rian/js.ex)); a browser playground that runs the compiler client-side needs them.
-- **Two-Elixir-emitter consolidation** — the Erlang abstract-forms backend ([beam.ex](../lib/rian/beam.ex))
-  is the real BEAM path; [lower.ex](../lib/rian/lower.ex)'s Elixir *text* is now **demoted to a
-  debug view** (`mix rian.compile --show-elixir`), no longer the default — `mix rian.compile`
-  compiles BEAM to real bytecode via `Rian.Beam`. The text emitter still walks the surface tree
-  rather than the typed core IR, so *collapsing* it onto the IR (the full ADR-0050 endpoint) remains
-  open; the drift tax is now confined to an opt-in debug surface.
+- **Two-Elixir-emitter consolidation** — *resolved*. The Erlang abstract-forms backend
+  ([beam.ex](../lib/rian/beam.ex)) is the real BEAM path; [lower.ex](../lib/rian/lower.ex)'s Elixir
+  *text* is a **debug view** (`mix rian.compile --show-elixir`). Both now consume the typed core IR,
+  and the text emitter threads the same lexical scope `Rian.Beam` does — so the last documented
+  divergence (higher-order *application*: a function-valued variable emits `f.(x)`, a local call
+  `f(x)`) is gone. The two Elixir paths no longer drift.
 - **Declarative `@targets(…)` annotation** (ADR-0058) — **shipped**: a `@targets(ex, rs, js)` module
   contract is parsed onto `IR.Mod.targets` and gated at compile time by `Rian.Reach.gate!` (every
   `pub` function must reach the declared set); an unannotated module falls back to the **build
