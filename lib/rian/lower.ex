@@ -1590,7 +1590,8 @@ defmodule Rian.Lower do
 
   defp prim_ex(t) do
     cond do
-      Regex.match?(~r/^(Int|UInt)(8|16|32|64|128)$/, t) -> "integer()"
+      # bare `Int` (arbitrary precision, ADR-0064) and fixed widths both -> integer()
+      Regex.match?(~r/^(Int|UInt)(8|16|32|64|128)?$/, t) -> "integer()"
       Regex.match?(~r/^Float(32|64)$/, t) -> "float()"
       true -> "term()"
     end

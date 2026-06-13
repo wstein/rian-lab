@@ -230,15 +230,22 @@ defmodule Rian.Reach do
     # the `ref` capability (`&mut`) is BEAM-rejected (ADR-0055/0025, P5): a `ref`
     # parameter pins the function off `:ex` — it is outside the portable capability
     # core, so the reach report says so instead of overselling a tidy four.
-    base = if Enum.any?(Map.get(f, :params, []), &(&1.cap == :ref)), do: [ref_blocker()], else: []
+    ref = if Enum.any?(Map.get(f, :params, []), &(&1.cap == :ref)), do: [ref_blocker()], else: []
+    # arbitrary-precision `Int` (ADR-0064) is native on BEAM/JS but needs a bignum
+    # on Rust/JVM (not yet implemented), so it pins the function off `:rs`/`:jvm`.
+    sig_types = Enum.map(Map.get(f, :params, []), & &1.type) ++ [Map.get(f, :ret)]
+    int = if Enum.any?(sig_types, &(&1 == "Int")), do: [int_blocker()], else: []
 
-    Enum.reduce(f.clauses, {base, MapSet.new()}, fn c, acc ->
+    Enum.reduce(f.clauses, {ref ++ int, MapSet.new()}, fn c, acc ->
       acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
       if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
     end)
   end
 
   defp ref_blocker, do: %{construct: "ref capability (&mut)", kind: :capability, kills: [:ex]}
+
+  defp int_blocker,
+    do: %{construct: "Int (arbitrary precision)", kind: :numeric, kills: [:rs, :jvm]}
 
   defp core(src, parser), do: src |> parser.() |> Core.from_expr()
 

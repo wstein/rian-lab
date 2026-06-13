@@ -1,6 +1,6 @@
 # ADR-0064 — Portable numeric contract: `Int` (arbitrary precision) + fixed-width wrap
 
-**Status:** Proposed · **Supersedes:** the numeric/overflow decision of **ADR-0034 §1** ("Int* declare intent, not a portable overflow contract"), **ADR-0041 §"native-per-target representation"** *as applied to integers*, and the **ADR-0035** overflow-scope clarification
+**Status:** Proposed · **`Int` (arbitrary precision) implemented for BEAM + JS** (2026-06-14) · **Supersedes:** the numeric/overflow decision of **ADR-0034 §1** ("Int* declare intent, not a portable overflow contract"), **ADR-0041 §"native-per-target representation"** *as applied to integers*, and the **ADR-0035** overflow-scope clarification
 **Refs:** ADR-0036 (subrange types), ADR-0047 (portable prelude — `Int.checked/saturating/wrapping_add` live here), ADR-0049/0050 (emitters / core IR), ADR-0057/0058 (portability is the thesis)
 **Owners:** Samir Patel (numeric rigor) · Maya Lin (emitters) · Tomás (BEAM performance) · Mira (totality/semantics) · Kira Neri (honesty) · Rachel Okafor (PM)
 
@@ -94,6 +94,24 @@ the in-domain idiom over either.
   The Rust-bignum and BEAM-masking emitters are each gated on their own conformance tests.
 - Supersedes the numeric clauses of ADR-0034 §1 / ADR-0041 / ADR-0035; those get a "superseded by
   ADR-0064" note rather than deletion.
+
+## Implementation status (2026-06-14)
+
+**`Int` (arbitrary precision) is implemented where it is native — BEAM + JS** (`test/rian/numeric_test.exs`):
+- **BEAM:** a native integer (bignum) — `Int` arithmetic stays exact past 64 bits (`fact(30)` ≈ 2.65e32 is
+  exact); the `-spec` is `integer()`.
+- **JS:** `BigInt` (literals `2n`).
+- **Rust / JVM (the bignum gap, honest):** `Int` needs `i128`/`BigInteger`-style bignum, not implemented —
+  so it **fails loudly** (`Capability.owned("Int")` / `Rian.JVM` raise) instead of mis-mapping to a
+  bounded type, and `Rian.Reach` pins `Int` **off `:rs`/`:jvm`** (a `:numeric` blocker), so `Int` reaches
+  `[:ex, :js]` and the portability gate says so.
+- **Fixed-width contract:** already realized by the explicit ops — `__prim_wrapping_add` two's-complement
+  wraps on the BEAM (`wrap(MAX64, 1) == MIN64`), distinct from `Int`'s exactness, both verified.
+
+**Not yet done (the larger follow-ups the ADR itself scoped):** the **Rust/JVM bignum emitters**; making
+the **default integer literal `Int`** (a breaking migration — currently still `Int64`); and making
+fixed-width `Int64` *implicitly* wrap on the BEAM (the ~15× change — today the wrap is opt-in via the
+`wrapping_*` ops).
 
 ## Open items
 

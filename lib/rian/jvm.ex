@@ -289,15 +289,40 @@ defmodule Rian.JVM do
 
   defp kt_type(t) do
     cond do
-      t in ~w(Int64 Int Int53) -> "Long"
-      String.match?(t, ~r/^U?Int\d*$/) -> "Long"
-      String.match?(t, ~r/^Float\d*$/) -> "Double"
-      t == "Bool" -> "Boolean"
-      t == "String" -> "String"
-      t == "Char" -> "Long"
-      m = Regex.run(~r/^Vec\((.+)\)$/, t) -> "List<#{kt_type(Enum.at(m, 1))}>"
-      String.match?(t, ~r/^[A-Z]/) -> t
-      true -> raise(Unsupported, "jvm: type `#{t}`")
+      # `Int` is arbitrary precision (ADR-0064) — a JVM `Long` would wrap, so it
+      # needs `BigInteger` (not implemented); fail loudly rather than mis-map.
+      t == "Int" ->
+        raise(
+          Unsupported,
+          "jvm: `Int` (arbitrary precision, ADR-0064) needs BigInteger; use `Int64`"
+        )
+
+      t in ~w(Int64 Int53) ->
+        "Long"
+
+      String.match?(t, ~r/^U?Int\d*$/) ->
+        "Long"
+
+      String.match?(t, ~r/^Float\d*$/) ->
+        "Double"
+
+      t == "Bool" ->
+        "Boolean"
+
+      t == "String" ->
+        "String"
+
+      t == "Char" ->
+        "Long"
+
+      m = Regex.run(~r/^Vec\((.+)\)$/, t) ->
+        "List<#{kt_type(Enum.at(m, 1))}>"
+
+      String.match?(t, ~r/^[A-Z]/) ->
+        t
+
+      true ->
+        raise(Unsupported, "jvm: type `#{t}`")
     end
   end
 end

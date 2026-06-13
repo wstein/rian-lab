@@ -45,6 +45,18 @@ defmodule Rian.Capability do
 
   def owned("String"), do: "String"
 
+  # `Int` is arbitrary precision (ADR-0064) — it needs a bignum on Rust (`i128` is
+  # still bounded), which is not implemented. Fail loudly instead of emitting an
+  # undefined `Int` type. (`Rian.Reach` already pins `Int` off `:rs`, so this is a
+  # backstop for a direct `--rust` on un-gated code.)
+  def owned("Int"),
+    do:
+      raise(
+        ArgumentError,
+        "`Int` (arbitrary precision, ADR-0064) has no Rust lowering yet — it needs a bignum; " <>
+          "use a fixed width (`Int64`) on Rust, or target the BEAM/JS"
+      )
+
   def owned("Vec(" <> rest) do
     inner = String.trim_trailing(rest, ")")
     "Vec<" <> owned(inner) <> ">"
