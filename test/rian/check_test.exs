@@ -523,4 +523,62 @@ defmodule Rian.CheckTest do
       end
     end
   end
+
+  describe "join lattice — least-upper-bound (ADR-0059)" do
+    test "numeric LUB: same kind widens; differing widths climb" do
+      assert Check.join("Int32", "Int64") == "Int64"
+      assert Check.join("Int64", "Int32") == "Int64"
+      assert Check.join("Float32", "Float64") == "Float64"
+      assert Check.join("Int64", "Int64") == "Int64"
+    end
+
+    test "unsigned ⊔ signed climbs to the least Int wide enough for both" do
+      assert Check.join("UInt8", "Int8") == "Int16"
+      assert Check.join("UInt32", "Int32") == "Int64"
+      assert Check.join("UInt64", "Int64") == "Int128"
+    end
+
+    test "integer ⊔ float picks the least float that holds the integer exactly" do
+      assert Check.join("Int16", "Float32") == "Float32"
+      assert Check.join("Int32", "Float32") == "Float64"
+    end
+
+    test "gaps with no representable upper bound resolve to :unknown" do
+      assert Check.join("UInt128", "Int64") == :unknown
+      # 2^63 is not exact in any float (mantissa maxes at 53)
+      assert Check.join("Int64", "Float64") == :unknown
+      assert Check.join("Int128", "Float64") == :unknown
+    end
+
+    test ":unknown is absorbing (an uninferable arm poisons the join); :bottom is identity" do
+      assert Check.join("Int64", :unknown) == :unknown
+      assert Check.join(:unknown, "Int64") == :unknown
+      assert Check.join(:bottom, "Int64") == "Int64"
+      assert Check.join("Int64", :bottom) == "Int64"
+      assert Check.join(:bottom, :bottom) == :bottom
+    end
+
+    test "same-constructor covariant join recurses; cross-constructor is :unknown" do
+      assert Check.join("Vec(Int32)", "Vec(Int64)") == "Vec(Int64)"
+      assert Check.join("Option(Int32)", "Option(Int64)") == "Option(Int64)"
+      # different nominal sums never promote (ADR-0035 / ADR-0059 §4)
+      assert Check.join("Shape", "Color") == :unknown
+      # a covariant arg that itself has no LUB poisons the whole
+      assert Check.join("Vec(Int64)", "Vec(Float64)") == :unknown
+    end
+
+    test "if-arm join is precise where a binding would widen (the closed asymmetry)" do
+      # both arms numeric, differing width -> the if infers the LUB, not :unknown
+      assert Check.infer(Pratt.parse_body("if c do x else y end"), %{
+               "x" => "Int32",
+               "y" => "Int64"
+             }) ==
+               "Int64"
+    end
+
+    test "list literal elements join to the LUB element type" do
+      assert Check.infer(Pratt.parse_body("[a, b]"), %{"a" => "Int32", "b" => "Int64"}) ==
+               "Vec(Int64)"
+    end
+  end
 end

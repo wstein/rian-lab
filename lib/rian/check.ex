@@ -228,34 +228,35 @@ defmodule Rian.Check do
     if fn_type?(ft), do: fn_ret(ft), else: :unknown
   end
 
-  # Branch/arm *joins* use strict `unify` (not the widening `assignable?` of
-  # bindings/returns): a join of two differing concretes is `conservative/1` →
-  # `:unknown`, never a fabricated widened type. So `Int32`-vs-`Int64` arms infer
-  # `:unknown` even though a binding would widen `Int32` to `Int64`. This boundary
-  # is intentional — a widening join needs a least-upper-bound (and the signed/
-  # unsigned/float LUB gaps of ADR-0034 §1's lattice), which is a future ADR item;
-  # until then joins stay strict rather than guess an LUB.
+  # Branch/arm *joins* use `join/2` — the least-upper-bound lattice (ADR-0059),
+  # NOT strict `unify`: two differing-but-compatible concretes climb to their LUB
+  # (`Int32`-vs-`Int64` arms infer `Int64`, mirroring how a binding widens), while
+  # operands with no common upper bound (a signed/unsigned or int/float gap) or an
+  # uninferable arm resolve to `:unknown`. `join` is commutative & associative, so
+  # the N-ary `case`/list reductions below are fold-order-independent.
   def infer(%EIf{then: t, else: e}, env, ic),
-    do: conservative(unify(infer(t, env, ic), infer(e, env, ic)))
+    do: join(infer(t, env, ic), infer(e, env, ic))
 
   # `case` — flow narrowing: each arm body is inferred under an env where the
   # arm pattern's bindings are refined against the scrutinee's type. The case's
-  # type is the unification of all arm bodies (conservative on mismatch).
+  # type is the LUB-join of all arm bodies.
   def infer(%ECase{scrut: scrut, arms: arms}, env, ic) do
     st = infer(scrut, env, ic)
 
     arms
     |> Enum.map(fn {pat, _guard, body} -> infer(body, narrow(pat, st, ic, env), ic) end)
-    |> Enum.reduce(:unknown, fn t, acc -> conservative(unify(acc, t)) end)
+    |> Enum.reduce(:bottom, fn t, acc -> join(acc, t) end)
+    |> debottom()
   end
 
   # a list literal infers `Vec(T)` (the family list type) when its elements — and
-  # any cons tail — agree on a concrete element type `T`; else `:unknown`
+  # any cons tail — LUB-join to a concrete element type `T`; else `:unknown`
   def infer(%EList{elems: elems, tail: tail}, env, ic) do
     elem_t =
       elems
       |> Enum.map(&infer(&1, env, ic))
-      |> Enum.reduce(:unknown, &conservative(unify(&1, &2)))
+      |> Enum.reduce(:bottom, &join(&1, &2))
+      |> debottom()
 
     case {elem_t, list_elem(infer_tail(tail, env, ic))} do
       {t, te} when te == :unknown or te == t -> list_of(conservative(t))
@@ -702,6 +703,95 @@ defmodule Rian.Check do
   defp float_mantissa(64), do: 53
   defp float_mantissa(32), do: 24
   defp float_mantissa(_), do: 0
+
+  # ── join: least-upper-bound for branch/arm/element types (ADR-0059) ─────
+  # Combine the types of two branches that both execute-or-not (the arms of an
+  # `if`, the arms of a `case`, the elements of a list) into the single type of
+  # the surrounding expression. This is NOT `unify/2`: there `:unknown` is a
+  # wildcard that adopts the other side (matching a partial inference against a
+  # declaration); here `:unknown` is ABSORBING (top), so an uninferable arm
+  # poisons the join and `node.type` never over-claims. `:bottom` is the fold
+  # identity (the empty set of branches). Commutative and associative.
+  @doc false
+  def join(t, t), do: t
+  def join(:bottom, t), do: t
+  def join(t, :bottom), do: t
+  def join(:unknown, _), do: :unknown
+  def join(_, :unknown), do: :unknown
+
+  def join(from, to) do
+    case {num_kind(from), num_kind(to)} do
+      {a, b} when a != nil and b != nil -> num_join(a, b)
+      _ -> parametric_join(from, to)
+    end
+  end
+
+  # numeric LUB over the `⊑` order (`num_widens?`): the least width/kind that
+  # contains both, or `:unknown` when none exists in the vocabulary.
+  @int_widths [8, 16, 32, 64, 128]
+  @float_widths [32, 64]
+
+  defp num_join({k, a}, {k, b}) when is_integer(a) and is_integer(b),
+    do: "#{kind_prefix(k)}#{max(a, b)}"
+
+  defp num_join({:uint, a}, {:int, b}), do: uint_signed_join(a, b)
+  defp num_join({:int, a}, {:uint, b}), do: uint_signed_join(b, a)
+  defp num_join({:int, a}, {:float, b}), do: int_float_join(a - 1, b)
+  defp num_join({:float, b}, {:int, a}), do: int_float_join(a - 1, b)
+  defp num_join({:uint, a}, {:float, b}), do: int_float_join(a, b)
+  defp num_join({:float, b}, {:uint, a}), do: int_float_join(a, b)
+
+  defp kind_prefix(:int), do: "Int"
+  defp kind_prefix(:uint), do: "UInt"
+  defp kind_prefix(:float), do: "Float"
+
+  # `UIntₐ ⊔ Int_b` = least Int width strictly wider than `a` (to hold the
+  # unsigned range) and at least `b`; none ⇒ `:unknown`.
+  defp uint_signed_join(u, i) do
+    case Enum.find(@int_widths, fn c -> c > u and c >= i end) do
+      nil -> :unknown
+      c -> "Int#{c}"
+    end
+  end
+
+  # `Int/UInt ⊔ Float` = least Float width ≥ the float operand whose mantissa
+  # holds the integer exactly (`exact_bits`); none ⇒ `:unknown`.
+  defp int_float_join(exact_bits, fb) do
+    case Enum.find(@float_widths, fn c -> c >= fb and float_mantissa(c) >= exact_bits end) do
+      nil -> :unknown
+      c -> "Float#{c}"
+    end
+  end
+
+  # same-constructor covariant join: `Vec(A) ⊔ Vec(B) = Vec(A⊔B)`,
+  # `Option(A) ⊔ Option(B) = Option(A⊔B)`, componentwise for any `Name(args)`.
+  # Different constructors / non-parametric differing types ⇒ `:unknown` — the
+  # lattice never promotes across constructors (ADR-0035, ADR-0059 §4).
+  defp parametric_join(from, to) do
+    with {n, fa} when is_list(fa) <- parse_parametric(from),
+         {^n, ta} when length(ta) == length(fa) <- parse_parametric(to) do
+      parts = Enum.zip(fa, ta) |> Enum.map(fn {x, y} -> join(x, y) end)
+      if :unknown in parts, do: :unknown, else: "#{n}(#{Enum.join(parts, ",")})"
+    else
+      _ -> :unknown
+    end
+  end
+
+  # "Vec(Int64)" -> {"Vec", ["Int64"]}; "Result(A,E)" -> {"Result", ["A","E"]};
+  # a non-parametric type -> `:error`. (`split_top_commas/1` — the existing
+  # paren-aware splitter — keeps a nested `Vec(B,C)` as one component.)
+  defp parse_parametric(s) when is_binary(s) do
+    case Regex.run(~r/^([A-Za-z_]\w*)\((.*)\)$/, s) do
+      [_, name, inner] -> {name, split_top_commas(inner)}
+      _ -> :error
+    end
+  end
+
+  defp parse_parametric(_), do: :error
+
+  # a leftover `:bottom` (empty branch set) surfaces as `:unknown` to callers.
+  defp debottom(:bottom), do: :unknown
+  defp debottom(t), do: t
 
   defp check_return(%Func{name: name, params: ps, ret: ret, tvars: tvars, clauses: clauses}, ic) do
     # A return type mentioning a `forall` type variable is generic; we don't yet
