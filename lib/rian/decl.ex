@@ -326,17 +326,44 @@ defmodule Rian.Decl do
     :ok = Check.gate!(prog)
     :ok = Rian.Reach.gate!(prog)
 
+    # protocol-method -> trait name, for the Rust UFCS call-site rewrite (ADR-0061
+    # §2). Set before lowering so `rust_fn` sees it; sums/impls flow per-target.
+    Process.put(:rian_proto_methods, proto_method_traits(prog))
+
     funs =
       Enum.map(funcs, fn f ->
-        out = Lower.compile(types, f, structs, ranges)
         # a protocol's BEAM/JS dispatcher + `impl_*` methods are not the Rust shape
-        # (Rust gets traits, ADR-0061 §1/§2) — drop their Rust text; the Elixir
-        # debug view keeps them as a faithful picture of the BEAM artifact.
-        out = if f.dispatch, do: Map.delete(out, :rust), else: out
+        # (Rust gets traits, ADR-0061 §1/§2) — lower only their Elixir debug view;
+        # their guards (`element/2`, `:tag`) are BEAM-only and would crash `to_rust`.
+        out =
+          if f.dispatch,
+            do: Lower.compile_elixir(types, f, structs, ranges),
+            else: Lower.compile(types, f, structs, ranges)
+
         {f.name, out}
       end)
 
-    funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module(m)} end)
+    mod_units = Enum.map(mods, fn m -> {m.name, Lower.compile_module(m)} end)
+    funs ++ mod_units ++ protocol_unit(prog, types, structs)
+  end
+
+  # protocol-method name -> its protocol (trait) name, for UFCS rewriting on Rust.
+  defp proto_method_traits(prog) do
+    for p <- Map.get(prog, :protocols, []), m <- p.methods, into: %{}, do: {m.name, p.name}
+  end
+
+  # the Rust trait+impl block for the program's protocols, as a single unit (no
+  # Elixir/BEAM counterpart — those use the runtime dispatcher). Empty when none.
+  defp protocol_unit(prog, types, structs) do
+    protocols = Map.get(prog, :protocols, [])
+    impl_decls = Map.get(prog, :impl_decls, [])
+
+    if protocols == [] and impl_decls == [] do
+      []
+    else
+      rust = Lower.rust_protocols(protocols, impl_decls, types, structs)
+      [{"protocols", %{rust: rust}}]
+    end
   end
 
   @doc "Parse and lower to the BEAM target only (FFI / BEAM-only bodies)."

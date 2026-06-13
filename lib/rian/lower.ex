@@ -75,6 +75,18 @@ defmodule Rian.Lower do
     }
   end
 
+  @doc """
+  Lower only the Elixir-text view (no Rust). Used for the protocol BEAM/JS
+  runtime-dispatch funcs (`dispatch: …`): their guards (`element/2`, `:tag`) are
+  BEAM-only, and Rust gets traits instead (ADR-0061), so emitting their Rust is
+  both wrong and a hard error.
+  """
+  def compile_elixir(types, func, structs \\ [], ranges \\ []) do
+    env = build_env(types, structs, ranges)
+    :ok = check!(func, env)
+    %{elixir: to_elixir(func, types, structs, build_struct_meta(structs))}
+  end
+
   @doc "Compile to the BEAM target only (for functions using BEAM-only constructs)."
   def compile_beam(types, func, structs \\ [], ranges \\ []) do
     env = build_env(types, structs, ranges)
@@ -613,6 +625,181 @@ defmodule Rian.Lower do
     |> Enum.join("\n\n")
   end
 
+  # ── Rust protocol lowering (ADR-0061 §2): traits + impls ─────────────────
+  # A `protocol` is a fresh, Rian-namespaced `trait Rian<Name>`; an `impl P for T`
+  # is `impl RianP for <rust(T)>`. The receiver maps to `&self` (the impl's first
+  # parameter is rebound to it); bounded generics (`forall T: Eq`) become
+  # `fn f<T: RianEq>` in `rust_fn` and their protocol-method calls rewrite to
+  # UFCS (`RianEq::eq(..)`). rustc dispatches statically — no dispatcher.
+  @doc """
+  Rust traits + impls from the protocol IR (ADR-0061 §2), as a self-contained
+  unit: the `enum`/`struct` defs the impls reference are emitted alongside.
+  """
+  def rust_protocols(protocols, impl_decls, types, structs) do
+    c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new())
+    impl_types = MapSet.new(impl_decls, & &1.type)
+    # only the types an impl targets (so a protocol-only unit doesn't redeclare
+    # enums already carried by the function units)
+    enums =
+      types
+      |> Enum.filter(&MapSet.member?(impl_types, &1.name))
+      |> Enum.map_join("\n\n", &rust_enum/1)
+
+    struct_defs =
+      structs
+      |> Enum.filter(&MapSet.member?(impl_types, &1.name))
+      |> Enum.map_join("\n\n", &rust_struct/1)
+
+    traits = Enum.map_join(protocols, "\n\n", &rust_trait/1)
+    impls = Enum.map_join(impl_decls, "\n\n", &rust_impl(&1, protocols, c))
+
+    [struct_defs, enums, traits, impls] |> Enum.reject(&(&1 in ["", nil])) |> Enum.join("\n\n")
+  end
+
+  defp rust_trait(%{name: name, methods: methods}) do
+    sigs =
+      Enum.map_join(methods, "\n", fn m ->
+        "    fn #{m.name}(#{trait_params(m.params, "Self")}) -> #{rust_ret(self_subst(m.ret, "Self"))};"
+      end)
+
+    "trait Rian#{name} {\n#{sigs}\n}"
+  end
+
+  defp rust_impl(%{proto: proto, type: type, methods: methods}, protocols, c) do
+    sig_for =
+      protocols
+      |> Enum.find(%{methods: []}, &(&1.name == proto))
+      |> Map.fetch!(:methods)
+      |> Map.new(&{&1.name, &1})
+
+    rust_type = rust_proto_type!(type)
+    bodies = Enum.map_join(methods, "\n", &rust_impl_method(&1, sig_for[&1.name], rust_type, c))
+    "impl Rian#{proto} for #{rust_type} {\n#{bodies}\n}"
+  end
+
+  # the Rust spelling of an impl target type: a primitive maps via `Capability`,
+  # a sum/struct keeps its (PascalCase) name.
+  defp rust_proto_type!(type), do: Rian.Capability.rust_name(type)
+
+  defp rust_impl_method(method, sig, rust_type, c) do
+    [recv | rest_names] = method.params |> pcommas() |> Enum.map(&String.trim/1)
+    rest_sig = tl(pcommas(sig.params))
+
+    params =
+      ["&self" | Enum.zip(rest_names, rest_sig) |> Enum.map(&impl_param(&1, rust_type))]
+      |> Enum.join(", ")
+
+    ret_ty = self_subst(sig.ret, rust_type)
+    body = method.body |> rust_proto_body(c) |> coerce_ret(ret_ty)
+    "    fn #{method.name}(#{params}) -> #{rust_ret(ret_ty)} { let #{recv} = self; #{body} }"
+  end
+
+  # a Rian string literal lowers to a Rust `&str`; coerce an impl method that
+  # returns `String` (`.to_string()` is a no-op clone if the body is already one).
+  defp coerce_ret(body, "String"), do: "(#{body}).to_string()"
+  defp coerce_ret(body, _ret), do: body
+
+  defp impl_param({name, sig_p}, rust_type) do
+    {_n, ty} = name_type(sig_p)
+    "#{name}: #{ref_type(ty, rust_type)}"
+  end
+
+  # lower an impl-method body through the same Rust pipeline `rust_fn` uses,
+  # rewriting protocol-method calls to UFCS first.
+  defp rust_proto_body(src, c) do
+    src
+    |> body_ast(c)
+    |> rewrite_proto_calls(proto_methods())
+    |> resolve_rust_pats(c.meta)
+    |> insert_borrows(Map.get(c, :funs, %{}))
+    |> Core.from_expr()
+    |> emit(:rust)
+    |> elem(0)
+  end
+
+  # trait method params from a sig string (`self Self, b Self`): receiver -> &self.
+  defp trait_params(param_str, self_repr) do
+    case pcommas(param_str) do
+      [] -> "&self"
+      [_recv | rest] -> Enum.join(["&self" | Enum.map(rest, &sig_param(&1, self_repr))], ", ")
+    end
+  end
+
+  defp sig_param(p, self_repr) do
+    {name, ty} = name_type(p)
+    "#{name}: #{ref_type(ty, self_repr)}"
+  end
+
+  # a protocol param type -> a borrowed Rust type; `Self` -> `&<self_repr>`.
+  defp ref_type("Self", self_repr), do: "&#{self_repr}"
+  defp ref_type(ty, _self_repr), do: Rian.Capability.rust_param(:val, ty)
+
+  defp name_type(p) do
+    case p |> String.trim() |> String.split(~r/\s+/, trim: true) do
+      [name, ty] -> {name, ty}
+      [ty] -> {"_", ty}
+    end
+  end
+
+  defp self_subst(t, repr), do: Regex.replace(~r/\bSelf\b/, t, repr)
+
+  # the protocol-method -> trait-name map for the current compile (UFCS rewrite),
+  # carried in the process dict (a single sequential emitter pass, like js int53).
+  defp proto_methods, do: Process.get(:rian_proto_methods, %{})
+
+  # rewrite a protocol-method call `m(a, …)` to UFCS `RianP::m(a, …)` so rustc
+  # dispatches statically; non-protocol calls pass through.
+  def rewrite_proto_calls({:call, {:id, m}, args}, methods) do
+    args = Enum.map(args, &rewrite_proto_calls(&1, methods))
+
+    case Map.get(methods, m) do
+      nil -> {:call, {:id, m}, args}
+      trait -> {:call, {:dot, {:id, "Rian" <> trait}, m}, args}
+    end
+  end
+
+  def rewrite_proto_calls(node, methods) when is_tuple(node),
+    do: node |> Tuple.to_list() |> Enum.map(&rewrite_proto_calls(&1, methods)) |> List.to_tuple()
+
+  def rewrite_proto_calls(list, methods) when is_list(list),
+    do: Enum.map(list, &rewrite_proto_calls(&1, methods))
+
+  def rewrite_proto_calls(other, _methods), do: other
+
+  # `<T, U: RianEq + RianOrd>` from a function's `tvars`/`bounds` (ADR-0061 §2/§4).
+  defp rust_generics(%{tvars: []}), do: ""
+
+  defp rust_generics(%{tvars: tvars, bounds: bounds}) do
+    inner =
+      Enum.map_join(tvars, ", ", fn tv ->
+        case Map.get(bounds || %{}, tv) do
+          nil -> tv
+          ps -> "#{tv}: #{Enum.map_join(ps, " + ", &"Rian#{&1}")}"
+        end
+      end)
+
+    "<#{inner}>"
+  end
+
+  defp rust_generics(_), do: ""
+
+  # paren-aware top-level comma split of a parameter string
+  defp pcommas(""), do: []
+
+  defp pcommas(s) do
+    {parts, cur, _} =
+      s
+      |> String.graphemes()
+      |> Enum.reduce({[], "", 0}, fn
+        ",", {ps, cur, 0} -> {[cur | ps], "", 0}
+        "(", {ps, cur, d} -> {ps, cur <> "(", d + 1}
+        ")", {ps, cur, d} -> {ps, cur <> ")", d - 1}
+        ch, {ps, cur, d} -> {ps, cur <> ch, d}
+      end)
+
+    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  end
+
   # One Rust `fn` (no type/struct preamble). `vis` is `""` or `"pub "`.
   defp rust_fn(func, ctx, vis) do
     param_decls =
@@ -639,6 +826,7 @@ defmodule Rian.Lower do
           c.body
           |> body_ast(ctx)
           |> widen_char_arith(char_vars(func.params, c.pats))
+          |> rewrite_proto_calls(proto_methods())
           |> resolve_rust_pats(ctx.meta)
           |> insert_borrows(Map.get(ctx, :funs, %{}))
           |> Core.from_expr()
@@ -665,7 +853,7 @@ defmodule Rian.Lower do
     shim = if rust_total_shim?(func), do: "\n        _ => unreachable!(),", else: ""
 
     fn_str =
-      "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} {\n" <>
+      "#{vis}fn #{func.name}#{rust_generics(func)}(#{param_decls}) -> #{rust_ret(func.ret)} {\n" <>
         "    match #{scrut} {\n#{arms}#{shim}\n    }\n}"
 
     join_doc(rs_doc(Map.get(func, :doc), "///"), fn_str)
@@ -952,6 +1140,8 @@ defmodule Rian.Lower do
   # Rust: case of head/name selects field vs module-path vs type/variant-path
   defp emit(%EDot{head: %EId{name: m}, name: n}, :rust) do
     cond do
+      # a Rian protocol trait — UFCS `RianEq::eq(..)`, case preserved (ADR-0061 §2)
+      String.starts_with?(m, "Rian") and pascal?(m) -> {"#{m}::#{n}", 12}
       # value.field
       not pascal?(m) -> {"#{m}.#{n}", 12}
       # Type::Variant
