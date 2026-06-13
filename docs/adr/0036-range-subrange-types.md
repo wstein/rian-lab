@@ -81,14 +81,37 @@ wanted to avoid — admitted **only for `range` types**, where it is finite and 
 open primitives. It is a performance optimization, not a correctness gap, and is tracked in the
 exhaustiveness spec §7.
 
-## Lowering (implemented — `test/rian/range_test.exs`)
+## Lowering
 
-| Rian | Elixir | Rust |
+A range type lands in two parts — the **type** (declaration + finite exhaustiveness, the
+representation rule) and the **checked construction** (`Name.of` + the literal bound-check). Status:
+
+| Rian | Elixir / BEAM | Rust |
 |---|---|---|
-| `range Digit := 0..9` | `@type digit :: 0..9` (native typespec range) | base `i64` + checked ctor `Digit::of(i64) -> Result<i64, RangeError>` |
-| `range Letter := 'A'..'Z'` | `@type letter :: ?A..?Z` (codepoint integers) | base `char` + checked ctor |
-| `Char` literal `'A'` | `?A` (= integer `65`) | `'A'` (`char`) |
-| out-of-range construction | `{:error, :range}` / error tuple | `Err(RangeError)` |
+| `range Digit := 0..9` *(type)* | name substitutes to base `Int64`; registers a finite exhaustiveness signature ✓ | name substitutes to `i64`; a totally-covered `match` gets the `unreachable!()` shim ✓ |
+| `range Letter := 'A'..'Z'` *(type)* | substitutes to `Char` (codepoint integer) ✓ | substitutes to `char` ✓ |
+| `Char` literal `'A'` | codepoint integer (`?A`) ✓ | native `'A'` (`char`) ✓ |
+| `d Digit := 7` *(literal bind)* | compile-time in-bounds check (✓ `7`, ✗ `12`) — target-agnostic (checker) ✓ | — same — ✓ |
+| `Digit.of(n)` *(construction)* | desugars to an in-bounds `if`-Result → `{:ok, n}` / `{:error, :range_error}` ✓ | **pending** (see Open items) |
+
+**What landed (2026-06-13):** the type + finite exhaustiveness ([`test/rian/range_test.exs`](../../test/rian/range_test.exs)),
+the literal in-bounds binding check ([`test/rian/check_test.exs`](../../test/rian/check_test.exs) —
+the ADR-0034 §1 typed-binding gate extended with the range table), and `Name.of(n)` checked
+construction **on the BEAM**, verified end-to-end on real bytecode
+([`test/rian/beam_test.exs`](../../test/rian/beam_test.exs)) for both `Int64`- and `Char`-based ranges.
+
+**Construction is a desugar, not a per-emitter constructor.** Rather than emit a `Digit::of`
+function per range type, `Name.of(n)` is rewritten *before* lowering ([`Rian.Range.expand_of/2`](../../lib/rian/range.ex))
+into an ordinary in-bounds `if`-Result the existing emitters already handle:
+
+```elixir
+Digit.of(n)   ~>   if 0 <= n and n <= 9 do {:ok, n} else {:error, RangeError} end
+```
+
+So the value is a `Name | RangeError` Result (ADR-0040) — `{:ok, n}` / `{:error, :range_error}` on
+the BEAM — and the checker infers `Name.of(n) : base | RangeError`. The desugar is target-agnostic;
+so far only the **BEAM** emitter has the range table threaded to its body-parse point. Rust/JS are
+pending (Rust additionally needs a `RangeError` type emitted for `Result<i64, RangeError>`).
 
 **Representation, not newtype.** A range value lowers to its **base primitive** (`i64` / `char` /
 codepoint integer), with bounds enforced at construction boundaries — not a wrapper struct. This
@@ -121,8 +144,10 @@ on the `@type` spec and first-match clauses; no shim needed.
   heads cover the interval is **total without a catch-all**; an extra `_` clause is flagged
   *unreachable*; the Rust `match` over the open base gets the `unreachable!()` shim. **The `Char`
   literal *and* the distinct `Char` type are done** too — see the implementation note under Open
-  items. **Still future:** dynamic construction (`Name.of` → `Name | RangeError`) and the
-  large-range interval-coverage optimization.
+  items. **Checked construction is done (2026-06-13):** the literal in-bounds binding check
+  (`d Digit := 7` ✓ / `:= 12` ✗) and `Name.of(n)` → `Name | RangeError` (desugared to an in-bounds
+  `if`-Result), verified end-to-end on the BEAM for `Int64`- and `Char`-based ranges. **Still
+  future:** `Name.of` lowering on **Rust/JS**, and the large-range interval-coverage optimization.
 - **`range` is a bounded, finite opaque type** ([ADR-0043](0043-opaque-types.md)). This ADR's
   "representation, not newtype" mechanism *is* opacity; `range` adds a bounds invariant (fallible
   `T.of`) and a finite signature (exhaustiveness) on top of `opaque T := Base`. No rewrite here —
@@ -154,9 +179,9 @@ on the `@type` spec and first-match clauses; no shim needed.
   an integer, so this is free; on Rust a `Char` operand of `+ - * rem div` is wrapped in
   `__prim_char_code/1` (→ `char as i64`) by a lowering pre-pass. The explicit `__prim_char_code(c) :
   Int64` conversion remains available. The self-hosting lexer reads `lex(cs Vec(Char))` with
-  `when c == '+'` / `['(' | rest]`, lowering and running on all three targets. **Still future:**
-  `range` *construction* over `Char` (`'A'..'Z'`) — the ordinal-base machinery (ADR-0036 above)
-  builds on this `Char` type.
+  `when c == '+'` / `['(' | rest]`, lowering and running on all three targets. `range`
+  *construction* over `Char` (`Up.of('M')`) is **done on the BEAM** (`Up.of(?M) == {:ok, ?M}`,
+  `Up.of(?5) == {:error, :range_error}`); the ordinal-base machinery builds on this `Char` type.
 - ~~**Range arithmetic & coercion.**~~ **Resolved 2026-06-12: arithmetic widens to base.**
   `Digit + Digit : Int64` — *not* `Digit`, because `9 + 9 = 18 ∉ 0..9`; any in-bounds wrap or hidden
   `RangeError` on `+` would be hidden control flow (ADR-0035). Re-narrow explicitly with `Digit.of(18)`
@@ -165,6 +190,11 @@ on the `@type` spec and first-match clauses; no shim needed.
   types auto-inherit nothing"): a **general `opaque` gets no `+`** (adding `UserId`s is nonsense), but
   a **`range` is a *numeric/ordinal* opaque**, so it exposes base arithmetic — widening to the base,
   which honestly escapes the bounded representation rather than leaking it.
+- **`Name.of` construction on Rust/JS.** The desugar ([`Rian.Range.expand_of/2`](../../lib/rian/range.ex))
+  is target-agnostic but is currently threaded only into the BEAM emitter's body-parse point. Thread
+  the same range table into the Rust and JS emitters (Rust additionally needs a `RangeError` type
+  emitted so `Result<i64, RangeError>` type-checks); and teach [`Rian.Reach`](../../lib/rian/reach.ex)
+  that a range `Name.of(…)` is portable construction, not host FFI (ADR-0058).
 - **Large-range completeness cap.** Fix the naive-enumeration threshold and the interval-coverage
   fallback in the exhaustiveness reference implementation.
 - **Non-zero / non-contiguous bases.** This ADR covers contiguous inclusive intervals only;
