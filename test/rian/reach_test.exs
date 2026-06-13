@@ -1,0 +1,141 @@
+defmodule Rian.ReachTest do
+  use ExUnit.Case, async: true
+
+  alias Rian.Reach
+
+  defp reach(src), do: src |> Rian.Decl.parse() |> Reach.analyze()
+  defp targets(rep, fn_name), do: rep[fn_name].reach |> MapSet.to_list() |> Enum.sort()
+
+  describe "portable code reaches every target" do
+    test "pure arithmetic / cons recursion / variants are portable" do
+      rep =
+        reach("""
+        mod P do
+          pub def add(a Int64, b Int64) Int64 := a + b
+          pub def sum(xs Vec(Int64)) Int64
+          pub def sum([]) := 0
+          pub def sum([h | t]) := h + sum(t)
+        end
+        """)
+
+      assert targets(rep, "add") == [:ex, :js, :rs]
+      assert targets(rep, "sum") == [:ex, :js, :rs]
+      assert rep["add"].blockers == []
+    end
+
+    test "the portable prelude `__prim_*` layer stays all-target" do
+      rep = reach(File.read!("examples/rian/prelude_int.rian"))
+
+      for f <- ~w(wrapping_add saturating_add checked_add),
+          do: assert(targets(rep, f) == [:ex, :js, :rs])
+    end
+
+    test "a Rian cross-module call is portable (not host FFI)" do
+      rep =
+        reach("""
+        mod Lex do
+          pub def lex(n Int64) Int64 := n
+        end
+        mod Driver do
+          pub def run(n Int64) Int64 := Lex.lex(n)
+        end
+        """)
+
+      assert targets(rep, "run") == [:ex, :js, :rs]
+    end
+  end
+
+  describe "host FFI pins a function to :ex" do
+    test "an Erlang remote call is ex-only and names the blocker" do
+      rep =
+        reach("""
+        mod M do
+          pub def total(xs Vec(Int64)) Int64 := :lists.sum(xs)
+        end
+        """)
+
+      assert targets(rep, "total") == [:ex]
+      assert [%{construct: ":lists.sum", kind: :ffi, kills: kills}] = rep["total"].blockers
+      assert Enum.sort(kills) == [:js, :rs]
+    end
+
+    test "an Elixir-module call (non-Rian) is ex-only" do
+      rep =
+        reach("""
+        mod M do
+          pub def up(s String) String := String.upcase(s)
+        end
+        """)
+
+      assert targets(rep, "up") == [:ex]
+      assert [%{construct: "String.upcase"}] = rep["up"].blockers
+    end
+  end
+
+  describe "concurrency/process/state FFI is ex-only by design (ADR-0057)" do
+    test "spawn, ETS, and GenServer are flagged as concurrency, not generic FFI" do
+      rep =
+        reach("""
+        mod C do
+          pub def s() Int64 := :erlang.spawn(:m, :f, [])
+          pub def t(k String) Int64 := :ets.lookup(:tab, k)
+          pub def g(pid Int64) Int64 := GenServer.call(pid, :v)
+        end
+        """)
+
+      for f <- ~w(s t g) do
+        assert targets(rep, f) == [:ex]
+        assert [%{kind: :concurrency}] = rep[f].blockers
+      end
+    end
+
+    test "a pure `:erlang` function is plain FFI, not concurrency" do
+      rep =
+        reach("""
+        mod M do
+          pub def a(x Int64) Int64 := :erlang.abs(x)
+        end
+        """)
+
+      assert [%{kind: :ffi}] = rep["a"].blockers
+    end
+  end
+
+  describe "reachability propagates along the local call graph" do
+    test "a portable-looking caller inherits a callee's ex-only pin" do
+      rep =
+        reach("""
+        mod P do
+          pub def leaf(n Int64) Int64 := :lists.sum([n])
+          pub def mid(n Int64) Int64 := leaf(n) + 1
+          pub def caller(n Int64) Int64 := mid(n) * 2
+        end
+        """)
+
+      # leaf is directly ex-only; mid and caller have no FFI of their own but
+      # cannot reach further than the function they (transitively) call
+      assert targets(rep, "leaf") == [:ex]
+      assert targets(rep, "mid") == [:ex]
+      assert targets(rep, "caller") == [:ex]
+      # the pin is propagated, so mid/caller carry no *local* blocker
+      assert rep["mid"].blockers == []
+      assert rep["caller"].blockers == []
+    end
+
+    test "a portable function calling only portable functions stays all-target" do
+      rep =
+        reach("""
+        mod P do
+          pub def inc(n Int64) Int64 := n + 1
+          pub def twice(n Int64) Int64 := inc(inc(n))
+        end
+        """)
+
+      assert targets(rep, "twice") == [:ex, :js, :rs]
+    end
+  end
+
+  test "the closed target vocabulary is ex/rs/js" do
+    assert Enum.sort(Reach.targets()) == [:ex, :js, :rs]
+  end
+end
