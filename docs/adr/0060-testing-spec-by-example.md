@@ -106,10 +106,12 @@ Recorded so the question stops recurring. A natural-language `.feature` layer is
 
 ## Open items
 
-- **Doctest runner.** *MVP shipped* ([`Rian.Doctest`](../../lib/rian/doctest.ex)): the `#=>` marker
-  was chosen (`expr #=> expected`, both real Rian, compared by value on the BEAM). *Still open:*
-  doctests on **module-internal** functions (the MVP handles top-level `@doc`s), extraction from
-  `docs/spec/*.md` fences, and the per-target (Rust/JS) harness.
+- **Doctest runner.** *Shipped* ([`Rian.Doctest`](../../lib/rian/doctest.ex)): the `#=>` marker
+  (`expr #=> expected`, both real Rian, compared by value on the BEAM); doctests on top-level **and
+  single-`mod` module-internal** functions (the checks are injected into the module so unqualified
+  references resolve); and `run_markdown/1` / `exunit_markdown/1` over ` ```rian ` fences in
+  `docs/spec/*.md` (e.g. [expressions.md](../spec/expressions.md) §4, locked in CI). *Still open:*
+  multi-module-internal doctests and the per-target (Rust/JS) doctest harness.
 - **Tour-as-regression.** Each `examples/rian/*.rian` already compiles; assert its documented
   outputs in CI (the `Rian.Fixpoint` pattern, generalised).
 - **`@test` annotation** vs the `test_` prefix convention — needs the annotation parser extended

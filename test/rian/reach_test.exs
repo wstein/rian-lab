@@ -1,5 +1,8 @@
 defmodule Rian.ReachTest do
-  use ExUnit.Case, async: true
+  # async: false — the build-default tests mutate the global `:rian_lab` app env
+  # (`:rian_targets`), which `Rian.Reach.gate!/1` reads on *every* compile; running
+  # concurrently would leak a transient value into other tests' `Beam.compile`.
+  use ExUnit.Case, async: false
 
   alias Rian.Reach
 

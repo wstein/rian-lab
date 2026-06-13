@@ -124,7 +124,33 @@ need without making `(` tri-ambiguous (group vs. lambda vs. section).
 
 ---
 
-## 4. Open items
+## 4. Spec by example (executed)
+
+The fence below is **run as a doctest** (ADR-0060 tier B, `Rian.Doctest`): each
+`expr #=> expected` is compiled and evaluated on every build, so these claims
+cannot drift from the implementation.
+
+```rian
+@doc """
+Operator precedence — `*` and `/` bind tighter than `+`/`-` (§2).
+
+    precedence()  #=> 14
+    mixed()       #=> 7
+"""
+def precedence() Int64 := 2 + 3 * 4
+def mixed() Int64 := 1 + 12 / 2
+
+@doc """
+`if` is an expression; both arms yield a value, and comparisons are `Bool` (§1).
+
+    sign(5)       #=> 1
+    sign(0 - 3)   #=> 0 - 1
+    sign(0)       #=> 1
+"""
+def sign(n Int64) Int64 := if n >= 0 do 1 else 0 - 1 end
+```
+
+## 5. Open items
 - Operator-as-value sections (`(+)`) — rejected in favour of `&`-captures (above); not planned.
 - `let else` for refutable bindings with an early-exit arm — deferred (use `match` for now).
 - Whether `<>` generalizes beyond `str` (e.g. list concat) or stays string-only.

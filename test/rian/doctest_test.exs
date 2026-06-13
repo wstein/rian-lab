@@ -10,6 +10,17 @@ defmodule Rian.DoctestFileTest do
   Rian.Doctest.exunit("examples/rian/16_doctests.rian")
 end
 
+defmodule Rian.SpecDoctestTest do
+  @moduledoc """
+  ADR-0060 tier B: the ` ```rian ` fences in a `docs/spec/*.md` file, executed —
+  the spec corpus made un-driftable. Each `expr #=> expected` is its own case.
+  """
+  use ExUnit.Case, async: false
+  require Rian.Doctest
+
+  Rian.Doctest.exunit_markdown("docs/spec/expressions.md")
+end
+
 defmodule Rian.DoctestRunnerTest do
   use ExUnit.Case, async: false
 
@@ -66,6 +77,45 @@ defmodule Rian.DoctestRunnerTest do
       """
 
       assert Doctest.run(src) == [{"greet()", :pass}]
+    end
+
+    test "module-internal @doc doctests run (injected into the module)" do
+      src = """
+      mod Calc do
+        @doc \"\"\"
+            double(21) #=> 42
+        \"\"\"
+        pub def double(n Int64) Int64 := n * 2
+      end
+      """
+
+      assert Doctest.extract(src) == [{"double(21)", "42"}]
+      assert Doctest.run(src) == [{"double(21)", :pass}]
+    end
+
+    test "run_markdown runs the ```rian fences in a Markdown string" do
+      md = """
+      # Spec
+
+      ```rian
+      @doc \"\"\"
+          inc(1) #=> 2
+      \"\"\"
+      def inc(n Int64) Int64 := n + 1
+      ```
+
+      prose
+
+      ```rian
+      @doc \"\"\"
+          neg(3) #=> 0 - 3
+      \"\"\"
+      def neg(n Int64) Int64 := 0 - n
+      ```
+      """
+
+      assert length(Doctest.fences(md)) == 2
+      assert Doctest.run_markdown(md) == [{"inc(1)", :pass}, {"neg(3)", :pass}]
     end
   end
 end
