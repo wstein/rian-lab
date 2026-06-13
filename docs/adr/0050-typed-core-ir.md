@@ -115,3 +115,19 @@ body simply begins on the next line. A plain one-liner still ends at its newline
 relaxation only — tokens and the operator table are unchanged (and are what P7 will freeze). The
 self-host budget the review noted: `examples/rian/selfhost_decl.rian` (which re-parses bodies) and the
 `Rian.Fixpoint` anchor will track this when the Rian-written front-end widens to multi-line bodies.
+
+## Spike finding (P6 — shared-traversal LCD check, 2026-06-14)
+
+The review's P6 dissent (Mira/Dmitri vs Tomás/Kai): a shared-traversal emitter refactor risks
+**lowest-common-denominator semantics** — the exact thing ADR-0041 exists to prevent — e.g. Rust
+losing its real `enum` to a "simulated tuple." Resolution path was *spike one feature first*.
+
+**Spike (`bench/p6_sum_lowering_lcd.exs`): no LCD regression.** Lowering `type Expr := Num(Int64) |
+Add(Expr, Expr) | Zero` over the one Core IR yields, simultaneously, a real Rust `enum Expr { Num(i64),
+Add(Expr, Expr) }`, a Kotlin `sealed interface` + `data class`/`object`, a BEAM tagged tuple
+(`{:num, 5}`), and a JS tagged array — all idiomatic. **Conclusion:** a shared traversal is safe **iff
+it shares the traversal *skeleton* but keeps a per-target *representation* hook at the lowering leaf**
+(the existing `rust_enum` / `sealed interface` / tagged-tuple split). Sharing the *representation*
+(collapsing everyone to a common tagged tuple) is where LCD would bite — Rust would lose its enum. So:
+generalize the traversal, never the representation. (P6 stays *spike-only* until a concrete refactor is
+proposed against that constraint.)
