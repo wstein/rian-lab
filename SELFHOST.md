@@ -271,10 +271,24 @@ operators, and parens (the slice-1 fixpoint test). Direct evidence that the
   `_` separators, decimals, and signed/unsigned exponents (the slice-4 corpus +
   a number-lexeme teeth test).
 
-**Next:** the jump from `expr_tokens/1` to the full **`tokenize/1`** stream that
-`Rian.Decl` actually consumes — **significant newlines (`{:nl}`), `;`, and the
-`@annot` lane** — plus escapes inside literals and brackets. That parity is the
-gateway to porting the *declaration* front-end, not just the expression lexer.
+- **Slice 5 — `tokenize/1` parity (the declaration stream).** The jump from
+  `expr_tokens/1` to the full **`tokenize/1`** stream `Rian.Decl` actually
+  consumes: **significant newlines** (`{:nl}`, runs collapsed via `dedup_nl` +
+  leading/trailing drop, matching `Rian.Lexer.collapse_nl`), `;` `,`, **`@annot`**,
+  brackets `[] {} %{`, line comments (`# …`), and the full operator set
+  (`-> .. := |> <> <~ <- . | : &`) — every operator unified as one
+  `TOp(String)`, mirroring the reference's `@multi`/`@single` longest-match. The
+  port now agrees with **`Rian.Lexer.tokenize/1`** (not just `expr_tokens/1`) over
+  a corpus of multi-line declarations, punctuation, annotations, and operators
+  (`Fixpoint.check/4` takes the reference tokenizer; slice-5 corpus + a
+  `{:nl}`-divergence teeth test). **This is the gateway rung: the Rian lexer now
+  produces the declaration token stream the parser will consume.**
+
+**Next:** port the **declaration parser** (`Rian.Pratt` + `Rian.Decl`) in Rian and
+fixpoint-diff its AST/IR against the reference — turning the parser spike from a
+demo into a checked, equivalence-locked stage (the same method, AST projection
+instead of token projection). Remaining lexer gaps (heredocs `"""`, string-body
+escapes, `\u{…}` char escapes) are small and unforced by the parser corpus.
 
 ## The whole compiler as one Rian artifact
 

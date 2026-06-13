@@ -37,16 +37,18 @@ defmodule Rian.Fixpoint do
 
   @doc """
   For each `input` in `corpus`, compare the Rian lexer's projected output against
-  `Rian.Lexer.expr_tokens/1`. Returns `:ok`, or the first
-  `{:mismatch, input, expected, got}` so the failing case is reported precisely.
+  the `reference` tokenizer (default `Rian.Lexer.expr_tokens/1`; pass
+  `&Rian.Lexer.tokenize/1` to check the full declaration stream incl. `{:nl}`).
+  Returns `:ok`, or the first `{:mismatch, input, expected, got}` so the failing
+  case is reported precisely.
 
   `project` maps one Rian token (tagged tuple/atom) to its reference-token shape.
   """
-  @spec check(lexer_mod(), [String.t()], (term() -> term())) ::
+  @spec check(lexer_mod(), [String.t()], (term() -> term()), (String.t() -> [term()])) ::
           :ok | {:mismatch, String.t(), [term()], [term()]}
-  def check(mod, corpus, project) do
+  def check(mod, corpus, project, reference \\ &Rian.Lexer.expr_tokens/1) do
     Enum.reduce_while(corpus, :ok, fn input, _acc ->
-      expected = Rian.Lexer.expr_tokens(input)
+      expected = reference.(input)
       got = mod.tokenize(input) |> Enum.map(project)
 
       if got == expected,

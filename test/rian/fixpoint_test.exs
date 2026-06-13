@@ -67,8 +67,19 @@ defmodule Rian.FixpointTest do
   defp project_v2({:t_op, s}), do: {:op, s}
   defp project_v2({:t_str, s}), do: {:str, s}
   defp project_v2({:t_char, cp}), do: {:char, cp}
+  # slice 5 — the full `tokenize/1` vocabulary: annotations, brackets, punctuation,
+  # and the significant newline (`{:nl}`).
+  defp project_v2({:t_annot, s}), do: {:annot, s}
   defp project_v2(:tlp), do: {:lparen}
   defp project_v2(:trp), do: {:rparen}
+  defp project_v2(:tl_bracket), do: {:lbracket}
+  defp project_v2(:tr_bracket), do: {:rbracket}
+  defp project_v2(:tl_brace), do: {:lbrace}
+  defp project_v2(:tr_brace), do: {:rbrace}
+  defp project_v2(:t_map_open), do: {:mapopen}
+  defp project_v2(:t_comma), do: {:comma}
+  defp project_v2(:t_semi), do: {:semi}
+  defp project_v2(:tnl), do: {:nl}
   defp project_v2(other), do: project(other)
 
   # within slices 1-4: integers, identifiers, all 16 keywords, the comparison
@@ -156,6 +167,65 @@ defmodule Rian.FixpointTest do
       assert {:mismatch, "1e9", expected, got} = Fixpoint.check(mod, @corpus_v2, wrong)
       assert {:num, "1.0e9"} in expected
       assert {:num, "1e9"} in got
+    end
+  end
+
+  # Slice 5 corpus — the FULL declaration stream `Rian.Decl` consumes: significant
+  # newlines (runs collapsed, leading/trailing dropped), `;` `,`, `@annot`,
+  # brackets `[] {} %{`, line comments, and the extra operators (`-> .. := |> <>
+  # <~ <- . | : &`). Checked against `Rian.Lexer.tokenize/1` (not `expr_tokens/1`).
+  @corpus_tok [
+    # significant newlines: collapsed runs, leading/trailing dropped
+    "a\nb",
+    "\n\nx\n\n",
+    "a\n\n\nb\nc",
+    # punctuation + brackets + map-open
+    "[1, 2, 3]",
+    "%{k: v, j: w}",
+    "f(a, b) ; g(c)",
+    # the new operators
+    "x := y",
+    "p |> q.r",
+    "ok <- e",
+    "total <~ total + n",
+    "lo .. hi",
+    "a <> b",
+    "&f | x",
+    # line comment is skipped; the newline after it survives as {:nl}
+    "a # trailing comment\nb",
+    # a realistic multi-line declaration (newlines, @annot, keywords, do/end, `:=`)
+    "@doc\nmod M do\n  pub def f(n Int64) Int64 := n + 1\nend"
+  ]
+
+  describe "lexer port slice 5 — tokenize/1 parity (newlines, punctuation, @annot, full ops)" do
+    setup do
+      mod =
+        Fixpoint.load_lexer(
+          File.read!("examples/rian/selfhost_lexer_v2.rian"),
+          :rian_fixpoint_lexer_tok
+        )
+
+      {:ok, mod: mod}
+    end
+
+    test "the v2 Rian lexer agrees with Rian.Lexer.tokenize/1 (full declaration stream)",
+         %{mod: mod} do
+      assert Fixpoint.check(mod, @corpus_tok, &project_v2/1, &Rian.Lexer.tokenize/1) == :ok
+    end
+
+    # slice-5 teeth: a wrong newline projection (dropping `{:nl}`) MUST be caught —
+    # significant newlines are real tokens in the declaration stream.
+    test "divergence in the significant newline is caught (the diff has teeth)", %{mod: mod} do
+      wrong = fn
+        :tnl -> {:semi}
+        other -> project_v2(other)
+      end
+
+      assert {:mismatch, "a\nb", expected, got} =
+               Fixpoint.check(mod, @corpus_tok, wrong, &Rian.Lexer.tokenize/1)
+
+      assert {:nl} in expected
+      assert {:semi} in got
     end
   end
 end
