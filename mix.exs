@@ -38,6 +38,8 @@ defmodule RianLab.MixProject do
     [
       main: "readme",
       source_ref: "v#{@version}",
+      # html for comparison; Rian.DocFormatter is the Starlight production path
+      formatters: ["html", Rian.DocFormatter],
       # Explicit slugs/titles for the same-named READMEs so they do not collide
       # (root README.md keeps the `readme` slug that `main: "readme"` resolves to).
       extras:
