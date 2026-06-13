@@ -88,5 +88,25 @@ defmodule Rian.RangeTest do
           assert {"1 0\n", 0} = System.cmd(bin, [])
       end
     end
+
+    @tag :rust
+    test "implicit Char arithmetic lowers to `char as i64` casts and runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          [{_, %{rust: rust}}] = Decl.compile("def dval(c Char) Int64 := c - '0'")
+          # the native `char` operands are widened to their codepoint base
+          assert rust =~ "(c as i64) - ('0' as i64)"
+
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_chararith_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+          File.write!(src, "#{rust}\nfn main() { println!(\"{}\", dval('7')); }")
+          {_, 0} = System.cmd(rustc, ["--edition", "2021", src, "-o", bin])
+          assert {"7\n", 0} = System.cmd(bin, [])
+      end
+    end
   end
 end

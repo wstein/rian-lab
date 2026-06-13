@@ -157,6 +157,14 @@ defmodule Rian.CheckTest do
       assert Check.infer(Pratt.parse_body("__prim_char_code('0')")) == "Int64"
     end
 
+    test "ordinal arithmetic widens Char to its Int64 base (ADR-0036)" do
+      # `'9' - '0' = 9` is an Int64, not a Char
+      assert Check.infer(Pratt.parse_body("'9' - '0'")) == "Int64"
+      assert Check.infer(Pratt.parse_body("'a' + 1")) == "Int64"
+      # a Char-typed param flows through: `c - '0' : Int64`
+      assert Check.check("def dval(c Char) Int64 := c - '0'") == :ok
+    end
+
     test "a typed binding may declare `Char`" do
       assert Check.check("def f(n Int64) Int64 := c Char := 'A' ; n") == :ok
       assert Check.infer(Pratt.parse_body("c Char := 'A' ; c")) == "Char"

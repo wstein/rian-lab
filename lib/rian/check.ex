@@ -141,8 +141,8 @@ defmodule Rian.Check do
     do: if(String.contains?(n, ".") or String.match?(n, ~r/[eE]/), do: "Float64", else: "Int64")
 
   def infer(%EStr{}, _env, _ic), do: "String"
-  # a `Char` literal is the `Char` primitive (ADR-0036); to use its codepoint in
-  # arithmetic, convert explicitly with `__prim_char_code(c) : Int64`
+  # a `Char` literal is the `Char` primitive (ADR-0036); ordinal arithmetic on it
+  # widens to the `Int64` base (see `ordinal_base/1`)
   def infer(%EChar{}, _env, _ic), do: "Char"
   def infer(%EId{name: b}, _env, _ic) when b in ~w(true false), do: "Bool"
   # a name resolves to a bound var, else a nullary variant constructor, else unknown
@@ -152,12 +152,23 @@ defmodule Rian.Check do
 
   def infer(%EBin{op: op, left: l, right: r}, env, ic) do
     cond do
-      op in @bool_ops -> "Bool"
-      op == "<>" -> "String"
-      op == "/" -> "Float64"
-      op in @int_ops -> "Int64"
-      op in @arith -> conservative(unify(infer(l, env, ic), infer(r, env, ic)))
-      true -> :unknown
+      op in @bool_ops ->
+        "Bool"
+
+      op == "<>" ->
+        "String"
+
+      op == "/" ->
+        "Float64"
+
+      op in @int_ops ->
+        "Int64"
+
+      op in @arith ->
+        conservative(unify(ordinal_base(infer(l, env, ic)), ordinal_base(infer(r, env, ic))))
+
+      true ->
+        :unknown
     end
   end
 
@@ -475,6 +486,12 @@ defmodule Rian.Check do
   # fully yet) rather than rejecting; only the body-vs-return check rejects
   defp conservative(:mismatch), do: :unknown
   defp conservative(t), do: t
+
+  # ordinal arithmetic widens to the base (ADR-0036): `Char ± _` is `Int64`, not
+  # `Char` (`'9' - '0' = 9 ∉ Char`). A `Char` operand contributes its codepoint
+  # base; every other type passes through unchanged.
+  defp ordinal_base("Char"), do: "Int64"
+  defp ordinal_base(t), do: t
 
   # ── function checking ──────────────────────────────────────────────────
   @doc """

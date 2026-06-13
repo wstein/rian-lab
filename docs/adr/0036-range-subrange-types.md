@@ -149,12 +149,14 @@ on the `@type` spec and first-match clauses; no shim needed.
   the BEAM (charlists are integer lists) and a **BigInt** codepoint in JS, but a native **`char`** on
   Rust (`__prim_str_chars : Vec(Char)` → `Vec<char>`; `Rian.Capability` lowers `Char` → `char`, a
   `Copy` scalar). Ordinal comparison (`==`, `<`, `>=`) works directly on every target (Rust `char`
-  is `Ord`+`Eq`). **Arithmetic does not widen implicitly** (ADR-0035 — no hidden coercion): use
-  `__prim_char_code(c) : Int64` for the explicit `Char` → codepoint conversion (identity on BEAM/JS,
-  `char as i64` on Rust). The self-hosting lexer now reads `lex(cs Vec(Char))` with `when c == '+'`
-  / `['(' | rest]` and `acc * 10 + __prim_char_code(c) - __prim_char_code('0')`, lowering and running
-  on all three targets. **Still future:** `range` *construction* over `Char` (`'A'..'Z'`) — the
-  ordinal-base machinery (ADR-0036 above) builds on this `Char` type.
+  is `Ord`+`Eq`). **Ordinal arithmetic widens to the `Int64` base** — `'9' - '0' : Int64` (not
+  `Char`; `9 ∉ Char`), matching the `range` arithmetic rule above. On the BEAM/JS a `Char` is already
+  an integer, so this is free; on Rust a `Char` operand of `+ - * rem div` is wrapped in
+  `__prim_char_code/1` (→ `char as i64`) by a lowering pre-pass. The explicit `__prim_char_code(c) :
+  Int64` conversion remains available. The self-hosting lexer reads `lex(cs Vec(Char))` with
+  `when c == '+'` / `['(' | rest]`, lowering and running on all three targets. **Still future:**
+  `range` *construction* over `Char` (`'A'..'Z'`) — the ordinal-base machinery (ADR-0036 above)
+  builds on this `Char` type.
 - ~~**Range arithmetic & coercion.**~~ **Resolved 2026-06-12: arithmetic widens to base.**
   `Digit + Digit : Int64` — *not* `Digit`, because `9 + 9 = 18 ∉ 0..9`; any in-bounds wrap or hidden
   `RangeError` on `+` would be hidden control flow (ADR-0035). Re-narrow explicitly with `Digit.of(18)`

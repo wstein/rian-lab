@@ -43,6 +43,16 @@ defmodule Rian.BeamTest do
       assert mod.to_digit(?9) == 9
     end
 
+    test "implicit Char ordinal arithmetic widens to Int64 and runs (ADR-0036)" do
+      # `c - '0'` needs no explicit conversion — a `Char` is a codepoint integer
+      # on the BEAM; the checker types the result `Int64`
+      {:ok, mod} =
+        Beam.load("def dval(c Char) Int64 := c - '0'", :rian_beam_char_arith)
+
+      assert mod.dval(?7) == 7
+      assert mod.dval(?0) == 0
+    end
+
     test "multi-clause with a `when` guard" do
       {:ok, mod} =
         Beam.load(

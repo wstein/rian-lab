@@ -634,6 +634,7 @@ defmodule Rian.Lower do
         ast =
           c.body
           |> body_ast(ctx)
+          |> widen_char_arith(char_vars(func.params, c.pats))
           |> resolve_rust_pats(ctx.meta)
           |> insert_borrows(Map.get(ctx, :funs, %{}))
           |> Core.from_expr()
@@ -684,6 +685,52 @@ defmodule Rian.Lower do
   defp catchall_pat?(%PWild{}), do: true
   defp catchall_pat?(%PVar{}), do: true
   defp catchall_pat?(_), do: false
+
+  # ── Char-arithmetic widening (ADR-0036, Rust only) ─────────────────────
+  # On Rust a `Char` is a native `char`, and ordinal arithmetic widens to the
+  # base `Int64` — so a `Char` operand of `+ - * rem div` is wrapped in
+  # `__prim_char_code/1` (lowered to `char as i64`). BEAM/JS need no pass: there a
+  # `Char` is already a codepoint integer, so the arithmetic runs as-is. `cvars`
+  # is the set of `Char`-typed names in scope for the clause.
+  @char_arith_ops ~w(+ - * rem div)
+
+  defp widen_char_arith({:bin, op, l, r}, cvars) when op in @char_arith_ops do
+    {:bin, op, wrap_char(widen_char_arith(l, cvars), cvars),
+     wrap_char(widen_char_arith(r, cvars), cvars)}
+  end
+
+  defp widen_char_arith(node, cvars),
+    do: Rian.Macro.map_node(node, &widen_char_arith(&1, cvars))
+
+  defp wrap_char({:char, _} = c, _cvars), do: {:call, {:id, "__prim_char_code"}, [c]}
+
+  defp wrap_char({:id, n} = v, cvars),
+    do: if(MapSet.member?(cvars, n), do: {:call, {:id, "__prim_char_code"}, [v]}, else: v)
+
+  defp wrap_char(other, _cvars), do: other
+
+  # names bound at `Char` type in a clause: a `Char` param matched by a variable,
+  # plus the element binders of a `Vec(Char)` param matched by a list/cons pattern
+  # (the head `c` in `[c | rest]` is a `Char`; the tail `rest` is a `Vec(Char)`).
+  defp char_vars(params, pats) do
+    params
+    |> Enum.zip(pats)
+    |> Enum.reduce(MapSet.new(), fn {p, pat}, acc ->
+      case p.type do
+        "Char" -> add_var(acc, pat)
+        "Vec(Char)" -> add_list_elem_vars(acc, pat)
+        _ -> acc
+      end
+    end)
+  end
+
+  defp add_var(acc, {:var, n}), do: MapSet.put(acc, n)
+  defp add_var(acc, _), do: acc
+
+  defp add_list_elem_vars(acc, {:list, elems, _tail}),
+    do: Enum.reduce(elems, acc, fn e, a -> add_var(a, e) end)
+
+  defp add_list_elem_vars(acc, _), do: acc
 
   # param positions that are an owned `iso Vec` destructured by a list/cons
   # pattern — those match `param.as_slice()` and get owned rebinds in each arm
