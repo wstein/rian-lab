@@ -902,6 +902,18 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, :rust),
     do: {"format!(\"{}{}\", #{p(a, 0, :rust)}, #{p(b, 0, :rust)})", 12}
 
+  # explicit overflow ops (ADR-0035 §3) on Rust — the native `i64` methods; this
+  # is the target where overflow actually bites (debug panic / release wrap), so
+  # `checked_add` returns `Option<i64>` (Rian `Option(Int64)`) directly.
+  defp emit(%ECall{fun: %EId{name: "__prim_wrapping_add"}, args: [a, b]}, :rust),
+    do: {"#{p(a, 12, :rust)}.wrapping_add(#{p(b, 0, :rust)})", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_saturating_add"}, args: [a, b]}, :rust),
+    do: {"#{p(a, 12, :rust)}.saturating_add(#{p(b, 0, :rust)})", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_checked_add"}, args: [a, b]}, :rust),
+    do: {"#{p(a, 12, :rust)}.checked_add(#{p(b, 0, :rust)})", 12}
+
   defp emit(%ECall{fun: f, args: args}, t),
     do: {p(f, 12, t) <> "(" <> Enum.map_join(args, ", ", &p(&1, 0, t)) <> ")", 12}
 

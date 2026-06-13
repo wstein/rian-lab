@@ -156,6 +156,51 @@ defmodule Rian.FeaturesTest do
       assert rust =~ "count(&"
     end
 
+    test "explicit overflow ops lower to the native i64 methods; checked -> Option<i64>" do
+      [{_, %{rust: rust}}] = Rian.Decl.compile(File.read!("examples/rian/prelude_int.rian"))
+
+      assert rust =~ "a.wrapping_add(b)"
+      assert rust =~ "a.saturating_add(b)"
+      assert rust =~ "a.checked_add(b)"
+      # the parametric prelude type lowers to a Rust generic (ADR-0047)
+      assert rust =~ "-> Option<i64>"
+    end
+
+    @tag :rust
+    test "the overflow ops compile and run under rustc (deterministic Int64 projection)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          [{_, %{rust: rust}}] = Rian.Decl.compile(File.read!("examples/rian/prelude_int.rian"))
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_int_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            rust <>
+              """
+              fn main() {
+                  use int::*;
+                  assert_eq!(wrapping_add(i64::MAX, 1), i64::MIN);
+                  assert_eq!(saturating_add(i64::MAX, 100), i64::MAX);
+                  assert_eq!(checked_add(2, 3), Some(5));
+                  assert_eq!(checked_add(i64::MAX, 1), None);
+                  println!("ok");
+              }
+              """
+          )
+
+          {_, 0} = System.cmd(rustc, ["-O", "--edition", "2021", src, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "ok"
+      end
+    end
+
     test "a type named in a `pub` fn's signature is emitted `pub` (cross-module usable)" do
       rust =
         File.read!("examples/rian/selfhost_lexer.rian")

@@ -263,6 +263,23 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
     do: "(#{expr_js(a)} + #{expr_js(b)})"
 
+  # explicit overflow ops (ADR-0035 §3) — Int64 is a BigInt in JS (arbitrary
+  # precision, like the BEAM bignum), so each op projects the true sum onto the
+  # signed 64-bit range: `BigInt.asIntN` wraps, an arrow clamps/checks once.
+  defp expr_js(%ECall{fun: %EId{name: "__prim_wrapping_add"}, args: [a, b]}),
+    do: "BigInt.asIntN(64, #{expr_js(a)} + #{expr_js(b)})"
+
+  defp expr_js(%ECall{fun: %EId{name: "__prim_saturating_add"}, args: [a, b]}),
+    do:
+      "(s => s > 9223372036854775807n ? 9223372036854775807n : " <>
+        "(s < -9223372036854775808n ? -9223372036854775808n : s))(#{expr_js(a)} + #{expr_js(b)})"
+
+  # `checked_add` -> `Option(Int64)`, the JS tagged array `["Some", s]` / `["None"]`
+  defp expr_js(%ECall{fun: %EId{name: "__prim_checked_add"}, args: [a, b]}),
+    do:
+      "(s => (s >= -9223372036854775808n && s <= 9223372036854775807n) ? " <>
+        "[\"Some\", s] : [\"None\"])(#{expr_js(a)} + #{expr_js(b)})"
+
   # the handful of stdlib calls the self-hosting spikes use, mapped to portable
   # JS (a stopgap until the portable prelude, ADR-0047, owns these):
   #   Map.get/put (immutable), String.to_charlist, List.to_string, :lists.reverse

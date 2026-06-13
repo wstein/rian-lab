@@ -50,7 +50,36 @@ defmodule Rian.Capability do
     "Vec<" <> owned(inner) <> ">"
   end
 
-  def owned(t), do: rust_name(t)
+  def owned(t) do
+    case parametric(t) do
+      # any other generic nominal `Name(A, B)` -> Rust `Name<A, B>` (e.g.
+      # `Option(Int64)` -> `Option<i64>`), each argument lowered in turn
+      {name, args} -> name <> "<" <> Enum.map_join(args, ", ", &owned/1) <> ">"
+      nil -> rust_name(t)
+    end
+  end
+
+  # `Name(A, B, …)` -> `{name, [A, B, …]}` splitting on top-level commas only
+  # (so nested generics like `Map(String, Vec(Int64))` parse); `nil` otherwise
+  defp parametric(t) do
+    case Regex.run(~r/^([A-Za-z_]\w*)\((.*)\)$/, t) do
+      [_, name, inner] -> {name, split_top_level(inner)}
+      _ -> nil
+    end
+  end
+
+  defp split_top_level(s) do
+    {parts, last, _} =
+      String.graphemes(s)
+      |> Enum.reduce({[], "", 0}, fn
+        "(", {acc, cur, d} -> {acc, cur <> "(", d + 1}
+        ")", {acc, cur, d} -> {acc, cur <> ")", d - 1}
+        ",", {acc, cur, 0} -> {[String.trim(cur) | acc], "", 0}
+        c, {acc, cur, d} -> {acc, cur <> c, d}
+      end)
+
+    Enum.reverse([String.trim(last) | parts])
+  end
 
   def borrowed("String"), do: "&str"
 

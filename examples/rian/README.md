@@ -113,6 +113,15 @@ compile + run on real BEAM bytecode:
   Rust `chars()`/`collect()`/`format!`) — all three lower and run. With it,
   [selfhost_lexer.rian](selfhost_lexer.rian) uses `__prim_str_chars` instead of
   host FFI, so its source is portable (it now runs on BEAM **and** under node).
+- [prelude_int.rian](prelude_int.rian) — **explicit overflow ops over `__prim_*`
+  (ADR-0035 §3).** Bare `+` on `Int64` is native-per-target (bignum on BEAM/JS, a
+  panicking/wrapping `i64` on Rust); when you need one deterministic answer
+  everywhere, `Int.wrapping_add`/`saturating_add`/`checked_add` project the sum
+  onto the 64-bit domain — Rust's native `i64::{wrapping,saturating,checked}_add`,
+  a bignum projection on BEAM/JS. `checked_add` returns `Option(Int64)`, surfacing
+  overflow in the type (no hidden control flow). Prefer a **subrange** (ADR-0036)
+  when the bound is known at the type level; these are the unbounded-`Int64`
+  fallback. Verified on BEAM, rustc, and node.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

@@ -497,6 +497,30 @@ defmodule Rian.BeamTest do
       assert m.get(counts, "b") == 1
     end
 
+    test "explicit overflow ops (ADR-0035 §3) project the bignum sum onto Int64" do
+      {:ok, m} = Beam.load(File.read!("examples/rian/prelude_int.rian"), :rian_beam_int_ovf)
+
+      max = 9_223_372_036_854_775_807
+      min = -9_223_372_036_854_775_808
+
+      # in-range arithmetic is unchanged across every op
+      assert m.wrapping_add(2, 3) == 5
+      assert m.saturating_add(2, 3) == 5
+      assert m.checked_add(2, 3) == {:some, 5}
+
+      # wrapping: two's-complement wrap (MAX + 1 == MIN), deterministic and total
+      assert m.wrapping_add(max, 1) == min
+      assert m.wrapping_add(min, -1) == max
+
+      # saturating: clamp to the representable extreme
+      assert m.saturating_add(max, 100) == max
+      assert m.saturating_add(min, -5) == min
+
+      # checked: overflow is surfaced in the type — `Option(Int64)` (`{:some,_}`/`:none`)
+      assert m.checked_add(max, 1) == :none
+      assert m.checked_add(min, -1) == :none
+    end
+
     test "a portable `List` library written in Rian (cons recursion, no FFI; ADR-0047)" do
       {:ok, m} = Beam.load(File.read!("examples/rian/selfhost_listlib.rian"), :rian_beam_listlib)
 

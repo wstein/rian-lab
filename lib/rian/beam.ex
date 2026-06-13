@@ -78,6 +78,11 @@ defmodule Rian.Beam do
 
   @ln 1
 
+  # signed 64-bit domain — the explicit overflow ops (ADR-0035 §3) project the
+  # true (bignum) sum back onto this range
+  @i64_max 9_223_372_036_854_775_807
+  @i64_min -9_223_372_036_854_775_808
+
   defmodule Unsupported do
     defexception [:message]
   end
@@ -260,6 +265,19 @@ defmodule Rian.Beam do
   # a `Char`'s codepoint — identity on the BEAM, where a `Char` *is* its integer
   defp expr_form(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}, s),
     do: expr_form(c, s)
+
+  # explicit overflow ops (ADR-0035 §3) — BEAM integers are bignums, so each op
+  # computes the true sum (once, via an immediately-applied `fun`) and projects it
+  # onto the signed 64-bit domain: wrap (two's complement), saturate (clamp), or
+  # check (`Option(Int64)` — the sum if in range, else `None`).
+  defp expr_form(%ECall{fun: %EId{name: "__prim_wrapping_add"}, args: [a, b]}, s),
+    do: i64_overflow(:wrapping, a, b, s)
+
+  defp expr_form(%ECall{fun: %EId{name: "__prim_saturating_add"}, args: [a, b]}, s),
+    do: i64_overflow(:saturating, a, b, s)
+
+  defp expr_form(%ECall{fun: %EId{name: "__prim_checked_add"}, args: [a, b]}, s),
+    do: i64_overflow(:checked, a, b, s)
 
   # named construction `Name(field: v, …)` builds a **struct**: a map keyed by
   # field-name atoms plus a `__struct__` tag (the snake-cased name). Field access
@@ -525,6 +543,51 @@ defmodule Rian.Beam do
   defp remote_call(mod, fun, args, scope) do
     {:call, @ln, {:remote, @ln, {:atom, @ln, mod}, {:atom, @ln, String.to_atom(fun)}},
      Enum.map(args, &expr_form(&1, scope))}
+  end
+
+  # `(fun (S) -> project(S) end)(A + B)` — bind the bignum sum once, then project
+  defp i64_overflow(kind, a, b, s) do
+    sum = {:op, @ln, :+, expr_form(a, s), expr_form(b, s)}
+    sv = {:var, @ln, :OvfSum}
+
+    {:call, @ln, {:fun, @ln, {:clauses, [{:clause, @ln, [sv], [], [i64_project(kind, sv)]}]}},
+     [sum]}
+  end
+
+  # two's-complement low 64 bits, then sign-correct (>= 2^63 -> subtract 2^64)
+  defp i64_project(:wrapping, sv) do
+    low = {:op, @ln, :band, sv, {:integer, @ln, 0xFFFFFFFFFFFFFFFF}}
+
+    {:case, @ln, {:op, @ln, :>=, low, {:integer, @ln, 0x8000000000000000}},
+     [
+       {:clause, @ln, [{:atom, @ln, true}], [],
+        [{:op, @ln, :-, low, {:integer, @ln, 0x10000000000000000}}]},
+       {:clause, @ln, [{:atom, @ln, false}], [], [low]}
+     ]}
+  end
+
+  # clamp into [min, max] via `erlang:max(erlang:min(S, MAX), MIN)`
+  defp i64_project(:saturating, sv) do
+    capped =
+      {:call, @ln, {:remote, @ln, {:atom, @ln, :erlang}, {:atom, @ln, :min}},
+       [sv, {:integer, @ln, @i64_max}]}
+
+    {:call, @ln, {:remote, @ln, {:atom, @ln, :erlang}, {:atom, @ln, :max}},
+     [capped, {:integer, @ln, @i64_min}]}
+  end
+
+  # the sum if it fits the signed 64-bit range, else the `Option` `None` — so
+  # `__prim_checked_add` has Rian type `Option(Int64)` (`{:some, S}` / `:none`)
+  defp i64_project(:checked, sv) do
+    in_range =
+      {:op, @ln, :andalso, {:op, @ln, :>=, sv, {:integer, @ln, @i64_min}},
+       {:op, @ln, :"=<", sv, {:integer, @ln, @i64_max}}}
+
+    {:case, @ln, in_range,
+     [
+       {:clause, @ln, [{:atom, @ln, true}], [], [{:tuple, @ln, [{:atom, @ln, :some}, sv]}]},
+       {:clause, @ln, [{:atom, @ln, false}], [], [{:atom, @ln, :none}]}
+     ]}
   end
 
   # a remote fun reference `&Mod.fun/arity` (the module/name/arity are literals)

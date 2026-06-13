@@ -131,6 +131,27 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "explicit overflow ops (ADR-0035 §3) project the BigInt sum onto Int64" do
+      js = JS.compile(File.read!("examples/rian/prelude_int.rian"))
+
+      # Int64 is a BigInt in JS; `BigInt.asIntN(64, …)` is the native wrap
+      assert js =~ "BigInt.asIntN(64,"
+      # checked -> the `Option` tagged array
+      assert js =~ ~s|["Some", s]|
+      assert js =~ ~s|["None"]|
+
+      probe =
+        "[wrapping_add(9223372036854775807n, 1n) === -9223372036854775808n, " <>
+          "saturating_add(9223372036854775807n, 100n) === 9223372036854775807n, " <>
+          "checked_add(2n, 3n)[1] === 5n, checked_add(9223372036854775807n, 1n)[0] === 'None'" <>
+          "].every(Boolean)"
+
+      case node_eval(js, probe) do
+        :no_node -> :ok
+        out -> assert out == "true"
+      end
+    end
+
     test "the self-hosting optimizer spike lowers to JS and folds under node (multi-target)" do
       js = JS.compile(File.read!("examples/rian/selfhost_opt.rian"))
 
