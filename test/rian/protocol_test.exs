@@ -40,6 +40,35 @@ defmodule Rian.ProtocolTest do
       assert m.show("hi") == "hi"
     end
 
+    test "a protocol impl over a STRUCT dispatches a named-constructed value (map_get guard regression)" do
+      # Regression for the bare `map_get/2` in the struct dispatcher guard, which is
+      # not a guard BIF ("cannot invoke local map_get/2 inside a guard"). The named
+      # construction `Point(x:, y:)` builds a `%{__struct__: :point, …}` map, so the
+      # guard's map branch (`:erlang.map_get`) must actually be exercised — it was
+      # not, the silent test hole the verification pass found.
+      m =
+        load(
+          """
+          struct Point(x Int64, y Int64)
+
+          protocol Norm do
+            def norm(self Self) Int64
+          end
+
+          impl Norm for Point do
+            def norm(p) := p.x + p.y
+          end
+
+          def go() Int64 := norm(Point(x: 3, y: 4))
+          """,
+          :rian_proto_struct
+        )
+
+      assert m.go() == 7
+      # a directly-constructed struct map dispatches through the same guard
+      assert m.norm(%{__struct__: :point, x: 10, y: 20}) == 30
+    end
+
     test "a two-arg protocol (Eq) dispatches on the first argument" do
       m =
         load(

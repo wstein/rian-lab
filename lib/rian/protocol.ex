@@ -278,8 +278,11 @@ defmodule Rian.Protocol do
   # a struct value is either a tagged tuple (positional construction `Name(a, b)`)
   # or a `:__struct__` map (named construction `Name(f: v)`) — accept both.
   defp struct_guard(tag) do
+    # bare `map_get/2` is NOT a guard BIF — `cannot invoke local map_get/2 inside a
+    # guard`. Use the auto-imported `is_map_key/2` to confirm the key, then the
+    # remote guard BIF `:erlang.map_get/2` to read it (both valid in guards).
     "(is_tuple(v0) and element(1, v0) == :#{tag}) or " <>
-      "(is_map(v0) and map_get(:__struct__, v0) == :#{tag})"
+      "(is_map(v0) and is_map_key(:__struct__, v0) and :erlang.map_get(:__struct__, v0) == :#{tag})"
   end
 
   defp snake(name), do: Rian.PatternLower.to_snake(name)

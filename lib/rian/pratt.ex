@@ -144,7 +144,7 @@ defmodule Rian.Pratt do
 
   # `&N` placeholder
   defp parse_capture([{:num, n} | rest]),
-    do: parse_postfix({:cap_arg, String.to_integer(n)}, rest)
+    do: parse_postfix({:cap_arg, int_of(n)}, rest)
 
   # `&( expr )` — anonymous capture; placeholders inside set the arity
   defp parse_capture([{:lparen} | rest]) do
@@ -159,7 +159,7 @@ defmodule Rian.Pratt do
     rest = expect_op(rest, "/")
 
     case rest do
-      [{:num, n} | r] -> {{:capture_named, path, String.to_integer(n)}, r}
+      [{:num, n} | r] -> {{:capture_named, path, int_of(n)}, r}
       other -> raise ArgumentError, "expected an integer arity after `/`: #{inspect(other)}"
     end
   end
@@ -340,10 +340,16 @@ defmodule Rian.Pratt do
     parse_arms(tokens, [{pat, guard, body} | acc])
   end
 
+  # integer value of a numeric lexeme — strips `_` separators the lexer preserves
+  # in the lexeme (`1_000` lexes as `{:num, "1_000"}`; `String.to_integer/1` would
+  # otherwise raise on the underscore — the lexer/parser contradiction the review
+  # flagged).
+  defp int_of(n), do: n |> String.replace("_", "") |> String.to_integer()
+
   # token-level pattern parser (arm heads): wildcard, integer, atom, tuple, var, constructor
   defp parse_pat([{:id, "_"} | rest]), do: {:wild, rest}
-  defp parse_pat([{:op, "-"}, {:num, n} | rest]), do: {{:lit, -String.to_integer(n)}, rest}
-  defp parse_pat([{:num, n} | rest]), do: {{:lit, String.to_integer(n)}, rest}
+  defp parse_pat([{:op, "-"}, {:num, n} | rest]), do: {{:lit, -int_of(n)}, rest}
+  defp parse_pat([{:num, n} | rest]), do: {{:lit, int_of(n)}, rest}
   # a `Char` literal pattern (ADR-0036) — a distinct node so a clause head can
   # match a `Char` by value (codepoint on BEAM/JS, native `char` on Rust)
   defp parse_pat([{:char, cp} | rest]), do: {{:char_lit, cp}, rest}

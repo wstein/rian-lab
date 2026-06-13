@@ -11,6 +11,22 @@ defmodule Rian.BeamTest do
       assert {:file, _} = :code.is_loaded(:rian_beam_double)
     end
 
+    test "underscore numeric literals lex AND compile, in expression and pattern position" do
+      # Regression: the lexer accepts `1_000` but `String.to_integer/1` on the
+      # lexeme would raise — the lexer/parser contradiction the verification pass
+      # found. The `_` is now stripped at every value conversion.
+      {:ok, mod} =
+        Beam.load(
+          "def k() Int64 := 1_000 + 2_500\n" <>
+            "def cls(1_000) Int64\ndef cls(1_000) := 1\ndef cls(_) := 0",
+          :rian_beam_underscore
+        )
+
+      assert mod.k() == 3500
+      assert mod.cls(1000) == 1
+      assert mod.cls(5) == 0
+    end
+
     test "typed bindings (ADR-0034 §1) lower and run — the annotation is erased" do
       {:ok, mod} =
         Beam.load(

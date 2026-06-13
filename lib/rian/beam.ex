@@ -731,6 +731,11 @@ defmodule Rian.Beam do
   defp cons([h | t], tail, f), do: {:cons, @ln, f.(h), cons(t, tail, f)}
 
   defp num_form(n) do
+    # strip the `_` separators the lexer keeps in a numeric lexeme (`1_000` /
+    # `1_000.5`) — `String.to_integer/float` would otherwise raise (the lexer
+    # accepts the underscore, so the emitter must too).
+    n = String.replace(n, "_", "")
+
     if String.contains?(n, ".") or String.match?(n, ~r/[eE]/),
       do: {:float, @ln, String.to_float(n)},
       else: {:integer, @ln, String.to_integer(n)}

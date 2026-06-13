@@ -143,65 +143,38 @@ defmodule Rian.Macro do
     rename(tmpl, ren)
   end
 
-  defp collect_binders({:block, stmts}) do
+  # Template-local binder NAMES — block `:=` binds and lambda params — found
+  # anywhere by a GENERIC walk over the AST. Previously this hand-rolled one clause
+  # per node type and drifted out of sync with `map_node`, so a binder nested under
+  # `:tuple`/`:struct_lit`/`:variant_lit`/`:with`/`:label` escaped renaming (the
+  # hygiene bug). The generic tuple/list recursion enumerates *no* node types, so it
+  # can never drift again; `binders_here/1` is the only node-specific knowledge.
+  defp collect_binders(node) when is_tuple(node),
+    do: binders_here(node) ++ Enum.flat_map(Tuple.to_list(node), &collect_binders/1)
+
+  defp collect_binders(node) when is_list(node), do: Enum.flat_map(node, &collect_binders/1)
+  defp collect_binders(_), do: []
+
+  defp binders_here({:block, stmts}) do
     Enum.flat_map(stmts, fn
-      {:bind, n, e} -> [n | collect_binders(e)]
-      {:typed_bind, n, _t, e} -> [n | collect_binders(e)]
-      {:expr, e} -> collect_binders(e)
+      {:bind, n, _} -> [n]
+      {:typed_bind, n, _, _} -> [n]
+      _ -> []
     end)
   end
 
-  defp collect_binders({:lambda, ps, b}),
-    do: Enum.map(ps, fn {n, _} -> n end) ++ collect_binders(b)
+  defp binders_here({:lambda, ps, _}), do: Enum.map(ps, fn {n, _} -> n end)
+  defp binders_here(_), do: []
 
-  defp collect_binders({:bin, _, l, r}), do: collect_binders(l) ++ collect_binders(r)
-  defp collect_binders({:unary, _, x}), do: collect_binders(x)
-
-  defp collect_binders({:call, f, a}),
-    do: collect_binders(f) ++ Enum.flat_map(a, &collect_binders/1)
-
-  defp collect_binders({:dot, o, _}), do: collect_binders(o)
-  defp collect_binders({:capture, b}), do: collect_binders(b)
-  defp collect_binders({:capture_named, p, _}), do: collect_binders(p)
-
-  defp collect_binders({:if, c, t, e}),
-    do: collect_binders(c) ++ collect_binders(t) ++ collect_binders(e)
-
-  defp collect_binders({:case, s, arms}) do
-    collect_binders(s) ++
-      Enum.flat_map(arms, fn {_p, g, b} ->
-        ((g && collect_binders(g)) || []) ++ collect_binders(b)
-      end)
-  end
-
-  defp collect_binders({:list_lit, es, tail}) do
-    Enum.flat_map(es, &collect_binders/1) ++
-      case tail do
-        {:tail, p} -> collect_binders(p)
-        _ -> []
-      end
-  end
-
-  defp collect_binders({:map_lit, ps}), do: Enum.flat_map(ps, fn {_, v} -> collect_binders(v) end)
-  defp collect_binders(_), do: []
-
+  # The actual rename happens at `{:id, x}`; the two binder-introducing nodes
+  # (`:block` binds, `:lambda` params) also rename their bound NAMES. EVERYTHING
+  # else just recurses into children — which is exactly `map_node`, so the generic
+  # fallback covers every node `map_node` knows (including the tuple/struct_lit/
+  # variant_lit/with/label that the old hand-rolled clauses missed). No drift.
   defp rename({:id, x}, ren), do: {:id, Map.get(ren, x, x)}
-  defp rename({:bin, op, l, r}, ren), do: {:bin, op, rename(l, ren), rename(r, ren)}
-  defp rename({:unary, op, x}, ren), do: {:unary, op, rename(x, ren)}
-  defp rename({:call, f, a}, ren), do: {:call, rename(f, ren), Enum.map(a, &rename(&1, ren))}
-  defp rename({:dot, o, n}, ren), do: {:dot, rename(o, ren), n}
-  defp rename({:capture, b}, ren), do: {:capture, rename(b, ren)}
-  defp rename({:capture_named, p, a}, ren), do: {:capture_named, rename(p, ren), a}
 
   defp rename({:lambda, ps, b}, ren),
     do: {:lambda, Enum.map(ps, fn {n, t} -> {Map.get(ren, n, n), t} end), rename(b, ren)}
-
-  defp rename({:if, c, t, e}, ren), do: {:if, rename(c, ren), rename(t, ren), rename(e, ren)}
-
-  defp rename({:case, s, arms}, ren),
-    do:
-      {:case, rename(s, ren),
-       Enum.map(arms, fn {p, g, b} -> {p, g && rename(g, ren), rename(b, ren)} end)}
 
   defp rename({:block, stmts}, ren) do
     {:block,
@@ -212,16 +185,5 @@ defmodule Rian.Macro do
      end)}
   end
 
-  defp rename({:list_lit, es, tail}, ren) do
-    {:list_lit, Enum.map(es, &rename(&1, ren)),
-     case tail do
-       {:tail, p} -> {:tail, rename(p, ren)}
-       _ -> nil
-     end}
-  end
-
-  defp rename({:map_lit, ps}, ren),
-    do: {:map_lit, Enum.map(ps, fn {k, v} -> {k, rename(v, ren)} end)}
-
-  defp rename(leaf, _ren), do: leaf
+  defp rename(node, ren), do: map_node(node, &rename(&1, ren))
 end

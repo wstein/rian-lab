@@ -140,6 +140,18 @@ defmodule Rian.MacroTest do
   end
 
   describe "hygiene over every AST node kind (collect_binders/rename, ADR-0030)" do
+    test "tuple: a binder nested inside a `{…}` literal is renamed (drift regression)" do
+      # Regression: the old hand-rolled collect_binders/rename had no `:tuple` clause,
+      # so a block binder nested inside a tuple escaped renaming. The generic walk
+      # (over map_node) now covers it.
+      out = expand1("m", ["x"], "{1, if true do t := 5; t + x else 0 end}", "m(99)")
+
+      assert {:tuple, [{:num, "1"}, {:if, _, {:block, [{:bind, t, _}, {:expr, body}]}, _}]} = out
+      assert t =~ ~r/^t__h\d+$/
+      # the nested use of `t` is renamed consistently; the macro param `x` is not
+      assert {:bin, "+", {:id, ^t}, {:num, "99"}} = body
+    end
+
     test "lambda: param + body are renamed (collect_binders/rename lambda)" do
       out = expand1("m", ["x"], "(u) -> u + t", "m(99)")
       # The only template-local binder is the lambda param `u`, which must be
