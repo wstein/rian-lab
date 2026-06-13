@@ -346,9 +346,13 @@ over time. The proof is a four-stage ladder:
   Rian.Decl's tuples; list nil/cons chains are flattened to `{:list,…}`/`{:list_lit,…}`
   in the projection (the shared `{:tail,…}` tag would otherwise collide), and AST clause
   guards reach the backend via a `Pratt.parse/1` passthrough (symmetric with the macro
-  `parse_body`). **Remaining (the long tail of `Rian.Decl`):** `mod`/`struct`/`alias`/
-  `protocol`/generics/doc-comments, and the portable `Enum`/`Map`/`String` stdlib
-  breadth (ADR-0047).
+  `parse_body`). It now also parses **`struct` records** (field access `p.x` +
+  labeled construction `Point(x: 0, y: 0)`) and **`mod` nesting** (incl. `pub def`):
+  a struct program and a `mod` compiled to its **own BEAM module** (`Calc.double`/
+  `Calc.quad`, local cross-call) both run via `Rian.Beam.load_ir`/`load_program_ir`.
+  **Remaining (the last of the `Rian.Decl` tail):** string/char clause patterns,
+  `alias`/`const`/`protocol`/`impl`/generics/doc-comments, block (`do … end`) bodies,
+  and the portable `Enum`/`Map`/`String` stdlib breadth (ADR-0047).
 - **Stage 3 — bootstrap fixed point** (future; **determinism prerequisite verified**):
   the whole compiler in Rian; compile its source with the Elixir host → v1, compile
   with v1 → v2, assert **v1 == v2** (bit-identical `.beam`). The canonical terminus.

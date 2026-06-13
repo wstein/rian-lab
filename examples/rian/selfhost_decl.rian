@@ -9,15 +9,18 @@
 #
 # Forms covered:
 #   type Name := V1 | V2(T, …)                         sum declarations
+#   struct Name(field Type, …)                         product (record) types
+#   mod Name do … end                                  module nesting (incl. `pub def`)
 #   def name(p [cap] Type, …) Ret := expr              single typed clause
-#   def name(p [cap] Type, …) Ret                      bodiless signature
-#   def name(pat, …) := expr                           pattern clause (multi-clause)
-#   patterns: _  ·  var  ·  Int literal  ·  Ctor(pat, …)  ·  nullary Ctor (nested)
-#   capabilities: val / iso / ref / tag (default val)
+#   def name(pat, …) [when g] := expr                  pattern clause (multi-clause)
+#   patterns: _ · var · Int literal · Ctor(pat, …) · cons/list [] / [h | t] (nested)
+#   capabilities: val / iso / ref / tag (default val); parametric types `Vec(T)`
+#   exprs: binops (precedence climbing) · prefix - / not · calls · `.field` access
+#          · labeled construction `Name(f: v)` · list construction `[x | acc]`
 #
-# Out of slice (the long tail of Rian.Decl): `when` guards, parametric param types
-# (`Vec(T)`), cons/list/string/char patterns, negative-literal patterns, block
-# bodies, and `mod`/`struct`/`alias`/`const`/`protocol`/`impl`/`forall`/doc-comments.
+# Out of slice (the remaining long tail of Rian.Decl): string/char clause patterns,
+# negative-literal patterns, `alias`/`const`/`protocol`/`impl`/`forall` generics,
+# doc-comments, and block (`do … end`) function bodies.
 # ---------------------------------------------------------------------------
 
 mod SelfhostDecl do
@@ -31,6 +34,7 @@ mod SelfhostDecl do
   type Expr :=
       Num(String) | Id(String) | Bin(String, Expr, Expr)
     | Unary(String, Expr) | Call(Expr, Vec(Expr))
+    | Dot(Expr, String) | Label(String, Expr)
     | NilE | ConsE(Expr, Expr) | EErr
 
   # clause PATTERNS — Wild/Var/Lit/Ctor lower straight to Rian.Decl's tuples
@@ -43,12 +47,16 @@ mod SelfhostDecl do
   type Variant := V(String, Vec(String))
   type Param := Par(String, String, String)
   type PType := PT(String, Vec(Tok))
+  # `pub?` (a Bool) is carried on the function head (DFunc/DSig) so `pub def`
+  # inside a `mod` projects to `Func.pub? = true` (exported on the BEAM).
   type Decl :=
       DType(String, Vec(Variant))
-    | DFunc(String, Vec(Param), String, Expr)
-    | DSig(String, Vec(Param), String)
+    | DStruct(String, Vec(Param))
+    | DFunc(Bool, String, Vec(Param), String, Expr)
+    | DSig(Bool, String, Vec(Param), String)
     | DClause(String, Vec(Pat), Expr)
     | DClauseG(String, Vec(Pat), Expr, Expr)
+    | DMod(String, Vec(Decl))
     | DErr
 
   # result pairs (a value + the unconsumed tokens)
@@ -62,6 +70,7 @@ mod SelfhostDecl do
   type Paren := Paren(Vec(Tok), Vec(Tok))
   type PatRes := PP(Pat, Vec(Tok))
   type PatList := PL(Vec(Pat), Vec(Tok))
+  type ModBody := MB(Vec(Tok), Vec(Tok))
 
   # ── program: declarations separated by significant newlines ──────────────
   pub def parse_program(ts Vec(Tok)) Vec(Decl)
@@ -73,11 +82,51 @@ mod SelfhostDecl do
     end
   end
   pub def parse_program([TKw("def") | rest])
-    case parse_def(rest) do
+    case parse_def(false, rest) do
       DR(d, rest2) -> [d | parse_program(rest2)]
     end
   end
+  pub def parse_program([TKw("pub"), TKw("def") | rest])
+    case parse_def(true, rest) do
+      DR(d, rest2) -> [d | parse_program(rest2)]
+    end
+  end
+  pub def parse_program([TKw("struct") | rest])
+    case parse_struct(rest) do
+      DR(d, rest2) -> [d | parse_program(rest2)]
+    end
+  end
+  pub def parse_program([TKw("mod"), TId(name), TKw("do") | rest])
+    case take_mod_body(rest, []) do
+      MB(inner, rest2) -> [DMod(name, parse_program(inner)) | parse_program(rest2)]
+    end
+  end
   pub def parse_program([_ | rest]) := parse_program(rest)
+
+  # struct Name(field Type, …) — a product type; fields reuse the param grammar.
+  def parse_struct(ts Vec(Tok)) DeclRes
+  def parse_struct([TId(name), TLP | rest])
+    case take_parens(rest, 0, []) do
+      Paren(inside, after) -> DR(DStruct(name, parse_params(inside)), after)
+    end
+  end
+  def parse_struct(ts) := DR(DErr, ts)
+
+  # collect a `mod` body up to its matching `end` (a block `end` from a nested
+  # `if`/`case` is balanced by its `do`); returns (inner-tokens, rest).
+  def take_mod_body(ts Vec(Tok), acc Vec(Tok)) ModBody
+  def take_mod_body([TKw("do") | rest], acc) := take_mod_body_do(rest, [TKw("do") | acc], 1)
+  def take_mod_body([TKw("end") | rest], acc) := MB(rev_tok(acc, []), rest)
+  def take_mod_body([t | rest], acc) := take_mod_body(rest, [t | acc])
+  def take_mod_body([], acc) := MB(rev_tok(acc, []), [])
+
+  # inside a nested do-block: track depth so the block's `end` doesn't close the mod.
+  def take_mod_body_do(ts Vec(Tok), acc Vec(Tok), depth Int64) ModBody
+  def take_mod_body_do([TKw("do") | rest], acc, depth) := take_mod_body_do(rest, [TKw("do") | acc], depth + 1)
+  def take_mod_body_do([TKw("end") | rest], acc, 1) := take_mod_body(rest, [TKw("end") | acc])
+  def take_mod_body_do([TKw("end") | rest], acc, depth) := take_mod_body_do(rest, [TKw("end") | acc], depth - 1)
+  def take_mod_body_do([t | rest], acc, depth) := take_mod_body_do(rest, [t | acc], depth)
+  def take_mod_body_do([], acc, depth) := MB(rev_tok(acc, []), [])
 
   # ── type Name := variant ('|' variant)* ──────────────────────────────────
   def parse_type(ts Vec(Tok)) DeclRes
@@ -119,13 +168,13 @@ mod SelfhostDecl do
   def parse_typelist(ts) := TL([], ts)
 
   # ── def: split the parenthesized head, then classify by what follows ──────
-  def parse_def(ts Vec(Tok)) DeclRes
-  def parse_def([TId(name), TLP | rest])
+  def parse_def(pb Bool, ts Vec(Tok)) DeclRes
+  def parse_def(pb, [TId(name), TLP | rest])
     case take_parens(rest, 0, []) do
-      Paren(inside, after) -> classify_def(name, inside, after)
+      Paren(inside, after) -> classify_def(pb, name, inside, after)
     end
   end
-  def parse_def(ts) := DR(DErr, ts)
+  def parse_def(pb, ts) := DR(DErr, ts)
 
   # collect tokens up to the matching `)` (depth 0), returning (inside, rest).
   def take_parens(ts Vec(Tok), depth Int64, acc Vec(Tok)) Paren
@@ -137,8 +186,8 @@ mod SelfhostDecl do
 
   # `(pats) when g := body` / `(pats) := body` -> a pattern clause; `(params) Ret
   # := body` -> a typed single clause; `(params) Ret` -> a bodiless signature.
-  def classify_def(name String, inside Vec(Tok), after Vec(Tok)) DeclRes
-  def classify_def(name, inside, [TKw("when") | rest])
+  def classify_def(pb Bool, name String, inside Vec(Tok), after Vec(Tok)) DeclRes
+  def classify_def(pb, name, inside, [TKw("when") | rest])
     case parse_bp(0, rest) do
       P(g, [TOp(":=") | body]) ->
         case parse_bp(0, body) do
@@ -147,21 +196,21 @@ mod SelfhostDecl do
       P(_, other) -> DR(DErr, other)
     end
   end
-  def classify_def(name, inside, [TOp(":=") | body])
+  def classify_def(pb, name, inside, [TOp(":=") | body])
     case parse_bp(0, body) do
       P(b, rest) -> DR(DClause(name, parse_pats(inside), b), rest)
     end
   end
-  def classify_def(name, inside, [TId(rb) | rb_rest])
+  def classify_def(pb, name, inside, [TId(rb) | rb_rest])
     case parse_ptype([TId(rb) | rb_rest]) do
       PT(ret, [TOp(":=") | body]) ->
         case parse_bp(0, body) do
-          P(b, rest) -> DR(DFunc(name, parse_params(inside), ret, b), rest)
+          P(b, rest) -> DR(DFunc(pb, name, parse_params(inside), ret, b), rest)
         end
-      PT(ret, rest) -> DR(DSig(name, parse_params(inside), ret), rest)
+      PT(ret, rest) -> DR(DSig(pb, name, parse_params(inside), ret), rest)
     end
   end
-  def classify_def(name, inside, after) := DR(DErr, after)
+  def classify_def(pb, name, inside, after) := DR(DErr, after)
 
   # ── parameters: `name [cap] Type` (cap in val/iso/ref/tag, default val) ────
   def parse_params(ts Vec(Tok)) Vec(Param)
@@ -336,7 +385,9 @@ mod SelfhostDecl do
     end
   end
 
+  # postfix := '.' field (field access) | '(' args ')' (call), repeated
   def parse_postfix(node Expr, ts Vec(Tok)) Parse
+  def parse_postfix(node, [TOp("."), TId(field) | rest]) := parse_postfix(Dot(node, field), rest)
   def parse_postfix(node, [TLP | rest])
     case parse_args(rest) do
       AP(args, rest2) -> parse_postfix(Call(node, args), rest2)
@@ -344,8 +395,14 @@ mod SelfhostDecl do
   end
   def parse_postfix(node, ts) := P(node, ts)
 
+  # args := ε | arg (',' arg)*  where arg := Id ':' expr (labeled) | expr
   def parse_args(ts Vec(Tok)) Args
   def parse_args([TRP | rest]) := AP([], rest)
+  def parse_args([TId(name), TOp(":") | rest])
+    case parse_bp(0, rest) do
+      P(v, after) -> finish_arg(Label(name, v), after)
+    end
+  end
   def parse_args(ts)
     case parse_bp(0, ts) do
       P(a, rest) -> finish_arg(a, rest)

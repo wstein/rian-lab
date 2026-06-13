@@ -3,7 +3,7 @@ defmodule Rian.DeclFixpointTest do
   use ExUnit.Case, async: false
 
   alias Rian.{Beam, Decl, Lexer, Pratt}
-  alias Rian.IR.{Clause, Field, Func, Param, Type, Variant}
+  alias Rian.IR.{Clause, Field, Func, Mod, Param, Struct, Type, Variant}
 
   # Stage 2 of the bootstrap ladder (ADR-0063) for **declarations**: the
   # Rian-written front-end (examples/rian/selfhost_decl.rian) parses `type` sums
@@ -13,11 +13,12 @@ defmodule Rian.DeclFixpointTest do
   # Stage-2 thesis: a Rian front-end producing IR the existing backend consumes,
   # with no Elixir parse in the loop.
   #
-  # Covers: `type` sums; `def` functions (single + multi-clause); clause patterns
-  # (var/lit/ctor/wildcard/cons-list); capabilities (val/iso/ref/tag); parametric
-  # param/return types (`Vec(T)`); list construction; and `when` guards. Remaining
-  # long tail of `Rian.Decl`: `mod`/`struct`/`alias`/`protocol`/generics/doc-comments
-  # and the portable stdlib breadth — see ADR-0063.
+  # Covers: `type` sums; `struct` records; `mod` nesting (incl. `pub def`); `def`
+  # functions (single + multi-clause); clause patterns (var/lit/ctor/wildcard/
+  # cons-list); capabilities (val/iso/ref/tag); parametric types (`Vec(T)`); list
+  # construction; `.field` access + labeled construction; and `when` guards.
+  # Remaining long tail of `Rian.Decl`: string/char clause patterns, `alias`/
+  # `protocol`/generics/doc-comments, and the portable stdlib breadth — see ADR-0063.
 
   setup_all do
     {:ok, fe} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :rian_decl_frontend)
@@ -90,6 +91,8 @@ defmodule Rian.DeclFixpointTest do
   defp ce({:bin, op, l, r}), do: {:bin, op, ce(l), ce(r)}
   defp ce({:unary, op, x}), do: {:unary, op, ce(x)}
   defp ce({:call, f, args}), do: {:call, ce(f), Enum.map(args, &ce/1)}
+  defp ce({:dot, e, field}), do: {:dot, ce(e), field}
+  defp ce({:label, name, v}), do: {:label, name, ce(v)}
   defp ce(leaf), do: leaf
 
   defp flat_e(:nil_e), do: {[], nil}
@@ -102,13 +105,13 @@ defmodule Rian.DeclFixpointTest do
 
   defp flat_e({:cons_e, h, t}), do: {[h], {:tail, ce(t)}}
 
-  defp func(name, params, ret, clauses) do
+  defp func(name, params, ret, clauses, pub) do
     %Func{
       name: name,
       params: Enum.map(params, &param/1),
       ret: ret,
       clauses: clauses,
-      pub?: false,
+      pub?: pub,
       tvars: [],
       bounds: %{},
       doc: nil,
@@ -118,23 +121,47 @@ defmodule Rian.DeclFixpointTest do
     }
   end
 
+  defp to_struct({:d_struct, name, params}),
+    do: %Struct{
+      name: name,
+      fields: Enum.map(params, fn {:par, n, _, t} -> %Field{label: n, type: t} end)
+    }
+
+  defp to_mod({:d_mod, name, decls}) do
+    ir = group(decls)
+
+    %Mod{
+      name: name,
+      types: Enum.filter(ir, &match?(%Type{}, &1)),
+      structs: Enum.filter(ir, &match?(%Struct{}, &1)),
+      funcs: Enum.filter(ir, &match?(%Func{}, &1)),
+      uses: [],
+      ranges: [],
+      consts: [],
+      doc: nil,
+      targets: nil
+    }
+  end
+
   # group a flat decl list into IR: a `d_sig` absorbs the following `d_clause`s of
   # the same name (multi-clause); a `d_func` is a single typed clause.
   defp group([]), do: []
   defp group([{:d_type, _, _} = t | rest]), do: [to_type(t) | group(rest)]
+  defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
+  defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
-  defp group([{:d_func, name, params, ret, body} | rest]) do
+  defp group([{:d_func, pub, name, params, ret, body} | rest]) do
     pats = Enum.map(params, fn {:par, n, _, _} -> {:var, n} end)
-    [func(name, params, ret, [clause(pats, body)]) | group(rest)]
+    [func(name, params, ret, [clause(pats, body)], pub) | group(rest)]
   end
 
-  defp group([{:d_sig, name, params, ret} | rest]) do
+  defp group([{:d_sig, pub, name, params, ret} | rest]) do
     {cls, rest2} =
       Enum.split_while(rest, fn d ->
         match?({:d_clause, ^name, _, _}, d) or match?({:d_clause_g, ^name, _, _, _}, d)
       end)
 
-    [func(name, params, ret, Enum.map(cls, &to_clause/1)) | group(rest2)]
+    [func(name, params, ret, Enum.map(cls, &to_clause/1), pub) | group(rest2)]
   end
 
   defp to_clause({:d_clause, _, pats, body}), do: clause(pats, body)
@@ -152,9 +179,9 @@ defmodule Rian.DeclFixpointTest do
     %{
       types: Enum.filter(ir, &match?(%Type{}, &1)),
       funcs: Enum.filter(ir, &match?(%Func{}, &1)),
-      structs: [],
-      ranges: [],
-      mods: []
+      structs: Enum.filter(ir, &match?(%Struct{}, &1)),
+      mods: Enum.filter(ir, &match?(%Mod{}, &1)),
+      ranges: []
     }
   end
 
@@ -201,8 +228,18 @@ defmodule Rian.DeclFixpointTest do
     # `when` guards
     "def clamp(n Int64) Int64\n" <>
       "def clamp(n) when n < 0 := 0\n" <>
-      "def clamp(n) := n"
+      "def clamp(n) := n",
+    # struct declarations + field access + labeled construction
+    "struct Point(x Int64, y Int64)",
+    "struct Point(x Int64, y Int64)\n" <>
+      "def mag(p Point) Int64 := p.x * p.x + p.y * p.y\n" <>
+      "def origin() Point := Point(x: 0, y: 0)",
+    # mod with a pub def
+    "mod Calc do\n  pub def double(n Int64) Int64 := n * 2\nend",
+    "mod M do\n  type T := A | B\n  pub def f(n Int64) Int64 := n + 1\nend"
   ]
+
+  defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}
 
   describe "Stage 2 declarations — the Rian front-end builds the same IR as Rian.Decl.parse" do
     test "type sums and def functions project to IR equal to Rian.Decl.parse", %{frontend: fe} do
@@ -211,9 +248,13 @@ defmodule Rian.DeclFixpointTest do
         ref = Decl.parse(src)
 
         assert prog.types == ref.types, "types diverged from Rian.Decl.parse on #{inspect(src)}"
+        assert prog.structs == ref.structs, "structs diverged on #{inspect(src)}"
 
         assert Enum.map(prog.funcs, &norm_func/1) == Enum.map(ref.funcs, &norm_func/1),
                "funcs diverged from Rian.Decl.parse on #{inspect(src)}"
+
+        assert Enum.map(prog.mods, &norm_mod/1) == Enum.map(ref.mods, &norm_mod/1),
+               "mods diverged from Rian.Decl.parse on #{inspect(src)}"
       end
     end
   end
@@ -306,6 +347,39 @@ defmodule Rian.DeclFixpointTest do
       {:ok, mod} = Beam.load_ir(prog, :RianStage2Clamp)
       assert mod.clamp(-5) == 0
       assert mod.clamp(7) == 7
+    end
+
+    test "a STRUCT program (construction + field access) runs", %{frontend: fe} do
+      src = """
+      struct Point(x Int64, y Int64)
+      def mag(p Point) Int64 := p.x * p.x + p.y * p.y
+      def origin() Point := Point(x: 0, y: 0)
+      def shift(p Point) Int64 := mag(p) + p.x
+      """
+
+      prog = front_decls(fe, src) |> to_prog()
+      {:ok, mod} = Beam.load_ir(prog, :RianStage2Struct)
+      # a struct value is a tagged map; construct one and read it back
+      pt = mod.origin()
+      assert mod.mag(%{__struct__: :point, x: 3, y: 4}) == 25
+      assert mod.shift(%{__struct__: :point, x: 3, y: 4}) == 28
+      assert pt.x == 0 and pt.y == 0
+    end
+
+    test "a MOD declaration compiles to its own BEAM module and runs", %{frontend: fe} do
+      src = """
+      mod Calc do
+        pub def double(n Int64) Int64 := n * 2
+        pub def quad(n Int64) Int64 := double(double(n))
+      end
+      """
+
+      prog = front_decls(fe, src) |> to_prog()
+      [mod] = Beam.load_program_ir(prog)
+      assert mod == Calc
+      assert Calc.double(21) == 42
+      # quad calls double — a local call within the compiled mod
+      assert Calc.quad(5) == 20
     end
   end
 end

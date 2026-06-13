@@ -182,6 +182,40 @@ defmodule Rian.Beam do
     {:ok, module}
   end
 
+  @doc """
+  Compile a pre-built **multi-module** program IR (each `%IR.Mod{}` -> its own
+  `Elixir.<Mod>` BEAM module) — the Stage-2 seam for a Rian front-end that parses
+  `mod` declarations (see `compile_program/1`, IR form).
+  """
+  def compile_program_ir(prog) do
+    top = Map.get(prog, :ranges, [])
+
+    prog
+    |> Map.get(:mods, [])
+    |> Enum.map(fn m ->
+      {:ok, atom, bin} =
+        beam_for(
+          :"Elixir.#{m.name}",
+          m.funcs,
+          top ++ Map.get(m, :ranges, []),
+          Map.get(m, :types, []),
+          Map.get(m, :structs, [])
+        )
+
+      {atom, bin}
+    end)
+  end
+
+  @doc "Compile and load a multi-module program IR (see `compile_program_ir/1`)."
+  def load_program_ir(prog) do
+    prog
+    |> compile_program_ir()
+    |> Enum.map(fn {atom, bin} ->
+      {:module, ^atom} = :code.load_binary(atom, ~c"#{atom}.beam", bin)
+      atom
+    end)
+  end
+
   # build one module's `.beam` from its function list. `ranges` (a list of
   # `%IR.Range{}`) lets `Name.of(n)` construction desugar (ADR-0036). `types` and
   # `structs` let `-spec` attributes expand sum/struct types (Stage 0.5).
