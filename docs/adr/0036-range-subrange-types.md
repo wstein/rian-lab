@@ -115,10 +115,10 @@ on the `@type` spec and first-match clauses; no shim needed.
 - **Lands in slices** (like ADR-0033): (a) emitter range/`Char` lowering + the finite-signature path
   in `Exhaustiveness` are implementable and testable now against hand-built IR; (b) spec + example
   rewrites land now as authoritative surface (this ADR + [02_types_match.rian](../../examples/rian/02_types_match.rian));
-  (c) `range` **parsing** lands with the declaration parser. **`Char`-literal lexing/parsing is
-  done** — `Rian.Lexer` scans `'…'` to a `{:char, codepoint}` token and `Rian.Pratt` desugars it
-  (expression and pattern position) to its codepoint integer; the self-hosting lexer now reads
-  `when c == '+'` / `['(' | rest]`. See the implementation note under Open items.
+  (c) `range` **parsing** lands with the declaration parser. **The `Char` literal *and* the distinct
+  `Char` type are done** — `Rian.Lexer` scans `'…'`, `Rian.Pratt` parses a distinct `{:char, cp}` /
+  `{:char_lit, cp}` node, and the checker types it `Char` (lowered native per target). See the
+  implementation note under Open items for the full design.
 - **`range` is a bounded, finite opaque type** ([ADR-0043](0043-opaque-types.md)). This ADR's
   "representation, not newtype" mechanism *is* opacity; `range` adds a bounds invariant (fallible
   `T.of`) and a finite signature (exhaustiveness) on top of `opaque T := Base`. No rewrite here —
