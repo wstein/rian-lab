@@ -40,6 +40,10 @@ defmodule RianLab.MixProject do
       source_ref: "v#{@version}",
       # html for comparison; Rian.DocFormatter is the Starlight production path
       formatters: ["html", Rian.DocFormatter],
+      # the docs tooling itself is not public API — keep it out of the docs
+      filter_modules: fn module, _meta ->
+        module not in [Rian.DocFormatter, Rian.DocFormatter.MDX]
+      end,
       # Explicit slugs/titles for the same-named READMEs so they do not collide
       # (root README.md keeps the `readme` slug that `main: "readme"` resolves to).
       extras:
