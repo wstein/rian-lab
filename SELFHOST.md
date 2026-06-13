@@ -250,9 +250,31 @@ with ordinal arithmetic (`acc * 10 + c - '0'`), accumulates a name as a
 by string-literal clause heads. It compiles to real `.beam` and **agrees with
 `Rian.Lexer.expr_tokens/1`** over a corpus of identifiers, keywords, integers,
 operators, and parens (the slice-1 fixpoint test). Direct evidence that the
-`Char`/range work unblocked the port. Next slices: strings, floats/`_`
-separators, the full operator set, and significant newlines — each widening the
-corpus.
+`Char`/range work unblocked the port.
+
+**Slices 2–4 widened the vocabulary, each fixpoint-locked with teeth:**
+
+- **Slice 2 — comparison + word operators.** `< > <= >= == !=` (two-char
+  longest-match via `[a, b | rest]` peeking) and the word-operators
+  `and or not in rem div` (which the reference lexes as `{:op, w}`, not keywords),
+  plus the full 16-keyword set.
+- **Slice 3 — string and char literals.** `"…"` and `'X'` scanned char-by-char
+  (`scan_str`/`scan_char`), the body rebuilt via `Prim.str_from_chars`, the char's
+  codepoint via `Prim.char_code`.
+- **Slice 4 — number lexemes.** A model change: `TNum` now carries the source
+  *lexeme* (a `String`), not a folded `Int64`, because the reference keeps the
+  text — `1_000` stays `1_000` — and applies `norm_num` (a bare exponent gains
+  `.0` and lowercases its marker: `1e9`/`1E9` → `1.0e9`; a decimal keeps its
+  marker, `1.0E9`). The scanner accumulates the lexeme char-by-char across
+  `lex_int`/`lex_frac`/`lex_exp`, mirroring `Rian.Lexer.@num_re`
+  (`\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?`). It agrees with the reference over
+  `_` separators, decimals, and signed/unsigned exponents (the slice-4 corpus +
+  a number-lexeme teeth test).
+
+**Next:** the jump from `expr_tokens/1` to the full **`tokenize/1`** stream that
+`Rian.Decl` actually consumes — **significant newlines (`{:nl}`), `;`, and the
+`@annot` lane** — plus escapes inside literals and brackets. That parity is the
+gateway to porting the *declaration* front-end, not just the expression lexer.
 
 ## The whole compiler as one Rian artifact
 
