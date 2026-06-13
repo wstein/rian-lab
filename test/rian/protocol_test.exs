@@ -92,6 +92,28 @@ defmodule Rian.ProtocolTest do
       assert atom.show(true) == "T"
       assert atom.show(false) == "F"
     end
+
+    test "a method with a parametric-typed param (comma in the type) parses correctly" do
+      # `Map(String, Int64)` is ONE parameter — the comma inside it must not be
+      # counted as a parameter separator (paren-aware split)
+      m =
+        load(
+          """
+          protocol Keyed do
+            def pick(self Self, m Map(String, Int64)) Int64
+          end
+
+          impl Keyed for Int64 do
+            def pick(self, m) := self
+          end
+
+          def call(n Int64) Int64 := pick(n, %{})
+          """,
+          :rian_proto_parametric
+        )
+
+      assert m.call(42) == 42
+    end
   end
 
   describe "the type gate accepts a well-typed protocol program" do
