@@ -62,13 +62,16 @@ defmodule Rian.FixpointTest do
   defp project_v2({:t_id, s}), do: {:id, s}
   defp project_v2({:t_kw, s}), do: {:kw, s}
   defp project_v2({:t_op, s}), do: {:op, s}
+  defp project_v2({:t_str, s}), do: {:str, s}
+  defp project_v2({:t_char, cp}), do: {:char, cp}
   defp project_v2(:tlp), do: {:lparen}
   defp project_v2(:trp), do: {:rparen}
   defp project_v2(other), do: project(other)
 
-  # within slices 1-2: integers, identifiers, all 16 keywords, the comparison
+  # within slices 1-3: integers, identifiers, all 16 keywords, the comparison
   # operators (`< > <= >= == !=`), the word-operators (`and or not in rem div`),
-  # `+ - * /`, parens, and spaces. (Out of slice: literals, floats, brackets.)
+  # `+ - * /`, parens, spaces, **string** (`"…"`) and **char** (`'X'`) literals.
+  # (Out of slice: floats, escapes in literals, brackets.)
   @corpus_v2 [
     "foo",
     "x_1",
@@ -86,11 +89,16 @@ defmodule Rian.FixpointTest do
     "p rem q div r in s",
     "12 < 34",
     "i > 0 and i < 10",
+    # slice 3 — string + char literals
+    "\"hi\"",
+    "'A'",
+    "foo \"bar\" + 'z'",
+    "if c == 'x' do \"yes\" else \"no\" end",
     # every keyword at least once, so the full @keywords slice is exercised
     "type range case when struct alias mod pub const macro use with def if do else end"
   ]
 
-  describe "lexer port slices 1-2 — ids, keywords, comparisons, word-ops" do
+  describe "lexer port slices 1-3 — ids, keywords, comparisons, word-ops, literals" do
     setup do
       mod =
         Fixpoint.load_lexer(
