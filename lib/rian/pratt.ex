@@ -461,7 +461,39 @@ defmodule Rian.Pratt do
 
   defp parse_block(tokens) do
     {stmts, tokens} = parse_stmts(tokens, [])
-    {{:block, Enum.reverse(stmts)}, tokens}
+    {desugar_propagation(Enum.reverse(stmts)), tokens}
+  end
+
+  # ADR-0066 (P4): a bare `name <- expr` statement is **error propagation** —
+  # desugar a block carrying one into a `case` over the `Result`: `{:ok, name}`
+  # binds and continues; `{:error, e}` short-circuits, returning the error
+  # unchanged (so the enclosing function's error set carries it — the pub-boundary
+  # invariant is then the checker's job over the resulting `case`). Sugar over the
+  # same Result match `with` desugars to; no new semantics.
+  defp desugar_propagation(stmts) do
+    if Enum.any?(stmts, &match?({:bind_arrow, _, _}, &1)),
+      do: desugar_prop(stmts),
+      else: {:block, stmts}
+  end
+
+  defp desugar_prop(stmts) do
+    {before, rest} = Enum.split_while(stmts, &(not match?({:bind_arrow, _, _}, &1)))
+
+    case rest do
+      [] ->
+        {:block, before}
+
+      [{:bind_arrow, name, e} | after_arrow] ->
+        prop_case =
+          {:case, e,
+           [
+             {{:tuple, [{:atom, "ok"}, {:var, name}]}, nil, desugar_prop(after_arrow)},
+             {{:tuple, [{:atom, "error"}, {:var, "__prop_e"}]}, nil,
+              {:tuple, [{:atom, "error"}, {:id, "__prop_e"}]}}
+           ]}
+
+        {:block, before ++ [{:expr, prop_case}]}
+    end
   end
 
   defp parse_stmts([{:kw, k} | _] = tokens, acc) when k in ["else", "end"], do: {acc, tokens}
@@ -479,6 +511,14 @@ defmodule Rian.Pratt do
   defp parse_stmt([{:id, name}, {:op, ":="} | rest]) do
     {e, rest} = parse_expr(rest, 0)
     {{:bind, name, e}, rest}
+  end
+
+  # `name <- expr` — failable bind / error propagation outside a `with` (ADR-0066,
+  # P4). Desugared by `parse_block` into a `Result` `case` (Ok continues, Error
+  # short-circuits). `<-` is otherwise only a `with`/`for` clause-header arrow.
+  defp parse_stmt([{:id, name}, {:op, "<-"} | rest]) do
+    {e, rest} = parse_expr(rest, 0)
+    {{:bind_arrow, name, e}, rest}
   end
 
   # typed binding `x Int32 := 66` / `xs Vec(Int64) := [1, 2, 3]` — a declared type

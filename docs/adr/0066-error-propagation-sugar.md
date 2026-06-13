@@ -1,6 +1,6 @@
 # ADR-0066 — Error-propagation sugar: a spelling shootout (not `?`, not `!`)
 
-**Status:** Proposed (design / shootout) · **Refs:** ADR-0040 (error handling — `Result(T, E)` over typed error sets), ADR-0039 (failable bind `<-` in `with`/`for` headers), ADR-0034 §1 (untyped `?` propagation *removed*), ADR-0032 (`?` is a boolean predicate; borrow surface only from the family), ADR-0035 (no hidden control flow), ADR-0065 (P7 — surface freeze; this operator is *not* yet frozen)
+**Status:** Proposed (design / shootout) · **Option C (bare `<-`) implemented for the BEAM** (2026-06-14) · **Refs:** ADR-0040 (error handling — `Result(T, E)` over typed error sets), ADR-0039 (failable bind `<-` in `with`/`for` headers), ADR-0034 §1 (untyped `?` propagation *removed*), ADR-0032 (`?` is a boolean predicate; borrow surface only from the family), ADR-0035 (no hidden control flow), ADR-0065 (P7 — surface freeze; this operator is *not* yet frozen)
 **Owners:** Maya Lin (surface) · Samir Patel (error sets / totality) · Mira (totality) · Kira Neri (honesty) · Rachel Okafor (PM)
 
 ## Context
@@ -56,6 +56,19 @@ inline-expression form** (`g(try f(a))`) where a bind is awkward — they are co
   already desugars to; it adds no partiality (the error branch returns, the ok branch binds).
 - **Not frozen (ADR-0065):** this operator is explicitly outside the P7 surface freeze until this ADR
   settles its spelling.
+
+## Implementation (option C, the bare `<-` statement — 2026-06-14)
+
+The statement form is implemented and runs on the BEAM: `Rian.Pratt` parses a bare `name <- expr`
+statement (outside a `with`) into a `{:bind_arrow, name, expr}`, and `parse_block` **desugars** a block
+carrying one into a `Result` `case` — `{:ok, name}` binds and continues; `{:error, e}` short-circuits,
+returning `{:error, e}` unchanged. It is pure surface→surface sugar over the same `case` `with` already
+produces, so the existing checker/exhaustiveness/BEAM machinery handle it with no new node. Verified
+end-to-end (`test/rian/propagation_test.exs`): a two-step `calc` returns the value when both binds
+succeed and propagates the first `{:error, …}` otherwise. **Remaining:** the `try` prefix (option A,
+inline form); the **pub-boundary error-set check** (the desugared `case` types the error, but the
+explicit "propagated error ⊆ declared `| E`" gate is the checker follow-up); and JS/Rust support
+(blocked on those emitters handling atoms/`Result`, an independent limitation).
 
 ## Open items
 
