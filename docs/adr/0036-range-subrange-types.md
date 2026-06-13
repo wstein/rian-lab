@@ -81,7 +81,7 @@ wanted to avoid — admitted **only for `range` types**, where it is finite and 
 open primitives. It is a performance optimization, not a correctness gap, and is tracked in the
 exhaustiveness spec §7.
 
-## Lowering (verified-on-paper; to be re-asserted in tests)
+## Lowering (implemented — `test/rian/range_test.exs`)
 
 | Rian | Elixir | Rust |
 |---|---|---|
@@ -115,10 +115,14 @@ on the `@type` spec and first-match clauses; no shim needed.
 - **Lands in slices** (like ADR-0033): (a) emitter range/`Char` lowering + the finite-signature path
   in `Exhaustiveness` are implementable and testable now against hand-built IR; (b) spec + example
   rewrites land now as authoritative surface (this ADR + [02_types_match.rian](../../examples/rian/02_types_match.rian));
-  (c) `range` **parsing** lands with the declaration parser. **The `Char` literal *and* the distinct
-  `Char` type are done** — `Rian.Lexer` scans `'…'`, `Rian.Pratt` parses a distinct `{:char, cp}` /
-  `{:char_lit, cp}` node, and the checker types it `Char` (lowered native per target). See the
-  implementation note under Open items for the full design.
+  (c) **`range` parsing + the finite-exhaustiveness path are done** — `range Name := lo..hi` over
+  `Int64`/`Char` parses to an `IR.Range`, registers a finite signature (`Exhaustiveness.add_range`),
+  and its name substitutes to its ordinal base in every type position. A multi-clause function whose
+  heads cover the interval is **total without a catch-all**; an extra `_` clause is flagged
+  *unreachable*; the Rust `match` over the open base gets the `unreachable!()` shim. **The `Char`
+  literal *and* the distinct `Char` type are done** too — see the implementation note under Open
+  items. **Still future:** dynamic construction (`Name.of` → `Name | RangeError`) and the
+  large-range interval-coverage optimization.
 - **`range` is a bounded, finite opaque type** ([ADR-0043](0043-opaque-types.md)). This ADR's
   "representation, not newtype" mechanism *is* opacity; `range` adds a bounds invariant (fallible
   `T.of`) and a finite signature (exhaustiveness) on top of `opaque T := Base`. No rewrite here —

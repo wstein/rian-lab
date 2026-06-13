@@ -46,7 +46,7 @@ defmodule Rian.Decl do
   reserved keywords raise `Rian.Decl.Error`.
   """
   alias Rian.{Check, Lexer, Lower, Pratt}
-  alias Rian.IR.{Clause, Const, Field, Func, Mod, Param, Struct, Type, Use, Variant}
+  alias Rian.IR.{Clause, Const, Field, Func, Mod, Param, Range, Struct, Type, Use, Variant}
 
   defmodule Error do
     defexception [:message]
@@ -76,6 +76,7 @@ defmodule Rian.Decl do
           name: name,
           uses: p.uses,
           types: p.types,
+          ranges: p.ranges,
           structs: p.structs,
           consts: p.consts,
           funcs: p.funcs,
@@ -89,7 +90,22 @@ defmodule Rian.Decl do
   # `alias Name := Type` is a transparent synonym: collect the name->type map so
   # the name can be substituted out of every type position (ADR-0033 / types-match:
   # aliases introduce no runtime form).
-  defp collect_aliases(decls), do: Map.new(for {:alias, t} <- decls, do: parse_alias(t))
+  # `alias` synonyms plus `range` names — both substitute out of type positions
+  # (a `range Name := lo..hi` resolves to its ordinal `base`, ADR-0036's
+  # "representation, not newtype"). The `Range` records are kept separately (for
+  # the finite exhaustiveness signature); here only the name→base mapping matters.
+  defp collect_aliases(decls) do
+    aliases = Map.new(for {:alias, t} <- decls, do: parse_alias(t))
+
+    Enum.reduce(decls, aliases, fn
+      {:range, text, pub?, doc}, acc ->
+        r = parse_range(text, pub?, doc)
+        Map.put(acc, r.name, r.base)
+
+      _, acc ->
+        acc
+    end)
+  end
 
   # One scope's declarations (top level, or one module's body) -> typed IR.
   defp assemble(decls, aliases) do
@@ -107,6 +123,8 @@ defmodule Rian.Decl do
       for({:type, t, pub?, doc} <- decls, do: parse_type(t, pub?, doc))
       |> Enum.map(&subst_type(&1, aliases))
 
+    ranges = for {:range, r, pub?, doc} <- decls, do: parse_range(r, pub?, doc)
+
     structs =
       for({:struct, s, pub?, doc} <- decls, do: parse_struct(s, pub?, doc))
       |> Enum.map(&subst_struct(&1, aliases))
@@ -117,7 +135,7 @@ defmodule Rian.Decl do
 
     uses = for {:use, u} <- decls, do: parse_use(u)
 
-    %{types: types, structs: structs, consts: consts, uses: uses, funcs: funcs}
+    %{types: types, ranges: ranges, structs: structs, consts: consts, uses: uses, funcs: funcs}
   end
 
   defp parse_alias(text) do
@@ -156,6 +174,47 @@ defmodule Rian.Decl do
     %Struct{s | fields: subst_fields(fs, aliases)}
   end
 
+  # `range Name := lo..hi` (ADR-0036): an inclusive ordinal interval over `Int64`
+  # or `Char`. Bounds are compile-time constant ordinals (a `Char` bound is its
+  # codepoint); both must share the base and satisfy `lo <= hi`.
+  defp parse_range(text, pub?, doc) do
+    case split_once(text, ":=") do
+      {left, right} ->
+        {lo, hi, base} = parse_bounds(String.trim(right))
+        %Range{name: strip_type_params(left), base: base, lo: lo, hi: hi, pub?: pub?, doc: doc}
+
+      :none ->
+        raise Error, "range declaration needs `:=`: #{text}"
+    end
+  end
+
+  defp parse_bounds(text) do
+    case String.split(text, "..", parts: 2) do
+      [lo_s, hi_s] ->
+        {lo, lk} = parse_ordinal(String.trim(lo_s))
+        {hi, hk} = parse_ordinal(String.trim(hi_s))
+
+        if lk != hk,
+          do: raise(Error, "range bounds must share a base (both Int64 or both Char): #{text}")
+
+        if lo > hi, do: raise(Error, "empty/inverted range (need lo <= hi): #{text}")
+        {lo, hi, if(lk == :char, do: "Char", else: "Int64")}
+
+      _ ->
+        raise Error, "range needs `lo..hi`: #{text}"
+    end
+  end
+
+  # an ordinal bound: a `Char` literal -> {codepoint, :char}; else an integer
+  defp parse_ordinal("'" <> _ = s) do
+    case Lexer.expr_tokens(s) do
+      [{:char, cp}] -> {cp, :char}
+      _ -> raise Error, "invalid Char bound: #{s}"
+    end
+  end
+
+  defp parse_ordinal(s), do: {s |> String.replace(" ", "") |> String.to_integer(), :int}
+
   defp subst_fields(fs, aliases) do
     Enum.map(fs, fn %Field{} = fl -> %Field{fl | type: subst_type_str(fl.type, aliases)} end)
   end
@@ -166,17 +225,21 @@ defmodule Rian.Decl do
   keyed by the module name.
   """
   def compile(src) do
-    %{types: types, structs: structs, funcs: funcs, mods: mods} = prog = parse(src)
+    %{types: types, ranges: ranges, structs: structs, funcs: funcs, mods: mods} =
+      prog = parse(src)
+
     :ok = Check.gate!(prog)
-    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f, structs)} end)
+    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile(types, f, structs, ranges)} end)
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module(m)} end)
   end
 
   @doc "Parse and lower to the BEAM target only (FFI / BEAM-only bodies)."
   def compile_beam(src) do
-    %{types: types, structs: structs, funcs: funcs, mods: mods} = prog = parse(src)
+    %{types: types, ranges: ranges, structs: structs, funcs: funcs, mods: mods} =
+      prog = parse(src)
+
     :ok = Check.gate!(prog)
-    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs)} end)
+    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs, ranges)} end)
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m)} end)
   end
 
@@ -214,6 +277,11 @@ defmodule Rian.Decl do
   defp take_decl([{:kw, "type"} | rest]) do
     {toks, rest} = take_type(rest, [])
     {{:type, Lexer.detokenize(toks), false, nil}, rest}
+  end
+
+  defp take_decl([{:kw, "range"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    {{:range, Lexer.detokenize(toks), false, nil}, rest}
   end
 
   defp take_decl([{:kw, "struct"} | rest]) do
@@ -271,6 +339,7 @@ defmodule Rian.Decl do
   end
 
   defp mark_pub({:type, s, _, doc}), do: {:type, s, true, doc}
+  defp mark_pub({:range, s, _, doc}), do: {:range, s, true, doc}
   defp mark_pub({:struct, s, _, doc}), do: {:struct, s, true, doc}
   defp mark_pub({:const, s, _, doc}), do: {:const, s, true, doc}
   defp mark_pub({:def, raw}), do: {:def, Map.put(raw, :pub, true)}
@@ -280,6 +349,7 @@ defmodule Rian.Decl do
 
   # attach a doc string to the declaration that follows the `@doc`/… annotation
   defp attach_doc({:type, s, pub, _}, doc), do: {:type, s, pub, doc}
+  defp attach_doc({:range, s, pub, _}, doc), do: {:range, s, pub, doc}
   defp attach_doc({:struct, s, pub, _}, doc), do: {:struct, s, pub, doc}
   defp attach_doc({:const, s, pub, _}, doc), do: {:const, s, pub, doc}
   defp attach_doc({:mod, n, inner, _}, doc), do: {:mod, n, inner, doc}

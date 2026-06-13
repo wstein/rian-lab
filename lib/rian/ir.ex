@@ -42,6 +42,18 @@ defmodule Rian.IR do
     defstruct name: nil, variants: [], pub?: false, doc: nil
   end
 
+  defmodule Range do
+    @moduledoc """
+    A finite ordinal subrange type (`range Name := lo..hi`, ADR-0036) over an
+    ordinal base (`Int64` / `Char`). `lo`/`hi` are inclusive integer bounds (a
+    `Char` bound is its codepoint). It registers a **finite** exhaustiveness
+    signature (its member literals), and its name substitutes to `base` in every
+    type position — the value *is* the base ordinal (representation, not newtype).
+    """
+    @enforce_keys [:name, :base, :lo, :hi]
+    defstruct name: nil, base: nil, lo: nil, hi: nil, pub?: false, doc: nil
+  end
+
   defmodule Struct do
     @moduledoc """
     A product-type declaration (`struct Name(field Type, …)`). Unlike a `Type`,
@@ -81,7 +93,14 @@ defmodule Rian.IR do
     `mod` on Rust; `pub?` items are exported (`def`/`pub fn`), the rest private.
     """
     @enforce_keys [:name]
-    defstruct name: nil, uses: [], types: [], structs: [], consts: [], funcs: [], doc: nil
+    defstruct name: nil,
+              uses: [],
+              types: [],
+              ranges: [],
+              structs: [],
+              consts: [],
+              funcs: [],
+              doc: nil
   end
 
   defmodule Param do

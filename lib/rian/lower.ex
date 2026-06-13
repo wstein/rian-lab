@@ -63,8 +63,8 @@ defmodule Rian.Lower do
   alias Rian.Pratt
 
   # ── Pipeline ───────────────────────────────────────────────────────────
-  def compile(types, func, structs \\ []) do
-    env = build_env(types, structs)
+  def compile(types, func, structs \\ [], ranges \\ []) do
+    env = build_env(types, structs, ranges)
     :ok = check!(func, env)
     meta = build_meta(types)
     smeta = build_struct_meta(structs)
@@ -76,8 +76,8 @@ defmodule Rian.Lower do
   end
 
   @doc "Compile to the BEAM target only (for functions using BEAM-only constructs)."
-  def compile_beam(types, func, structs \\ []) do
-    env = build_env(types, structs)
+  def compile_beam(types, func, structs \\ [], ranges \\ []) do
+    env = build_env(types, structs, ranges)
     :ok = check!(func, env)
     %{elixir: to_elixir(func, types, structs, build_struct_meta(structs))}
   end
@@ -95,7 +95,7 @@ defmodule Rian.Lower do
   def compile_module_beam(%Rian.IR.Mod{} = m), do: %{elixir: module_elixir(m)}
 
   defp module_elixir(%{name: name, types: types, structs: structs, funcs: funcs} = m) do
-    env = build_env(types, structs)
+    env = build_env(types, structs, Map.get(m, :ranges, []))
     Enum.each(funcs, &(:ok = check!(&1, env)))
     consts = Map.get(m, :consts, [])
     ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts))
@@ -127,7 +127,7 @@ defmodule Rian.Lower do
     do: doc |> String.split("\n") |> Enum.map_join("\n", &"#{prefix} #{&1}")
 
   defp module_rust(%{name: name, types: types, structs: structs, funcs: funcs} = m) do
-    env = build_env(types, structs)
+    env = build_env(types, structs, Map.get(m, :ranges, []))
     Enum.each(funcs, &(:ok = check!(&1, env)))
     consts = Map.get(m, :consts, [])
     # a signature table (name -> func) lets the Rust call-site borrow pass see
@@ -207,12 +207,16 @@ defmodule Rian.Lower do
   # env / meta know the prelude types (e.g. `Option`) as well as the user's, so
   # `Some`/`None` resolve and `case` over them is exhaustiveness-checked — but the
   # prelude definitions are *not* emitted (they are built into each target).
-  defp build_env(types, structs) do
+  defp build_env(types, structs, ranges) do
     env =
       Enum.reduce(Rian.Prelude.with_prelude(types), E.base_env(), fn t, env ->
         variants = Enum.map(t.variants, fn v -> {PL.to_snake(v.ctor), length(v.fields)} end)
         E.add_type(env, PL.to_snake(t.name), variants)
       end)
+
+    # a `range` registers a finite ordinal signature (ADR-0036): its member
+    # literals exhaust the type, so clause heads covering `lo..hi` are total
+    env = Enum.reduce(ranges, env, fn r, env -> E.add_range(env, r.name, r.lo, r.hi) end)
 
     Enum.reduce(structs, env, fn s, env ->
       PL.add_struct(env, s.name, Enum.map(s.fields, &PL.to_snake(&1.label)))
@@ -648,12 +652,38 @@ defmodule Rian.Lower do
         "        #{pat}#{guard_str(c, :rust, deref)} => #{arm},"
       end)
 
+    # Per-target exhaustiveness shim (ADR-0036): a `range`-total match has literal
+    # arms over an *open* base primitive (`i64`/`char`), which `rustc` sees as
+    # non-exhaustive. The Rian gate already proved totality, so append an
+    # `unreachable!()` arm — never reached, satisfies rustc. (Sum-type matches are
+    # closed and need no shim; a `_`/var clause already provides the fallthrough.)
+    shim = if rust_total_shim?(func), do: "\n        _ => unreachable!(),", else: ""
+
     fn_str =
       "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} {\n" <>
-        "    match #{scrut} {\n#{arms}\n    }\n}"
+        "    match #{scrut} {\n#{arms}#{shim}\n    }\n}"
 
     join_doc(rs_doc(Map.get(func, :doc), "///"), fn_str)
   end
+
+  # A function whose clause heads are literal/`Char` patterns with **no** catch-all
+  # clause is total only because a `range`'s finite signature covers them — so the
+  # emitted Rust `match` over the open base needs an `unreachable!()` fallthrough.
+  defp rust_total_shim?(func) do
+    pats = Enum.map(func.clauses, fn c -> Enum.map(c.pats, &Core.from_pat/1) end)
+    flat = List.flatten(pats)
+    has_catchall = Enum.any?(pats, fn ps -> Enum.all?(ps, &catchall_pat?/1) end)
+
+    literal_headed =
+      Enum.any?(flat, &match?(%PLit{}, &1)) or Enum.any?(flat, &match?(%Core.PChar{}, &1))
+
+    has_variant = Enum.any?(flat, &match?(%PCtor{}, &1))
+    not has_catchall and literal_headed and not has_variant
+  end
+
+  defp catchall_pat?(%PWild{}), do: true
+  defp catchall_pat?(%PVar{}), do: true
+  defp catchall_pat?(_), do: false
 
   # param positions that are an owned `iso Vec` destructured by a list/cons
   # pattern — those match `param.as_slice()` and get owned rebinds in each arm

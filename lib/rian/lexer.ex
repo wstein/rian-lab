@@ -31,9 +31,9 @@ defmodule Rian.Lexer do
 
   # Keywords. `if`/`do`/`else`/`end` drive expressions (Pratt); the rest are
   # declaration/`case` keywords for the token-driven declaration parser.
-  @keywords ~w(if do else end def type case when struct alias mod pub const macro use with)
+  @keywords ~w(if do else end def type range case when struct alias mod pub const macro use with)
 
-  @multi ["->", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!="]
+  @multi ["->", "..", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!="]
   @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&"]
 
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/
