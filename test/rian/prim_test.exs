@@ -57,6 +57,15 @@ defmodule Rian.PrimTest do
         assert Pratt.parse("Prim.#{name}(x)") == {:call, {:id, "__prim_#{name}"}, [{:id, "x"}]}
       end
     end
+
+    test "a user `mod Prim` is rejected (the namespace is reserved)" do
+      err =
+        assert_raise Rian.Decl.Error, fn ->
+          Rian.Decl.parse("mod Prim do\n  pub def f(x Int64) Int64 := x\nend")
+        end
+
+      assert Exception.message(err) =~ "reserved"
+    end
   end
 
   describe "end-to-end on BEAM via the updated prelude files" do

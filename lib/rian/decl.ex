@@ -68,6 +68,16 @@ defmodule Rian.Decl do
 
     mods =
       for {:mod, name, inner, doc} <- decls do
+        # `Prim` is the reserved intrinsic namespace (ADR-0047 §2): a `Prim.x(…)`
+        # call rewrites to the `__prim_x` intrinsic, so a user `mod Prim` would be
+        # shadowed (its calls hijacked). Reject it outright rather than miscompile.
+        if name == "Prim",
+          do:
+            raise(
+              Error,
+              "`Prim` is a reserved namespace (ADR-0047 §2); name the module differently"
+            )
+
         # top-level aliases are visible inside a module; module-local aliases add to them
         scoped = Map.merge(aliases, collect_aliases(inner))
         p = assemble(inner, scoped)
