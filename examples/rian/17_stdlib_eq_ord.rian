@@ -88,5 +88,5 @@ def maximum([h | t], acc) := if lt(acc, h) do maximum(t, h) else maximum(t, acc)
 # a tiny concrete list-equality helper for the test assertions above
 def eq3(xs Vec(Int64), ys Vec(Int64)) Bool
 def eq3([], []) := true
-def eq3([a | as], [b | bs]) := if a == b do eq3(as, bs) else false end
+def eq3([a | xs], [b | ys]) := if a == b do eq3(xs, ys) else false end
 def eq3(xs, ys) := false

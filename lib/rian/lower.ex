@@ -650,11 +650,49 @@ defmodule Rian.Lower do
       |> Enum.filter(&MapSet.member?(impl_types, &1.name))
       |> Enum.map_join("\n\n", &rust_struct/1)
 
+    [struct_defs, enums, trait_impl_block(protocols, impl_decls, c)]
+    |> Enum.reject(&(&1 in ["", nil]))
+    |> Enum.join("\n\n")
+  end
+
+  # the traits + impls alone (no type/struct preamble) — for whole-program
+  # assembly, where the types are emitted once at the top.
+  defp trait_impl_block(protocols, impl_decls, c) do
     traits = Enum.map_join(protocols, "\n\n", &rust_trait/1)
     impls = Enum.map_join(impl_decls, "\n\n", &rust_impl(&1, protocols, c))
-
-    [struct_defs, enums, traits, impls] |> Enum.reject(&(&1 in ["", nil])) |> Enum.join("\n\n")
+    [traits, impls] |> Enum.reject(&(&1 in ["", nil])) |> Enum.join("\n\n")
   end
+
+  @doc """
+  Assemble a whole parsed program into **one** Rust module (ADR-0061): every
+  `enum`/`struct`/`trait`/`impl` is emitted once, then every non-dispatch
+  top-level function (the BEAM/JS runtime dispatcher is dropped — Rust uses
+  traits). This composes the stdlib + protocols + generics that the per-unit
+  `to_rust` cannot (it repeats type defs per unit).
+  """
+  def rust_program(prog) do
+    types = Map.get(prog, :types, [])
+    structs = Map.get(prog, :structs, [])
+    funcs = Map.get(prog, :funcs, []) |> Enum.reject(& &1.dispatch)
+    protocols = Map.get(prog, :protocols, [])
+    impl_decls = Map.get(prog, :impl_decls, [])
+
+    Process.put(:rian_proto_methods, proto_method_traits(protocols))
+    sigs = Map.new(Map.get(prog, :funcs, []), fn f -> {f.name, f} end)
+    c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new(), sigs)
+
+    [
+      Enum.map_join(structs, "\n\n", &rust_struct/1),
+      Enum.map_join(types, "\n\n", &rust_enum/1),
+      trait_impl_block(protocols, impl_decls, c),
+      Enum.map_join(funcs, "\n\n", &rust_fn(&1, c, ""))
+    ]
+    |> Enum.reject(&(&1 in ["", nil]))
+    |> Enum.join("\n\n")
+  end
+
+  defp proto_method_traits(protocols),
+    do: for(p <- protocols, m <- p.methods, into: %{}, do: {m.name, p.name})
 
   defp rust_trait(%{name: name, methods: methods}) do
     sigs =
@@ -747,16 +785,22 @@ defmodule Rian.Lower do
   # carried in the process dict (a single sequential emitter pass, like js int53).
   defp proto_methods, do: Process.get(:rian_proto_methods, %{})
 
-  # rewrite a protocol-method call `m(a, …)` to UFCS `RianP::m(a, …)` so rustc
-  # dispatches statically; non-protocol calls pass through.
-  def rewrite_proto_calls({:call, {:id, m}, args}, methods) do
-    args = Enum.map(args, &rewrite_proto_calls(&1, methods))
-
-    case Map.get(methods, m) do
-      nil -> {:call, {:id, m}, args}
-      trait -> {:call, {:dot, {:id, "Rian" <> trait}, m}, args}
-    end
+  # rewrite a protocol-method call `m(recv, rest…)` to Rust **method-call** syntax
+  # `recv.m(rest…)` so rustc dispatches statically. Method-call (not UFCS
+  # `Trait::m(recv, …)`) auto-refs the receiver, so it works whether `recv` is a
+  # `&T` parameter or an owned `T` (a cloned slice-element binder) — both reach
+  # the `&self` method. Non-protocol calls pass through.
+  def rewrite_proto_calls({:call, {:id, m}, [recv | rest]}, methods)
+      when is_map_key(methods, m) do
+    recv = rewrite_proto_calls(recv, methods)
+    rest = Enum.map(rest, &rewrite_proto_calls(&1, methods))
+    {:call, {:dot, recv, m}, rest}
   end
+
+  def rewrite_proto_calls({:call, fun, args}, methods),
+    do:
+      {:call, rewrite_proto_calls(fun, methods),
+       Enum.map(args, &rewrite_proto_calls(&1, methods))}
 
   def rewrite_proto_calls(node, methods) when is_tuple(node),
     do: node |> Tuple.to_list() |> Enum.map(&rewrite_proto_calls(&1, methods)) |> List.to_tuple()
@@ -766,16 +810,19 @@ defmodule Rian.Lower do
 
   def rewrite_proto_calls(other, _methods), do: other
 
-  # `<T, U: RianEq + RianOrd>` from a function's `tvars`/`bounds` (ADR-0061 §2/§4).
+  # `<T: RianEq + RianOrd + Clone>` from a function's `tvars`/`bounds`
+  # (ADR-0061 §2/§4). `Clone` is added to every type parameter so a generic that
+  # returns/constructs an owned collection from borrowed elements (`sort` building
+  # a `Vec<T>`) type-checks; for our Copy primitives it is free, and over-
+  # constraining a caller to `Clone` is benign. (A precise "only when owned-
+  # construction occurs" bound is a future refinement.)
   defp rust_generics(%{tvars: []}), do: ""
 
   defp rust_generics(%{tvars: tvars, bounds: bounds}) do
     inner =
       Enum.map_join(tvars, ", ", fn tv ->
-        case Map.get(bounds || %{}, tv) do
-          nil -> tv
-          ps -> "#{tv}: #{Enum.map_join(ps, " + ", &"Rian#{&1}")}"
-        end
+        traits = Enum.map(Map.get(bounds || %{}, tv, []), &"Rian#{&1}") ++ ["Clone"]
+        "#{tv}: #{Enum.join(traits, " + ")}"
       end)
 
     "<#{inner}>"

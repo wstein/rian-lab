@@ -405,7 +405,7 @@ defmodule Rian.ProtocolTest do
   end
 
   describe "Rust lowering — traits + impls + bounded generics (ADR-0061 §2)" do
-    test "a protocol lowers to a fresh Rian-namespaced trait + impls + UFCS calls" do
+    test "a protocol lowers to a fresh Rian-namespaced trait + impls + method-call dispatch" do
       units =
         Decl.compile("""
         protocol Eq do
@@ -425,9 +425,10 @@ defmodule Rian.ProtocolTest do
       assert protos.rust =~ "impl RianEq for i64 {"
 
       {_, eq3} = Enum.find(units, &(elem(&1, 0) == "equal3"))
-      # the bound becomes a real Rust trait bound; protocol calls become UFCS
-      assert eq3.rust =~ "fn equal3<T: RianEq>"
-      assert eq3.rust =~ "RianEq::eq(a, b)"
+      # the bound becomes a real Rust trait bound (+ Clone for owned-construction
+      # generics); protocol calls become method-call dispatch (auto-refs receiver)
+      assert eq3.rust =~ "fn equal3<T: RianEq + Clone>"
+      assert eq3.rust =~ "a.eq(b)"
     end
 
     # each program is a single self-contained rustc compile. (Composing several
@@ -456,6 +457,80 @@ defmodule Rian.ProtocolTest do
           File.rm(src)
           File.rm(bin)
           assert String.trim(out) == expected
+      end
+    end
+
+    @tag :rust
+    test "Lower.rust_program assembles a whole program into one rustc module (#1, ADR-0061)" do
+      # types/traits/impls emitted once; sum + 2 protocols + cons-recursive bounded
+      # generic compose in ONE module (the per-unit emitter repeats type defs)
+      prog =
+        Decl.parse("""
+        type Expr := Num(n Int64) | Zero
+
+        protocol Show do
+          def show(self Self) String
+        end
+        impl Show for Expr do
+          def show(e)
+            case e do
+              Num(n) -> "num"
+              Zero -> "zero"
+            end
+          end
+        end
+        impl Show for Int64 do
+          def show(n) := "int"
+        end
+
+        protocol Eq do
+          def eq(a Self, b Self) Bool
+        end
+        impl Eq for Int64 do
+          def eq(a, b) := a == b
+        end
+
+        def contains(xs Vec(T), x T) Bool forall T: Eq
+        def contains([], x) := false
+        def contains([h | t], x) := if eq(h, x) do true else contains(t, x) end
+        """)
+
+      rust = Rian.Lower.rust_program(prog)
+      # one definition each — no per-unit duplication
+      assert length(String.split(rust, "enum Expr")) == 2
+      assert rust =~ "trait RianShow"
+      assert rust =~ "fn contains<T: RianEq + Clone>"
+
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_prog_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            rust <>
+              """
+
+              fn main() {
+                  assert_eq!(RianShow::show(&Expr::Num{n:5}), "num");
+                  assert_eq!(RianShow::show(&7i64), "int");
+                  assert_eq!(contains(&[1i64,2,3], &2), true);
+                  assert_eq!(contains(&[1i64,2,3], &9), false);
+                  println!("ok");
+              }
+              """
+          )
+
+          {err, code} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", src, "-o", bin])
+          assert code == 0, "rustc failed:\n#{err}\n--- source ---\n#{File.read!(src)}"
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "ok"
       end
     end
 
