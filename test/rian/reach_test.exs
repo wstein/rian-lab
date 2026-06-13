@@ -71,6 +71,18 @@ defmodule Rian.ReachTest do
       assert [%{kind: :capability, kills: [:ex]}] = rep["bump"].blockers
     end
 
+    test "ordering a Symbol/atom is a compile error — equality-only boundary (P9, ADR-0041 §2)" do
+      # atom term-order diverges across targets (BEAM atom-table vs &str vs enum),
+      # so `:a < :b` is rejected; `==`/`!=` on atoms is fine.
+      assert_raise Rian.Reach.Error, ~r/equality-only/, fn ->
+        Reach.gate!(Rian.Decl.parse("def bad(s Symbol) Bool := s < :foo"))
+      end
+
+      assert Reach.symbol_lint!(Rian.Decl.parse("def ok(s Symbol) Bool := s == :foo")) == :ok
+      # ordering on non-Symbols is unaffected
+      assert Reach.symbol_lint!(Rian.Decl.parse("def n(a Int64) Bool := a < 5")) == :ok
+    end
+
     test "an Elixir-module call (non-Rian) is ex-only" do
       rep =
         reach("""

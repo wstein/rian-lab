@@ -112,11 +112,54 @@ defmodule Rian.Reach do
 
   @doc "Gate against an explicit build-default target set (`nil` = none)."
   def gate!(prog, default) do
+    :ok = symbol_lint!(prog)
+
     case check_contracts(prog, default) do
       :ok -> :ok
       {:error, msg} -> raise Error, msg
     end
   end
+
+  # Symbol ordering operators (`< <= > >=`) — the equality-only boundary (ADR-0041 §2).
+  @ord_ops ~w(< <= > >=)
+
+  @doc """
+  Lint the equality-only boundary (ADR-0041 §2, P9): a `Symbol`/atom literal is
+  comparable by `==`/`!=` only — **ordering is not portable** (atom term-order on
+  the BEAM is atom-table position, which won't match `&str`/enum order elsewhere).
+  Ordering an atom literal is a cross-target divergence, so it is a compile error
+  here rather than a silent per-target difference. Returns `:ok` or raises.
+  """
+  def symbol_lint!(prog) do
+    case Enum.flat_map(all_funcs(prog), &func_symbol_violations/1) do
+      [] ->
+        :ok
+
+      [{op, atom} | _] ->
+        raise Error,
+              "`Symbol`/atom `:#{atom}` compared with `#{op}` — Symbols are equality-only " <>
+                "across targets (no portable ordering, ADR-0041 §2); use `==`/`!=`"
+    end
+  end
+
+  defp func_symbol_violations(f) do
+    Enum.flat_map(f.clauses, fn c ->
+      guard = if c.guard, do: find_atom_ordering(Pratt.parse(c.guard)), else: []
+      find_atom_ordering(Pratt.parse_body(c.body)) ++ guard
+    end)
+  end
+
+  # generic surface-AST walk: every `{:bin, <ord>, l, r}` with an atom-literal operand.
+  defp find_atom_ordering({:bin, op, l, r} = node) when op in @ord_ops do
+    here = for a <- [l, r], match?({:atom, _}, a), do: {op, elem(a, 1)}
+    here ++ deep(node)
+  end
+
+  defp find_atom_ordering(t) when is_tuple(t), do: deep(t)
+  defp find_atom_ordering(l) when is_list(l), do: Enum.flat_map(l, &find_atom_ordering/1)
+  defp find_atom_ordering(_), do: []
+
+  defp deep(t), do: t |> Tuple.to_list() |> Enum.flat_map(&find_atom_ordering/1)
 
   @doc """
   The build-default target set (ADR-0058 §2) for modules that declare no

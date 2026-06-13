@@ -43,7 +43,11 @@ allocation, and init-order footguns on Rust, for no observable benefit.
 
 - **`Symbol` supports equality only — no portable ordering.** Atom term-ordering on the BEAM is
   implementation-defined (atom-table position) and would not match string/enum ordering elsewhere.
-  Equality is total and **identical on every target**; ordering is **not offered**.
+  Equality is total and **identical on every target**; ordering is **not offered**. **Enforced (P9,
+  2026-06-14):** `Rian.Reach.symbol_lint!/1` (run inside `gate!`) makes ordering an atom literal
+  (`:a < :b`) a **compile error**, not a silent per-target divergence — use `==`/`!=`. (Open-`Symbol`
+  representation caveats on Rust — `&'static str`, no global interner — are documented; a finer
+  `@targets`-scoped open-vs-closed lint awaits the atom-classification work `Rian.Reach` tracks.)
 - **An unmapped BEAM-stdlib call on a non-BEAM target is a compile error, never a silent stub.**
   `:lists.sum` is free FFI on the BEAM; on Rust it maps to a real equivalent or **fails to compile**
   (ADR-0035 no-silent-partiality). A stubbed `:maps.get` returning a default would be a
