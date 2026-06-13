@@ -104,3 +104,14 @@ B1 (list patterns), done again under this IR, must touch one place.
 - **Migration order** — which emitter construct moves first; the BEAM path vs the Rust path.
 - **`ir.ex` node catalogue** — the concrete sealed-sum definitions for expr + pattern (the structs to
   add alongside `Type`/`Struct`/`Const`/…).
+
+## Amendment (P1 — newline-tolerant `:=` bodies, 2026-06-14)
+
+The design review flagged the "a `def … :=` body must stay on one line" rule as a **wart to kill
+before freezing the surface** (P7), not a design choice. `Rian.Decl`'s `:=`-body collector
+(`take_line`) is now **newline-tolerant**: a body continues across a newline when (a) inside
+unbalanced `(`/`[`/`{`/`%{`, (b) a binary operator trails the line or (c) leads the next, or (d) the
+body simply begins on the next line. A plain one-liner still ends at its newline. This is a *layout*
+relaxation only — tokens and the operator table are unchanged (and are what P7 will freeze). The
+self-host budget the review noted: `examples/rian/selfhost_decl.rian` (which re-parses bodies) and the
+`Rian.Fixpoint` anchor will track this when the Rian-written front-end widens to multi-line bodies.

@@ -50,6 +50,24 @@ defmodule Rian.DeclTest do
       assert f.clauses == [%Clause{pats: [{:var, "n"}], body: "n * 2", guard: nil}]
     end
 
+    test "a `:=` body is newline-tolerant (P1): trailing/leading op, brackets, next line" do
+      bodies = fn src ->
+        Decl.parse(src).funcs |> hd() |> Map.fetch!(:clauses) |> hd() |> Map.fetch!(:body)
+      end
+
+      # trailing binary operator continues onto the next line
+      assert bodies.("def f(a Int64, b Int64) Int64 := a +\n  b") == "a + b"
+      # leading binary operator continues the previous line
+      assert bodies.("def g(a Int64, b Int64) Int64 := a\n  + b * 2") == "a + b * 2"
+      # a newline inside unbalanced parens continues
+      assert bodies.("def h(xs Vec(Int64)) Int64 := sum(\n  xs\n)") == "sum ( xs )"
+      # the body may simply begin on the next line
+      assert bodies.("def k(n Int64) Int64 :=\n  n * n + 1") == "n * n + 1"
+      # a plain one-liner still ends at its newline (next decl is separate)
+      %{funcs: [a, b]} = Decl.parse("def p() Int64 := 1\ndef q() Int64 := 2")
+      assert a.name == "p" and b.name == "q"
+    end
+
     test "multi-line declarations are joined by continuation" do
       %{types: [t]} =
         Decl.parse("""

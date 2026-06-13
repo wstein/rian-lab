@@ -46,7 +46,9 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
    `expr_tokens/1` (expression stream).
 2. **`Rian.Decl`** (declarations) + **`Rian.Pratt`** (expressions & patterns). There is exactly **one
    pattern parser** (`Pratt.parse_pat`, shared by clause heads and `case` arms — ADR-0050 §2).
-   `Decl` splits declarations on significant newlines, so a `def … :=` body must stay on **one line**.
+   `Decl` splits declarations on significant newlines, but a `def … :=` body is **newline-tolerant**
+   (P1): it continues across a newline inside unbalanced `(`/`[`/`{`, after a trailing binary operator
+   or before a leading one, or onto the next line — so `:=` expressions may span lines.
 3. **`Rian.Core`** — the typed, sealed-sum Core IR (`from_expr`/`from_pat` translate surface tuples →
    core structs like `ENum`/`EChar`/`PCtor`). **Every downstream pass consumes Core.**
 4. **Gates** (refuse to emit on failure): `Rian.Check` (unification-based inference + error sets),

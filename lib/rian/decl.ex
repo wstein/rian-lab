@@ -736,9 +736,42 @@ defmodule Rian.Decl do
     end
   end
 
-  defp take_line([], acc), do: {Enum.reverse(acc), []}
-  defp take_line([{:nl} | rest], acc), do: {Enum.reverse(acc), rest}
-  defp take_line([t | rest], acc), do: take_line(rest, [t | acc])
+  # Binary operators that continue a `:=` body across a newline when they trail the
+  # current line or lead the next (P1: newline-tolerant bodies).
+  @cont_ops ~w(+ - * / < > <= >= == != <> |> and or in rem div)
+
+  # Collect a `:=` body. A newline ends it (the one-line default), EXCEPT when the
+  # body plainly continues: inside unbalanced `(`/`[`/`{`/`%{`, after a trailing
+  # binary operator, before a leading one, or when the body simply starts on the
+  # next line — so a `:=` expression may now span multiple lines (P1).
+  defp take_line(tokens, acc), do: take_line(tokens, acc, 0)
+
+  defp take_line([], acc, _depth), do: {Enum.reverse(acc), []}
+
+  # leading newline(s): the body may begin on the next line — skip them, unless the
+  # next token starts a new declaration (then the body is empty).
+  defp take_line([{:nl} | rest], [], depth) do
+    if decl_boundary?(rest), do: {[], rest}, else: take_line(rest, [], depth)
+  end
+
+  defp take_line([{open} = t | rest], acc, depth)
+       when open in [:lparen, :lbracket, :lbrace, :mapopen],
+       do: take_line(rest, [t | acc], depth + 1)
+
+  defp take_line([{close} = t | rest], acc, depth) when close in [:rparen, :rbracket, :rbrace],
+    do: take_line(rest, [t | acc], max(depth - 1, 0))
+
+  defp take_line([{:nl} | rest], acc, depth) do
+    if depth > 0 or line_continues?(acc, rest),
+      do: take_line(rest, acc, depth),
+      else: {Enum.reverse(acc), rest}
+  end
+
+  defp take_line([t | rest], acc, depth), do: take_line(rest, [t | acc], depth)
+
+  defp line_continues?([{:op, o} | _], _rest) when o in @cont_ops, do: true
+  defp line_continues?(_acc, [{:op, o} | _]) when o in @cont_ops, do: true
+  defp line_continues?(_acc, _rest), do: false
 
   # Collect a block body up to the `end` that closes it; `do` (from nested
   # `if`/`case`) deepens, `end` un-deepens, depth 1's `end` closes the body.
