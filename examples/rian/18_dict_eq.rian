@@ -1,0 +1,77 @@
+# ===========================================================================
+# 18 — A Dict over `Eq`: keys compared by the protocol (ADR-0042 · ADR-0047)
+# ===========================================================================
+# Character: the protocol's payoff — a `Dict` (association list) whose lookup is
+# generic over ANY key type that implements `Eq`. `get`/`has` are bounded generics
+# (`forall K: Eq`): the compiler ENFORCES that the key type has an `Eq` impl at
+# the call site (ADR-0042 §2), and `eq` DISPATCHES on the key's runtime value
+# (ADR-0042 §3). Entries are a generic `Pair(k K, v V)` — written once, reused for
+# Int64 keys, String keys, anything `Eq`.
+#
+# This is "Dict keys need Eq" made real: the stdlib's first keyed structure, and
+# the strongest proof that protocol-bounded generics hold up.
+#
+# ADRs: 0042 (protocols/bounds) · 0047 (portable stdlib) · 0057 (logic + tests)
+# ---------------------------------------------------------------------------
+
+# a key/value entry — generic in both K and V
+type Pair := P(k K, v V)
+
+# ── the key-equality protocol ────────────────────────────────────────────
+protocol Eq do
+  def eq(a Self, b Self) Bool
+end
+
+impl Eq for Int64 do
+  def eq(a, b) := a == b
+end
+
+impl Eq for String do
+  def eq(a, b) := a == b
+end
+
+# ── Dict = an association list `Vec(Pair)`, lookup by `Eq` on keys ─────────
+
+@doc """
+Look up `key`, returning its value or `fallback` — `forall K: Eq`.
+
+    demo_get_hit()   #=> 20
+    demo_get_miss()  #=> 0 - 1
+"""
+def get(d Vec(Pair), key K, fallback V) V forall K: Eq, V
+def get([], key, fallback) := fallback
+def get([P(k, v) | rest], key, fallback) := if eq(k, key) do v else get(rest, key, fallback) end
+
+@doc """
+Is `key` present? — `forall K: Eq`.
+
+    demo_has()       #=> true
+    demo_absent()    #=> false
+"""
+def has(d Vec(Pair), key K) Bool forall K: Eq
+def has([], key) := false
+def has([P(k, v) | rest], key) := if eq(k, key) do true else has(rest, key) end
+
+# insert (prepend; a later `put` shadows an earlier key on lookup). `value` —
+# not `val`, which is the reserved capability keyword.
+def put(d Vec(Pair), key K, value V) Vec(Pair) forall K, V := [P(key, value) | d]
+
+# ── a sample Int64-keyed dict (built once, queried by the demos/tests) ─────
+def sample() Vec(Pair) := put(put(put([], 1, 10), 2, 20), 3, 30)
+
+def demo_get_hit() Int64 := get(sample(), 2, 0)
+def demo_get_miss() Int64 := get(sample(), 9, 0 - 1)
+def demo_has() Bool := has(sample(), 3)
+def demo_absent() Bool := has(sample(), 7)
+
+# String keys reuse the SAME generic Dict — only the `Eq for String` impl differs
+def names() Vec(Pair) := put(put([], "a", 1), "b", 2)
+def demo_string_key() Int64 := get(names(), "b", 0)
+
+# ── tests (ADR-0057): the bound + dispatch + generic Pair run end-to-end ───
+@test def get_finds_value() Bool := get(sample(), 2, 0) == 20
+@test def get_returns_default() Bool := get(sample(), 99, 0 - 1) == 0 - 1
+@test def put_shadows_earlier_key() Bool := get(put(sample(), 2, 99), 2, 0) == 99
+@test def has_present() Bool := has(sample(), 1)
+@test def has_absent() Bool := not has(sample(), 8)
+@test def string_keys_work() Bool := get(names(), "a", 0) == 1

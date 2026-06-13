@@ -140,11 +140,12 @@ sections; they are tracked here so the corpus has one place to look:
   coherence-checked; dispatch covers **primitive, sum (by constructor tag), and struct** types —
   enough for a real `Eq`/`Show` over the compiler's own data (`Token`, `Expr`). `forall T: Bound`
   is now **enforced at call sites** (a concrete type lacking the required `impl` is a proven error).
-  A first **portable stdlib slice** rides it: `contains`/`sort`/`maximum` as bounded generics over
-  `Eq`/`Ord` ([17_stdlib_eq_ord.rian](../examples/rian/17_stdlib_eq_ord.rian)), run by its own
-  `@test`s + doctests. *Still open:* dynamic dispatch, the Rust/JS lowerings, and a `Dict` over `Eq`
-  (needs generic pair types).
-- **JS emitter completeness** (ADR-0049) — `struct`/`with`/lambdas/FFI still raise `Unsupported`
+  A **portable stdlib** rides it: `contains`/`sort`/`maximum` over `Eq`/`Ord`
+  ([17_stdlib_eq_ord.rian](../examples/rian/17_stdlib_eq_ord.rian)) and a **`Dict` over `Eq`**
+  (`get`/`has`/`put` bounded `forall K: Eq` over a generic `Pair(k K, v V)`, Int64 + String keys,
+  [18_dict_eq.rian](../examples/rian/18_dict_eq.rian)) — both run by their own `@test`s + doctests
+  on BEAM/JS. *Still open:* dynamic (`dyn`) dispatch.
+- **JS emitter completeness** (ADR-0049) — `with`/lambdas/atoms/FFI still raise `Unsupported`
   ([js.ex](../lib/rian/js.ex)); a browser playground that runs the compiler client-side needs them.
 - **Two-Elixir-emitter consolidation** — the Erlang abstract-forms backend ([beam.ex](../lib/rian/beam.ex))
   is the real BEAM path; [lower.ex](../lib/rian/lower.ex)'s Elixir *text* is now **demoted to a

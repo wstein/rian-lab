@@ -37,6 +37,7 @@ idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
 | [15_targets.rian](15_targets.rian) | Portability as a declaration (ADR-0058) — `@targets(ex, rs, js)` on a `mod`; the compiler gates every `pub` fn's reachability against the contract |
 | [16_doctests.rian](16_doctests.rian) | Doctests (ADR-0060 tier B) — `expr #=> expected` in a `@doc` heredoc, executed by `Rian.Doctest`; a drifted example fails the build |
 | [17_stdlib_eq_ord.rian](17_stdlib_eq_ord.rian) | A portable stdlib slice over `Eq`/`Ord` (ADR-0042) — `contains`/`sort`/`maximum` as **bounded generics** (`forall T: Eq`/`Ord`); the protocol's first real customer, with `@test`s + doctests |
+| [18_dict_eq.rian](18_dict_eq.rian) | A `Dict` over `Eq` — `get`/`has`/`put` bounded `forall K: Eq` over a generic `Pair(k K, v V)`; "Dict keys need Eq" made real (Int64 + String keys), runs on BEAM/JS, with `@test`s + doctests |
 
 Suggested reading order is numeric; 04 is the one to linger on — it is what
 distinguishes Rian from "Elixir with different keywords."
