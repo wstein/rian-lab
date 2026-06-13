@@ -212,7 +212,7 @@ defmodule Rian.Decl do
       |> Enum.chunk_by(& &1.name)
       |> Enum.map(&build_func/1)
       |> Enum.map(&subst_func(&1, aliases))
-      |> expand_macros(decls, targets)
+      |> lower_meta(decls, targets)
 
     consts =
       for({:const, c, pub?, doc} <- decls, do: parse_const(c, pub?, doc))
@@ -223,24 +223,37 @@ defmodule Rian.Decl do
     %{types: types, ranges: ranges, structs: structs, consts: consts, uses: uses, funcs: funcs}
   end
 
-  # Expand `macro` calls in this scope's function bodies (ADR-0030), a pure
-  # AST->AST pass that runs *before* the checker and every emitter. The expanded
-  # `{:block, …}` AST is stored back into each clause's `body`, which all body
-  # consumers re-parse transparently (`Pratt.parse_body/1` passes an AST through).
+  # The pre-typecheck metaprogramming pass over this scope's function bodies: pure
+  # AST->AST transforms that must run *before* the checker and every emitter —
+  # `macro` expansion (ADR-0030) then `comptime` folding (ADR-0046, "compile-time
+  # by default"). The transformed `{:block, …}` AST is stored back into each
+  # clause's `body`, which all body consumers re-parse transparently
+  # (`Pratt.parse_body/1` passes an AST through). Macro expansion is
   # `portable: true` when the enclosing `mod` declares `@targets` (ADR-0058): a
   # template introducing a failable bind is then rejected (ADR-0035). Synthetic
-  # funcs (protocol dispatchers/impls) never call user macros, so they are skipped.
-  defp expand_macros(funcs, decls, targets) do
+  # funcs (protocol dispatchers/impls) carry no user `macro`/`comptime`, so they
+  # are skipped to keep their generated bodies as the emitters produced them.
+  defp lower_meta(funcs, decls, targets) do
     env = collect_macros(decls)
+    portable? = targets != nil
 
-    if env == %{} do
-      funcs
-    else
-      Enum.map(funcs, fn
-        %Func{synthetic: true} = f -> f
-        %Func{} = f -> expand_func(f, env, targets != nil)
-      end)
-    end
+    Enum.map(funcs, fn
+      %Func{synthetic: true} = f -> f
+      %Func{clauses: cs} = f -> %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?))}
+    end)
+  end
+
+  defp meta_clause(%Clause{body: nil} = c, _env, _p), do: c
+
+  defp meta_clause(%Clause{body: body} = c, env, portable?) when is_binary(body) do
+    ast = Pratt.parse_body(body)
+    expanded = if env == %{}, do: ast, else: Rian.Macro.expand(env, ast, portable: portable?)
+    out = Rian.Comptime.fold(expanded)
+
+    # Only swap the source-string body for an AST when a transform actually fired;
+    # bodies with no macro/`comptime` keep their string form (and the invariant
+    # that an untouched clause body is its source text).
+    if out == ast, do: c, else: %{c | body: out}
   end
 
   defp collect_macros(decls) do
@@ -260,17 +273,6 @@ defmodule Rian.Decl do
     |> split_top(",")
     |> Enum.map(&(&1 |> String.trim() |> String.split() |> List.first()))
     |> Enum.reject(&(&1 in [nil, ""]))
-  end
-
-  defp expand_func(%Func{clauses: cs} = f, env, portable?) do
-    %{f | clauses: Enum.map(cs, &expand_clause(&1, env, portable?))}
-  end
-
-  defp expand_clause(%Clause{body: nil} = c, _env, _p), do: c
-
-  defp expand_clause(%Clause{body: body} = c, env, portable?) when is_binary(body) do
-    expanded = Rian.Macro.expand(env, Pratt.parse_body(body), portable: portable?)
-    %{c | body: expanded}
   end
 
   # `protocol`/`impl` (ADR-0042 §3) desugar to ordinary raw `def` maps — a

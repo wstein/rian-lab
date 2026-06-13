@@ -186,7 +186,7 @@ Geometry.area(x)   # Rian module call      point.x         # field access
 Value.Num(n)       # variant path          :lists.sum(xs)  # Erlang FFI (atom head)
 String.upcase(s)   # Elixir-lib FFI
 
-macro square(x) => x * x                   # declarative macro (AST substitution, hygienic)
+macro square(x) := x * x                   # declarative macro (AST substitution, hygienic)
 comptime(2 + 3 * 4)                        # pure compile-time constant folding -> 14
 ```
 

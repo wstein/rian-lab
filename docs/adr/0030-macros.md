@@ -32,9 +32,14 @@ parser changes** were needed):
 **1. Declarative pattern→template macros** (the `macro_rules!`/`syntax-rules` model):
 
 ```
-macro unless(cond, body) => if not cond do body else 0 end
-macro square(x)          => x * x
+macro unless(cond, body) := if not cond do body else 0 end
+macro square(x)          := x * x
 ```
+
+> **Amendment (2026-06-13):** the template separator is **`:=`**, not the `=>` originally sketched
+> here. `=>` was never lexable, and `:=` is already Rian's "defined as" operator (`def f := body`,
+> binds) — reusing it keeps the surface consistent and adds no token. The macro declaration reuses the
+> `def` head/body grammar verbatim (`Rian.Decl`).
 
 The template is **ordinary Rian code**; parameters are substituted as **AST**, not text. There
 is **no `quote`/`unquote`**. Calls look like normal calls: `unless(n > 5, log)`. Two guarantees

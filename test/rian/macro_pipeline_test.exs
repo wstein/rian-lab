@@ -53,6 +53,30 @@ defmodule Rian.MacroPipelineTest do
       assert Map.get(unit, :rust) =~ "n * n"
       refute Map.get(unit, :rust) =~ "sq("
     end
+
+    test "`comptime(expr)` folds to a literal through the pipeline (ADR-0046)" do
+      {:ok, mod} =
+        Beam.load("def sz() Int64 := comptime(2 + 3 * 4)", :rian_macro_pipe_comptime)
+
+      assert mod.sz() == 14
+    end
+  end
+
+  describe "the by-example tour file compiles and runs (06_macros_comptime)" do
+    test "macros + comptime in examples/rian/06 load and produce the documented results" do
+      src = File.read!(Path.join([File.cwd!(), "examples", "rian", "06_macros_comptime.rian"]))
+      {:ok, mod} = Beam.load(src, :rian_tour_06)
+
+      assert mod.demo_unless(3) == 30
+      assert mod.demo_unless(7) == 0
+      assert mod.demo_square(2, 3) == 25
+      # hygiene: the macro-local `tmp` (=100) does not capture the caller's (=5)
+      assert mod.demo_hygiene(5) == 105
+      # comptime folds to literals
+      assert mod.table_size() == 14
+      assert mod.scaled() == 15
+      assert mod.always() == false
+    end
   end
 
   describe "portable-core macro discipline at the @targets boundary (ADR-0035/0058)" do

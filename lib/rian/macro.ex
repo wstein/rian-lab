@@ -1,6 +1,6 @@
 defmodule Rian.Macro do
   @moduledoc """
-  Declarative, hygienic macros — `macro name(params) => template`, where the
+  Declarative, hygienic macros — `macro name(params) := template`, where the
   template is ordinary Rian code (NO quote/unquote). This is the
   macro_rules!/syntax-rules model: macro calls are substituted at the AST level
   (so precedence is always correct — no C-preprocessor bugs), and template-local

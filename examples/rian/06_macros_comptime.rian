@@ -4,15 +4,19 @@
 # Character: macros are DECLARATIVE pattern->template (the `macro_rules!` /
 # `syntax-rules` model), NOT Elixir-style `quote`/`unquote` AST construction.
 # Both macros and `comptime` are pure AST->AST passes that run BEFORE typecheck,
-# so they need no parser changes and work uniformly for the BEAM and Rust.
+# so they need no parser changes and work uniformly across the BEAM, Rust and JS.
 #
-# ADR: docs/adr/0030-macros.md
+# These run for real now: `macro`/`comptime` are expanded by `Rian.Decl` before
+# the checker and every emitter, so this whole file compiles and executes (see
+# test/rian/macro_pipeline_test.exs, which loads it and checks the results).
+#
+# ADR: docs/adr/0030-macros.md · docs/adr/0046-compile-time-by-default.md
 # ---------------------------------------------------------------------------
 
-# A declarative macro: parameters are substituted as AST (never as text). The
-# template is ordinary Rian code.
-macro unless(cond, body) => if not cond do body else 0 end
-macro square(x)          => x * x
+# A declarative macro: `macro name(params) := template`. Parameters are
+# substituted as AST (never as text); the template is ordinary Rian code.
+macro unless(cond, body) := if not cond do body else 0 end
+macro square(x)          := x * x
 
 # Two guarantees fall out of substituting at the AST level:
 #
@@ -23,19 +27,19 @@ macro square(x)          => x * x
 # 2. HYGIENE BY DEFAULT. A template's own binders are gensym-renamed, so they
 #    cannot capture the caller's variables. In the macro below, the template's
 #    `tmp` becomes `tmp__h<N>` and will NOT clobber a caller's `tmp`.
-macro add_tmp(x) => if true do tmp := 100; x + tmp else 0 end
+macro add_tmp(x) := if true do tmp Int64 := 100 ; x + tmp else 0 end
 
 # Usage looks like an ordinary call:
-def demo_unless(n Int64) Int64 := unless(n > 5, n * 10)   # n=3 -> 30 ; n=7 -> 0
-def demo_square(a Int64, b Int64) Int64 := square(a + b)    # (a+b)*(a+b)
-def demo_hygiene(tmp Int64) Int64 := add_tmp(tmp)         # 5 -> 105 (NOT 200)
+def demo_unless(n Int64) Int64 := unless(n > 5, n * 10)     # n=3 -> 30 ; n=7 -> 0
+def demo_square(a Int64, b Int64) Int64 := square(a + b)    # (a+b)*(a+b): 2,3 -> 25
+def demo_hygiene(tmp Int64) Int64 := add_tmp(tmp)           # 5 -> 105 (NOT 200)
 
 # `comptime(expr)`: evaluate a constant expression at compile time and replace
 # it with its literal (the Zig model). The evaluator is a PURE SANDBOX:
 # literals, arithmetic, boolean and comparison operators only.
 def table_size() Int64 := comptime(2 + 3 * 4)           # becomes the literal 14
 def scaled() Int64     := comptime((1 + 2) * 5)          # becomes 15
-def always() Bool    := comptime(3 > 5)                # becomes false
+def always() Bool      := comptime(3 > 5)                # becomes false
 
 # The sandbox REFUSES effects at compile time (each of these is a compile error):
 #   comptime(foo(3))            # calls are not allowed in a pure comptime sandbox
@@ -44,3 +48,20 @@ def always() Bool    := comptime(3 > 5)                # becomes false
 #
 # There is no build-time effect without an explicit (and currently deferred)
 # build capability. Purity is the default and the guarantee.
+
+# ---------------------------------------------------------------------------
+# PORTABLE-CORE DISCIPLINE (ADR-0035 no-hidden-control-flow · ADR-0058)
+# ---------------------------------------------------------------------------
+# In a `@targets(…)` module — code promised to compile to every listed target —
+# a macro may NOT introduce caller-invisible control flow. A template that
+# expands a one-line call site into a failable bind (`with … <- …`, ADR-0039)
+# is rejected at compile time, because the error a reader would have to debug
+# points at expanded nodes they never wrote ("debugging a ghost"). For example,
+# inside `@targets(ex, rs, js) mod …` this macro is refused:
+#
+#   macro unwrap(e) := with {:ok, v} <- e do v end
+#                      # ^ rejected: "introduces a failable bind … not allowed
+#                      #   in portable/@targets code"
+#
+# Outside a `@targets` module the same macro is allowed — the discipline binds
+# exactly the code that claims to be portable, nothing more.
