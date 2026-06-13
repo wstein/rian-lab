@@ -325,15 +325,21 @@ over time. The proof is a four-stage ladder:
   sources; the rest use heredoc doc-comments, and the lexer cannot yet lex *its own*
   source (char escapes `'\n'`) — the documented frontier.
   See [`test/rian/selfhost_fixedpoint_test.exs`](test/rian/selfhost_fixedpoint_test.exs).
-- **Stage 2 — front-end self-host** (**partial — the expression front-end self-hosts**):
-  the Rian-written parser (full binary precedence table + prefix `-`/`not` + function
-  calls) produces an AST that **term-equals `Rian.Pratt.parse`**, and that output is
-  consumed by the **real Elixir backend** (`Rian.Lower`/`Rian.Core`) to **actually run**
-  — `(2 + 3) * 4` → `20`, `a + b * c` (a=2,b=3,c=4) → `14`, proven in
-  [`parse_fixpoint_test.exs`](test/rian/parse_fixpoint_test.exs). This is "Rian
-  front-end + reused backend = working program" for expressions. **Remaining:**
-  declaration parsing (`Rian.Decl` → Core IR for `def`/`type`/`mod`) and the portable
-  `Enum`/`Map`/`String` stdlib breadth (ADR-0047) — the gate on the *full* front-end.
+- **Stage 2 — front-end self-host** (**core declaration forms done**): two layers
+  now self-host. (a) The Rian *expression* parser (full binary precedence table +
+  prefix `-`/`not` + calls) term-equals `Rian.Pratt.parse`
+  ([`parse_fixpoint_test.exs`](test/rian/parse_fixpoint_test.exs)). (b) The Rian
+  *declaration* front-end [`selfhost_decl.rian`](examples/rian/selfhost_decl.rian)
+  parses `type` sums and `def` functions into a `Decl` representation that, projected
+  to `Rian.IR`, **equals what `Rian.Decl.parse` builds** *and* is **compiled and run
+  by the real backend** via the new `Rian.Beam.compile_ir/2` seam — e.g. a program of
+  `sq`/`add`/`main` parsed in Rian runs `main(4) = add(sq(4),4) = 20`
+  ([`decl_fixpoint_test.exs`](test/rian/decl_fixpoint_test.exs)). That is "Rian
+  front-end produces IR → existing backend compiles+runs it," with no Elixir parse in
+  the loop. **Remaining (the long tail of `Rian.Decl`):** multi-clause `def` + clause
+  patterns, capabilities (`val`/`iso`/`ref`), parametric types (`Vec(T)`),
+  `mod`/`struct`/`alias`/`protocol`/generics, and the portable `Enum`/`Map`/`String`
+  stdlib breadth (ADR-0047).
 - **Stage 3 — bootstrap fixed point** (future; **determinism prerequisite verified**):
   the whole compiler in Rian; compile its source with the Elixir host → v1, compile
   with v1 → v2, assert **v1 == v2** (bit-identical `.beam`). The canonical terminus.

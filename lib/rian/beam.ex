@@ -161,6 +161,27 @@ defmodule Rian.Beam do
     end)
   end
 
+  @doc """
+  Compile a **pre-built program IR** (the `Rian.Decl.parse/1` shape —
+  `%{funcs, types, structs, ranges, mods}`) directly, skipping the Elixir parser.
+
+  This is the **Stage-2 self-hosting seam** (ADR-0063): a Rian-written front-end
+  produces this IR and the real backend compiles it, with no Elixir parse in the
+  loop. Clause bodies may be source strings *or* already-parsed `{:block,…}` ASTs
+  — `Pratt.parse_body/1` accepts either (the macro-pipeline passthrough).
+  """
+  def compile_ir(prog, module) when is_atom(module) do
+    :ok = Rian.Reach.gate!(prog)
+    beam_for(module, funcs_of(prog), ranges_of(prog), types_of(prog), structs_of(prog))
+  end
+
+  @doc "Compile and load a pre-built program IR (see `compile_ir/2`)."
+  def load_ir(prog, module) when is_atom(module) do
+    {:ok, ^module, bin} = compile_ir(prog, module)
+    {:module, ^module} = :code.load_binary(module, ~c"#{module}.beam", bin)
+    {:ok, module}
+  end
+
   # build one module's `.beam` from its function list. `ranges` (a list of
   # `%IR.Range{}`) lets `Name.of(n)` construction desugar (ADR-0036). `types` and
   # `structs` let `-spec` attributes expand sum/struct types (Stage 0.5).

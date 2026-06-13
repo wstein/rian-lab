@@ -61,7 +61,16 @@ compile + run on real BEAM bytecode:
   BEAM lowering *is* Pratt's surface tuples (`Num(s)`→`{:num,s}`, `Bin(op,l,r)`→
   `{:bin,op,l,r}`), so the parser's output term-equals `Rian.Pratt.parse` with no
   projection — diffed over a corpus (`test/rian/parse_fixpoint_test.exs`), the
-  parser analog of the lexer fixpoint. Slice: `+ - * /`, identifiers, parens.
+  parser analog of the lexer fixpoint. Covers the full binary precedence table
+  (precedence climbing), prefix `-`/`not`, and function calls.
+- [selfhost_decl.rian](selfhost_decl.rian) — a Rian **declaration** front-end
+  (self-hosting **Stage 2**, ADR-0063): parses `type` sums and `def` functions
+  into a `Decl` representation that, projected to `Rian.IR`, **equals what
+  `Rian.Decl.parse` builds** and is then **compiled and run by the real backend**
+  (`Rian.Beam.compile_ir/2`) — a Rian front-end producing IR the existing backend
+  consumes (`test/rian/decl_fixpoint_test.exs`). Core forms; the long tail of
+  `Rian.Decl` (multi-clause, capabilities, parametric types, mod/struct/protocol)
+  remains.
 - [selfhost_eval.rian](selfhost_eval.rian) — an evaluator that folds the `Expr`
   sum to an `Int64`, threading a **symbol table** (`Map(String, Int64)`) with
   `let`-binding and `Var` lookup. The symbol table is the first place that
