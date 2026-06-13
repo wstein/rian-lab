@@ -44,6 +44,19 @@ defmodule Rian.PrimTest do
       # second pass is identity
       assert Prim.normalize(ast) == ast
     end
+
+    test "an unknown `Prim.x` is a hard error, not a bogus `__prim_x`" do
+      # a typo (or a collision with a user module named `Prim`) must fail loudly
+      err = assert_raise ArgumentError, fn -> Pratt.parse("Prim.str_charz(s)") end
+      assert Exception.message(err) =~ "unknown primitive `Prim.str_charz`"
+      assert Exception.message(err) =~ "reserved"
+    end
+
+    test "every registered intrinsic rewrites (the registry has no dead names)" do
+      for name <- Prim.names() do
+        assert Pratt.parse("Prim.#{name}(x)") == {:call, {:id, "__prim_#{name}"}, [{:id, "x"}]}
+      end
+    end
   end
 
   describe "end-to-end on BEAM via the updated prelude files" do

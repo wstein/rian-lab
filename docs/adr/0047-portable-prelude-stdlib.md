@@ -37,6 +37,16 @@ hot primitive **delegate to the target's native lib** where it pays (BEAM `List.
 Rust → iterator). The all-in-Rian and N-hand-written-native alternatives are **rejected** (no
 primitives / a semantic-drift bug farm, respectively).
 
+**Surface of the primitive layer — the reserved `Prim.*` namespace (implemented).** The intrinsics
+are spelled `Prim.str_chars`, `Prim.char_code`, `Prim.map_get`, … in source. `Prim` is a **reserved,
+target-internal, unstable** namespace: `Rian.Pratt` rewrites a `Prim.<name>(args)` call to the
+canonical intrinsic `__prim_<name>(args)` at the parse boundary (one chokepoint, before any
+downstream walker), and **only the registered intrinsic names rewrite** (`Rian.Prim.names/0`) — an
+unknown `Prim.x` is a hard compile error, never a silently-bogus `__prim_x`. User code never writes
+`Prim.*`; it goes through the portable wrappers (`Str.chars/1`, `Char.code/1`, `Dict.get/2`), which
+are the stdlib-in-Rian over the primitives. The bare `__prim_*` form is legacy and no longer appears
+in tour or self-hosting `.rian` source.
+
 ### 3. No `nil` — absence is `Option(T) = Some(T) | None`
 
 Rian has **no `nil`**. Absence is the nominal sealed sum **`Option(T) = Some(T) | None`** (ADR-0034).

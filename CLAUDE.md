@@ -76,9 +76,13 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
   `:ex`. **Concurrency/OTP is native-per-target by design** — it is *not* a Rian surface (ADR-0057
   superseded the OTP-behaviours ADR-0044). A binary `@shared`/portable flag was explicitly rejected
   in favour of a target-environment *set*.
-- **`__prim_*` calls** (e.g. `__prim_str_chars`, `__prim_char_code`) are the portable-prelude
-  primitive layer (ADR-0047): each emitter lowers them to its native op, and portable `List`/`Dict`/
-  `Str` ops are written once in Rian over them (`examples/rian/prelude_*.rian`).
+- **The primitive layer** (ADR-0047): a small set of intrinsics each emitter lowers to its native op,
+  with portable `List`/`Dict`/`Str` ops written once in Rian over them (`examples/rian/prelude_*.rian`).
+  In source they are the **reserved `Prim.*` namespace** (`Prim.str_chars`, `Prim.char_code`, …);
+  `Rian.Prim.normalize/1` (hooked into `Pratt.parse`/`parse_body`) rewrites `Prim.<name>` to the
+  canonical `__prim_<name>` intrinsic at the parse boundary, validating against `Rian.Prim.names/0`
+  (an unknown `Prim.x` is a hard error). The bare `__prim_*` form is legacy. User code uses the
+  `Str`/`Char`/`Dict` wrappers, never `Prim.*`.
 - **The checker is deliberately conservative**: it infers `:unknown` rather than guess, and only
   reports an error on a *provable* mismatch. Don't "tighten" it into rejecting valid code.
 - **Self-hosting** (`SELFHOST.md`, `examples/rian/selfhost_*.rian`): a compiler pipeline written in

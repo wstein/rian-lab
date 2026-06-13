@@ -18,12 +18,37 @@ defmodule Rian.Prim do
   single canonical call form.
   """
 
+  # The closed set of compiler intrinsics each backend lowers natively
+  # (ADR-0047 §2). This is the surface registry — it must stay in sync with the
+  # `__prim_*` clauses in `beam.ex` / `js.ex` / `lower.ex`. Because `Prim` is a
+  # *reserved* namespace, only these names are rewritten; any other `Prim.x(…)`
+  # is a hard error (a typo, or a collision with a user module named `Prim`),
+  # never a silently-bogus `__prim_x` that fails cryptically downstream.
+  @prims ~w(
+    str_chars str_from_chars str_concat
+    char_code
+    map_new map_get map_put map_has
+    wrapping_add saturating_add checked_add
+  )
+
+  @doc "The intrinsic names the reserved `Prim.*` surface exposes."
+  def names, do: @prims
+
   @doc """
   Walk a tuple-form expression AST and rewrite `Prim.<name>(args)` calls into
-  `__prim_<name>(args)`. Idempotent; non-`Prim` calls pass through unchanged.
+  `__prim_<name>(args)`. Idempotent; non-`Prim` calls pass through unchanged; an
+  unknown `Prim.<name>` raises (the namespace is reserved, ADR-0047 §2).
   """
-  def normalize({:call, {:dot, {:id, "Prim"}, name}, args}),
+  def normalize({:call, {:dot, {:id, "Prim"}, name}, args}) when name in @prims,
     do: {:call, {:id, "__prim_" <> name}, Enum.map(args, &normalize/1)}
+
+  def normalize({:call, {:dot, {:id, "Prim"}, name}, _args}),
+    do:
+      raise(
+        ArgumentError,
+        "unknown primitive `Prim.#{name}` — `Prim` is the reserved intrinsic " <>
+          "namespace (ADR-0047 §2); valid: #{Enum.join(@prims, ", ")}"
+      )
 
   def normalize(node) when is_tuple(node) do
     node
