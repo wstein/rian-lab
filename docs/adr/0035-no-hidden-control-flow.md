@@ -81,7 +81,17 @@ ADR-0036 `unreachable!()` shim — is loud, not hidden, and is the sole sanction
 
 - **`@partial` on the BEAM** — exact diagnostic (generated raising clause vs. `FunctionClauseError`).
 - **Allocation visibility** — how explicit it must be on Rust/WASM at the surface vs. inferred from
-  capabilities; settle with the target-model ADR.
+  capabilities; settle with the target-model ADR. **Resolved (2026-06-13 design review):** a
+  proposal to surface non-GC memory in the *grammar* — a sigil (`~`/`^`) on `iso`/linear bindings,
+  or an allocation prefix on the universal dot (ADR-0029) for heavy Rust structs — was **rejected**.
+  It (a) imports a target-specific model into the shared surface, the same move ADR-0032 rejects for
+  Rust's `?`; (b) is redundant with information the checker already holds — capabilities are inferred
+  and checked (`Rian.Capability`), and the checker deliberately infers `:unknown` rather than guess
+  (ADR-0034), so a *mandatory* sigil has no honest rendering for an unknown capability; and (c) is
+  meaningless on the BEAM/JS two-thirds of targets. The visibility gap is real but belongs in
+  **tooling, not grammar**: capability-on-hover is an ADR-0038 Tier-2 LSP deliverable (needs
+  inference), and a provable misuse is already a `Rian.Capability` linearity error. The surface stays
+  family-clean; the reality is surfaced where it is computed.
 - **Non-BEAM concurrency** — a named gap (see ADR-0031): the non-BEAM targets get the *sequential
   core* only. *If* structured concurrency is ever added there it must be lexically explicit
   (Occam-style scoped parallelism, no detached tasks); OTP/actors stay BEAM-only, no CSP/dataflow.

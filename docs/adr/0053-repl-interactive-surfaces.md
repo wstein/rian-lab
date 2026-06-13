@@ -83,6 +83,20 @@ Live redefinition + hot-reload is native on the BEAM and **not** on Rust/JS — 
 is BEAM-hosted (like the compiler host). The **JS-target interactive surface is the web playground**
 (ADR-0052); we do not fake a Rust/JS terminal REPL. Native-per-target (ADR-0041), again.
 
+**Rejected (2026-06-13 design review): a multi-target-by-default REPL.** A review proposed that the
+REPL emit every expression to all Tier-1 targets and refuse to run anything that cannot emit to
+`ex`+`rs`+`js`, to break the "BEAM comfort zone." Rejected on two grounds. (1) It does not catch its
+own motivating example: a hot sequential loop *emits* to JS fine and then freezes the event loop at
+*runtime* — that is a cost/complexity property no emitter gate observes, not a reachability one (the
+bignum half of the example is already opt-in-visible via `Int.checked_add` &c., ADR-0035). (2) It
+would reject valid Rian today, because the JS emitter still raises `Unsupported` on `struct`/`with`/
+lambdas/FFI — making the REPL *less* capable to make a point. The portability discipline lives where
+it is sound: the **CI gate** (`mix rian.targets --require …`, ADR-0058), default-on for shared/
+`@targets` code. The keystroke-level check the review wanted is available **opt-in** — a `:targets
+ex,rs,js` REPL pragma running the three-way emit on the next expression — not forced on the default
+fast loop. The genuinely-unserved part (a *runtime-cost* axis distinct from reachability) is recorded
+as future work, not solved by a REPL posture change.
+
 ### 8. Notebooks: Livebook over Jupyter
 
 A notebook is **REPL-core + persistence + rich output + narrative**, so it shares this ADR's eval
