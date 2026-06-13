@@ -143,13 +143,19 @@ alongside the parser work.
 
 **Other open items:**
 
-- **Non-BEAM concurrency is an unfilled gap, now named** (decision-lock 2026-06-12). Non-BEAM
-  targets (Rust/Go/JS/WASM) get the *sequential core* only — there is no concurrency story for them.
-  This is a deliberate deferral, not a decision: *if* structured concurrency is ever added there it
-  must be lexically explicit (Occam-style scoped parallelism, no detached tasks) to satisfy ADR-0035,
-  never Go-style implicit `go`. OTP/actors stay BEAM-only; no CSP/Oz-dataflow in the core.
-  - **Forced file-forking** (a *separate* consequence): a BEAM-flavoured line makes its module
-    BEAM-only, pushing authors to fork `_beam.rian`/`_rust.rian`. **Proposed mitigation —
-    [ADR-0056](0056-comptime-target-conditional.md)** (`comptime if target`, proven-equivalent or
-    type-visible, else hard error). It does **not** lift the concurrency lock above (no synthesized
-    OTP on non-BEAM); it only ends forced-forking for the *legal* cases. Not yet accepted.
+- **Concurrency is native-per-target — a deliberate boundary, not a gap** (clarified 2026-06-13;
+  refines the 2026-06-12 lock). Rian's purpose is to **share sequential application logic and tests**
+  across targets — the canonical proof is Rian's own lexer/parser running on the BEAM, Rust, and
+  ECMAScript. Concurrency is **out of the portable core by design**: it *may and should* be
+  implemented in each target's native runtime — OTP on the BEAM, async/threads in Rust,
+  Promises/workers in JS. So "non-BEAM gets the sequential core" is not an unfilled gap to lament but
+  the **intended division of labour**: shared Rian = sequential logic; orchestration wraps it
+  natively per platform. *If* portable structured concurrency were ever added it would still have to
+  be lexically explicit (Occam-style scoped parallelism, no detached tasks; ADR-0035), never Go-style
+  implicit `go` — but the default stance is "write it native," not "abstract it portably."
+  - **No forced file-forking for concurrency**, because concurrency-flavoured code is simply **not
+    shared Rian source** — you write the pure logic once in Rian and call it from a native gen_server
+    / task / worker. The residual case for an author-directed target conditional (sequential
+    representation tails the portable prelude can't reach, ADR-0047) is narrow; see
+    [ADR-0056](0056-comptime-target-conditional.md) (**Proposed, motivation now thin** — not a
+    concurrency tool).

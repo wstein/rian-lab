@@ -1,24 +1,33 @@
 # ADR-0056 — `comptime if target`: the proven-equivalent target conditional
 
-**Status:** **Proposed (draft)** — not accepted; reopens the ADR-0031 sequential-core decision-lock (2026-06-12) and must clear the ADR-0041 §2 bar before acceptance
+**Status:** **Proposed (draft) — motivation thin; likely dormant.** Not accepted. The 2026-06-13 goal clarification (Rian shares *sequential logic + tests*; **concurrency is native-per-target**, ADR-0031) removed this ADR's primary motivation — the OTP/concurrency "fracture" is no longer a Rian-source problem at all. What remains is a narrow sequential-representation niche the portable prelude (ADR-0047) already mostly covers. Kept on record as the disciplined alternative to an undisciplined `@target_fallback`; **do not implement** unless a concrete sequential-only need appears.
 **Refs:** ADR-0030 (pure `comptime` / monomorphization), ADR-0031 (bootstrap; non-BEAM = sequential core — the lock this touches), ADR-0035 (no hidden control flow), ADR-0041 §2 (unmapped BEAM call = compile error, never a silent stub) / §4 (std-mapping), ADR-0044 §4 (OTP behaviour on non-BEAM = compile error), ADR-0046 §2 (compile-time specialization is idiomatic-per-target), ADR-0047 (portable prelude tiers), ADR-0050 (typed core IR)
 **Owners:** Maya Lin (multi-target / ecosystem fracture) · Samir Patel (no-silent-stub guard) · Elena Rostova (selection/lowering) · Arthur Pendelton (equivalence checking) · Kira Neri (determinism) · Marcus Chen (transparency) · Rachel Okafor (PM)
 
 ## Context
 
+> **Goal-clarification update (2026-06-13).** Rian's purpose is to **share sequential application
+> logic and tests** across targets (the lexer/parser running on BEAM/Rust/JS is the proof), and
+> **concurrency is native-per-target by design** (ADR-0031) — OTP on the BEAM, async/threads in
+> Rust, Promises/workers in JS. This **removes this ADR's original motivation**: the
+> `gen_server`-vs-`struct` "fracture" never was a Rian-source problem, because concurrency-flavoured
+> code is **not shared Rian** — you write the pure logic once in Rian and call it from a native
+> gen_server / task / worker. The Context below is preserved for the record, but its OTP framing is
+> superseded; the only residual niche is §1's sequential-representation tail.
+
 Today every BEAM-flavoured line makes its module BEAM-only: the emitters hard-fail late on an
 unmapped BEAM call (ADR-0041 §2) or an OTP behaviour on a non-BEAM target (ADR-0044 §4). That
 failure is **correct and deliberate** — a silent semantic substitution (swap a supervised
 `gen_server` for a plain struct and compile green) is exactly the correctness/security-grade bug
-ADR-0041 §2 forbids. But "correct and unusable" is still a real cost: authors who need one file to
-serve two targets are pushed to **fork into `_beam.rian` / `_rust.rian`**, and the write-once promise
-erodes. The portable-prelude tiers (ADR-0047) shrink how often this bites, but cannot reach
-genuinely target-specific code (a native primitive, an OTP-backed cache).
+ADR-0041 §2 forbids. The original worry was that "correct and unusable" pushes authors to **fork into
+`_beam.rian` / `_rust.rian`**. The goal clarification above largely dissolves that worry for the
+concurrency cases (they aren't shared Rian source); what is left is genuinely target-specific
+**sequential** code (a native scalar formatter, a native regex engine) that the portable-prelude
+tiers (ADR-0047) don't reach.
 
 The team debate (2026-06-13) rated a target conditional **3/5 — merit, needs an ADR, not a sprint**:
 worth specifying so the *idea* has a disciplined home, explicitly **not** a silent-fallback macro.
-This ADR is that home. It is **Proposed**, not Accepted: it reopens ADR-0031's 2026-06-12
-sequential-core lock and must satisfy the guardrails below to advance.
+This ADR is that home. It is **Proposed**, not Accepted.
 
 The nearest precedent is already accepted: **ADR-0046 §2** ("compile-time specialization is
 idiomatic-per-target — one program, each target specializes as far as its idiom allows") and
@@ -31,13 +40,19 @@ discipline.
 ### 1. The construct
 
 ```elixir
-def cache_get(c Cache, k String) Option(Bytes) :=
-  comptime if target == :beam do
-    GenServer.call(c, {:get, k})      # OTP path (BEAM only)
+# A *sequential* representation tail the portable prelude doesn't reach: pick the
+# target-native scalar formatter, same observable String on every backend.
+def format_f64(x Float64) String :=
+  comptime if target == :rust do
+    __prim_rust_ryu(x)        # Rust: ryu, shortest round-trip
   else
-    Map.get(c.store, k)               # sequential path (portable)
+    __prim_dtoa(x)            # BEAM/JS: their native shortest-float
   end
 ```
+
+> **Not for concurrency.** This is *not* the `gen_server`-vs-`struct` case — that is **not** shared
+> Rian source at all (see Context). Both branches here produce the **same `String`**; the construct
+> only selects the idiomatic *sequential* implementation.
 
 `target` is a **compile-time atom** (`:beam` / `:rust` / `:js` / …). `comptime if target` is a
 compile-time branch evaluated **per target during lowering**: the unselected branch is not emitted.
@@ -68,20 +83,20 @@ And in **all** cases:
   per-target branch is compiled as if written directly; its illegality is reported as if written
   directly.
 
-### 3. What this does and does NOT change about the ADR-0031 lock
+### 3. Relationship to the ADR-0031 sequential-core boundary
 
-- **Unchanged:** non-BEAM targets still get the **sequential core only**. `comptime if target` cannot
-  synthesize concurrency on Rust/JS; there is no `:beam`-branch construct that conjures OTP semantics
-  into the `else` branch. OTP/actors stay BEAM-only (ADR-0031, ADR-0044).
-- **Changed (the reopened part):** a file no longer **must fork** to serve both worlds for the
-  *legal* cases. The `gen_server`-on-BEAM / plain-`struct`-elsewhere cache is admissible **only** when
-  its signature promises a **sequential contract** (no concurrency effect) that both branches honour —
-  the BEAM branch merely *also* gets supervision, which callers cannot depend on because the signature
-  never promised it. The cross-target divergence is thereby (a)-equivalent on the promised contract,
-  not a silent swap.
+- **The sequential-core boundary is untouched and not reopened.** `comptime if target` is **not** a
+  concurrency tool: it cannot synthesize concurrency on Rust/JS, and it has no business expressing the
+  `gen_server`-vs-`struct` split — concurrency is **native-per-target by design** (ADR-0031, clarified
+  2026-06-13), so that split lives in native host code, never in shared Rian source.
+- **Scope is sequential-only.** Both branches must compute the **same sequential result** (guardrail
+  (a)) or surface their difference in the signature (guardrail (b)). The construct selects an
+  idiomatic *sequential* implementation; it never changes the concurrency or effect story.
 
-This is the consensus line from the debate: **"proven-equivalent, or type-visible difference, else
-hard error"** — preserving ADR-0041 §2 while ending forced file-forking.
+This keeps the debate's consensus line — **"proven-equivalent, or type-visible difference, else hard
+error"** — while staying entirely inside the sequential core. Because concurrency is native, the
+"forced file-forking" this was meant to relieve barely arises; the residual sequential niche is what,
+if anything, would justify implementing it.
 
 ## Rationale
 
@@ -95,15 +110,17 @@ hard error"** — preserving ADR-0041 §2 while ending forced file-forking.
   silent-stub bug. With it, an admissible `comptime if target` is — by construction — invisible to
   every caller, exactly like the overflow-op or `Symbol`-representation per-target choices already
   shipped.
-- It is the honest answer to ecosystem fracture: the portable prelude (ADR-0047) handles the common
-  surface; this handles the irreducibly target-specific tail **without** forking the file or faking
-  semantics.
+- Its *residual* value is the irreducibly target-specific **sequential** tail: the portable prelude
+  (ADR-0047) handles the common surface, concurrency is native-per-target (ADR-0031), and what is
+  left — a native scalar formatter, a native regex — is small. That smallness is precisely why this
+  stays **Proposed/dormant**: the disciplined design exists if needed, but the problem it solves is
+  now minor.
 
 ## Ratings
 
 | Decision | Rating |
 |---|---|
-| `comptime if target` as an author-directed extension of ADR-0046 §2 specialization | 3/5 (merit; reopens a lock) |
+| `comptime if target` as an author-directed extension of ADR-0046 §2 specialization | 3/5 (merit; motivation thinned by native-per-target concurrency) |
 | Guardrail (a) proven-equivalent — selection invisible to callers | 4/5 |
 | Guardrail (b) type-visible difference in the signature | 4/5 |
 | Guardrail (c) unavailable capability is still a hard error (not legalised) | 5/5 |
@@ -113,8 +130,9 @@ hard error"** — preserving ADR-0041 §2 while ending forced file-forking.
 
 ## Consequences (if accepted)
 
-- **Decision-lock review required:** advancing past *Proposed* amends ADR-0031's 2026-06-12 lock
-  (the forced-fork consequence, not the concurrency gap).
+- **No decision-lock amendment needed:** the sequential-core boundary stays intact (concurrency is
+  native-per-target); this construct lives entirely inside the sequential core, so it does not touch
+  ADR-0031's 2026-06-12 lock.
 - **Typed core IR (ADR-0050):** a `CTargetIf` node with both branches typed; emitters select per
   target during lowering. **Not** the untyped pre-typecheck `comptime` path.
 - **Checker:** the (a) type/effect-equivalence proof; the (b) signature-visibility rule; (c) reuses
