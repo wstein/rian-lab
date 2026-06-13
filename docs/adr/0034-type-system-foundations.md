@@ -169,8 +169,10 @@ narrowing, exactly as Kotlin invalidates a smart-cast on `var` reassignment.
   [ADR-0042](0042-protocol-bounded-generics.md):** `forall T: Bound` binder (Crystal), `protocol`/`impl`
   declarations, Rust orphan rule, static-by-default dispatch; the `when` collision dissolves. **All four
   §-pillars are now design-complete.**
-- **Capabilities × types:** how `val`/`iso`/`ref`/`tag` interact with inference and protocol bounds
-  (an `iso` returned from a protocol method, etc.).
+- ~~**Capabilities × types:** how `val`/`iso`/`ref`/`tag` interact with inference and protocol bounds
+  (an `iso` returned from a protocol method, etc.).~~ **Resolved by
+  [ADR-0055](0055-capabilities-through-dispatch-and-opaque.md):** the capability rides on the protocol
+  *method receiver* (survives `dyn` erasure via coherence); `val` default, `iso`/`ref` opt-in.
 - ~~**Target model for `Symbol` / error-tag representation** on non-atom targets (JVM/Go/JS/WASM).~~
   **Resolved by [ADR-0041](0041-target-model.md):** error tags are closed sums → tagged union per
   target; `Symbol` lowers closed→enum / open→`&'static str`, equality-only.

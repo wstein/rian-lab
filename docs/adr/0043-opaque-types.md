@@ -122,8 +122,11 @@ capability purposes. Confirmed default; see open items.
 
 - **`derives` convenience** — forward selected base operations (`opaque Meters := Float64 derives
   Comparable, Addable`) without hand-writing each `impl`. v1 is explicit `impl`.
-- **Capability inheritance** — confirm `opaque T := Base` always inherits `Base`'s capability, and how
-  an opaque-over-`struct` interacts with field capabilities (ADR-0034 capabilities × types).
+- ~~**Capability inheritance** — confirm `opaque T := Base` always inherits `Base`'s capability, and how
+  an opaque-over-`struct` interacts with field capabilities (ADR-0034 capabilities × types).~~
+  **Resolved by [ADR-0055](0055-capabilities-through-dispatch-and-opaque.md):** scalar/`Vec`/opaque
+  base inherits as before; an opaque-over-`struct` presents the **join** of its field capabilities
+  (`iso` if any field is `iso`/`ref`, else `val`), fields erased outside the defining module.
 - **`.value` vs an explicit unwrap keyword** — `.value` reads as field access (ADR-0029); confirm it
   does not collide with an opaque-over-`struct` whose base genuinely has a `value` field.
 - **Opaque over a generic base** (`opaque Id(T) := Int64`?) — deferred; v1 is opaque over a concrete

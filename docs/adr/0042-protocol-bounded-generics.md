@@ -155,6 +155,9 @@ machinery-friendly `Fn(…)` canonical form coexist. Default until then: one way
 - **Associated types** (Rust `type Item`) — deferred to v2; v1 protocols carry methods only.
 - **Protocol default methods** (a method with a body in the `protocol`, overridable in `impl`).
 - **Protocol-typed values (`dyn`)** — in the portable core, or a per-target capability? Interacts with
-  capabilities × types (ADR-0034 open item) and allocation (ADR-0041).
+  capabilities × types (ADR-0034 open item) and allocation (ADR-0041). **Capability half resolved by
+  [ADR-0055](0055-capabilities-through-dispatch-and-opaque.md)** (receiver capability through the
+  vtable; `iso self` consumes the protocol-typed value, `ref self` BEAM-rejected); the
+  portable-core-vs-per-target placement of `dyn` itself stays open.
 - **Bound on the binder vs the type position** — `forall T: Comparable` is settled; whether an inline
   Scala-style `xs Vec(T: Comparable)` is *also* allowed as sugar is deferred (default: no, one way).
