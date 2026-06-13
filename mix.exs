@@ -10,6 +10,11 @@ defmodule RianLab.MixProject do
       version: @version,
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
+      # `Rian.DocFormatter` (the ExDoc/Starlight formatter under `dev/`) uses ExDoc
+      # internals, and ExDoc is `only: [:dev, :test]` — so it must be compiled only
+      # where ExDoc is available, never in `:prod` (where `%ExDoc.Autolink{}` is an
+      # undefined struct). Docs build in `:dev` (`mix docs`); the suite is `:test`.
+      elixirc_paths: elixirc_paths(Mix.env()),
       deps: deps(),
       name: "RianLab",
       description:
@@ -26,6 +31,11 @@ defmodule RianLab.MixProject do
       extra_applications: [:logger]
     ]
   end
+
+  # `dev/` holds the ExDoc-dependent doc tooling (`Rian.DocFormatter`); it compiles
+  # only in `:dev`/`:test`, where ExDoc is a dependency. `:prod` builds `lib/` alone.
+  defp elixirc_paths(:prod), do: ["lib"]
+  defp elixirc_paths(_), do: ["lib", "dev"]
 
   defp deps do
     [
