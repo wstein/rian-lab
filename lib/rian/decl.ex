@@ -294,6 +294,13 @@ defmodule Rian.Decl do
     {attach_doc(decl, doc), rest}
   end
 
+  # `@test def name() Bool := …` marks the following `def` as a test (ADR-0057) —
+  # a zero-arity `Bool` function the `Rian.Test` runner executes.
+  defp take_decl([{:annot, "test"} | rest]) do
+    {decl, rest} = take_decl(skip_nl(rest))
+    {mark_test(decl), rest}
+  end
+
   defp take_decl([{:annot, a} | _]),
     do:
       raise(
@@ -399,6 +406,9 @@ defmodule Rian.Decl do
 
   defp mark_pub(_other),
     do: raise(Error, "`pub` may only precede `def` / `type` / `struct` / `const`")
+
+  defp mark_test({:def, raw}), do: {:def, Map.put(raw, :test, true)}
+  defp mark_test(_other), do: raise(Error, "`@test` may only precede a `def`")
 
   # attach a doc string to the declaration that follows the `@doc`/… annotation
   defp attach_doc({:type, s, pub, _}, doc), do: {:type, s, pub, doc}
@@ -665,7 +675,8 @@ defmodule Rian.Decl do
       pub?: sig[:pub] == true,
       tvars: sig[:tvars] || [],
       doc: sig[:doc],
-      synthetic: sig[:synthetic] == true
+      synthetic: sig[:synthetic] == true,
+      test?: sig[:test] == true
     }
   end
 
@@ -681,7 +692,8 @@ defmodule Rian.Decl do
       pub?: d[:pub] == true,
       tvars: d[:tvars] || [],
       doc: d[:doc],
-      synthetic: d[:synthetic] == true
+      synthetic: d[:synthetic] == true,
+      test?: d[:test] == true
     }
   end
 

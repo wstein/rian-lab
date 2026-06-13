@@ -1,0 +1,36 @@
+# ===========================================================================
+# 14 — Tests in Rian: `@test def` (ADR-0057)
+# ===========================================================================
+# Character: ADR-0057 says Rian source is *sequential logic + tests*. A test is
+# an ordinary `@test def` — a zero-arity function returning `Bool` (`true` =
+# pass) — so it compiles through the SAME pipeline as production code and runs on
+# the target. `Rian.Test` bridges each `@test` to the host's xUnit framework
+# (ExUnit on the BEAM; `#[test]` / Vitest per target are the same surface,
+# deferred).
+#
+# Tests are portable sequential logic by construction — they touch no
+# concurrency — which is exactly why they are the natural first thing to dogfood
+# from `rian_lab` into Rian.
+#
+# ADRs: 0057 (sequential logic + tests) · 0042 (Show, for richer diagnostics — deferred)
+# ---------------------------------------------------------------------------
+
+# the unit under test (ordinary Rian functions)
+def double(n Int64) Int64 := n * 2
+
+def fib(n Int64) Int64
+def fib(0) := 0
+def fib(1) := 1
+def fib(n) := fib(n - 1) + fib(n - 2)
+
+# ── tests ──────────────────────────────────────────────────────────────────
+@test def double_zero() Bool := double(0) == 0
+
+@test def double_positive() Bool := double(21) == 42
+
+@test def fib_base_cases() Bool := fib(0) == 0 and fib(1) == 1
+
+@test def fib_recurses() Bool := fib(10) == 55
+
+# a test may combine several checks with `and`
+@test def double_is_additive() Bool := double(3) == 6 and double(4) == 8

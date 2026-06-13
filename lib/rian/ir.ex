@@ -122,7 +122,9 @@ defmodule Rian.IR do
     empty for a non-generic function. `synthetic` marks a compiler-generated
     function — currently the `protocol` dispatcher (ADR-0042 §3/§6), which is
     **exempt from the exhaustiveness gate**: protocol dispatch is open by design
-    (no case-arms, no totality requirement), unlike a user `case`.
+    (no case-arms, no totality requirement), unlike a user `case`. `test?` marks
+    a `@test def` (ADR-0057) — a zero-arity `Bool` function the test runner
+    (`Rian.Test`) executes and bridges to the host's xUnit framework.
     """
     @enforce_keys [:name, :params, :ret, :clauses]
     defstruct name: nil,
@@ -132,6 +134,7 @@ defmodule Rian.IR do
               pub?: false,
               tvars: [],
               doc: nil,
-              synthetic: false
+              synthetic: false,
+              test?: false
   end
 end
