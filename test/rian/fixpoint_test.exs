@@ -55,17 +55,20 @@ defmodule Rian.FixpointTest do
     end
   end
 
-  # ── lexer port, slice 1: identifiers + keywords (selfhost_lexer_v2.rian) ──
+  # ── lexer port, slices 1-2 (selfhost_lexer_v2.rian) ──────────────────────
   # v2 keeps its own `Tok` sum; its parens are `TLP`/`TRP` (`:tlp`/`:trp`), distinct
-  # from the toy lexer's `:tl_paren`/`:tr_paren`, so project them here.
+  # from the toy lexer's `:tl_paren`/`:tr_paren`, so project them here. Slice 2
+  # adds `TOp(String)` (`:t_op`) for comparison + word-operators.
   defp project_v2({:t_id, s}), do: {:id, s}
   defp project_v2({:t_kw, s}), do: {:kw, s}
+  defp project_v2({:t_op, s}), do: {:op, s}
   defp project_v2(:tlp), do: {:lparen}
   defp project_v2(:trp), do: {:rparen}
   defp project_v2(other), do: project(other)
 
-  # within slice-1's vocabulary: integers, identifiers, the five keywords v2
-  # classifies, the four operators, parens, and spaces
+  # within slices 1-2: integers, identifiers, all 16 keywords, the comparison
+  # operators (`< > <= >= == !=`), the word-operators (`and or not in rem div`),
+  # `+ - * /`, parens, and spaces. (Out of slice: literals, floats, brackets.)
   @corpus_v2 [
     "foo",
     "x_1",
@@ -75,10 +78,19 @@ defmodule Rian.FixpointTest do
     "def f",
     "x1 * y2 / z3",
     "  spaced  out  ",
-    "ifx else end"
+    "ifx else end",
+    # slice 2 — comparisons (two-char longest match) + word-operators
+    "a <= b and c == d",
+    "x != y or not z",
+    "if a >= 2 do c end",
+    "p rem q div r in s",
+    "12 < 34",
+    "i > 0 and i < 10",
+    # every keyword at least once, so the full @keywords slice is exercised
+    "type range case when struct alias mod pub const macro use with def if do else end"
   ]
 
-  describe "lexer port slice 1 — identifiers + keywords agree with the reference" do
+  describe "lexer port slices 1-2 — ids, keywords, comparisons, word-ops" do
     setup do
       mod =
         Fixpoint.load_lexer(
@@ -89,8 +101,23 @@ defmodule Rian.FixpointTest do
       {:ok, mod: mod}
     end
 
-    test "the v2 Rian lexer agrees with Rian.Lexer over the slice-1 corpus", %{mod: mod} do
+    test "the v2 Rian lexer agrees with Rian.Lexer over the slices 1-2 corpus", %{mod: mod} do
       assert Fixpoint.check(mod, @corpus_v2, &project_v2/1) == :ok
+    end
+
+    # CI lock: a deliberate divergence in the v2 slice (a wrong comparison-op
+    # projection) MUST be caught, so drift in either lexer fails the build.
+    test "divergence in the slice-2 vocabulary is caught (the diff has teeth)", %{mod: mod} do
+      wrong = fn
+        {:t_op, "<="} -> {:op, "<"}
+        other -> project_v2(other)
+      end
+
+      assert {:mismatch, "a <= b and c == d", expected, got} =
+               Fixpoint.check(mod, @corpus_v2, wrong)
+
+      assert {:op, "<="} in expected
+      assert {:op, "<"} in got
     end
   end
 end

@@ -23,7 +23,7 @@ the normative behaviour the implementation must match).
 | Real type checker | **Compile gate + flow narrowing** | [check.ex](../lib/rian/check.ex) — ADR-0034 §1/§4: unification-based inference gates `compile`, rejecting only *provable* return-type mismatches; `case` arms and pattern clauses narrow bound variables to the matched variant's field types. Error sets (§2) are checked at the `T \| E` boundary; concrete generics (`Vec(T)`) infer. Protocol bounds (§3) await their surface |
 | Erlang abstract-forms backend | Implemented | [beam.ex](../lib/rian/beam.ex) — lowers to the Erlang abstract format + `:compile.forms` → loadable `.beam` (no `eval`); the default BEAM execution path |
 | ECMAScript backend | Implemented (partial) | [js.ex](../lib/rian/js.ex) — ADR-0049 Tier 1 on the core IR; gaps: `struct`/`with`/lambdas/FFI |
-| Self-hosting (compiler in Rian) | Started | six-layer pipeline in Rian compiles to `.beam`; real-lexer port underway, diffed vs reference by [fixpoint.ex](../lib/rian/fixpoint.ex) |
+| Self-hosting (compiler in Rian) | Started | six-layer pipeline in Rian compiles to `.beam`; real-lexer port at **slice 2** (ids, all 16 keywords, comparisons `< > <= >= == !=`, word-ops `and/or/not/in/rem/div`), diffed vs reference by [fixpoint.ex](../lib/rian/fixpoint.ex) and **locked in CI** ([ci.yml](../.github/workflows/ci.yml)). Out of slice: literals/floats/brackets (need string/regex machinery not yet portable) |
 
 A growing slice now flows **from `.rian` source** through the parser → typed core
 IR → dual-target lowering (the modules tour compiles end-to-end); the remaining
@@ -144,4 +144,6 @@ sections; they are tracked here so the corpus has one place to look:
   `mix rian.targets --require`, but the in-source annotation is unbuilt; "portable" is a derived
   property, not yet a declaration.
 - **Self-hosting Stage 1** — port the real compiler modules to Rian, each diffed against the
-  reference by [fixpoint.ex](../lib/rian/fixpoint.ex).
+  reference by [fixpoint.ex](../lib/rian/fixpoint.ex). The lexer port is at slice 2; the next
+  slices (string/char/float literals, brackets, `@annot`) are blocked on portable string/regex
+  primitives, then the declaration parser ([decl.ex](../lib/rian/decl.ex)) follows.

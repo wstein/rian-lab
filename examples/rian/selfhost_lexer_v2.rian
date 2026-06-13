@@ -1,15 +1,22 @@
 # ===========================================================================
-# SELF-HOSTING — porting the REAL Rian lexer to Rian (slice 1)
+# SELF-HOSTING — porting the REAL Rian lexer to Rian (slices 1-2)
 # ===========================================================================
 # The toy lexer (selfhost_lexer.rian) tokenized arithmetic only. This grows the
 # Rian-written lexer toward the *real* `Rian.Lexer` token vocabulary, one slice
 # at a time, checked for agreement against the reference by `Rian.Fixpoint`.
 #
-# Slice 1 adds **identifiers and keywords** on top of numbers/operators/parens —
-# newly writable because `Char` is now a real ordinal type (ADR-0036): the
-# scanner classifies bytes with `Char` comparisons (`c >= 'a' and c <= 'z'`) and
-# folds digit runs with ordinal arithmetic (`acc * 10 + c - '0'`). Keyword vs
-# identifier is decided by string-literal clause heads on the accumulated name.
+# Slice 1 added **identifiers and keywords** on top of numbers/operators/parens —
+# writable because `Char` is a real ordinal type (ADR-0036): the scanner
+# classifies bytes with `Char` comparisons (`c >= 'a' and c <= 'z'`) and folds
+# digit runs with ordinal arithmetic (`acc * 10 + c - '0'`).
+#
+# Slice 2 adds **comparison operators** (`< > <= >= == !=`, with two-char
+# longest-match via `[a, b | rest]` peeking), the **word-operators**
+# (`and or not in rem div`, which the reference lexes as `{:op, w}` not keywords),
+# and the **full 16-keyword set** of `Rian.Lexer.@keywords`. Still out of slice
+# (future work — they need string/regex machinery not yet portable to Rian):
+# string/char literals, floats, number underscores/exponents, heredocs, `@annot`,
+# the structural brackets `[] {} %{`, and the assignment/arrow operators.
 #
 # Char-class tests are *inlined* in `when` guards (BEAM guards cannot call a
 # user function — this leaks the host's guard constraint into source and will
@@ -20,18 +27,25 @@
 
 mod SelfhostLexerV2 do
   # The lexer's own token stream — projected onto `Rian.Lexer`'s tokens by the
-  # fixpoint harness (TNum -> {:num}, TId -> {:id}, TKw -> {:kw}, …).
-  type Tok := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLP | TRP | TId(String) | TKw(String)
+  # fixpoint harness (TNum -> {:num}, TId -> {:id}, TKw -> {:kw}, TOp -> {:op}, …).
+  type Tok := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLP | TRP | TId(String) | TKw(String) | TOp(String)
 
   pub def tokenize(src String) Vec(Tok) := lex(Prim.str_chars(src))
 
   def lex(cs Vec(Char)) Vec(Tok)
   def lex([]) := []
   def lex([c | rest]) when c == ' ' := lex(rest)
+  # two-char comparison operators FIRST (longest match: `<=` before `<`)
+  def lex(['<', '=' | rest]) := [TOp("<=") | lex(rest)]
+  def lex(['>', '=' | rest]) := [TOp(">=") | lex(rest)]
+  def lex(['=', '=' | rest]) := [TOp("==") | lex(rest)]
+  def lex(['!', '=' | rest]) := [TOp("!=") | lex(rest)]
   def lex(['+' | rest]) := [TPlus | lex(rest)]
   def lex(['-' | rest]) := [TMinus | lex(rest)]
   def lex(['*' | rest]) := [TStar | lex(rest)]
   def lex(['/' | rest]) := [TSlash | lex(rest)]
+  def lex(['<' | rest]) := [TOp("<") | lex(rest)]
+  def lex(['>' | rest]) := [TOp(">") | lex(rest)]
   def lex(['(' | rest]) := [TLP | lex(rest)]
   def lex([')' | rest]) := [TRP | lex(rest)]
   def lex([c | rest]) when c >= '0' and c <= '9' := lex_num([c | rest], 0)
@@ -43,20 +57,40 @@ mod SelfhostLexerV2 do
   def lex_num([c | rest], acc) when c >= '0' and c <= '9' := lex_num(rest, acc * 10 + c - '0')
   def lex_num(cs, acc) := [TNum(acc) | lex(cs)]
 
-  # a run of identifier chars -> the name string, classified as keyword or id.
-  # `chars` accumulates in reverse, then `rev` + `Prim.str_from_chars` rebuild
-  # the name in source order (portable: no host FFI).
+  # a run of identifier chars -> the name string, classified as keyword / word-op
+  # / id. `chars` accumulates in reverse, then `rev` + `Prim.str_from_chars`
+  # rebuild the name in source order (portable: no host FFI).
   def lex_id(cs Vec(Char), chars Vec(Char)) Vec(Tok)
   def lex_id([c | rest], chars) when (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_' := lex_id(rest, [c | chars])
   def lex_id(cs, chars) := [classify(Prim.str_from_chars(rev(chars, []))) | lex(cs)]
 
-  # keyword set (a slice of `Rian.Lexer`'s @keywords) vs a plain identifier
+  # the full keyword set (Rian.Lexer.@keywords); the word-operators
+  # (and/or/not/in/rem/div) are `{:op, w}` in the reference, not keywords; the
+  # rest is a plain identifier.
   def classify(name String) Tok
+  def classify("and") := TOp("and")
+  def classify("or") := TOp("or")
+  def classify("not") := TOp("not")
+  def classify("in") := TOp("in")
+  def classify("rem") := TOp("rem")
+  def classify("div") := TOp("div")
   def classify("if") := TKw("if")
   def classify("do") := TKw("do")
   def classify("else") := TKw("else")
   def classify("end") := TKw("end")
   def classify("def") := TKw("def")
+  def classify("type") := TKw("type")
+  def classify("range") := TKw("range")
+  def classify("case") := TKw("case")
+  def classify("when") := TKw("when")
+  def classify("struct") := TKw("struct")
+  def classify("alias") := TKw("alias")
+  def classify("mod") := TKw("mod")
+  def classify("pub") := TKw("pub")
+  def classify("const") := TKw("const")
+  def classify("macro") := TKw("macro")
+  def classify("use") := TKw("use")
+  def classify("with") := TKw("with")
   def classify(name) := TId(name)
 
   # reverse a Char list onto an accumulator (pure Rian, cons recursion)
