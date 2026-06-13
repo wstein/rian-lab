@@ -29,9 +29,27 @@ direct; PureScript reference-only).
 | **BEAM** | **1** | The bootstrap path (ADR-0031): Elixir-source interim → Erlang abstract forms. OTP/concurrency lives here. |
 | **Rust** | **1** | Backend-parallel source emitter, already component-tested (ADR-0031). The ownership/zero-cost anchor. |
 | **ECMAScript** | **1** | Web/Node reach; an *easy*, forgiving emission target. **Direct emission** (a source emitter like Rust). |
-| **JVM** | **2** | Broad enterprise reach; idiomatic JVM emission is more work (no value types pre-Valhalla, boxing). |
+| **JVM** | **2** | Broad enterprise reach. **Emitter landed (2026-06-13, `Rian.JVM`) — Kotlin, not Java** (see §3a). A source emitter on the typed core IR, like Rust/JS. |
 | **WASM** | **2** | **Rides the Rust pipeline** — emit Rust, compile to `wasm32` — so it is cheap given Rust is Tier 1. A *direct* WASM emitter is deferred. |
 | **Go** | **3** | Deferred/best-effort; no near-term resourcing. |
+
+### 3a. The JVM emitter targets Kotlin (landed 2026-06-13)
+
+The Tier-2 JVM emitter (`Rian.JVM`) lowers to **Kotlin source**, not Java. Rian is sum-and-match
+oriented, and Kotlin's `sealed interface` + `data class` + smart-cast `is` patterns + expression-`if`
+map almost 1:1 — far less boilerplate than Java's pre-Valhalla boxing, and consistent with the
+idiomatic-per-target ethos (BEAM/Rust/JS each get their native shape; ADR-0041 already specced sums →
+"JVM enum/sealed"). A Rian sum lowers to a sealed hierarchy (`data class Num(val f0: Long): Expr`),
+a multi-clause `def` to an `if`-dispatcher with smart-cast binds. `Int64` → `Long` (64-bit native,
+no boxing dance). It is a **source emitter on the typed core IR** (`Core.from_expr`/`from_pat`), the
+fourth backend with no new fork (ADR-0050) and the second proof of that thesis after `Rian.JS`.
+
+**Scope (MVP):** functions (single/multi-clause), `Int64`/`Float64`/`Bool`/`String`, operators,
+`if`, local calls, `when` guards, and sum variants — verified end-to-end (the `selfhost_opt` optimizer
+lowers to Kotlin, compiles with `kotlinc`, and folds correctly under `java`). Lists/`Vec`, maps,
+structs, `case`, protocols, and FFI raise `Rian.JVM.Unsupported` (the next increments). Per ADR-0026
+parity, JVM CI stays **non-blocking** until promoted (and `kotlinc`/`java` are absent from the
+Erlang-only CI image, so the run-tests no-op there, like the `node`/`rustc` pattern).
 
 ### 3. ECMAScript is emitted directly; PureScript is a reference, not a dependency
 

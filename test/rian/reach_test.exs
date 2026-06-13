@@ -21,8 +21,8 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      assert targets(rep, "add") == [:ex, :js, :rs]
-      assert targets(rep, "sum") == [:ex, :js, :rs]
+      assert targets(rep, "add") == [:ex, :js, :jvm, :rs]
+      assert targets(rep, "sum") == [:ex, :js, :jvm, :rs]
       assert rep["add"].blockers == []
     end
 
@@ -30,7 +30,7 @@ defmodule Rian.ReachTest do
       rep = reach(File.read!("examples/rian/prelude_int.rian"))
 
       for f <- ~w(wrapping_add saturating_add checked_add),
-          do: assert(targets(rep, f) == [:ex, :js, :rs])
+          do: assert(targets(rep, f) == [:ex, :js, :jvm, :rs])
     end
 
     test "a Rian cross-module call is portable (not host FFI)" do
@@ -44,7 +44,7 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      assert targets(rep, "run") == [:ex, :js, :rs]
+      assert targets(rep, "run") == [:ex, :js, :jvm, :rs]
     end
   end
 
@@ -59,7 +59,7 @@ defmodule Rian.ReachTest do
 
       assert targets(rep, "total") == [:ex]
       assert [%{construct: ":lists.sum", kind: :ffi, kills: kills}] = rep["total"].blockers
-      assert Enum.sort(kills) == [:js, :rs]
+      assert Enum.sort(kills) == [:js, :jvm, :rs]
     end
 
     test "an Elixir-module call (non-Rian) is ex-only" do
@@ -134,12 +134,12 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      assert targets(rep, "twice") == [:ex, :js, :rs]
+      assert targets(rep, "twice") == [:ex, :js, :jvm, :rs]
     end
   end
 
   test "the closed target vocabulary is ex/rs/js" do
-    assert Enum.sort(Reach.targets()) == [:ex, :js, :rs]
+    assert Enum.sort(Reach.targets()) == [:ex, :js, :jvm, :rs]
   end
 
   describe "build-default target set (ADR-0058 §2)" do

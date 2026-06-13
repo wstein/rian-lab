@@ -3,7 +3,8 @@ defmodule Rian.Reach do
   Target-reachability analysis (ADR-0057).
 
   For each function it computes the set of **target environments** it can lower
-  to — `:ex` (Elixir/BEAM), `:rs` (Rust), `:js` (ECMAScript). A function is
+  to — `:ex` (Elixir/BEAM), `:rs` (Rust), `:js` (ECMAScript), `:jvm` (Kotlin/JVM,
+  ADR-0049 Tier 2). A function is
   portable (reaches all targets) unless it uses an `ex`-only construct: **host
   FFI** — an Erlang remote call `:mod.fun(…)` or an Elixir-module call
   `Mod.fun(…)` to a module that is *not* a Rian module in the same program. That
@@ -14,7 +15,7 @@ defmodule Rian.Reach do
   Reachability propagates along the local call graph — a function is at most as
   portable as the least-portable local function it calls — by the same fixpoint
   shape as the error-set solver in `Rian.Check`. The label lattice is
-  `{:ex, :rs, :js}` today and is structured to relabel to effects (ADR-0048)
+  `{:ex, :rs, :js, :jvm}` today and is structured to relabel to effects (ADR-0048)
   later: classify *constructs*, intersect over callees, iterate to a fixpoint.
 
   This is the engine behind `mix rian.targets` and the portability gate; it does
@@ -36,7 +37,7 @@ defmodule Rian.Reach do
     defexception [:message]
   end
 
-  @targets [:ex, :rs, :js]
+  @targets [:ex, :rs, :js, :jvm]
 
   # Erlang modules that are concurrency/process/state (ex-only AND native-per-target)
   @conc_erl ~w(ets dets mnesia gen_server gen_statem gen_event global pg pg2 sys supervisor)

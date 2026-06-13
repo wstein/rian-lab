@@ -21,9 +21,15 @@ hex + npm + crates needs `[ex, rs, js]`; an internal service needs `[ex]`; a web
 
 ### 1. Closed, emitter-backed target vocabulary
 
-`:ex` (Elixir/BEAM), `:rs` (Rust), `:js` (ECMAScript) — the ADR-0049 Tier-1 emitters. A token with
-no emitter (`:wasm`, `:jvm`, `:go`) is a **compile error**, never a silent no-op — the vocabulary
-grows only when an emitter lands (Kira: no over-claims in the type system itself).
+`:ex` (Elixir/BEAM), `:rs` (Rust), `:js` (ECMAScript) — the ADR-0049 Tier-1 emitters — and **`:jvm`
+(Kotlin/JVM, ADR-0049 Tier 2; emitter landed 2026-06-13, `Rian.JVM`).** A token with
+no emitter (`:wasm`, `:go`) is a **compile error**, never a silent no-op — the vocabulary
+grows only when an emitter lands (Kira: no over-claims in the type system itself). The vocabulary
+just grew, exactly as designed: `Rian.Reach.targets/0` now returns `[:ex, :rs, :js, :jvm]`, so
+`@targets(… jvm)` is a valid contract and `mix rian.targets` reports a JVM column. (Reach stays
+coarse — it gates on host-FFI/concurrency pinning, not emitter coverage — so a `:jvm`-reachable
+function may still hit a `Rian.JVM.Unsupported` for a construct the Tier-2 emitter has not lowered
+yet, the same partial-emitter posture `:js` carried while it grew.)
 
 ### 2. The required set is configurable, at three levels
 

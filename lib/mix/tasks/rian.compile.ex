@@ -1,11 +1,11 @@
 defmodule Mix.Tasks.Rian.Compile do
-  @shortdoc "Compile a .rian source file to BEAM bytecode and/or Rust"
+  @shortdoc "Compile a .rian source file to BEAM bytecode and/or Rust/JVM"
 
   @moduledoc """
   Compile a Rian source file (Stage 0.1 declaration surface) for each top-level
   function and module.
 
-      mix rian.compile FILE [--beam | --rust] [--show-elixir]
+      mix rian.compile FILE [--beam | --rust | --jvm] [--show-elixir]
 
   The two **real** targets are emitted by default:
 
@@ -19,6 +19,7 @@ defmodule Mix.Tasks.Rian.Compile do
 
     * `--beam`         BEAM bytecode only
     * `--rust`         Rust source only
+    * `--jvm`          Kotlin/JVM source only (`Rian.JVM`, ADR-0049 Tier 2)
     * `--show-elixir`  *additionally* print the Elixir-text **debug** view
                        (`Rian.Lower`'s text emitter — a pedagogical artifact, not
                        the execution path; BEAM runs from bytecode, not this text)
@@ -35,7 +36,7 @@ defmodule Mix.Tasks.Rian.Compile do
   def run(args) do
     {opts, argv, invalid} =
       OptionParser.parse(args,
-        strict: [beam: :boolean, rust: :boolean, show_elixir: :boolean]
+        strict: [beam: :boolean, rust: :boolean, jvm: :boolean, show_elixir: :boolean]
       )
 
     if invalid != [],
@@ -63,6 +64,7 @@ defmodule Mix.Tasks.Rian.Compile do
 
     if :beam in show, do: print_beam(src)
     if :rust in show, do: print_rust(src)
+    if :jvm in show, do: print_jvm(src)
     if :elixir in show, do: print_elixir_debug(src)
   rescue
     e in [Rian.Decl.Error, Rian.Check.Error, ArgumentError, RuntimeError] ->
@@ -114,6 +116,11 @@ defmodule Mix.Tasks.Rian.Compile do
     end)
   end
 
+  # ── JVM: Kotlin source via `Rian.JVM` (ADR-0049 Tier 2) ──────────────────
+  defp print_jvm(src) do
+    Mix.shell().info("══ JVM (Kotlin) ══\n#{Rian.JVM.compile(src)}\n")
+  end
+
   # ── Elixir: the demoted debug view (text emitter, not the run path) ──────
   defp print_elixir_debug(src) do
     Mix.shell().info("══ Elixir (DEBUG text view — not the execution path) ══\n")
@@ -131,6 +138,7 @@ defmodule Mix.Tasks.Rian.Compile do
   defp targets(opts) do
     base =
       cond do
+        opts[:jvm] -> [:jvm]
         opts[:beam] && opts[:rust] -> [:beam, :rust]
         opts[:beam] -> [:beam]
         opts[:rust] -> [:rust]

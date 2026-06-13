@@ -60,11 +60,16 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
      emitters — don't confuse them.
    - **`Rian.JS`** — ECMAScript (ADR-0049 Tier 1); partial (`struct`/`with`/lambdas/FFI raise
      `Unsupported`).
+   - **`Rian.JVM`** — Kotlin/JVM (ADR-0049 **Tier 2**); a direct source emitter on Core, like JS.
+     MVP: functions, primitives, operators, `if`, sum variants (→ `sealed interface` + `data class` +
+     smart-cast patterns); lists/maps/structs/`case`/FFI raise `Unsupported`. Verified via
+     `kotlinc`+`java`. `:jvm` is now in the `Rian.Reach` target vocabulary.
 
 **Consequence for any new language feature:** a new AST node must be threaded through `Pratt` → `Core`
-→ `Check` → `PatternLower`/`Exhaustiveness` → **all three emitters** (`Beam`, `Lower`, `JS`) →
-`Macro`/`Capability` where relevant. Missing one surfaces as a `FunctionClauseError` or an
-`Unsupported` raise. This per-feature drift tax is the central architectural cost.
+→ `Check` → `PatternLower`/`Exhaustiveness` → the emitters (`Beam`, `Lower`, `JS`; **`JVM`** where the
+Tier-2 subset covers it) → `Macro`/`Capability` where relevant. Missing one surfaces as a
+`FunctionClauseError` or an `Unsupported` raise. This per-feature drift tax is the central
+architectural cost.
 
 ## Cross-cutting models you must understand before editing
 
