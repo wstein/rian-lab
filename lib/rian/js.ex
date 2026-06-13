@@ -31,8 +31,14 @@ defmodule Rian.JS do
   small set of **stdlib calls** the self-hosting spikes lean on, mapped to
   portable JS (`Map.get`/`Map.put` immutable, `String.to_charlist`,
   `List.to_string`, `:lists.reverse`) — a stopgap until the portable prelude
-  (ADR-0047) owns them. **Not yet** (raise `Rian.JS.Unsupported`): struct
-  construction/patterns, atoms/`Symbol`, `with`, lambdas/captures, general FFI.
+  (ADR-0047) owns them. **Protocol dispatch** (ADR-0061 §3): a `protocol` lowers
+  to a JS dispatcher generated from the protocol IR — it selects the impl by the
+  first argument's runtime shape (`typeof` for primitives, the tagged-array head
+  for sums), mirroring the BEAM strategy with JS-native guards; the `impl_*`
+  methods lower as plain functions, and bounded generics are plain functions
+  (the bound was checked statically and is erased). **Not yet** (raise
+  `Rian.JS.Unsupported`): struct construction/patterns and struct protocol
+  dispatch, atoms/`Symbol`, `with`, lambdas/captures, general FFI.
   """
   alias Rian.{Core, Decl, Pratt}
 
@@ -67,15 +73,115 @@ defmodule Rian.JS do
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
   def compile(src) do
     prog = Decl.parse(src)
-    # the BEAM runtime-dispatch desugaring (guarded dispatcher + `impl_*` funcs)
-    # is not the JS shape — JS generates its own dispatcher from the protocol IR
-    # (ADR-0061 §3, landed in a later slice). Skip those funcs here.
-    funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :runtime))
-    Enum.map_join(funcs, "\n\n", &function_js/1)
+    # the BEAM `:dispatcher` is a guarded runtime type-test — not the JS shape.
+    # JS keeps the `:impl` methods (they lower as plain functions) and regenerates
+    # the dispatcher with JS-native guards (ADR-0061 §3).
+    funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
+    fn_js = Enum.map_join(funcs, "\n\n", &function_js/1)
+    disp_js = protocol_dispatchers_js(prog)
+
+    [fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
   end
 
   defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
   defp funcs_of(%{funcs: funcs}), do: funcs
+
+  # ── protocol dispatch (ADR-0061 §3): a JS dispatcher per protocol method ──
+  # mirrors the BEAM strategy — select the impl by the first argument's runtime
+  # shape — but with JS-native guards (`typeof`, tagged-array head).
+  defp protocol_dispatchers_js(prog) do
+    sum_ctors = sum_ctor_map(prog)
+    protocols = Map.get(prog, :protocols, [])
+    impl_decls = Map.get(prog, :impl_decls, [])
+
+    for p <- protocols, m <- p.methods, reduce: [] do
+      acc ->
+        impl_types = for i <- impl_decls, i.proto == p.name, do: i.type
+
+        case impl_types do
+          [] -> acc
+          types -> [dispatcher_js(p.name, m, types, sum_ctors) | acc]
+        end
+    end
+    |> Enum.reverse()
+    |> Enum.join("\n\n")
+  end
+
+  defp dispatcher_js(proto, method, impl_types, sum_ctors) do
+    arity = method.params |> split_top_commas() |> length()
+    params = Enum.map_join(0..(arity - 1)//1, ", ", &"a#{&1}")
+    args = params
+
+    clauses =
+      Enum.map_join(impl_types, "\n", fn type ->
+        "  if (#{js_guard!(type, proto, sum_ctors)}) return #{mangle(proto, type, method.name)}(#{args});"
+      end)
+
+    "export function #{method.name}(#{params}) {\n#{clauses}\n  throw new Error(\"#{method.name}: no protocol impl\");\n}"
+  end
+
+  defp mangle(proto, type, method),
+    do: "impl_#{String.downcase(proto)}_#{String.downcase(type)}_#{method}"
+
+  # JS guard selecting the impl for `type` by the first argument's runtime shape.
+  defp js_guard!(type, proto, sum_ctors) do
+    cond do
+      type == "Bool" ->
+        ~s(typeof a0 === "boolean")
+
+      type == "String" ->
+        ~s(typeof a0 === "string")
+
+      type == "Char" ->
+        ~s(typeof a0 === "bigint")
+
+      String.match?(type, ~r/^U?Int\d*$/) ->
+        ~s(typeof a0 === "bigint")
+
+      String.match?(type, ~r/^Float\d*$/) ->
+        ~s(typeof a0 === "number")
+
+      ctors = sum_ctors[type] ->
+        sum_guard_js(ctors)
+
+      true ->
+        raise(
+          Unsupported,
+          "JS protocol dispatch for `impl #{proto} for #{type}` (only primitive and sum types are supported on JS; restrict the module with `@targets`)"
+        )
+    end
+  end
+
+  # a sum value is a tagged array `["Ctor", …]` (this module's representation)
+  defp sum_guard_js(ctors) do
+    tags = Enum.map_join(ctors, " || ", &~s(a0[0] === "#{&1}"))
+    "Array.isArray(a0) && (#{tags})"
+  end
+
+  # split a parameter string on top-level commas (respecting nested `(`/`)`), to
+  # count a protocol method's arity (`a Self, b Vec(T)` -> 2)
+  defp split_top_commas(""), do: []
+
+  defp split_top_commas(s) do
+    {parts, cur, _} =
+      s
+      |> String.graphemes()
+      |> Enum.reduce({[], "", 0}, fn
+        ",", {ps, cur, 0} -> {[cur | ps], "", 0}
+        "(", {ps, cur, d} -> {ps, cur <> "(", d + 1}
+        ")", {ps, cur, d} -> {ps, cur <> ")", d - 1}
+        ch, {ps, cur, d} -> {ps, cur <> ch, d}
+      end)
+
+    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+  end
+
+  defp sum_ctor_map(prog) do
+    types =
+      Map.get(prog, :types, []) ++ for(m <- Map.get(prog, :mods, []), t <- m.types, do: t)
+
+    Map.new(types, fn t -> {t.name, Enum.map(t.variants, & &1.ctor)} end)
+  end
 
   # ── function / clause dispatch ──────────────────────────────────────────
   defp function_js(%{name: name, clauses: clauses, pub?: pub?} = f) do

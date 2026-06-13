@@ -215,4 +215,80 @@ defmodule Rian.JSTest do
       end
     end
   end
+
+  describe "protocol dispatch on JS (ADR-0061 §3)" do
+    @show """
+    type Expr := Num(n Int64) | Zero
+
+    protocol Show do
+      def show(self Self) String
+    end
+
+    impl Show for Int64 do
+      def show(n) := "int"
+    end
+
+    impl Show for Bool do
+      def show(b) := "bool"
+    end
+
+    impl Show for Expr do
+      def show(e)
+        case e do
+          Num(n) -> "num"
+          Zero -> "zero"
+        end
+      end
+    end
+    """
+
+    test "the dispatcher uses JS-native guards (typeof + tagged-array head)" do
+      js = JS.compile(@show)
+      assert js =~ "export function show(a0)"
+      assert js =~ ~s(typeof a0 === "bigint")
+      assert js =~ ~s(typeof a0 === "boolean")
+      assert js =~ "Array.isArray(a0)"
+      assert js =~ ~s(a0[0] === "Num")
+      assert js =~ ~s(a0[0] === "Zero")
+      # no BEAM guard leaked through
+      refute js =~ "is_integer"
+      refute js =~ "element("
+    end
+
+    test "dispatch runs in node over primitives and a sum type" do
+      js = JS.compile(@show)
+      assert node_eval(js, "show(42n)") in [:no_node, "int"]
+      assert node_eval(js, "show(true)") in [:no_node, "bool"]
+      assert node_eval(js, ~s/show(["Num", 5n])/) in [:no_node, "num"]
+      assert node_eval(js, ~s/show(["Zero"])/) in [:no_node, "zero"]
+    end
+
+    test "the Eq/Ord stdlib (bounded generics + dispatch) runs in node" do
+      js = JS.compile(File.read!("examples/rian/17_stdlib_eq_ord.rian"))
+      assert node_eval(js, "contains([1n,2n,3n], 2n)") in [:no_node, "true"]
+
+      assert node_eval(js, "JSON.stringify(sort([3n,1n,2n]).map(Number))") in [
+               :no_node,
+               "[1,2,3]"
+             ]
+
+      assert node_eval(js, "maximum([3n,7n,2n,5n], 0n)") in [:no_node, "7"]
+    end
+
+    test "a struct impl on JS raises a clear Unsupported (gate it with @targets)" do
+      assert_raise JS.Unsupported, ~r/protocol dispatch/, fn ->
+        JS.compile("""
+        struct Point(x Int64, y Int64)
+
+        protocol Kind do
+          def kind(self Self) String
+        end
+
+        impl Kind for Point do
+          def kind(p) := "point"
+        end
+        """)
+      end
+    end
+  end
 end

@@ -128,7 +128,7 @@ defmodule Rian.Protocol do
           body: "#{mangle(proto, type, sig.name)}(#{argv})",
           pub: false,
           tvars: [],
-          dispatch: :runtime
+          dispatch: :dispatcher
         }
       end
 
@@ -149,7 +149,7 @@ defmodule Rian.Protocol do
         pub: true,
         tvars: ["Self" | sig[:tvars] || []],
         synthetic: true,
-        dispatch: :runtime
+        dispatch: :dispatcher
       }
 
       [sig_map | clauses]
@@ -194,7 +194,7 @@ defmodule Rian.Protocol do
         body: m.body,
         pub: false,
         tvars: [],
-        dispatch: :runtime
+        dispatch: :impl
       }
     end)
   end

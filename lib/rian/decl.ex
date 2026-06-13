@@ -329,10 +329,10 @@ defmodule Rian.Decl do
     funs =
       Enum.map(funcs, fn f ->
         out = Lower.compile(types, f, structs, ranges)
-        # a protocol's BEAM/JS runtime dispatcher is not the Rust shape (Rust gets
-        # traits, ADR-0061 §1/§2) — drop its Rust text; the Elixir debug view keeps
-        # it as a faithful picture of the BEAM artifact.
-        out = if f.dispatch == :runtime, do: Map.delete(out, :rust), else: out
+        # a protocol's BEAM/JS dispatcher + `impl_*` methods are not the Rust shape
+        # (Rust gets traits, ADR-0061 §1/§2) — drop their Rust text; the Elixir
+        # debug view keeps them as a faithful picture of the BEAM artifact.
+        out = if f.dispatch, do: Map.delete(out, :rust), else: out
         {f.name, out}
       end)
 
