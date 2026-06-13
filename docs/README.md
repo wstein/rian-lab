@@ -20,8 +20,10 @@ the normative behaviour the implementation must match).
 | End-to-end lowering (Elixir + Rust) | Implemented | [lower.ex](../lib/rian/lower.ex) |
 | Hygienic macros + pure comptime | Implemented | [macro.ex](../lib/rian/macro.ex), [comptime.ex](../lib/rian/comptime.ex) |
 | Lexer + declaration parser | **Stage 0.1 (broad)** | [decl.ex](../lib/rian/decl.ex) — token-driven; `type`/`struct`/`alias`/`const`/`use`/`mod` + single/multi-param `def`, `:=`/block/`case` bodies, `when` guards, `pub` visibility. Struct & sum-variant construction (positional + named) and constant references lower per target. The modules tour ([05_modules.rian](../examples/rian/05_modules.rian)) parses and lowers end-to-end. Not yet: `macro` files |
-| Real type checker | **Compile gate + flow narrowing** | [check.ex](../lib/rian/check.ex) — ADR-0034 §1/§4: unification-based inference gates `compile`, rejecting only *provable* return-type mismatches; `case` arms and pattern clauses narrow bound variables to the matched variant's field types. Error sets (§2) and protocol bounds (§3) await their surface |
-| Erlang abstract-forms backend | Not started | interim backend emits Elixir/text source |
+| Real type checker | **Compile gate + flow narrowing** | [check.ex](../lib/rian/check.ex) — ADR-0034 §1/§4: unification-based inference gates `compile`, rejecting only *provable* return-type mismatches; `case` arms and pattern clauses narrow bound variables to the matched variant's field types. Error sets (§2) are checked at the `T \| E` boundary; concrete generics (`Vec(T)`) infer. Protocol bounds (§3) await their surface |
+| Erlang abstract-forms backend | Implemented | [beam.ex](../lib/rian/beam.ex) — lowers to the Erlang abstract format + `:compile.forms` → loadable `.beam` (no `eval`); the default BEAM execution path |
+| ECMAScript backend | Implemented (partial) | [js.ex](../lib/rian/js.ex) — ADR-0049 Tier 1 on the core IR; gaps: `struct`/`with`/lambdas/FFI |
+| Self-hosting (compiler in Rian) | Started | six-layer pipeline in Rian compiles to `.beam`; real-lexer port underway, diffed vs reference by [fixpoint.ex](../lib/rian/fixpoint.ex) |
 
 A growing slice now flows **from `.rian` source** through the parser → typed core
 IR → dual-target lowering (the modules tour compiles end-to-end); the remaining
@@ -127,13 +129,16 @@ macros/`comptime`, FFI) and cites the spec it follows.
 These are the highest-priority items distilled from the specs' own "open items"
 sections; they are tracked here so the corpus has one place to look:
 
-- **No single typed core IR** — **designed: [ADR-0050](adr/0050-typed-core-ir.md)** (migration
-  pending). Each pass defines its own pattern/expression shape; the emitter consumes surface
-  patterns while the checker consumes lowered ones — the drift B1 hit in *three* places
-  ([SELFHOST.md](../SELFHOST.md)). ADR-0050 fixes the contract (one typed sealed-sum core IR,
-  emitters as pure consumers, one parser); the incremental migration is the highest-leverage
-  refactor and is sequenced before the ECMAScript emitter and Stage 0.5.
-- **Declaration parser** (ADR-0031 Stage 0.1) — the gate to compiling real files.
-- **Symbol resolution** for ADR-0029 — Rian module vs Elixir-stdlib vs field.
-- **Backend swap** to Erlang abstract forms / `:compile.forms` (ADR-0026), still
-  unexercised — the "invisible swap" assumption has no test coverage.
+- **Protocol-bounded generics** (ADR-0042 part 2) — `protocol`/`impl` with `Eq`/`Show`/`Ord`.
+  Concrete generics infer (`Vec(T)`), but bounds contribute nothing yet; this gates a non-toy
+  test framework and a portable stdlib beyond `List`/`Dict`/`Str`. The current critical path.
+- **JS emitter completeness** (ADR-0049) — `struct`/`with`/lambdas/FFI still raise `Unsupported`
+  ([js.ex](../lib/rian/js.ex)); a browser playground that runs the compiler client-side needs them.
+- **Two-Elixir-emitter consolidation** — the Erlang abstract-forms backend ([beam.ex](../lib/rian/beam.ex))
+  is the real BEAM path, while [lower.ex](../lib/rian/lower.ex) still emits Elixir *text* (a demo
+  path) alongside Rust. Collapsing the text-Elixir path removes a per-feature drift tax.
+- **Declarative `@targets(…)` annotation** (ADR-0058) — reachability is inferred + gated by
+  `mix rian.targets --require`, but the in-source annotation is unbuilt; "portable" is a derived
+  property, not yet a declaration.
+- **Self-hosting Stage 1** — port the real compiler modules to Rian, each diffed against the
+  reference by [fixpoint.ex](../lib/rian/fixpoint.ex).

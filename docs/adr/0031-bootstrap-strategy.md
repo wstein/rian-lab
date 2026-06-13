@@ -61,7 +61,8 @@ tension** — they are different layers and are sequenced independently.
   sequential core; concurrency stays BEAM-native.
 - **Ecosystem:** Hex, Mix/rebar3 integration, EEP-48 docs, dialyzer specs (per ADR-0026).
 - **Stdlib via FFI:** `:lists`, `:maps`, `String`, `Enum`, … are callable for free (ADR-0027).
-- **Execution today:** we already emit Elixir source and run it on the BEAM in every test.
+- **Execution:** the default BEAM path lowers to **Erlang abstract forms** (`:compile.forms` →
+  loadable `.beam`); the Elixir-source emitter remains as a demo/inspection path.
 
 The kernel of the proposal — *lean on Elixir, get a full language working, iterate
 continuously* — is correct. The only correction is **which layer**: the runtime and ecosystem,
@@ -70,26 +71,25 @@ plus interim source emission — **not** the compiler source.
 ## Roadmap (refines ADR-0027)
 
 State legend: ✅ done · 🟡 in progress · ⬜ not started. State reflects the
-implementation as of 2026-06-12 (214 component tests green at HEAD).
+implementation as of 2026-06-13.
 
 | Stage | Deliverable | Backend | State |
 |---|---|---|---|
-| **0 (today)** | Front-end components + per-function emission, verified | Elixir source (`eval`) | ✅ **Done** — all passes implemented & tested ([lib/rian/](../../lib/rian/)) |
-| **0.1 — the gate** | **Lexer + declaration parser**: parse whole `mod`/`type`/`fn`/`macro` files into the structures the pipeline already consumes | — | 🟡 **In progress** — [`Rian.Lexer`](../../lib/rian/lexer.ex) + [`Rian.Decl`](../../lib/rian/decl.ex) parse `type`/`struct`/`alias`/`def` (`:=` / `… end` block / `case` bodies, `when` guards, multi-param). `mod` parsing underway; `macro` files not yet |
-| **0.2** | Module emitter + driver: parsed defs → one module → run | Elixir source | 🟡 **Partial** — [`Decl.compile/1`](../../lib/rian/decl.ex) parses → lowers → runs a module end-to-end ([decl_run.exs](../../examples/decl_run.exs)); `mod`-level grouping/visibility pending |
-| **0.3** | **Functioning language**: compile & run real `.rian` files; iterate syntax/behavior freely here | Elixir source (interim) | 🟡 **Started** — real files compile & run ([examples/area.rian](../../examples/area.rian)); exhaustiveness gate fires on parsed source. Surface still narrow |
-| **0.5** | Swap backend to Erlang abstract forms / Core Erlang (`:compile.forms`); invisible to the language | Erlang-native (ADR-0026) | ⬜ **Not started** — interim backend still emits Elixir/text source |
-| **1** | Self-host: rewrite the compiler in Rian, FFI to `:lists`/`:maps`/`:compile` | BEAM | ⬜ **Not started** |
-| **2** | Fixpoint: Stage1 compiles itself; compare artifacts | BEAM | ⬜ **Not started** |
+| **0** | Front-end components + per-function emission, verified | Elixir source (`eval`) | ✅ **Done** — all passes implemented & tested ([lib/rian/](../../lib/rian/)) |
+| **0.1 — the gate** | **Lexer + declaration parser**: parse whole `mod`/`type`/`fn` files into the structures the pipeline consumes | — | ✅ **Done** — [`Rian.Lexer`](../../lib/rian/lexer.ex) + [`Rian.Decl`](../../lib/rian/decl.ex) parse `type`/`range`/`struct`/`alias`/`const`/`use`/`def` and `mod` files (`:=` / `… end` block / `case`, `with`, `when` guards, multi-param) |
+| **0.2** | Module emitter + driver: parsed defs → one module → run | Elixir source / BEAM | ✅ **Done** — [`Decl.compile/1`](../../lib/rian/decl.ex) and [`Rian.Beam.load_program/1`](../../lib/rian/beam.ex) compile a `mod` (or several) to one module and run it |
+| **0.3** | **Functioning language**: compile & run real `.rian` files; iterate syntax/behavior freely | BEAM | ✅ **Done** — real files compile & run; surface now covers sums, `struct`, `range`/`Char`, generics (`Vec(T)`), `case`/`with`, capabilities, typed bindings; exhaustiveness/error-set/linearity gates fire |
+| **0.5** | Swap backend to Erlang **abstract forms** (`:compile.forms`); invisible to the language | Erlang-native (ADR-0026) | ✅ **Done** — [`Rian.Beam`](../../lib/rian/beam.ex) lowers to the Erlang abstract format + `:compile.forms` → loadable `.beam` (no `eval`, no Elixir-compiler dep, line-tracked). The default execution path for BEAM tests and the self-hosting spikes |
+| **1** | Self-host: rewrite the compiler in Rian, FFI to `:lists`/`:maps`/`:compile` | BEAM | 🟡 **Started** — a six-layer compiler pipeline (lexer→parser→optimizer→checker→codegen→VM) is written in Rian and compiles to real `.beam` ([examples/rian/](../../examples/rian/), SELFHOST.md); the **real** `Rian.Lexer` port is underway ([selfhost_lexer_v2.rian](../../examples/rian/selfhost_lexer_v2.rian)) and diffed against the reference by [`Rian.Fixpoint`](../../lib/rian/fixpoint.ex) |
+| **2** | Fixpoint: Stage1 compiles itself; compare artifacts | BEAM | ⬜ **Not started** — the per-component fixpoint *harness* exists (`Rian.Fixpoint`); a full Stage1-compiles-Stage1 reproducibility check does not |
 
-The highest-leverage work now is **closing out Stage 0.1 → 0.2**: land `mod`
-parsing and module-level grouping/visibility so multi-declaration files emit as
-one cohesive module. The downstream components (checker, exhaustiveness,
-capabilities, macros, emitters) already exist and are tested — finishing the
-declaration parser + module emitter is what turns "verified components" into "a
-language that reads and runs whole source files." A first increment of the real
-type checker ([`Rian.Check`](../../lib/rian/check.ex), ADR-0034) has also landed
-alongside the parser work.
+The highest-leverage work now is **Stage 1**: porting the real compiler modules
+to Rian one at a time, each diffed against the Elixir reference by `Rian.Fixpoint`
+so a ported slice is a regression test. The blockers are protocol-bounded
+generics (ADR-0042 part 2 — needed to type map/fold-shaped compiler code and a
+test framework) and a portable stdlib beyond `List`/`Dict`/`Str`. The front-end
+components (parser, checker, exhaustiveness, capabilities, the three emitters)
+all exist and are tested.
 
 > **Note — the Rust target is not a bootstrap stage.** The stages above track the
 > *BEAM* path (interim Elixir source → Erlang abstract forms at Stage 0.5).
@@ -104,26 +104,21 @@ alongside the parser work.
 
 ## Consequences
 - No fork; no permanent downstream tax; macro mandate preserved.
-- A runnable language arrives as soon as the declaration parser + driver land, on the interim
-  Elixir-source backend — so syntax/behavior iteration can begin immediately.
-- The Erlang-native backend (ADR-0026) is sequenced *after* the language works, as a
-  backend-only swap.
+- A runnable language arrived on the interim Elixir-source backend, then the Erlang-native
+  abstract-forms backend ([`Rian.Beam`](../../lib/rian/beam.ex)) landed as a **backend-only swap**
+  invisible to the language — exactly as sequenced (Stage 0.5, now done).
 
 ## Open items
 
 **Cutover & packaging — resolved in the 2026-06-12 decision-lock review:**
 
-- **The cutover is a *gate*, not a date, preceded by an early de-risking spike.** The interim
-  Elixir-source/`eval` backend is a dev accelerator, not a shippable target (ADR-0026 demotes
-  Elixir-source: `'Elixir.Mod':func` prefixing makes it non-first-class for Erlang callers, and
-  `eval` produces no hashable `.beam`). Therefore:
-  - **Spike now:** push one function (`area/1`) through abstract forms → `:compile.forms` →
-    `:code.load_binary` → call, as a test — closing the "invisible swap has no test coverage" gap
-    *before* Stage 0.5, not discovering it there.
-  - **Freeze** the Elixir-source emitter at expression / single-function `eval` (enough for dev
-    iteration). All **module-level** work — naming, OTP behaviours, `-spec`, EEP-48 docs — skips the
-    textual path and targets the Erlang-native emitter (it is throwaway *and* non-first-class on
-    Elixir-source).
+- **The cutover was a *gate*, not a date — and it has happened.** The de-risking spike (push a
+  function through abstract forms → `:compile.forms` → `:code.load_binary` → call, as a test) became
+  the [`Rian.Beam`](../../lib/rian/beam.ex) backend: the abstract-forms path is the default for BEAM
+  execution and produces real, hashable `.beam`. The interim Elixir-source/`eval` text emitter
+  remains only as a demo/inspection path (and the Rust source emitter); it was never a shippable
+  target (ADR-0026 demotes it: `'Elixir.Mod':func` prefixing is non-first-class for Erlang callers,
+  and `eval` produces no hashable `.beam`).
   - **Readable `.erl` first** as the first Erlang-native output (ADR-0026 pragmatic step + permanent
     debug output) — it is the prettyprint of the abstract forms, so it costs nothing extra.
   - **Full-cutover gate = the ADR-0026 interop acceptance test passing** (a Rian module callable from
