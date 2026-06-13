@@ -56,6 +56,12 @@ compile + run on real BEAM bytecode:
   `Vec(Token)`, builds its own `Expr` sum, and threads `(Expr, Vec(Token))` as a
   `Parse` pair. It exercises higher-order-free recursion, sum construction,
   nested list/variant patterns, and `case` — and hits **no** backend wall.
+- [selfhost_parse.rian](selfhost_parse.rian) — the parser port **fixpoint-locked**
+  against `Rian.Pratt` (self-hosting rung 2). Its AST constructors are named so the
+  BEAM lowering *is* Pratt's surface tuples (`Num(s)`→`{:num,s}`, `Bin(op,l,r)`→
+  `{:bin,op,l,r}`), so the parser's output term-equals `Rian.Pratt.parse` with no
+  projection — diffed over a corpus (`test/rian/parse_fixpoint_test.exs`), the
+  parser analog of the lexer fixpoint. Slice: `+ - * /`, identifiers, parens.
 - [selfhost_eval.rian](selfhost_eval.rian) — an evaluator that folds the `Expr`
   sum to an `Int64`, threading a **symbol table** (`Map(String, Int64)`) with
   `let`-binding and `Var` lookup. The symbol table is the first place that

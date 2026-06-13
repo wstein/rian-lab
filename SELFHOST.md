@@ -284,11 +284,30 @@ operators, and parens (the slice-1 fixpoint test). Direct evidence that the
   `{:nl}`-divergence teeth test). **This is the gateway rung: the Rian lexer now
   produces the declaration token stream the parser will consume.**
 
-**Next:** port the **declaration parser** (`Rian.Pratt` + `Rian.Decl`) in Rian and
-fixpoint-diff its AST/IR against the reference — turning the parser spike from a
-demo into a checked, equivalence-locked stage (the same method, AST projection
-instead of token projection). Remaining lexer gaps (heredocs `"""`, string-body
-escapes, `\u{…}` char escapes) are small and unforced by the parser corpus.
+### Parser port — fixpoint-locked against `Rian.Pratt` (rung 2)
+
+[`examples/rian/selfhost_parse.rian`](examples/rian/selfhost_parse.rian) turns the
+parser spike from a *demo* into a *checked equivalence* — the parser analog of the
+lexer fixpoint. A Rian-written precedence-climbing parser compiles to real `.beam`
+and its output is **diffed against the reference `Rian.Pratt.parse`** over a corpus
+(`test/rian/parse_fixpoint_test.exs`). The diff needs **no projection**: the AST
+constructors are named so their BEAM lowering *is* Pratt's surface-tuple shape —
+`Num(s)` → `{:num, s}`, `Id(s)` → `{:id, s}`, `Bin(op,l,r)` → `{:bin, op, l, r}` —
+so `parse(tokens)` **term-equals** `Rian.Pratt.parse(source)`. The test injects the
+reference `Rian.Lexer` tokens into the parser's `Tok` sum (the same stream Pratt
+consumes), and asserts precedence (`1 + 2 * 3` nests `*` under `+`) and
+left-associativity (`1 - 2 - 3` ⇒ `(1 - 2) - 3`) match Pratt exactly.
+
+Slice: `+ - * /` (multiplicative tighter than additive, left-assoc — Pratt's levels
+for these ops), identifiers, integer literals, parentheses. The method is proven;
+later slices widen the grammar+corpus (calls, comparisons, pipes, then patterns and
+`Rian.Decl`'s declaration forms), each a regression test rather than a fresh demo.
+
+**Next:** widen the parser slice toward full `Rian.Pratt`/`Rian.Decl` coverage, then
+decide the **bootstrap boundary** (rung 3) and stand up the **bootstrap fixed-point**
+(rung 4) — compile the Rian-written front-end with the Elixir-hosted compiler, then
+with itself, and assert the two agree. Remaining lexer gaps (heredocs `"""`,
+string-body escapes, `\u{…}` char escapes) are small and unforced by the corpus.
 
 ## The whole compiler as one Rian artifact
 
