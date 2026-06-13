@@ -29,7 +29,9 @@ defmodule RianLab.MixProject do
 
   defp deps do
     [
-      {:ex_doc, "~> 0.34", only: :dev, runtime: false}
+      # `:test` too — `Rian.DocFormatter` (in `lib/`) references `ExDoc.Autolink`,
+      # so the test env must be able to compile it (CI runs `MIX_ENV=test`).
+      {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false}
     ]
   end
 
