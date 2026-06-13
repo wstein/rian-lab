@@ -123,18 +123,6 @@ defmodule Rian.Decl do
 
   # One scope's declarations (top level, or one module's body) -> typed IR.
   defp assemble(decls, aliases) do
-    user_defs =
-      Enum.flat_map(decls, fn
-        {:def, raw} -> [raw]
-        _ -> []
-      end)
-
-    funcs =
-      (user_defs ++ protocol_defs(decls))
-      |> Enum.chunk_by(& &1.name)
-      |> Enum.map(&build_func/1)
-      |> Enum.map(&subst_func(&1, aliases))
-
     types =
       for({:type, t, pub?, doc} <- decls, do: parse_type(t, pub?, doc))
       |> Enum.map(&subst_type(&1, aliases))
@@ -144,6 +132,18 @@ defmodule Rian.Decl do
     structs =
       for({:struct, s, pub?, doc} <- decls, do: parse_struct(s, pub?, doc))
       |> Enum.map(&subst_struct(&1, aliases))
+
+    user_defs =
+      Enum.flat_map(decls, fn
+        {:def, raw} -> [raw]
+        _ -> []
+      end)
+
+    funcs =
+      (user_defs ++ protocol_defs(decls, types, structs))
+      |> Enum.chunk_by(& &1.name)
+      |> Enum.map(&build_func/1)
+      |> Enum.map(&subst_func(&1, aliases))
 
     consts =
       for({:const, c, pub?, doc} <- decls, do: parse_const(c, pub?, doc))
@@ -156,9 +156,10 @@ defmodule Rian.Decl do
 
   # `protocol`/`impl` (ADR-0042 §3) desugar to ordinary raw `def` maps — a
   # guarded dispatcher per protocol method plus one mangled function per impl
-  # method — so they flow through `build_func` like any other function. Coherence
-  # is enforced by `Rian.Protocol.expand/2`.
-  defp protocol_defs(decls) do
+  # method — so they flow through `build_func` like any other function. The sum
+  # `types` and `structs` in scope let the dispatcher discriminate by runtime
+  # tag; coherence is enforced by `Rian.Protocol.expand/4`.
+  defp protocol_defs(decls, types, structs) do
     protocols =
       for {:protocol, name, inner, _doc} <- decls, into: %{} do
         {name, for({:def, raw} <- inner, do: raw)}
@@ -169,7 +170,9 @@ defmodule Rian.Decl do
         {proto, type, for({:def, raw} <- inner, do: raw)}
       end
 
-    if protocols == %{} and impls == [], do: [], else: Rian.Protocol.expand(protocols, impls)
+    if protocols == %{} and impls == [],
+      do: [],
+      else: Rian.Protocol.expand(protocols, impls, types, structs)
   end
 
   defp parse_alias(text) do

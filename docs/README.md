@@ -24,7 +24,7 @@ the normative behaviour the implementation must match).
 | Erlang abstract-forms backend | Implemented | [beam.ex](../lib/rian/beam.ex) — lowers to the Erlang abstract format + `:compile.forms` → loadable `.beam` (no `eval`); the default BEAM execution path |
 | ECMAScript backend | Implemented (partial) | [js.ex](../lib/rian/js.ex) — ADR-0049 Tier 1 on the core IR; gaps: `struct`/`with`/lambdas/FFI |
 | Self-hosting (compiler in Rian) | Started | six-layer pipeline in Rian compiles to `.beam`; real-lexer port at **slice 2** (ids, all 16 keywords, comparisons `< > <= >= == !=`, word-ops `and/or/not/in/rem/div`), diffed vs reference by [fixpoint.ex](../lib/rian/fixpoint.ex) and **locked in CI** ([ci.yml](../.github/workflows/ci.yml)). Out of slice: literals/floats/brackets (need string/regex machinery not yet portable) |
-| Protocols & impls (ADR-0042 §3/§5) | **MVP** | [protocol.ex](../lib/rian/protocol.ex) — `protocol`/`impl` desugar to a guarded BEAM dispatcher + mangled impl funcs, coherence-checked; primitive-type impls run. Deferred: sum-type/`forall`-bound/dynamic dispatch, Rust/JS |
+| Protocols & impls (ADR-0042 §3/§5) | **MVP** | [protocol.ex](../lib/rian/protocol.ex) — `protocol`/`impl` desugar to a guarded BEAM dispatcher + mangled impl funcs, coherence-checked; impls run over **primitive, sum (by constructor tag), and struct** types. Deferred: `forall`-bound/dynamic dispatch, Rust/JS |
 | Rian-native tests (ADR-0057) | **MVP** | [test.ex](../lib/rian/test.ex) — `@test def name() Bool` compiles + runs on the BEAM; `Rian.Test.exunit/1` bridges each to an ExUnit case ([14_test_framework.rian](../examples/rian/14_test_framework.rian)). Rust `#[test]`/Vitest deferred |
 
 A growing slice now flows **from `.rian` source** through the parser → typed core
@@ -135,9 +135,10 @@ sections; they are tracked here so the corpus has one place to look:
 
 - **Protocol-bounded generics** (ADR-0042 part 2) — **MVP landed**: `protocol`/`impl` parse,
   desugar to a guarded BEAM dispatcher ([protocol.ex](../lib/rian/protocol.ex)), run, and are
-  coherence-checked. *Still open:* impls over non-primitive (sum) types, the generic
-  `forall T: Bound` call path (bounds parsed-and-dropped), dynamic dispatch, and the Rust/JS
-  lowerings — these still gate a portable stdlib beyond `List`/`Dict`/`Str`.
+  coherence-checked; dispatch covers **primitive, sum (by constructor tag), and struct** types —
+  enough for a real `Eq`/`Show` over the compiler's own data (`Token`, `Expr`). *Still open:* the
+  generic `forall T: Bound` call path (bounds parsed-and-dropped), dynamic dispatch, and the
+  Rust/JS lowerings — these still gate a portable stdlib beyond `List`/`Dict`/`Str`.
 - **JS emitter completeness** (ADR-0049) — `struct`/`with`/lambdas/FFI still raise `Unsupported`
   ([js.ex](../lib/rian/js.ex)); a browser playground that runs the compiler client-side needs them.
 - **Two-Elixir-emitter consolidation** — the Erlang abstract-forms backend ([beam.ex](../lib/rian/beam.ex))

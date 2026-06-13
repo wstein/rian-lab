@@ -190,20 +190,104 @@ defmodule Rian.ProtocolTest do
       end
     end
 
-    test "an impl for a non-primitive type is rejected (MVP limit)" do
-      assert_raise CoherenceError, ~r/non-primitive types is not yet supported/, fn ->
+    test "an impl for a type with no runtime discriminator (a type variable) is rejected" do
+      assert_raise CoherenceError, ~r/no runtime discriminator for `T`/, fn ->
         Decl.parse("""
-        type Color := Red | Green
-
         protocol Show do
           def show(self Self) String
         end
 
-        impl Show for Color do
-          def show(c) := "color"
+        impl Show for T do
+          def show(x) := "x"
         end
         """)
       end
+    end
+  end
+
+  describe "sum-type dispatch (ADR-0042 — dispatch on the constructor tag)" do
+    test "dispatches a sum value by its constructor tag (tupled and nullary)" do
+      m =
+        load(
+          """
+          type Shape := Circle(r Int64) | Square(s Int64) | Unit
+
+          protocol Kind do
+            def kind(self Self) String
+          end
+
+          impl Kind for Shape do
+            def kind(sh) := "shape"
+          end
+
+          impl Kind for Int64 do
+            def kind(n) := "int"
+          end
+          """,
+          :rian_proto_sum
+        )
+
+      # field-carrying variant -> tagged tuple, nullary -> bare atom
+      assert m.kind({:circle, 3}) == "shape"
+      assert m.kind({:square, 4}) == "shape"
+      assert m.kind(:unit) == "shape"
+      # a different (primitive) impl still dispatches distinctly
+      assert m.kind(42) == "int"
+    end
+
+    test "a Show over a sum type with a case body (the compiler's own data shape)" do
+      m =
+        load(
+          """
+          type Expr := Num(n Int64) | Add(a Int64, b Int64) | Zero
+
+          protocol Show do
+            def show(self Self) String
+          end
+
+          impl Show for Expr do
+            def show(e)
+              case e do
+                Num(n) -> "num"
+                Add(a, b) -> "add"
+                Zero -> "zero"
+              end
+            end
+          end
+          """,
+          :rian_proto_sum_show
+        )
+
+      assert m.show({:num, 5}) == "num"
+      assert m.show({:add, 1, 2}) == "add"
+      assert m.show(:zero) == "zero"
+    end
+
+    test "dispatches a struct value by its :__struct__ tag" do
+      m =
+        load(
+          """
+          struct Point(x Int64, y Int64)
+
+          def origin() Point := Point(0, 0)
+
+          protocol Kind do
+            def kind(self Self) String
+          end
+
+          impl Kind for Point do
+            def kind(p) := "point"
+          end
+
+          impl Kind for Int64 do
+            def kind(n) := "int"
+          end
+          """,
+          :rian_proto_struct
+        )
+
+      assert m.kind(m.origin()) == "point"
+      assert m.kind(7) == "int"
     end
   end
 end
