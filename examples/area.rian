@@ -2,5 +2,5 @@
 type Shape := Circle(radius Float64) | Square(side Float64)
 
 def area(s val Shape) Float64
-def area(Circle(r)) := 3.14159 * r * r
+def area(Circle(r)) := pi * r * r
 def area(Square(s)) := s * s

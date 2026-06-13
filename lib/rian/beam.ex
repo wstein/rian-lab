@@ -213,6 +213,8 @@ defmodule Rian.Beam do
   # a `Char` is its codepoint integer on the BEAM (charlists are integer lists)
   defp expr_form(%EChar{value: cp}, _s), do: {:integer, @ln, cp}
   defp expr_form(%EId{name: b}, _s) when b in ~w(true false), do: {:atom, @ln, String.to_atom(b)}
+  # `pi` is the math constant — `:math.pi()`, matching the text emitter (`Rian.Lower`)
+  defp expr_form(%EId{name: "pi"}, s), do: remote_call(:math, "pi", [], s)
   # a bare PascalCase id is a nullary sum-variant value -> its snake atom tag
   defp expr_form(%EId{name: x}, _s),
     do: if(pascal?(x), do: {:atom, @ln, tag(x)}, else: var_form(x))

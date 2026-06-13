@@ -151,6 +151,14 @@ defmodule Rian.BeamTest do
       assert mod.eval(:zero) == 0
     end
 
+    test "the `pi` constant lowers on the canonical path (`:math.pi/0`)" do
+      # `examples/area.rian` uses `pi`; it must run on real bytecode, not only
+      # through the text emitter (`Rian.Lower`)
+      {:ok, mod} = Beam.load(File.read!("examples/area.rian"), :rian_beam_area)
+      assert_in_delta mod.area({:circle, 2.0}), :math.pi() * 4.0, 1.0e-9
+      assert mod.area({:square, 3.0}) == 9.0
+    end
+
     test "the full self-hosting lexer compiles to real bytecode (variants + recursion, FFI-free)" do
       {:ok, mod} =
         Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_lexer)
