@@ -45,11 +45,23 @@ defmodule Rian.DocFormatter do
 
     extra_nodes = Enum.filter(extras, &match?(%ExDoc.ExtraNode{}, &1))
 
+    # resolve `Module.fun/arity` cross-refs (ExDoc autolink) then rewrite the
+    # resulting hrefs to Astro routes
+    routes = build_routes(modules, tasks, extra_nodes)
+    base = autolink_base(config, extra_nodes)
+    modules = Enum.map(modules, &autolink_node(&1, base, routes))
+    tasks = Enum.map(tasks, &autolink_node(&1, base, routes))
+    extra_nodes = Enum.map(extra_nodes, &autolink_extra(&1, base, routes))
+
     files =
       Enum.map(modules, &write_node_page(config, &1, @api_dir)) ++
         Enum.map(tasks, &write_node_page(config, &1, @task_dir)) ++
         Enum.map(extra_nodes, &write_extra(config, &1)) ++
-        [write_sidebar(config, modules, tasks, extra_nodes)]
+        [
+          write_sidebar(config, modules, tasks, extra_nodes),
+          write_redirects(config, routes),
+          write_meta(config)
+        ]
 
     %{
       entrypoint: config.output |> Path.join("sidebar.mjs") |> Path.relative_to_cwd(),
@@ -80,9 +92,10 @@ defmodule Rian.DocFormatter do
 
   defp member(node, mod) do
     [
-      # explicit arity-stable anchor (valid JSX); signature in backticks so any
-      # `%{}` / `<` in it stays verbatim instead of being parsed as MDX
-      ~s(<a id="#{slug(node.id)}" />),
+      # explicit arity-stable anchors (valid JSX) — canonical id plus every
+      # default arity, so `fun/2` refs to a `fun/4`-with-defaults still resolve.
+      # signature in backticks so any `%{}` / `<` in it stays verbatim in MDX
+      member_anchors(node),
       "### `#{node.signature}`",
       annotations(node.annotations),
       spec_block(node, mod),
@@ -106,6 +119,12 @@ defmodule Rian.DocFormatter do
     "```#{lang}\n#{specs}\n```"
   end
 
+  defp member_anchors(node) do
+    [node.id | Enum.map(node.defaults, fn {name, arity} -> "#{name}/#{arity}" end)]
+    |> Enum.uniq()
+    |> Enum.map_join("\n", &~s(<a id="#{slug(&1)}" />))
+  end
+
   defp annotations([]), do: nil
   defp annotations(list), do: Enum.map_join(list, " ", &"*#{&1}*")
 
@@ -118,23 +137,174 @@ defmodule Rian.DocFormatter do
         :error -> extra.doc
       end
 
-    rel = "#{slug(extra.id)}.mdx"
-    write!(config, rel, "#{frontmatter(extra.title)}\n\n#{Rian.DocFormatter.MDX.render(ast)}\n")
+    body =
+      [frontmatter(extra.title), Rian.DocFormatter.MDX.render(ast)]
+      |> compact()
+      |> Enum.join("\n\n")
+
+    rel = "#{extra_content_slug(extra)}.mdx"
+    write!(config, rel, body <> "\n")
     rel
+  end
+
+  # route extras into their `groups_for_extras` folder (slugified group name);
+  # ungrouped extras stay at the docs root
+  defp extra_dir(nil), do: ""
+  defp extra_dir(group), do: slug(group)
+
+  defp extra_content_slug(extra) do
+    case extra_dir(extra.group) do
+      "" -> slug(extra.id)
+      dir -> "#{dir}/#{slug(extra.id)}"
+    end
+  end
+
+  defp extra_route(extra), do: "/#{extra_content_slug(extra)}/"
+
+  # --- cross-page links: ExDoc autolink + rewrite hrefs to Astro routes ------
+
+  defp build_routes(modules, tasks, extras) do
+    Map.new(
+      Enum.map(modules, &{&1.id, "/#{@api_dir}/#{slug(&1.id)}/"}) ++
+        Enum.map(tasks, &{&1.id, "/#{@task_dir}/#{slug(&1.id)}/"}) ++
+        Enum.map(extras, &{&1.id, extra_route(&1)})
+    )
+  end
+
+  defp autolink_base(config, extras) do
+    %ExDoc.Autolink{
+      apps: config.apps,
+      deps: config.deps,
+      ext: ".html",
+      extras: extra_basenames(extras),
+      skip_undefined_reference_warnings_on: config.skip_undefined_reference_warnings_on,
+      skip_code_autolink_to: config.skip_code_autolink_to,
+      # HTML formatter already emits ref warnings; route ours to the mailbox
+      warnings: :send
+    }
+  end
+
+  defp extra_basenames(extras) do
+    for %{source_path: p, id: id} when is_binary(p) <- extras,
+        into: %{},
+        do: {Path.basename(p), id}
+  end
+
+  defp autolink_node(node, base, routes) do
+    lang = node.language
+
+    modc = %{
+      base
+      | current_module: node.module,
+        module_id: node.id,
+        language: lang,
+        id: node.id,
+        file: node.moduledoc_file,
+        line: node.moduledoc_line
+    }
+
+    groups =
+      for g <- node.docs_groups do
+        docs =
+          for c <- g.docs do
+            cc = %{
+              modc
+              | id: c.id,
+                line: c.doc_line,
+                file: c.doc_file,
+                current_kfa: {c.type, c.name, c.arity}
+            }
+
+            %{c | doc: link_doc(c.doc, lang, cc, routes)}
+          end
+
+        %{g | doc: link_doc(g.doc, lang, modc, routes), docs: docs}
+      end
+
+    %{node | doc: link_doc(node.doc, lang, modc, routes), docs_groups: groups}
+  end
+
+  defp autolink_extra(extra, base, routes) do
+    cfg = %{base | file: extra.source_path, id: extra.id, language: ExDoc.Language.Elixir}
+    %{extra | doc: link_doc(extra.doc, ExDoc.Language.Elixir, cfg, routes)}
+  end
+
+  defp link_doc(nil, _lang, _cfg, _routes), do: nil
+
+  defp link_doc(doc, lang, cfg, routes) do
+    doc
+    |> lang.autolink_doc(cfg)
+    |> ExDoc.DocAST.map_tags(fn
+      {:a, attrs, inner, meta} -> {:a, rewrite_href(attrs, routes), inner, meta}
+      other -> other
+    end)
+  end
+
+  defp rewrite_href(attrs, routes) do
+    case attrs[:href] do
+      nil -> attrs
+      href -> Keyword.put(attrs, :href, to_route(href, routes))
+    end
+  end
+
+  defp to_route(href, routes) do
+    cond do
+      href =~ ~r/^(https?|mailto|ftp):/ ->
+        href
+
+      String.starts_with?(href, "#") ->
+        # same-page anchor -> slugified to match the member's <a id>
+        "#" <> slug(href)
+
+      true ->
+        {base, anchor} =
+          case String.split(href, "#", parts: 2) do
+            [b] -> {b, nil}
+            [b, a] -> {b, a}
+          end
+
+        case Map.fetch(routes, String.replace_suffix(base, ".html", "")) do
+          {:ok, route} -> route <> if(anchor, do: "#" <> slug(anchor), else: "")
+          :error -> href
+        end
+    end
   end
 
   # --- sidebar manifest (Astro/Starlight `sidebar` shape) -------------------
 
   defp write_sidebar(config, modules, tasks, extras) do
-    pages = grouped(extras, "Pages", fn e -> %{slug: slug(e.id)} end)
+    pages = grouped(extras, "Pages", fn e -> %{slug: extra_content_slug(e)} end)
 
     api =
       grouped(modules, "Modules", fn m -> %{slug: Path.join(@api_dir, slug(m.id))} end) ++
-        maybe_group("Mix Tasks", Enum.map(tasks, fn t -> %{slug: Path.join(@task_dir, slug(t.id))} end))
+        maybe_group(
+          "Mix Tasks",
+          Enum.map(tasks, fn t -> %{slug: Path.join(@task_dir, slug(t.id))} end)
+        )
 
     sidebar = [%{label: "Pages", items: pages}, %{label: "API", items: api}]
     write!(config, "sidebar.mjs", "export default #{to_json(sidebar)};\n")
     "sidebar.mjs"
+  end
+
+  # `/` -> the route of ExDoc's `main:` page (e.g. readme), now that foldering
+  # may move it under a group dir; emitted for the Astro app to import
+  defp write_redirects(config, routes) do
+    target = Map.get(routes, config.main, "/")
+    write!(config, "redirects.mjs", "export default #{to_json(%{"/" => target})};\n")
+    "redirects.mjs"
+  end
+
+  # ExDoc attribution data for the Starlight Footer override (rendered below the
+  # prev/next pager). Empty when `footer: false`.
+  defp write_meta(config) do
+    meta =
+      if config.footer,
+        do: %{exdocVersion: ExDoc.version(), proglang: to_string(config.proglang)},
+        else: %{}
+
+    write!(config, "meta.mjs", "export default #{to_json(meta)};\n")
+    "meta.mjs"
   end
 
   # chunk nodes into [%{label, items}] by their `.group`, preserving ExDoc's
@@ -168,7 +338,11 @@ defmodule Rian.DocFormatter do
     File.write!(path, content)
   end
 
-  defp slug(id) do
+  @doc false
+  # shared so Rian.DocFormatter.MDX emits heading <a id>s with the SAME slugging
+  # the link rewriter uses — otherwise Starlight's auto-slug (which differs on
+  # e.g. em-dashes) would not match our cross-page anchors
+  def slug(id) do
     id
     |> to_string()
     |> String.downcase()

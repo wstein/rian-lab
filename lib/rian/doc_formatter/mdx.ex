@@ -37,11 +37,14 @@ defmodule Rian.DocFormatter.MDX do
   defp mdx(text) when is_binary(text), do: escape(text)
   defp mdx({:comment, _, _, _}), do: ""
 
-  # no `{#id}` — that is an MDX expression and fails to parse; Starlight auto-slugs
-  # heading text, and members get an explicit <a id> in Rian.DocFormatter
+  # no `{#id}` — that is an MDX expression and fails to parse. Emit an explicit
+  # <a id> (slugged like the link rewriter) so cross-page heading links resolve
+  # deterministically instead of depending on Starlight's auto-slug.
   defp mdx({h, _attrs, inner, _}) when h in [:h1, :h2, :h3, :h4, :h5, :h6] do
     level = h |> Atom.to_string() |> String.trim_leading("h") |> String.to_integer()
-    ["\n\n", String.duplicate("#", level), " ", inline(inner), "\n\n"]
+    id = inner |> ExDoc.DocAST.text() |> Rian.DocFormatter.slug()
+    anchor = if id == "", do: "", else: ~s(<a id="#{id}" />\n\n)
+    ["\n\n", anchor, String.duplicate("#", level), " ", inline(inner), "\n\n"]
   end
 
   defp mdx({:p, _, inner, _}), do: ["\n\n", inline(inner), "\n\n"]
@@ -150,7 +153,10 @@ defmodule Rian.DocFormatter.MDX do
   end
 
   defp rows_of({:tr, _, _, _} = tr), do: [tr]
-  defp rows_of({tag, _, inner, _}) when tag in [:thead, :tbody, :tfoot], do: Enum.flat_map(inner, &rows_of/1)
+
+  defp rows_of({tag, _, inner, _}) when tag in [:thead, :tbody, :tfoot],
+    do: Enum.flat_map(inner, &rows_of/1)
+
   defp rows_of(_), do: []
 
   defp cells_of({:tr, _, cells, _}) do
@@ -167,14 +173,26 @@ defmodule Rian.DocFormatter.MDX do
   defp escape(text), do: text |> String.replace("{", "\\{") |> String.replace("<", "\\<")
 
   defp backtick_fence(code, min) do
-    longest = ~r/`+/ |> Regex.scan(code) |> Enum.map(fn [m] -> String.length(m) end) |> Enum.max(fn -> 0 end)
+    longest =
+      ~r/`+/
+      |> Regex.scan(code)
+      |> Enum.map(fn [m] -> String.length(m) end)
+      |> Enum.max(fn -> 0 end)
+
     String.duplicate("`", max(min, longest + 1))
   end
 
   defp lang(attrs) do
     case attrs[:class] do
-      nil -> ""
-      class -> class |> to_string() |> String.split() |> List.first("") |> String.replace_prefix("language-", "")
+      nil ->
+        ""
+
+      class ->
+        class
+        |> to_string()
+        |> String.split()
+        |> List.first("")
+        |> String.replace_prefix("language-", "")
     end
   end
 end
