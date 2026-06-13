@@ -53,6 +53,38 @@ defmodule Rian.BeamTest do
       assert mod.dval(?0) == 0
     end
 
+    test "range construction `Name.of(n)` (ADR-0036) compiles to a checked Result" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          range Digit := 0..9
+          def of_digit(n Int64) Int64 | RangeError := Digit.of(n)
+          """,
+          :rian_beam_range_of
+        )
+
+      # in range -> {:ok, n}; out of range -> {:error, :range_error}; bounds inclusive
+      assert mod.of_digit(7) == {:ok, 7}
+      assert mod.of_digit(0) == {:ok, 0}
+      assert mod.of_digit(9) == {:ok, 9}
+      assert mod.of_digit(12) == {:error, :range_error}
+      assert mod.of_digit(-1) == {:error, :range_error}
+    end
+
+    test "a `Char`-based range constructs over the codepoint (ADR-0036)" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          range Up := 'A'..'Z'
+          def of_up(c Char) Char | RangeError := Up.of(c)
+          """,
+          :rian_beam_range_of_char
+        )
+
+      assert mod.of_up(?M) == {:ok, ?M}
+      assert mod.of_up(?5) == {:error, :range_error}
+    end
+
     test "multi-clause with a `when` guard" do
       {:ok, mod} =
         Beam.load(

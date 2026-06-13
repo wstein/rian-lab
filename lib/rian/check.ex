@@ -56,6 +56,7 @@ defmodule Rian.Check do
     ECall,
     ECase,
     EChar,
+    EDot,
     EId,
     EIf,
     EList,
@@ -203,6 +204,20 @@ defmodule Rian.Check do
     cond do
       fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)
       true -> ctor_type(ic, f) || called_ret_with(ic, f, as, env)
+    end
+  end
+
+  # `Name.of(n)` — range construction (ADR-0036): the checked constructor of a
+  # `range` type returns `base | RangeError` (a `T | E` Result, ADR-0040). The
+  # argument must be assignable to the range's ordinal base.
+  def infer(%ECall{fun: %EDot{head: %EId{name: n}, name: "of"}} = call, env, ic) do
+    case Map.get(Map.get(ic, :ranges, %{}), n) do
+      %{base: base} ->
+        "#{base} | RangeError"
+
+      _ ->
+        ft = infer(call.fun, env, ic)
+        if fn_type?(ft), do: fn_ret(ft), else: :unknown
     end
   end
 

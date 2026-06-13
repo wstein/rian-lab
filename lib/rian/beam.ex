@@ -103,7 +103,8 @@ defmodule Rian.Beam do
     # `struct` declarations contribute no forms — a struct value is a tagged map
     # (built by named construction `Name(f: v)`, read by field access), so the
     # declaration itself is erased; only its constructions/accesses emit.
-    beam_for(module, src |> Decl.parse() |> funcs_of())
+    prog = Decl.parse(src)
+    beam_for(module, funcs_of(prog), ranges_of(prog))
   end
 
   @doc """
@@ -113,11 +114,13 @@ defmodule Rian.Beam do
   `[{module_atom, beam_binary}]`, one per `mod`, in source order.
   """
   def compile_program(src) do
-    src
-    |> Decl.parse()
+    prog = Decl.parse(src)
+    top = Map.get(prog, :ranges, [])
+
+    prog
     |> Map.get(:mods, [])
     |> Enum.map(fn m ->
-      {:ok, atom, bin} = beam_for(:"Elixir.#{m.name}", m.funcs)
+      {:ok, atom, bin} = beam_for(:"Elixir.#{m.name}", m.funcs, top ++ Map.get(m, :ranges, []))
       {atom, bin}
     end)
   end
@@ -136,13 +139,16 @@ defmodule Rian.Beam do
     end)
   end
 
-  # build one module's `.beam` from its function list
-  defp beam_for(module, funcs) do
+  # build one module's `.beam` from its function list. `ranges` (a list of
+  # `%IR.Range{}`) lets `Name.of(n)` construction desugar (ADR-0036).
+  defp beam_for(module, funcs, ranges) do
+    rtable = Rian.Range.table(ranges)
+
     forms =
       [
         {:attribute, @ln, :module, module},
         {:attribute, @ln, :export, Enum.map(funcs, &{String.to_atom(&1.name), arity(&1)})}
-      ] ++ Enum.map(funcs, &function_form/1)
+      ] ++ Enum.map(funcs, &function_form(&1, rtable))
 
     case :compile.forms(forms, [:return_errors]) do
       {:ok, ^module, bin} -> {:ok, module, bin}
@@ -155,22 +161,28 @@ defmodule Rian.Beam do
   defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
   defp funcs_of(%{funcs: funcs}), do: funcs
 
+  # every `range` in scope (top-level + any module's) — for `Name.of` desugaring
+  defp ranges_of(prog),
+    do:
+      Map.get(prog, :ranges, []) ++
+        for(m <- Map.get(prog, :mods, []), r <- Map.get(m, :ranges, []), do: r)
+
   defp arity(%{clauses: [c | _]}), do: length(c.pats)
 
   # ── function / clause forms ─────────────────────────────────────────────
-  defp function_form(%{name: name, clauses: clauses}) do
+  defp function_form(%{name: name, clauses: clauses}, rtable) do
     {:function, @ln, String.to_atom(name), length(hd(clauses).pats),
-     Enum.map(clauses, &clause_form/1)}
+     Enum.map(clauses, &clause_form(&1, rtable))}
   end
 
-  defp clause_form(%{pats: pats, body: body, guard: guard}) do
+  defp clause_form(%{pats: pats, body: body, guard: guard}, rtable) do
     core_pats = Enum.map(pats, &Core.from_pat/1)
     # the names bound by the clause head are in scope for the body — so a call to
     # one of them is a *variable application* (a fun value), not a local call
     scope = Enum.reduce(core_pats, MapSet.new(), &pat_vars/2)
 
     {:clause, @ln, Enum.map(core_pats, &pat_form/1), guard_form(guard_core(guard), scope),
-     body_forms(body, scope)}
+     body_forms(body, scope, rtable)}
   end
 
   # a clause guard is a source string (from `Rian.Decl`); normalize to core (or nil)
@@ -180,8 +192,10 @@ defmodule Rian.Beam do
   defp guard_form(nil, _scope), do: []
   defp guard_form(core, scope), do: [[expr_form(core, scope)]]
 
-  # a clause body is a non-empty sequence of Erlang expressions
-  defp body_forms(src, scope), do: block_forms(Core.from_expr(Pratt.parse_body(src)), scope)
+  # a clause body is a non-empty sequence of Erlang expressions; `Name.of(n)`
+  # range construction (ADR-0036) is desugared here before lowering
+  defp body_forms(src, scope, rtable),
+    do: block_forms(Rian.Range.expand_of(Core.from_expr(Pratt.parse_body(src)), rtable), scope)
 
   defp stmt_form({:bind, n, e}, scope), do: {:match, @ln, var_form(n), expr_form(e, scope)}
   # the declared type is erased at lowering — `Int*` is representation intent,

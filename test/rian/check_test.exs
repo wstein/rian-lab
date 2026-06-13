@@ -222,6 +222,20 @@ defmodule Rian.CheckTest do
       # to its base (use `Name.of(n)` when a runtime bound check is wanted)
       assert Check.check("range Digit := 0..9\ndef f(n Int64) Int64 := d Digit := n ; d") == :ok
     end
+
+    test "the `Name.of(n)` checked constructor returns `base | RangeError`" do
+      # the function's declared `Int64 | RangeError` matches the constructor's type
+      assert Check.check("""
+             range Digit := 0..9
+             def of_d(n Int64) Int64 | RangeError := Digit.of(n)
+             """) == :ok
+
+      # a `Char`-based range constructs `Char | RangeError`
+      assert Check.check("""
+             range Up := 'A'..'Z'
+             def of_u(c Char) Char | RangeError := Up.of(c)
+             """) == :ok
+    end
   end
 
   describe "flow narrowing (ADR-0034 pillar 4)" do
