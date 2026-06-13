@@ -57,4 +57,18 @@ defmodule Rian.Repl.HistoryTest do
   after
     System.delete_env("RIAN_HISTORY")
   end
+
+  test "path/0 falls back to ~/.rian_history when neither override is set" do
+    # Pure read of the default-path branch: no app env, no env var. This only
+    # computes the path; it never reads or writes the real history file.
+    Application.delete_env(:rian_lab, :history_file)
+    System.delete_env("RIAN_HISTORY")
+    assert History.path() == Path.expand("~/.rian_history")
+  end
+
+  test "add/1 swallows errors from a non-iodata argument" do
+    # An argument that IO.chardata_to_string cannot convert raises inside add/1;
+    # the rescue clause must turn it into :ok rather than propagate.
+    assert History.add({:not, :iodata}) == :ok
+  end
 end

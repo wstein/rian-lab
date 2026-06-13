@@ -2,7 +2,7 @@ defmodule Rian.ProtocolTest do
   # async: false — loads compiled modules into the VM.
   use ExUnit.Case, async: false
 
-  alias Rian.{Beam, Check, Decl}
+  alias Rian.{Beam, Check, Decl, Protocol}
   alias Rian.Protocol.Error, as: CoherenceError
 
   defp load(src, mod) do
@@ -588,6 +588,43 @@ defmodule Rian.ProtocolTest do
         """,
         "ok"
       )
+    end
+  end
+
+  describe "Protocol.expand/2 (default-arg head) and degenerate signatures" do
+    test "expand/2 expands with default types/structs/targets; a zero-param, no-return method" do
+      # calling with TWO args exercises the default-arg head (protocol.ex:49) and
+      # `targets == nil` (all targets). The method has an empty parameter list
+      # (`split_commas("")` -> [], protocol.ex:297) and no return type
+      # (`subst_self(nil, _)` -> nil, protocol.ex:287).
+      protocols = %{"P" => [%{name: "nullary", params: "", ret: nil}]}
+      impls = [{"P", "Int64", [%{name: "nullary", params: "", guard: nil, body: "0"}]}]
+
+      defs = Protocol.expand(protocols, impls)
+      by_name = Map.new(defs, &{&1.name, &1})
+
+      # the dispatcher signature + its single guarded clause + the mangled impl
+      assert by_name["nullary"].dispatch == :dispatcher
+      assert by_name["nullary"].guard == "is_integer(v0)"
+      assert by_name["nullary"].ret == nil
+
+      impl = by_name["impl_p_int64_nullary"]
+      assert impl.dispatch == :impl
+      # nil protocol return stays nil (subst_self short-circuit), empty params kept
+      assert impl.ret == nil
+      assert impl.params == ""
+      assert impl.body == "0"
+    end
+
+    test "an impl method with a different parameter count than the protocol is rejected" do
+      # protocol declares one param, the impl supplies two -> arity mismatch
+      # (protocol.ex:192-195)
+      protocols = %{"Q" => [%{name: "m", params: "self Self", ret: "Bool"}]}
+      impls = [{"Q", "Int64", [%{name: "m", params: "a, b", guard: nil, body: "true"}]}]
+
+      assert_raise CoherenceError,
+                   ~r/method `m` has 2 parameter\(s\) but the protocol declares 1/,
+                   fn -> Protocol.expand(protocols, impls) end
     end
   end
 end

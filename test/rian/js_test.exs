@@ -422,5 +422,135 @@ defmodule Rian.JSTest do
       assert neg =~ "return !b;"
       assert node_eval(neg, "f(false)") in [:no_node, "true"]
     end
+
+    test "an operator with no JS equivalent raises Unsupported (js_op default)" do
+      # `/` is a parsed infix op (ADR float division) but has no js_op clause —
+      # JS uses `div`/`rem`; the bare `/` must raise rather than emit garbage.
+      assert_raise JS.Unsupported, ~r/operator `\/`/, fn ->
+        JS.compile("def f(a Int64, b Int64) Int64 := a / b")
+      end
+    end
+  end
+
+  describe "char literals and prelude primitives (ADR-0036 / ADR-0047)" do
+    test "a Char literal pattern matches its codepoint as a BigInt" do
+      # pat_match(%PChar{}) -> `a0 === <cp>n`; expr_js(%EChar{}) -> `<cp>n`
+      js =
+        JS.compile("""
+        def name(c Char) String
+        def name('a') := "ay"
+        def name(_) := "other"
+        """)
+
+      assert js =~ "if (a0 === 97n)"
+
+      assert node_eval(js, "name(97n)") in [:no_node, "ay"]
+      assert node_eval(js, "name(98n)") in [:no_node, "other"]
+    end
+
+    test "a Char literal expression lowers to its codepoint BigInt" do
+      js = JS.compile("def z() Char := 'z'")
+      assert js =~ "return 122n;"
+      assert node_eval(js, "String(z())") in [:no_node, "122"]
+    end
+
+    test "`Prim.char_code` is identity in JS (a Char is already a BigInt codepoint)" do
+      js = JS.compile("def code(c Char) Int64 := Prim.char_code(c)")
+      assert js =~ "const c = a0;"
+      assert js =~ "return c;"
+      assert node_eval(js, "String(code(65n))") in [:no_node, "65"]
+    end
+
+    test "the Dict prelude lowers `__prim_map_*` to JS object ops" do
+      js = JS.compile(File.read!("examples/rian/prelude_dict.rian"))
+
+      # map_new -> {}; map_get -> m[k]; map_put -> spread; map_has -> Object.hasOwn
+      assert js =~ "return {};"
+      assert js =~ "return (m)[k];"
+      assert js =~ "return {...(m), [k]: v};"
+      assert js =~ "return Object.hasOwn((m), k);"
+
+      # round-trip: inc(empty(), "x") then get_or for "x" is 1, missing is 0
+      assert node_eval(js, "String(get_or(inc(empty(), 'x'), 'x', 0n))") in [:no_node, "1"]
+      assert node_eval(js, "String(get_or(empty(), 'x', 0n))") in [:no_node, "0"]
+    end
+
+    test "the Str prelude lowers `__prim_str_*` to JS string/codepoint ops" do
+      js = JS.compile(File.read!("examples/rian/prelude_str.rian"))
+
+      # str_chars -> codePointAt+BigInt; str_from_chars -> fromCodePoint; concat -> `+`
+      assert js =~ "codePointAt(0)"
+      assert js =~ "String.fromCodePoint(Number(c))"
+      assert js =~ "(a + b)"
+
+      assert node_eval(js, "String(length('héllo'))") in [:no_node, "5"]
+      assert node_eval(js, "concat('ab', 'cd')") in [:no_node, "abcd"]
+    end
+  end
+
+  describe "block typed binds and unsupported clause patterns (ADR-0034 / ADR-0050)" do
+    test "a typed bind in a block erases its type (stmt_js typed_bind)" do
+      # `x Int64 := …;` mid-block -> a plain `let`; the type is erased at lowering
+      js = JS.compile("def f(n Int64) Int64 := x Int64 := n + 1; x * 2")
+      assert js =~ "let x = (n + 1n);"
+      assert js =~ "return (x * 2n);"
+      assert node_eval(js, "String(f(4n))") in [:no_node, "10"]
+    end
+
+    test "a block whose last statement is a typed bind returns the bound value" do
+      # stmt_return({:typed_bind, …}) — the final `y Int64 := …` yields its rhs
+      js = JS.compile("def g(n Int64) Int64 := y Int64 := n + 1")
+      assert js =~ "return (n + 1n);"
+      assert node_eval(js, "String(g(4n))") in [:no_node, "5"]
+    end
+
+    test "a tuple clause pattern has no JS lowering yet — raises Unsupported" do
+      # pat_match has no PTuple clause -> the catch-all raise (pat_match other)
+      assert_raise JS.Unsupported, ~r/clause pattern/, fn ->
+        JS.compile("def f(p Tup) Int64\ndef f({a, b}) := a + b")
+      end
+    end
+  end
+
+  describe "protocol dispatcher arity and empty-impl edge cases (ADR-0061 §3)" do
+    test "a zero-arg method and a parenthesised parametric param resolve arity" do
+      # split_top_commas("") -> [] (zero params); a `Vec(T)` param exercises the
+      # paren-depth counting so the comma inside `Vec(T)` is not a separator.
+      js =
+        JS.compile("""
+        type T := A | B
+
+        protocol P do
+          def zero() String
+          def two(a Self, b Vec(T)) String
+        end
+
+        impl P for T do
+          def zero() := "z"
+          def two(a, b) := "t"
+        end
+        """)
+
+      # zero-arg dispatcher takes no params; two-arg dispatcher takes a0, a1
+      assert js =~ "export function zero() {"
+      assert js =~ "export function two(a0, a1) {"
+      assert js =~ "return impl_p_t_two(a0, a1);"
+    end
+
+    test "a protocol with no impls emits no dispatcher (empty impl_types)" do
+      # the reduce's `[] -> acc` branch: a declared protocol method with zero
+      # matching impls contributes nothing to the dispatcher output.
+      js =
+        JS.compile("""
+        protocol Q do
+          def n(self Self) String
+        end
+
+        def f(x Int64) Int64 := x
+        """)
+
+      refute js =~ "function n("
+      assert js =~ "function f(a0)"
+    end
   end
 end

@@ -367,5 +367,61 @@ defmodule Rian.ReplTest do
       assert Repl.render({:error, "boom"}) == "error: boom"
       assert Repl.render(:empty) == ""
     end
+
+    test "a bound result with an unknown (nil) type renders without an annotation" do
+      assert Repl.render({:bound, "x", 5, nil}) == "x := 5"
+    end
+  end
+
+  # ── default/fallthrough branches in the type-extraction helpers ──────────
+
+  describe "type-extraction fallthrough branches" do
+    test "type_of returns nil for a binding whose RHS type cannot be inferred" do
+      # `f(1)` calls an unknown function — the bind RHS infers to nil, exercising
+      # the `{:bind, _name, e}` branch of safe_infer_input.
+      assert Repl.type_of(Repl.new(), "x := f(1)") == nil
+    end
+
+    test "type_of of an untyped bind reflects the RHS inferred type" do
+      # exercises the `{:bind, _name, e}` branch with a concrete result
+      assert Repl.type_of(Repl.new(), "x := 1 + 2") == "Int64"
+    end
+
+    test "type_of of a typed bind returns the annotation (typed_bind branch)" do
+      assert Repl.type_of(Repl.new(), "x Int32 := 66") == "Int32"
+    end
+
+    test "type_of returns nil for a malformed/empty body (final fallthrough)" do
+      assert Repl.type_of(Repl.new(), "") == nil
+    end
+
+    test "describe tolerates a session whose accumulated program is malformed" do
+      # Force a session with a unit that parses as a decl name but does not
+      # re-parse cleanly as an accumulated program, hitting describe's `_ -> %{}`
+      # and session_ic's rescue. Built via the struct since eval gates units.
+      s = %Repl.Session{base: :erlang.unique_integer([:positive]), units: [{["x"], "def f(n"}]}
+      assert %{functions: functions, binds: binds} = Repl.describe(s)
+      assert is_map(functions)
+      assert is_map(binds)
+    end
+
+    test "type_of with a malformed accumulated program still infers a bare expression" do
+      # session_ic rescues a broken units source to an empty ic; a plain
+      # expression still infers without session knowledge.
+      s = %Repl.Session{base: :erlang.unique_integer([:positive]), units: [{["x"], "def f(n"}]}
+      assert Repl.type_of(s, "1 + 1") == "Int64"
+    end
+
+    test "describe maps a bind whose stmt does not match its recorded name" do
+      # A bind tuple whose stored statement does not parse to a `:= name` for
+      # this name hits bind_env's `_ -> acc` branch, leaving the name absent.
+      s = %Repl.Session{
+        base: :erlang.unique_integer([:positive]),
+        binds: [{"ghost", "1 + 1"}]
+      }
+
+      assert %{binds: binds} = Repl.describe(s)
+      assert Map.get(binds, "ghost") == nil
+    end
   end
 end

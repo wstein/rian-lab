@@ -109,4 +109,29 @@ defmodule Rian.RangeTest do
       end
     end
   end
+
+  describe "expand_of recursion (ADR-0036)" do
+    test "an `.of` call whose head is not a known range falls through to walk (line 34)" do
+      table = Rian.Range.table([%Range{name: "Digit", base: "Int64", lo: 0, hi: 9}])
+      # `Other` is absent from the table, so this `.of` is left intact (no EIf rewrite),
+      # exercising the `_ -> walk(node, table)` arm of the `.of` handler.
+      core = Rian.Core.from_expr(Rian.Pratt.parse("Other.of(5)"))
+
+      out = Rian.Range.expand_of(core, table)
+
+      assert %Rian.Core.ECall{fun: %Rian.Core.EDot{name: "of"}} = out
+      refute inspect(out, limit: :infinity) =~ "EIf"
+    end
+
+    test "a non-`.of` struct node recurses into nested known `.of` calls" do
+      table = Rian.Range.table([%Range{name: "Digit", base: "Int64", lo: 0, hi: 9}])
+      # an EBin wrapping `Digit.of(5)` — not itself an `.of` call, so it walks children,
+      # and the nested known `.of` rewrites to the in-bounds `if`-Result.
+      core = Rian.Core.from_expr(Rian.Pratt.parse("Digit.of(5) + 1"))
+
+      out = Rian.Range.expand_of(core, table)
+
+      assert inspect(out, limit: :infinity) =~ "EIf"
+    end
+  end
 end

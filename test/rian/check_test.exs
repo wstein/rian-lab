@@ -826,4 +826,116 @@ defmodule Rian.CheckTest do
       assert Check.infer(Pratt.parse_body("case s do\n x -> x\n end"), %{}) == :unknown
     end
   end
+
+  describe "a `.of` call on a non-range dot head" do
+    test "infers :unknown when the head is not a known range and not function-typed" do
+      # `Foo.of(3)` — `Foo` is not in `ic.ranges`, and `Foo.of` infers to a
+      # non-`Fn` type, so the fallthrough yields `:unknown` (lines 219-220).
+      assert Check.infer(Pratt.parse("Foo.of(3)")) == :unknown
+    end
+  end
+
+  describe "negative numeric literals against annotations" do
+    test "a negative integer literal adopts a signed-integer annotation" do
+      # `x Int32 := -5` — the unary-minus literal adopts the declared `Int32`.
+      assert Check.check("def f(n Int64) Int64 := x Int32 := -5 ; n") == :ok
+    end
+  end
+
+  describe "range bindings — non-integer ordinal kinds & runtime values" do
+    test "a Char literal against an Int64-based range is a kind mismatch naming `Char`" do
+      assert {:error, msg} =
+               Check.check("range S := 0..9\ndef f() Int64 := d S := 'A' ; 0")
+
+      assert msg =~ "range `S` is over `Int64`, but the literal is a `Char`"
+    end
+
+    test "a negative float literal against an Int64-based range is not assignable" do
+      # `-3.5` is a `EUnary{-, ENum{float}}`; its inner ordinal is `:not_literal`
+      # (a float for an `Int64` base), so the unary branch propagates `:not_literal`
+      # and the `Float64` value is reported as not assignable to the base.
+      assert {:error, msg} =
+               Check.check("range S := 0..9\ndef f() Int64 := d S := -3.5 ; 0")
+
+      assert msg =~ "value of type `Float64` is not assignable to range `S`"
+      assert msg =~ "base `Int64`"
+      assert msg =~ "use `S.of(n)`"
+    end
+
+    test "a String-typed runtime value is not assignable to an Int64-based range" do
+      assert {:error, msg} =
+               Check.check(~s|range Digit := 0..9\ndef f(s String) Int64 := d Digit := s ; 0|)
+
+      assert msg =~ "value of type `String` is not assignable to range `Digit`"
+      assert msg =~ "(base `Int64`); use `Digit.of(n)`"
+    end
+  end
+
+  describe "numeric widening across more kinds (assignable?)" do
+    test "unsigned widens to a wider unsigned" do
+      assert Check.check("def f(n UInt16) UInt32 := x UInt32 := n ; x") == :ok
+    end
+
+    test "unsigned widens losslessly into a float whose mantissa holds it" do
+      assert Check.check("def f(n UInt16) Float32 := x Float32 := n ; x") == :ok
+    end
+
+    test "a float widens into a wider float" do
+      assert Check.check("def f(n Float32) Float64 := x Float64 := n ; x") == :ok
+    end
+
+    test "a malformed numeric-prefixed width is treated as non-numeric (no widening)" do
+      # `Int` with a non-integer width parses to `nil` from `num_bits`, so the
+      # join falls back to non-numeric handling and yields `:unknown`.
+      assert Check.join("IntX", "Int64") == :unknown
+    end
+  end
+
+  describe "join lattice — remaining numeric & parametric branches (ADR-0059)" do
+    test "signed ⊔ unsigned is symmetric (either operand order)" do
+      assert Check.join("Int8", "UInt8") == "Int16"
+    end
+
+    test "float ⊔ integer is symmetric (either operand order)" do
+      assert Check.join("Float32", "Int16") == "Float32"
+    end
+
+    test "unsigned ⊔ float and float ⊔ unsigned both climb to the holding float" do
+      assert Check.join("UInt16", "Float32") == "Float32"
+      assert Check.join("Float32", "UInt16") == "Float32"
+    end
+
+    test "same-kind unsigned ⊔ unsigned widens (UInt prefix)" do
+      assert Check.join("UInt8", "UInt16") == "UInt16"
+    end
+
+    test "a parametric type joined with an `Fn(...)` is :unknown (either order)" do
+      assert Check.join("Vec(Int64)", "Fn(Int64,Bool)") == :unknown
+      assert Check.join("Fn(Int64,Bool)", "Vec(Int64)") == :unknown
+    end
+  end
+
+  describe "protocol-bound checking at call sites (ADR-0042 §2)" do
+    @eq_protocol """
+    protocol Eq do
+      def eq(a Self, b Self) Bool
+    end
+    impl Eq for Int64 do
+      def eq(a, b) := a == b
+    end
+    def equal3(a T, b T, c T) Bool forall T: Eq := eq(a, b) and eq(b, c)
+    """
+
+    test "calling a bounded generic with a concrete type lacking the impl is rejected" do
+      assert {:error, msg} =
+               Check.check(@eq_protocol <> "def caller(a Bool) Bool := equal3(a, a, a)")
+
+      assert msg =~ "`equal3` requires `T: Eq`"
+      assert msg =~ "`Bool` has no `impl Eq for Bool`"
+    end
+
+    test "calling a bounded generic with a type that has the impl passes" do
+      assert Check.check(@eq_protocol <> "def caller(a Int64) Bool := equal3(a, a, a)") == :ok
+    end
+  end
 end

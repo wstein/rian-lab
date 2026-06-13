@@ -107,7 +107,7 @@ defmodule Rian.JVMTest do
       end
     end
   end
-  
+
   describe "clause heads: guards, char patterns, and unsupported patterns" do
     test "a `when` guard lowers to a guarded `if (cond) { return .. }`" do
       kt =
@@ -252,6 +252,69 @@ defmodule Rian.JVMTest do
       # a lowercase, non-builtin type reaches the fall-through (jvm.ex:256)
       assert_raise JVM.Unsupported, fn ->
         JVM.compile("def lc(n Int64) widget := 0")
+      end
+    end
+  end
+
+  describe "blocks whose last statement is a bind (stmt_value)" do
+    test "a block ending in a plain bind yields that bind's value" do
+      kt = JVM.compile("def g(n Int64) Int64 := if n > 0 do a := 5 else 0 end")
+      # the block's last statement is `a := 5` -> stmt_value({:bind, _, e}) (jvm.ex:238)
+      assert kt =~ "run {  5L }"
+
+      case kotlin_run(kt, ~s|println(g(1L)); println(g(-1L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "5\n0"
+      end
+    end
+
+    test "a block ending in a typed bind yields that bind's value" do
+      kt = JVM.compile("def g(n Int64) Int64 := if n > 0 do a Int64 := 7 else 0 end")
+      # last statement is `a Int64 := 7` -> stmt_value({:typed_bind, _, _, e}) (jvm.ex:239)
+      assert kt =~ "run {  7L }"
+
+      case kotlin_run(kt, ~s|println(g(1L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "7"
+      end
+    end
+  end
+
+  describe "string-literal clause-head patterns (lit_kt binary)" do
+    test "a string-literal pattern matches by equality on the Kotlin String" do
+      kt =
+        JVM.compile("""
+        def tag(s String) Int64
+        def tag("x") := 1
+        def tag(s) := 0
+        """)
+
+      # a binary literal in a pattern reaches lit_kt/1 binary clause (jvm.ex:273)
+      assert kt =~ ~s|if (a0 == "x")|
+
+      case kotlin_run(kt, ~s|println(tag("x")); println(tag("y"))|) do
+        :no_jvm -> :ok
+        out -> assert out == "1\n0"
+      end
+    end
+  end
+
+  describe "JVM library jar (to_jar with no :main)" do
+    test "to_jar without a :main opt assembles a plain library jar" do
+      # kotlin_module(src, nil) = plain compile() — no generated `fun main`
+      # (jvm.ex:87/113). Skip the actual kotlinc run when the toolchain is absent,
+      # like the runnable-jar test above.
+      case System.find_executable("kotlinc") do
+        nil ->
+          :ok
+
+        _ ->
+          jar =
+            Path.join(System.tmp_dir!(), "rian_libjar_#{System.unique_integer([:positive])}.jar")
+
+          {:ok, ^jar} = JVM.to_jar("def answer() Int64 := 6 * 7", jar)
+          assert File.exists?(jar)
+          File.rm(jar)
       end
     end
   end

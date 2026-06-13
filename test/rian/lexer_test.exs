@@ -105,4 +105,47 @@ defmodule Rian.LexerTest do
     assert_raise ArgumentError, ~r/unterminated/, fn -> Lexer.tokenize("'a") end
     assert_raise ArgumentError, ~r/unknown character escape/, fn -> Lexer.tokenize(~S('\q')) end
   end
+
+  test "a lone `'` at end of input is an unterminated char literal" do
+    assert_raise ArgumentError, ~r/unterminated character literal/, fn -> Lexer.tokenize("'") end
+  end
+
+  test "the `\\\"` escape in a char literal lexes to the double-quote codepoint" do
+    assert Lexer.expr_tokens(~S('\"')) == [{:char, ?"}]
+  end
+
+  test "an unterminated `\\u{...}` escape is a lex error" do
+    assert_raise ArgumentError, ~r/unterminated `\\u\{\.\.\.\}` escape/, fn ->
+      Lexer.tokenize("'\\u{1F600")
+    end
+  end
+
+  test "an annotation token detokenizes back to `@name`" do
+    assert [{:annot, "doc"}] = Lexer.tokenize("@doc")
+    assert Lexer.detokenize(Lexer.tokenize("@doc")) == "@doc"
+  end
+
+  test "detokenize round-trips the \\t, \\r and \\0 char-source escapes" do
+    assert Lexer.detokenize(Lexer.tokenize(~S('\t'))) == ~S('\t')
+    assert Lexer.detokenize(Lexer.tokenize(~S('\r'))) == ~S('\r')
+    assert Lexer.detokenize(Lexer.tokenize(~S('\0'))) == ~S('\0')
+  end
+
+  test "a heredoc `\"\"\"…\"\"\"` is one trimmed string; an empty heredoc is the empty string" do
+    assert Lexer.tokenize(~s(\"\"\"hi\"\"\")) == [{:str, "hi"}]
+    assert Lexer.tokenize(~s(\"\"\"\"\"\")) == [{:str, ""}]
+  end
+
+  test "an unterminated heredoc is a lex error" do
+    assert_raise ArgumentError, ~r/unterminated heredoc/, fn -> Lexer.tokenize(~s(\"\"\"oops)) end
+  end
+
+  test "an unscannable character is a lex error" do
+    assert_raise ArgumentError, ~r/cannot scan/, fn -> Lexer.tokenize("\x00") end
+  end
+
+  test "a comment with no trailing newline runs cleanly to end of input" do
+    assert Lexer.tokenize("a # trailing comment, no newline") == [{:id, "a"}]
+    assert Lexer.tokenize("# whole-line comment, no newline") == []
+  end
 end

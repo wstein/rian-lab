@@ -169,4 +169,30 @@ defmodule Rian.ExhaustivenessTest do
       refute r.exhaustive?
     end
   end
+
+  describe "tuple-pattern witnesses (rendered as `{a, b}`)" do
+    # a tuple constructor `{:tuple, n}` as a single column makes its signature
+    # `{:complete, [t]}`; an incomplete sub-pattern leaves a tuple-shaped witness,
+    # rendered by `render({:ctor, {:tuple, _}, args})` (exhaustiveness.ex:234).
+    test "a tuple pattern with an incomplete bool element -> witness `{false, _}`" do
+      arms = [arm([c({:tuple, 2}, [c(true), w()])])]
+      r = E.analyze(arms, 1, E.base_env())
+      refute r.exhaustive?
+      assert E.render(r.missing) == "{false, _}"
+    end
+
+    test "render of a fully-wild tuple witness is `{_, _}`" do
+      assert E.render(c({:tuple, 2}, [w(), w()])) == "{_, _}"
+    end
+
+    test "a tuple pattern over an incomplete sum -> witness names the missing variant" do
+      # the inner column is a sum head with only `:some` present, so the witness
+      # recursion hits the `:incomplete` branch (exhaustiveness.ex:172) and
+      # `missing_head` returns the missing `:none` variant (exhaustiveness.ex:186).
+      arms = [arm([c({:tuple, 2}, [c(:some, [w()]), w()])])]
+      r = E.analyze(arms, 1, env_option())
+      refute r.exhaustive?
+      assert E.render(r.missing) == "{None, _}"
+    end
+  end
 end
