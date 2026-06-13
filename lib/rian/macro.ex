@@ -7,6 +7,19 @@ defmodule Rian.Macro do
   binders are gensym-renamed so they cannot capture the caller's variables.
 
   Runs as a pure AST -> AST pass before typecheck.
+
+  ## Portable-core discipline (ADR-0035 · ADR-0058)
+
+  `expand/3` with `portable: true` enforces the rule the design review reached
+  for shared (`@targets`)-declared code: a macro may not **introduce
+  caller-invisible control flow**. Concretely, a template that expands a one-line
+  call site into a failable bind (`with … <- …`, ADR-0039) hides where control
+  diverges — the "debugging a ghost" failure where a type/ownership error points
+  at expanded nodes the caller never wrote. In portable expansion such a template
+  is rejected at the call site, by name. (We gate on the *kind* of node
+  introduced, not a raw depth counter — a benign macro calling a benign helper is
+  not "macro soup"; an invisible `<-` is. `@max_depth` remains a separate runaway
+  backstop.)
   """
   alias Rian.Pratt
 
@@ -19,24 +32,52 @@ defmodule Rian.Macro do
     end)
   end
 
-  def expand(env, ast), do: expand(env, ast, 0)
+  @doc """
+  Expand all macro calls in `ast`. `opts[:portable]` (default `false`) enforces
+  the portable-core discipline above — a template that introduces a failable bind
+  is rejected. Used by shared/`@targets`-declared code once macros are threaded
+  into the checked pipeline.
+  """
+  def expand(env, ast, opts \\ []),
+    do: do_expand(env, ast, 0, Keyword.get(opts, :portable, false))
 
-  def expand(_env, _ast, d) when d > @max_depth, do: raise("macro expansion too deep")
+  defp do_expand(_env, _ast, d, _p) when d > @max_depth, do: raise("macro expansion too deep")
 
-  def expand(env, {:call, {:id, name}, args} = node, d) do
+  defp do_expand(env, {:call, {:id, name}, args} = node, d, portable?) do
     case Map.get(env, name) do
       %{params: ps, template: tmpl} when length(ps) == length(args) ->
-        eargs = Enum.map(args, &expand(env, &1, d))
+        if portable?, do: check_portable!(name, tmpl)
+        eargs = Enum.map(args, &do_expand(env, &1, d, portable?))
         tmpl = freshen(tmpl, ps)
         subst = Map.new(Enum.zip(ps, eargs))
-        expand(env, substitute(tmpl, subst), d + 1)
+        do_expand(env, substitute(tmpl, subst), d + 1, portable?)
 
       _ ->
-        map_node(node, &expand(env, &1, d))
+        map_node(node, &do_expand(env, &1, d, portable?))
     end
   end
 
-  def expand(env, node, d), do: map_node(node, &expand(env, &1, d))
+  defp do_expand(env, node, d, portable?), do: map_node(node, &do_expand(env, &1, d, portable?))
+
+  # Portable-core guard: reject a template that introduces a failable bind
+  # (`with … <- …`), which would hide control flow behind a one-line call site.
+  defp check_portable!(name, tmpl) do
+    if introduces_failable_bind?(tmpl) do
+      raise "macro `#{name}` introduces a failable bind (`with … <- …`) — not " <>
+              "allowed in portable/@targets code: it hides control flow the call " <>
+              "site does not show (ADR-0035 no-hidden-control-flow, ADR-0039)"
+    end
+  end
+
+  defp introduces_failable_bind?(node) do
+    walk_for_with(node)
+    false
+  catch
+    :__with__ -> true
+  end
+
+  defp walk_for_with({:with, _clauses, _body, _els}), do: throw(:__with__)
+  defp walk_for_with(node), do: map_node(node, fn c -> walk_for_with(c) && c end)
 
   # ── generic child mapping (also reused by Rian.Comptime) ───────────────
   def map_node({:bin, op, l, r}, f), do: {:bin, op, f.(l), f.(r)}

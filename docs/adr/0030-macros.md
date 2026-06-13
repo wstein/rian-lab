@@ -80,6 +80,22 @@ unaffected (22/22). Full suite **116 tests, 0 failures**.
 - Because expansion is pre-typecheck and pre-emit, macros work uniformly for the BEAM and Rust
   with no per-target macro logic.
 
+## Portable-core discipline (2026-06-13 design review)
+
+A review raised the "debugging a ghost" failure: a one-line macro call whose template expands into
+hidden failable binds produces type/ownership errors pointing at nodes the caller never wrote. The
+proposed fix — a raw macro-depth cap (e.g. ≤ 2) for portable code — was **reframed**: depth is a poor
+proxy (a benign macro calling a benign helper is not "soup"), and the thing actually worth forbidding
+is the **introduction of caller-invisible control flow**. So for shared / `@targets`-declared code
+(ADR-0058) a macro template **may not introduce a failable bind** (`with … <- …`, ADR-0039) — the
+no-hidden-control-flow rule (ADR-0035) applied to expansion. Implemented in `Rian.Macro.expand/3` as
+`portable: true` (rejection by macro name; `@max_depth` stays a separate runaway backstop). The
+companion tooling half — **expand-macro-on-hover** — is an ADR-0038 capability, honestly tiered as
+**Tier 3** (needs a resolved semantic model to map expanded spans back to source), not Tier 1.
+*Integration note:* user `macro` declarations are not yet threaded into the checked compile pipeline
+(the expander + this guard exist and are unit-tested in isolation); the `portable:` gate plugs into
+`Check` when they are.
+
 ## Open items
 - **`comptime`-as-generics**: monomorphize a function over a comptime type/const parameter
   (emit one specialized fn per instantiation). The evaluator built here is the foundation.

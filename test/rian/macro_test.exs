@@ -101,4 +101,32 @@ defmodule Rian.MacroTest do
       assert MacT.c(0) == 14
     end
   end
+
+  describe "portable-core discipline (ADR-0035/0058)" do
+    @penv Macro.build_env(
+            [
+              {"unwrap", "e", "with {:ok, v} <- e do v end"},
+              {"square", "x", "x * x"}
+            ]
+            |> Enum.map(fn {n, p, t} -> %{name: n, params: [p], template: t} end)
+          )
+
+    test "rejects a macro whose template introduces a failable bind (`with … <-`)" do
+      assert_raise RuntimeError, ~r/introduces a failable bind/, fn ->
+        Macro.expand(@penv, Pratt.parse("unwrap(f(a))"), portable: true)
+      end
+    end
+
+    test "the same expansion is allowed when not portable (default)" do
+      assert Macro.expand(@penv, Pratt.parse("unwrap(f(a))")) ==
+               Macro.expand(@penv, Pratt.parse("unwrap(f(a))"), portable: false)
+
+      refute match?(nil, Macro.expand(@penv, Pratt.parse("unwrap(f(a))")))
+    end
+
+    test "a control-flow-free macro is fine in portable mode" do
+      assert el("square(m + 1)") == "(m + 1) * (m + 1)"
+      refute match?(nil, Macro.expand(@penv, Pratt.parse("square(m + 1)"), portable: true))
+    end
+  end
 end
