@@ -46,10 +46,10 @@ defmodule Rian.Protocol do
   (`[{proto, type, [method_raw_map]}]`) into a list of raw `def` maps to append
   to a scope's function stream. Raises `Error` on any coherence violation.
   """
-  def expand(protocols, impls, types \\ [], structs \\ []) do
+  def expand(protocols, impls, types \\ [], structs \\ [], targets \\ nil) do
     reg = registry(types, structs)
     Enum.each(impls, &check_impl(&1, protocols, reg))
-    check_no_overlap(impls, reg)
+    check_no_overlap(impls, reg, targets)
 
     dispatchers =
       for {name, sigs} <- protocols, sig <- sigs, do: dispatcher(name, sig, impls, reg)
@@ -91,25 +91,39 @@ defmodule Rian.Protocol do
     _ = guard_for!(type, proto, reg)
   end
 
-  defp check_no_overlap(impls, reg) do
+  # Coherence (ADR-0061 §5), target-set-relative:
+  #   * one `impl` per `(protocol, type)` — required on **every** target;
+  #   * no two impl types sharing a runtime discriminator (e.g. `Int64`+`Char`,
+  #     both `is_integer`) — required only on the **runtime-dispatch** targets
+  #     (`:ex`/`:js`); on a Rust-only module the two are distinct static types, so
+  #     it is allowed. `targets == nil` (unannotated) is treated as all targets.
+  defp check_no_overlap(impls, reg, targets) do
+    discriminator? = runtime_dispatch_target?(targets)
+
     impls
     |> Enum.reduce(%{}, fn {proto, type, _}, seen ->
       key = {proto, type}
       if Map.has_key?(seen, key), do: raise(Error, "duplicate `impl #{proto} for #{type}`")
 
       gkey = {proto, guard_for!(type, proto, reg)}
+      other = Map.get(seen, gkey)
 
-      if other = Map.get(seen, gkey) do
+      if discriminator? and other do
         raise(
           Error,
           "ambiguous dispatch: `impl #{proto} for #{type}` and `impl #{proto} for #{other}` " <>
-            "select on the same runtime shape"
+            "select on the same runtime shape (allowed only on a Rust-only `@targets(rs)` module)"
         )
       end
 
       seen |> Map.put(key, true) |> Map.put(gkey, type)
     end)
   end
+
+  # the runtime-discriminator rule applies when the module can reach a runtime
+  # dispatch target (`:ex`/`:js`); an unannotated module (`nil`) reaches all.
+  defp runtime_dispatch_target?(nil), do: true
+  defp runtime_dispatch_target?(targets), do: :ex in targets or :js in targets
 
   # ── dispatcher: one guarded clause per impl ──────────────────────────────
   defp dispatcher(proto, sig, impls, reg) do

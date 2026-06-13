@@ -199,6 +199,49 @@ defmodule Rian.ProtocolTest do
       end
     end
 
+    test "a Rust-only @targets(rs) module allows two impls that share a runtime guard" do
+      # `i64` and `char` are distinct static types on Rust, so the runtime-
+      # discriminator rule does not apply there (ADR-0061 §5).
+      assert [_ | _] =
+               Decl.compile("""
+               @targets(rs)
+               mod M do
+                 protocol P do
+                   def m(self Self) Bool
+                 end
+
+                 impl P for Int64 do
+                   def m(x) := true
+                 end
+
+                 impl P for Char do
+                   def m(x) := false
+                 end
+               end
+               """)
+    end
+
+    test "an @targets(ex) (runtime-dispatch) module still rejects the shared guard" do
+      assert_raise CoherenceError, ~r/ambiguous dispatch/, fn ->
+        Decl.compile("""
+        @targets(ex)
+        mod M do
+          protocol P do
+            def m(self Self) Bool
+          end
+
+          impl P for Int64 do
+            def m(x) := true
+          end
+
+          impl P for Char do
+            def m(x) := false
+          end
+        end
+        """)
+      end
+    end
+
     test "an impl for a type with no runtime discriminator (a type variable) is rejected" do
       assert_raise CoherenceError, ~r/no runtime discriminator for `T`/, fn ->
         Decl.parse("""

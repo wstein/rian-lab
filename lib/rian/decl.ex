@@ -84,7 +84,7 @@ defmodule Rian.Decl do
 
         # top-level aliases are visible inside a module; module-local aliases add to them
         scoped = Map.merge(aliases, collect_aliases(inner))
-        p = assemble(inner, scoped)
+        p = assemble(inner, scoped, targets)
 
         %Mod{
           name: name,
@@ -180,7 +180,9 @@ defmodule Rian.Decl do
   end
 
   # One scope's declarations (top level, or one module's body) -> typed IR.
-  defp assemble(decls, aliases) do
+  # `targets` is the enclosing `mod`'s `@targets` (nil at top level / unannotated),
+  # used to select the target-relative coherence rules (ADR-0061 §5).
+  defp assemble(decls, aliases, targets \\ nil) do
     types =
       for({:type, t, pub?, doc} <- decls, do: parse_type(t, pub?, doc))
       |> Enum.map(&subst_type(&1, aliases))
@@ -198,7 +200,7 @@ defmodule Rian.Decl do
       end)
 
     funcs =
-      (user_defs ++ protocol_defs(decls, types, structs))
+      (user_defs ++ protocol_defs(decls, types, structs, targets))
       |> Enum.chunk_by(& &1.name)
       |> Enum.map(&build_func/1)
       |> Enum.map(&subst_func(&1, aliases))
@@ -217,7 +219,7 @@ defmodule Rian.Decl do
   # method — so they flow through `build_func` like any other function. The sum
   # `types` and `structs` in scope let the dispatcher discriminate by runtime
   # tag; coherence is enforced by `Rian.Protocol.expand/4`.
-  defp protocol_defs(decls, types, structs) do
+  defp protocol_defs(decls, types, structs, targets) do
     protocols =
       for {:protocol, name, inner, _doc} <- decls, into: %{} do
         {name, for({:def, raw} <- inner, do: raw)}
@@ -230,7 +232,7 @@ defmodule Rian.Decl do
 
     if protocols == %{} and impls == [],
       do: [],
-      else: Rian.Protocol.expand(protocols, impls, types, structs)
+      else: Rian.Protocol.expand(protocols, impls, types, structs, targets)
   end
 
   defp parse_alias(text) do
