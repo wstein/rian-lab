@@ -428,14 +428,16 @@ defmodule Rian.Lower do
   # `when …` on Elixir and `if …` on Rust (clauses-guards §5).
   defp guard_str(c, target, deref \\ []) do
     case Map.get(c, :guard) do
-      g when is_binary(g) ->
+      nil ->
+        ""
+
+      g ->
         # On Rust, a binder bound inside a slice/list element is a `&T` borrow
         # (match ergonomics); a guard comparing it (`*c == 32`) must deref it.
+        # `g` is a source string (Rian.Decl) or an already-parsed AST (Stage-2
+        # front-end, ADR-0063) — `Pratt.parse/1` accepts either.
         ast = Pratt.parse(g) |> deref_ids(deref)
         guard_kw(target) <> (emit(Core.from_expr(ast), target) |> elem(0))
-
-      _ ->
-        ""
     end
   end
 

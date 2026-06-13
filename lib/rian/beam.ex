@@ -368,9 +368,10 @@ defmodule Rian.Beam do
      body_forms(body, scope, rtable)}
   end
 
-  # a clause guard is a source string (from `Rian.Decl`); normalize to core (or nil)
+  # a clause guard is a source string (from `Rian.Decl`) or an already-parsed AST
+  # (from a Rian-written front-end, ADR-0063); `Pratt.parse/1` accepts either.
   defp guard_core(nil), do: nil
-  defp guard_core(g) when is_binary(g), do: Core.from_expr(Pratt.parse(g))
+  defp guard_core(g), do: Core.from_expr(Pratt.parse(g))
 
   defp guard_form(nil, _scope), do: []
   defp guard_form(core, scope), do: [[expr_form(core, scope)]]

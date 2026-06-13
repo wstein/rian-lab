@@ -17,7 +17,12 @@ defmodule Rian.Pratt do
   # it is the failable-bind arrow, valid only in `with`/`for` clause headers.
   @infix ~w(+ - * / rem div <> in |> < <= > >= == != and or <~)
 
-  def parse(str) do
+  # already-parsed passthrough (symmetric with `parse_body/1`): a Rian-written
+  # front-end (ADR-0063 Stage 2) may hand the checker/emitters an AST directly —
+  # e.g. a clause guard parsed in Rian — so they can re-`parse` it idempotently.
+  def parse(ast) when is_tuple(ast), do: ast
+
+  def parse(str) when is_binary(str) do
     {ast, rest} = parse_expr(Rian.Lexer.expr_tokens(str), 0)
     if rest != [], do: raise(ArgumentError, "trailing tokens: #{inspect(rest)}")
     Rian.Prim.normalize(ast)

@@ -23,24 +23,32 @@
 mod SelfhostDecl do
   type Tok :=
       TNum(String) | TId(String) | TKw(String) | TOp(String)
-    | TLP | TRP | TComma | TNL
+    | TLP | TRP | TLBracket | TRBracket | TComma | TNL
 
-  # expression AST — constructor names lower to Rian.Pratt's surface tuples.
+  # expression AST — Num/Id/Bin/Unary/Call lower to Rian.Pratt's surface tuples;
+  # list construction is nil/cons (NilE / ConsE), flattened to `{:list_lit, …}` by
+  # the projection (the cons `{:tail, …}` tag would otherwise collide with patterns).
   type Expr :=
       Num(String) | Id(String) | Bin(String, Expr, Expr)
-    | Unary(String, Expr) | Call(Expr, Vec(Expr)) | EErr
+    | Unary(String, Expr) | Call(Expr, Vec(Expr))
+    | NilE | ConsE(Expr, Expr) | EErr
 
-  # clause PATTERNS — names chosen to lower to Rian.Decl's pattern tuples:
-  #   Wild -> :wild   Var(n) -> {:var,n}   Lit(k) -> {:lit,k}   Ctor(c,ps) -> {:ctor,c,ps}
-  type Pat := Wild | Var(String) | Lit(Int64) | Ctor(String, Vec(Pat))
+  # clause PATTERNS — Wild/Var/Lit/Ctor lower straight to Rian.Decl's tuples
+  # (:wild / {:var,n} / {:lit,k} / {:ctor,c,ps}); list patterns are nil/cons
+  # (NilP / ConsP), flattened to `{:list, elems, :close | {:tail,p}}` by the test.
+  type Pat :=
+      Wild | Var(String) | Lit(Int64) | Ctor(String, Vec(Pat))
+    | NilP | ConsP(Pat, Pat)
 
   type Variant := V(String, Vec(String))
   type Param := Par(String, String, String)
+  type PType := PT(String, Vec(Tok))
   type Decl :=
       DType(String, Vec(Variant))
     | DFunc(String, Vec(Param), String, Expr)
     | DSig(String, Vec(Param), String)
     | DClause(String, Vec(Pat), Expr)
+    | DClauseG(String, Vec(Pat), Expr, Expr)
     | DErr
 
   # result pairs (a value + the unconsumed tokens)
@@ -127,20 +135,32 @@ mod SelfhostDecl do
   def take_parens([t | rest], depth, acc) := take_parens(rest, depth, [t | acc])
   def take_parens([], depth, acc) := Paren(rev_tok(acc, []), [])
 
-  # `(pats) := body` -> a pattern clause; `(params) Ret := body` -> a typed single
-  # clause; `(params) Ret` -> a bodiless signature.
+  # `(pats) when g := body` / `(pats) := body` -> a pattern clause; `(params) Ret
+  # := body` -> a typed single clause; `(params) Ret` -> a bodiless signature.
   def classify_def(name String, inside Vec(Tok), after Vec(Tok)) DeclRes
+  def classify_def(name, inside, [TKw("when") | rest])
+    case parse_bp(0, rest) do
+      P(g, [TOp(":=") | body]) ->
+        case parse_bp(0, body) do
+          P(b, rest2) -> DR(DClauseG(name, parse_pats(inside), g, b), rest2)
+        end
+      P(_, other) -> DR(DErr, other)
+    end
+  end
   def classify_def(name, inside, [TOp(":=") | body])
     case parse_bp(0, body) do
       P(b, rest) -> DR(DClause(name, parse_pats(inside), b), rest)
     end
   end
-  def classify_def(name, inside, [TId(ret), TOp(":=") | body])
-    case parse_bp(0, body) do
-      P(b, rest) -> DR(DFunc(name, parse_params(inside), ret, b), rest)
+  def classify_def(name, inside, [TId(rb) | rb_rest])
+    case parse_ptype([TId(rb) | rb_rest]) do
+      PT(ret, [TOp(":=") | body]) ->
+        case parse_bp(0, body) do
+          P(b, rest) -> DR(DFunc(name, parse_params(inside), ret, b), rest)
+        end
+      PT(ret, rest) -> DR(DSig(name, parse_params(inside), ret), rest)
     end
   end
-  def classify_def(name, inside, [TId(ret) | rest]) := DR(DSig(name, parse_params(inside), ret), rest)
   def classify_def(name, inside, after) := DR(DErr, after)
 
   # ── parameters: `name [cap] Type` (cap in val/iso/ref/tag, default val) ────
@@ -153,13 +173,42 @@ mod SelfhostDecl do
     end
   end
 
+  # `name [cap] Type` where cap in val/iso/ref/tag (default val) and Type may be a
+  # simple id or a single-arg parametric type `Base(Arg)` (e.g. `Vec(Int64)`).
   def parse_param(ts Vec(Tok)) ParamRes
-  def parse_param([TId(n), TId("val"), TId(t) | rest]) := PR(Par(n, "val", t), rest)
-  def parse_param([TId(n), TId("iso"), TId(t) | rest]) := PR(Par(n, "iso", t), rest)
-  def parse_param([TId(n), TId("ref"), TId(t) | rest]) := PR(Par(n, "ref", t), rest)
-  def parse_param([TId(n), TId("tag"), TId(t) | rest]) := PR(Par(n, "tag", t), rest)
-  def parse_param([TId(n), TId(t) | rest]) := PR(Par(n, "val", t), rest)
+  def parse_param([TId(n), TId("val") | rest])
+    case parse_ptype(rest) do
+      PT(t, r) -> PR(Par(n, "val", t), r)
+    end
+  end
+  def parse_param([TId(n), TId("iso") | rest])
+    case parse_ptype(rest) do
+      PT(t, r) -> PR(Par(n, "iso", t), r)
+    end
+  end
+  def parse_param([TId(n), TId("ref") | rest])
+    case parse_ptype(rest) do
+      PT(t, r) -> PR(Par(n, "ref", t), r)
+    end
+  end
+  def parse_param([TId(n), TId("tag") | rest])
+    case parse_ptype(rest) do
+      PT(t, r) -> PR(Par(n, "tag", t), r)
+    end
+  end
+  def parse_param([TId(n) | rest])
+    case parse_ptype(rest) do
+      PT(t, r) -> PR(Par(n, "val", t), r)
+    end
+  end
   def parse_param(ts) := PR(Par("", "val", ""), ts)
+
+  # a type: simple `Id`, or single-arg parametric `Base(Arg)` rebuilt as the string
+  # `"Base(Arg)"` (matches Rian.Decl's collapsed spacing).
+  def parse_ptype(ts Vec(Tok)) PType
+  def parse_ptype([TId(base), TLP, TId(arg), TRP | rest]) := PT(Prim.str_concat(base, Prim.str_concat("(", Prim.str_concat(arg, ")"))), rest)
+  def parse_ptype([TId(t) | rest]) := PT(t, rest)
+  def parse_ptype(ts) := PT("", ts)
 
   # ── clause patterns ───────────────────────────────────────────────────────
   def parse_pats(ts Vec(Tok)) Vec(Pat)
@@ -174,6 +223,7 @@ mod SelfhostDecl do
   def parse_pat(ts Vec(Tok)) PatRes
   def parse_pat([TId("_") | rest]) := PP(Wild, rest)
   def parse_pat([TNum(s) | rest]) := PP(Lit(str_to_int(s)), rest)
+  def parse_pat([TLBracket | rest]) := parse_list_pat(rest)
   def parse_pat([TId(ctor), TLP | rest])
     case parse_patlist(rest) do
       PL(args, rest2) -> PP(Ctor(ctor, args), rest2)
@@ -187,6 +237,26 @@ mod SelfhostDecl do
     end
   end
   def parse_pat(ts) := PP(Wild, ts)
+
+  # list pattern as a nil/cons chain: `[]` -> NilP, `[a, b]` -> ConsP(a, ConsP(b,
+  # NilP)), `[h | t]` -> ConsP(h, t).
+  def parse_list_pat(ts Vec(Tok)) PatRes
+  def parse_list_pat([TRBracket | rest]) := PP(NilP, rest)
+  def parse_list_pat(ts)
+    case parse_pat(ts) do
+      PP(h, [TComma | rest]) ->
+        case parse_list_pat(rest) do
+          PP(t, r) -> PP(ConsP(h, t), r)
+        end
+      PP(h, [TOp("|") | rest]) ->
+        case parse_pat(rest) do
+          PP(t, [TRBracket | r]) -> PP(ConsP(h, t), r)
+          PP(t, other) -> PP(ConsP(h, t), other)
+        end
+      PP(h, [TRBracket | rest]) -> PP(ConsP(h, NilP), rest)
+      PP(h, rest) -> PP(ConsP(h, NilP), rest)
+    end
+  end
 
   def parse_patlist(ts Vec(Tok)) PatList
   def parse_patlist([TRP | rest]) := PL([], rest)
@@ -237,6 +307,7 @@ mod SelfhostDecl do
   def parse_primary(ts Vec(Tok)) Parse
   def parse_primary([TNum(n) | rest]) := parse_postfix(Num(n), rest)
   def parse_primary([TId(x) | rest]) := parse_postfix(Id(x), rest)
+  def parse_primary([TLBracket | rest]) := parse_list_expr(rest)
   def parse_primary([TLP | rest])
     case parse_bp(0, rest) do
       P(e, [TRP | rest2]) -> parse_postfix(e, rest2)
@@ -244,6 +315,26 @@ mod SelfhostDecl do
     end
   end
   def parse_primary(ts) := P(EErr, ts)
+
+  # list construction as a nil/cons chain (mirrors parse_list_pat): `[x | acc]` ->
+  # ConsE(x, acc); elements are full expressions.
+  def parse_list_expr(ts Vec(Tok)) Parse
+  def parse_list_expr([TRBracket | rest]) := P(NilE, rest)
+  def parse_list_expr(ts)
+    case parse_bp(0, ts) do
+      P(h, [TComma | rest]) ->
+        case parse_list_expr(rest) do
+          P(t, r) -> P(ConsE(h, t), r)
+        end
+      P(h, [TOp("|") | rest]) ->
+        case parse_bp(0, rest) do
+          P(t, [TRBracket | r]) -> P(ConsE(h, t), r)
+          P(t, other) -> P(ConsE(h, t), other)
+        end
+      P(h, [TRBracket | rest]) -> P(ConsE(h, NilE), rest)
+      P(h, rest) -> P(ConsE(h, NilE), rest)
+    end
+  end
 
   def parse_postfix(node Expr, ts Vec(Tok)) Parse
   def parse_postfix(node, [TLP | rest])

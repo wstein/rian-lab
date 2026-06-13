@@ -13,9 +13,11 @@ defmodule Rian.DeclFixpointTest do
   # Stage-2 thesis: a Rian front-end producing IR the existing backend consumes,
   # with no Elixir parse in the loop.
   #
-  # Core forms only (type sums + single-clause `def` over simple types); the long
-  # tail of `Rian.Decl` (multi-clause, capabilities, parametric types, mod/struct/
-  # protocol/generics) remains — see ADR-0063.
+  # Covers: `type` sums; `def` functions (single + multi-clause); clause patterns
+  # (var/lit/ctor/wildcard/cons-list); capabilities (val/iso/ref/tag); parametric
+  # param/return types (`Vec(T)`); list construction; and `when` guards. Remaining
+  # long tail of `Rian.Decl`: `mod`/`struct`/`alias`/`protocol`/generics/doc-comments
+  # and the portable stdlib breadth — see ADR-0063.
 
   setup_all do
     {:ok, fe} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :rian_decl_frontend)
@@ -31,6 +33,8 @@ defmodule Rian.DeclFixpointTest do
   defp inject({:rparen}), do: :trp
   defp inject({:comma}), do: :t_comma
   defp inject({:nl}), do: :tnl
+  defp inject({:lbracket}), do: :tl_bracket
+  defp inject({:rbracket}), do: :tr_bracket
 
   defp front_decls(fe, src), do: fe.parse_program(src |> Lexer.tokenize() |> Enum.map(&inject/1))
 
@@ -48,7 +52,55 @@ defmodule Rian.DeclFixpointTest do
   end
 
   defp param({:par, n, cap, t}), do: %Param{name: n, type: t, cap: String.to_atom(cap)}
-  defp clause(pats, body), do: %Clause{pats: pats, body: {:block, [{:expr, body}]}, guard: nil}
+
+  defp clause(pats, body),
+    do: %Clause{pats: Enum.map(pats, &cp/1), body: {:block, [{:expr, ce(body)}]}, guard: nil}
+
+  # convert the front-end's nil/cons list PATTERNS to Rian.Decl's `{:list, …}` shape
+  # (var/lit/ctor/wild lower directly); flatten the cons chain.
+  defp cp({:ctor, c, args}), do: {:ctor, c, Enum.map(args, &cp/1)}
+  defp cp(:nil_p), do: {:list, [], :close}
+
+  defp cp({:cons_p, _, _} = c) do
+    {elems, tail} = flat_p(c)
+    {:list, Enum.map(elems, &cp/1), tail}
+  end
+
+  defp cp(leaf), do: leaf
+
+  defp flat_p(:nil_p), do: {[], :close}
+  defp flat_p({:cons_p, h, :nil_p}), do: {[h], :close}
+
+  defp flat_p({:cons_p, h, {:cons_p, _, _} = t}) do
+    {es, tl} = flat_p(t)
+    {[h | es], tl}
+  end
+
+  defp flat_p({:cons_p, h, t}), do: {[h], {:tail, cp(t)}}
+
+  # convert the front-end's nil/cons list EXPRESSIONS to `{:list_lit, …}` (recurse
+  # into bin/unary/call); num/id lower directly.
+  defp ce(:nil_e), do: {:list_lit, [], nil}
+
+  defp ce({:cons_e, _, _} = c) do
+    {elems, tail} = flat_e(c)
+    {:list_lit, Enum.map(elems, &ce/1), tail}
+  end
+
+  defp ce({:bin, op, l, r}), do: {:bin, op, ce(l), ce(r)}
+  defp ce({:unary, op, x}), do: {:unary, op, ce(x)}
+  defp ce({:call, f, args}), do: {:call, ce(f), Enum.map(args, &ce/1)}
+  defp ce(leaf), do: leaf
+
+  defp flat_e(:nil_e), do: {[], nil}
+  defp flat_e({:cons_e, h, :nil_e}), do: {[h], nil}
+
+  defp flat_e({:cons_e, h, {:cons_e, _, _} = t}) do
+    {es, tl} = flat_e(t)
+    {[h | es], tl}
+  end
+
+  defp flat_e({:cons_e, h, t}), do: {[h], {:tail, ce(t)}}
 
   defp func(name, params, ret, clauses) do
     %Func{
@@ -77,10 +129,22 @@ defmodule Rian.DeclFixpointTest do
   end
 
   defp group([{:d_sig, name, params, ret} | rest]) do
-    {cls, rest2} = Enum.split_while(rest, &match?({:d_clause, ^name, _, _}, &1))
-    clauses = Enum.map(cls, fn {:d_clause, _, pats, body} -> clause(pats, body) end)
-    [func(name, params, ret, clauses) | group(rest2)]
+    {cls, rest2} =
+      Enum.split_while(rest, fn d ->
+        match?({:d_clause, ^name, _, _}, d) or match?({:d_clause_g, ^name, _, _, _}, d)
+      end)
+
+    [func(name, params, ret, Enum.map(cls, &to_clause/1)) | group(rest2)]
   end
+
+  defp to_clause({:d_clause, _, pats, body}), do: clause(pats, body)
+
+  defp to_clause({:d_clause_g, _, pats, guard, body}),
+    do: %Clause{
+      pats: Enum.map(pats, &cp/1),
+      body: {:block, [{:expr, ce(body)}]},
+      guard: ce(guard)
+    }
 
   defp to_prog(decls) do
     ir = group(decls)
@@ -94,10 +158,18 @@ defmodule Rian.DeclFixpointTest do
     }
   end
 
-  # clause bodies differ in form (Decl.parse keeps a source string; the front-end a
-  # parsed AST) — normalize both through `Pratt.parse_body/1` to compare.
-  defp norm_func(f),
-    do: %{f | clauses: Enum.map(f.clauses, &%{&1 | body: Pratt.parse_body(&1.body)})}
+  # clause bodies/guards differ in form (Decl.parse keeps source strings; the
+  # front-end parsed ASTs) — normalize both through `Pratt.parse_body`/`parse` to
+  # compare (`Pratt.parse/1` is idempotent on an AST).
+  defp norm_func(f) do
+    %{
+      f
+      | clauses:
+          Enum.map(f.clauses, fn c ->
+            %{c | body: Pratt.parse_body(c.body), guard: c.guard && Pratt.parse(c.guard)}
+          end)
+    }
+  end
 
   @corpus [
     "type Color := Red | RGB(Int64, Int64)",
@@ -118,7 +190,18 @@ defmodule Rian.DeclFixpointTest do
     # multi-clause over integers (literal + var clauses)
     "def classify(n Int64) Int64\n" <>
       "def classify(0) := 100\n" <>
-      "def classify(n) := n * 2"
+      "def classify(n) := n * 2",
+    # parametric types + cons/list patterns + list construction (cons recursion)
+    "def rev(xs val Vec(Int64), acc val Vec(Int64)) Vec(Int64)\n" <>
+      "def rev([], acc) := acc\n" <>
+      "def rev([x | xs], acc) := rev(xs, [x | acc])",
+    "def len(xs val Vec(Int64)) Int64\n" <>
+      "def len([]) := 0\n" <>
+      "def len([_ | t]) := 1 + len(t)",
+    # `when` guards
+    "def clamp(n Int64) Int64\n" <>
+      "def clamp(n) when n < 0 := 0\n" <>
+      "def clamp(n) := n"
   ]
 
   describe "Stage 2 declarations — the Rian front-end builds the same IR as Rian.Decl.parse" do
@@ -195,6 +278,34 @@ defmodule Rian.DeclFixpointTest do
       {:ok, mod} = Beam.load_ir(prog, :RianStage2Classify)
       assert mod.classify(0) == 100
       assert mod.classify(7) == 14
+    end
+
+    test "a CONS-RECURSIVE function (list patterns + construction) runs", %{frontend: fe} do
+      # the lexer/parser idiom: `[]` / `[h | t]` patterns and `[x | acc]` construction
+      src = """
+      def rev(xs val Vec(Int64), acc val Vec(Int64)) Vec(Int64)
+      def rev([], acc) := acc
+      def rev([x | xs], acc) := rev(xs, [x | acc])
+      def reverse(xs val Vec(Int64)) Vec(Int64) := rev(xs, [])
+      """
+
+      prog = front_decls(fe, src) |> to_prog()
+      {:ok, mod} = Beam.load_ir(prog, :RianStage2Rev)
+      assert mod.reverse([1, 2, 3]) == [3, 2, 1]
+      assert mod.rev([1, 2], [9]) == [2, 1, 9]
+    end
+
+    test "a GUARDED multi-clause function runs", %{frontend: fe} do
+      src = """
+      def clamp(n Int64) Int64
+      def clamp(n) when n < 0 := 0
+      def clamp(n) := n
+      """
+
+      prog = front_decls(fe, src) |> to_prog()
+      {:ok, mod} = Beam.load_ir(prog, :RianStage2Clamp)
+      assert mod.clamp(-5) == 0
+      assert mod.clamp(7) == 7
     end
   end
 end
