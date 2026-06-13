@@ -68,6 +68,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 | [0057](adr/0057-concurrency-and-otp-are-native-per-target.md) | Concurrency & OTP are native-per-target: Rian source is sequential logic + tests; gen_servers/tasks/workers are written in the host's native language and call shared Rian functions. Supersedes 0044 | Accepted (direction) |
 | [0058](adr/0058-configurable-target-environments.md) | Configurable target environments (`:ex`/`:rs`/`:js`), reachability-gated: `Rian.Reach` computes per-function reach via a call-graph fixpoint; `mix rian.targets [--require …]` reports and gates by need. Concurrency-FFI is a fallout | Accepted; partially implemented |
 | [0059](adr/0059-join-lattice-lub.md) | Join lattice (LUB) for `if`/`case`/list-element types: `Check.join/2` is the least-upper-bound over the `num_widens?` order (numeric + same-constructor covariant `Vec`/`Option`); `:unknown` absorbing, gaps explicit. Closes the strict-`unify` join asymmetry | Accepted; implemented |
+| [0060](adr/0060-testing-spec-by-example.md) | Testing: three tiers (properties/fixpoint · executable spec-by-example/doctests · `describe`/`it`+matchers); assertions are values not exceptions (ADR-0035); doctests land first, matchers wait on protocols; **Gherkin rejected** (second grammar, prose↔stepdef drift, audience mismatch) | Accepted (direction) |
 
 ### Amending a decision-lock
 
