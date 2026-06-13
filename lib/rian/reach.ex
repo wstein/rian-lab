@@ -62,7 +62,11 @@ defmodule Rian.Reach do
     facts =
       Map.new(funs, fn f ->
         {blockers, callees} = scan_func(f, modnames)
-        local = if blockers == [], do: MapSet.new(@targets), else: MapSet.new([:ex])
+        # local reach = the closed vocabulary minus every target any blocker kills.
+        # Host FFI/concurrency kill the non-BEAM targets; a `ref` capability kills
+        # `:ex` (BEAM-rejected, ADR-0055/P5) — so the two compose correctly.
+        killed = MapSet.new(Enum.flat_map(blockers, & &1.kills))
+        local = MapSet.difference(MapSet.new(@targets), killed)
 
         {f.name,
          %{local: local, callees: MapSet.intersection(callees, local_names), blockers: blockers}}
@@ -180,11 +184,18 @@ defmodule Rian.Reach do
 
   # scan every clause body (and guard) of one function for ex-only constructs + local-call edges
   defp scan_func(f, modnames) do
-    Enum.reduce(f.clauses, {[], MapSet.new()}, fn c, acc ->
+    # the `ref` capability (`&mut`) is BEAM-rejected (ADR-0055/0025, P5): a `ref`
+    # parameter pins the function off `:ex` — it is outside the portable capability
+    # core, so the reach report says so instead of overselling a tidy four.
+    base = if Enum.any?(Map.get(f, :params, []), &(&1.cap == :ref)), do: [ref_blocker()], else: []
+
+    Enum.reduce(f.clauses, {base, MapSet.new()}, fn c, acc ->
       acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
       if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
     end)
   end
+
+  defp ref_blocker, do: %{construct: "ref capability (&mut)", kind: :capability, kills: [:ex]}
 
   defp core(src, parser), do: src |> parser.() |> Core.from_expr()
 

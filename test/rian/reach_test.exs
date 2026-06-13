@@ -62,6 +62,15 @@ defmodule Rian.ReachTest do
       assert Enum.sort(kills) == [:js, :jvm, :rs]
     end
 
+    test "a `ref` capability pins a function OFF :ex (P5 — ref is not in the portable core)" do
+      rep = reach("def bump(x ref Int64) Int64 := x + 1")
+
+      # ref (&mut) is BEAM-rejected, so the function reaches everything BUT :ex —
+      # the reachability report no longer oversells `ref` as portable (ADR-0055/P5).
+      assert targets(rep, "bump") == [:js, :jvm, :rs]
+      assert [%{kind: :capability, kills: [:ex]}] = rep["bump"].blockers
+    end
+
     test "an Elixir-module call (non-Rian) is ex-only" do
       rep =
         reach("""

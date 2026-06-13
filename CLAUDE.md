@@ -76,9 +76,12 @@ architectural cost.
 
 ## Cross-cutting models you must understand before editing
 
-- **Capabilities** `val` / `iso` / `ref` / `tag` (`Rian.Capability`) drive Rust parameter signatures
-  (`&[T]`, owned `Vec<T>`, `&mut`) and BEAM linearity (use-once for `iso`/`ref`). They are how Rian
-  gets ownership-checked Rust without hand-written lifetimes.
+- **Capabilities** (`Rian.Capability`) drive Rust parameter signatures and BEAM linearity — how Rian
+  gets ownership-checked Rust without hand-written lifetimes. The **portable core is `val`/`iso`/`tag`**
+  (BEAM-legal): `val`→`&[T]`/`&T`, `iso`→owned `Vec<T>`/move (use-once), `tag`→`&T`. **`ref` (`&mut`) is
+  NOT in the portable core (P5):** it is BEAM-rejected, so a `ref` parameter pins the function off
+  `:ex` — `Rian.Reach` reports it as a `:capability` blocker killing `:ex` (the matrix is honest, not a
+  tidy-looking four). See ADR-0055/0025/ADR-0064-adjacent P5.
 - **Portability is *inferred*, not annotated** (`Rian.Reach`, ADR-0057/0058). A function is
   "portable" iff it reaches all of `:ex`/`:rs`/`:js`; host FFI (and all concurrency) pins it to
   `:ex`. **Concurrency/OTP is native-per-target by design** — it is *not* a Rian surface (ADR-0057

@@ -75,6 +75,17 @@ binding, never a borrowed (`val`) one. BEAM/JS reuse the existing use-once linea
 `ref self` through `dyn` is **rejected on the BEAM target** at the call site (consistent with
 ADR-0025's blanket `ref`-on-BEAM rejection), a compile error, never a silent downgrade (ADR-0041).
 
+## Amendment (P5 — `ref` leaves the portable capability core, 2026-06-14)
+
+The design review (P5) flagged the `val`/`iso`/`ref`/`tag` matrix as **overselling**: `ref` is
+BEAM-rejected, yet it was presented as one of four equally-portable capabilities, and `Rian.Reach`
+didn't account for it — a `ref` function claimed `:ex`-reachability and only failed at emit. Resolution
+(*honesty over a tidy table*): **`ref` is explicitly outside the portable capability core.** The
+portable three are `val`/`iso`/`tag` (BEAM-legal); `ref` (`&mut`) is a non-BEAM (Rust/JS) capability.
+`Rian.Reach` now emits a `:capability` blocker for any `ref` parameter that **kills `:ex`**, so the
+reachability report and the portability gate tell the truth (a `ref` function reaches `[:rs, :js, :jvm]`,
+not `:ex`). No change to the Rust/JS lowering or the BEAM-rejection rule — only the *claim* is corrected.
+
 ### 3. Opaque-over-`struct` presents the *join* of its field capabilities
 
 For `opaque T := struct{ … }`, the opaque's externally-visible capability is the **most-restrictive
