@@ -1,31 +1,42 @@
 defmodule Mix.Tasks.Rian.Compile do
-  @shortdoc "Compile a .rian source file to Elixir and/or Rust"
+  @shortdoc "Compile a .rian source file to BEAM bytecode and/or Rust"
 
   @moduledoc """
-  Compile a Rian source file (Stage 0.1 declaration surface) and print the
-  lowered output for each top-level function and module.
+  Compile a Rian source file (Stage 0.1 declaration surface) for each top-level
+  function and module.
 
-      mix rian.compile FILE [--beam | --elixir | --rust]
+      mix rian.compile FILE [--beam | --rust] [--show-elixir]
 
-  By default **both** targets are emitted. Options:
+  The two **real** targets are emitted by default:
 
-    * `--beam`    compile to the BEAM target only; permits Erlang FFI
-                  (`:lists.sum(...)`, `String.upcase(...)`) that has no Rust form
-    * `--elixir`  show only the Elixir output (both-target compile)
-    * `--rust`    show only the Rust output (both-target compile)
+    * **BEAM** — compiled to loadable bytecode through the Erlang abstract-forms
+      backend (`Rian.Beam`, the canonical BEAM path); the task reports each
+      module, its exports, and its `.beam` byte size. Erlang FFI (`:lists.sum`,
+      `String.upcase`) is permitted — it lowers to native remote calls.
+    * **Rust** — emitted as idiomatic source text (`Rian.Lower`).
+
+  Options:
+
+    * `--beam`         BEAM bytecode only
+    * `--rust`         Rust source only
+    * `--show-elixir`  *additionally* print the Elixir-text **debug** view
+                       (`Rian.Lower`'s text emitter — a pedagogical artifact, not
+                       the execution path; BEAM runs from bytecode, not this text)
 
   Exits non-zero on a parse, exhaustiveness, or type-check error.
 
       mix rian.compile examples/area.rian
       mix rian.compile examples/rian/05_modules.rian --rust
-      mix rian.compile examples/rian/08_lambdas_collections.rian --beam
+      mix rian.compile examples/rian/08_lambdas_collections.rian --beam --show-elixir
   """
   use Mix.Task
 
   @impl Mix.Task
   def run(args) do
     {opts, argv, invalid} =
-      OptionParser.parse(args, strict: [beam: :boolean, elixir: :boolean, rust: :boolean])
+      OptionParser.parse(args,
+        strict: [beam: :boolean, rust: :boolean, show_elixir: :boolean]
+      )
 
     if invalid != [],
       do: Mix.raise("unknown option(s): #{inspect(Enum.map(invalid, &elem(&1, 0)))}")
@@ -33,7 +44,7 @@ defmodule Mix.Tasks.Rian.Compile do
     file =
       case argv do
         [f] -> f
-        [] -> Mix.raise("usage: mix rian.compile FILE [--beam | --elixir | --rust]")
+        [] -> Mix.raise("usage: mix rian.compile FILE [--beam | --rust] [--show-elixir]")
         _ -> Mix.raise("compile one file at a time")
       end
 
@@ -46,35 +57,86 @@ defmodule Mix.Tasks.Rian.Compile do
 
   defp compile_and_print(file, opts) do
     src = File.read!(file)
-    targets = targets(opts)
+    show = targets(opts)
 
-    units =
-      if opts[:beam], do: Rian.Decl.compile_beam(src), else: Rian.Decl.compile(src)
+    Mix.shell().info("# #{file}\n")
 
-    Mix.shell().info("# #{file} — #{length(units)} unit(s)\n")
-    Enum.each(units, &print_unit(&1, targets))
+    if :beam in show, do: print_beam(src)
+    if :rust in show, do: print_rust(src)
+    if :elixir in show, do: print_elixir_debug(src)
   rescue
     e in [Rian.Decl.Error, Rian.Check.Error, ArgumentError, RuntimeError] ->
       Mix.raise("#{file}: #{Exception.message(e)}")
   end
 
-  defp print_unit({name, out}, targets) do
-    Mix.shell().info("══ #{name} ══")
-    if :elixir in targets && out[:elixir], do: section("Elixir", out.elixir)
-    if :rust in targets && out[:rust], do: section("Rust", out.rust)
+  # ── BEAM: the canonical path — real bytecode via `Rian.Beam` ─────────────
+  defp print_beam(src) do
+    prog = Rian.Decl.parse(src)
+    :ok = Rian.Check.gate!(prog)
+
+    mods =
+      case prog do
+        %{mods: [_ | _]} -> Rian.Beam.compile_program(src)
+        _ -> [single_module(src)]
+      end
+
+    Mix.shell().info("══ BEAM bytecode (Rian.Beam → :compile.forms) ══")
+
+    Enum.each(mods, fn {atom, bin} ->
+      Mix.shell().info("  #{atom}  —  #{byte_size(bin)} bytes  ·  exports #{exports(bin)}")
+    end)
+
+    Mix.shell().info("")
   end
 
-  defp section(label, code), do: Mix.shell().info("── #{label} ──\n#{code}\n")
+  defp single_module(src) do
+    {:ok, atom, bin} = Rian.Beam.compile(src, :"Elixir.RianCompiled")
+    {atom, bin}
+  end
 
-  # `--beam` forces Elixir-only; otherwise an explicit `--elixir`/`--rust`
-  # narrows the display, and with neither both targets are shown.
+  # read the `-export([...])` chunk back from the produced bytecode so the report
+  # reflects what actually compiled, not what we intended to compile.
+  defp exports(bin) do
+    {:ok, {_mod, [{:exports, exps}]}} = :beam_lib.chunks(bin, [:exports])
+
+    exps
+    |> Enum.reject(fn {name, _a} -> name in [:module_info] end)
+    |> Enum.map_join(", ", fn {name, a} -> "#{name}/#{a}" end)
+  end
+
+  # ── Rust: the real text target ───────────────────────────────────────────
+  defp print_rust(src) do
+    Rian.Decl.compile(src)
+    |> Enum.each(fn {name, out} ->
+      if out[:rust] do
+        Mix.shell().info("══ #{name} — Rust ══\n#{out.rust}\n")
+      end
+    end)
+  end
+
+  # ── Elixir: the demoted debug view (text emitter, not the run path) ──────
+  defp print_elixir_debug(src) do
+    Mix.shell().info("══ Elixir (DEBUG text view — not the execution path) ══\n")
+
+    Rian.Decl.compile(src)
+    |> Enum.each(fn {name, out} ->
+      if out[:elixir] do
+        Mix.shell().info("── #{name} ──\n#{out.elixir}\n")
+      end
+    end)
+  end
+
+  # default shows both real targets; an explicit `--beam`/`--rust` narrows them.
+  # `--show-elixir` is additive: it appends the debug Elixir text either way.
   defp targets(opts) do
-    cond do
-      opts[:beam] -> [:elixir]
-      opts[:elixir] && opts[:rust] -> [:elixir, :rust]
-      opts[:elixir] -> [:elixir]
-      opts[:rust] -> [:rust]
-      true -> [:elixir, :rust]
-    end
+    base =
+      cond do
+        opts[:beam] && opts[:rust] -> [:beam, :rust]
+        opts[:beam] -> [:beam]
+        opts[:rust] -> [:rust]
+        true -> [:beam, :rust]
+      end
+
+    if opts[:show_elixir], do: base ++ [:elixir], else: base
   end
 end

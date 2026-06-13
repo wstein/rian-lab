@@ -135,8 +135,11 @@ sections; they are tracked here so the corpus has one place to look:
 - **JS emitter completeness** (ADR-0049) — `struct`/`with`/lambdas/FFI still raise `Unsupported`
   ([js.ex](../lib/rian/js.ex)); a browser playground that runs the compiler client-side needs them.
 - **Two-Elixir-emitter consolidation** — the Erlang abstract-forms backend ([beam.ex](../lib/rian/beam.ex))
-  is the real BEAM path, while [lower.ex](../lib/rian/lower.ex) still emits Elixir *text* (a demo
-  path) alongside Rust. Collapsing the text-Elixir path removes a per-feature drift tax.
+  is the real BEAM path; [lower.ex](../lib/rian/lower.ex)'s Elixir *text* is now **demoted to a
+  debug view** (`mix rian.compile --show-elixir`), no longer the default — `mix rian.compile`
+  compiles BEAM to real bytecode via `Rian.Beam`. The text emitter still walks the surface tree
+  rather than the typed core IR, so *collapsing* it onto the IR (the full ADR-0050 endpoint) remains
+  open; the drift tax is now confined to an opt-in debug surface.
 - **Declarative `@targets(…)` annotation** (ADR-0058) — reachability is inferred + gated by
   `mix rian.targets --require`, but the in-source annotation is unbuilt; "portable" is a derived
   property, not yet a declaration.

@@ -42,16 +42,24 @@ backends share one core.
 ## Compiling a `.rian` file
 
 ```sh
-mix rian.compile examples/area.rian                       # emit Elixir + Rust
+mix rian.compile examples/area.rian                       # BEAM bytecode + Rust
 mix rian.compile examples/rian/05_modules.rian --rust     # Rust only
-mix rian.compile examples/rian/08_lambdas_collections.rian --beam  # BEAM only (allows Erlang FFI)
+mix rian.compile examples/rian/08_lambdas_collections.rian --beam  # BEAM bytecode only (allows Erlang FFI)
+mix rian.compile examples/area.rian --beam --show-elixir  # + the Elixir-text debug view
 ```
 
-`--beam` lowers to the BEAM target only (permitting Erlang FFI such as
-`:lists.sum/1`, which has no Rust form); `--elixir`/`--rust` narrow the displayed
-target of a both-target compile. The task exits non-zero on a parse,
-exhaustiveness, or type-check error. From code the entry points are
-`Rian.Decl.compile/1` (both targets) and `Rian.Decl.compile_beam/1`.
+By default both **real** targets are emitted: the BEAM target is compiled to
+loadable **bytecode** through the Erlang abstract-forms backend
+([`Rian.Beam`](lib/rian/beam.ex), the canonical BEAM path — reported by module,
+exports, and `.beam` size), and Rust as idiomatic source. `--beam` permits
+Erlang FFI (`:lists.sum/1`, which has no Rust form); `--rust` narrows to Rust.
+
+The Elixir-text emitter ([`Rian.Lower`](lib/rian/lower.ex)) is a **debug
+artifact**, not the execution path — BEAM runs from bytecode, not this text. It
+is printed only with `--show-elixir` (additive). The task exits non-zero on a
+parse, exhaustiveness, or type-check error. From code the BEAM entry point is
+`Rian.Beam.compile/2` / `Rian.Beam.compile_program/1`; `Rian.Decl.compile/1`
+still drives the Rust + debug-Elixir text.
 
 ## Layout
 
