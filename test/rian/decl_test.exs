@@ -796,9 +796,16 @@ defmodule Rian.DeclTest do
 
   describe "honest limits raise Rian.Decl.Error" do
     test "unsupported declaration keywords are rejected" do
-      assert_raise Decl.Error, ~r/unsupported declaration `macro`/, fn ->
-        Decl.parse("macro m() := 1")
+      assert_raise Decl.Error, ~r/unsupported declaration `case`/, fn ->
+        Decl.parse("case x do end")
       end
+    end
+
+    test "`macro` is now a supported declaration (ADR-0030): emits no IR, expands at call sites" do
+      # the macro itself produces no func; its call is expanded into the body
+      prog = Decl.parse("macro sq(x) := x * x\ndef area(n Int64) Int64 := sq(n)")
+      assert [%{name: "area"}] = prog.funcs
+      assert [%{body: {:block, _}}] = hd(prog.funcs).clauses
     end
   end
 end

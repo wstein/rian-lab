@@ -115,7 +115,7 @@ defmodule Rian.IR do
   end
 
   defmodule Clause do
-    @moduledoc "One function clause: argument `pats`, a `body` (source string), an optional `guard` (source string)."
+    @moduledoc "One function clause: argument `pats`, a `body` (source string — or the expanded `{:block, …}` AST after macro expansion, `Rian.Decl`), an optional `guard` (source string)."
     @enforce_keys [:pats, :body]
     defstruct pats: [], body: nil, guard: nil
   end

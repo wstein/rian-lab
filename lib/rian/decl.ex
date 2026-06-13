@@ -44,10 +44,18 @@ defmodule Rian.Decl do
       `Rian.Protocol`; coherence-checked. Dispatch over primitive / sum / struct
       types (BEAM). `forall T: Bound` bounds are parsed and enforced by the checker.
 
+    * `macro name(params) := template` / `… do … end` (ADR-0030) — a declarative
+      hygienic macro. Calls are expanded AST->AST in `assemble/3` before the
+      checker; the macro itself emits no IR. In a `@targets` module the expansion
+      is portable-gated (a template introducing a failable bind is rejected,
+      ADR-0035/0058). Macros are scope-local (a `mod`'s macros are visible to its
+      functions; top-level macros to top-level functions).
+
   ## Not yet supported
 
-  A top-level `const`/`use` (outside any `mod`) is rejected. `macro` and other
-  reserved keywords raise `Rian.Decl.Error`.
+  A top-level `const`/`use` (outside any `mod`) is rejected. Macro *fragment
+  kinds* (`expr`/`pat`/`type` positions) and macro calls inside clause *guards*
+  are not yet handled; other reserved keywords raise `Rian.Decl.Error`.
   """
   alias Rian.{Check, Lexer, Lower, Pratt}
   alias Rian.IR.{Clause, Const, Field, Func, Mod, Param, Range, Struct, Type, Use, Variant}
@@ -204,6 +212,7 @@ defmodule Rian.Decl do
       |> Enum.chunk_by(& &1.name)
       |> Enum.map(&build_func/1)
       |> Enum.map(&subst_func(&1, aliases))
+      |> expand_macros(decls, targets)
 
     consts =
       for({:const, c, pub?, doc} <- decls, do: parse_const(c, pub?, doc))
@@ -212,6 +221,56 @@ defmodule Rian.Decl do
     uses = for {:use, u} <- decls, do: parse_use(u)
 
     %{types: types, ranges: ranges, structs: structs, consts: consts, uses: uses, funcs: funcs}
+  end
+
+  # Expand `macro` calls in this scope's function bodies (ADR-0030), a pure
+  # AST->AST pass that runs *before* the checker and every emitter. The expanded
+  # `{:block, …}` AST is stored back into each clause's `body`, which all body
+  # consumers re-parse transparently (`Pratt.parse_body/1` passes an AST through).
+  # `portable: true` when the enclosing `mod` declares `@targets` (ADR-0058): a
+  # template introducing a failable bind is then rejected (ADR-0035). Synthetic
+  # funcs (protocol dispatchers/impls) never call user macros, so they are skipped.
+  defp expand_macros(funcs, decls, targets) do
+    env = collect_macros(decls)
+
+    if env == %{} do
+      funcs
+    else
+      Enum.map(funcs, fn
+        %Func{synthetic: true} = f -> f
+        %Func{} = f -> expand_func(f, env, targets != nil)
+      end)
+    end
+  end
+
+  defp collect_macros(decls) do
+    defs =
+      for {:macro, raw} <- decls do
+        if raw.body == nil, do: raise(Error, "macro `#{raw.name}` has no template body")
+        %{name: raw.name, params: macro_param_names(raw.params), template: raw.body}
+      end
+
+    Rian.Macro.build_env(defs)
+  end
+
+  # A macro parameter is a bare substitution name (the leading identifier of each
+  # comma-separated slot); any trailing type annotation is ignored.
+  defp macro_param_names(pstr) do
+    pstr
+    |> split_top(",")
+    |> Enum.map(&(&1 |> String.trim() |> String.split() |> List.first()))
+    |> Enum.reject(&(&1 in [nil, ""]))
+  end
+
+  defp expand_func(%Func{clauses: cs} = f, env, portable?) do
+    %{f | clauses: Enum.map(cs, &expand_clause(&1, env, portable?))}
+  end
+
+  defp expand_clause(%Clause{body: nil} = c, _env, _p), do: c
+
+  defp expand_clause(%Clause{body: body} = c, env, portable?) when is_binary(body) do
+    expanded = Rian.Macro.expand(env, Pratt.parse_body(body), portable: portable?)
+    %{c | body: expanded}
   end
 
   # `protocol`/`impl` (ADR-0042 §3) desugar to ordinary raw `def` maps — a
@@ -462,6 +521,15 @@ defmodule Rian.Decl do
   defp take_decl([{:kw, "def"} | rest]) do
     {raw, rest} = take_def(rest)
     {{:def, raw}, rest}
+  end
+
+  # `macro name(p, …) := template` (or a `do … end` block body) — a declarative,
+  # hygienic AST->AST macro (ADR-0030). Reuses the `def` head/body grammar; the
+  # body is the template, the params are bare substitution names. Macros emit no
+  # IR — they are expanded into call sites in `assemble/3` before the checker.
+  defp take_decl([{:kw, "macro"} | rest]) do
+    {raw, rest} = take_def(rest)
+    {{:macro, raw}, rest}
   end
 
   # `mod Name do <declarations> end` — parse the body declaration-by-declaration

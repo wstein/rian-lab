@@ -92,9 +92,15 @@ no-hidden-control-flow rule (ADR-0035) applied to expansion. Implemented in `Ria
 `portable: true` (rejection by macro name; `@max_depth` stays a separate runaway backstop). The
 companion tooling half — **expand-macro-on-hover** — is an ADR-0038 capability, honestly tiered as
 **Tier 3** (needs a resolved semantic model to map expanded spans back to source), not Tier 1.
-*Integration note:* user `macro` declarations are not yet threaded into the checked compile pipeline
-(the expander + this guard exist and are unit-tested in isolation); the `portable:` gate plugs into
-`Check` when they are.
+
+*Pipeline integration (shipped 2026-06-13):* user `macro name(params) := template` declarations are
+now parsed by `Rian.Decl`, collected into a per-scope env, and expanded into call sites in
+`assemble/3` — a pure AST→AST pass *before* the checker and every emitter. The expanded `{:block, …}`
+AST is stored back into each clause's `body`; `Pratt.parse_body/1` passes an AST through unchanged, so
+all body consumers (Check, Reach, Beam, Lower, JS) see expanded code with no per-consumer threading.
+Macros are scope-local and emit no IR. In a `@targets` module the `portable:` guard above is active
+(a failable-bind template is rejected at parse). Verified end-to-end on the BEAM (`Beam.load`) and to
+Rust (`Decl.compile`). Still open: macro *fragment kinds* and macro calls inside clause *guards*.
 
 ## Open items
 - **`comptime`-as-generics**: monomorphize a function over a comptime type/const parameter

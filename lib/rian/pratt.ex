@@ -52,7 +52,14 @@ defmodule Rian.Pratt do
   value expression (a single `:= expr` body is the one-statement case). Always
   returns a `{:block, stmts}` node; the emitter unwraps a single expression.
   """
-  def parse_body(str) do
+  # Already-parsed body passthrough: macro expansion (`Rian.Decl`) runs before the
+  # checker/emitters and stores the expanded `{:block, …}` AST back into a clause's
+  # `body`, so every consumer that re-parses a body transparently sees expanded,
+  # normalized code without threading a macro env (the body was normalized when it
+  # was first parsed here).
+  def parse_body(ast) when is_tuple(ast), do: ast
+
+  def parse_body(str) when is_binary(str) do
     {block, rest} = parse_block(Rian.Lexer.expr_tokens(str))
     if rest != [], do: raise(ArgumentError, "trailing tokens in body: #{inspect(rest)}")
     Rian.Prim.normalize(block)

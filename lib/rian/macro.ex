@@ -35,8 +35,8 @@ defmodule Rian.Macro do
   @doc """
   Expand all macro calls in `ast`. `opts[:portable]` (default `false`) enforces
   the portable-core discipline above — a template that introduces a failable bind
-  is rejected. Used by shared/`@targets`-declared code once macros are threaded
-  into the checked pipeline.
+  is rejected. Driven by `Rian.Decl.assemble/3`, which passes `portable: true` for
+  `@targets`-declared modules.
   """
   def expand(env, ast, opts \\ []),
     do: do_expand(env, ast, 0, Keyword.get(opts, :portable, false))
