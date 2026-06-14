@@ -58,5 +58,31 @@ defmodule Rian.TourTest do
            "site/src/data/tour.json is stale — regenerate it with `mix rian.tour`"
   end
 
+  describe "to_json/0 — the deterministic encoder the mix task writes" do
+    test "round-trips through a standard JSON decoder back to generate/0" do
+      json = Tour.to_json()
+      assert is_binary(json)
+      # the bespoke encoder must agree with a standard decoder on the real dataset
+      # (exercises map/list/string encoding and `\n`/`\"`/`\\` escaping in sources).
+      assert :json.decode(json) == Tour.generate()
+    end
+
+    test "is deterministic — identical bytes on repeated calls, with sorted object keys" do
+      assert Tour.to_json() == Tour.to_json()
+      # object keys are emitted in sorted order, so `cells` precedes `reachExamples`
+      # and `targets`, and within a cell `blurb` precedes `covers` precedes `file`.
+      json = Tour.to_json()
+      assert :binary.match(json, "\"cells\"") < :binary.match(json, "\"reachExamples\"")
+      assert :binary.match(json, "\"blurb\"") < :binary.match(json, "\"covers\"")
+    end
+
+    test "pretty-prints with 2-space indentation and escapes newlines in sources" do
+      json = Tour.to_json()
+      assert String.starts_with?(json, "{\n  \"cells\": [\n")
+      # multi-line Rian sources keep their newlines as `\n` escapes, not raw breaks
+      assert json =~ "\\n"
+    end
+  end
+
   defp cell(data, id), do: Enum.find(data["cells"], &(&1["id"] == id))
 end

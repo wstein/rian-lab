@@ -190,27 +190,27 @@ defmodule Rian.Tour do
     |> String.trim()
   end
 
-  # ── minimal deterministic JSON encoder (sorted object keys, 2-space indent) ──
+  # ── deterministic JSON encoder (sorted object keys, 2-space indent) ──
+  # `generate/0` produces a closed JSON shape — non-empty objects, non-empty
+  # arrays, and strings — so the encoder handles exactly those. Should a future
+  # cell introduce another value type (a number/bool/empty collection), the
+  # round-trip test (`Rian.TourTest`) fails loudly on the missing clause rather
+  # than letting an untested branch ship; add the clause with its case then.
 
   defp encode(map, indent) when is_map(map) do
     pad = String.duplicate("  ", indent + 1)
     close = String.duplicate("  ", indent)
 
-    case map |> Map.keys() |> Enum.sort() do
-      [] ->
-        "{}"
+    body =
+      map
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.map_join(",\n", fn k ->
+        [pad, encode_string(to_string(k)), ": ", encode(Map.fetch!(map, k), indent + 1)]
+      end)
 
-      keys ->
-        body =
-          Enum.map_join(keys, ",\n", fn k ->
-            [pad, encode_string(to_string(k)), ": ", encode(Map.fetch!(map, k), indent + 1)]
-          end)
-
-        ["{\n", body, "\n", close, "}"]
-    end
+    ["{\n", body, "\n", close, "}"]
   end
-
-  defp encode([], _indent), do: "[]"
 
   defp encode(list, indent) when is_list(list) do
     pad = String.duplicate("  ", indent + 1)
@@ -220,8 +220,6 @@ defmodule Rian.Tour do
   end
 
   defp encode(s, _indent) when is_binary(s), do: encode_string(s)
-  defp encode(b, _indent) when is_boolean(b), do: to_string(b)
-  defp encode(n, _indent) when is_integer(n), do: Integer.to_string(n)
 
   defp encode_string(s) do
     escaped =
