@@ -1,0 +1,159 @@
+---
+import "../styles/rian-site.css";
+
+interface Props {
+  title: string;
+  description?: string;
+  active?: string;
+  /** extra content for the sub-header bar (e.g. the by-example target toggle) */
+}
+
+const { title, description = "Rian — one typed source, lowered to the BEAM, Rust, JS and the JVM.", active = "" } =
+  Astro.props;
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const link = (p: string) => `${base}${p}`;
+
+const nav = [
+  { key: "home", label: "Why Rian", href: link("/home") },
+  { key: "examples", label: "Examples", href: link("/by-example") },
+  { key: "docs", label: "Docs", href: link("/docs-reader") },
+  { key: "playground", label: "Playground", href: link("/playground") },
+  { key: "contributors", label: "Contributors", href: link("/contributors") },
+];
+---
+
+<!doctype html>
+<html lang="en" data-theme="dark" data-target="rs">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <script is:inline>
+      // set the theme before first paint (no flash)
+      try {
+        const t = localStorage.getItem("rian-theme");
+        document.documentElement.dataset.theme = t === "light" ? "light" : "dark";
+        const tg = localStorage.getItem("rian-target");
+        if (["ex", "rs", "js", "jvm"].includes(tg)) document.documentElement.dataset.target = tg;
+      } catch (e) {}
+    </script>
+  </head>
+  <body>
+    <header class="rl-header">
+      <div class="rl-header-row">
+        <div class="rl-left">
+          <a class="rl-brand" href={link("/home")} aria-label="Rian home">
+            <svg width="26" height="26" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <path
+                d="M2 11V22C2 26.4183 5.58172 30 10 30H22C26.4183 30 30 26.4183 30 22V11L25 4L19 9L16 2L13 9L7 4Z"
+                fill="var(--accent)"></path>
+              <text x="16" y="25.5" text-anchor="middle" font-family="Inter, sans-serif" font-size="13.5" font-weight="800" fill="#fff">R</text>
+            </svg>
+            <span>Rian</span>
+          </a>
+          <nav class="rl-nav">
+            {
+              nav.map((n) => (
+                <a class="rl-nl" href={n.href} aria-current={active === n.key ? "page" : undefined}>
+                  {n.label}
+                </a>
+              ))
+            }
+          </nav>
+        </div>
+        <div class="rl-right">
+          <a
+            class="rl-nl rl-desktop"
+            href="https://github.com/wstein/rian-lab"
+            target="_blank"
+            rel="noopener"
+            aria-label="GitHub">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" xmlns="http://www.w3.org/2000/svg"
+              ><path
+                d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.53 1.05 1.53 1.05.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.55-1.14-4.55-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.27 2.75 1.05A9.34 9.34 0 0 1 12 6.84c.85 0 1.71.12 2.51.34 1.91-1.32 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.48-.01 2.82 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"
+              ></path></svg
+            >
+          </a>
+          <button class="rl-icon-btn rl-desktop" id="rl-theme" aria-label="Toggle theme">
+            <svg class="rl-moon" width="15" height="15" viewBox="0 0 24 24" fill="currentColor"
+              ><path d="M21.5 13.2A9.2 9.2 0 0 1 10.8 2.5 9 9 0 1 0 21.5 13.2Z"></path></svg
+            >
+            <svg class="rl-sun" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" style="display:none"
+              ><circle cx="12" cy="12" r="4.2" fill="currentColor" stroke="none"></circle><path
+                d="M12 2.5v2.2M12 19.3v2.2M4.2 12H2M22 12h-2.2M5.2 5.2l1.6 1.6M17.2 17.2l1.6 1.6M18.8 5.2l-1.6 1.6M6.8 17.2l-1.6 1.6"
+              ></path></svg
+            >
+          </button>
+          <button class="rl-icon-btn rl-menu-btn" id="rl-menu" aria-label="Menu">
+            <svg width="18" height="14" viewBox="0 0 18 14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"
+              ><path d="M1 1h16M1 7h16M1 13h16"></path></svg
+            >
+          </button>
+        </div>
+      </div>
+      <slot name="subheader" />
+      <div class="rl-mobile-menu" id="rl-mobile">
+        {
+          nav.map((n) => (
+            <a href={n.href} aria-current={active === n.key ? "page" : undefined}>
+              {n.label}
+            </a>
+          ))
+        }
+      </div>
+    </header>
+
+    <slot />
+
+    <footer class="rl-footer">
+      <div class="rl-footer-row">
+        <div style="display:flex; align-items:center; gap:10px;">
+          <svg width="24" height="24" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path
+              d="M2 11V22C2 26.4183 5.58172 30 10 30H22C26.4183 30 30 26.4183 30 22V11L25 4L19 9L16 2L13 9L7 4Z"
+              fill="var(--accent)"></path>
+            <text x="16" y="25.5" text-anchor="middle" font-family="Inter, sans-serif" font-size="13.5" font-weight="800" fill="#fff">R</text>
+          </svg>
+          <span style="font-weight:700; font-size:15px;">Rian</span>
+          <span class="rl-mono" style="font-size:12px; color:var(--dim); margin-left:6px;">Irish, “little king” — one core ruling four targets.</span>
+        </div>
+        <span class="rl-mono" style="font-size:11.5px; color:var(--dim); display:inline-flex; align-items:center; gap:7px;">
+          <span style="width:6px; height:6px; border-radius:50%; background:#f59e0b;"></span>proof-of-concept · v0.1
+        </span>
+      </div>
+    </footer>
+
+    <script is:inline>
+      (function () {
+        const root = document.documentElement;
+        const sync = () => {
+          const dark = root.dataset.theme !== "light";
+          document.querySelectorAll(".rl-moon").forEach((e) => (e.style.display = dark ? "" : "none"));
+          document.querySelectorAll(".rl-sun").forEach((e) => (e.style.display = dark ? "none" : ""));
+        };
+        const themeBtn = document.getElementById("rl-theme");
+        if (themeBtn)
+          themeBtn.addEventListener("click", () => {
+            const next = root.dataset.theme === "light" ? "dark" : "light";
+            root.dataset.theme = next;
+            try {
+              localStorage.setItem("rian-theme", next);
+            } catch (e) {}
+            sync();
+          });
+        const menuBtn = document.getElementById("rl-menu");
+        const menu = document.getElementById("rl-mobile");
+        if (menuBtn && menu) menuBtn.addEventListener("click", () => menu.classList.toggle("open"));
+        sync();
+      })();
+    </script>
+  </body>
+</html>

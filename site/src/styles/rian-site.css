@@ -1,0 +1,396 @@
+/* Rian site design system — shared by every bespoke page (home, by-example,
+   playground, docs reader, contributors). Dark is the default; light is opt-in
+   via [data-theme="light"] on <html>. Code surfaces stay dark in both themes
+   for token legibility, exactly as in the design board. */
+
+:root,
+[data-theme="dark"] {
+  --accent: #e2581e;
+  --page: #020617;
+  --text-strong: #f1f5f9;
+  --ink: #cbd5e1;
+  --dim: #94a3b8;
+  --border: #1e293b;
+  --header-bg: rgba(2, 6, 23, 0.94);
+  --active: #172033;
+  --code-bg: #0f172a;
+  --code-chrome: #0b1120;
+  --raise: #0b1120;
+  --card: #0b1120;
+}
+
+[data-theme="light"] {
+  --page: #ffffff;
+  --text-strong: #0f172a;
+  --ink: #475569;
+  --dim: #475569;
+  --border: #e2e8f0;
+  --header-bg: rgba(255, 255, 255, 0.9);
+  --active: #fdf0eb;
+  --code-bg: #0f172a; /* code stays dark */
+  --code-chrome: #0b1120;
+  --raise: #f8fafc;
+  --card: #ffffff;
+}
+
+/* target accents */
+:root {
+  --t-ex: #a78bfa;
+  --t-rs: #fb923c;
+  --t-js: #7dd3fc;
+  --t-jvm: #2dd4bf;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  font-family: "Inter", system-ui, -apple-system, sans-serif;
+  color: var(--text-strong);
+  background: var(--page);
+  -webkit-font-smoothing: antialiased;
+  transition:
+    background 0.2s,
+    color 0.2s;
+}
+
+::selection {
+  background: rgba(226, 88, 30, 0.2);
+}
+
+a {
+  color: inherit;
+}
+
+.rl-mono {
+  font-family: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+/* ── header / nav ─────────────────────────────────────────────────────── */
+.rl-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background: var(--header-bg);
+  backdrop-filter: blur(10px);
+  border-bottom: 1px solid var(--border);
+}
+.rl-header-row {
+  max-width: 1240px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 0 clamp(18px, 4vw, 36px);
+  height: 56px;
+}
+.rl-brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  text-decoration: none;
+}
+.rl-brand span {
+  font-weight: 700;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+  color: var(--text-strong);
+}
+.rl-nav {
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+.rl-nl {
+  font-size: 13.5px;
+  font-weight: 500;
+  color: var(--dim);
+  text-decoration: none;
+  padding: 7px 11px;
+  border-radius: 8px;
+  white-space: nowrap;
+}
+.rl-nl:hover {
+  color: var(--text-strong);
+  background: var(--active);
+}
+.rl-nl[aria-current="page"] {
+  font-weight: 600;
+  color: var(--text-strong);
+  background: var(--active);
+}
+.rl-icon-btn {
+  font-family: inherit;
+  cursor: pointer;
+  background: var(--code-bg);
+  color: var(--dim);
+  border: 1px solid var(--border);
+  padding: 8px 9px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+}
+.rl-icon-btn:hover {
+  color: var(--text-strong);
+}
+.rl-left {
+  display: flex;
+  align-items: center;
+  gap: clamp(14px, 3vw, 30px);
+}
+.rl-right {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.rl-menu-btn {
+  display: none;
+}
+
+/* ── buttons ──────────────────────────────────────────────────────────── */
+.rl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  text-decoration: none;
+  padding: 10px 18px;
+  border-radius: 10px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.rl-btn-primary {
+  background: var(--accent);
+  color: #fff;
+}
+.rl-btn-primary:hover {
+  filter: brightness(1.06);
+}
+.rl-btn-ghost {
+  background: transparent;
+  color: var(--text-strong);
+  border-color: var(--border);
+}
+.rl-btn-ghost:hover {
+  background: var(--active);
+}
+
+/* ── shared layout ────────────────────────────────────────────────────── */
+.rl-wrap {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 0 clamp(18px, 4vw, 36px);
+}
+.rl-eyebrow {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  color: var(--accent);
+}
+.rl-kicker {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.11em;
+  color: var(--dim);
+}
+
+/* ── code panes (always dark) ─────────────────────────────────────────── */
+.rl-code {
+  margin: 0;
+  padding: 18px;
+  overflow-x: auto;
+  font-family: "JetBrains Mono", ui-monospace, monospace;
+  font-size: 13px;
+  line-height: 1.75;
+  color: #cbd5e1;
+  background: var(--code-bg);
+  tab-size: 2;
+}
+.rl-code::-webkit-scrollbar {
+  height: 8px;
+}
+.rl-code::-webkit-scrollbar-thumb {
+  background: #334155;
+  border-radius: 99px;
+}
+.rl-pane-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 11px 18px;
+  border-bottom: 1px solid var(--border);
+  background: var(--code-bg);
+}
+.rl-pane-name {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 12px;
+  font-weight: 600;
+  color: #e2e8f0;
+}
+.rl-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.rl-rtile {
+  width: 15px;
+  height: 15px;
+  border-radius: 4px;
+  background: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-weight: 800;
+  font-size: 9px;
+  flex-shrink: 0;
+}
+
+/* target-toggle: only the active target's pane is shown (default rust). The
+   active target is held in [data-target] on an ancestor (the page wrapper). */
+.rl-pane {
+  display: none;
+}
+[data-target="ex"] .rl-pane[data-t="ex"],
+[data-target="rs"] .rl-pane[data-t="rs"],
+[data-target="js"] .rl-pane[data-t="js"],
+[data-target="jvm"] .rl-pane[data-t="jvm"] {
+  display: block;
+}
+
+/* target toggle control */
+.rl-toggle {
+  border-top: 1px solid var(--border);
+  background: var(--raise);
+}
+.rl-toggle-row {
+  max-width: 1240px;
+  margin: 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 13px;
+  padding: 9px clamp(18px, 4vw, 36px);
+  flex-wrap: wrap;
+}
+.rl-toggle-label {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 11.5px;
+  color: var(--dim);
+  letter-spacing: 0.02em;
+}
+.rl-seg {
+  display: flex;
+  gap: 3px;
+  background: var(--page);
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  padding: 3px;
+}
+.rl-seg button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  font-size: 13px;
+  padding: 7px 15px;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--dim);
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+[data-target="ex"] .rl-seg button[data-set="ex"],
+[data-target="rs"] .rl-seg button[data-set="rs"],
+[data-target="js"] .rl-seg button[data-set="js"],
+[data-target="jvm"] .rl-seg button[data-set="jvm"] {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+}
+
+/* token palette (dark panes) */
+.sx-kw {
+  color: #fda4af;
+}
+.sx-fn {
+  color: #fcd34d;
+}
+.sx-type {
+  color: #7dd3fc;
+}
+.sx-num {
+  color: #6ee7b7;
+}
+.sx-str {
+  color: #86efac;
+}
+.sx-com {
+  color: #64748b;
+}
+
+/* ── footer ───────────────────────────────────────────────────────────── */
+.rl-footer {
+  background: var(--page);
+  border-top: 1px solid var(--border);
+  margin-top: 30px;
+}
+.rl-footer-row {
+  max-width: 1240px;
+  margin: 0 auto;
+  padding: 30px clamp(18px, 4vw, 36px);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 14px;
+}
+
+/* ── mobile ───────────────────────────────────────────────────────────── */
+@media (max-width: 860px) {
+  .rl-nav,
+  .rl-right .rl-desktop {
+    display: none;
+  }
+  .rl-menu-btn {
+    display: inline-flex;
+  }
+}
+
+.rl-mobile-menu {
+  display: none;
+  border-top: 1px solid var(--border);
+  background: var(--page);
+  padding: 12px clamp(18px, 4vw, 36px) 18px;
+}
+.rl-mobile-menu.open {
+  display: block;
+}
+.rl-mobile-menu a {
+  display: block;
+  font-size: 15px;
+  font-weight: 500;
+  color: var(--dim);
+  padding: 10px 6px;
+  border-bottom: 1px solid var(--border);
+  text-decoration: none;
+}
+.rl-mobile-menu a[aria-current="page"] {
+  color: var(--text-strong);
+  font-weight: 600;
+}

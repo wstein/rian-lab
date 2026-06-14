@@ -1,0 +1,130 @@
+---
+import { highlight, TARGET_META } from "../../lib/highlight";
+
+interface Cell {
+  id: string;
+  title: string;
+  file: string;
+  blurb: string;
+  covers: string[];
+  source: string;
+  panes: Record<string, string>;
+  reach: Record<string, string[]>;
+}
+
+interface Props {
+  cell: Cell;
+  /** when true, render the eyebrow/heading (default); set false to embed bare */
+  heading?: boolean;
+}
+
+const { cell, heading = true } = Astro.props as Props;
+const order = ["ex", "rs", "js", "jvm"];
+---
+
+<section id={cell.id} class="rl-cell">
+  {
+    heading && (
+      <header class="rl-cell-head">
+        <h2>{cell.title}</h2>
+        <p class="rl-cell-blurb" set:html={cell.blurb.replace(/`([^`]+)`/g, '<code>$1</code>')} />
+        <div class="rl-covers">
+          <span class="rl-covers-label">covers</span>
+          {cell.covers.map((c) => <code class="rl-mono">{c}</code>)}
+        </div>
+      </header>
+    )
+  }
+
+  <div class="rl-grid">
+    <div class="rl-col">
+      <div class="rl-pane-head">
+        <span class="rl-rtile">R</span>
+        <span class="rl-pane-name">{cell.file}</span>
+        <span class="rl-mono" style="margin-left:auto; font-size:10.5px; color:#64748b; letter-spacing:0.06em;">SOURCE</span>
+      </div>
+      <pre class="rl-code" set:html={highlight(cell.source)}></pre>
+    </div>
+    <div class="rl-col">
+      {
+        order.map((t) => (
+          <div class="rl-pane" data-t={t} style={`border-top:2px solid ${TARGET_META[t].dot};`}>
+            <div class="rl-pane-head">
+              <span class="rl-dot" style={`background:${TARGET_META[t].dot};`} />
+              <span class="rl-pane-name" style={`color:${TARGET_META[t].dot};`}>
+                {TARGET_META[t].label}
+              </span>
+            </div>
+            <pre class="rl-code" set:html={highlight(cell.panes[t])} />
+          </div>
+        ))
+      }
+    </div>
+  </div>
+</section>
+
+<style>
+  .rl-cell {
+    margin-bottom: 44px;
+    scroll-margin-top: 132px;
+  }
+  .rl-cell-head h2 {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 8px;
+  }
+  .rl-cell-blurb {
+    font-size: 15.5px;
+    line-height: 1.6;
+    color: var(--ink);
+    margin: 0 0 12px;
+    max-width: 640px;
+  }
+  .rl-cell-blurb :global(code),
+  .rl-covers code {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 12.5px;
+    background: var(--active);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text-strong);
+  }
+  .rl-covers {
+    display: flex;
+    gap: 7px;
+    flex-wrap: wrap;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  .rl-covers-label {
+    font-size: 11.5px;
+    font-weight: 600;
+    color: var(--dim);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+  }
+  .rl-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    overflow: hidden;
+  }
+  .rl-col {
+    min-width: 0;
+    background: var(--code-bg);
+  }
+  .rl-col:first-child {
+    border-right: 1px solid var(--border);
+  }
+  @media (max-width: 720px) {
+    .rl-grid {
+      grid-template-columns: 1fr;
+    }
+    .rl-col:first-child {
+      border-right: none;
+      border-bottom: 1px solid var(--border);
+    }
+  }
+</style>

@@ -1,0 +1,47 @@
+---
+import { TARGET_META } from "../../lib/highlight";
+const order = ["ex", "rs", "js", "jvm"];
+const { caption = "— every cell re-lowers" } = Astro.props;
+---
+
+<div class="rl-toggle">
+  <div class="rl-toggle-row">
+    <span class="rl-toggle-label">showing output for</span>
+    <div class="rl-seg" role="group" aria-label="Target">
+      {
+        order.map((t) => (
+          <button data-set={t} type="button">
+            <span class="rl-dot" style={`width:7px;height:7px;background:${TARGET_META[t].dot};`} />
+            {t === "ex" ? "BEAM" : t === "rs" ? "Rust" : t === "js" ? "JS" : "JVM"}
+          </button>
+        ))
+      }
+    </div>
+    <span class="rl-toggle-label">{caption}</span>
+  </div>
+</div>
+
+<script is:inline>
+  (function () {
+    const KEY = "rian-target";
+    let cur = "rs";
+    try {
+      const s = localStorage.getItem(KEY);
+      if (["ex", "rs", "js", "jvm"].includes(s)) cur = s;
+    } catch (e) {}
+    const apply = (t) => {
+      cur = t;
+      document.documentElement.dataset.target = t;
+      try {
+        localStorage.setItem(KEY, t);
+      } catch (e) {}
+      document.querySelectorAll("[data-tour-target-label]").forEach((el) => {
+        el.textContent = { ex: "BEAM · Elixir", rs: "Rust", js: "JavaScript", jvm: "JVM · Kotlin" }[t];
+      });
+    };
+    document.querySelectorAll(".rl-seg button[data-set]").forEach((b) => {
+      b.addEventListener("click", () => apply(b.dataset.set));
+    });
+    apply(cur);
+  })();
+</script>

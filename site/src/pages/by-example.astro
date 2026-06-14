@@ -1,0 +1,378 @@
+---
+import SiteShell from "../layouts/SiteShell.astro";
+import TargetToggle from "../components/site/TargetToggle.astro";
+import LoweredCell from "../components/site/LoweredCell.astro";
+import { highlight, TARGET_META } from "../lib/highlight";
+import tour from "../data/tour.json";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const cells = tour.cells;
+const flagship = cells.find((c) => c.id === "types")!;
+const pipeline = [".rian source", "parse", "check", "gate", "BEAM", "Rust", "JS", "JVM"];
+
+const onThis = [
+  { id: "why", label: "Why one source" },
+  ...cells.map((c) => ({ id: c.id, label: c.title })),
+  { id: "reach", label: "Reachability" },
+  { id: "flagship", label: "Flagship: end to end" },
+  { id: "beyond", label: "Beyond this guide" },
+];
+---
+
+<SiteShell title="Rian by Example" active="examples">
+  <TargetToggle slot="subheader" />
+
+  <div class="be-wrap">
+    <aside class="be-side">
+      <div class="rl-kicker">ON THIS PAGE</div>
+      <nav>
+        {onThis.map((s) => <a href={`#${s.id}`}>{s.label}</a>)}
+      </nav>
+      <div class="rl-kicker" style="margin-top:26px;">REFERENCES</div>
+      <nav class="be-refs">
+        <a href={`${base}/docs-reader`}><code>ADR-0049</code> Targets</a>
+        <a href={`${base}/docs-reader`}><code>ADR-0057</code> Portability</a>
+        <a href={`${base}/docs-reader`}><code>ADR-0050</code> Core IR</a>
+      </nav>
+    </aside>
+
+    <main class="be-main">
+      <section id="why">
+        <div class="rl-eyebrow">RUNNABLE GUIDE</div>
+        <h1 class="be-h1">One source, read in four targets</h1>
+        <p class="be-lede">
+          Rian lowers the <em>same</em> typed source to the BEAM, Rust, JS, and the JVM. This guide teaches the surface by
+          example — and every cell shows the code this compiler actually emits for whichever target you pick in the
+          toggle above. Flip it and the whole page re-lowers.
+        </p>
+
+        <div class="be-pipe">
+          {
+            pipeline.map((p) => {
+              const dot = { BEAM: "ex", Rust: "rs", JS: "js", JVM: "jvm" }[p];
+              const color = dot ? TARGET_META[dot].dot : undefined;
+              const isGate = p === "gate";
+              return (
+                <>
+                  <span
+                    class="rl-mono be-chip"
+                    style={`${isGate ? "color:#fff;background:var(--accent);" : color ? `color:${color};` : "color:#e2e8f0;"}`}>
+                    {p}
+                  </span>
+                  {(p === ".rian source" || p === "parse" || p === "check") && <span class="be-arrow">→</span>}
+                </>
+              );
+            })
+          }
+        </div>
+        <p class="be-note">
+          Currently showing: <strong data-tour-target-label>Rust</strong>. The typed Core IR is the spine — every
+          emitter consumes it.
+        </p>
+      </section>
+
+      <div class="be-rule"></div>
+
+      {cells.map((cell) => <LoweredCell cell={cell} />)}
+
+      <!-- reachability strip (the honest, inferred matrix) -->
+      <section id="reach" class="be-reach">
+        <h2>Reachability is inferred, not annotated</h2>
+        <p class="be-lede" style="font-size:15.5px;">
+          Portability is a property the compiler <em>infers</em> (ADR-0057): a function is portable only if it reaches
+          every target. Some capabilities and all host FFI pin a function to a subset — the matrix is honest, not tidy.
+        </p>
+        <div class="be-matrix">
+          {
+            tour.reachExamples.map((r) => (
+              <div class="be-row">
+                <code class="rl-mono be-sig">{r.sig}</code>
+                <div class="be-marks">
+                  {["ex", "rs", "js", "jvm"].map((t) => (
+                    <span
+                      class="rl-mono be-mark"
+                      style={`color:${r.reach.includes(t) ? TARGET_META[t].dot : "var(--dim)"};`}>
+                      :{t === "ex" ? "ex" : t} {r.reach.includes(t) ? "✓" : "·"}
+                    </span>
+                  ))}
+                </div>
+                <span class="be-why">{r.blurb}</span>
+              </div>
+            ))
+          }
+        </div>
+      </section>
+
+      <div class="be-rule"></div>
+
+      <!-- flagship -->
+      <section id="flagship">
+        <div class="rl-eyebrow">FLAGSHIP · END TO END</div>
+        <h2 class="be-h2">The whole idea in one cell</h2>
+        <p class="be-lede" style="font-size:15.5px; margin-bottom:20px;">
+          The <code>Shape</code> source is parsed, type-checked, proved exhaustive, and capability-checked — only then
+          does it lower. The right pane is the <strong data-tour-target-label>Rust</strong> output of that pipeline.
+        </p>
+        <div class="be-flagship">
+          <LoweredCell cell={flagship} heading={false} />
+          <div class="be-flag-foot">
+            <span class="rl-mono" style="font-size:11.5px; color:var(--dim);">
+              reachability inferred ·
+              {" "}<span style="color:var(--t-ex);">:ex</span>
+              {" "}<span style="color:var(--t-rs);">:rs</span>
+              {" "}<span style="color:var(--t-js);">:js</span>
+              {" "}<span style="color:var(--t-jvm);">:jvm</span>
+            </span>
+            <span class="rl-mono" style="font-size:11.5px; font-weight:600; color:#34d399;">portable ✓</span>
+          </div>
+        </div>
+      </section>
+
+      <div class="be-rule"></div>
+
+      <section id="beyond">
+        <h2 class="be-h2" style="font-size:24px;">Beyond this guide</h2>
+        <p class="be-lede" style="font-size:15.5px;">
+          This is the tour, not the whole language. The ADRs are the source of truth; the specs carry the prose; the
+          examples corpus is the full by-example set.
+        </p>
+        <div class="be-cards">
+          <a class="be-card" href={`${base}/docs-reader`}>
+            <div class="be-card-k">DECISIONS</div>
+            <h4>The ADRs →</h4>
+            <p>~30 architecture decision records — the governing source of truth.</p>
+          </a>
+          <a class="be-card" href={`${base}/docs-reader`}>
+            <div class="be-card-k">SPECS</div>
+            <h4>Lowering specs →</h4>
+            <p>Capability lowering, clauses &amp; guards, end-to-end semantics.</p>
+          </a>
+          <a class="be-card" href="https://github.com/wstein/rian-lab/tree/develop/examples/rian">
+            <div class="be-card-k">CORPUS</div>
+            <h4>All 18 examples →</h4>
+            <p>The complete annotated tour, plus the self-hosting spikes.</p>
+          </a>
+        </div>
+      </section>
+    </main>
+  </div>
+</SiteShell>
+
+<style>
+  .be-wrap {
+    max-width: 1240px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 232px minmax(0, 1fr);
+    gap: clamp(28px, 4vw, 52px);
+    padding: 0 clamp(18px, 4vw, 36px);
+  }
+  .be-side {
+    position: sticky;
+    top: 132px;
+    align-self: start;
+    height: calc(100vh - 132px);
+    overflow-y: auto;
+    padding: 40px 0;
+  }
+  .be-side nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 13px;
+  }
+  .be-side nav a {
+    font-size: 13.5px;
+    color: var(--ink);
+    text-decoration: none;
+    padding: 6px 11px;
+    border-radius: 7px;
+    border-left: 2px solid var(--border);
+  }
+  .be-side nav a:hover {
+    color: var(--text-strong);
+    border-left-color: var(--accent);
+  }
+  .be-refs a {
+    border-left: none !important;
+    padding-left: 0 !important;
+    color: var(--dim);
+    display: flex;
+    gap: 7px;
+    align-items: center;
+  }
+  .be-refs code {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 10.5px;
+    color: var(--dim);
+  }
+  .be-main {
+    min-width: 0;
+    padding: 44px 0 90px;
+    max-width: 840px;
+  }
+  .be-h1 {
+    font-size: clamp(32px, 4.6vw, 44px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.06;
+    margin: 13px 0 18px;
+  }
+  .be-h2 {
+    font-size: clamp(24px, 3.4vw, 30px);
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    margin: 10px 0;
+  }
+  .be-lede {
+    font-size: clamp(16px, 2.2vw, 18px);
+    line-height: 1.65;
+    color: var(--ink);
+    margin: 0 0 26px;
+    max-width: 660px;
+  }
+  .be-lede :global(code),
+  .be-reach :global(code.be-sig),
+  .be-main :global(code) {
+    font-family: "JetBrains Mono", monospace;
+  }
+  .be-pipe {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 20px 22px;
+    margin-bottom: 14px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+  .be-chip {
+    font-size: 12.5px;
+    font-weight: 600;
+    background: #1e293b;
+    border-radius: 7px;
+    padding: 7px 13px;
+  }
+  .be-arrow {
+    color: #64748b;
+  }
+  .be-note {
+    font-size: 13px;
+    color: var(--dim);
+    margin: 0 0 8px;
+  }
+  .be-note strong {
+    color: var(--ink);
+  }
+  .be-rule {
+    height: 1px;
+    background: var(--border);
+    margin: 40px 0;
+  }
+  .be-reach h2 {
+    font-size: 24px;
+    font-weight: 700;
+    letter-spacing: -0.02em;
+    margin: 0 0 8px;
+  }
+  .be-matrix {
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    overflow: hidden;
+  }
+  .be-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) auto minmax(0, 1fr);
+    gap: 16px;
+    align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border);
+  }
+  .be-row:last-child {
+    border-bottom: none;
+  }
+  .be-sig {
+    font-size: 12.5px;
+    color: var(--text-strong);
+  }
+  .be-marks {
+    display: flex;
+    gap: 10px;
+  }
+  .be-mark {
+    font-size: 11.5px;
+    white-space: nowrap;
+  }
+  .be-why {
+    font-size: 12.5px;
+    color: var(--dim);
+  }
+  .be-flagship {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+  }
+  .be-flagship :global(.rl-grid) {
+    border: none;
+    border-radius: 0;
+  }
+  .be-flag-foot {
+    background: var(--code-chrome);
+    border-top: 1px solid var(--border);
+    padding: 13px 18px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .be-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+  }
+  .be-card {
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    padding: 20px;
+    text-decoration: none;
+    color: inherit;
+    display: block;
+    background: var(--card);
+  }
+  .be-card:hover {
+    border-color: var(--accent);
+  }
+  .be-card-k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--accent);
+    font-weight: 700;
+    margin-bottom: 9px;
+  }
+  .be-card h4 {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 0 0 5px;
+  }
+  .be-card p {
+    font-size: 13px;
+    line-height: 1.55;
+    color: var(--dim);
+    margin: 0;
+  }
+  @media (max-width: 940px) {
+    .be-wrap {
+      grid-template-columns: 1fr;
+    }
+    .be-side {
+      display: none;
+    }
+    .be-row {
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+  }
+</style>
