@@ -92,5 +92,9 @@ a footnote. Rolling a precise `Implemented:` line onto every ADR is tracked as f
 ## Open items
 
 - **Per-ADR `Implemented:` line + a docs-build check** that the line matches reality (consensus #1).
-- **Target-honest Reach** for emitter-unsupported constructs (atoms/`Result` on JS/JVM), so the reach
-  matrix matches the emitters rather than ADR-0041's architectural claim (consensus #4).
+- ~~**Target-honest Reach** for emitter-unsupported constructs (atoms/`Result` on JS/JVM), so the reach
+  matrix matches the emitters rather than ADR-0041's architectural claim (consensus #4).~~ **Done
+  (2026-06-14):** `Rian.Reach` now pins a **bare value atom** to `:ex` (no emitter lowers it — JS/JVM
+  raise `Unsupported`, Rust raises "atom is BEAM-only") and a constructed **`Result` value**
+  (`{:ok,_}`/`{:error,_}`) off `:js`/`:jvm` (Rust lowers it to `Ok`/`Err`, so it stays `:rs`-reachable).
+  An FFI module-head atom and a Result tag are not double-flagged. `test/rian/reach_test.exs`.

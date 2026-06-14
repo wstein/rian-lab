@@ -312,6 +312,22 @@ defmodule Rian.Reach do
       kills: [:rs]
     }
 
+  # A bare value atom (`:foo`, a `Symbol` literal) has no JS/JVM/Rust representation:
+  # `Rian.JS`/`Rian.JVM` raise `Unsupported` on it and `Rian.Lower` raises "atom is
+  # BEAM-only". ADR-0041 deems atoms *architecturally* portable, but no emitter lowers
+  # one, so Reach pins the function to `:ex` — the matrix matches the emitters, not the
+  # ADR's aspiration (the ADR-0000 open item). FFI module-head atoms and Result tags
+  # are consumed by their own `scan` clauses, so this fires only on *value* atoms.
+  defp bare_atom_blocker,
+    do: %{construct: "bare atom literal (`:foo`)", kind: :atom, kills: [:js, :jvm, :rs]}
+
+  # A `Result` value `{:ok, _}` / `{:error, _}` (ADR-0040): lowered on the BEAM (tagged
+  # tuple) and on Rust (`Ok`/`Err`), but **not** on JS/JVM — their emitters do not lower
+  # the tag atom (`Rian.JS` has no `EAtom` clause; `Rian.JVM` lists atoms unsupported).
+  # So a constructed Result pins the function off `:js`/`:jvm` (honest matrix).
+  defp result_value_blocker,
+    do: %{construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: :result, kills: [:js, :jvm]}
+
   # A function is generic-in-its-result iff its declared return type mentions a type
   # variable (`T`/`Vec(T)`/`V`) — only a `forall` tvar can appear there, so this
   # already implies the function is generic. The Rust emitter borrows every generic
@@ -368,6 +384,20 @@ defmodule Rian.Reach do
 
   defp core(src, parser), do: src |> parser.() |> Core.from_expr()
 
+  # A Result value `{:ok, v}` / `{:error, e}` (ADR-0040): off `:js`/`:jvm` (their
+  # emitters don't lower the tag atom), fine on `:ex`/`:rs`. Scan only the payload —
+  # the `:ok`/`:error` tag is consumed here, NOT re-flagged as a bare value atom
+  # (which would wrongly also kill `:rs`, where Rust lowers it to `Ok`/`Err`).
+  defp scan(%Core.ETuple{elems: [%Core.EAtom{name: t}, v]}, modnames, {bl, ca})
+       when t in ~w(ok error),
+       do: scan(v, modnames, {[result_value_blocker() | bl], ca})
+
+  # An Erlang FFI call `:mod.fun(args)`: classify it (the FFI blocker) then scan only
+  # the args — the `:mod` atom head is the FFI module name, already covered, not a
+  # value atom to re-flag as a bare-atom blocker.
+  defp scan(%Core.ECall{fun: %Core.EDot{head: %Core.EAtom{}}, args: args} = node, modnames, acc),
+    do: Enum.reduce(args, classify(node, modnames, acc), &scan(&1, modnames, &2))
+
   # generic deep walk over the typed-core AST: classify each node, recurse children
   defp scan(node, modnames, acc) when is_struct(node) do
     acc = classify(node, modnames, acc)
@@ -415,6 +445,10 @@ defmodule Rian.Reach do
   # local function application — a call-graph edge
   defp classify(%Core.ECall{fun: %Core.EId{name: f}}, _modnames, {bl, ca}),
     do: {bl, MapSet.put(ca, f)}
+
+  # a bare value atom that escaped the FFI-head and Result-tag `scan` clauses above —
+  # off every non-BEAM target (no emitter lowers it).
+  defp classify(%Core.EAtom{}, _modnames, {bl, ca}), do: {[bare_atom_blocker() | bl], ca}
 
   defp classify(_node, _modnames, acc), do: acc
 

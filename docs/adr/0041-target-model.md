@@ -49,6 +49,14 @@ allocation, and init-order footguns on Rust, for no observable benefit.
   (`:a < :b`) a **compile error**, not a silent per-target divergence — use `==`/`!=`. (Open-`Symbol`
   representation caveats on Rust — `&'static str`, no global interner — are documented; a finer
   `@targets`-scoped open-vs-closed lint awaits the atom-classification work `Rian.Reach` tracks.)
+- **Reach is honest about atoms/`Result` against the *emitters*, not this ADR's aspiration (2026-06-14).**
+  This ADR calls atoms and `Result` architecturally portable, but the emitters do not yet realize that:
+  no emitter lowers a **bare value atom** (`Rian.JS`/`Rian.JVM` raise `Unsupported`; `Rian.Lower` raises
+  "atom is BEAM-only"), and JS/JVM do not lower a constructed **`Result`** (`{:ok,_}`/`{:error,_}`) tag.
+  So `Rian.Reach` pins a bare value atom to `:ex` and a constructed `Result` off `:js`/`:jvm` (it stays
+  `:rs`-reachable — Rust lowers it to `Ok`/`Err`). The reach matrix matches what the emitters can produce;
+  when a JS/JVM Symbol/`Result` lowering lands, the corresponding blocker is removed (`Rian.Reach`,
+  `test/rian/reach_test.exs`).
 - **An unmapped BEAM-stdlib call on a non-BEAM target is a compile error, never a silent stub.**
   `:lists.sum` is free FFI on the BEAM; on Rust it maps to a real equivalent or **fails to compile**
   (ADR-0035 no-silent-partiality). A stubbed `:maps.get` returning a default would be a

@@ -127,7 +127,10 @@ defmodule Rian.ReachTest do
 
       for f <- ~w(s t g) do
         assert targets(rep, f) == [:ex]
-        assert [%{kind: :concurrency}] = rep[f].blockers
+        # a concurrency blocker is present (the load-bearing one); these bodies also
+        # pass bare atoms (`:m`/`:tab`/`:v`), which now carry honest `:atom` blockers
+        # too — both pin to `:ex`, so the function is ex-only either way.
+        assert Enum.any?(rep[f].blockers, &(&1.kind == :concurrency))
       end
     end
 
@@ -140,6 +143,41 @@ defmodule Rian.ReachTest do
         """)
 
       assert [%{kind: :ffi}] = rep["a"].blockers
+    end
+  end
+
+  describe "atoms/Result are honest against the emitters (ADR-0041 vs emitter)" do
+    test "a bare value atom pins the function to `:ex` (no JS/JVM/Rust lowering)" do
+      rep = reach("def f(s Symbol) Bool := s == :foo")
+      assert targets(rep, "f") == [:ex]
+      assert [%{kind: :atom, kills: [:js, :jvm, :rs]}] = rep["f"].blockers
+    end
+
+    test "a constructed Result reaches `:ex`+`:rs` but is off `:js`/`:jvm`" do
+      rep =
+        reach("""
+        type DivErr := Bad
+        def half(n Int53) Int53 | DivErr
+        def half(0) := {:error, Bad}
+        def half(n) := {:ok, n}
+        """)
+
+      assert targets(rep, "half") == [:ex, :rs]
+      assert Enum.any?(rep["half"].blockers, &(&1.kind == :result and &1.kills == [:js, :jvm]))
+      # the `:ok`/`:error` tag is NOT re-flagged as a bare value atom (that would
+      # wrongly also kill `:rs`, where Rust lowers the Result to `Ok`/`Err`)
+      refute Enum.any?(rep["half"].blockers, &(&1.kind == :atom))
+    end
+
+    test "an FFI module-head atom is not double-flagged as a bare atom" do
+      rep =
+        reach("""
+        mod M do
+          pub def total(xs Vec(Int53)) Int53 := :lists.sum(xs)
+        end
+        """)
+
+      assert [%{kind: :ffi}] = rep["total"].blockers
     end
   end
 
