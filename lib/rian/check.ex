@@ -533,11 +533,12 @@ defmodule Rian.Check do
   defp adoptable_int?(t), do: int_type?(t)
 
   # a constant *integer* expression of literals — a bare int literal, a negation, or
-  # arithmetic of such. (Mirrors `lit_expr_adopts?`, but as a type-flexibility test.)
+  # arithmetic of such (the same op set `lit_expr_adopts?` accepts: `+ - * div rem`,
+  # so the two sibling predicates agree — `4 div 2` is a width-flexible constant too).
   defp int_lit_expr?(%ENum{text: t}), do: int_literal?(t)
   defp int_lit_expr?(%EUnary{op: "-", arg: a}), do: int_lit_expr?(a)
 
-  defp int_lit_expr?(%EBin{op: op, left: l, right: r}) when op in @arith,
+  defp int_lit_expr?(%EBin{op: op, left: l, right: r}) when op in @arith or op in @int_ops,
     do: int_lit_expr?(l) and int_lit_expr?(r)
 
   # an `if`/`case` branch is a single-expression block (`do 0 end` → `{block, [0]}`)

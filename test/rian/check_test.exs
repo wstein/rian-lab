@@ -35,6 +35,16 @@ defmodule Rian.CheckTest do
       assert t("a div b") == :unknown
     end
 
+    test "a `div`/`rem` constant of literals is width-flexible like `+`/`-`/`*`" do
+      # `int_lit_expr?` accepts the same op set as `lit_expr_adopts?` (`+ - * div
+      # rem`), so a literal `div`/`rem` sub-expression adopts a typed neighbour's
+      # width instead of forcing the default `Int64` (ADR-0064).
+      assert Check.infer(Pratt.parse("x * (4 div 2)"), %{"x" => "Int53"}) == "Int53"
+      assert Check.infer(Pratt.parse("x + (10 rem 3)"), %{"x" => "Int53"}) == "Int53"
+      # consistent with the already-flexible `+`/`-`/`*`
+      assert Check.infer(Pratt.parse("x * (4 - 2)"), %{"x" => "Int53"}) == "Int53"
+    end
+
     test "arithmetic unifies operands; mixed/unknown is conservative (not an error)" do
       assert Check.infer(Pratt.parse("x + 1"), %{"x" => "Int64"}) == "Int64"
       # mixing int and float does not crash the checker — it infers `:unknown`
