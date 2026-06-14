@@ -292,6 +292,18 @@ compile + run on real BEAM bytecode:
   `len` — incl. a source with `#` comments and blank lines that only the real lexer
   handles — identical to `Rian.Beam`. Path to `v1==v2`: widen `selfhost_decl` off
   `:partial` (it lacks `if`/`case`/strings/sum-types) and the lowering to match.
+- [selfhost_compose_real_sum.rian](selfhost_compose_real_sum.rian) — **COMPOSITION
+  rung 11** (ADR-0063 Step 3): widens the composed build's **surface** to **sum types
+  + constructor-pattern dispatch**, using `selfhost_decl`'s already-locked `type`/ctor
+  capability — **no verified-port change**. Only the driver glue grows: the `type`
+  declaration is *erased* (variants are atoms / tagged tuples on the BEAM), and the
+  `Form` inflater learns `FCtorN`/`FCtor` (nullary ctor → snake atom `Red`→`:red`;
+  applied ctor → tagged tuple `Pair(a,b)`→`{:pair,a,b}`) via a `to_snake` matching
+  `Rian.PatternLower.to_snake` (`SNum`→`:s_num`, `SP`→`:sp`).
+  `test/rian/compose_real_sum_fixpoint_test.exs` compiles `Color`/`Shape`/`Box`
+  programs — nullary dispatch, payload destructuring, and ctor-value construction —
+  identical to `Rian.Beam`. Same three verified ports as rung 10; only host FFI:
+  `:compile.forms`/`:code.load_binary`.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
