@@ -29,7 +29,10 @@ defmodule Rian.CheckTest do
       assert t("a and b") == "Bool"
       assert t("a <> b") == "String"
       assert t("a / b") == "Float64"
-      assert t("a div b") == "Int64"
+      # `div`/`rem` infer from their operands like `+`/`-`/`*` (so an `Int53 div
+      # Int53` stays `Int53`); with unknown operands the result is `:unknown`.
+      assert Check.infer(Pratt.parse("a div b"), %{"a" => "Int53", "b" => "Int53"}) == "Int53"
+      assert t("a div b") == :unknown
     end
 
     test "arithmetic unifies operands; mixed/unknown is conservative (not an error)" do

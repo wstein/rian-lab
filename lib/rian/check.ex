@@ -162,10 +162,7 @@ defmodule Rian.Check do
       op == "/" ->
         "Float64"
 
-      op in @int_ops ->
-        "Int64"
-
-      op in @arith ->
+      op in @int_ops or op in @arith ->
         arith_type(l, r, infer(l, env, ic), infer(r, env, ic))
 
       true ->
@@ -388,7 +385,13 @@ defmodule Rian.Check do
       |> Enum.zip(arg_types)
       |> Enum.reduce(%{}, fn {p, a}, acc -> bind_tvar(p, a, tvars, acc) end)
 
-    if Enum.all?(tvars, &Map.has_key?(subs, &1)) do
+    # Only the tvars that actually appear in `ret` need binding: `length(xs Vec(T))
+    # Int53 forall T` returns `Int53` regardless of `T`, so a recursive `length(t)`
+    # over an `:unknown` tail still infers `Int53` (not `:unknown`). A tvar that the
+    # return uses but the args can't pin still yields `:unknown` — sound.
+    needed = Enum.filter(tvars, &Regex.match?(~r/\b#{&1}\b/, ret))
+
+    if Enum.all?(needed, &Map.has_key?(subs, &1)) do
       Enum.reduce(subs, ret, fn {tv, ty}, r -> Regex.replace(~r/\b#{tv}\b/, r, ty) end)
     else
       :unknown
