@@ -488,4 +488,42 @@ defmodule Rian.LowerTest do
       assert Lower.to_elixir(func, ctypes) =~ "@type tok :: {:ch, char()}"
     end
   end
+
+  describe "string-literal escaping (full Elixir/Gleam set)" do
+    test "quotes/newlines/control chars emit valid Elixir and Rust literals" do
+      assert Lower.emit_expr(~S|"\t\"$\a"|, :elixir) == ~S|"\t\"$\u{7}"|
+      assert Lower.emit_expr(~S|"\t\"$\a"|, :rust) == ~S|"\t\"$\u{7}"|
+
+      {v, _} = Code.eval_string(Lower.emit_expr(~S|"\t\"$\a"|, :elixir))
+      assert v == "\t\"$" <> <<7>>
+    end
+
+    @tag :rust
+    test "the emitted Rust string literal compiles and decodes under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          lit = Lower.emit_expr(~S|"\t\"$\a"|, :rust)
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_str_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            "fn main() { let s = #{lit}; " <>
+              "println!(\"{}\", s.chars().map(|c| (c as u32).to_string()).collect::<Vec<_>>().join(\",\")); }"
+          )
+
+          {_, 0} =
+            System.cmd(rustc, ["--edition", "2021", src, "-o", bin], stderr_to_stdout: true)
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "9,34,36,7"
+      end
+    end
+  end
 end

@@ -363,4 +363,16 @@ defmodule Rian.JVMTest do
       end
     end
   end
+
+  describe "string-literal escaping (full Elixir/Gleam set)" do
+    test "quotes, control chars and `$` emit a valid, runnable Kotlin literal" do
+      kt = JVM.compile(~S|def s() String := "\t\"$\a"|)
+      assert kt =~ ~S|"\t\"\$\u0007"|
+
+      case kotlin_run(kt, ~S|println(s().map { it.code }.joinToString(","))|) do
+        :no_jvm -> :ok
+        out -> assert out == "9,34,36,7"
+      end
+    end
+  end
 end

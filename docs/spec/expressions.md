@@ -133,6 +133,12 @@ A codepoint must be a Unicode scalar value — surrogates (`\u{D800}`–`\u{DFFF
 re-renders re-lexably on detokenization (`Rian.Lexer.detokenize/2`): the common escapes round-trip
 by name and any other control codepoint falls back to `\u{HEX}`.
 
+Each emitter re-escapes the **decoded value** into a literal valid for its target, so an embedded
+quote, newline, or control codepoint is never mis-emitted: `Rian.Lower` (Elixir + Rust) and
+`Rian.JS` use `\\ \" \n \r \t` plus a `\u{HEX}`/`\uHHHH` control fallback; `Rian.JVM` (Kotlin)
+additionally escapes `$` (string templates) and uses fixed four-digit `\uHHHH`. `Rian.Beam` builds
+the BEAM binary from the raw bytes directly, so it needs no textual escaping.
+
 ### `&` — function captures
 
 A prefix `&` builds a function value, in the BEAM-consonant style (not Haskell operator sections):

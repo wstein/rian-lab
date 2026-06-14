@@ -329,7 +329,7 @@ defmodule Rian.JVM do
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_kt(%ENum{text: n}), do: num_kt(n)
   defp expr_kt(%EChar{value: cp}), do: "#{cp}L"
-  defp expr_kt(%EStr{value: s}), do: inspect(s)
+  defp expr_kt(%EStr{value: s}), do: kt_str(s)
   defp expr_kt(%EId{name: b}) when b in ~w(true false), do: b
   # a bare PascalCase id is a nullary sum variant -> its singleton `object`
   defp expr_kt(%EId{name: x}), do: x
@@ -362,7 +362,23 @@ defmodule Rian.JVM do
   defp num_kt(n), do: if(float?(n), do: n, else: "#{n}L")
 
   defp lit_kt(v) when is_integer(v), do: "#{v}L"
-  defp lit_kt(v) when is_binary(v), do: inspect(v)
+  defp lit_kt(v) when is_binary(v), do: kt_str(v)
+
+  # render a decoded `String` value as a Kotlin double-quoted literal. Beyond the
+  # quote/backslash and common control chars, Kotlin needs `$` escaped (string
+  # templates) and uses fixed four-digit `\uHHHH` for other control codepoints.
+  defp kt_str(s), do: ~s(") <> for(<<cp::utf8 <- s>>, into: "", do: kt_str_cp(cp)) <> ~s(")
+
+  defp kt_str_cp(?\\), do: "\\\\"
+  defp kt_str_cp(?"), do: "\\\""
+  defp kt_str_cp(?$), do: "\\$"
+  defp kt_str_cp(?\n), do: "\\n"
+  defp kt_str_cp(?\r), do: "\\r"
+  defp kt_str_cp(?\t), do: "\\t"
+  defp kt_str_cp(cp) when cp < 0x20 or cp == 0x7F, do: "\\u" <> kt_hex4(cp)
+  defp kt_str_cp(cp), do: <<cp::utf8>>
+
+  defp kt_hex4(cp), do: String.pad_leading(Integer.to_string(cp, 16), 4, "0")
 
   defp float?(n), do: String.contains?(n, ".") or String.match?(n, ~r/[eE]/)
 

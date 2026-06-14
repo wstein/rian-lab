@@ -613,4 +613,16 @@ defmodule Rian.JSTest do
       assert node_eval(js, "h(-5n)") in [:no_node, "-2"]
     end
   end
+
+  describe "string-literal escaping (full Elixir/Gleam set)" do
+    test "quotes, control chars and `$` emit a valid, runnable JS literal" do
+      js = JS.compile(~S|def s() String := "\t\"$\a"|)
+      assert js =~ ~S|"\t\"$\u0007"|
+
+      case node_eval(js, ~S|[...s()].map(c => c.charCodeAt(0)).join(",")|) do
+        :no_node -> :ok
+        out -> assert out == "9,34,36,7"
+      end
+    end
+  end
 end

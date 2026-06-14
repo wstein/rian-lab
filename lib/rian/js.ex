@@ -572,7 +572,7 @@ defmodule Rian.JS do
   # a `Char` is its codepoint integer, in the function's integer mode
   defp expr_js(%EChar{value: cp}), do: cp_lit(cp)
   # a Rian `String` is a JS string; `<>` concatenation is `+` (see js_op)
-  defp expr_js(%EStr{value: s}), do: inspect(s)
+  defp expr_js(%EStr{value: s}), do: js_str(s)
   defp expr_js(%EId{name: b}) when b in ~w(true false), do: b
 
   # a bare PascalCase id is a nullary sum variant -> a one-element tagged array
@@ -735,7 +735,22 @@ defmodule Rian.JS do
   defp lit_js(v) when is_integer(v),
     do: if(Process.get(:rian_js_int53, false), do: "#{v}", else: "#{v}n")
 
-  defp lit_js(v) when is_binary(v), do: inspect(v)
+  defp lit_js(v) when is_binary(v), do: js_str(v)
+
+  # render a decoded `String` value as a JS double-quoted literal, escaping the
+  # quote/backslash, the common control chars by name, and any other control
+  # codepoint as `\uHHHH` (printable codepoints, incl. non-ASCII, pass through).
+  defp js_str(s), do: ~s(") <> for(<<cp::utf8 <- s>>, into: "", do: js_str_cp(cp)) <> ~s(")
+
+  defp js_str_cp(?\\), do: "\\\\"
+  defp js_str_cp(?"), do: "\\\""
+  defp js_str_cp(?\n), do: "\\n"
+  defp js_str_cp(?\r), do: "\\r"
+  defp js_str_cp(?\t), do: "\\t"
+  defp js_str_cp(cp) when cp < 0x20 or cp == 0x7F, do: "\\u" <> hex4(cp)
+  defp js_str_cp(cp), do: <<cp::utf8>>
+
+  defp hex4(cp), do: String.pad_leading(Integer.to_string(cp, 16), 4, "0")
 
   # A `Char`/codepoint integer follows the function's integer mode: a plain JS
   # number in number-mode (`Int53`/`Int32`), a `BigInt` otherwise — so codepoints

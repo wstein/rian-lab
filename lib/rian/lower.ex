@@ -1110,7 +1110,7 @@ defmodule Rian.Lower do
 
   defp pat_rs(%PWild{}, _), do: "_"
   defp pat_rs(%PVar{name: x}, _), do: x
-  defp pat_rs(%PLit{value: v}, _) when is_binary(v), do: inspect(v)
+  defp pat_rs(%PLit{value: v}, _) when is_binary(v), do: str_lit(v)
   defp pat_rs(%PLit{value: v}, _), do: to_string(v)
   # a `Char` literal pattern is a native Rust `char` literal (ADR-0036)
   defp pat_rs(%Core.PChar{value: cp}, _), do: rust_char_lit(cp)
@@ -1213,9 +1213,26 @@ defmodule Rian.Lower do
 
   defp core_pat_vars(_), do: []
 
+  # render a decoded `String` value as a double-quoted literal valid on *both*
+  # text targets: Elixir and Rust share `\n \r \t \\ \"` plus the `\u{HEX}`
+  # form, so one renderer serves the shared `emit/2` path. Printable codepoints
+  # (incl. non-ASCII) pass through; other control codepoints use `\u{HEX}`.
+  defp str_lit(s), do: ~s(") <> for(<<cp::utf8 <- s>>, into: "", do: str_lit_cp(cp)) <> ~s(")
+
+  defp str_lit_cp(?\\), do: "\\\\"
+  defp str_lit_cp(?"), do: "\\\""
+  defp str_lit_cp(?\n), do: "\\n"
+  defp str_lit_cp(?\r), do: "\\r"
+  defp str_lit_cp(?\t), do: "\\t"
+
+  defp str_lit_cp(cp) when cp < 0x20 or cp == 0x7F,
+    do: "\\u{" <> Integer.to_string(cp, 16) <> "}"
+
+  defp str_lit_cp(cp), do: <<cp::utf8>>
+
   defp emit(%ENum{text: n}, _t), do: {n, 12}
   # string literal — same surface on both targets (Rust yields `&str`)
-  defp emit(%EStr{value: s}, _t), do: {"\"#{s}\"", 12}
+  defp emit(%EStr{value: s}, _t), do: {str_lit(s), 12}
   # a `Char` (ADR-0036): a codepoint integer on the BEAM text target, a native
   # `char` literal on Rust. Convert to an integer with `__prim_char_code/1`.
   defp emit(%EChar{value: cp}, :elixir), do: {Integer.to_string(cp), 12}
