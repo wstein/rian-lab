@@ -137,6 +137,13 @@ Consequences of target-relativity:
        (`insert`/`sort`/`maximum` → `Vec(T)`/`T`, `get` → `V`) must `.clone()` its `&T` params into the
        owned result and re-borrow an owned local at a `&Self` protocol-method arg (rustc E0308). The
        Bool-returning bounded generics (`contains`/`equal3`) the emitter *does* lower keep `:rs`.
+       *(Investigated 2026-06-14: cloning only the directly-returned arm — and narrowing the blocker to
+       compound `Vec(T)` returns — is **unsound**. A bare-`T` return like `maximum(xs Vec(T), acc T) T`
+       still fails rustc: the recursive `maximum(t, h)` passes an owned cloned `h` where the `acc: &T`
+       param is expected. Toy bare-`T` returns (`id`/`pair_first`) compile, but signature shape alone
+       can't tell them from `maximum`, so the blocker stays conservative until the **full** owned↔borrow
+       coercion — clone on return AND re-borrow at every `&T` call arg — is implemented. Reverted; not a
+       contained increment.)*
     2. **parametric user types** — `type Pair := P(k K, v V)` (and `Tree(T)`) lower to `enum Pair {`
        with no `<K, V>` params, and the per-unit emitter repeats the def (duplicate `enum Pair`,
        E0428). Any signature touching a parametric type is pinned off `:rs`.
