@@ -77,10 +77,11 @@ defmodule Rian.SelfHost do
       id: :checker,
       name: "Type checker (inference + error sets)",
       role: :checker,
-      status: :not_started,
-      source: nil,
-      test: nil,
-      note: "selfhost_check.rian checks a TOY language, not Rian.Check — not a port"
+      status: :partial,
+      source: "selfhost_checker.rian",
+      test: "test/rian/checker_infer_fixpoint_test.exs",
+      note:
+        "type inference agrees with the REAL Rian.Check.infer over closed integer expressions; env/floats/calls/lambdas/case remain (selfhost_check.rian is a separate TOY-language spike)"
     },
     %{
       id: :exhaustiveness,
@@ -106,19 +107,21 @@ defmodule Rian.SelfHost do
       id: :beam_backend,
       name: "BEAM abstract-forms backend",
       role: :backend,
-      status: :not_started,
-      source: nil,
-      test: nil,
-      note: "selfhost_codegen.rian is a toy stack VM, not the Rian.Beam emitter"
+      status: :partial,
+      source: "selfhost_beam.rian",
+      test: "test/rian/beam_emit_fixpoint_test.exs",
+      note:
+        "abstract forms for the literal/unary/binary slice equal :erl_parse's canonical AST and compile via :compile.forms; strings/calls/lists/case remain (selfhost_codegen.rian is a separate toy stack VM)"
     },
     %{
       id: :text_backend,
       name: "Rust/Elixir text backend",
       role: :backend,
-      status: :not_started,
-      source: nil,
-      test: nil,
-      note: "not ported"
+      status: :partial,
+      source: "selfhost_rust.rian",
+      test: "test/rian/rust_emit_fixpoint_test.exs",
+      note:
+        "precedence-aware Rust emitter equals Rian.Lower.emit_expr(_, :rust) over the literal/unary/binary slice; calls/lists/structs/Elixir-text remain"
     },
     %{
       id: :js_backend,
@@ -134,10 +137,11 @@ defmodule Rian.SelfHost do
       id: :jvm_backend,
       name: "Kotlin/JVM backend",
       role: :backend,
-      status: :not_started,
-      source: nil,
-      test: nil,
-      note: "not ported"
+      status: :partial,
+      source: "selfhost_kotlin.rian",
+      test: "test/rian/kotlin_emit_fixpoint_test.exs",
+      note:
+        "Kotlin emitter equals Rian.JVM term-for-term over the integer-literal/unary/binary slice; floats/calls/lists/structs remain"
     }
   ]
 

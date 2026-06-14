@@ -1,0 +1,59 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — the real type checker (inference), written in Rian
+# ===========================================================================
+# Goal (ADR-0063 §2, the type-checker stage): infer the type of an expression —
+# a slice of the REAL `Rian.Check.infer/3` (not the toy-language `selfhost_check`
+# checker). Fixpoint-locked against `Rian.Check.infer` in
+# `test/rian/checker_infer_fixpoint_test.exs`.
+#
+# Inference rules (ADR-0064): an integer literal is `Int53`, a string `String`,
+# `true`/`false` `Bool`; unary `-` passes the operand type through and `not` is
+# `Bool`; a binary op's result is determined by the op — comparisons/`and`/`or`
+# are `Bool`, `<>` is `String`, `/` is `Float64`, and `+ - * div rem` over
+# integers are `Int53`. An unbound identifier is `unknown` — the checker is
+# deliberately conservative and does NOT guess.
+#
+# Slice: closed integer expressions (no typing environment, no float literals).
+# Variables-in-env, float widths, calls, lambdas, `case`, lists, and the abstract
+# operators are the `:partial` tail — see ADR-0063 / docs/self-host-status.md.
+# ---------------------------------------------------------------------------
+
+mod SelfhostChecker do
+  type Core := CNum(String)
+             | CStr(String)
+             | CId(String)
+             | CUnary(String, Core)
+             | CBin(String, Core, Core)
+
+  # A binary op's result type, keyed by the operator (the integer slice):
+  # comparisons/`and`/`or`/`in` -> Bool, `<>` -> String, `/` -> Float64, the
+  # arithmetic ops over integers -> Int53.
+  def bin_ty(String) String
+  def bin_ty("==") := "Bool"
+  def bin_ty("!=") := "Bool"
+  def bin_ty("<") := "Bool"
+  def bin_ty("<=") := "Bool"
+  def bin_ty(">") := "Bool"
+  def bin_ty(">=") := "Bool"
+  def bin_ty("and") := "Bool"
+  def bin_ty("or") := "Bool"
+  def bin_ty("in") := "Bool"
+  def bin_ty("<>") := "String"
+  def bin_ty("/") := "Float64"
+  def bin_ty("+") := "Int53"
+  def bin_ty("-") := "Int53"
+  def bin_ty("*") := "Int53"
+  def bin_ty("div") := "Int53"
+  def bin_ty("rem") := "Int53"
+
+  # Infer the type of a Core node, returning the type name (or "unknown").
+  pub def infer(Core) String
+  pub def infer(CNum(_)) := "Int53"
+  pub def infer(CStr(_)) := "String"
+  pub def infer(CId("true")) := "Bool"
+  pub def infer(CId("false")) := "Bool"
+  pub def infer(CId(_)) := "unknown"
+  pub def infer(CUnary("not", _)) := "Bool"
+  pub def infer(CUnary("-", x)) := infer(x)
+  pub def infer(CBin(op, _, _)) := bin_ty(op)
+end

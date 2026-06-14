@@ -1,0 +1,65 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — the BEAM abstract-forms backend, written in Rian
+# ===========================================================================
+# Goal (ADR-0063 §2, the default BEAM/self-host target): emit Erlang **abstract
+# forms** from the Core IR — the input to `:compile.forms`. This is the
+# Rian-written counterpart of `Rian.Beam`'s `expr_form`, fixpoint-locked against
+# Erlang's OWN parser (`:erl_parse`) in `test/rian/beam_emit_fixpoint_test.exs`:
+# the forms the port builds equal the canonical AST `:erl_parse` produces for the
+# equivalent Erlang expression, term-for-term (annotations normalised).
+#
+# Because Rian's atom syntax cannot spell operator atoms (`:+`, `:"=<"`), the
+# port carries the Erlang operator as a **string** (it still does the real
+# `erl_op` mapping: `!=`→`/=`, `<=`→`=<`, `and`→`andalso`, `or`→`orelse`); the
+# fixpoint inflates those strings to atoms — a serialisation detail, not the
+# operator logic.
+#
+# Slice: integer/atom/identifier leaves, prefix unary, binary operators. Strings,
+# calls, lists, maps, `case`, and prims are the `:partial` tail — see ADR-0063.
+# ---------------------------------------------------------------------------
+
+mod SelfhostBeam do
+  type Core := CNum(String)
+             | CId(String)
+             | CAtom(String)
+             | CUnary(String, Core)
+             | CBin(String, Core, Core)
+
+  # An Erlang abstract form (the operator is carried as a string — see moduledoc):
+  #   FInt  -> {integer, _, N}     FVar -> {var, _, Name}   FAtom -> {atom, _, A}
+  #   FUn   -> {op, _, Op, Arg}    FBin -> {op, _, Op, L, R}
+  type Form := FInt(String)
+             | FVar(String)
+             | FAtom(String)
+             | FUn(String, Form)
+             | FBin(String, Form, Form)
+
+  # Rian binary operator -> Erlang operator spelling (the reference `erl_op`).
+  def eop(String) String
+  def eop("==") := "=="
+  def eop("!=") := "/="
+  def eop("<=") := "=<"
+  def eop(">=") := ">="
+  def eop("<") := "<"
+  def eop(">") := ">"
+  def eop("and") := "andalso"
+  def eop("or") := "orelse"
+  def eop("+") := "+"
+  def eop("-") := "-"
+  def eop("*") := "*"
+  def eop("div") := "div"
+  def eop("rem") := "rem"
+
+  # Prefix unary operator -> Erlang spelling.
+  def uop(String) String
+  def uop("-") := "-"
+  def uop("not") := "not"
+
+  # Emit a Core node to its Erlang abstract form.
+  pub def emit(Core) Form
+  pub def emit(CNum(t)) := FInt(t)
+  pub def emit(CId(n)) := FVar(n)
+  pub def emit(CAtom(a)) := FAtom(a)
+  pub def emit(CUnary(op, x)) := FUn(uop(op), emit(x))
+  pub def emit(CBin(op, l, r)) := FBin(eop(op), emit(l), emit(r))
+end

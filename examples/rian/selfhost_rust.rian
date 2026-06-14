@@ -1,0 +1,107 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — the Rust text backend, written in Rian
+# ===========================================================================
+# Goal (ADR-0063 §2 backend rung; ADR-0049/0055): emit Rust source text from the
+# Core IR. Unlike the JS backend (which parenthesises every binary), the Rust
+# emitter is **precedence-aware**: it threads each node's precedence and adds a
+# paren only when a child binds looser than its context (`Rian.Lower`'s
+# `emit/2 -> {string, prec}` + `p/3`). This is the Rian-written counterpart of
+# that emitter, fixpoint-locked against `Rian.Lower.emit_expr(_, :rust)` in
+# `test/rian/rust_emit_fixpoint_test.exs`.
+#
+# Slice: number/string/identifier literals, prefix unary (`-`/`not`), and binary
+# operators with the full precedence/associativity table. Atoms are BEAM-only
+# (the reference raises on Rust), and calls/lists/structs/prims are the `:partial`
+# tail — see ADR-0063 / docs/self-host-status.md.
+# ---------------------------------------------------------------------------
+
+mod SelfhostRust do
+  type Core := CNum(String)
+             | CStr(String)
+             | CId(String)
+             | CUnary(String, Core)
+             | CBin(String, Core, Core)
+
+  # An emitted fragment with its precedence (the reference's `{string, prec}`).
+  struct Em(s String, pr Int53)
+
+  def dq(s String) String := "\"" <> s <> "\""
+
+  # Operator precedence (the reference `prec/1` table): tighter binds higher.
+  def prec(String) Int53
+  def prec("*") := 10
+  def prec("/") := 10
+  def prec("rem") := 10
+  def prec("div") := 10
+  def prec("+") := 9
+  def prec("-") := 9
+  def prec("<>") := 8
+  def prec("<") := 5
+  def prec("<=") := 5
+  def prec(">") := 5
+  def prec(">=") := 5
+  def prec("==") := 4
+  def prec("!=") := 4
+  def prec("and") := 3
+  def prec("or") := 2
+
+  # Associativity (the reference `assoc/1`): `<>` is right, comparisons are
+  # non-associative, everything else is left.
+  def assoc(String) String
+  def assoc("<>") := "right"
+  def assoc("<") := "none"
+  def assoc("<=") := "none"
+  def assoc(">") := "none"
+  def assoc(">=") := "none"
+  def assoc("==") := "none"
+  def assoc("!=") := "none"
+  def assoc(other) := "left"
+
+  # Rust operator spelling (the reference `disp(_, :rust)`): `and`/`or` remap;
+  # arithmetic/relational operators pass through.
+  def disp(String) String
+  def disp("and") := "&&"
+  def disp("or") := "||"
+  def disp(other) := other
+
+  # Prefix unary spelling.
+  def udisp(String) String
+  def udisp("not") := "!"
+  def udisp("-") := "-"
+
+  # Wrap a fragment in parens iff it binds looser than the context (`pr < ctx`).
+  def paren(e Em, ctx Int53) String
+    if e.pr < ctx do
+      "(" <> e.s <> ")"
+    else
+      e.s
+    end
+  end
+
+  # Emit a node to a fragment + precedence (leaf = 12, unary = 11).
+  pub def emit(Core) Em
+  pub def emit(CNum(t)) := Em(s: t, pr: 12)
+  pub def emit(CStr(s)) := Em(s: dq(s), pr: 12)
+  pub def emit(CId(n)) := Em(s: n, pr: 12)
+  pub def emit(CUnary(op, x)) := Em(s: udisp(op) <> paren(emit(x), 11), pr: 11)
+  pub def emit(CBin(op, l, r)) := bin_em(op, l, r)
+
+  # Left/right context precedences come from associativity; assemble the binary.
+  def bin_em(op String, l Core, r Core) Em
+    case assoc(op) do
+      "right" -> mk_bin(op, l, r, prec(op) + 1, prec(op))
+      "none" -> mk_bin(op, l, r, prec(op) + 1, prec(op) + 1)
+      other -> mk_bin(op, l, r, prec(op), prec(op) + 1)
+    end
+  end
+
+  def mk_bin(op String, l Core, r Core, lc Int53, rc Int53) Em
+    Em(s: paren(emit(l), lc) <> " " <> disp(op) <> " " <> paren(emit(r), rc), pr: prec(op))
+  end
+
+  # The rendered Rust expression string.
+  pub def render(c Core) String
+    e := emit(c)
+    e.s
+  end
+end

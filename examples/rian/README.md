@@ -112,6 +112,31 @@ compile + run on real BEAM bytecode:
   expression `Rian.JS.compile` produces, term-for-term
   (`test/rian/js_fixpoint_test.exs`). Covers the literal/unary/binary slice;
   calls, lists, `if`/`case`, structs, and prims remain.
+- [selfhost_rust.rian](selfhost_rust.rian) — the **Rust text backend** port
+  (ADR-0063, ADR-0049): emits Rust source from Core. Unlike JS, it is
+  **precedence-aware** — it threads each node's precedence and parenthesises only
+  when a child binds looser than its context — matching `Rian.Lower.emit_expr(_,
+  :rust)` term-for-term (`test/rian/rust_emit_fixpoint_test.exs`). Atoms are
+  BEAM-only; calls/lists/structs remain.
+- [selfhost_kotlin.rian](selfhost_kotlin.rian) — the **Kotlin/JVM backend** port
+  (ADR-0063, ADR-0049 Tier 2): emits Kotlin from Core (always-parenthesised, `==`
+  stays structural `==` not JS's `===`, integer literals carry the `L` suffix),
+  **fixpoint-locked** against `Rian.JVM` (`test/rian/kotlin_emit_fixpoint_test.exs`).
+  Floats, calls, lists, and structs remain.
+- [selfhost_beam.rian](selfhost_beam.rian) — the **BEAM abstract-forms backend**
+  port (ADR-0063): builds the Erlang abstract forms `:compile.forms` consumes,
+  doing the real `erl_op` mapping (`!=`→`/=`, `<=`→`=<`, `and`→`andalso`).
+  **Fixpoint-locked** against Erlang's own parser — the forms equal `:erl_parse`'s
+  canonical AST and compile+run (`test/rian/beam_emit_fixpoint_test.exs`).
+  Operators are carried as strings (Rian can't spell `:+`); strings/calls/lists
+  remain.
+- [selfhost_checker.rian](selfhost_checker.rian) — the **real type checker**
+  (inference) port (ADR-0063, ADR-0064): a slice of the REAL `Rian.Check.infer`
+  (not the toy-language `selfhost_check`), inferring `Int53`/`Bool`/`String`/
+  `Float64`/`unknown` for closed integer expressions and **fixpoint-locked**
+  against `Rian.Check.infer` (`test/rian/checker_infer_fixpoint_test.exs`). It is
+  conservative — an unbound identifier is `unknown`, not a guess. Env, floats,
+  calls, lambdas, and `case` remain.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via

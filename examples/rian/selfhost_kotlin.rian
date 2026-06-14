@@ -1,0 +1,49 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — the Kotlin/JVM backend, written in Rian
+# ===========================================================================
+# Goal (ADR-0063 §2 backend rung; ADR-0049 Tier 2): emit Kotlin source text from
+# the Core IR. Like the JS backend (and unlike Rust), the Kotlin emitter
+# parenthesises every binary, so the structure is explicit. This is the
+# Rian-written counterpart of `Rian.JVM`'s expression emitter, fixpoint-locked
+# against it in `test/rian/kotlin_emit_fixpoint_test.exs`.
+#
+# The operator spellings are the point and differ from JS: `==`→`==` (structural,
+# not `===`), `!=`→`!=`, `and`→`&&`, `or`→`||`, `<>`→`+`, `div`→`/`, `rem`→`%`.
+#
+# Slice: integer (Long) literals, strings, identifiers, prefix unary, and binary
+# operators. Float literals (no `L` suffix), atoms (unsupported on the JVM), and
+# calls/lists/structs/prims are the `:partial` tail — see ADR-0063.
+# ---------------------------------------------------------------------------
+
+mod SelfhostKotlin do
+  type Core := CNum(String)
+             | CStr(String)
+             | CId(String)
+             | CUnary(String, Core)
+             | CBin(String, Core, Core)
+
+  def dq(s String) String := "\"" <> s <> "\""
+
+  # Binary operator -> Kotlin spelling (the reference `kt_op`). Note `==` stays
+  # `==` (Kotlin structural equality), unlike JS's `===`.
+  def ktop(String) String
+  def ktop("and") := "&&"
+  def ktop("or") := "||"
+  def ktop("<>") := "+"
+  def ktop("div") := "/"
+  def ktop("rem") := "%"
+  def ktop(other) := other
+
+  def udisp(String) String
+  def udisp("not") := "!"
+  def udisp("-") := "-"
+
+  # Emit Kotlin source for a Core node; binary is always parenthesised. An integer
+  # literal carries Kotlin's `L` (Long) suffix (the slice is integer literals).
+  pub def emit(Core) String
+  pub def emit(CNum(t)) := t <> "L"
+  pub def emit(CStr(s)) := dq(s)
+  pub def emit(CId(n)) := n
+  pub def emit(CUnary(op, x)) := udisp(op) <> emit(x)
+  pub def emit(CBin(op, l, r)) := "(" <> emit(l) <> " " <> ktop(op) <> " " <> emit(r) <> ")"
+end

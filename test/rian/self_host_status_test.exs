@@ -31,9 +31,13 @@ defmodule Rian.SelfHostStatusTest do
     # the headline number must appear in the rendered doc (not a hardcoded string)
     assert SelfHost.status_markdown() =~ "#{pct}% self-hosted"
 
-    # honesty floor: the backend stages are not ported, so we are nowhere near 100%
+    # honesty floor: not every stage is fully self-hosted, so we are not at 100%.
+    # (Every stage is now at least :partial, so :not_started may legitimately be 0;
+    # the floor that still bites is that most stages are partial, not self_hosted.)
     refute pct == 100, "self-hosting is not complete; a 100% headline would be dishonest"
-    assert SelfHost.count(:not_started) > 0
+
+    assert SelfHost.count(:self_hosted) < length(SelfHost.stages()),
+           "not every stage is fully self-hosted; 100% would be dishonest"
   end
 
   test "only stages with an equivalence/fixpoint test are marked self_hosted (teeth)" do
