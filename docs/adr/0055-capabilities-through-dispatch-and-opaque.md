@@ -1,7 +1,7 @@
 # ADR-0055 — Capabilities through dynamic dispatch and opaque types
 
 **Status:** Accepted (direction) — implements with Stage 0.1 (`protocol`/`impl`/`opaque` parsing)
-**Implemented:** no — `opaque` has no parser/lowering and dynamic dispatch carries no receiver capability; the `protocol`/`impl` MVP that exists (`Rian.Protocol`, `test/rian/protocol_test.exs`) is plain BEAM dispatch with no capability annotation, so neither §1 (capability on the method receiver) nor §2 (linearity-preserving `dyn` dispatch) is realized
+**Implemented:** no — although `opaque` itself now parses/lowers (ADR-0043, `Rian.Opaque`), this ADR's content is unbuilt: dynamic dispatch carries no receiver capability, and `opaque`-over-`struct` does not present the join of its field capabilities. The `protocol`/`impl` MVP that exists (`Rian.Protocol`, `test/rian/protocol_test.exs`) is plain BEAM dispatch with no capability annotation, so neither §1 (capability on the method receiver) nor §2 (linearity-preserving `dyn` dispatch) is realized
 **Resolves:** ADR-0034 "Capabilities × types" open item (an `iso` returned/consumed through a protocol method); ADR-0042 "Protocol-typed values (`dyn`)" capability half; ADR-0043 "Capability inheritance" — opaque-over-`struct` × field capabilities
 **Refs:** ADR-0025 (memory capabilities), ADR-0034 (capabilities × types; flow narrowing), ADR-0035 (no hidden control flow — dynamic dispatch only when visible), ADR-0041 (per-target dispatch table), ADR-0042 (protocols; static-by-default dispatch; orphan rule), ADR-0043 (opaque types; default-to-base capability)
 **Owners:** Elena Rostova (dispatch/lowering) · Arthur Pendelton (type system) · Samir Patel (linearity/totality) · Maya Lin (multi-target) · Kira Neri (determinism) · Rachel Okafor (PM)
