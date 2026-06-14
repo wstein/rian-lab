@@ -20,7 +20,9 @@ defmodule Rian.Pratt do
   # already-parsed passthrough (symmetric with `parse_body/1`): a Rian-written
   # front-end (ADR-0063 Stage 2) may hand the checker/emitters an AST directly —
   # e.g. a clause guard parsed in Rian — so they can re-`parse` it idempotently.
-  def parse(ast) when is_tuple(ast), do: ast
+  # Still run `Prim.normalize` (idempotent): a front-end-built AST may carry raw
+  # `Prim.*` calls that must be rewritten to `__prim_*`, exactly as the string path.
+  def parse(ast) when is_tuple(ast), do: Rian.Prim.normalize(ast)
 
   def parse(str) when is_binary(str) do
     {ast, rest} = parse_expr(Rian.Lexer.expr_tokens(str), 0)
@@ -478,11 +480,15 @@ defmodule Rian.Pratt do
   # same Result match `with` desugars to; no new semantics.
   defp desugar_propagation(stmts) do
     if Enum.any?(stmts, &match?({:bind_arrow, _, _}, &1)),
-      do: desugar_prop(stmts),
+      do: desugar_prop(stmts, 0),
       else: {:block, stmts}
   end
 
-  defp desugar_prop(stmts) do
+  # `depth` is a deterministic per-arrow counter naming each propagation's error
+  # binder `__prop_e<depth>` — so nested `<-` chains get distinct names (no shadowing)
+  # without a non-deterministic gensym, which would break bit-identical re-parse
+  # (ADR-0063 §3 determinism). The `__`-prefix keeps it out of the user namespace.
+  defp desugar_prop(stmts, depth) do
     {before, rest} = Enum.split_while(stmts, &(not match?({:bind_arrow, _, _}, &1)))
 
     case rest do
@@ -500,12 +506,14 @@ defmodule Rian.Pratt do
                 "(it binds and continues — use `:=` to just return the Result)"
 
       [{:bind_arrow, name, e} | after_arrow] ->
+        ev = "__prop_e#{depth}"
+
         prop_case =
           {:case, e,
            [
-             {{:tuple, [{:atom, "ok"}, {:var, name}]}, nil, desugar_prop(after_arrow)},
-             {{:tuple, [{:atom, "error"}, {:var, "__prop_e"}]}, nil,
-              {:tuple, [{:atom, "error"}, {:id, "__prop_e"}]}}
+             {{:tuple, [{:atom, "ok"}, {:var, name}]}, nil, desugar_prop(after_arrow, depth + 1)},
+             {{:tuple, [{:atom, "error"}, {:var, ev}]}, nil,
+              {:tuple, [{:atom, "error"}, {:id, ev}]}}
            ]}
 
         {:block, before ++ [{:expr, prop_case}]}
@@ -657,7 +665,8 @@ defmodule Rian.Pratt do
   defp tok_desc({:char, cp}), do: "char `?#{cp}`"
   defp tok_desc({:op, o}), do: "operator `#{o}`"
   defp tok_desc({:kw, k}), do: "keyword `#{k}`"
-  defp tok_desc({:atom, a}), do: "atom `:#{a}`"
+  # (no `{:atom, _}` token: the lexer emits `:` + `id`, and `{:atom, _}` is built at
+  # parse time — so an atom never appears in a raw token stream here.)
   defp tok_desc(t) when is_tuple(t), do: "`#{elem(t, 0)}`"
   defp tok_desc(t), do: inspect(t)
 

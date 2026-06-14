@@ -12,12 +12,25 @@ defmodule Rian.PropagationTest do
     test "a block with `<-` becomes a case: ok continues, error short-circuits" do
       ast = Pratt.parse_body("x <- f(a) ; {:ok, x}")
 
-      # ok arm binds x and continues; error arm returns {:error, __prop_e}
+      # ok arm binds x and continues; error arm returns {:error, __prop_e0} (the
+      # per-arrow error binder is depth-indexed so nested `<-` chains don't clash)
       assert {:block, [{:expr, {:case, {:call, {:id, "f"}, _}, arms}}]} = ast
       assert [{ok_pat, nil, _ok_body}, {err_pat, nil, err_body}] = arms
       assert ok_pat == {:tuple, [{:atom, "ok"}, {:var, "x"}]}
-      assert err_pat == {:tuple, [{:atom, "error"}, {:var, "__prop_e"}]}
-      assert err_body == {:tuple, [{:atom, "error"}, {:id, "__prop_e"}]}
+      assert err_pat == {:tuple, [{:atom, "error"}, {:var, "__prop_e0"}]}
+      assert err_body == {:tuple, [{:atom, "error"}, {:id, "__prop_e0"}]}
+    end
+
+    test "nested `<-` chains get distinct, depth-indexed error binders" do
+      # two arrows -> two cases, with `__prop_e0` (outer) and `__prop_e1` (inner)
+      ast = Pratt.parse_body("x <- f(a) ; y <- g(x) ; {:ok, y}")
+      assert {:block, [{:expr, {:case, _, [_, {_, nil, outer_err}]} = outer}]} = ast
+      assert outer_err == {:tuple, [{:atom, "error"}, {:id, "__prop_e0"}]}
+
+      {:case, _, [{_, nil, {:block, [{:expr, inner_case}]}}, _]} = outer
+
+      assert {:case, _, [_, {_, nil, {:tuple, [{:atom, "error"}, {:id, "__prop_e1"}]}}]} =
+               inner_case
     end
 
     test "a plain block (no `<-`) is unchanged" do
