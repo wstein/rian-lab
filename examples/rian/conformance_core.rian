@@ -1,0 +1,38 @@
+# ===========================================================================
+# Portable-core conformance (ADR-0049 §5a · the ADR-0041 matrix)
+# ===========================================================================
+# Every `@test` here MUST be green on EVERY Tier-1 target (:ex, :rs, :js). This
+# file is the executable definition of "the portable core": only features all
+# Tier-1 emitters lower and run identically — `Int53` arithmetic, integer
+# `div`/`rem`, comparison + boolean logic, and multi-clause recursion (literal
+# clause patterns + guards). `Rian.ConformanceTest` runs these on :ex/:rs/:js and
+# fails the build if any Tier-1 target regresses.
+#
+# Deliberately scalar for now: lists/`Vec` + cons patterns and sum-type `match`
+# are portable on :ex/:js but have open gaps in the Rust `@test`-harness path
+# (duplicate-type / type-mismatch emission) — so they are not yet all-Tier-1
+# green and stay out of this corpus until that lands (tracked separately). No FFI,
+# no `Int64` (off :js, ADR-0064).
+# ---------------------------------------------------------------------------
+
+def fib(n Int53) Int53
+def fib(0) := 0
+def fib(1) := 1
+def fib(n) := fib(n - 1) + fib(n - 2)
+
+def gcd(a Int53, b Int53) Int53
+def gcd(a, 0) := a
+def gcd(a, b) := gcd(b, a rem b)
+
+def clamp(n Int53) Int53
+def clamp(n) when n < 0 := 0
+def clamp(n) when n > 100 := 100
+def clamp(n) := n
+
+@test def arithmetic() Bool := 2 + 3 * 4 == 14 and 10 - 7 == 3 and (1 - 5) == 0 - 4
+@test def int_division() Bool := 17 div 5 == 3 and 17 rem 5 == 2
+@test def comparison() Bool := 2 < 3 and 5 == 5 and 4 != 5 and not (3 < 2)
+@test def boolean_logic() Bool := (true and not false) or false
+@test def recursion() Bool := fib(10) == 55
+@test def multi_clause_gcd() Bool := gcd(48, 36) == 12
+@test def guarded_clauses() Bool := clamp(0 - 7) == 0 and clamp(250) == 100 and clamp(42) == 42
