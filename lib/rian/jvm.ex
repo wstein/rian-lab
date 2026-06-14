@@ -337,6 +337,10 @@ defmodule Rian.JVM do
   defp expr_kt(%EUnary{op: "not", arg: x}), do: "!#{expr_kt(x)}"
   defp expr_kt(%EBin{op: op, left: l, right: r}), do: "(#{expr_kt(l)} #{kt_op(op)} #{expr_kt(r)})"
 
+  # integer → string (ADR-0069 interpolation): Kotlin `Long.toString()`
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
+    do: "(#{expr_kt(n)}).toString()"
+
   # a PascalCase call is sum-variant construction `Ctor(args)`; a lowercase call
   # is a local function call
   defp expr_kt(%ECall{fun: %EId{name: f}, args: args}) do

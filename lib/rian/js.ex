@@ -560,6 +560,11 @@ defmodule Rian.JS do
   # a `Char`'s codepoint — identity in JS, where a `Char` is a BigInt codepoint
   defp expr_js(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}), do: expr_js(c)
 
+  # integer → string (ADR-0069 interpolation): `String(n)` stringifies a `number`
+  # or a `BigInt` (`String(5n)` === "5") — no suffix either way
+  defp expr_js(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
+    do: "String(#{expr_js(n)})"
+
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
     do: "(#{expr_js(a)} + #{expr_js(b)})"
 

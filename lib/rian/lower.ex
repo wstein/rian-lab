@@ -1265,6 +1265,13 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}, :elixir),
     do: {p(c, 12, :elixir), 12}
 
+  # integer → string (ADR-0069 interpolation): native `to_string`/`Integer.to_string`
+  defp emit(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, :rust),
+    do: {"#{p(n, 12, :rust)}.to_string()", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, :elixir),
+    do: {"Integer.to_string(#{p(n, 0, :elixir)})", 12}
+
   defp emit(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, :rust),
     do: {"format!(\"{}{}\", #{p(a, 0, :rust)}, #{p(b, 0, :rust)})", 12}
 

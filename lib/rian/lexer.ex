@@ -61,6 +61,19 @@ defmodule Rian.Lexer do
   defp tok_str({:num, n}, _), do: n
   defp tok_str({:char, cp}, _), do: "'" <> char_source(cp) <> "'"
   defp tok_str({:str, s}, _), do: ~s(") <> escape_str(s) <> ~s(")
+
+  # round-trip an interpolated string: literal segments re-escape, holes re-emit
+  # as `\(source)` (ADR-0069 — the detokenizer must not flatten interpolation)
+  defp tok_str({:istr, parts}, _) do
+    body =
+      Enum.map_join(parts, "", fn
+        {:lit, s} -> escape_str(s)
+        {:hole, src} -> "\\(" <> src <> ")"
+      end)
+
+    ~s(") <> body <> ~s(")
+  end
+
   defp tok_str({:op, o}, _), do: o
   defp tok_str({:kw, k}, _), do: k
   defp tok_str({:annot, a}, _), do: "@" <> a
@@ -177,19 +190,63 @@ defmodule Rian.Lexer do
   # and `rest` is the source past the closing `"`. Honors the same escapes as
   # `char_escape/1`, so `"a\"b"` lexes to the value `a"b` rather than terminating
   # early on the inner quote.
-  defp lex_string("", _acc), do: raise(ArgumentError, "unterminated string literal")
-
-  defp lex_string("\"" <> rest, acc),
-    do: {acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
-
-  defp lex_string("\\" <> rest, acc) do
-    {cp, after_escape} = char_escape(rest)
-    lex_string(after_escape, [<<cp::utf8>> | acc])
+  # A regular `"…"` string with optional `\(expr)` interpolation holes (ADR-0069).
+  # Returns `{:str, binary}` when there are no holes, else `{:istr, parts}` where
+  # `parts` interleaves `{:lit, binary}` (escape-decoded) and `{:hole, source}`
+  # (raw expression text, parsed later by `Rian.Pratt`).
+  defp lex_string_token(str) do
+    {parts, rest} = lex_parts(str, [], [])
+    {string_token(parts), rest}
   end
 
-  defp lex_string(str, acc) do
+  defp lex_parts("", _lit, _parts), do: raise(ArgumentError, "unterminated string literal")
+
+  defp lex_parts("\"" <> rest, lit, parts),
+    do: {Enum.reverse([{:lit, binify(lit)} | parts]), rest}
+
+  # interpolation hole `\(expr)` — MUST precede the general `\\` escape clause.
+  # `\\(` (escaped backslash then paren) does not match here (two backslashes), so
+  # it falls through to the escape clause as a literal backslash + `(`, for free.
+  defp lex_parts("\\(" <> rest, lit, parts) do
+    {src, rest2} = capture_hole(rest, 0, [])
+    lex_parts(rest2, [], [{:hole, src}, {:lit, binify(lit)} | parts])
+  end
+
+  defp lex_parts("\\" <> rest, lit, parts) do
+    {cp, after_escape} = char_escape(rest)
+    lex_parts(after_escape, [<<cp::utf8>> | lit], parts)
+  end
+
+  defp lex_parts(str, lit, parts) do
     {ch, rest} = String.next_codepoint(str)
-    lex_string(rest, [ch | acc])
+    lex_parts(rest, [ch | lit], parts)
+  end
+
+  # capture a hole's raw source up to its matching `)` (paren-depth aware). The
+  # source is parsed later by `Rian.Pratt` (it re-enters the expression grammar);
+  # a string literal containing `)` inside a hole is out of scope (ADR-0069
+  # discourages nesting strings in holes).
+  defp capture_hole("", _d, _acc),
+    do: raise(ArgumentError, "unterminated interpolation hole `\\(` in string")
+
+  defp capture_hole(")" <> rest, 0, acc), do: {binify(acc), rest}
+  defp capture_hole(")" <> rest, d, acc), do: capture_hole(rest, d - 1, [")" | acc])
+  defp capture_hole("(" <> rest, d, acc), do: capture_hole(rest, d + 1, ["(" | acc])
+
+  defp capture_hole(str, d, acc) do
+    {ch, rest} = String.next_codepoint(str)
+    capture_hole(rest, d, [ch | acc])
+  end
+
+  defp binify(acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
+  # no holes -> a plain `{:str, s}`; otherwise the structured `{:istr, parts}`
+  defp string_token(parts) do
+    if Enum.any?(parts, &match?({:hole, _}, &1)) do
+      {:istr, parts}
+    else
+      {:str, parts |> Enum.map_join("", fn {:lit, s} -> s end)}
+    end
   end
 
   # re-lexable rendering of a codepoint inside `'…'` (the inverse of `lex_char/1`).
@@ -257,8 +314,8 @@ defmodule Rian.Lexer do
         end
 
       String.starts_with?(str, "\"") ->
-        {content, rest} = lex_string(advance(str, 1), [])
-        lex(rest, [{:str, content} | acc])
+        {token, rest} = lex_string_token(advance(str, 1))
+        lex(rest, [token | acc])
 
       # `Char` literal `'A'` (ADR-0036) — exactly one codepoint between single
       # quotes (Crystal-style); the parser desugars it to its codepoint integer.

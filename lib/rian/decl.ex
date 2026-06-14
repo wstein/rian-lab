@@ -241,22 +241,44 @@ defmodule Rian.Decl do
     portable? = targets != nil
 
     Enum.map(funcs, fn
-      %Func{synthetic: true} = f -> f
-      %Func{clauses: cs} = f -> %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?))}
+      %Func{synthetic: true} = f ->
+        f
+
+      %Func{clauses: cs, params: ps} = f ->
+        %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?, ps))}
     end)
   end
 
-  defp meta_clause(%Clause{body: nil} = c, _env, _p), do: c
+  defp meta_clause(%Clause{body: nil} = c, _env, _p, _params), do: c
 
-  defp meta_clause(%Clause{body: body} = c, env, portable?) when is_binary(body) do
+  defp meta_clause(%Clause{body: body} = c, env, portable?, params) when is_binary(body) do
     ast = Pratt.parse_body(body)
     expanded = if env == %{}, do: ast, else: Rian.Macro.expand(env, ast, portable: portable?)
-    out = Rian.Comptime.fold(expanded)
+    folded = Rian.Comptime.fold(expanded)
+    # ADR-0069: resolve `\(expr)` interpolation here, where the clause's parameter
+    # types are in scope, so each hole stringifies by its static type before the
+    # checker and emitters see a plain `<>`/stringify chain.
+    out = Rian.Interp.resolve(folded, clause_env(c, params), %{})
 
     # Only swap the source-string body for an AST when a transform actually fired;
-    # bodies with no macro/`comptime` keep their string form (and the invariant
-    # that an untouched clause body is its source text).
+    # bodies with no macro/`comptime`/interpolation keep their string form (and the
+    # invariant that an untouched clause body is its source text).
     if out == ast, do: c, else: %{c | body: out}
+  end
+
+  # name->type for a clause's variable parameters, by zipping its argument
+  # patterns against the function signature's typed params (ADR-0069 — gives
+  # interpolation the static type of a `\(param)` hole). Non-`var` patterns
+  # (literals, ctors) contribute nothing; a pattern-bound field's type is not
+  # threaded yet (an interpolation hole over one infers `:unknown` → error).
+  defp clause_env(%Clause{pats: pats}, params) do
+    pats
+    |> Enum.zip(params)
+    |> Enum.flat_map(fn
+      {{:var, v}, %Param{type: t}} -> [{v, t}]
+      _ -> []
+    end)
+    |> Map.new()
   end
 
   defp collect_macros(decls) do

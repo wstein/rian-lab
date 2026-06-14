@@ -250,6 +250,17 @@ defmodule Rian.Core do
   @doc "Translate a surface expression (the `Rian.Pratt` tuple AST) into the typed core."
   def from_expr({:num, n}), do: %ENum{text: n}
   def from_expr({:str, s}), do: %EStr{value: s}
+
+  # String interpolation (ADR-0069) is resolved to a `<>`/stringify chain by
+  # `Rian.Interp` in the declaration pass, before Core. One reaching here means it
+  # appeared somewhere that pass doesn't cover (e.g. a clause guard) — fail clearly.
+  def from_expr({:str_interp, _}),
+    do:
+      raise(
+        ArgumentError,
+        "string interpolation is not supported here (e.g. in a guard) — ADR-0069"
+      )
+
   def from_expr({:char, cp}), do: %EChar{value: cp}
   def from_expr({:id, x}), do: %EId{name: x}
   def from_expr({:atom, a}), do: %EAtom{name: a}

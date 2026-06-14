@@ -1,7 +1,7 @@
 # ADR-0069 — String interpolation that auto-stringifies via a portable `Show`
 
-**Status:** Proposed (design) · **Unimplemented** — no lexer/parser/Core/emitter support yet (the lexer decodes a string to a flat binary, `Rian.Lexer.lex_string/2`; Core carries only `EStr{value}`).
-**Implemented:** no — design only (no lexer/parser/Core/emitter support; depends on a portable `Show`)
+**Status:** Accepted · **Implemented (partial, 2026-06-14)** — the `\(expr)` surface (decision A) + auto-stringify for `Int*`/`Bool`/`String` holes, portable across all four targets. `Char`/`Float64`/user-type & derived `Show`/runtime dispatch are deferred (see *Open items* and *Implementation* below).
+**Implemented:** partial — `\(expr)` lexing (`{:istr}`), Pratt (`{:str_interp}`), `Rian.Interp` static resolution, `__prim_int_to_string` on Beam/JS/Lower(Rust+Elixir)/JVM; `Int*`/`Bool`/`String` holes reach all four targets, honestly via `Rian.Reach` (an `Int` hole inherits ADR-0064's `[:ex,:js]`). `test/rian/interp_test.exs`. Deferred: `Char` (dispatch-guard collision), `Float64` (round-trip), user/derived `Show`, runtime dispatch.
 **Refs:** ADR-0042 (protocols & bounded generics — the dispatch this leans on), ADR-0061 (multi-target protocol lowering — BEAM/Rust/JS dispatch, the Rust owned-return gap), ADR-0047 (portable prelude/stdlib — the `Prim.*` intrinsic layer), ADR-0051 §"Open items" (interpolation deferred for doc heredocs — "probably no"), ADR-0035 (no hidden control flow — the central tension), ADR-0033 (surface vocabulary), ADR-0064 (portable numeric contract — `Int53` is the portable integer; `Int`/wide ints are off some targets), ADR-0057/0058 (target-environment sets; reachability), ADR-0065 (P7 surface freeze — this surface is *not* frozen).
 **Owners:** Maya Lin (surface / emitters) · Samir Patel (types / protocol bounds) · Kira Neri (honesty) · Mira (totality) · Tomás (BEAM performance) · Rachel Okafor (PM)
 
@@ -160,6 +160,38 @@ operation, never an `inspect`-style reflective fallback for un-`Show`-able types
 - **Detokenizer round-trip:** the lexer's re-escape path (`escape_str`/`char_source`) must round-trip
   `\(` as interpolation, not as a literal — a test the self-host lexer fixpoint (`Rian.Fixpoint`) will
   catch if missed.
+
+## Implementation (partial, 2026-06-14)
+
+Shipped the settled core; deferred the items this ADR itself flagged "resolve
+before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Float`):
+
+- **Surface (decision A).** `Rian.Lexer` scans `\(expr)` as one more arm of its
+  existing `\` escape dispatch, producing an `{:istr, parts}` token (literal
+  segments + raw hole source); `\\(` stays a literal backslash + paren for free.
+  `Rian.Pratt` re-parses each hole into a `{:str_interp, parts}` node; an empty
+  hole `\()` is a parse error. The detokenizer round-trips `\(…)`.
+- **Static resolution, not runtime dispatch.** Because interpolation is
+  **monomorphic per call site** (§4), `Rian.Interp` resolves each hole to a plain
+  `<>`/stringify chain in the declaration pass — *where the clause's parameter
+  types are in scope* — by the hole's **statically inferred type**: `String` →
+  identity, `Int*`/`UInt*` → `__prim_int_to_string`, `Bool` → an `if`. This is the
+  key simplification: no runtime `Show` dispatcher is generated, so **the
+  Char/Int53 dispatch-guard collision (the sharpest open cost) does not arise**,
+  and Rust gets the monomorphic concrete `impl` for free. There is **no new Core
+  node and no per-emitter `{:str_interp}` handling** — the checker and all four
+  emitters see an ordinary `<>` tree.
+- **The one new intrinsic.** `__prim_int_to_string` lowers natively on all four
+  emitters (`erlang:integer_to_binary` / `String(n)` / `n.to_string()` /
+  `.toString()`), so an `Int53`/`Bool`/`String` interpolation reaches **all four
+  targets** — the portability win, replacing the `:ex`-only `Integer.to_string`
+  FFI. `Rian.Reach` needs no new blocker: a hole inherits its value type's reach
+  (an `Int` hole is `[:ex,:js]` per ADR-0064; a wide-int hole is off `:js`).
+- **Deferred (compile errors, never silent):** a `Char` hole, a `Float64` hole,
+  and a hole whose type can't be statically inferred each raise a clear error at
+  the hole — no `inspect`-style fallback (ADR-0035). User-type / derived `Show`
+  through the full protocol (so a sum/struct can be interpolated) is the next
+  increment; until then a user-type hole is the "no `Show`" error.
 
 ## Open items
 

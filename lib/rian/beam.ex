@@ -518,6 +518,10 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}, s),
     do: expr_form(c, s)
 
+  # integer → string (ADR-0069 interpolation): native `erlang:integer_to_binary/1`
+  defp expr_form(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, s),
+    do: remote_call(:erlang, "integer_to_binary", [n], s)
+
   # explicit overflow ops (ADR-0035 §3) — BEAM integers are bignums, so each op
   # computes the true sum (once, via an immediately-applied `fun`) and projects it
   # onto the signed 64-bit domain: wrap (two's complement), saturate (clamp), or

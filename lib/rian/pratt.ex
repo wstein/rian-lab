@@ -196,12 +196,35 @@ defmodule Rian.Pratt do
 
   defp parse_primary([{:op, ":"}, {:id, name} | rest]), do: parse_postfix({:atom, name}, rest)
   defp parse_primary([{:str, s} | rest]), do: parse_postfix({:str, s}, rest)
+  # an interpolated string `"… \(expr) …"` (ADR-0069): each hole's raw source is
+  # re-parsed as an expression. The node is resolved to a `<>`/stringify chain by
+  # `Rian.Interp` once types are known; an empty hole `\()` is a parse error.
+  defp parse_primary([{:istr, parts} | rest]), do: parse_postfix(str_interp(parts), rest)
   defp parse_primary([{:num, n} | rest]), do: parse_postfix({:num, n}, rest)
   # a `Char` literal (ADR-0036) — a distinct node typed `Char` by the checker,
   # lowered to a codepoint integer on BEAM/JS and a native `char` on Rust
   defp parse_primary([{:char, cp} | rest]), do: parse_postfix({:char, cp}, rest)
   defp parse_primary([{:id, x} | rest]), do: parse_postfix({:id, x}, rest)
   defp parse_primary(other), do: raise(ArgumentError, "unexpected token: #{here(other)}")
+
+  # build the `{:str_interp, parts}` node — literal segments pass through, each
+  # hole's raw source is parsed as a full expression (ADR-0069). An empty hole is
+  # a parse error (there is nothing to stringify).
+  defp str_interp(parts) do
+    resolved =
+      Enum.map(parts, fn
+        {:lit, s} ->
+          {:lit, s}
+
+        {:hole, src} ->
+          case String.trim(src) do
+            "" -> raise ArgumentError, "empty interpolation hole `\\()` — nothing to interpolate"
+            _ -> {:hole, parse(src)}
+          end
+      end)
+
+    {:str_interp, resolved}
+  end
 
   defp parse_postfix(node, [{:op, "."}, {:id, name} | rest]),
     do: parse_postfix({:dot, node, name}, rest)
@@ -672,6 +695,17 @@ defmodule Rian.Pratt do
 
   defp sexpr({:num, n}), do: n
   defp sexpr({:str, s}), do: "\"#{s}\""
+
+  defp sexpr({:str_interp, parts}) do
+    inner =
+      Enum.map_join(parts, " ", fn
+        {:lit, s} -> "\"#{s}\""
+        {:hole, e} -> "\\(#{sexpr(e)})"
+      end)
+
+    "(str-interp #{inner})"
+  end
+
   defp sexpr({:char, cp}), do: "?#{cp}"
   defp sexpr({:id, x}), do: x
   defp sexpr({:bin, op, l, r}), do: "(#{op} #{sexpr(l)} #{sexpr(r)})"
