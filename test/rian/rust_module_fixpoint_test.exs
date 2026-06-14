@@ -17,12 +17,13 @@ defmodule Rian.RustModuleFixpointTest do
   # `<T: Clone>` signatures + bare-tvar-return clone, list PATTERNS (`[h | t]`
   # → slice `[h, t @ ..]`) with the slice-element clone rebind, and the non-generic
   # call-site owned→borrow coercion (an owned `vec![…]` arg to a `&`-typed param is
-  # `&`-wrapped), and the generic borrowed-set Vec-element clone (a borrowed `&T` binder
-  # in a closed list / cons head is `.clone()`d) are now covered; the rest of the
-  # owned↔borrow coercion (borrowed `&T` in a variant payload, owned-String/owned-
-  # returning-call producers, borrowed args at generic call sites), parametric
-  # monomorphization, maps, String-returns, the Elixir target, and struct *patterns*
-  # (a reference gap — Rian.Lower raises) are out of scope.
+  # `&`-wrapped), the generic borrowed-set element clone (a borrowed `&T` binder in a
+  # closed list / cons head / non-Result variant payload is `.clone()`d), and parametric-
+  # enum monomorphization (a parametric sum → `enum Name<K: Clone, …>`; a generic
+  # builder's bare return `Pair` → `Pair<K, V>`) are now covered; the rest (a non-generic
+  # builder's concrete `Box`→`Box<i64>`, nested `Vec(Pair)`→`Vec<Pair<K,V>>`, owned-String/
+  # owned-returning-call producers, borrowed args at generic call sites, maps,
+  # String-returns, the Elixir target, struct *patterns* — a reference gap) are out of scope.
 
   setup_all do
     {:ok, mod} =
@@ -71,7 +72,14 @@ defmodule Rian.RustModuleFixpointTest do
          Enum.map(args, fn %Core.ELabel{name: l, expr: e} -> {:vp, l, ic(e, m)} end)}
 
       pascal?(f) ->
-        variant(f, Enum.map(args, fn a -> {"", a} end), m)
+        variant(
+          f,
+          Enum.map(args, fn
+            %Core.ELabel{name: l, expr: e} -> {l, e}
+            a -> {"", a}
+          end),
+          m
+        )
 
       true ->
         {:c_call, f, Enum.map(args, &ic(&1, m))}
@@ -130,8 +138,19 @@ defmodule Rian.RustModuleFixpointTest do
         {:e_var, v.ctor, Enum.map(v.fields, &Capability.owned(&1.type)), named, labels}
       end)
 
-    {:enum_def, t.name, vs}
+    {:enum_def, t.name, type_tvars(t), vs}
   end
+
+  # a parametric type's tvar params: the distinct tvar field types, in first-seen order
+  # (`type Pair := P(k K, v V)` -> ["K", "V"]). Mirrors Lower's `type_param_tvars/1`.
+  defp type_tvars(t) do
+    t.variants
+    |> Enum.flat_map(fn v -> Enum.map(v.fields, & &1.type) end)
+    |> Enum.filter(&tvar_name?/1)
+    |> Enum.uniq()
+  end
+
+  defp tvar_name?(s) when is_binary(s), do: String.match?(s, ~r/^[A-Z][0-9]*$/)
 
   defp istruct(s) do
     {:struct_def, s.name,
@@ -208,7 +227,15 @@ defmodule Rian.RustModuleFixpointTest do
     # generic borrowed-set branch: a borrowed `&T` binder stored into an owned Vec
     # element is `.clone()`d — closed list elements and a cons head.
     "def dup(x val T) Vec(T) forall T := [x, x]",
-    "def pre(x val T, xs iso Vec(T)) Vec(T) forall T := [x | xs]"
+    "def pre(x val T, xs iso Vec(T)) Vec(T) forall T := [x | xs]",
+    # parametric sum types → `enum Name<K: Clone, …>` (ADR-0061): the params are the
+    # distinct tvar field types in first-seen order; a monomorphic enum keeps a bare name.
+    "type Pair := P(k K, v V)",
+    "type Box := Bx(v T)",
+    # generic builder of a parametric type (ADR-0061 monomorphization): the bare return
+    # `Pair` is instantiated `Pair<K, V>`, and the borrowed `&K`/`&V` payloads are cloned.
+    "type Pair := P(k K, v V)\ndef mk(a val K, b val V) Pair forall K, V := P(k: a, v: b)",
+    "type Box := Bx(v T)\ndef wrap(x val T) Box forall T := Bx(v: x)"
   ]
 
   describe "self-hosting Rust-module fixpoint — Rian emitter vs Rian.Lower.rust_program" do
@@ -329,6 +356,34 @@ defmodule Rian.RustModuleFixpointTest do
 
       # a non-generic identity over a Vec does NOT clone (no borrowed-set)
       refute ported(mod, "def keep(xs iso Vec(Int64)) Vec(Int64) := xs") =~ ".clone()"
+    end
+
+    test "a parametric sum type lowers to `enum Name<…: Clone>`", %{mod: mod} do
+      assert ported(mod, "type Pair := P(k K, v V)") =~
+               "enum Pair<K: Clone, V: Clone> {\n    P { k: K, v: V },\n}"
+
+      assert ported(mod, "type Box := Bx(v T)") =~ "enum Box<T: Clone> {"
+
+      # a monomorphic enum keeps a bare name — the `<…>` is doing real work
+      refute ported(mod, "type Opt := None | Some(Int64)") =~ "enum Opt<"
+    end
+
+    test "a generic builder instantiates the parametric return and clones the payload",
+         %{mod: mod} do
+      out =
+        ported(
+          mod,
+          "type Pair := P(k K, v V)\ndef mk(a val K, b val V) Pair forall K, V := P(k: a, v: b)"
+        )
+
+      # the bare `Pair` return is instantiated with the type's params (no Clone bounds here)
+      assert out =~ "fn mk<K: Clone, V: Clone>(a: &K, b: &V) -> Pair<K, V> {"
+      # the named variant builds `Enum::Ctor { … }` with the borrowed payloads cloned
+      assert out =~ "Pair::P { k: a.clone(), v: b.clone() }"
+
+      wrap = ported(mod, "type Box := Bx(v T)\ndef wrap(x val T) Box forall T := Bx(v: x)")
+      assert wrap =~ "-> Box<T> {"
+      assert wrap =~ "Box::Bx { v: x.clone() }"
     end
   end
 end

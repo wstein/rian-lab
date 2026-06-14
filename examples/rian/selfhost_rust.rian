@@ -18,13 +18,17 @@
 # binder is `let h = h.clone();`-rebound to an owned value). The non-generic
 # call-site owned→borrow coercion is also in: an owned `vec![…]` argument passed to
 # a `&`-typed parameter is `&`-wrapped (`takes(&vec![1, 2])`, via `borrow_prog`). The
-# generic borrowed-set element clone (`clone_owned`) covers the `Vec`-element case: a
-# borrowed `&T` binder stored into a closed list (`[x, x]` -> `vec![x.clone(), …]`) or
-# a cons head (`[x | xs]` -> `__v.insert(0, x.clone())`) is `.clone()`d. The REST of the
-# owned↔borrow coercion — borrowed `&T` in a VARIANT payload (`Some(x)`), owned-`String`/
-# owned-returning-call arg producers, and the `borrow_value` clone-or-`&` for borrowed
-# args at generic call sites — and parametric-type monomorphization (`Vec(Pair)` ->
-# `Vec<Pair<K, V>>`, see `render_inst` below; the variant-payload clone needs it), plus
+# generic borrowed-set element clone (`clone_owned`) covers a borrowed `&T` binder
+# stored into an owned position: a closed list (`[x, x]` -> `vec![x.clone(), …]`), a
+# cons head (`[x | xs]` -> `__v.insert(0, x.clone())`), or a non-`Result` variant payload
+# (`P(k: a, …)` -> `Pair::P { k: a.clone(), … }`). Parametric-enum monomorphization
+# (ADR-0061) is in for the common case: a parametric sum lowers to `enum Name<K: Clone,
+# …>` (`generics`), and a GENERIC builder's bare parametric return is instantiated with
+# the type's params (`Pair` -> `Pair<K, V>`, via `inst_ret`). The REST — a NON-generic
+# builder's concrete instantiation (`Box` -> `Box<i64>`, inferred from the body) and
+# NESTED/param-position parametric types (`Vec(Pair)` -> `Vec<Pair<K, V>>`, the
+# structured-`Ty` `render_inst` below) — plus owned-`String`/owned-returning-call arg
+# producers, the `borrow_value` clone-or-`&` for borrowed args at generic call sites,
 # maps, String-return coercion, the Elixir text target, and struct *patterns* (a
 # reference gap — `Rian.Lower` raises) remain out of scope.
 # ---------------------------------------------------------------------------
@@ -79,13 +83,15 @@ mod SelfhostRust do
   # (`-> T`) clones the borrowed arm body (`T: Clone`, ADR-0061).
   type Func := Func(String, Bool, Vec(String), Vec(Param), String, Vec(Clause))
   type EVar := EVar(String, Vec(String), Bool, Vec(String))
-  type EnumDef := EnumDef(String, Vec(EVar))
+  # a sum type: name, its parametric tvars (`["K", "V"]` for `Pair`, `[]` for a
+  # monomorphic enum), and variants. Parametric types lower to `enum Name<K: Clone, …>`.
+  type EnumDef := EnumDef(String, Vec(String), Vec(EVar))
 
   struct Em(s String, pr Int53)
 
   # `Rian.Lower.rust_program` emits structs, then enums, then functions.
   pub def compile_prog(structs Vec(StructDef), enums Vec(EnumDef), funcs Vec(Func)) String :=
-    join_nn(join_nn(struct_decls(structs), enum_decls(enums)), fn_decls(borrow_prog(funcs)))
+    join_nn(join_nn(struct_decls(structs), enum_decls(enums)), fn_decls(borrow_prog(funcs, enums)))
 
   # ── struct decl ──
   def struct_decls(Vec(StructDef)) String
@@ -109,8 +115,9 @@ mod SelfhostRust do
   def enum_decls([e | rest]) := enum_decl(e) <> "\n\n" <> enum_decls(rest)
 
   def enum_decl(EnumDef) String
-  def enum_decl(EnumDef(name, variants)) :=
-    "#[derive(Clone, Debug, PartialEq)]\nenum " <> name <> " {\n" <> variant_lines(variants) <> "}"
+  def enum_decl(EnumDef(name, tvars, variants)) :=
+    "#[derive(Clone, Debug, PartialEq)]\nenum " <> name <> generics(tvars) <> " {\n" <>
+      variant_lines(variants) <> "}"
 
   def variant_lines(Vec(EVar)) String
   def variant_lines([]) := ""
@@ -154,18 +161,37 @@ mod SelfhostRust do
   # ported, so leaving generic bodies untouched keeps the port honest rather than
   # half-coercing them. The owned-`String`/owned-returning-call producers and scalar
   # literals are likewise deferred (this slice coerces list literals only).
-  def borrow_prog(Vec(Func)) Vec(Func)
-  def borrow_prog(funcs) := borrow_each(funcs, funcs)
+  #
+  # `borrow_prog` also threads the enums so a GENERIC function's bare parametric return
+  # type is instantiated (`Pair` -> `Pair<K, V>`, ADR-0061 monomorphization) using the
+  # type's own params. A non-generic builder's concrete instantiation (`Box` -> `Box<i64>`,
+  # inferred from the body) and nested/param-position parametric types are deferred.
+  def borrow_prog(Vec(Func), Vec(EnumDef)) Vec(Func)
+  def borrow_prog(funcs, enums) := borrow_each(funcs, funcs, enums)
 
-  def borrow_each(Vec(Func), Vec(Func)) Vec(Func)
-  def borrow_each([], _) := []
-  def borrow_each([f | rest], all) := [borrow_func(f, all) | borrow_each(rest, all)]
+  def borrow_each(Vec(Func), Vec(Func), Vec(EnumDef)) Vec(Func)
+  def borrow_each([], _, _) := []
+  def borrow_each([f | rest], all, enums) := [borrow_func(f, all, enums) | borrow_each(rest, all, enums)]
 
-  def borrow_func(Func, Vec(Func)) Func
-  def borrow_func(Func(n, p, [], params, ret, clauses), all) :=
+  def borrow_func(Func, Vec(Func), Vec(EnumDef)) Func
+  def borrow_func(Func(n, p, [], params, ret, clauses), all, _) :=
     Func(n, p, [], params, ret, borrow_clauses(clauses, all))
-  def borrow_func(Func(n, p, tvars, params, ret, clauses), _) :=
-    Func(n, p, tvars, params, ret, clone_clauses(clauses, params))
+  def borrow_func(Func(n, p, tvars, params, ret, clauses), _, enums) :=
+    Func(n, p, tvars, params, inst_ret(ret, enums), clone_clauses(clauses, params))
+
+  # instantiate a generic function's bare parametric return type with the type's params
+  # (`Pair` + `Pair => [K, V]` -> `Pair<K, V>`); a non-parametric return is unchanged.
+  def inst_ret(String, Vec(EnumDef)) String
+  def inst_ret(ret, enums) := inst_with(ret, enum_tvars(ret, enums))
+
+  def inst_with(String, Vec(String)) String
+  def inst_with(ret, []) := ret
+  def inst_with(ret, tvs) := ret <> "<" <> comma_join(tvs) <> ">"
+
+  def enum_tvars(String, Vec(EnumDef)) Vec(String)
+  def enum_tvars(_, []) := []
+  def enum_tvars(name, [EnumDef(n, tvs, _) | rest]) :=
+    if name == n do tvs else enum_tvars(name, rest) end
 
   def borrow_clauses(Vec(Clause), Vec(Func)) Vec(Clause)
   def borrow_clauses([], _) := []
@@ -251,9 +277,9 @@ mod SelfhostRust do
   # head (`[x | xs]` → `__v.insert(0, x.clone())`) — it is `.clone()`d back to an owned
   # `T`. The borrowed set is the clause's `&`-typed plain-var params plus any cons-TAIL
   # binder (slice ELEMENT binders are excluded — `arm_rebinds` already made them owned).
-  # Variant payloads (`Some(x)` → `.clone()` in the reference) and `Ok`/`Err` (which keep
-  # the borrow) are deferred — a generic variant payload needs the parametric-enum
-  # monomorphization that is itself out of scope.
+  # A non-`Result` variant payload is also an owned position (`P(k: a, …)` ->
+  # `Pair::P { k: a.clone(), … }`); `Ok`/`Err` keep the borrow (matching the reference),
+  # so `COk`/`CErr` are not rewritten.
   def clone_clauses(Vec(Clause), Vec(Param)) Vec(Clause)
   def clone_clauses([], _) := []
   def clone_clauses([Clause(pats, g, body) | rest], params) :=
@@ -277,6 +303,7 @@ mod SelfhostRust do
   def clone_owned(Core, Vec(String)) Core
   def clone_owned(CList(es, LClose), bs) := CList(clone_elems(es, bs), LClose)
   def clone_owned(CList(es, LCons(t)), bs) := CList(clone_elems(es, bs), LCons(clone_owned(t, bs)))
+  def clone_owned(CVariant(en, ct, nm, pairs), bs) := CVariant(en, ct, nm, clone_vpairs(pairs, bs))
   def clone_owned(CIf(c, t, e), bs) := CIf(clone_owned(c, bs), clone_owned(t, bs), clone_owned(e, bs))
   def clone_owned(leaf, _) := leaf
 
@@ -288,6 +315,12 @@ mod SelfhostRust do
   def clone_elem(Core, Vec(String)) Core
   def clone_elem(CId(n), bs) := if member(n, bs) do CClone(CId(n)) else CId(n) end
   def clone_elem(e, bs) := clone_owned(e, bs)
+
+  # a non-`Result` variant payload is an owned position too (`Some(x)` ->
+  # `Option::Some(x.clone())`, `P(k: a, …)` -> `Pair::P { k: a.clone(), … }`).
+  def clone_vpairs(Vec(VPair), Vec(String)) Vec(VPair)
+  def clone_vpairs([], _) := []
+  def clone_vpairs([VP(l, v) | rest], bs) := [VP(l, clone_elem(v, bs)) | clone_vpairs(rest, bs)]
 
   # `rust_program` emits plain `fn` for every top-level function (a single Rust
   # module; the `pub?` flag is not a Rust visibility here), so it is ignored.
