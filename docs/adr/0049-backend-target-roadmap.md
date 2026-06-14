@@ -122,6 +122,17 @@ explicit rule, not by momentum:
    portable-core parity — lists/maps/`case`/FFI raise `Unsupported`), which is the rule working as
    intended, not a gap to paper over.
 
+**The gate is mechanized** — `Rian.ConformanceTest` (`test/rian/conformance_test.exs`) compiles and
+*runs* the portable-core corpus (`examples/rian/conformance_core.rian` + `14_test_framework.rian`) on
+every Tier-1 target (`:ex` via `Rian.Test.run`, `:rs` via `rustc --test`, `:js` via `node --test`) plus
+a `reach`-matrix check; a Tier-1 regression fails the build. The corpus is presently **scalar** (`Int53`
+arithmetic / `div`-`rem` / comparison / multi-clause recursion + guards): lists/`Vec` + cons patterns and
+sum-type `match` are portable on `:ex`/`:js` but have open gaps in the **Rust** `@test`-harness lowering
+(duplicate-type / type-mismatch emission), so they are not yet all-Tier-1 green and join the corpus when
+that lands. **JVM audit (2026-06-14):** `Rian.JVM` compiles the scalar corpus but raises `Unsupported`
+on portable-core lists/maps/`case`/structs/strings/FFI (`jvm_test.exs`), so it cannot pass the *full*
+portable-core matrix → **Tier 2 by rule 1**, confirmed.
+
 ### 6. Roadmap sequence
 
 1. **Now:** BEAM (bootstrap) + Rust (parallel) — component-tested.
