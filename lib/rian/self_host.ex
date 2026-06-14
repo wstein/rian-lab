@@ -157,14 +157,14 @@ defmodule Rian.SelfHost do
   # bootstrap terminus (Stage 3: v1==v2) is gated on this reaching the whole
   # pipeline — not on `percent`.
   @composition %{
-    rung: "lex → parse → group → lower → assemble → compile → load",
+    rung: "parse → selfhost_beam Func → SelfhostBeam.compile_forms → inflate → load",
     stages: 4,
     subset:
-      "a whole multi-function module compiled AND loaded by a Rian driver, now over arithmetic + conditionals (`if`/`case`), comparison (`== < > <= >=`) and boolean (`and`/`or`) operators (several functions incl. multi-clause + mutual recursion; literal/variable head patterns, calls, parens)",
-    source: "selfhost_compose_cond.rian",
-    test: "test/rian/compose_cond_fixpoint_test.exs",
+      "a whole multi-function module (arithmetic + `if`/comparison/boolean) compiled by a Rian driver whose BACKEND is the equivalence-locked selfhost_beam port, called CROSS-MODULE — not a toy reimplementation",
+    source: "selfhost_compose_real_beam.rian",
+    test: "test/rian/compose_real_beam_fixpoint_test.exs",
     note:
-      "the stages are wired directly over shared types (no projection glue), and a Rian DRIVER owns the whole loop. Rung 1 (selfhost_compose.rian) composed an expression; rung 2 (selfhost_compose_decl.rian) a single-clause declaration; rung 3 (selfhost_compose_multi.rian) a multi-clause recursive function; rung 4 (selfhost_compose_mod.rian) emitted a whole module's form list; rung 5 (selfhost_compose_driver.rian) closed the loop — `build(src, modname)` calls :compile.forms + :code.load_binary (the two irreducible BEAM toolchain calls, declared as @external(:ex) FFI and counted in the ledger) and returns a LOADED, runnable module, with all orchestration in Rian. Rung 6 widens the driver's surface past arithmetic toward real code: `if`/`else` (lowered to a `case` on the boolean), comparison and boolean operators. The fixpoint calls only build/2 — no Elixir compile/load anywhere — and runs the result identically to the full Elixir toolchain. This is the BEAM-bootstrap terminus shape (ADR-0063 §4): widen the surface until build can compile a slice of the compiler's own source, and the loop closes"
+      "Rungs 1-6 built a driver that owns the source→loaded-module loop, but over a TOY backend (its own hand-rolled `forms`), separate from the verified ports — two disconnected successes. Rung 7 connects them: the driver builds selfhost_beam's `Func` IR and calls the equivalence-locked `SelfhostBeam.compile_forms` ACROSS MODULES (loaded under :\"Elixir.SelfhostBeam\", a Pascal-qualified call — ADR-0041), so stage N's Rian output is stage N+1's Rian input with no projection glue. The `Form`→abstract-form inflation the beam fixpoint did in Elixir is ported into the driver. The cross-module call is composition, not a host crutch (excluded from the FFI ledger); the only host FFI is still :compile.forms/:code.load_binary. The fixpoint calls only build/2 and runs the result identically to the full Elixir toolchain. Earlier rungs (1 expression … 6 if/comparison) widened the front-end surface; this one swaps the toy backend for the verified one. Widening the front-end to the real parser/core ports (so build compiles a slice of the compiler's own source — the v1==v2 fixed point) is the next cut"
   }
 
   @doc """
@@ -287,7 +287,11 @@ defmodule Rian.SelfHost do
     "selfhost_compose_driver.rian" => [":code.load_binary", ":compile.forms"],
     # rung 6 widens the driver's surface (if/comparisons/boolean) but keeps the
     # same two BEAM toolchain calls as its only FFI (ADR-0063 §4 / ADR-0068).
-    "selfhost_compose_cond.rian" => [":code.load_binary", ":compile.forms"]
+    "selfhost_compose_cond.rian" => [":code.load_binary", ":compile.forms"],
+    # rung 7 wires the VERIFIED beam backend into the driver via a cross-module call
+    # to SelfhostBeam.compile_forms (composition — excluded from this count, see
+    # ffi_in_file/1). Its only host FFI is still the two BEAM toolchain calls.
+    "selfhost_compose_real_beam.rian" => [":code.load_binary", ":compile.forms"]
   }
 
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."
@@ -297,6 +301,23 @@ defmodule Rian.SelfHost do
   @doc "All `examples/rian/selfhost_*.rian` source paths."
   @spec selfhost_files() :: [String.t()]
   def selfhost_files, do: Path.wildcard(Path.join(@examples_dir, "selfhost_*.rian"))
+
+  @doc """
+  The `mod <Name>` module names declared across the self-host sources — the set of
+  *sibling self-host ports*. A Pascal-qualified call to one of these (e.g.
+  `SelfhostBeam.compile_forms`) is intra-self-host **composition**, not a host
+  crutch, so `ffi_in_file/1` excludes it from the FFI count (it is the loop closing,
+  tracked by the composition axis — counting it would perversely make composing more
+  verified stages look like more host dependency).
+  """
+  @spec selfhost_module_names() :: [String.t()]
+  def selfhost_module_names do
+    for path <- selfhost_files(),
+        [_, name] <- Regex.scan(~r/^\s*mod\s+(\w+)\s+do/m, File.read!(path)) do
+      name
+    end
+    |> Enum.uniq()
+  end
 
   @doc """
   The *actual* host-FFI constructs a self-host source leans on — the `:ffi`/
@@ -311,6 +332,11 @@ defmodule Rian.SelfHost do
   splices would otherwise be invisible to the ledger — under-reporting the crutch.
   We scan each external spec for `:mod.fun` host MFAs so the toolchain FFI a BEAM
   bootstrap driver leans on (`:compile.forms`, `:code.load_binary`) is counted.
+
+  Cross-module calls to a *sibling self-host port* (`SelfhostBeam.compile_forms`) are
+  excluded: they are composition (one verified stage feeding the next), not a host
+  crutch (see `selfhost_module_names/0`). Genuine host `Mod.fun` calls (`String.to_atom`)
+  stay counted — their module head is not a self-host port.
   """
   @spec ffi_in_file(String.t()) :: [String.t()]
   def ffi_in_file(path) do
@@ -324,7 +350,22 @@ defmodule Rian.SelfHost do
       |> Enum.filter(&(&1.kind in [:ffi, :concurrency]))
       |> Enum.map(& &1.construct)
 
-    (body_ffi ++ external_host_calls(prog)) |> Enum.uniq() |> Enum.sort()
+    siblings = MapSet.new(selfhost_module_names())
+
+    (body_ffi ++ external_host_calls(prog))
+    |> Enum.reject(&sibling_compose_call?(&1, siblings))
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  # true for a Pascal-qualified call `Mod.fun` whose `Mod` is a sibling self-host
+  # port — intra-self-host composition, not host FFI. Host MFAs (`:compile.forms`,
+  # `String.to_atom`) have a non-self-host head and are kept.
+  defp sibling_compose_call?(construct, siblings) do
+    case String.split(construct, ".", parts: 2) do
+      [head, _fun] -> MapSet.member?(siblings, head)
+      _ -> false
+    end
   end
 
   # the `:mod.fun` host MFAs spliced by every `@external(:target, spec)` body in a

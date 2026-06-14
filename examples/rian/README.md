@@ -236,6 +236,21 @@ compile + run on real BEAM bytecode:
   `gcd`/`inrange`, identical to `Rian.Beam`. Widening toward the full Rian surface
   (so `build` can compile a slice of the compiler's own source — the `v1==v2` fixed
   point) continues from here.
+- [selfhost_compose_real_beam.rian](selfhost_compose_real_beam.rian) — **COMPOSITION
+  rung 7** (ADR-0063 Step 3/§4): the first cut connecting the two disconnected
+  successes — per-stage equivalence and the composition loop. Rungs 1-6 used a *toy*
+  backend (the driver's own `forms`); this rung's backend **is** the
+  equivalence-locked [selfhost_beam.rian](selfhost_beam.rian), called **across
+  modules**: the driver builds selfhost_beam's `Func` IR and invokes
+  `SelfhostBeam.compile_forms` (loaded under its `:"Elixir.SelfhostBeam"` atom — a
+  Pascal-qualified call, ADR-0041), so stage N's Rian output is stage N+1's Rian
+  input with no projection glue. The `Form`→abstract-form inflation the beam fixpoint
+  test did in Elixir (`erl_op`/`var_atom`) is ported into the driver. The cross-module
+  call is **composition, not a host crutch** — excluded from the FFI ledger (see
+  `Rian.SelfHost.ffi_in_file/1`); the only host FFI is still
+  `:compile.forms`/`:code.load_binary`. `test/rian/compose_real_beam_fixpoint_test.exs`
+  calls only `build/2` and runs the result, identical to `Rian.Beam`. Widening the
+  *front-end* to the real parser/core ports is the next cut.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
