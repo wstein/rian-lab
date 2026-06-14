@@ -6,8 +6,8 @@ self-hosting (ADR-0063 §4) — the Rian compiler compiling its own source to `.
 **Portable** self-hosting (the compiler lowered to Rust/JS) is a separate, further
 terminus and is *not* measured here.
 
-**55% self-hosted** — 1 stage(s) self-hosted,
-10 partial, 0 not started, of 11.
+**64% self-hosted** — 3 stage(s) self-hosted,
+8 partial, 0 not started, of 11.
 
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
@@ -16,8 +16,8 @@ terminus and is *not* measured here.
 | Expression/pattern parser | frontend | 🟡 partial | `examples/rian/selfhost_parse.rian` · `test/rian/parse_fixpoint_test.exs` | AST equals Rian.Pratt over an arithmetic/precedence slice |
 | Typed Core IR (from_expr/from_pat) | frontend | 🟡 partial | `examples/rian/selfhost_core.rian` · `test/rian/core_fixpoint_test.exs` | surface→Core lowering equals Rian.Core.from_expr over the literal/unary/binary slice; calls/lists/blocks/lambdas remain |
 | Type checker (inference + error sets) | checker | 🟡 partial | `examples/rian/selfhost_checker.rian` · `test/rian/checker_infer_fixpoint_test.exs` | type inference agrees with the REAL Rian.Check.infer over closed integer expressions; env/floats/calls/lambdas/case remain (selfhost_check.rian is a separate TOY-language spike) |
-| Exhaustiveness gate | checker | 🟡 partial | `examples/rian/selfhost_exhaust.rian` · `test/rian/exhaust_fixpoint_test.exs` | single-column nullary-constructor verdict agrees with Maranget useful?/3; ctors-with-args, multi-column, list/literal/range patterns remain |
-| Capability checker | checker | 🟡 partial | `examples/rian/selfhost_cap.rian` · `test/rian/cap_fixpoint_test.exs` | capability→Rust lowering + ref-rejecting BEAM legality equal Rian.Capability over the scalar/String/Vec/nominal slice; deep generics + linearity remain |
+| Exhaustiveness gate | checker | ✅ yes | `examples/rian/selfhost_exhaust.rian` · `test/rian/exhaust_fixpoint_test.exs` | the complete Maranget useful?/3 (specialize/default/signature over single+multi-column matrices, ctors-with-args, finite/infinite types) reproduces Rian.Exhaustiveness.useful? — the gate decision; only the witness/counterexample diagnostic (algorithm I) is unported |
+| Capability checker | checker | ✅ yes | `examples/rian/selfhost_cap.rian` · `test/rian/cap_fixpoint_test.exs` | the full capability→Rust mapping (every Copy width, String, nominal, nested Vec, parametric generics incl. the val-generic quirk) + ref-rejecting BEAM legality equal Rian.Capability over the whole matrix; type-string tokenisation is the type-parser's stage, the BEAM linearity check is native typestate |
 | BEAM abstract-forms backend | backend | 🟡 partial | `examples/rian/selfhost_beam.rian` · `test/rian/beam_emit_fixpoint_test.exs` | abstract forms for the literal/unary/binary slice equal :erl_parse's canonical AST and compile via :compile.forms; strings/calls/lists/case remain (selfhost_codegen.rian is a separate toy stack VM) |
 | Rust/Elixir text backend | backend | 🟡 partial | `examples/rian/selfhost_rust.rian` · `test/rian/rust_emit_fixpoint_test.exs` | precedence-aware Rust emitter equals Rian.Lower.emit_expr(_, :rust) over the literal/unary/binary slice; calls/lists/structs/Elixir-text remain |
 | ECMAScript backend | backend | 🟡 partial | `examples/rian/selfhost_js.rian` · `test/rian/js_fixpoint_test.exs` | expression emitter equals Rian.JS term-for-term over the literal/unary/binary slice; calls/lists/if/case/structs/prims remain |

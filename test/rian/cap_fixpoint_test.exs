@@ -2,45 +2,73 @@ defmodule Rian.CapFixpointTest do
   # async: false — loads a real module into the VM via :code.load_binary.
   use ExUnit.Case, async: false
 
-  alias Rian.{Beam, Capability}
+  alias Rian.{Beam, Capability, TypeStr}
 
   # Self-hosting fixpoint (ADR-0063) for the **capability checker** stage: a
   # Rian-written capability→Rust lowering (examples/rian/selfhost_cap.rian),
-  # compiled to real `.beam`, diffed against the reference `Rian.Capability`.
+  # compiled to real `.beam`, diffed against the reference `Rian.Capability` over
+  # the FULL type vocabulary — every `Copy` width, `String`, nominal types, nested
+  # `Vec(...)`, and parametric generics `Name(A, B, …)`, across all four
+  # capabilities, plus the reference quirk that `val` of a generic borrows the
+  # unlowered source spelling.
   #
-  #   * `rust_param/2` — capability + type -> Rust parameter spelling — must equal
-  #     `Rian.Capability.rust_param/2` over the slice.
-  #   * `beam_legal/1` — the portable-core legality (`ref` rejected, P5) — must
-  #     agree with the reference `beam_legal!/1` (which raises on `ref`).
-  #
-  # Slice: the scalar `Copy` types, `String`, one level of `Vec(...)`, and a bare
-  # nominal type. The remaining vocabulary (deep generics, `Int`, the BEAM
-  # linearity check) is the `:partial` tail (ADR-0063 / docs/self-host-status.md).
+  # The capability stage maps cap+type→Rust; it consumes a type in structured form
+  # (`Ty`). `to_ty/1` here is the type-parser's job (tokenising `"Vec(Int32)"` →
+  # `TVec(TScalar("Int32"))`) — the reference re-parses the string only because the
+  # IR stores types as strings; the mapping itself is fully self-hosted.
 
   setup_all do
     {:ok, mod} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :rian_cap_fixpoint)
     {:ok, mod: mod}
   end
 
+  @copy ~w(Int8 Int16 Int32 Int64 Int128 UInt8 UInt16 UInt32 UInt64 UInt128
+           Int53 Float32 Float64 Bool Char)
+
+  # tokenise a type string into the port's structured `Ty` (the type-parser's job).
+  defp to_ty(s) do
+    cond do
+      s in @copy ->
+        {:t_scalar, s}
+
+      s == "String" ->
+        :t_string
+
+      m = Regex.run(~r/^([A-Za-z_]\w*)\((.*)\)$/, s) ->
+        [_, name, inner] = m
+
+        if name == "Vec",
+          do: {:t_vec, to_ty(inner)},
+          else: {:t_gen, name, Enum.map(TypeStr.split_top_commas(inner), &to_ty/1), s}
+
+      true ->
+        {:t_nom, s}
+    end
+  end
+
   @caps [:iso, :val, :ref, :tag]
 
-  # {reference source-type string, the port's `Ty` injection}
-  @types [
-    {"Int53", :t_int53},
-    {"Int32", :t_int32},
-    {"Bool", :t_bool},
-    {"Float64", :t_float64},
-    {"String", :t_str},
-    {"Vec(Int53)", :t_vec_int53},
-    {"Vec(String)", :t_vec_str},
-    {"Foo", {:t_nom, "Foo"}}
-  ]
+  # the full type vocabulary: every Copy width, String, nominal, nested Vec, and
+  # parametric generics (incl. nesting and a generic that borrows unlowered).
+  @types @copy ++
+           [
+             "String",
+             "Foo",
+             "Vec(Int32)",
+             "Vec(String)",
+             "Vec(Foo)",
+             "Vec(Vec(Int8))",
+             "Option(Int64)",
+             "Pair(Int32, String)",
+             "Vec(Option(Int64))",
+             "Map(String, Vec(Int64))"
+           ]
 
-  describe "self-hosting capability fixpoint — Rian lowering vs Rian.Capability" do
-    test "rust_param agrees with Rian.Capability.rust_param over the whole matrix", %{mod: mod} do
-      for cap <- @caps, {tstr, tport} <- @types do
-        assert mod.rust_param(cap, tport) == Capability.rust_param(cap, tstr),
-               "diverged on #{cap} #{tstr}"
+  describe "self-hosting capability fixpoint — Rian lowering vs Rian.Capability (full)" do
+    test "rust_param agrees with Rian.Capability.rust_param over the WHOLE matrix", %{mod: mod} do
+      for cap <- @caps, t <- @types do
+        assert mod.rust_param(cap, to_ty(t)) == Capability.rust_param(cap, t),
+               "diverged on #{cap} #{t}"
       end
     end
 
@@ -59,27 +87,31 @@ defmodule Rian.CapFixpointTest do
     end
   end
 
-  describe "teeth — the lowering is capability- and type-sensitive (not a lookup constant)" do
-    test "val borrows a non-Copy type but passes a Copy scalar by value", %{mod: mod} do
-      assert mod.rust_param(:val, :t_str) == "&str"
-      assert mod.rust_param(:val, :t_int53) == "i64"
-      # iso owns the same String that val borrows — capability changes the answer.
-      refute mod.rust_param(:iso, :t_str) == mod.rust_param(:val, :t_str)
+  describe "teeth — the full mapping is capability- and structure-sensitive" do
+    test "val borrows non-Copy but passes Copy by value; every width maps", %{mod: mod} do
+      assert mod.rust_param(:val, to_ty("String")) == "&str"
+      assert mod.rust_param(:val, to_ty("Int53")) == "i64"
+      assert mod.rust_param(:val, to_ty("UInt128")) == "u128"
+      refute mod.rust_param(:iso, to_ty("String")) == mod.rust_param(:val, to_ty("String"))
     end
 
-    test "ref emits the BEAM-illegal &mut form", %{mod: mod} do
-      assert mod.rust_param(:ref, :t_int53) == "&mut i64"
-      refute mod.rust_param(:ref, :t_int53) == mod.rust_param(:tag, :t_int53)
+    test "nested generics lower recursively under iso/owned", %{mod: mod} do
+      assert mod.rust_param(:iso, to_ty("Vec(Vec(Int8))")) == "Vec<Vec<i8>>"
+      assert mod.rust_param(:iso, to_ty("Option(Int64)")) == "Option<i64>"
+      assert mod.rust_param(:iso, to_ty("Map(String, Vec(Int64))")) == "Map<String, Vec<i64>>"
     end
 
-    test "only ref is BEAM-illegal — the portable core is val/iso/tag (P5)", %{mod: mod} do
+    test "the reference quirk: val of a generic borrows the UNLOWERED spelling", %{mod: mod} do
+      assert mod.rust_param(:val, to_ty("Option(Int64)")) == "&Option(Int64)"
+      # ...whereas iso lowers it — the two must differ.
+      refute mod.rust_param(:val, to_ty("Option(Int64)")) ==
+               mod.rust_param(:iso, to_ty("Option(Int64)"))
+    end
+
+    test "ref emits &mut and only ref is BEAM-illegal (P5)", %{mod: mod} do
+      assert mod.rust_param(:ref, to_ty("Int53")) == "&mut i64"
       refute mod.beam_legal(:ref)
       assert mod.beam_legal(:iso) and mod.beam_legal(:val) and mod.beam_legal(:tag)
-    end
-
-    test "the type changes the spelling (not constant per capability)", %{mod: mod} do
-      refute mod.rust_param(:iso, :t_str) == mod.rust_param(:iso, :t_vec_int53)
-      refute mod.rust_param(:tag, :t_int53) == mod.rust_param(:tag, {:t_nom, "Foo"})
     end
   end
 end

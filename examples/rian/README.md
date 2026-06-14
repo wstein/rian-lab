@@ -89,21 +89,25 @@ compile + run on real BEAM bytecode:
   error** via a `struct Mismatch(op, expected, got)`. The diagnostic record is
   the first place a checker wants a `struct`; it drove the BEAM **struct**
   increment (a struct value is a tagged map, read by field access).
-- [selfhost_cap.rian](selfhost_cap.rian) — the **capability checker** port
-  (ADR-0063, ADR-0055): maps a reference capability (`val`/`iso`/`tag`/`ref`) +
-  type to its Rust parameter spelling and decides BEAM legality, **fixpoint-locked**
-  against `Rian.Capability` (`test/rian/cap_fixpoint_test.exs`). Shows the real
-  capability logic — `val` borrows a non-`Copy` type but passes a `Copy` scalar by
-  value, `ref` is the BEAM-illegal `&mut` excluded from the portable core (P5).
-  Covers the scalar/`String`/`Vec`/nominal slice; deep generics and the linearity
-  check remain.
-- [selfhost_exhaust.rian](selfhost_exhaust.rian) — the **exhaustiveness gate**
-  port (ADR-0063): decides whether a single-column `case` over a finite sum of
-  nullary constructors is exhaustive — a column is exhaustive iff it has a
-  wildcard or covers the whole signature, the heart of the Maranget usefulness
-  check. **Fixpoint-locked** against the real `Rian.Exhaustiveness.useful?`
-  (`test/rian/exhaust_fixpoint_test.exs`). Constructors with arguments,
-  multi-column matrices, and list/literal/range patterns remain.
+- [selfhost_cap.rian](selfhost_cap.rian) — the **capability checker**, fully
+  self-hosted (ADR-0063, ADR-0055): the complete capability→Rust mapping
+  (`val`/`iso`/`tag`/`ref` × every `Copy` width, `String`, nominal types, nested
+  `Vec(...)`, parametric generics `Name(A, B)` — including the reference quirk that
+  `val` of a generic borrows the unlowered spelling) plus `ref`-rejecting BEAM
+  legality, **equivalence-locked** against `Rian.Capability` over the whole matrix
+  (`test/rian/cap_fixpoint_test.exs`). `val` borrows a non-`Copy` type but passes a
+  `Copy` scalar by value; `ref` is the BEAM-illegal `&mut` outside the portable
+  core (P5). Type-string tokenisation is the type-parser's stage; the BEAM
+  linearity check is native typestate.
+- [selfhost_exhaust.rian](selfhost_exhaust.rian) — the **exhaustiveness gate**,
+  fully self-hosted (ADR-0063): the complete Maranget usefulness check `U(P, q)`
+  with `specialize`/`default`/`signature` over single- and multi-column matrices,
+  constructors with arguments (arity-specialised), wildcards, and finite/infinite
+  signatures — patterns are `PWild | PCtor(name, args)`, so lists/tuples/sums are
+  all just constructors. **Equivalence-locked** against the real
+  `Rian.Exhaustiveness.useful?` (`test/rian/exhaust_fixpoint_test.exs`); the typing
+  env is searched linearly, so the port is FFI-free. Exhaustiveness is then `not
+  useful(…, [PWild…])`; only the witness/counterexample diagnostic remains.
 - [selfhost_js.rian](selfhost_js.rian) — the **ECMAScript backend** port
   (ADR-0063, ADR-0049 Tier 1): emits JS source text from the Core IR, with the
   operator remapping that is the point (`and`→`&&`, `==`→`===`, `<>`→`+`,

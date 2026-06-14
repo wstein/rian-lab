@@ -87,21 +87,21 @@ defmodule Rian.SelfHost do
       id: :exhaustiveness,
       name: "Exhaustiveness gate",
       role: :checker,
-      status: :partial,
+      status: :self_hosted,
       source: "selfhost_exhaust.rian",
       test: "test/rian/exhaust_fixpoint_test.exs",
       note:
-        "single-column nullary-constructor verdict agrees with Maranget useful?/3; ctors-with-args, multi-column, list/literal/range patterns remain"
+        "the complete Maranget useful?/3 (specialize/default/signature over single+multi-column matrices, ctors-with-args, finite/infinite types) reproduces Rian.Exhaustiveness.useful? — the gate decision; only the witness/counterexample diagnostic (algorithm I) is unported"
     },
     %{
       id: :capability,
       name: "Capability checker",
       role: :checker,
-      status: :partial,
+      status: :self_hosted,
       source: "selfhost_cap.rian",
       test: "test/rian/cap_fixpoint_test.exs",
       note:
-        "capability→Rust lowering + ref-rejecting BEAM legality equal Rian.Capability over the scalar/String/Vec/nominal slice; deep generics + linearity remain"
+        "the full capability→Rust mapping (every Copy width, String, nominal, nested Vec, parametric generics incl. the val-generic quirk) + ref-rejecting BEAM legality equal Rian.Capability over the whole matrix; type-string tokenisation is the type-parser's stage, the BEAM linearity check is native typestate"
     },
     %{
       id: :beam_backend,
