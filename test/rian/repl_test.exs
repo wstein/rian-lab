@@ -442,4 +442,41 @@ defmodule Rian.ReplTest do
       assert Map.get(binds, "ghost") == nil
     end
   end
+
+  describe "rebinding (`:=` shadows; the prior value stays in scope for the RHS)" do
+    # Regression: a rebind whose RHS references the prior binding must keep the
+    # earlier statement in scope when the session recompiles (it used to drop it,
+    # producing `unbound_var :A`).
+    test "a self-referential rebind reads the prior value" do
+      s = Repl.new()
+      {_, s} = eval(s, "a := 8")
+      {_, s} = eval(s, "a := 8 + 9")
+      assert {{:bound, "a", 25, _}, s} = eval(s, "a := 8 + a")
+      assert {{:value, 25, _}, _} = eval(s, "a")
+    end
+
+    test "a back-reference: an earlier bind keeps its value when a referent is rebound" do
+      s = Repl.new()
+      {_, s} = eval(s, "a := 8")
+      {_, s} = eval(s, "b := a + 1")
+      {_, s} = eval(s, "a := 100")
+      assert {{:value, 9, _}, _} = eval(s, "b")
+      assert {{:value, 100, _}, _} = eval(s, "a")
+    end
+
+    test "`\\env` shows a rebound name once" do
+      s = Repl.new()
+      {_, s} = eval(s, "a := 1")
+      {_, s} = eval(s, "a := 2")
+      assert %{bound: ["a"]} = Repl.info(s)
+    end
+
+    test "top-level `<~` (mutation) is rejected with a clear message, not a raw lowering error" do
+      s = Repl.new()
+      {_, s} = eval(s, "a := 8")
+      assert {{:error, msg}, ^s} = eval(s, "a <~ 8 + a")
+      assert msg =~ "in-place mutation"
+      assert msg =~ "Use `:=`"
+    end
+  end
 end

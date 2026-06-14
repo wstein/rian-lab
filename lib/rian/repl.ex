@@ -132,7 +132,9 @@ defmodule Rian.Repl do
   def info(%Session{units: units, binds: binds}) do
     %{
       defined: units |> Enum.flat_map(fn {names, _} -> names end) |> Enum.uniq(),
-      bound: Enum.map(binds, fn {name, _} -> name end)
+      # binds keep entry order (rebinds shadow, not replace — see `bind_with_type`);
+      # a name is shown once for `\env`
+      bound: binds |> Enum.map(fn {name, _} -> name end) |> Enum.uniq()
     }
   end
 
@@ -285,6 +287,17 @@ defmodule Rian.Repl do
       {:ok, {:block, [{:typed_bind, name, ann, _rhs}]}} ->
         bind_with_type(s, input, name, ann)
 
+      # `name <~ expr` is in-place *mutation* of a `ref`/`iso` binding (ADR-0039),
+      # not a rebind. A REPL top-level `:=` binding is immutable — there is no
+      # mutable cell to mutate (and no backend lowers `<~` yet). Rebind with `:=`,
+      # which shadows (ADR-0034). Caught here for a clear message instead of the
+      # raw "abstract-forms: operator `<~`".
+      {:ok, {:block, [{:expr, {:bin, "<~", _, _}}]}} ->
+        {{:error,
+          "`<~` is in-place mutation of a `ref`/`iso` binding (ADR-0039), not valid at the " <>
+            "REPL top level — a top-level `:=` binding is immutable. Use `:=` to rebind " <>
+            "(it shadows the old value)."}, s}
+
       {:ok, _block} ->
         eval_expr(s, input)
 
@@ -302,7 +315,14 @@ defmodule Rian.Repl do
   # A typed binding displays at its declared type (ADR-0034 §1); an untyped one
   # at its inferred type. Both share the recompile-and-run path.
   defp bind_with_type(s, input, name, type) do
-    binds = Enum.reject(s.binds, fn {n, _} -> n == name end) ++ [{name, String.trim(input)}]
+    # Append in entry order — do NOT drop the prior binding of `name`. A rebind
+    # whose RHS references the old value (`a := 8 + a`) or a later bind that
+    # depends on it (`b := a + 1` then `a := 100`) needs the earlier statement
+    # still in scope when the session recompiles. Rian `:=` *shadows* (ADR-0034),
+    # so the spliced block `a := 8 ; a := 8 + 9 ; a := 8 + a` is correct and the
+    # Beam emitter renames each to a fresh var; `bind_env`/`describe` take the
+    # latest binding per name, and `info/1` deduplicates for display.
+    binds = s.binds ++ [{name, String.trim(input)}]
 
     case run(s, binds, s.units, name) do
       {:ok, value} -> {{:bound, name, value, type}, %{s | binds: binds}}

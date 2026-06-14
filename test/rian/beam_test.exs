@@ -787,4 +787,33 @@ defmodule Rian.BeamTest do
       assert "-spec id(any()) -> any()." in a
     end
   end
+
+  describe "`:=` shadowing in a block (ADR-0034 — Erlang is single-assignment)" do
+    # Regression: a rebind `x := x * 10` must lower to a FRESH Erlang var, not a
+    # second `X = …` match against the already-bound `X` (a runtime MatchError).
+    test "the tour's shadow_demo pattern runs" do
+      {:ok, m} =
+        Beam.load(
+          "def shadow_demo(n Int53) Int53\n  x := n + 1\n  x := x * 10\n  x\nend",
+          :beam_shadow_demo
+        )
+
+      assert m.shadow_demo(1) == 20
+    end
+
+    test "a self-referential rebind reads the prior binding" do
+      {:ok, m} =
+        Beam.load(
+          "def g(n Int53) Int53\n  a := n + n\n  a := a + 1\n  a\nend",
+          :beam_shadow_selfref
+        )
+
+      assert m.g(8) == 17
+    end
+
+    test "a parameter can be shadowed by a later bind of the same name" do
+      {:ok, m} = Beam.load("def f(n Int53) Int53\n  n := n + 100\n  n\nend", :beam_shadow_param)
+      assert m.f(5) == 105
+    end
+  end
 end

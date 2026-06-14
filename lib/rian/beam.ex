@@ -414,7 +414,7 @@ defmodule Rian.Beam do
     core_pats = Enum.map(pats, &Core.from_pat/1)
     # the names bound by the clause head are in scope for the body — so a call to
     # one of them is a *variable application* (a fun value), not a local call
-    scope = Enum.reduce(core_pats, MapSet.new(), &pat_vars/2)
+    scope = Enum.reduce(core_pats, %{}, &pat_vars/2)
 
     {:clause, @ln, Enum.map(core_pats, &pat_form/1), guard_form(guard_core(guard), scope),
      body_forms(body, scope, rtable)}
@@ -433,11 +433,45 @@ defmodule Rian.Beam do
   defp body_forms(src, scope, rtable),
     do: block_forms(Rian.Range.expand_of(Core.from_expr(Pratt.parse_body(src)), rtable), scope)
 
-  defp stmt_form({:bind, n, e}, scope), do: {:match, @ln, var_form(n), expr_form(e, scope)}
+  # A block statement lowers to one Erlang form *and* threads the block scope
+  # (the `map_reduce` reducer in `block_forms`). A `:=` bind emits `Var = Expr`;
+  # if the name is already bound it **shadows** (ADR-0034) — and since Erlang is
+  # single-assignment, the rebind takes a FRESH Erlang var (`X` -> `X@1` -> `X@2`)
+  # and later references to the name resolve to it. The RHS is lowered against the
+  # OLD scope, so `a := 8 + a` reads the prior `a` (not the var being bound).
+  defp stmt_form({:bind, n, e}, s) do
+    rhs = expr_form(e, s)
+    {var, s2} = bind_var(n, s)
+    {{:match, @ln, {:var, @ln, var}, rhs}, s2}
+  end
+
   # the declared type is erased at lowering — `Int*` is representation intent,
   # not a portable overflow contract (ADR-0034 §1); the value lowers unchanged.
-  defp stmt_form({:typed_bind, n, _t, e}, scope), do: stmt_form({:bind, n, e}, scope)
-  defp stmt_form({:expr, e}, scope), do: expr_form(e, scope)
+  defp stmt_form({:typed_bind, n, _t, e}, s), do: stmt_form({:bind, n, e}, s)
+  defp stmt_form({:expr, e}, s), do: {expr_form(e, s), s}
+
+  # the Erlang var to bind `n` to: its canonical var on the first bind in scope,
+  # else a shadow var derived by bumping the current var's version (`X` -> `X@1`).
+  # The version lives in the var name, so it is deterministic and unique per name
+  # across nested blocks without a counter (user names can't contain `@`).
+  defp bind_var(n, s) do
+    case Map.get(s, n) do
+      nil ->
+        base = var_atom(n)
+        {base, Map.put(s, n, base)}
+
+      cur ->
+        fresh = bump_var(cur)
+        {fresh, Map.put(s, n, fresh)}
+    end
+  end
+
+  defp bump_var(cur) do
+    case String.split(Atom.to_string(cur), "@") do
+      [base] -> String.to_atom(base <> "@1")
+      [base, k] -> String.to_atom(base <> "@" <> Integer.to_string(String.to_integer(k) + 1))
+    end
+  end
 
   # ── expression forms (consume the typed core IR, Rian.Core) ────────────
   # `scope` is the set of in-scope bound variable names (clause-head + `:=`
@@ -451,9 +485,12 @@ defmodule Rian.Beam do
   defp expr_form(%EId{name: b}, _s) when b in ~w(true false), do: {:atom, @ln, String.to_atom(b)}
   # `pi` is the math constant — `:math.pi()`, matching the text emitter (`Rian.Lower`)
   defp expr_form(%EId{name: "pi"}, s), do: remote_call(:math, "pi", [], s)
-  # a bare PascalCase id is a nullary sum-variant value -> its snake atom tag
-  defp expr_form(%EId{name: x}, _s),
-    do: if(pascal?(x), do: {:atom, @ln, tag(x)}, else: var_form(x))
+  # a bare PascalCase id is a nullary sum-variant value -> its snake atom tag; a
+  # lowercase id is a variable — resolved through the scope to its *current*
+  # Erlang var (a `:=` shadow rebinds the name to a fresh var; unshadowed names
+  # map to their canonical var, so this is identical to the old behaviour)
+  defp expr_form(%EId{name: x}, s),
+    do: if(pascal?(x), do: {:atom, @ln, tag(x)}, else: {:var, @ln, Map.get(s, x, var_atom(x))})
 
   defp expr_form(%EAtom{name: a}, _s), do: {:atom, @ln, String.to_atom(a)}
   defp expr_form(%EUnary{op: "-", arg: x}, s), do: {:op, @ln, :-, expr_form(x, s)}
@@ -556,7 +593,7 @@ defmodule Rian.Beam do
 
     cond do
       pascal?(f) -> {:tuple, @ln, [{:atom, @ln, tag(f)} | arg_forms]}
-      MapSet.member?(s, f) -> {:call, @ln, var_form(f), arg_forms}
+      Map.has_key?(s, f) -> {:call, @ln, {:var, @ln, Map.fetch!(s, f)}, arg_forms}
       true -> {:call, @ln, {:atom, @ln, String.to_atom(f)}, arg_forms}
     end
   end
@@ -568,7 +605,7 @@ defmodule Rian.Beam do
   # lambda `(a, b) -> body` -> an Erlang `fun` clause; its params extend the scope
   defp expr_form(%ELambda{params: params, body: body}, s) do
     names = Enum.map(params, fn {n, _} -> n end)
-    inner = Enum.reduce(names, s, &MapSet.put(&2, &1))
+    inner = Enum.reduce(names, s, &Map.put(&2, &1, var_atom(&1)))
 
     {:fun, @ln,
      {:clauses, [{:clause, @ln, Enum.map(names, &var_form/1), [], body_seq(body, inner)}]}}
@@ -588,7 +625,7 @@ defmodule Rian.Beam do
   defp expr_form(%ECapture{body: body}, s) do
     n = cap_arity(body)
     names = for i <- 1..n//1, do: "caparg_#{i}"
-    inner = Enum.reduce(names, s, &MapSet.put(&2, &1))
+    inner = Enum.reduce(names, s, &Map.put(&2, &1, var_atom(&1)))
 
     {:fun, @ln,
      {:clauses, [{:clause, @ln, Enum.map(names, &var_form/1), [], body_seq(body, inner)}]}}
@@ -667,19 +704,13 @@ defmodule Rian.Beam do
   defp block_forms(%EBlock{stmts: []}, _s), do: [{:atom, @ln, nil}]
 
   defp block_forms(%EBlock{stmts: stmts}, scope) do
-    {forms, _} =
-      Enum.map_reduce(stmts, scope, fn stmt, s -> {stmt_form(stmt, s), grow_scope(s, stmt)} end)
-
+    {forms, _} = Enum.map_reduce(stmts, scope, &stmt_form/2)
     forms
   end
 
-  defp grow_scope(s, {:bind, n, _}), do: MapSet.put(s, n)
-  defp grow_scope(s, {:typed_bind, n, _, _}), do: MapSet.put(s, n)
-  defp grow_scope(s, _), do: s
-
   # collect the variable names a core pattern binds (for scope tracking)
-  defp pat_vars(%Core.PVar{name: n}, acc), do: MapSet.put(acc, n)
-  defp pat_vars(%Core.PAs{name: n, pat: p}, acc), do: pat_vars(p, MapSet.put(acc, n))
+  defp pat_vars(%Core.PVar{name: n}, acc), do: Map.put(acc, n, var_atom(n))
+  defp pat_vars(%Core.PAs{name: n, pat: p}, acc), do: pat_vars(p, Map.put(acc, n, var_atom(n)))
   defp pat_vars(%Core.PTuple{elems: ps}, acc), do: Enum.reduce(ps, acc, &pat_vars/2)
 
   defp pat_vars(%Core.PList{elems: ps, tail: t}, acc),
@@ -774,9 +805,13 @@ defmodule Rian.Beam do
   defp bin_seg(form), do: {:bin_element, @ln, form, :default, [:binary]}
 
   # Rian's snake_case binding -> a legal Erlang variable (leading-cap, `_` kept).
-  defp var_form("_"), do: {:var, @ln, :_}
-  defp var_form("_" <> _ = u), do: {:var, @ln, String.to_atom(u)}
-  defp var_form(x), do: {:var, @ln, String.to_atom(capitalize_first(x))}
+  defp var_form(x), do: {:var, @ln, var_atom(x)}
+
+  # the canonical Erlang variable atom for a Rian name (`n` -> `:N`); `_`/`_x`
+  # discards pass through unchanged
+  defp var_atom("_"), do: :_
+  defp var_atom("_" <> _ = u), do: String.to_atom(u)
+  defp var_atom(x), do: String.to_atom(capitalize_first(x))
 
   defp capitalize_first(<<c::utf8, rest::binary>>), do: String.upcase(<<c::utf8>>) <> rest
 
