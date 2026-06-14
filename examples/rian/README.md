@@ -117,14 +117,16 @@ compile + run on real BEAM bytecode:
   `Rian.Exhaustiveness.useful?` (`test/rian/exhaust_fixpoint_test.exs`); the typing
   env is searched linearly, so the port is FFI-free. Exhaustiveness is then `not
   useful(…, [PWild…])`; only the witness/counterexample diagnostic remains.
-- [selfhost_js.rian](selfhost_js.rian) — the **ECMAScript backend** port
-  (ADR-0063, ADR-0049 Tier 1): emits JS source text from the Core IR, with the
-  operator remapping that is the point (`and`→`&&`, `==`→`===`, `<>`→`+`,
-  atoms→quoted strings, binary always parenthesised). **Fixpoint-locked** against
-  the reference `Rian.JS` emitter — the port's output equals the `return`
-  expression `Rian.JS.compile` produces, term-for-term
-  (`test/rian/js_fixpoint_test.exs`). Covers the literal/unary/binary slice;
-  calls, lists, `if`/`case`, structs, and prims remain.
+- [selfhost_js.rian](selfhost_js.rian) — the **ECMAScript backend**, fully
+  self-hosted (ADR-0063, ADR-0049 Tier 1): a whole-module emitter — functions with
+  multi-clause **pattern dispatch**, sum variants as tagged arrays
+  (`["Ctor", …]`), structs (`{__struct__: …}`), tuples/lists (with `...`-spread
+  tail)/maps, `.field`, `if` (ternary), `case` (IIFE), operators (`and`→`&&`,
+  `==`→`===`, `<>`→`+`, `div`→`Math.trunc`), atoms→strings, primitives.
+  **Equivalence-locked** against `Rian.JS.compile` over its expression+function
+  surface (`test/rian/js_module_fixpoint_test.exs`). Protocol dispatch, the
+  whole-program int-mode, and `Rian.Shadow` are out of scope (program-level /
+  separate-subsystem concerns).
 - [selfhost_rust.rian](selfhost_rust.rian) — the **Rust text backend** port
   (ADR-0063, ADR-0049): emits Rust source from Core. Unlike JS, it is
   **precedence-aware** — it threads each node's precedence and parenthesises only

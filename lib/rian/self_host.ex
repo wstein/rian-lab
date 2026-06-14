@@ -128,11 +128,11 @@ defmodule Rian.SelfHost do
       id: :js_backend,
       name: "ECMAScript backend",
       role: :backend,
-      status: :partial,
+      status: :self_hosted,
       source: "selfhost_js.rian",
-      test: "test/rian/js_fixpoint_test.exs",
+      test: "test/rian/js_module_fixpoint_test.exs",
       note:
-        "expression emitter equals Rian.JS term-for-term over the literal/unary/binary/call slice; lists/if/case/structs/prims remain"
+        "the whole-module JS emitter — functions with multi-clause pattern dispatch, sum variants (tagged arrays), structs/tuples/lists/maps, .field, if (ternary), case (IIFE), operators, atoms, prims — equals Rian.JS.compile; protocol dispatch + whole-program int-mode + Shadow are out of scope (program-level / separate-subsystem concerns)"
     },
     %{
       id: :jvm_backend,
