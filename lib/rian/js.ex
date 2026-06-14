@@ -598,8 +598,11 @@ defmodule Rian.JS do
   defp js_op("or"), do: "||"
   defp js_op(op) when op in ~w(+ - * < <= > >= %), do: op
   defp js_op("<>"), do: "+"
-  # `div` is handled by a dedicated `expr_js(%EBin{op: "div"})` clause above
-  # (ECMAScript has no integer-division operator — `/` is float), not here.
+  # float division: ECMAScript `/` *is* IEEE-754 float division, which is exactly
+  # what Rian `/` means (the checker types it `Float64`, ADR-0049). `Float64` is a
+  # native JS `number`, so this is portable. (Integer `div` is the dedicated
+  # `expr_js(%EBin{op: "div"})` clause above — `Math.trunc(l / r)`.)
+  defp js_op("/"), do: "/"
   defp js_op("rem"), do: "%"
   defp js_op(op), do: raise(Unsupported, "ecmascript: operator `#{op}`")
 

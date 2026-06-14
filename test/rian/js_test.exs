@@ -46,6 +46,16 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "float `/` lowers to native JS division (ADR-0049 gap closed)" do
+      js = JS.compile("def half(x Float64) Float64 := x / 2.0")
+      assert js =~ "(x / 2.0)"
+
+      case node_eval(js, "half(7.0)") do
+        :no_node -> :ok
+        out -> assert out == "3.5"
+      end
+    end
+
     test "multi-clause with a guard lowers to a dispatcher (binds precede the guard)" do
       js =
         JS.compile("""
@@ -435,10 +445,10 @@ defmodule Rian.JSTest do
     end
 
     test "an operator with no JS equivalent raises Unsupported (js_op default)" do
-      # `/` is a parsed infix op (ADR float division) but has no js_op clause —
-      # JS uses `div`/`rem`; the bare `/` must raise rather than emit garbage.
-      assert_raise JS.Unsupported, ~r/operator `\/`/, fn ->
-        JS.compile("def f(a Int, b Int) Int := a / b")
+      # `in` (membership) has no js_op clause yet — it must raise rather than emit
+      # garbage. (Float `/` now *does* lower — see the float-division test above.)
+      assert_raise JS.Unsupported, ~r/operator `in`/, fn ->
+        JS.compile("def f(a Int, xs Vec(Int)) Bool := a in xs")
       end
     end
   end

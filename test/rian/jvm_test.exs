@@ -35,6 +35,17 @@ defmodule Rian.JVMTest do
       assert kt =~ "(n * 2L)"
     end
 
+    test "float `/` lowers to Kotlin Double division (integer `div` stays `/` on Long)" do
+      kt = JVM.compile("def half(x Float64) Float64 := x / 2.0")
+      assert kt =~ "fun half(a0: Double): Double"
+      assert kt =~ "(x / 2.0)"
+
+      case kotlin_run(kt, ~s|println(half(7.0))|) do
+        :no_jvm -> :ok
+        out -> assert out == "3.5"
+      end
+    end
+
     test "a multi-clause function lowers to an if-dispatcher with Long literals" do
       kt =
         JVM.compile("""

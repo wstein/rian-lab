@@ -77,8 +77,9 @@ Most of the ECMAScript target is already specified across the corpus:
   truncate-toward-zero, matching the BEAM) must **not** lower to a bare `/`. The emitter is mode-aware
   (`expr_js(%EBin{op: "div"})`): **number-mode** (`Int53`/`Int32`) → `Math.trunc(l / r)`; **BigInt-mode**
   (`Int`) → `l / r` (BigInt `/` already truncates toward zero, so it matches `div` for both signs).
-  Float division (`/`, which the checker types `Float64`) has **no JS lowering yet** and raises
-  `Unsupported` — a gap, not a silent miscompile.
+  Float division (`/`, which the checker types `Float64`) lowers to **native JS `/`** (`js_op("/")`):
+  `Float64` is a JS `number`, and ECMAScript `/` *is* IEEE-754 float division — exactly `/`'s meaning.
+  The JVM emitter is symmetric (`kt_op("/")` → Kotlin `Double` `/`).
 - Effects **erase** to ambient JS IO (ADR-0048); the event loop **fits the sequential core** (ADR-0031 —
   no OTP off-BEAM).
 - Protocol dispatch → **dictionary/vtable objects** (ADR-0042 JS note, confirmed by the PureScript study).

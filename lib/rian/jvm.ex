@@ -292,6 +292,10 @@ defmodule Rian.JVM do
   # Long `/` is integer division in Kotlin (matches Rian `div`); `%` is `rem`
   defp kt_op("div"), do: "/"
   defp kt_op("rem"), do: "%"
+  # float division: Rian `/` is always `Float64` (ADR-0049) -> a Kotlin `Double`, on
+  # which `/` is IEEE-754 float division. (Kotlin disambiguates by operand type:
+  # `Long / Long` from `div` is integer division, `Double / Double` here is float.)
+  defp kt_op("/"), do: "/"
   defp kt_op(op) when op in ~w(+ - * < <= > >=), do: op
   defp kt_op(op), do: raise(Unsupported, "jvm: operator `#{op}`")
 
