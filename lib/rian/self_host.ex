@@ -160,11 +160,11 @@ defmodule Rian.SelfHost do
     rung: "lex → parse → group → lower → assemble → compile → load",
     stages: 4,
     subset:
-      "a whole multi-function module over arithmetic, compiled AND loaded by a Rian driver (several functions incl. multi-clause + mutual recursion; literal/variable head patterns, calls, `+ - *`, parens)",
-    source: "selfhost_compose_driver.rian",
-    test: "test/rian/compose_driver_fixpoint_test.exs",
+      "a whole multi-function module compiled AND loaded by a Rian driver, now over arithmetic + conditionals (`if`/`case`), comparison (`== < > <= >=`) and boolean (`and`/`or`) operators (several functions incl. multi-clause + mutual recursion; literal/variable head patterns, calls, parens)",
+    source: "selfhost_compose_cond.rian",
+    test: "test/rian/compose_cond_fixpoint_test.exs",
     note:
-      "the stages are wired directly over shared types (no projection glue), and a Rian DRIVER now owns the whole loop. Rung 1 (selfhost_compose.rian) composed an expression; rung 2 (selfhost_compose_decl.rian) a single-clause declaration; rung 3 (selfhost_compose_multi.rian) a multi-clause recursive function; rung 4 (selfhost_compose_mod.rian) emitted a whole module's form list; rung 5 (capstone) closes the loop — `build(src, modname)` calls :compile.forms + :code.load_binary (the two irreducible BEAM toolchain calls, declared as @external(:ex) FFI and counted in the ledger) and returns a LOADED, runnable module, with all orchestration in Rian. The fixpoint calls only build/2 — no Elixir compile/load anywhere — and runs the result identically to the full Elixir toolchain. This is the BEAM-bootstrap terminus shape (ADR-0063 §4): feed build a slice of the compiler's own source and the loop closes"
+      "the stages are wired directly over shared types (no projection glue), and a Rian DRIVER owns the whole loop. Rung 1 (selfhost_compose.rian) composed an expression; rung 2 (selfhost_compose_decl.rian) a single-clause declaration; rung 3 (selfhost_compose_multi.rian) a multi-clause recursive function; rung 4 (selfhost_compose_mod.rian) emitted a whole module's form list; rung 5 (selfhost_compose_driver.rian) closed the loop — `build(src, modname)` calls :compile.forms + :code.load_binary (the two irreducible BEAM toolchain calls, declared as @external(:ex) FFI and counted in the ledger) and returns a LOADED, runnable module, with all orchestration in Rian. Rung 6 widens the driver's surface past arithmetic toward real code: `if`/`else` (lowered to a `case` on the boolean), comparison and boolean operators. The fixpoint calls only build/2 — no Elixir compile/load anywhere — and runs the result identically to the full Elixir toolchain. This is the BEAM-bootstrap terminus shape (ADR-0063 §4): widen the surface until build can compile a slice of the compiler's own source, and the loop closes"
   }
 
   @doc """
@@ -284,7 +284,10 @@ defmodule Rian.SelfHost do
     # the composition-driver capstone owns the whole source->loaded-module loop in
     # Rian; the two irreducible BEAM toolchain calls are @external(:ex) FFI (ADR-0068),
     # counted here. Everything between them is portable Rian (ADR-0063 §4).
-    "selfhost_compose_driver.rian" => [":code.load_binary", ":compile.forms"]
+    "selfhost_compose_driver.rian" => [":code.load_binary", ":compile.forms"],
+    # rung 6 widens the driver's surface (if/comparisons/boolean) but keeps the
+    # same two BEAM toolchain calls as its only FFI (ADR-0063 §4 / ADR-0068).
+    "selfhost_compose_cond.rian" => [":code.load_binary", ":compile.forms"]
   }
 
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."

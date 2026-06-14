@@ -223,6 +223,19 @@ compile + run on real BEAM bytecode:
   identical to `Rian.Beam`. This is the **BEAM-bootstrap terminus shape** (§4): feed
   `build` a slice of the compiler's own source and the loop closes. (The portable
   terminus — compiling the compiler to Rust/JS — is separate and further.)
+- [selfhost_compose_cond.rian](selfhost_compose_cond.rian) — **COMPOSITION rung 6**
+  (ADR-0063 Step 3): widens the rung-5 driver's surface past arithmetic toward real
+  compiler code — `if … do … else … end` (lowered to an Erlang `case` on the
+  boolean), comparison operators (`== < > <= >=`, with Rian `<=` → Erlang `=<`), and
+  boolean `and`/`or` (→ `andalso`/`orelse`). The expression emitter drops the
+  `ErlForm` sum and builds every form as a native Rian **tuple literal** — the only
+  shape that can express the nested `{:case, L, Cond, [Clause, Clause]}` an `if`
+  needs (the `:"case"` tag is a quoted-atom literal, since `case` is reserved). The
+  driver is unchanged: `build/2` still owns the compile→load loop. The fixpoint
+  (`test/rian/compose_cond_fixpoint_test.exs`) builds + runs `max`/`abs`/`countdown`/
+  `gcd`/`inrange`, identical to `Rian.Beam`. Widening toward the full Rian surface
+  (so `build` can compile a slice of the compiler's own source — the `v1==v2` fixed
+  point) continues from here.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
