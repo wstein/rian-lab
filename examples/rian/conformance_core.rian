@@ -29,6 +29,17 @@ def clamp(n) when n < 0 := 0
 def clamp(n) when n > 100 := 100
 def clamp(n) := n
 
+# `:=` SHADOWING in a block body (ADR-0034). This is portable-core — but it broke
+# on :ex (Erlang is single-assignment, so the rebind emitted `X = X*10`, a match)
+# and :js (`let x` re-declaration is a SyntaxError) until each emitter renamed a
+# shadow to a fresh var. It lives in this corpus so a shadowing regression fails
+# the Tier-1 gate on every target, not just silently at runtime.
+def shadowed(n Int53) Int53
+  x := n + 1
+  x := x * 10
+  x
+end
+
 @test def arithmetic() Bool := 2 + 3 * 4 == 14 and 10 - 7 == 3 and (1 - 5) == 0 - 4
 @test def int_division() Bool := 17 div 5 == 3 and 17 rem 5 == 2
 @test def comparison() Bool := 2 < 3 and 5 == 5 and 4 != 5 and not (3 < 2)
@@ -36,3 +47,4 @@ def clamp(n) := n
 @test def recursion() Bool := fib(10) == 55
 @test def multi_clause_gcd() Bool := gcd(48, 36) == 12
 @test def guarded_clauses() Bool := clamp(0 - 7) == 0 and clamp(250) == 100 and clamp(42) == 42
+@test def block_shadowing() Bool := shadowed(1) == 20 and shadowed(4) == 50
