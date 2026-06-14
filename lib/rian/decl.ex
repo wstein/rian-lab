@@ -970,6 +970,15 @@ defmodule Rian.Decl do
   defp take_line([{close} = t | rest], acc, depth) when close in [:rparen, :rbracket, :rbrace],
     do: take_line(rest, [t | acc], max(depth - 1, 0))
 
+  # a `do … end` block inside a `:=` body (a multi-line `case`/`if`/`with`) deepens
+  # like a bracket, so its arm/branch newlines continue the body to the matching
+  # `end` instead of leaking each line as a bogus declaration (P1).
+  defp take_line([{:kw, "do"} = t | rest], acc, depth),
+    do: take_line(rest, [t | acc], depth + 1)
+
+  defp take_line([{:kw, "end"} = t | rest], acc, depth),
+    do: take_line(rest, [t | acc], max(depth - 1, 0))
+
   defp take_line([{:nl} | rest], acc, depth) do
     if depth > 0 or line_continues?(acc, rest),
       do: take_line(rest, acc, depth),
