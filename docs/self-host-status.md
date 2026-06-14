@@ -19,6 +19,18 @@ Source: `selfhost_compose_real_sum.rian`, fixpoint: `test/rian/compose_real_sum_
 terminus (Stage 3, v1==v2) is gated on this reaching the whole pipeline — not on the
 per-stage percentage.
 
+**Self-compiling, not self-checking.** This loop is **self-compiling** (codegen:
+lex→parse→lower→emit→load) but **not self-checking** — `Rian.Check`,
+`Rian.Exhaustiveness`, and `Rian.Capability` are *not* in the `build` loop, so
+`build` compiles known-good source but does not yet reject ill-typed/non-exhaustive
+programs. A backend-only bootstrap must not masquerade as the whole compiler.
+
+**Loop closed on real source:** `build` compiles a verbatim slice of a real compiler
+stage — **selfhost_cap.rian (Ty + copyt)** — and runs identically to
+`Rian.Beam` (`test/rian/compose_selfcompile_fixpoint_test.exs`). This is a stage compiling its own
+source, not a toy corpus. Widening `build`'s surface (`if`/strings) until it compiles
+a whole real `selfhost_*.rian` file remains the work before v1==v2.
+
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | Lexer | frontend | ✅ yes | `examples/rian/selfhost_lexer_v2.rian` · `test/rian/fixpoint_test.exs` | token stream equals Rian.Lexer over slices 1-5 (incl. tokenize/1, {:nl}) |

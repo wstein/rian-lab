@@ -304,6 +304,17 @@ compile + run on real BEAM bytecode:
   programs — nullary dispatch, payload destructuring, and ctor-value construction —
   identical to `Rian.Beam`. Same three verified ports as rung 10; only host FFI:
   `:compile.forms`/`:code.load_binary`.
+
+**The loop closes on real source** — [test/rian/compose_selfcompile_fixpoint_test.exs](../../test/rian/compose_selfcompile_fixpoint_test.exs)
+feeds the composed `build` a **verbatim slice of a real compiler stage** —
+[selfhost_cap.rian](selfhost_cap.rian)'s `Ty` sum type + `copyt` function — and asserts
+it runs identically to `Rian.Beam`. This is the first time a stage compiles its *own*
+source, not a hand-written corpus (the test even asserts each `copyt` clause is verbatim
+in the real file, so it can't drift into a toy). **Honest scope:** the loop is
+*self-compiling* (codegen), **not** *self-checking* — `Rian.Check`/`Exhaustiveness`/
+`Capability` are not in the `build` loop — and it's a *slice*: the whole file needs
+`if`/strings/`Prim`, which the surface doesn't cover yet. Widening that surface until
+`build` compiles a whole real `selfhost_*.rian` file is the work before `v1==v2`.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via

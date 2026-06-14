@@ -164,6 +164,18 @@ defmodule Rian.SelfHost do
       "a whole multi-function module whose ENTIRE front-end is verified ports — tokenized by selfhost_lexer_v2, parsed by selfhost_decl (def heads, multi-clause patterns incl. cons-LISTS, SUM-TYPE declarations + constructor dispatch, arithmetic + calls; `if`/strings not yet) — and compiled by the selfhost_beam backend; all THREE ports called CROSS-MODULE, with only a surface→Core lowering + Form inflater as driver glue",
     source: "selfhost_compose_real_sum.rian",
     test: "test/rian/compose_real_sum_fixpoint_test.exs",
+    # honesty distinction (ADR-0063): the composed loop is self-COMPILING (codegen —
+    # lex→parse→lower→emit→load) but NOT self-CHECKING — Rian.Check (inference/error
+    # sets), Rian.Exhaustiveness, and Rian.Capability are NOT in the build loop. `build`
+    # compiles known-good source; it does not yet reject ill-typed/non-exhaustive
+    # programs the way the full compiler does. A backend-only bootstrap must not
+    # masquerade as the whole compiler, so these are tracked separately.
+    self_compiling: true,
+    self_checking: false,
+    # has `build` compiled a real selfhost_*.rian slice (not a toy corpus)? Yes —
+    # the capability checker's `Ty`+`copyt` compile + run identically to Rian.Beam.
+    closed_on_real_source: "selfhost_cap.rian (Ty + copyt)",
+    real_source_test: "test/rian/compose_selfcompile_fixpoint_test.exs",
     note:
       "Rungs 1-6 built a driver owning the source→loaded-module loop over a TOY pipeline. Rung 7 made the BACKEND verified (`selfhost_beam`); rung 8 made body-parsing verified (`selfhost_parse`); rung 9 made declaration-parsing verified (`selfhost_decl`); rung 10 makes LEXING verified too (`selfhost_lexer_v2`), so the driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports, composed cross-module. The lexer's token tags are a superset of the parser's (same tags), so `SelfhostLexerV2.tokenize` feeds `SelfhostDecl.parse_program` with NO projection. The only driver-local code left reimplements no stage: the surface→Core lowering (selfhost_decl's Decl/Expr/Pat IR → selfhost_beam Core/Pat, incl. cons-list patterns → PList) and the Form inflater. Rung 11 widens the SURFACE to sum types + constructor dispatch using selfhost_decl's already-locked type/ctor capability (no port change — only the driver glue grows: `type` decls are erased, and the Form inflater learns FCtorN/FCtor via a to_snake matching Rian.PatternLower). Surface is now selfhost_decl's slice (arithmetic + calls + multi-clause + cons-lists + sum-type declarations/dispatch; list recursion like sum/len AND ctor dispatch like Color/Shape work). All ports load under :\"Elixir.Selfhost*\" atoms (Pascal calls, ADR-0041); sibling-port calls are composition, not host crutches (excluded from the FFI ledger). Only host FFI: :compile.forms/:code.load_binary. The fixpoint calls only build/2 and runs the result identically to the full Elixir toolchain. The path to v1==v2: widen selfhost_decl off :partial (it lacks `if`/`case`/block bodies/strings/sum-types) and the surface→Core lowering to match, until build compiles a real selfhost_*.rian slice"
   }
@@ -236,6 +248,18 @@ defmodule Rian.SelfHost do
     Source: `#{@composition.source}`, fixpoint: `#{@composition.test}`. The bootstrap
     terminus (Stage 3, v1==v2) is gated on this reaching the whole pipeline — not on the
     per-stage percentage.
+
+    **Self-compiling, not self-checking.** This loop is **self-compiling** (codegen:
+    lex→parse→lower→emit→load) but **not self-checking** — `Rian.Check`,
+    `Rian.Exhaustiveness`, and `Rian.Capability` are *not* in the `build` loop, so
+    `build` compiles known-good source but does not yet reject ill-typed/non-exhaustive
+    programs. A backend-only bootstrap must not masquerade as the whole compiler.
+
+    **Loop closed on real source:** `build` compiles a verbatim slice of a real compiler
+    stage — **#{@composition.closed_on_real_source}** — and runs identically to
+    `Rian.Beam` (`#{@composition.real_source_test}`). This is a stage compiling its own
+    source, not a toy corpus. Widening `build`'s surface (`if`/strings) until it compiles
+    a whole real `selfhost_*.rian` file remains the work before v1==v2.
 
     | Stage | Role | Self-hosted | Evidence | Notes |
     | --- | --- | --- | --- | --- |
