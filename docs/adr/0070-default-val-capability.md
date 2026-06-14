@@ -1,7 +1,7 @@
 # ADR-0070 — `val` is the inferred default capability; annotate only `iso`/`ref`/`tag`
 
-**Status:** Proposed (design)
-**Implemented:** no — proposed; touches `Rian.Decl` (parse a bare param as `val`), `Rian.Capability`, and the surface docs.
+**Status:** Accepted · **implemented** (a bare parameter parses as `val`; explicit `iso`/`ref`/`tag` stay spelled)
+**Implemented:** yes — `Rian.Decl.param/1` defaults a capability-less parameter to `:val` (`def f(x Int64)` ≡ `def f(x val Int64)`); explicit `val` still parses (redundant, allowed); `iso`/`ref`/`tag` remain explicit. Tests: `test/rian/decl_test.exs` (params assert `cap: :val`). Pure parse-time default — checker/Reach/emitters see the same capability as before.
 **Refs:** ADR-0025 (the capability model this relaxes), ADR-0055 (capabilities through dispatch — receiver capabilities unaffected), ADR-0035 (no hidden behaviour — `val` is the *read-only* default, the safe one), ADR-0065 (surface — an additive ergonomic change), ADR-0000 (charter — keep the distinctive capability model, cut its tax)
 **Owners:** Elena Rostova (Rust/DX) · Arthur Pendelton (soundness — co-signs) · Chloe Bennett (ergonomics) · Maya Lin (multi-target) · Kira Neri (no hidden behaviour) · Rachel Okafor (PM)
 **Origin:** the Gleam/Haxe borrow debate (2026-06-14, consensus #5, 4/5) and the corpus-review debate (capabilities are a surface tax most targets ignore).

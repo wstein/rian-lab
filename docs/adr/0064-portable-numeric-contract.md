@@ -1,7 +1,7 @@
 # ADR-0064 — Portable numeric contract: `Int` (arbitrary precision) + fixed-width wrap
 
 **Status:** Proposed · **`Int` (arbitrary precision) implemented for BEAM + JS** (2026-06-14) · **Supersedes:** the numeric/overflow decision of **ADR-0034 §1** ("Int* declare intent, not a portable overflow contract"), **ADR-0041 §"native-per-target representation"** *as applied to integers*, and the **ADR-0035** overflow-scope clarification
-**Implemented:** partial — `Int` arbitrary precision adopted for BEAM + JS (BigInt) (`Rian.Check`, `Rian.JS`; `test/rian/numeric_test.exs`); fixed-width wrap helpers and Rust/JVM/Go contract gaps open
+**Implemented:** partial — `Int` arbitrary precision adopted for BEAM + JS (BigInt) (`Rian.Check`, `Rian.JS`; `test/rian/numeric_test.exs`); the **fixed-width literal range-check is in** (`width_bounds/1` + `lit_range_error/3`, `Rian.Check`; `test/rian/check_test.exs`) — a literal outside a declared width's two's-complement range is a compile error. Open by explicit scope decision: the **generic-from-literals** case is OUT (a tvar inferred purely from literals stays `Int64`, the literal-polymorphism gap); fixed-width wrap helpers and Rust/JVM/Go contract gaps remain
 **Refs:** ADR-0036 (subrange types), ADR-0047 (portable prelude — `Int.checked/saturating/wrapping_add` live here), ADR-0049/0050 (emitters / core IR), ADR-0057/0058 (portability is the thesis)
 **Owners:** Samir Patel (numeric rigor) · Maya Lin (emitters) · Tomás (BEAM performance) · Mira (totality/semantics) · Kira Neri (honesty) · Rachel Okafor (PM)
 

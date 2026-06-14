@@ -50,6 +50,19 @@ defmodule Rian.DeclTest do
       assert f.clauses == [%Clause{pats: [{:var, "n"}], body: "n * 2", guard: nil}]
     end
 
+    test "a bare parameter defaults to `val`; only iso/ref/tag are spelled (ADR-0070)" do
+      %{funcs: [f]} =
+        Decl.parse("def f(a Int64, b val Int64, c iso Vec(Int64), d ref Int64, e tag Bool) Int64 := a")
+
+      assert Enum.map(f.params, &{&1.name, &1.cap}) == [
+               {"a", :val},
+               {"b", :val},
+               {"c", :iso},
+               {"d", :ref},
+               {"e", :tag}
+             ]
+    end
+
     test "a `:=` body is newline-tolerant (P1): trailing/leading op, brackets, next line" do
       bodies = fn src ->
         Decl.parse(src).funcs |> hd() |> Map.fetch!(:clauses) |> hd() |> Map.fetch!(:body)
