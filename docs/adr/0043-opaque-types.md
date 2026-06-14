@@ -1,7 +1,7 @@
 # ADR-0043 — Opaque Types: module-scoped nominal distinctness over a base, zero-cost
 
-**Status:** Accepted (direction) · implementation gated on the declaration parser (ADR-0031 Stage 0.1)
-**Implemented:** no — not parsed by `Rian.Decl` yet (only `range`, ADR-0036's mechanism, exists in `lib/rian/decl.ex`)
+**Status:** Accepted · **implemented** (`opaque T := Base`, nominal in `Rian.Check`, erased to base on every target by `Rian.Opaque.erase/1`; total `T.of(x)` constructor). The operator/cast surface on top of this is ADR-0067 (P1b/P1c, pending).
+**Implemented:** yes — `opaque T := Base` parsed by `Rian.Decl`, nominal-distinct in `Rian.Check`, erased to base on every target by `Rian.Opaque.erase/1`; tests `test/rian/opaque_test.exs`. (`range`, ADR-0036's bounded sibling, also lives in `lib/rian/decl.ex`.)
 **Refs:** ADR-0032 (family / concept-borrowing), ADR-0033 (declaration keywords; `alias`), ADR-0034 (nominal types; capabilities × types), ADR-0035 (no implicit coercion), ADR-0041 (target model), ADR-0042 (protocols; orphan-rule escape)
 **Generalizes:** ADR-0036's "representation, not newtype" range mechanism
 **Owners:** Maya Lin (Scala model/emitters) · Elena Rostova (Rust/zero-cost) · Arthur Pendelton (abstraction boundary) · Marcus Chen (encapsulation) · Samir Patel (exhaustiveness) · Julian Vance (grammar) · Rachel Okafor (PM)

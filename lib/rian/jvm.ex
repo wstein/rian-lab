@@ -75,6 +75,9 @@ defmodule Rian.JVM do
     # Run the full type gate first — parity with the BEAM path (`Decl.compile`); a
     # `Rian.Check` error is caught here rather than emitted as malformed Kotlin.
     :ok = Check.gate!(prog)
+    # Erase abstract types to their base after the gate (ADR-0067): `opaque Token
+    # := String` emits as the underlying `String`, and `Token.of(x)` -> `x`.
+    prog = Rian.Opaque.erase(prog)
     # the BEAM `:dispatcher` is a guarded runtime type-test, not the Kotlin shape;
     # protocol lowering for the JVM is a later increment.
     funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))

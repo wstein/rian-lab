@@ -681,6 +681,9 @@ defmodule Rian.Lower do
   `to_rust` cannot (it repeats type defs per unit).
   """
   def rust_program(prog) do
+    # Erase abstract types to their base (ADR-0067) — a whole-program Rust emit
+    # entry reached directly (e.g. tests), so it must erase like `Decl.compile`.
+    prog = Rian.Opaque.erase(prog)
     types = Map.get(prog, :types, [])
     structs = Map.get(prog, :structs, [])
     funcs = Map.get(prog, :funcs, []) |> Enum.reject(& &1.dispatch)

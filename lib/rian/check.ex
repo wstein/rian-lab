@@ -210,11 +210,17 @@ defmodule Rian.Check do
   # `range` type returns `base | RangeError` (a `T | E` Result, ADR-0040). The
   # argument must be assignable to the range's ordinal base.
   def infer(%ECall{fun: %EDot{head: %EId{name: n}, name: "of"}} = call, env, ic) do
-    case Map.get(Map.get(ic, :ranges, %{}), n) do
-      %{base: base} ->
+    cond do
+      # `opaque Name := Base` (ADR-0067/ADR-0043): the constructor is *total* —
+      # `Name.of(x)` (x : Base) returns the nominal `Name` itself, no Result wrap
+      # (the abstraction adds no failure mode; it erases to `x` at emit).
+      Map.has_key?(Map.get(ic, :opaques, %{}), n) ->
+        n
+
+      base = range_base(ic, n) ->
         "#{base} | RangeError"
 
-      _ ->
+      true ->
         ft = infer(call.fun, env, ic)
         if fn_type?(ft), do: fn_ret(ft), else: :unknown
     end
@@ -1249,6 +1255,7 @@ defmodule Rian.Check do
           fsigs: map(),
           ctors: map(),
           ranges: map(),
+          opaques: map(),
           impls: map(),
           fbounds: map()
         }
@@ -1264,6 +1271,7 @@ defmodule Rian.Check do
       fsigs: Map.new(all_funcs, fn f -> {f.name, fsig(f)} end),
       ctors: ctor_types(types, prog),
       ranges: range_table(prog),
+      opaques: opaque_table(prog),
       impls: impl_table(prog),
       fbounds: fbound_table(all_funcs)
     }
@@ -1295,6 +1303,26 @@ defmodule Rian.Check do
         for(m <- Map.get(prog, :mods, []), r <- Map.get(m, :ranges, []), do: r)
 
     Map.new(ranges, fn r -> {r.name, %{base: r.base, lo: r.lo, hi: r.hi}} end)
+  end
+
+  # `opaque Name := Base` (ADR-0067/ADR-0043) records, keyed by name -> %{base}.
+  # Unlike a `range`, an opaque is *nominal*: it does NOT resolve to its base in
+  # type positions (that distinctness is the whole point). Its only checker effect
+  # is the total `Name.of(x)` constructor (`x : Base -> Name`) below.
+  defp opaque_table(prog) do
+    opaques =
+      Map.get(prog, :opaques, []) ++
+        for(m <- Map.get(prog, :mods, []), o <- Map.get(m, :opaques, []), do: o)
+
+    Map.new(opaques, fn o -> {o.name, %{base: o.base}} end)
+  end
+
+  # the ordinal base of a `range` named `n`, or nil if `n` is not a range
+  defp range_base(ic, n) do
+    case Map.get(Map.get(ic, :ranges, %{}), n) do
+      %{base: base} -> base
+      _ -> nil
+    end
   end
 
   # a range name resolves to its base type; any other type is unchanged

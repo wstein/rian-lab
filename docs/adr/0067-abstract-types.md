@@ -1,7 +1,7 @@
 # ADR-0067 — Abstract types: zero-cost wrappers with operators and controlled casts
 
-**Status:** Accepted (direction) — unimplemented; gated on the declaration parser + `opaque` lowering (ADR-0043 / ADR-0031 Stage 0.1)
-**Implemented:** no — design only; gated on `opaque`/`abstract` parsing in `Rian.Decl` (ADR-0043, itself not yet built)
+**Status:** Accepted — **P1a (`opaque` core) implemented**; the operator/cast surface (P1b/P1c) remains; the `Int53` demotion is **withdrawn** (§3).
+**Implemented:** partial — the `opaque` core is parsed (`Rian.Decl`), nominal-checked (`Rian.Check`), and erased to base on every target (`Rian.Opaque`); tests `test/rian/opaque_test.exs`. The `abstract` operator/cast surface (P1b/P1c) is pending; `Int53` stays a builtin (§3).
 **Extends:** ADR-0043 (opaque types — nominal distinctness over a base, zero-cost). This ADR adds the *operator* and *cast* surface that ADR-0043 deliberately left out.
 **Refs:** ADR-0036 (`range` — "representation, not newtype"), ADR-0033 (surface vocabulary), ADR-0035 (no implicit coercion — the constraint), ADR-0041 (per-target representation / observable contract), ADR-0042 (protocols — an abstract may `impl`), ADR-0050 (one typed Core IR — erasure happens in the emitters), ADR-0055 (capability rides the base), ADR-0064 (`Int53`/fixed-width — stays a **builtin**; *not* demotable to an abstract, §3)
 **Owners:** Maya Lin (emitters / erasure) · Elena Rostova (Rust zero-cost) · Arthur Pendelton (type system) · Samir Patel (totality / coherence) · Kira Neri (no hidden coercion) · Rachel Okafor (PM)
@@ -112,6 +112,32 @@ number-mode invariant are precisely why it is **not** one, and stays a compiler 
 - **Protocols** (ADR-0042): an `abstract` may `impl` a protocol like any nominal type.
 - **ADR-0064 is unaffected.** `Int53`/fixed-width stay compiler builtins (§3) — abstract types do not
   touch the numeric subsystem.
+
+## Implementation status
+
+Delivered in four phases; **P1a is done**, P1b–P1d remain.
+
+- **P1a — `opaque` core (DONE).** `opaque T := Base` (and the reserved `abstract`
+  keyword) parse to `%Rian.IR.Opaque{name, base, ops, casts}` (`Rian.Decl`). The type is
+  **nominal in `Rian.Check`**: it is deliberately *not* substituted to its base during
+  parsing (unlike a `range`, ADR-0036), so `Token`≠`String` falls out of unification for
+  free, and the total constructor `T.of(x)` (`x : Base → T`, ADR-0043) is typed in the
+  `.of` infer clause. Erasure to the base is a single post-gate pass, **`Rian.Opaque.erase/1`**,
+  run after `Check.gate!`/`Reach.gate!` in every compile entry point (`Decl.compile`/`compile_beam`,
+  `Beam`, `JS`, `JVM`, `Lower.rust_program`): it substitutes `T → Base` in all type positions and
+  rewrites `T.of(x) → x` in clause bodies (a range's `.of` is a real call and is preserved). After
+  erasure **no emitter ever sees an opaque** — `opaque Token := String` reaches and emits exactly as
+  `String` on BEAM/Rust/JS/JVM, zero-cost. Tested in `test/rian/opaque_test.exs`.
+  - *Known gap:* erasure runs **after** `Reach.gate!`, so an `opaque T := Int64`-style abstract over a
+    *wide* integer is not yet pinned off `:js` (Reach sees the nominal name, not the wide base). Opaque-
+    over-portable-base (e.g. `String`) is unaffected; resolve when P1d touches the numeric abstracts.
+- **P1b — operators.** `abstract T := Base do op +(…) end`: parse the `do … end` operator block into
+  `Opaque.ops`, add the typed operator rule to `Rian.Check`, and lower each `op` to the base operator
+  on the underlying representation (erasure already carries it).
+- **P1c — casts.** `to base()` exposure (`m.base()`), checked (only declared casts type-check), erased.
+- **P1d — `Int53` demotion.** Move `Int53`/fixed-width from compiler builtin to prelude abstracts
+  without regressing the JS number-mode contract (ADR-0064 §2a) — risky, gated behind the conformance
+  suite, last.
 
 ## Open items
 

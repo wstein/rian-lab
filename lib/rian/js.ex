@@ -102,6 +102,9 @@ defmodule Rian.JS do
     # latent on the JS path (commit 80f6929). A type error is now caught here, not
     # discovered as malformed JS downstream.
     :ok = Check.gate!(prog)
+    # Erase abstract types to their base after the gate (ADR-0067): `opaque Token
+    # := String` emits as the underlying `String`, and `Token.of(x)` -> `x`.
+    prog = Rian.Opaque.erase(prog)
     # Integer mode is a WHOLE-PROGRAM decision, not per-function: integer values
     # (a depth counter, a codepoint) flow across function boundaries, and BigInt
     # and number cannot be combined in JS. A "neutral" function with no integer in

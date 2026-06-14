@@ -54,6 +54,24 @@ defmodule Rian.IR do
     defstruct name: nil, base: nil, lo: nil, hi: nil, pub?: false, doc: nil
   end
 
+  defmodule Opaque do
+    @moduledoc """
+    An **abstract type** (`opaque T := Base`, ADR-0067 / ADR-0043): a type that is
+    nominally **distinct** from `Base` to the checker but **erases to `Base` at
+    runtime on every target** (zero-cost — no wrapper, no box). Constructed by the
+    total `T.of(x)` (x : Base); the abstraction lives only in `Rian.Check`, and
+    `Rian.Opaque.erase/1` substitutes `T -> Base` and rewrites `T.of(x) -> x` before
+    any emitter sees it.
+
+    `ops` are declared operator rules (ADR-0067 P1b, `abstract … do op +(…) end`) —
+    a set of operator strings the abstract overloads (each forwards to the base
+    operator on the underlying representation). `casts` are declared `to base()`
+    exposures (P1c). A plain `opaque` has empty `ops`/`casts`.
+    """
+    @enforce_keys [:name, :base]
+    defstruct name: nil, base: nil, pub?: false, doc: nil, ops: [], casts: []
+  end
+
   defmodule Struct do
     @moduledoc """
     A product-type declaration (`struct Name(field Type, …)`). Unlike a `Type`,
@@ -101,6 +119,7 @@ defmodule Rian.IR do
               uses: [],
               types: [],
               ranges: [],
+              opaques: [],
               structs: [],
               consts: [],
               funcs: [],

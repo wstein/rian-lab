@@ -26,6 +26,11 @@ defmodule Rian.Decl do
       `case … do … end` expressions, string literals, and `when` guards.
     * `alias Name := Type` — transparent synonyms, resolved by substituting the
       name out of every type position (introduces no runtime form).
+    * `opaque Name := Base` (ADR-0043 / ADR-0067) — an **abstract** type: nominally
+      distinct from `Base` in the checker (so `Name`≠`Base`) but **erased to `Base`**
+      at zero cost on every target by `Rian.Opaque.erase/1` (after the gates).
+      Constructed by the total `Name.of(x)` (`x : Base`). The `abstract` keyword (its
+      operator/cast superset, ADR-0067 P1b/P1c) is reserved but not yet parsed.
     * `struct Name(field Type, …)` — product types; lower to `defstruct` (BEAM) /
       `struct {…}` (Rust) and are built with positional `Name(v1, v2)` or named
       `Name(field: v, …)` constructor calls.
@@ -61,7 +66,21 @@ defmodule Rian.Decl do
   are not yet handled; other reserved keywords raise `Rian.Decl.Error`.
   """
   alias Rian.{Check, Lexer, Lower, Pratt}
-  alias Rian.IR.{Clause, Const, Field, Func, Mod, Param, Range, Struct, Type, Use, Variant}
+
+  alias Rian.IR.{
+    Clause,
+    Const,
+    Field,
+    Func,
+    Mod,
+    Opaque,
+    Param,
+    Range,
+    Struct,
+    Type,
+    Use,
+    Variant
+  }
 
   defmodule Error do
     defexception [:message]
@@ -102,6 +121,7 @@ defmodule Rian.Decl do
           uses: p.uses,
           types: p.types,
           ranges: p.ranges,
+          opaques: p.opaques,
           structs: p.structs,
           consts: p.consts,
           funcs: p.funcs,
@@ -200,6 +220,8 @@ defmodule Rian.Decl do
 
     ranges = for {:range, r, pub?, doc} <- decls, do: parse_range(r, pub?, doc)
 
+    opaques = for {:opaque, o, pub?, doc} <- decls, do: parse_opaque(o, pub?, doc)
+
     structs =
       for({:struct, s, pub?, doc} <- decls, do: parse_struct(s, pub?, doc))
       |> Enum.map(&subst_struct(&1, aliases))
@@ -223,7 +245,15 @@ defmodule Rian.Decl do
 
     uses = for {:use, u} <- decls, do: parse_use(u)
 
-    %{types: types, ranges: ranges, structs: structs, consts: consts, uses: uses, funcs: funcs}
+    %{
+      types: types,
+      ranges: ranges,
+      opaques: opaques,
+      structs: structs,
+      consts: consts,
+      uses: uses,
+      funcs: funcs
+    }
   end
 
   # The pre-typecheck metaprogramming pass over this scope's function bodies: pure
@@ -371,6 +401,25 @@ defmodule Rian.Decl do
     end
   end
 
+  # `opaque Name := Base` (ADR-0067 / ADR-0043): an abstract type, nominally
+  # distinct from `Base` in the checker but erased to `Base` at emit. Unlike a
+  # `range`, it is *not* substituted out of type positions here (that is what makes
+  # it nominal); `Rian.Opaque.erase/1` performs the substitution after the gates.
+  defp parse_opaque(text, pub?, doc) do
+    case split_once(text, ":=") do
+      {left, right} ->
+        %Opaque{
+          name: strip_type_params(left),
+          base: collapse_parens(String.trim(right)),
+          pub?: pub?,
+          doc: doc
+        }
+
+      :none ->
+        raise Error, "opaque declaration needs `:=`: #{text}"
+    end
+  end
+
   defp parse_bounds(text) do
     case String.split(text, "..", parts: 2) do
       [lo_s, hi_s] ->
@@ -408,11 +457,14 @@ defmodule Rian.Decl do
   keyed by the module name.
   """
   def compile(src) do
-    %{types: types, ranges: ranges, structs: structs, funcs: funcs, mods: mods} =
-      prog = parse(src)
-
+    prog = parse(src)
     :ok = Check.gate!(prog)
     :ok = Rian.Reach.gate!(prog)
+
+    # Erase abstract types to their base *after* the gates checked them nominally
+    # (ADR-0067): every emitter below sees `String`, never `opaque Token`.
+    %{types: types, ranges: ranges, structs: structs, funcs: funcs, mods: mods} =
+      prog = Rian.Opaque.erase(prog)
 
     # protocol-method -> trait name, for the Rust UFCS call-site rewrite (ADR-0061
     # §2). Set before lowering so `rust_fn` sees it; sums/impls flow per-target.
@@ -456,11 +508,13 @@ defmodule Rian.Decl do
 
   @doc "Parse and lower to the BEAM target only (FFI / BEAM-only bodies)."
   def compile_beam(src) do
-    %{types: types, ranges: ranges, structs: structs, funcs: funcs, mods: mods} =
-      prog = parse(src)
-
+    prog = parse(src)
     :ok = Check.gate!(prog)
     :ok = Rian.Reach.gate!(prog)
+
+    %{types: types, ranges: ranges, structs: structs, funcs: funcs, mods: mods} =
+      Rian.Opaque.erase(prog)
+
     funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs, ranges)} end)
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m)} end)
   end
@@ -537,6 +591,11 @@ defmodule Rian.Decl do
   defp take_decl([{:kw, "range"} | rest]) do
     {toks, rest} = take_type(rest, [])
     {{:range, Lexer.detokenize(toks), false, nil}, rest}
+  end
+
+  defp take_decl([{:kw, "opaque"} | rest]) do
+    {toks, rest} = take_type(rest, [])
+    {{:opaque, Lexer.detokenize(toks), false, nil}, rest}
   end
 
   defp take_decl([{:kw, "struct"} | rest]) do
@@ -624,6 +683,7 @@ defmodule Rian.Decl do
 
   defp mark_pub({:type, s, _, doc}), do: {:type, s, true, doc}
   defp mark_pub({:range, s, _, doc}), do: {:range, s, true, doc}
+  defp mark_pub({:opaque, s, _, doc}), do: {:opaque, s, true, doc}
   defp mark_pub({:struct, s, _, doc}), do: {:struct, s, true, doc}
   defp mark_pub({:const, s, _, doc}), do: {:const, s, true, doc}
   defp mark_pub({:def, raw}), do: {:def, Map.put(raw, :pub, true)}
@@ -726,7 +786,8 @@ defmodule Rian.Decl do
   defp decl_boundary?(toks), do: decl_kw?(toks)
 
   defp decl_kw?([{:kw, k} | _]),
-    do: k in ~w(type def struct alias mod pub const macro use import protocol impl)
+    do:
+      k in ~w(type def struct alias mod pub const macro use import protocol impl opaque abstract)
 
   defp decl_kw?(_), do: false
 

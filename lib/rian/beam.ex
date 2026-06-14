@@ -117,6 +117,7 @@ defmodule Rian.Beam do
     # declaration itself is erased; only its constructions/accesses emit.
     prog = Decl.parse(src)
     :ok = Rian.Reach.gate!(prog)
+    prog = Rian.Opaque.erase(prog)
     beam_for(module, funcs_of(prog), ranges_of(prog), types_of(prog), structs_of(prog))
   end
 
@@ -129,6 +130,7 @@ defmodule Rian.Beam do
   def compile_program(src) do
     prog = Decl.parse(src)
     :ok = Rian.Reach.gate!(prog)
+    prog = Rian.Opaque.erase(prog)
     top = Map.get(prog, :ranges, [])
 
     prog
@@ -172,6 +174,7 @@ defmodule Rian.Beam do
   """
   def compile_ir(prog, module) when is_atom(module) do
     :ok = Rian.Reach.gate!(prog)
+    prog = Rian.Opaque.erase(prog)
     beam_for(module, funcs_of(prog), ranges_of(prog), types_of(prog), structs_of(prog))
   end
 
@@ -188,6 +191,7 @@ defmodule Rian.Beam do
   `mod` declarations (see `compile_program/1`, IR form).
   """
   def compile_program_ir(prog) do
+    prog = Rian.Opaque.erase(prog)
     top = Map.get(prog, :ranges, [])
 
     prog
