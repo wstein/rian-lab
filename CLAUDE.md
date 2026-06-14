@@ -96,6 +96,17 @@ architectural cost.
   `Str`/`Char`/`Dict` wrappers, never `Prim.*`.
 - **The checker is deliberately conservative**: it infers `:unknown` rather than guess, and only
   reports an error on a *provable* mismatch. Don't "tighten" it into rejecting valid code.
+- **The integer types** (ADR-0064): `Int` is arbitrary-precision (BEAM bignum / JS `BigInt`) and the
+  conceptual default, but reaches only `[:ex, :js]` — Rust/JVM need a bignum that isn't built, so
+  `Rian.Reach` pins it off `:rs`/`:jvm`. Fixed-width `Int8/16/32/64/128` + `UInt*` carry a portable
+  two's-complement wrap contract. **On JS only `Int`, `Int53`, and `Int32`-and-smaller are valid**:
+  `Int53` is the portable all-target integer (native JS `number`, `i64` elsewhere); `Int64`/`Int128`/
+  `UInt64`/`UInt128` exceed 2^53 and are *rejected* on JS (`Rian.JS.reject_wide_int!`, pinned off `:js`
+  by Reach) — never silently elevated to `BigInt`. Caveat: integer **literals still infer `Int64`**
+  (the ADR-0064 default-`Int` migration is unfinished). A *constant of literals* adopts a narrower
+  declared width (`def g() Int53 := 0`, `if …`-chains — `check_return`), but a type variable inferred
+  purely from literals (`contains([1,2,3], 2)` → `T = Int64`) does **not** yet — so generic stdlib over
+  integer literals (`17_stdlib_eq_ord`) is not JS-portable. That's the open literal-polymorphism work.
 - **Self-hosting** (`SELFHOST.md`, `examples/rian/selfhost_*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.

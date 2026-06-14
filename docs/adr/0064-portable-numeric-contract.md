@@ -149,6 +149,16 @@ the **default integer literal `Int`** (a breaking migration — currently still 
 fixed-width `Int64` *implicitly* wrap on the BEAM (the ~15× change — today the wrap is opt-in via the
 `wrapping_*` ops).
 
+**Integer-literal polymorphism (partial).** Because a literal still infers `Int64`, `Int53` is not yet a
+drop-in for the portable corpus. A *constant of literals* now adopts a narrower declared width in return
+position — a bare literal, an arithmetic of literals, or an `if`/`case` of literal branches
+(`Rian.Check`, `lit_expr_adopts?`), so `def g() Int53 := 0` and literal `if`-chains type-check. **Still
+open:** a type variable inferred *purely* from literals — `contains([1, 2, 3], 2)` makes `T = Int64`, and
+no `impl Eq` for a JS-valid width can match — so generic stdlib over integer literals
+(`17_stdlib_eq_ord`) is not JS-portable. Closing this needs literals to carry a flexible integer type
+that unifies with the bound's impl width. Until then, portable all-target code uses `Int53` explicitly
+and the integer-generic stdlib stays `Int64` (off `:js`, honestly reported by `Rian.Reach`).
+
 ## Open items
 
 - **Default-precision ergonomics on Rust** — when can an `Int` provably fit `i64` (small-loop induction
