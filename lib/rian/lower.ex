@@ -741,6 +741,7 @@ defmodule Rian.Lower do
       |> Enum.join(", ")
 
     ret_ty = self_subst(sig.ret, rust_type)
+    put_result_str_flags(ret_ty)
     body = method.body |> rust_proto_body(c) |> coerce_ret(ret_ty)
     "    fn #{method.name}(#{params}) -> #{rust_ret(ret_ty)} { let #{recv} = self; #{body} }"
   end
@@ -752,6 +753,33 @@ defmodule Rian.Lower do
   # already yields a `String` (e.g. a `<>` concat that lowered to `format!`).
   defp coerce_ret(body, "String"), do: "(#{body}).to_string()"
   defp coerce_ret(body, _ret), do: body
+
+  # A `String | E` return wraps its value in `Ok(…)`/`Err(…)` (ADR-0040): an
+  # `Ok("hi")` is `Result<&str, _>`, not the `Result<String, _>` the signature
+  # promises, so the *payload* needs the same `&str -> String` coercion `coerce_ret`
+  # applies to a plain `String` body. These per-function flags (set in `rust_fn` /
+  # `rust_impl_method`) tell the `Ok`/`Err` emit whether its payload type is `String`.
+  # `.to_string()` is a no-op clone when the payload is already a `String`.
+  defp put_result_str_flags(ret) do
+    {ok?, err?} =
+      case result_parts(ret) do
+        {:result, ok, err} -> {ok == "String", err == "String"}
+        _ -> {false, false}
+      end
+
+    Process.put(:rian_rust_ok_string, ok?)
+    Process.put(:rian_rust_err_string, err?)
+  end
+
+  defp ok_payload(v) do
+    s = p(v, 0, :rust)
+    if Process.get(:rian_rust_ok_string, false), do: "(#{s}).to_string()", else: s
+  end
+
+  defp err_payload(e) do
+    s = p(e, 0, :rust)
+    if Process.get(:rian_rust_err_string, false), do: "(#{s}).to_string()", else: s
+  end
 
   defp impl_param({name, sig_p}, rust_type) do
     {_n, ty} = name_type(sig_p)
@@ -883,6 +911,9 @@ defmodule Rian.Lower do
     # (e.g. `cat`) lower with owned semantics (ADR-0047).
     iso = iso_cons_positions(func)
     scrut = rust_scrut(func.params, iso)
+    # a `String | E` return makes `Ok(payload)` need the payload coerced to owned
+    # `String` (an `Ok("hi")` is `Result<&str, _>`); flag it for the `Ok`/`Err` emit.
+    put_result_str_flags(func.ret)
 
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
@@ -1460,8 +1491,8 @@ defmodule Rian.Lower do
   # tuple literal — a BEAM tuple / a Rust tuple. The `{:ok, v}` / `{:error, e}`
   # shapes are the canonical Result surface (ADR-0040): they keep their tagged
   # tuple on the BEAM but lower to Rust `Ok(…)` / `Err(…)`.
-  defp emit(%ETuple{elems: [%EAtom{name: "ok"}, v]}, :rust), do: {"Ok(#{p(v, 0, :rust)})", 12}
-  defp emit(%ETuple{elems: [%EAtom{name: "error"}, e]}, :rust), do: {"Err(#{p(e, 0, :rust)})", 12}
+  defp emit(%ETuple{elems: [%EAtom{name: "ok"}, v]}, :rust), do: {"Ok(#{ok_payload(v)})", 12}
+  defp emit(%ETuple{elems: [%EAtom{name: "error"}, e]}, :rust), do: {"Err(#{err_payload(e)})", 12}
   defp emit(%ETuple{elems: es}, :rust), do: {"(#{Enum.map_join(es, ", ", &p(&1, 0, :rust))})", 12}
 
   defp emit(%ETuple{elems: es}, :elixir),

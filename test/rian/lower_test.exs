@@ -580,4 +580,52 @@ end|
       end
     end
   end
+
+  describe "Result-of-String coerces the Ok payload to owned String (ADR-0040/0061)" do
+    @res_src ~S"""
+    mod R do
+      type Oops := Bad
+      pub def get(n Int64) String | Oops
+      pub def get(0) := {:error, Bad}
+      pub def get(_) := {:ok, "hi"}
+    end
+    """
+
+    test "the `Ok(...)` payload gains `.to_string()`; `Err` (non-String) is untouched" do
+      [{_, %{rust: rust}}] = Rian.Decl.compile(@res_src)
+      assert rust =~ "-> Result<String, Oops>"
+      assert rust =~ ~S|Ok(("hi").to_string())|
+      # the error arm carries a non-String error type, so it is NOT coerced
+      assert rust =~ "Err(Oops::Bad)"
+      refute rust =~ ~S|Err(("|
+    end
+
+    @tag :rust
+    test "the emitted Result<String, _> Rust compiles and runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          [{_, %{rust: rust}}] = Rian.Decl.compile(@res_src)
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_result_str_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <>
+              "\nfn main() { match r::get(1) { Ok(s) => println!(\"{}\", s), Err(_) => {} } }"
+          )
+
+          {_, 0} =
+            System.cmd(rustc, ["--edition", "2021", path, "-o", bin], stderr_to_stdout: true)
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "hi"
+      end
+    end
+  end
 end
