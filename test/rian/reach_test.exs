@@ -147,13 +147,14 @@ defmodule Rian.ReachTest do
   end
 
   describe "atoms/Result are honest against the emitters (ADR-0041 vs emitter)" do
-    test "a bare value atom pins the function to `:ex` (no JS/JVM/Rust lowering)" do
+    test "a bare value atom reaches `:ex`+`:js` but is off `:rs`/`:jvm`" do
       rep = reach("def f(s Symbol) Bool := s == :foo")
-      assert targets(rep, "f") == [:ex]
-      assert [%{kind: :atom, kills: [:js, :jvm, :rs]}] = rep["f"].blockers
+      # JS lowers an atom to a string; Rust raises BEAM-only, JVM has no atom lowering
+      assert targets(rep, "f") == [:ex, :js]
+      assert [%{kind: :atom, kills: [:rs, :jvm]}] = rep["f"].blockers
     end
 
-    test "a constructed Result reaches `:ex`+`:rs` but is off `:js`/`:jvm`" do
+    test "a constructed Result reaches `:ex`+`:rs`+`:js` but is off `:jvm`" do
       rep =
         reach("""
         type DivErr := Bad
@@ -162,10 +163,10 @@ defmodule Rian.ReachTest do
         def half(n) := {:ok, n}
         """)
 
-      assert targets(rep, "half") == [:ex, :rs]
-      assert Enum.any?(rep["half"].blockers, &(&1.kind == :result and &1.kills == [:js, :jvm]))
+      assert targets(rep, "half") == [:ex, :js, :rs]
+      assert Enum.any?(rep["half"].blockers, &(&1.kind == :result and &1.kills == [:jvm]))
       # the `:ok`/`:error` tag is NOT re-flagged as a bare value atom (that would
-      # wrongly also kill `:rs`, where Rust lowers the Result to `Ok`/`Err`)
+      # wrongly also kill `:rs`/`:js`, where the emitters lower the Result)
       refute Enum.any?(rep["half"].blockers, &(&1.kind == :atom))
     end
 

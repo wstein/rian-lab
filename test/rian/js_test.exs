@@ -212,9 +212,10 @@ defmodule Rian.JSTest do
     end
 
     test "constructs outside this increment raise a clear Unsupported" do
-      # atom/`Symbol` literals have no JS lowering yet (strings/lists/maps now do)
+      # general host FFI has no JS lowering (atoms/Result now do; only specific
+      # bridges like `:lists.reverse` are wired)
       assert_raise JS.Unsupported, fn ->
-        JS.compile("def tag(n Int) Bool := :ok")
+        JS.compile("def q() Int := :queue.new()")
       end
     end
 
@@ -388,6 +389,41 @@ defmodule Rian.JSTest do
     end
   end
 
+  describe "atoms and Result lower to JS (ADR-0040/0041)" do
+    test "a bare atom lowers to a JS string; equality holds" do
+      js = JS.compile("def is_ok(s Symbol) Bool := s == :ok")
+      assert js =~ ~s|(s === "ok")|
+      assert node_eval(js, ~s|is_ok("ok")|) in [:no_node, "true"]
+      assert node_eval(js, ~s|is_ok("no")|) in [:no_node, "false"]
+    end
+
+    test "a Result `{:ok,v}`/`{:error,e}` round-trips through a `case` (`[\"ok\", v]`)" do
+      js =
+        JS.compile("""
+        type DivErr := Bad
+        def half(n Int53) Int53 | DivErr
+        def half(0) := {:error, Bad}
+        def half(n) := {:ok, n}
+
+        def unwrap(n Int53) Int53
+          case half(n) do
+            {:ok, x} -> x
+            {:error, _} -> 0 - 1
+          end
+        end
+        """)
+
+      # construction: a Result is a tagged array, parallel to a sum variant
+      assert js =~ ~s|["ok", n]|
+      assert js =~ ~s|["error", ["Bad"]]|
+      # matching: positional length + tag-string test
+      assert js =~ ~s|_s[0] === "ok"|
+
+      assert node_eval(js, "unwrap(5)") in [:no_node, "5"]
+      assert node_eval(js, "unwrap(0)") in [:no_node, "-1"]
+    end
+  end
+
   describe "block bodies, guards, and branches (ADR-0050)" do
     test "a multi-statement body emits lets and expr-statements then returns a value" do
       # `;`-separated statements: a bind (`let`), an expr statement, a returned value
@@ -542,11 +578,13 @@ defmodule Rian.JSTest do
       assert node_eval(js, "String(g(4n))") in [:no_node, "5"]
     end
 
-    test "a tuple clause pattern has no JS lowering yet — raises Unsupported" do
-      # pat_match has no PTuple clause -> the catch-all raise (pat_match other)
-      assert_raise JS.Unsupported, ~r/clause pattern/, fn ->
-        JS.compile("def f(p Tup) Int\ndef f({a, b}) := a + b")
-      end
+    test "a tuple clause pattern lowers to positional array matching and runs" do
+      js = JS.compile("def f(p Tup) Int\ndef f({a, b}) := a + b")
+      # a tuple pattern fixes the length and binds positionally (`a0[0]`/`a0[1]`)
+      assert js =~ "a0.length === 2"
+      assert js =~ "const a = a0[0];"
+      assert js =~ "const b = a0[1];"
+      assert node_eval(js, "f([2n, 3n])") in [:no_node, "5"]
     end
   end
 

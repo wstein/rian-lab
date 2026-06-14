@@ -50,13 +50,16 @@ allocation, and init-order footguns on Rust, for no observable benefit.
   representation caveats on Rust — `&'static str`, no global interner — are documented; a finer
   `@targets`-scoped open-vs-closed lint awaits the atom-classification work `Rian.Reach` tracks.)
 - **Reach is honest about atoms/`Result` against the *emitters*, not this ADR's aspiration (2026-06-14).**
-  This ADR calls atoms and `Result` architecturally portable, but the emitters do not yet realize that:
-  no emitter lowers a **bare value atom** (`Rian.JS`/`Rian.JVM` raise `Unsupported`; `Rian.Lower` raises
-  "atom is BEAM-only"), and JS/JVM do not lower a constructed **`Result`** (`{:ok,_}`/`{:error,_}`) tag.
-  So `Rian.Reach` pins a bare value atom to `:ex` and a constructed `Result` off `:js`/`:jvm` (it stays
-  `:rs`-reachable — Rust lowers it to `Ok`/`Err`). The reach matrix matches what the emitters can produce;
-  when a JS/JVM Symbol/`Result` lowering lands, the corresponding blocker is removed (`Rian.Reach`,
-  `test/rian/reach_test.exs`).
+  This ADR calls atoms and `Result` architecturally portable; `Rian.Reach` reports what the emitters
+  actually lower and removes a blocker as each emitter catches up. Current state:
+  - a **bare value atom** lowers on **`:ex`** (native atom) and **`:js`** (a string — `Rian.JS`), but
+    not **`:rs`** (`Rian.Lower` raises "atom is BEAM-only") or **`:jvm`** (no atom lowering) → reaches
+    `[:ex, :js]`.
+  - a constructed **`Result`** (`{:ok,_}`/`{:error,_}`) lowers on **`:ex`** (tuple), **`:rs`** (`Ok`/`Err`),
+    and **`:js`** (`["ok", v]`), but not **`:jvm`** (no tuple/`case` lowering yet) → reaches `[:ex, :rs, :js]`.
+
+  FFI module-head atoms and Result tags are not double-flagged. When the JVM emitter gains atoms/`case`,
+  its blocker drops too (`Rian.Reach`, `test/rian/reach_test.exs`).
 - **An unmapped BEAM-stdlib call on a non-BEAM target is a compile error, never a silent stub.**
   `:lists.sum` is free FFI on the BEAM; on Rust it maps to a real equivalent or **fails to compile**
   (ADR-0035 no-silent-partiality). A stubbed `:maps.get` returning a default would be a
@@ -74,7 +77,7 @@ Error sets (ADR-0040) and sealed `type` sums are **closed**, so they never reach
 | Rust | native `enum` (the discriminated union) |
 | JVM | sealed class / `enum` |
 | Go | struct with a tag field |
-| JS | tagged object `{tag: "...", ...}` |
+| JS | tagged **array** — `["ok", v]` / `["error", e]` / `["Ctor", …]` (atoms are strings); structs are tagged objects (`Rian.JS`) |
 
 ### 4. Module resolution (closes the ADR-0029 Rust item)
 

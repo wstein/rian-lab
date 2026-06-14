@@ -312,21 +312,21 @@ defmodule Rian.Reach do
       kills: [:rs]
     }
 
-  # A bare value atom (`:foo`, a `Symbol` literal) has no JS/JVM/Rust representation:
-  # `Rian.JS`/`Rian.JVM` raise `Unsupported` on it and `Rian.Lower` raises "atom is
-  # BEAM-only". ADR-0041 deems atoms *architecturally* portable, but no emitter lowers
-  # one, so Reach pins the function to `:ex` — the matrix matches the emitters, not the
-  # ADR's aspiration (the ADR-0000 open item). FFI module-head atoms and Result tags
-  # are consumed by their own `scan` clauses, so this fires only on *value* atoms.
+  # A bare value atom (`:foo`, a `Symbol` literal): lowered on the BEAM (native atom)
+  # and on JS (a string, `Rian.JS` `EAtom` clause), but **not** on Rust (`Rian.Lower`
+  # raises "atom is BEAM-only") or JVM (atoms listed unsupported). ADR-0041 deems atoms
+  # architecturally portable; Reach reports what the emitters actually lower (the matrix
+  # matches the emitters, not the aspiration — ADR-0000). FFI module-head atoms and
+  # Result tags are consumed by their own `scan` clauses, so this fires only on values.
   defp bare_atom_blocker,
-    do: %{construct: "bare atom literal (`:foo`)", kind: :atom, kills: [:js, :jvm, :rs]}
+    do: %{construct: "bare atom literal (`:foo`)", kind: :atom, kills: [:rs, :jvm]}
 
   # A `Result` value `{:ok, _}` / `{:error, _}` (ADR-0040): lowered on the BEAM (tagged
-  # tuple) and on Rust (`Ok`/`Err`), but **not** on JS/JVM — their emitters do not lower
-  # the tag atom (`Rian.JS` has no `EAtom` clause; `Rian.JVM` lists atoms unsupported).
-  # So a constructed Result pins the function off `:js`/`:jvm` (honest matrix).
+  # tuple), Rust (`Ok`/`Err`), and JS (`["ok", v]`, `Rian.JS`), but **not** on JVM (its
+  # emitter has no tuple/`case` lowering yet). So a constructed Result pins the function
+  # off `:jvm` only — honest against the emitters.
   defp result_value_blocker,
-    do: %{construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: :result, kills: [:js, :jvm]}
+    do: %{construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: :result, kills: [:jvm]}
 
   # A function is generic-in-its-result iff its declared return type mentions a type
   # variable (`T`/`Vec(T)`/`V`) — only a `forall` tvar can appear there, so this

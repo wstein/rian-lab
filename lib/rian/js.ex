@@ -81,11 +81,13 @@ defmodule Rian.JS do
     ELabel,
     ETuple,
     EUnary,
+    PAtom,
     PChar,
     PCtor,
     PList,
     PLit,
     PStruct,
+    PTuple,
     PVar,
     PWild
   }
@@ -412,6 +414,14 @@ defmodule Rian.JS do
   # a `Char` is its codepoint integer, in the function's integer mode (number or
   # BigInt) so it never mixes with the surrounding codepoints
   defp pat_match(%PChar{value: cp}, acc), do: {["#{acc} === #{cp_lit(cp)}"], []}
+  defp pat_match(%PAtom{name: a}, acc), do: {["#{acc} === #{js_atom(a)}"], []}
+
+  # a tuple is a JS array (a Result `{:ok, x}` is `["ok", x]`); fix the length and
+  # match each element positionally (`acc[i]`)
+  defp pat_match(%PTuple{elems: es}, acc) do
+    {ts, bs} = match_elems(es, acc)
+    {["#{acc}.length === #{length(es)}" | ts], bs}
+  end
 
   defp pat_match(%PCtor{ctor: ctor, args: args}, acc) do
     {ts, bs} =
@@ -577,6 +587,10 @@ defmodule Rian.JS do
   # a Rian `String` is a JS string; `<>` concatenation is `+` (see js_op)
   defp expr_js(%EStr{value: s}), do: js_str(s)
   defp expr_js(%EId{name: b}) when b in ~w(true false), do: b
+  # an atom (`Symbol`, incl. the `:ok`/`:error` Result tags) lowers to a JS string —
+  # equality holds, ordering is rejected by `symbol_lint!` (ADR-0041 §2). A Result
+  # `{:ok, v}` is then `["ok", v]`, exactly parallel to a sum variant `["Ctor", …]`.
+  defp expr_js(%EAtom{name: a}), do: js_atom(a)
 
   # a bare PascalCase id is a nullary sum variant -> a one-element tagged array
   defp expr_js(%EId{name: x}) do
@@ -744,6 +758,10 @@ defmodule Rian.JS do
   # quote/backslash, the common control chars by name, and any other control
   # codepoint as `\uHHHH` (printable codepoints, incl. non-ASCII, pass through).
   defp js_str(s), do: ~s(") <> for(<<cp::utf8 <- s>>, into: "", do: js_str_cp(cp)) <> ~s(")
+
+  # an atom lowers to its name as a JS string literal (ADR-0041 §3: open symbols are
+  # strings on JS); the same escaping as a `String` literal so a quirky tag is safe
+  defp js_atom(name), do: js_str(name)
 
   defp js_str_cp(?\\), do: "\\\\"
   defp js_str_cp(?"), do: "\\\""
