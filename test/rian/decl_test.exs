@@ -52,7 +52,9 @@ defmodule Rian.DeclTest do
 
     test "a bare parameter defaults to `val`; only iso/ref/tag are spelled (ADR-0070)" do
       %{funcs: [f]} =
-        Decl.parse("def f(a Int64, b val Int64, c iso Vec(Int64), d ref Int64, e tag Bool) Int64 := a")
+        Decl.parse(
+          "def f(a Int64, b val Int64, c iso Vec(Int64), d ref Int64, e tag Bool) Int64 := a"
+        )
 
       assert Enum.map(f.params, &{&1.name, &1.cap}) == [
                {"a", :val},
