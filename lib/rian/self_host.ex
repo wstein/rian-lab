@@ -160,11 +160,11 @@ defmodule Rian.SelfHost do
     rung: "lex → parse → lower → emit",
     stages: 4,
     subset:
-      "a single-clause `def` over arithmetic (def head + parameter list + `:=` body; identifiers, integers, `+ - *`, parens)",
-    source: "selfhost_compose_decl.rian",
-    test: "test/rian/compose_decl_fixpoint_test.exs",
+      "a multi-clause, self-recursive function over arithmetic (literal/variable head patterns, function calls, `+ - *`, parens)",
+    source: "selfhost_compose_multi.rian",
+    test: "test/rian/compose_multi_fixpoint_test.exs",
     note:
-      "four stages wired directly over shared types (no projection glue); rung 1 (selfhost_compose.rian) composed an expression, rung 2 widens to a whole declaration — Rian now parses the def head and assembles the complete {:function, …} abstract form (name, arity, params, body all from source). The composed output compiles via :compile.forms and RUNS identically to the full Elixir toolchain"
+      "four stages wired directly over shared types (no projection glue). Rung 1 (selfhost_compose.rian) composed an expression; rung 2 (selfhost_compose_decl.rian) a single-clause declaration; rung 3 widens to a whole multi-clause recursive function — Rian splits the clause sequence, reads literal/variable head patterns, parses calls, and assembles one multi-clause {:function, …} form. The composed output compiles via :compile.forms and RUNS identically to the full Elixir toolchain (recursion, pattern dispatch, and precedence all survive end to end)"
   }
 
   @doc """

@@ -187,6 +187,18 @@ compile + run on real BEAM bytecode:
   that Rian's tag-injecting variant lowering can't spell; even there the name and
   arity are read back out of the Rian-produced form. Multi-clause heads, patterns,
   and guards are the next widening.
+- [selfhost_compose_multi.rian](selfhost_compose_multi.rian) — **COMPOSITION rung 3**
+  (ADR-0063 Step 3): widens the composed subset from a single-clause `def` to a
+  whole **multi-clause, self-recursive function** — the shape a real compiler stage
+  actually is. `def` lexes to its own token so the body parser stops at the next
+  clause; clause heads carry **literal/variable patterns** (`0` → `{:integer,…}`,
+  `n` → `{:var,…}`); the expression grammar gains **function calls** (`fib(n - 1)` →
+  the Erlang local-call form). `compile_fn(s) = emit_fn(parse_clauses(lex(s)))` emits
+  one multi-clause `{:function, …}` and `test/rian/compose_multi_fixpoint_test.exs`
+  **runs** it — compiling `fib`/`fact`/`sumto` to functions that compute identically
+  to `Rian.Beam` (recursion, pattern dispatch, and precedence all surviving). Host-
+  FFI-free (quoted-atom operator literals + `Prim.str_to_atom`). Guards and multi-
+  function modules are the next widening.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
