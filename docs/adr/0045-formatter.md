@@ -1,6 +1,7 @@
 # ADR-0045 — Formatter: one canonical zero-config style, comment-preserving, deterministic
 
 **Status:** Accepted (direction) · implementation rides the lexer/parser ([`Rian.Lexer`](../../lib/rian/lexer.ex) / [`Rian.Decl`](../../lib/rian/decl.ex)) plus a comment-preserving CST
+**Implemented:** no — no formatter module or `mix` task exists (`lib/mix/tasks/` has compile/build/repl/targets/jar only)
 **Refs:** ADR-0035 (one obvious way; no hidden control flow as a *discipline*), ADR-0038 (LSP — closes its formatter-ownership open item), ADR-0026 (toolchain / CI parity), ADR-0032/0033 (family surface)
 **Owners:** Liam Davis (conventions) · Kira Neri (CI/determinism) · Julian Vance (style rules / CST) · Chloe Bennett (parser) · Samir Patel (invariants) · Maya Lin (LSP integration) · Rachel Okafor (PM)
 

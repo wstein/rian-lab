@@ -1,6 +1,7 @@
 # ADR-0058 — Configurable target environments; reachability-gated portability
 
 **Status:** Accepted (direction) · **partially implemented** (the reachability analysis, the `mix rian.targets --require` gate, **and the in-source `@targets(…)` module annotation + its compile-time contract gate** — `Rian.Reach.gate!/1`, enforced in `Decl.compile`/`compile_beam` and `Beam.compile`/`compile_program` — are shipped; **the build default is shipped too** — `Rian.Reach.build_default/0` reads the `:rian_lab` app env `:rian_targets` (else `mix.exs` `rian: [targets: […]]`), and a module with no `@targets` falls back to it, so an unannotated module is gated by the build's required set. Fully implemented)
+**Implemented:** yes — `Rian.Reach` (`targets/0` → `[:ex, :rs, :js, :jvm]`, `gate!/1`, `build_default/0`), `IR.Mod.targets` from the `@targets(…)` annotation, and `Mix.Tasks.Rian.Targets` (`test/rian/reach_test.exs`, `test/rian/reach_rust_honesty_test.exs`)
 **Refs:** ADR-0031 (sequential-core boundary), ADR-0041 §2 (unmapped BEAM call = compile error, never a silent stub), ADR-0047 (portable prelude `__prim_*`), ADR-0048 (effect tracking — the lattice this generalizes to), ADR-0049 (backend target roadmap / tiers), ADR-0057 (concurrency & OTP are native-per-target)
 **Owners:** Maya Lin (emitters/build) · Samir Patel (gate rigor) · Kira Neri (honesty/determinism) · Arthur Pendelton (analysis lattice) · Elena Rostova (interop seam) · Liam Davis (ergonomics) · Rachel Okafor (PM)
 

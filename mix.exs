@@ -74,12 +74,14 @@ defmodule RianLab.MixProject do
       extras:
         [
           "README.md",
+          {"docs/rian-in-10-minutes.md",
+           filename: "rian-in-10-minutes", title: "Rian in 10 Minutes"},
           {"docs/README.md", filename: "design-corpus", title: "Design Corpus"},
           {"examples/rian/README.md", filename: "rian-by-example", title: "Rian by Example"}
         ] ++
           Path.wildcard("docs/adr/*.md") ++ Path.wildcard("docs/spec/*.md"),
       groups_for_extras: [
-        Overview: ["README.md", "docs/README.md"],
+        Overview: ["README.md", "docs/rian-in-10-minutes.md", "docs/README.md"],
         "Architecture Decisions": Path.wildcard("docs/adr/*.md"),
         Specifications: Path.wildcard("docs/spec/*.md"),
         Examples: ["examples/rian/README.md"]

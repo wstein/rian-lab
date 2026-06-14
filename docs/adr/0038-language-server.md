@@ -1,6 +1,7 @@
 # ADR-0038 — Language Server (LSP): a tolerant analysis layer over the compiler library
 
 **Status:** Accepted (direction) · implementation sequenced with ADR-0031 Stages 0.1→0.3
+**Implemented:** no — no language-server code exists (no LSP module/test); only the syntactic TextMate grammar under `editors/vscode/` ships
 **Refs:** ADR-0026 (BEAM/ecosystem, no fork) · ADR-0030 (declarative/sandboxed macros) · ADR-0031 (bootstrap; reuse the runtime, not the compiler) · ADR-0033/0034 (vocabulary, type-system foundations) · editors/vscode (existing TextMate grammar)
 **Owners:** Kira Neri (toolchain, server) · Maya Lin (architecture/library boundary) · Chloe Bennett (parser / error recovery) · Arthur Pendelton (incremental checking) · Marcus Webb (sandbox/security) · Samir Patel (rigor/conformance) · Elena Rostova (semantic features) · Liam Davis (ecosystem) · Rachel Okafor (PM)
 

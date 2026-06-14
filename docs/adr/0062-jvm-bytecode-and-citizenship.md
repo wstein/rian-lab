@@ -1,6 +1,8 @@
 # ADR-0062 — JVM citizenship: from a Kotlin transpiler to direct bytecode
 
-**Status:** Proposed · **Refs:** ADR-0031 (the BEAM precedent — reuse the runtime, emit forms, not source text), ADR-0049 §3a (the JVM emitter is Kotlin), ADR-0041 (target model / per-target representation), ADR-0057 (concurrency & FFI are native-per-target), ADR-0050 (typed core IR — one IR, many emitters), ADR-0026 (don't fork the host)
+**Status:** Proposed
+**Implemented:** partial — rung B shipped (`Rian.JVM.to_jar`, `mix rian.jar` — `lib/rian/jvm.ex`, `lib/mix/tasks/rian.jar.ex`); rung C (direct JVM bytecode, no Kotlin source) not
+**Refs:** ADR-0031 (the BEAM precedent — reuse the runtime, emit forms, not source text), ADR-0049 §3a (the JVM emitter is Kotlin), ADR-0041 (target model / per-target representation), ADR-0057 (concurrency & FFI are native-per-target), ADR-0050 (typed core IR — one IR, many emitters), ADR-0026 (don't fork the host)
 **Owners:** Maya Lin (emitters) · Arthur Pendelton (compilers/bytecode) · Elena Rostova (interop seam) · Samir Patel (conformance) · Kira Neri (honesty/determinism) · Rachel Okafor (PM)
 
 ## Context

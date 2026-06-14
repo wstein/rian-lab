@@ -1,6 +1,7 @@
 # ADR-0026 — Erlang/BEAM Ecosystem Integration (No Fork)
 
 **Status:** Accepted · **Supersedes (partially):** the "transpile to Elixir source" framing
+**Implemented:** partial — Erlang-native BEAM backend via `:compile.forms` shipped (`Rian.Beam`, `test/rian/beam_test.exs`); rebar3 plugin / Mix compiler / OTP-behaviour emission / escript packaging not built
 **Owners:** Maya Lin (architecture) · Kira Neri (toolchain) · Liam Davis (ecosystem)
 
 ## Context

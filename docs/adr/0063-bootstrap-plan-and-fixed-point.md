@@ -1,6 +1,8 @@
 # ADR-0063 — Bootstrap plan: the self-hosting boundary and the fixed-point criterion
 
-**Status:** Proposed · **Refs:** ADR-0027 (fast track to self-hosting), ADR-0031 (reuse the runtime, not the compiler; abstract-forms backend), ADR-0050 (typed core IR — one IR, many front/back ends), ADR-0047 (portable prelude — the stdlib the ported compiler leans on), SELFHOST.md (the blocker ledger + the lexer/parser fixpoints)
+**Status:** Proposed
+**Implemented:** partial — Stage 0/1 equivalence-locked (ported lexer + parser slice; `Rian.Fixpoint`, `examples/rian/selfhost_*.rian`; `test/rian/fixpoint_test.exs`, `test/rian/parse_fixpoint_test.exs`); Stage 2/3 (full self-compile, fixed point) not
+**Refs:** ADR-0027 (fast track to self-hosting), ADR-0031 (reuse the runtime, not the compiler; abstract-forms backend), ADR-0050 (typed core IR — one IR, many front/back ends), ADR-0047 (portable prelude — the stdlib the ported compiler leans on), SELFHOST.md (the blocker ledger + the lexer/parser fixpoints)
 **Owners:** Arthur Pendelton (compilers) · Chloe Bennett (parser) · Maya Lin (architecture) · Samir Patel (conformance) · Kira Neri (honesty) · Rachel Okafor (PM)
 
 ## Context

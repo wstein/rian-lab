@@ -1,6 +1,7 @@
 # ADR-0041 — Target Model: per-target representation, observable contracts, module resolution
 
 **Status:** Accepted (direction) · implementation rides the emitters ([`Rian.Lower`](../../lib/rian/lower.ex)) and the declaration parser (ADR-0031 Stage 0.1)
+**Implemented:** partial — per-target representation/dispatch lives in the emitters (`Rian.Lower`, `Rian.Beam`, `Rian.JS`, `Rian.JVM`) and reachability in `Rian.Reach` (`test/rian/reach_test.exs`); the model is realized, but the full BEAM-stdlib→target mapping catalogue is incremental and not complete
 **Refs:** ADR-0026 (Erlang-native backend), ADR-0029 (dot syntax / symbol resolution), ADR-0032/0033 (atom lowering open item), ADR-0034 §2 (error sets), ADR-0035 (no silent partiality; allocation visibility), ADR-0036 (finite vs open universes), ADR-0037 (`@wire`)
 **Owners:** Maya Lin (emitters) · Elena Rostova (Rust/perf) · Chloe Bennett (resolution) · Arthur Pendelton (open/closed universes) · Marcus Chen (contracts) · Kira Neri (determinism) · Liam Davis (JS) · Rachel Okafor (PM)
 **Closes:** the atom-lowering open item in ADR-0032/0033, the error-tag representation item in ADR-0034, the Rust symbol-resolution item in ADR-0029, and the allocation-visibility item in ADR-0035 — four open items in one ADR.

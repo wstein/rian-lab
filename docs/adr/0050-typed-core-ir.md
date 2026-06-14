@@ -1,6 +1,7 @@
 # ADR-0050 — One Typed Core IR: single contract, sealed-sum nodes, emitters as pure consumers
 
 **Status:** Accepted (direction) · **Refines:** the `ir.ex` "expr/pattern stay tuples" pragma (overturned, with evidence)
+**Implemented:** yes — `Rian.Core` typed sealed-sum IR (`test/rian/core_test.exs`); all emitters consume Core
 **Refs:** ADR-0027 (self-hosting), ADR-0031 (abstract-forms backend; Stage 0.1), ADR-0034 (types; exhaustiveness over sums), ADR-0041 (representation needs types at emission), ADR-0043 (opaque erasure), ADR-0046 (monomorphization), ADR-0049 (three new emitters incoming)
 **Owners:** Maya Lin (pipeline/emitters) · Arthur Pendelton (typed IR) · Chloe Bennett (parser unification) · Elena Rostova (migration) · Samir Patel (metric/dogfood) · Kira Neri (backend swap) · Rachel Okafor (PM)
 **Evidence:** [SELFHOST.md](../../SELFHOST.md) verdict #3 (B1 fixed in *three* places — "the fork a self-hosted front end would inherit"); README "known gaps" #1.

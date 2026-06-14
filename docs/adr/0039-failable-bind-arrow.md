@@ -1,6 +1,7 @@
 # ADR-0039 — Reassign `<-` to the family failable-bind/generator; re-spell capability-gated mutation
 
 **Status:** Accepted (direction) · **Prerequisite for:** ADR-0040 (error handling / `with`)
+**Implemented:** yes — `<~` parses as capability-gated mutation and `<-` as the failable-bind arrow (`:bind_arrow`, valid in `with`/`for` headers) (`Rian.Pratt`; `test/rian/pratt_test.exs`, `test/rian/propagation_test.exs`)
 **Refs:** ADR-0032 (collision test), ADR-0033 (vocabulary — *mutation row superseded here*), ADR-0034 §2 (error sets), ADR-0035 (no hidden control flow)
 **Owners:** Julian Vance (grammar) · Chloe Bennett (parser) · Arthur Pendelton (compilers) · Rachel Okafor (PM)
 

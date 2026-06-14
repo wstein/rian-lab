@@ -1,6 +1,7 @@
 # ADR-0053 — REPL & Interactive Surfaces: a compiling, connected REPL; one eval engine, many surfaces
 
 **Status:** Accepted (direction) · implementation wraps [`Rian.Beam`](../../lib/rian/beam.ex)
+**Implemented:** partial — local compiling REPL is shipped (`Rian.Repl`, `Mix.Tasks.Rian.Repl`; `test/rian/repl_test.exs`, `test/rian/repl/history_test.exs`); the `--remote`/connected REPL (§2) and the Livebook/Jupyter surfaces (§8) are not built (see ADR-0054)
 **Refs:** ADR-0026/0031 (BEAM host; `Rian.Beam` abstract-forms eval core), ADR-0033/0034 (single-assignment; the compile gate), ADR-0038 (LSP / editor-eval), ADR-0046 (BEAM dynamism preserved *for* the REPL), ADR-0048 (effect sets shown), ADR-0051 (`@doc` → `h` lookup), ADR-0052 (web playground — a sibling surface)
 **Owners:** Arthur Pendelton (compiling REPL) · Maya Lin (architecture) · Liam Davis (IEx/IRB/Livebook) · Chloe Bennett (Jupyter/notebooks) · Elena Rostova (BEAM scoping) · Samir Patel (no-drift) · Marcus Chen (connected-prod security) · Kira Neri (remote/ops) · Rachel Okafor (PM)
 **Models on:** IEx, IRB, and — decisively — the **Clojure connected REPL** (nREPL).

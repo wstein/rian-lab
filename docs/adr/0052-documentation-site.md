@@ -1,6 +1,7 @@
 # ADR-0052 — Documentation Site: Astro/Starlight portal + native per-target API reference
 
 **Status:** Accepted (direction) · **Lightweight/tooling** (not on the implementation critical path)
+**Implemented:** partial — an Astro/Starlight portal exists (`site/astro.config.mjs` with `@astrojs/starlight`, `site/src/content`); the in-browser Rian playground (gated on the ECMAScript emitter / self-host) is not built
 **Refs:** ADR-0026 (ExDoc/EEP-48), ADR-0041/0046 (native-per-target; "don't simulate"), ADR-0049 (Tier-1 ECMAScript — enables the playground), ADR-0051 (doc-comment extraction — the *other* layer)
 **Prior-art blueprint:** [github.com/wstein/flatbars](https://github.com/wstein/flatbars) — a same-author PureScript monorepo with an Astro Starlight MDX spec site and a client-side `lab/` playground (engine compiled to a committed JS bundle + a WASM core). It already runs the patterns below in production; the playground open items adopt its architecture.
 **Owners:** Liam Davis (site/JS) · Julian Vance (content) · Kira Neri (build/CI) · Maya Lin (architecture) · Marcus Chen (supply chain) · Rachel Okafor (PM)

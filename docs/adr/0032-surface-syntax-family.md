@@ -1,6 +1,7 @@
 # ADR-0032 — Surface Syntax Belongs to the Elixir/Ruby/Crystal Family
 
 **Status:** Accepted · **Refs:** ADR-0026 (no fork / ecosystem), ADR-0029 (dot syntax), ADR-0031 (bootstrap)
+**Implemented:** no — design principle (surface-family lineage / collision test); no single implementing module, realized concretely by ADR-0033's vocabulary
 **Owners:** Chloe Bennett (parser) · Julian Vance (grammar) · Maya Lin (architecture/emitters) · Rachel Okafor (PM)
 **Corrects framing in:** the spec headers that describe a target as a "superset"
 

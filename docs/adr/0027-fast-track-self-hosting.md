@@ -1,6 +1,7 @@
 # ADR-0027 — Fast Track to Self-Hosting
 
 **Status:** Accepted; FFI implemented & verified · **Refs:** ADR-0026 (ecosystem)
+**Implemented:** partial — FFI path-calls done & tested (`Rian.Lower`, `test/rian/ffi_test.exs`); self-hosting subset spikes exist (`Rian.Fixpoint`) but Stage 1/2 bootstrap fixpoint not reached
 **Owners:** Chloe Bennett (FFI/host) · Arthur Pendelton (bootstrap) · Maya Lin (subset)
 **Implementation:** FFI in `lib/rian/lower.ex` · **Tests:** `test/rian/ffi_test.exs` (6/6)
 

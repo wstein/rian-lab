@@ -1,6 +1,7 @@
 # ADR-0048 — Effect Tracking: fine-grained, inferred, ambient (not object-capability)
 
 **Status:** Accepted (direction) · **Resolves:** the ADR-0047 effects/IO open item
+**Implemented:** no — no effect-tracking module or test; `Rian.Check` infers no effects
 **Refs:** ADR-0025 (memory capabilities — *orthogonal*), ADR-0030/0046 (`comptime` purity), ADR-0034 §1 (infer-local/declare-public), ADR-0035 (transparency — "what you read is what runs"), ADR-0039 (`<~` mutation), ADR-0040 §4 (composition — the parallel), ADR-0041 (per-target), ADR-0047 (pure/effectful boundary)
 **Owners:** Arthur Pendelton (effect inference) · Marcus Chen (transparency) · Elena Rostova (lowering) · Maya Lin (multi-target) · Samir Patel (testability) · Kira Neri (determinism) · Chloe Bennett (comptime) · Liam Davis (family ergonomics) · Rachel Okafor (PM)
 

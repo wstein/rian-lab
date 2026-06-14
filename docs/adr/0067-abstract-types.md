@@ -1,6 +1,7 @@
 # ADR-0067 — Abstract types: zero-cost wrappers with operators and controlled casts
 
 **Status:** Accepted (direction) — unimplemented; gated on the declaration parser + `opaque` lowering (ADR-0043 / ADR-0031 Stage 0.1)
+**Implemented:** no — design only; gated on `opaque`/`abstract` parsing in `Rian.Decl` (ADR-0043, itself not yet built)
 **Extends:** ADR-0043 (opaque types — nominal distinctness over a base, zero-cost). This ADR adds the *operator* and *cast* surface that ADR-0043 deliberately left out.
 **Refs:** ADR-0036 (`range` — "representation, not newtype"), ADR-0033 (surface vocabulary), ADR-0035 (no implicit coercion — the constraint), ADR-0041 (per-target representation / observable contract), ADR-0042 (protocols — an abstract may `impl`), ADR-0050 (one typed Core IR — erasure happens in the emitters), ADR-0055 (capability rides the base), ADR-0064 (`Int53`/fixed-width — a candidate to *demote* from compiler-builtin to library abstract)
 **Owners:** Maya Lin (emitters / erasure) · Elena Rostova (Rust zero-cost) · Arthur Pendelton (type system) · Samir Patel (totality / coherence) · Kira Neri (no hidden coercion) · Rachel Okafor (PM)

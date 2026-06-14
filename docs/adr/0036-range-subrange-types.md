@@ -1,6 +1,8 @@
 # ADR-0036 — Range (Subrange) Types: finite ordinal subtypes over `Int64` / `Char`
 
-**Status:** Accepted (direction) · **Refines:** ADR-0033 (surface vocabulary — adds `Char` and the `range` keyword), the exhaustiveness spec §4 ("no integer-range machinery")
+**Status:** Accepted (direction)
+**Implemented:** yes — range decls + `Name.of(n)` checked constructor returning `base | RangeError` (`Rian.Range`, `Rian.Decl`; `test/rian/range_test.exs`, `test/rian/check_test.exs`)
+ · **Refines:** ADR-0033 (surface vocabulary — adds `Char` and the `range` keyword), the exhaustiveness spec §4 ("no integer-range machinery")
 **Refs:** ADR-0032 (Elixir/Ruby/Crystal family), ADR-0034 (type-system foundations), ADR-0035 (errors are values; no hidden control flow)
 **Owners:** Arthur Pendelton (exhaustiveness algorithm) · Maya Lin (emitters) · Chloe Bennett (parser) · Samir Patel (exhaustiveness tests) · Rachel Okafor (PM)
 

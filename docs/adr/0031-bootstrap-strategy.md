@@ -1,6 +1,7 @@
 # ADR-0031 — Bootstrap Strategy: Reuse the Elixir *Runtime*, Not the Elixir *Compiler*
 
 **Status:** Accepted · **Refines:** ADR-0027 (fast track to self-hosting) · **Consistent with:** ADR-0026 (don't fork Elixir/OTP)
+**Implemented:** yes — Elixir-hosted front-end with both interim text backend (`Rian.Lower`) and abstract-forms backend (`Rian.Beam`); Elixir compiler not forked
 **Owners:** Arthur Pendelton (compilers) · Chloe Bennett (parser) · Maya Lin (architecture) · Rachel Okafor (PM)
 
 ## Context

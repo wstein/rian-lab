@@ -1,6 +1,7 @@
 # ADR-0000 — Charter: Rian's thesis, the borrowing rule, the target model, and how to read this corpus
 
 **Status:** Accepted — living (the index/charter; amended as the corpus evolves)
+**Implemented:** n/a — charter/index, no code of its own; the [Status-at-a-glance](../README.md) table + tests are the shipped-ness index it defines
 **Refs:** everything. This ADR states what the other ~40 are *for*. Most-load-bearing: ADR-0050 (one typed Core IR), ADR-0057 (concurrency native-per-target), ADR-0058 (inferred reachability), ADR-0032 (concept-borrowing), ADR-0035 (no hidden control flow), ADR-0049 (target tiers).
 **Owners:** the whole team (Rachel Okafor, custodian).
 **Origin:** the corpus-review debate (2026-06-14) — consensus #2, rated **5/5**. A reader had to reverse-engineer Rian's identity from 40 documents; this writes it down once.

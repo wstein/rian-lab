@@ -1,6 +1,7 @@
 # ADR-0049 — Backend Target Roadmap & Tiers
 
 **Status:** Accepted (direction) · **Refines:** ADR-0026 (the flat six-target list), ADR-0031 (bootstrap stages; backend-parallel emitters)
+**Implemented:** partial — `Rian.Beam`/`Rian.Lower` (BEAM+Rust), `Rian.JS` (Tier 1), `Rian.JVM` (Tier 2) emitters exist; Go/WASM not started, JS/JVM are subsets
 **Refs:** ADR-0034 (integers), ADR-0035 (no hidden allocation on non-GC targets), ADR-0041 (target model), ADR-0042 (dispatch), ADR-0047 (stdlib), ADR-0048 (effects)
 **Owners:** Maya Lin (emitters/tiers) · Liam Davis (ECMAScript) · Arthur Pendelton (typeclass/effect lowering) · Elena Rostova (Rust/WASM) · Kira Neri (CI parity) · Samir Patel (conformance) · Marcus Chen (supply chain) · Rachel Okafor (PM)
 

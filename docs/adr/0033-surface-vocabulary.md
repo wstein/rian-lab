@@ -1,6 +1,7 @@
 # ADR-0033 — Surface Vocabulary: `def`, juxtaposed types, `case`/`when`, Crystal primitives
 
 **Status:** Accepted
+**Implemented:** yes — `def`/`case`…`do`/`when` guards/juxtaposed types/`:=` binding parsed in `Rian.Decl` + `Rian.Pratt` (`test/rian/decl_test.exs`)
 **Refs:** ADR-0032 (surface belongs to the Elixir/Ruby/Crystal family), ADR-0029 (dot syntax), ADR-0031 (bootstrap)
 **Supersedes:** the "reject `:`-typed params" debate; ADR-0032's *primitive type spelling* open item
 **Owners:** Chloe Bennett (parser) · Julian Vance (grammar) · Maya Lin (emitters) · Rachel Okafor (PM)

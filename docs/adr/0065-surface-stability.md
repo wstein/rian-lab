@@ -1,6 +1,8 @@
 # ADR-0065 — Surface stability: freeze the token + operator surface (not layout, not semantics)
 
-**Status:** Proposed · **Refs:** ADR-0032/0033 (surface syntax family + vocabulary), ADR-0050 (parser/core IR), ADR-0029 (dot syntax), ADR-0039 (failable bind), ADR-0064 (numeric semantics — *not* frozen), P1 (newline-tolerant bodies — layout *not* frozen), P5 (`ref` portability — *not* frozen)
+**Status:** Proposed
+**Implemented:** partial — token/operator surface present in the parser (`Rian.Pratt` `opinfo`, `Rian.Lexer`); the freeze itself (declaring the surface stable) is a process decision, not landed
+**Refs:** ADR-0032/0033 (surface syntax family + vocabulary), ADR-0050 (parser/core IR), ADR-0029 (dot syntax), ADR-0039 (failable bind), ADR-0064 (numeric semantics — *not* frozen), P1 (newline-tolerant bodies — layout *not* frozen), P5 (`ref` portability — *not* frozen)
 **Owners:** Maya Lin (surface) · Chloe Bennett (parser) · Samir Patel (rigor) · Kira Neri (honesty) · Rachel Okafor (PM)
 
 ## Context

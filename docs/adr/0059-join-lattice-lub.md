@@ -1,6 +1,7 @@
 # ADR-0059 — The join lattice: least-upper-bound for branch/arm types
 
 **Status:** Accepted; **implemented** (numeric LUB + same-constructor covariant join — `Vec`/`Option` — in `Rian.Check.join/2`; the `if`/`case`/list-literal sites consume it). `Result` error-set *union* (§3) is **specified, pending** the checker carrying structured `Result(A,E)` types into inferred type strings — until then a `Result` join falls under the generic covariant rule (equal-or-`:unknown` error component)
+**Implemented:** yes — join lattice (`Rian.Check.join/2` + `num_join`, `lib/rian/check.ex`; `if`/`case`/list sites consume it) (`test/rian/check_test.exs`)
 **Refs:** ADR-0034 §1 (type-system foundations; the 2026-06-13 lossless-widening amendment that introduced `assignable?`/`num_widens?`), ADR-0033 (Crystal-family numeric vocabulary), ADR-0035 (no hidden control flow — no implicit coercion), ADR-0040 (error sets — the `Result` error component joins by set union), ADR-0042 (protocol bounds will consume this lattice), ADR-0050 (one typed core IR — `node.type` is read by emitters)
 **Owners:** Arthur Pendelton (analysis lattice) · Maya Lin (type system / soundness) · Kira Neri (honesty/determinism) · Rachel Okafor (PM)
 

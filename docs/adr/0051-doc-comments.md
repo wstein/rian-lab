@@ -1,6 +1,7 @@
 # ADR-0051 — Doc Comments: `@moduledoc`/`@doc`/`@typedoc`, documented self-hosting from day one
 
 **Status:** Accepted (direction) · **Day-one / Stage-1 prerequisite** (not a deferred surface item)
+**Implemented:** partial — `@doc`/`@moduledoc`/`@typedoc` + heredoc `"""…"""` parse and attach as the `doc` field (`Rian.Lexer`, `Rian.Decl`, `Rian.IR`; `test/rian/decl_test.exs`, `test/rian/lexer_test.exs`), lowered to Elixir-text and rustdoc `///`/`//!` (`Rian.Lower`); but **no EEP-48 BEAM doc chunks** (`Rian.Beam` emits no doc attribute) and **no JSDoc** (`Rian.JS`)
 **Refs:** ADR-0026 (EEP-48 doc-chunk *output* — this is its missing *input* surface), ADR-0027/0031 (self-hosting), ADR-0032 (family surface), ADR-0035/0037/0044 (the `@`-annotation lane), ADR-0041 (per-target lowering), ADR-0045 (formatter / CST), ADR-0046 (compile-time metadata), ADR-0049 (Tier-1 doc contract), ADR-0050 (declaration structs carry the doc)
 **Owners:** Julian Vance (doc surface) · Arthur Pendelton (self-hosting) · Chloe Bennett (parser/lexer) · Maya Lin (per-target lowering) · Liam Davis (EEP-48/ExDoc) · Samir Patel (doctests deferral) · Rachel Okafor (PM)
 

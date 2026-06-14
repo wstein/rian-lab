@@ -1,6 +1,7 @@
 # ADR-0030 — Macros: Declarative, Hygienic, Pattern→Template (+ sandboxed comptime)
 
 **Status:** Accepted; implemented & verified · **Implements:** ADR-0008 (hygienic macros), ADR-0009 (pure comptime)
+**Implemented:** yes — `Rian.Macro`, `Rian.Comptime` (`test/rian/macro_test.exs`)
 **Owners:** Arthur Pendelton (expansion) · Marcus Webb (sandbox) · Chloe Bennett (ergonomics)
 **Code:** `lib/rian/macro.ex`, `lib/rian/comptime.ex` · **Tests:** `test/rian/macro_test.exs` (10/10); full suite 116/0
 

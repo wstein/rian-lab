@@ -1,6 +1,7 @@
 # ADR-0040 — Error handling: `Result(T, E)`, the `T | E` return sugar, `with` propagation, error-set composition
 
 **Status:** Accepted (direction) · **Depends on:** ADR-0039 (`<-` failable-bind) · **Implements:** ADR-0034 §2
+**Implemented:** partial — `Result`/`T | E` return sugar and `with` (`EWith`) parse, check, and lower to the BEAM (`Rian.Check`, `Rian.Core`, `Rian.Beam`; `test/rian/check_test.exs`); full error-set composition/Rust+JS lowering not exhaustively covered
 **Refs:** ADR-0032 (family; `?` reserved for predicates), ADR-0033 (vocabulary), ADR-0034 §1/§2 (inference, error sets), ADR-0035 (errors are values; no hidden control flow), ADR-0036/0037 (existing error sets), ADR-0026 (precise `-spec`)
 **Owners:** Arthur Pendelton (inference/composition) · Elena Rostova (Rust lowering) · Chloe Bennett (parser) · Samir Patel (exhaustiveness) · Rachel Okafor (PM)
 

@@ -1,6 +1,7 @@
 # ADR-0068 — `@external`: target-scoped FFI bodies, Reach-honest
 
 **Status:** Accepted — **implemented (2026-06-14)** across `Rian.Decl` (parse), `Rian.Reach` (honest target set), `Rian.Check` (signature + `val`/`tag` restriction), and all four emitters (`Rian.Beam`/`Rian.JS`/`Rian.JVM`/`Rian.Lower`); `test/rian/external_test.exs`
+**Implemented:** yes — `Rian.Decl`/`Rian.Reach`/`Rian.Check` + all four emitters (`test/rian/external_test.exs`)
 **Refs:** ADR-0057 (concurrency & FFI are native-per-target — the principle this gives a surface), ADR-0058 (configurable target environments; **inferred** reachability, *not* a binary `@shared` flag), ADR-0056 (`comptime if target` — the *adjacent but distinct* mechanism; see §4), ADR-0041 §2 (an unmapped host call is a compile error, never a silent stub), ADR-0035 (no hidden control flow / what-you-read-is-what-runs), ADR-0050 (one typed Core IR)
 **Owners:** Elena Rostova (FFI / lowering) · Maya Lin (emitters / the anti-`#if` position) · Samir Patel (no-silent-stub guard) · Arthur Pendelton (Reach) · Kira Neri (honesty) · Rachel Okafor (PM)
 **Origin:** the Gleam/Haxe borrow debate (2026-06-14) — consensus #2, rated **4/5**. Borrow Gleam's disciplined `@external`, explicitly **reject** Haxe's `#if` scattered through bodies.

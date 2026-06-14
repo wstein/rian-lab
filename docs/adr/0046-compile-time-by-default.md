@@ -1,6 +1,7 @@
 # ADR-0046 — Compile-Time by Default
 
 **Status:** Accepted · **The positive complement to:** ADR-0035 (No Hidden Control Flow)
+**Implemented:** partial — `comptime` constant folding (`Rian.Comptime`, `test/rian/comptime_test.exs`) and exhaustiveness/checking gates exist; full monomorphization/specialization is not realized
 **Refs:** ADR-0030 (pure `comptime` / monomorphization), ADR-0034 (bidirectional checking; infer-local boundary), ADR-0035 (predictability discipline), ADR-0036 (range bounds), ADR-0037 (`@wire` codecs), ADR-0040 (error-set completeness), ADR-0041 (target-conditioned representation), ADR-0042 (static-by-default dispatch), ADR-0043 (zero-cost opaque types), ADR-0025/capability-lowering (linearity)
 **Owners:** Arthur Pendelton (comptime/partial eval) · Elena Rostova (specialization/zero-cost) · Maya Lin (BEAM dynamism) · Samir Patel (checks-as-gate) · Marcus Chen (checks-as-posture) · Kira Neri (determinism/build-time) · Rachel Okafor (PM)
 

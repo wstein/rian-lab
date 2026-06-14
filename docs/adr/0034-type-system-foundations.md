@@ -1,6 +1,7 @@
 # ADR-0034 — Type-System Foundations: unification, error sets, protocol bounds, flow narrowing
 
 **Status:** Accepted (direction) · implementation gated on the declaration parser (ADR-0031 Stage 0.1)
+**Implemented:** partial — unification-based bidirectional inference + error sets + flow narrowing shipped (`Rian.Check`, `test/rian/check_test.exs`); protocol-bounded generics (§3) deferred to its own ADR
 **Refs:** ADR-0030 (comptime), ADR-0032 (family / concept-borrowing), ADR-0033 (vocabulary), ADR-0035 (no hidden control flow)
 **Owners:** Arthur Pendelton (inference) · Elena Rostova (polymorphism) · Maya Lin (multi-target) · Samir Patel (rigor) · Rachel Okafor (PM)
 **Amended 2026-06-12 (decision-lock review):** structural-unions, inference-algorithm, error-set-composition, and integer-overflow open items are **resolved** (see §1, §4, and Open items). The §2 propagation form is decided (`with`) and split into **ADR-0039** (`<-` reassignment) + **ADR-0040** (error handling). §3 (protocol-bounded generics) remains open and gets its own ADR.

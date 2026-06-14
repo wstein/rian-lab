@@ -1,6 +1,7 @@
 # ADR-0069 — String interpolation that auto-stringifies via a portable `Show`
 
 **Status:** Proposed (design) · **Unimplemented** — no lexer/parser/Core/emitter support yet (the lexer decodes a string to a flat binary, `Rian.Lexer.lex_string/2`; Core carries only `EStr{value}`).
+**Implemented:** no — design only (no lexer/parser/Core/emitter support; depends on a portable `Show`)
 **Refs:** ADR-0042 (protocols & bounded generics — the dispatch this leans on), ADR-0061 (multi-target protocol lowering — BEAM/Rust/JS dispatch, the Rust owned-return gap), ADR-0047 (portable prelude/stdlib — the `Prim.*` intrinsic layer), ADR-0051 §"Open items" (interpolation deferred for doc heredocs — "probably no"), ADR-0035 (no hidden control flow — the central tension), ADR-0033 (surface vocabulary), ADR-0064 (portable numeric contract — `Int53` is the portable integer; `Int`/wide ints are off some targets), ADR-0057/0058 (target-environment sets; reachability), ADR-0065 (P7 surface freeze — this surface is *not* frozen).
 **Owners:** Maya Lin (surface / emitters) · Samir Patel (types / protocol bounds) · Kira Neri (honesty) · Mira (totality) · Tomás (BEAM performance) · Rachel Okafor (PM)
 

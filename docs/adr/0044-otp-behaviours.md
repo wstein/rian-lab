@@ -9,6 +9,7 @@
 > kept only as a historical record.
 
 **Status:** ~~Accepted (direction)~~ **Superseded by ADR-0057** · ~~implementation gated on the declaration parser (ADR-0031 Stage 0.1) and the checker~~
+**Implemented:** no — superseded by ADR-0057; withdrawn, never implemented
 **Refs:** ADR-0026 (first-class OTP behaviours — closes that open item), ADR-0030 (macros are declarative, *not* `use`/injection), ADR-0031 (concurrency is OTP/actors, BEAM-native; non-BEAM = sequential core), ADR-0034 (typed contracts), ADR-0035 (errors are values; no silent drop), ADR-0041 (target model — BEAM-only features), ADR-0042 (protocols — the kin concept)
 **Owners:** Maya Lin (architecture) · Arthur Pendelton (contract checking) · Elena Rostova (BEAM/state) · Chloe Bennett (parser) · Samir Patel (contract rigor) · Kira Neri (supervision/releases) · Rachel Okafor (PM)
 

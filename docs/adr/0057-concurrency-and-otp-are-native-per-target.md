@@ -1,6 +1,7 @@
 # ADR-0057 — Concurrency & OTP are native-per-target; Rian is sequential-logic shared across hosts
 
 **Status:** Accepted (direction) · **Supersedes:** [ADR-0044](0044-otp-behaviours.md) (OTP behaviours as a Rian surface) · **Refines:** [ADR-0031](0031-bootstrap-strategy.md) (sequential-core boundary), [ADR-0026](0026-ecosystem-integration.md) (withdraws the "first-class OTP behaviours in Rian" promise)
+**Implemented:** n/a — principle (Rian models no concurrency); enforced negatively by `Rian.Reach`, whose `@conc_erl_fun`/concurrency FFI list pins any `:erlang.spawn`/`send`/… caller to `:ex` (`test/rian/reach_test.exs`)
 **Refs:** ADR-0035 (no hidden control flow), ADR-0041 (target model; BEAM-only features), ADR-0042 (protocols — the portable interface concept), ADR-0047 (portable prelude), ADR-0056 (already dormant under this principle)
 **Owners:** Maya Lin (architecture) · Elena Rostova (BEAM interop) · Samir Patel (boundary rigor) · Kira Neri (supervision/releases) · Arthur Pendelton (types across the boundary) · Rachel Okafor (PM)
 

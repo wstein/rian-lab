@@ -1,6 +1,8 @@
 # ADR-0066 — Error-propagation sugar: a spelling shootout (not `?`, not `!`)
 
-**Status:** Proposed (design / shootout) · **Option C (bare `<-`) implemented for the BEAM** (2026-06-14) · **Refs:** ADR-0040 (error handling — `Result(T, E)` over typed error sets), ADR-0039 (failable bind `<-` in `with`/`for` headers), ADR-0034 §1 (untyped `?` propagation *removed*), ADR-0032 (`?` is a boolean predicate; borrow surface only from the family), ADR-0035 (no hidden control flow), ADR-0065 (P7 — surface freeze; this operator is *not* yet frozen)
+**Status:** Proposed (design / shootout) · **Option C (bare `<-`) implemented for the BEAM** (2026-06-14)
+**Implemented:** partial — bare `<-` propagation on the BEAM (`Rian.Pratt` `desugar_propagation`, `Rian.Beam`; `test/rian/propagation_test.exs`); Option A (`try` inline form) and JS/Rust lowerings not
+**Refs:** ADR-0040 (error handling — `Result(T, E)` over typed error sets), ADR-0039 (failable bind `<-` in `with`/`for` headers), ADR-0034 §1 (untyped `?` propagation *removed*), ADR-0032 (`?` is a boolean predicate; borrow surface only from the family), ADR-0035 (no hidden control flow), ADR-0065 (P7 — surface freeze; this operator is *not* yet frozen)
 **Owners:** Maya Lin (surface) · Samir Patel (error sets / totality) · Mira (totality) · Kira Neri (honesty) · Rachel Okafor (PM)
 
 ## Context

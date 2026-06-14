@@ -1,6 +1,7 @@
 # ADR-0054 — Connected REPL Prerequisites: attach authentication and an evaluation sandbox/fuel envelope
 
 **Status:** Accepted (direction) · gates [ADR-0053 §2](0053-repl-interactive-surfaces.md) before `--remote` ships
+**Implemented:** no — `--remote` itself is unbuilt (`Mix.Tasks.Rian.Repl` only references the missing sandbox/fuel story in a comment), so its attach-auth and sandbox/fuel prerequisites are likewise unimplemented
 **Refs:** ADR-0030 (comptime sandbox), ADR-0038 (LSP / editor-eval), ADR-0048 (effect visibility), ADR-0053 (REPL & interactive surfaces)
 **Owners:** Marcus Chen (security) · Kira Neri (remote/ops) · Maya Lin (architecture) · Arthur Pendelton (compiling REPL) · Rachel Okafor (PM)
 

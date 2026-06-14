@@ -1,6 +1,8 @@
 # ADR-0037 — Binary Wire-Format Records: `@wire` structs with derived `decode`/`encode`
 
-**Status:** Accepted (direction) · **Refines:** ADR-0033 (adds the `Bytes` builtin and the `@wire` annotation)
+**Status:** Accepted (direction)
+**Implemented:** no — `@wire` appears only as a name in a `Rian.Lexer` annotation-lane comment; no `Bytes` builtin, no derived `decode`/`encode`, no parser/emitter/test
+ · **Refines:** ADR-0033 (adds the `Bytes` builtin and the `@wire` annotation)
 **Refs:** ADR-0032 (surface decouples from target representation), ADR-0034 (error sets), ADR-0035 (errors are values; no hidden control flow), ADR-0029 (dot qualifier)
 **Owners:** Maya Lin (emitters) · Chloe Bennett (parser) · Arthur Pendelton (compilers) · Rachel Okafor (PM)
 
