@@ -2,7 +2,7 @@ defmodule Rian.Interp do
   @moduledoc """
   String-interpolation resolution (ADR-0069).
 
-  `Rian.Pratt` parses `"… \\(expr) …"` into a `{:str_interp, parts}` surface node.
+  `Rian.Pratt` parses `"… ${expr} …"` into a `{:str_interp, parts}` surface node.
   This pass — run in the `Rian.Decl` metaprogramming stage, *with the enclosing
   clause's parameter types in scope* — rewrites each node into a plain `<>`/
   stringify chain *before* the checker and every emitter see it. So there is **no

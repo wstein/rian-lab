@@ -198,13 +198,13 @@ defmodule Rian.Pratt do
   defp parse_primary([{:op, ":"}, {:id, name} | rest]), do: parse_postfix({:atom, name}, rest)
   # a quoted atom `:"+"` / `:"hello world"` (Elixir-style): any atom whose name is
   # not a bare identifier — operators, mixed case, reserved words. The lexer emits
-  # `:` + a plain string; an *interpolated* `:"\(x)"` is not a literal and falls
+  # `:` + a plain string; an *interpolated* `:"${x}"` is not a literal and falls
   # through to an error.
   defp parse_primary([{:op, ":"}, {:str, s} | rest]), do: parse_postfix({:atom, s}, rest)
   defp parse_primary([{:str, s} | rest]), do: parse_postfix({:str, s}, rest)
-  # an interpolated string `"… \(expr) …"` (ADR-0069): each hole's raw source is
+  # an interpolated string `"… ${expr} …"` (ADR-0069): each hole's raw source is
   # re-parsed as an expression. The node is resolved to a `<>`/stringify chain by
-  # `Rian.Interp` once types are known; an empty hole `\()` is a parse error.
+  # `Rian.Interp` once types are known; an empty hole `${}` is a parse error.
   defp parse_primary([{:istr, parts} | rest]), do: parse_postfix(str_interp(parts), rest)
   defp parse_primary([{:num, n} | rest]), do: parse_postfix({:num, n}, rest)
   # a `Char` literal (ADR-0036) — a distinct node typed `Char` by the checker,
@@ -224,7 +224,7 @@ defmodule Rian.Pratt do
 
         {:hole, src} ->
           case String.trim(src) do
-            "" -> raise ArgumentError, "empty interpolation hole `\\()` — nothing to interpolate"
+            "" -> raise ArgumentError, "empty interpolation hole `${}` — nothing to interpolate"
             _ -> {:hole, parse(src)}
           end
       end)
@@ -707,7 +707,7 @@ defmodule Rian.Pratt do
     inner =
       Enum.map_join(parts, " ", fn
         {:lit, s} -> "\"#{s}\""
-        {:hole, e} -> "\\(#{sexpr(e)})"
+        {:hole, e} -> "${#{sexpr(e)}}"
       end)
 
     "(str-interp #{inner})"

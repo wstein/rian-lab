@@ -455,10 +455,10 @@ defmodule Rian.JVMTest do
 
   describe "string interpolation (ADR-0069) — integer and bool holes" do
     test "an Int64 hole lowers via `(n).toString()` and concatenation" do
-      # `"\(n)"` rewrites (Rian.Interp) to a `<>`/stringify chain; the Int64 hole
+      # `"${n}"` rewrites (Rian.Interp) to a stringify/join chain; the Int64 hole
       # uses `__prim_int_to_string`, which the JVM emitter lowers to Kotlin
       # `(<expr>).toString()` (jvm.ex:345).
-      kt = JVM.compile(~S|def f(n Int64) String := "v\(n)"|)
+      kt = JVM.compile(~S|def f(n Int64) String := "v${n}"|)
       assert kt =~ "(n).toString()"
 
       case kotlin_run(kt, ~S|println(f(42L))|) do
@@ -468,10 +468,10 @@ defmodule Rian.JVMTest do
     end
 
     test "a Bool hole rewrites to a single-expr-block `if` (branch_kt block path)" do
-      # `"\(b)"` with a Bool hole rewrites (Rian.Interp) to `if (b) "true" else
+      # `"${b}"` with a Bool hole rewrites (Rian.Interp) to `if (b) "true" else
       # "false"`; each branch is a single-expression `EBlock`, lowered through
       # `branch_kt(%EBlock{stmts: [{:expr, e}]})` (jvm.ex:359).
-      kt = JVM.compile(~S|def f(b Bool) String := "\(b)"|)
+      kt = JVM.compile(~S|def f(b Bool) String := "${b}"|)
       assert kt =~ ~S|if (b) "true" else "false"|
 
       case kotlin_run(kt, ~S|println(f(true)); println(f(false))|) do

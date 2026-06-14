@@ -803,10 +803,10 @@ defmodule Rian.JSTest do
       assert Exception.message(err) =~ "cannot mix `Int`"
     end
 
-    test "string interpolation `\\(n)` lowers an `Int53` hole via `String(n)` (ADR-0069)" do
+    test "string interpolation `${n}` lowers an `Int53` hole via `String(n)` (ADR-0069)" do
       # `__prim_int_to_string` lowers to `String(n)` — stringifies a `number` or BigInt
       # with no suffix, so an interpolated integer hole reaches JS.
-      js = JS.compile(~S|def shw(n Int53) String := "n=\(n)"|)
+      js = JS.compile(~S|def shw(n Int53) String := "n=${n}"|)
       assert js =~ "String(n)"
 
       assert node_eval(js, "shw(7)") in [:no_node, "n=7"]

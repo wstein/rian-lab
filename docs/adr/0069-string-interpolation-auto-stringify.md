@@ -1,7 +1,7 @@
 # ADR-0069 — String interpolation that auto-stringifies via a portable `Show`
 
-**Status:** Accepted · **Implemented (partial, 2026-06-14)** — the `\(expr)` surface (decision A) + auto-stringify for `Char`/`Int*`/`Bool`/`String` holes, portable and byte-identical across all four targets; interpolation lowers to a single-shot join (§6). The lowering strategy is settled in §6 (canonical desugar, not target-native interpolation). `Float64`/user-type & derived `Show`/runtime dispatch are deferred (see §6, *Open items*, and *Implementation* below).
-**Implemented:** partial — `\(expr)` lexing (`{:istr}`), Pratt (`{:str_interp}`), `Rian.Interp` static resolution, `__prim_int_to_string` on Beam/JS/Lower(Rust+Elixir)/JVM; `Int*`/`Bool`/`String` holes reach all four targets, honestly via `Rian.Reach` (an `Int` hole inherits ADR-0064's `[:ex,:js]`). `test/rian/interp_test.exs`. Deferred: `Char` (dispatch-guard collision), `Float64` (round-trip), user/derived `Show`, runtime dispatch.
+**Status:** Accepted · **Implemented (partial, 2026-06-14)** — the `${expr}` surface (decision A) + auto-stringify for `Char`/`Int*`/`Bool`/`String` holes, portable and byte-identical across all four targets; interpolation lowers to a single-shot join (§6). The lowering strategy is settled in §6 (canonical desugar, not target-native interpolation). `Float64`/user-type & derived `Show`/runtime dispatch are deferred (see §6, *Open items*, and *Implementation* below).
+**Implemented:** partial — `${expr}` lexing (`{:istr}`), Pratt (`{:str_interp}`), `Rian.Interp` static resolution, `__prim_int_to_string` on Beam/JS/Lower(Rust+Elixir)/JVM; `Int*`/`Bool`/`String` holes reach all four targets, honestly via `Rian.Reach` (an `Int` hole inherits ADR-0064's `[:ex,:js]`). `test/rian/interp_test.exs`. Deferred: `Char` (dispatch-guard collision), `Float64` (round-trip), user/derived `Show`, runtime dispatch.
 **Refs:** ADR-0042 (protocols & bounded generics — the dispatch this leans on), ADR-0061 (multi-target protocol lowering — BEAM/Rust/JS dispatch, the Rust owned-return gap), ADR-0047 (portable prelude/stdlib — the `Prim.*` intrinsic layer), ADR-0051 §"Open items" (interpolation deferred for doc heredocs — "probably no"), ADR-0035 (no hidden control flow — the central tension), ADR-0033 (surface vocabulary), ADR-0064 (portable numeric contract — `Int53` is the portable integer; `Int`/wide ints are off some targets), ADR-0057/0058 (target-environment sets; reachability), ADR-0065 (P7 surface freeze — this surface is *not* frozen).
 **Owners:** Maya Lin (surface / emitters) · Samir Patel (types / protocol bounds) · Kira Neri (honesty) · Mira (totality) · Tomás (BEAM performance) · Rachel Okafor (PM)
 
@@ -39,23 +39,30 @@ collision** with existing in-string syntax.
 
 | # | Spelling | Example | Visible | Family | Lexer delta | Notes |
 |---|----------|---------|---------|--------|-------------|-------|
-| A | `\(expr)` | `"hi \(name), age \(age)"` | ✅ | ✅ Swift-lineage; backslash already *is* the in-string escape sigil | **smallest** — `\` already dispatches into `char_escape/1`; add one `\(` arm that hands off to the expr lexer | recommended — reuses the existing escape hatch, so `\\(` is a literal `(` for free |
-| B | `${expr}` | `"hi ${name}"` | ✅ | ⚠ JS/shell, not Elixir/Gleam | new: `$` is otherwise unused, must special-case inside strings | familiar to most readers; `$` is free elsewhere in the grammar |
+| A | `\(expr)` | `"hi \(name), age \(age)"` | ✅ | ⚠ Swift-only; reads like an escaped paren to most | **smallest** — `\` already dispatches into `char_escape/1`; add one `\(` arm | smallest lexer delta, but Swift is the *only* mainstream precedent |
+| B | `${expr}` | `"hi ${name}"` | ✅ | ✅ JS/Kotlin/Scala/Dart/shell — incl. two of Rian's own targets | new: `$` is otherwise unused, must special-case `${` inside strings | **chosen** — familiar to the broadest audience and to Rian's JS/Kotlin targets; `$` is free elsewhere |
 | C | `#{expr}` | `"hi #{name}"` | ✅ | ✅ Elixir-native | new + **adjacency hazard**: `#` is the line-comment sigil; readers must learn `#` means two things | rejected — overloading the comment sigil costs more than it buys |
 
-**Direction (to confirm):** **A (`\(expr)`)**. It is the smallest lexer change by construction —
-`\` is *already* the codepoint that diverts `lex_string/2` into escape handling, so interpolation
-becomes one more escape arm rather than a new scanning mode, and `\\(` already means "literal
-backslash then `(`" so the escape-the-escape story is free. B is the acceptable fallback if
-familiarity wins over lineage; C is excluded for overloading the comment sigil.
+**Direction:** **B (`${expr}`)** — *chosen 2026-06-14, reversing the initial pick of A.* The original
+call optimised for the **smallest lexer delta** (`\` already diverts `lex_string/2` into escape
+handling, so `\(` is one more arm). But that is an implementation virtue, not a reader virtue, and the
+deciding axis is **familiarity for Rian's actual population**: `\(…)` is Swift-only and reads as an
+*escaped paren* on first sight, whereas Rian lowers to **JS and Kotlin** (both `${…}`) and an enormous
+swath of working programmers already know `${…}` from those plus Scala/Dart/shell. `$` is otherwise
+unused in the grammar, so the collision cost is one new lexer rule (`$` is special only before `{`; a
+bare `$` like `"$5.00"` is an ordinary character) plus a `\$` escape for a literal `${`. C stays
+rejected for overloading the `#` comment sigil. (The lexer-minimalism that favoured A is a one-time
+cost; the surface is read forever — ADR-0065 P7 left `${…}` outside the freeze precisely so this could
+be revisited.)
 
-A hole may contain any expression the Pratt parser accepts (it re-enters `expr_tokens`); nesting a
-string inside a hole is allowed but discouraged by the formatter (ADR-0045). An empty hole `\()` is a
+A hole may contain any expression the Pratt parser accepts (it re-enters `expr_tokens`); the lexer
+captures a hole by **brace depth**, so a map/tuple literal inside a hole nests correctly. Nesting a
+string inside a hole is allowed but discouraged by the formatter (ADR-0045). An empty hole `${}` is a
 compile error.
 
 ### 2. Semantics — desugar to `Show.show` + `<>`
 
-`"a \(x) b \(y)"` desugars, at the parse boundary, to the concatenation chain
+`"a ${x} b ${y}"` desugars, at the parse boundary, to the concatenation chain
 
 ```
 "a " <> show(x) <> " b " <> show(y) <> ""
@@ -69,7 +76,7 @@ strictly required — the desugaring can emit `ECall`/`EStr` directly — though
 node is worth keeping through `Check` so error messages point at the hole, not the desugared chain.
 
 The whole expression has type `String`. Each hole imposes a `Show` bound on its expression's type: a
-hole `\(e)` type-checks iff `typeof(e)` has an `impl Show`. A type with no `Show` impl is a **compile
+hole `${e}` type-checks iff `typeof(e)` has an `impl Show`. A type with no `Show` impl is a **compile
 error at the hole** (`no impl Show for <T> — interpolation requires it`), never a silent
 `inspect`-style fallback.
 
@@ -128,7 +135,7 @@ exactly like any other call (ADR-0057/0058). Concretely:
 
 Interpolation **hides a protocol dispatch and a concatenation chain** behind string syntax. That is
 in tension with "what you read is what runs" (ADR-0035). The defense: the *hole markers are visible*
-(you can see `\(x)` runs *something* on `x`), and the something is a single, total, value-returning
+(you can see `${x}` runs *something* on `x`), and the something is a single, total, value-returning
 `show` — no control flow, no early return, no effect. This is unlike the error-propagation case
 (ADR-0066) where the hidden thing was *control flow*; here the hidden thing is a *pure function call*,
 which ADR-0035 has never objected to (every operator desugars to a call). The line we hold:
@@ -177,7 +184,7 @@ valuable unlock; until it lands, a `Float64` hole stays a compile error at the h
 
 | Decision | Rating | Note |
 |----------|--------|------|
-| 1 — `\(expr)` surface | 4/5 | smallest lexer delta and family-native; −1 because `${}` familiarity is a real pull and the call is close |
+| 1 — `${expr}` surface | 4/5 | chosen for familiarity (JS/Kotlin/Scala/Dart/shell, incl. two targets) over A's smaller lexer delta; −1 for the one-time `${`/`\$` lexer special-case vs A's zero-delta reuse of escape dispatch |
 | 2 — desugar to `show` + `<>` | 5/5 | zero new semantics, reuses checked/lowered machinery; error-locating node is cheap |
 | 3 — portable `Show` + 2 prims | 4/5 | the genuine payoff (kills the #1 portability leak); −1 for the float round-trip divergence and the four-emitter prim cost |
 | 4 — Reach honesty | 5/5 | inherits existing blockers; adds only a `:prim` blocker that follows the established ADR-0064 pattern |
@@ -194,9 +201,9 @@ valuable unlock; until it lands, a `Float64` hole stays a compile error at the h
   one surfaces as the usual `FunctionClauseError`/`Unsupported`.
 - **Formatter (ADR-0045):** must learn to format inside holes and decide a house style for nested
   interpolation (lean: forbid nesting strings in holes, suggest a `let`).
-- **Surface freeze (ADR-0065 P7):** `\(…)` is explicitly *outside* the freeze until this ADR settles.
+- **Surface freeze (ADR-0065 P7):** `${…}` is explicitly *outside* the freeze until this ADR settles.
 - **Detokenizer round-trip:** the lexer's re-escape path (`escape_str`/`char_source`) must round-trip
-  `\(` as interpolation, not as a literal — a test the self-host lexer fixpoint (`Rian.Fixpoint`) will
+  `${…}` as interpolation, not as a literal — a test the self-host lexer fixpoint (`Rian.Fixpoint`) will
   catch if missed.
 
 ## Implementation (partial, 2026-06-14)
@@ -204,11 +211,12 @@ valuable unlock; until it lands, a `Float64` hole stays a compile error at the h
 Shipped the settled core; deferred the items this ADR itself flagged "resolve
 before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Float`):
 
-- **Surface (decision A).** `Rian.Lexer` scans `\(expr)` as one more arm of its
-  existing `\` escape dispatch, producing an `{:istr, parts}` token (literal
-  segments + raw hole source); `\\(` stays a literal backslash + paren for free.
-  `Rian.Pratt` re-parses each hole into a `{:str_interp, parts}` node; an empty
-  hole `\()` is a parse error. The detokenizer round-trips `\(…)`.
+- **Surface (decision B, `${expr}`).** `Rian.Lexer` recognises `${` inside a string
+  as a hole start (a bare `$`, e.g. `"$5.00"`, is an ordinary character) and captures
+  the hole's source by **brace depth**, producing an `{:istr, parts}` token (literal
+  segments + raw hole source); a literal `${` is written `\${` (the `\$` escape).
+  `Rian.Pratt` re-parses each hole into a `{:str_interp, parts}` node; an empty hole
+  `${}` is a parse error. The detokenizer round-trips `${…}`.
 - **Static resolution, not runtime dispatch.** Because interpolation is
   **monomorphic per call site** (§4), `Rian.Interp` resolves each hole to a
   stringify expression in the declaration pass — *where the clause's parameter
@@ -244,7 +252,7 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
 
 ## Open items
 
-- **Confirm A (`\(expr)`) vs B (`${expr}`).** Lexer-minimalism vs familiarity; decide before any code.
+- ~~**Confirm A (`\(expr)`) vs B (`${expr}`).**~~ **Resolved (2026-06-14): B (`${expr}`)** — familiarity for Rian's JS/Kotlin targets and the broad audience won over A's smaller lexer delta (§1).
 - ~~**The `Char`/`Int53` dispatch-guard collision on `:ex`/`:js`.**~~ **Resolved (2026-06-14).** The
   collision only exists for *runtime* `Show` dispatch; the implemented design resolves each hole by its
   **static** type (§"Static resolution"), so a `Char` hole emits `__prim_char_to_string` directly with
@@ -265,7 +273,7 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
 
 ## Alternatives considered
 
-- **Pure-sugar, `String`-only interpolation (the other direction).** `\(e)` requires `typeof(e) ==
+- **Pure-sugar, `String`-only interpolation (the other direction).** `${e}` requires `typeof(e) ==
   String`; desugars to a bare `<>` chain with no `show`. Pros: zero new protocol, zero new prim, fully
   portable on day one, no ADR-0035 tension (it hides only `<>`, already an operator). Cons: solves
   *none* of the formatting-FFI portability problem — you still write `Int.to_string(n)` by hand, and

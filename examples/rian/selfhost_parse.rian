@@ -14,7 +14,7 @@
 # (`:=`/typed/bare statements).
 #
 # Out of scope (documented surface SUGAR resolved by separate passes, not the core
-# grammar): string interpolation `"…\(e)…"` (ADR-0069, re-parses hole source) and
+# grammar): string interpolation `"…${e}…"` (ADR-0069, re-parses hole source) and
 # the bare `<-` propagation bind (ADR-0066, desugars a block to a Result `case`).
 # ---------------------------------------------------------------------------
 

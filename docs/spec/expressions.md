@@ -144,7 +144,7 @@ the BEAM binary from the raw bytes directly, so it needs no textual escaping.
 An **atom** (type `Symbol`, ADR-0041) is written `:name` for a bare identifier (`:ok`, `:error`,
 `:Foo`) or in **quoted** form `:"…"` for any other name — operators (`:"+"`), reserved keywords
 (`:"if"`), or names with non-identifier characters. The quoted form reuses the string-escape
-vocabulary above and accepts an empty atom (`:""`); an *interpolated* `:"\(e)"` is not a literal and
+vocabulary above and accepts an empty atom (`:""`); an *interpolated* `:"${e}"` is not a literal and
 is a parse error. Both forms also appear in pattern position (`case t do :"+" -> … end`).
 
 A `Symbol` is **equality-only** — there is no portable ordering (atom term-order is BEAM-specific,

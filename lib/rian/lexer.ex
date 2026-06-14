@@ -63,12 +63,12 @@ defmodule Rian.Lexer do
   defp tok_str({:str, s}, _), do: ~s(") <> escape_str(s) <> ~s(")
 
   # round-trip an interpolated string: literal segments re-escape, holes re-emit
-  # as `\(source)` (ADR-0069 — the detokenizer must not flatten interpolation)
+  # as `${source}` (ADR-0069 — the detokenizer must not flatten interpolation)
   defp tok_str({:istr, parts}, _) do
     body =
       Enum.map_join(parts, "", fn
         {:lit, s} -> escape_str(s)
-        {:hole, src} -> "\\(" <> src <> ")"
+        {:hole, src} -> "${" <> src <> "}"
       end)
 
     ~s(") <> body <> ~s(")
@@ -190,7 +190,7 @@ defmodule Rian.Lexer do
   # and `rest` is the source past the closing `"`. Honors the same escapes as
   # `char_escape/1`, so `"a\"b"` lexes to the value `a"b` rather than terminating
   # early on the inner quote.
-  # A regular `"…"` string with optional `\(expr)` interpolation holes (ADR-0069).
+  # A regular `"…"` string with optional `${expr}` interpolation holes (ADR-0069).
   # Returns `{:str, binary}` when there are no holes, else `{:istr, parts}` where
   # `parts` interleaves `{:lit, binary}` (escape-decoded) and `{:hole, source}`
   # (raw expression text, parsed later by `Rian.Pratt`).
@@ -204,13 +204,16 @@ defmodule Rian.Lexer do
   defp lex_parts("\"" <> rest, lit, parts),
     do: {Enum.reverse([{:lit, binify(lit)} | parts]), rest}
 
-  # interpolation hole `\(expr)` — MUST precede the general `\\` escape clause.
-  # `\\(` (escaped backslash then paren) does not match here (two backslashes), so
-  # it falls through to the escape clause as a literal backslash + `(`, for free.
-  defp lex_parts("\\(" <> rest, lit, parts) do
+  # interpolation hole `${expr}` (ADR-0069) — a `$` is special only when followed by
+  # `{`; a bare `$` (e.g. `"$5.00"`) is an ordinary character via the default clause.
+  defp lex_parts("${" <> rest, lit, parts) do
     {src, rest2} = capture_hole(rest, 0, [])
     lex_parts(rest2, [], [{:hole, src}, {:lit, binify(lit)} | parts])
   end
+
+  # `\$` is a literal `$` — the only escape `$` needs, so a literal `${` is `\${`.
+  # MUST precede the general `\\` escape clause.
+  defp lex_parts("\\$" <> rest, lit, parts), do: lex_parts(rest, ["$" | lit], parts)
 
   defp lex_parts("\\" <> rest, lit, parts) do
     {cp, after_escape} = char_escape(rest)
@@ -222,16 +225,16 @@ defmodule Rian.Lexer do
     lex_parts(rest, [ch | lit], parts)
   end
 
-  # capture a hole's raw source up to its matching `)` (paren-depth aware). The
-  # source is parsed later by `Rian.Pratt` (it re-enters the expression grammar);
-  # a string literal containing `)` inside a hole is out of scope (ADR-0069
-  # discourages nesting strings in holes).
+  # capture a hole's raw source up to its matching `}` (brace-depth aware, so a map
+  # or struct literal inside a hole nests correctly). The source is parsed later by
+  # `Rian.Pratt` (it re-enters the expression grammar); a string literal containing
+  # `}` inside a hole is out of scope (ADR-0069 discourages nesting strings in holes).
   defp capture_hole("", _d, _acc),
-    do: raise(ArgumentError, "unterminated interpolation hole `\\(` in string")
+    do: raise(ArgumentError, "unterminated interpolation hole `${` in string")
 
-  defp capture_hole(")" <> rest, 0, acc), do: {binify(acc), rest}
-  defp capture_hole(")" <> rest, d, acc), do: capture_hole(rest, d - 1, [")" | acc])
-  defp capture_hole("(" <> rest, d, acc), do: capture_hole(rest, d + 1, ["(" | acc])
+  defp capture_hole("}" <> rest, 0, acc), do: {binify(acc), rest}
+  defp capture_hole("}" <> rest, d, acc), do: capture_hole(rest, d - 1, ["}" | acc])
+  defp capture_hole("{" <> rest, d, acc), do: capture_hole(rest, d + 1, ["{" | acc])
 
   defp capture_hole(str, d, acc) do
     {ch, rest} = String.next_codepoint(str)
