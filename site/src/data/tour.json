@@ -1,0 +1,151 @@
+{
+  "cells": [
+    {
+      "blurb": "Rian is expression-oriented and `:=` is single-assignment. A typed head is the type boundary; the body is the value.",
+      "covers": [
+        "def",
+        ":=",
+        "type ascription"
+      ],
+      "file": "twice.rian",
+      "id": "basics",
+      "panes": {
+        "ex": "def twice(n) do n * 2 end",
+        "js": "function twice(a0) {\n  { const n = a0; return (n * 2); }\n  throw new Error(\"twice: no clause matched\");\n}",
+        "jvm": "private fun twice(a0: Long): Long {\n  val n = a0; return (n * 2L)\n}",
+        "rs": "fn twice(n: i64) -> i64 {\n    match n {\n        n => n * 2,\n    }\n}"
+      },
+      "reach": {
+        "twice": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "source": "# expression-oriented · := single assignment\ndef twice(n Int53) Int53 := n * 2",
+      "title": "The basics"
+    },
+    {
+      "blurb": "A sealed sum and clause-per-constructor dispatch. The same definition becomes a tagged match on the BEAM, an `enum` + `match` on Rust, a tag switch on JS, and a sealed `when` on Kotlin.",
+      "covers": [
+        "type",
+        "constructors",
+        "pattern clauses"
+      ],
+      "file": "area.rian",
+      "id": "types",
+      "panes": {
+        "ex": "@type shape :: {:circle, float()} | {:square, float()}\ndef area({:circle, r}) do 3.14159 * r * r end\ndef area({:square, s}) do s * s end",
+        "js": "function area(a0) {\n  { if (a0[0] === \"Circle\") { const r = a0[1]; return ((3.14159 * r) * r); } }\n  { if (a0[0] === \"Square\") { const s = a0[1]; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}",
+        "jvm": "sealed interface Shape\ndata class Circle(val f0: Double) : Shape\ndata class Square(val f0: Double) : Shape\n\nprivate fun area(a0: Shape): Double {\n  if (a0 is Circle) { val r = a0.f0; return ((3.14159 * r) * r) }\n  if (a0 is Square) { val s = a0.f0; return (s * s) }\n  throw RuntimeException(\"area: no clause matched\")\n}",
+        "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Shape {\n    Circle { radius: f64 },\n    Square { side: f64 },\n}\n\nfn area(s: &Shape) -> f64 {\n    match s {\n        Shape::Circle { radius: r } => 3.14159 * r * r,\n        Shape::Square { side: s } => s * s,\n    }\n}"
+      },
+      "reach": {
+        "area": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "source": "type Shape := Circle(radius Float64) | Square(side Float64)\n\ndef area(s val Shape) Float64\ndef area(Circle(r)) := 3.14159 * r * r\ndef area(Square(s)) := s * s",
+      "title": "Types & match"
+    },
+    {
+      "blurb": "Ordered clauses with a restricted guard sublanguage. The Maranget exhaustiveness gate proves the set total before any target is emitted — a missing case is a compile error, not a runtime surprise.",
+      "covers": [
+        "when",
+        "literal patterns",
+        "exhaustiveness"
+      ],
+      "file": "classify.rian",
+      "id": "clauses",
+      "panes": {
+        "ex": "def classify(n) when n < 0 do \"negative\" end\ndef classify(0) do \"zero\" end\ndef classify(n) do \"positive\" end",
+        "js": "function classify(a0) {\n  { const n = a0; if ((n < 0)) { return \"negative\"; } }\n  { if (a0 === 0) { return \"zero\"; } }\n  { const n = a0; return \"positive\"; }\n  throw new Error(\"classify: no clause matched\");\n}",
+        "jvm": "private fun classify(a0: Long): String {\n  run { val n = a0; if ((n < 0L)) { return \"negative\" } }\n  if (a0 == 0L) { return \"zero\" }\n  val n = a0; return \"positive\"\n}",
+        "rs": "fn classify(n: i64) -> String {\n    match n {\n        n if n < 0 => (\"negative\").to_string(),\n        0 => (\"zero\").to_string(),\n        n => (\"positive\").to_string(),\n    }\n}"
+      },
+      "reach": {
+        "classify": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "source": "def classify(n Int53) String\ndef classify(n) when n < 0 := \"negative\"\ndef classify(0) := \"zero\"\ndef classify(n) := \"positive\"",
+      "title": "Clauses & guards"
+    },
+    {
+      "blurb": "A parameter's reference capability drives its Rust signature and its BEAM-side linearity — you never write a lifetime. `val` borrows (`&Shape`); `iso` owns and is consumed once (an owned `Shape`).",
+      "covers": [
+        "val",
+        "iso",
+        "ownership"
+      ],
+      "file": "capability.rian",
+      "id": "capabilities",
+      "panes": {
+        "ex": "@type shape :: {:circle, float()} | {:square, float()}\ndef area({:circle, r}) do 3.14159 * r * r end\ndef area({:square, s}) do s * s end\ndef consume(s) do area(s) end",
+        "js": "function area(a0) {\n  { if (a0[0] === \"Circle\") { const r = a0[1]; return ((3.14159 * r) * r); } }\n  { if (a0[0] === \"Square\") { const s = a0[1]; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}\n\nfunction consume(a0) {\n  { const s = a0; return area(s); }\n  throw new Error(\"consume: no clause matched\");\n}",
+        "jvm": "sealed interface Shape\ndata class Circle(val f0: Double) : Shape\ndata class Square(val f0: Double) : Shape\n\nprivate fun area(a0: Shape): Double {\n  if (a0 is Circle) { val r = a0.f0; return ((3.14159 * r) * r) }\n  if (a0 is Square) { val s = a0.f0; return (s * s) }\n  throw RuntimeException(\"area: no clause matched\")\n}\n\nprivate fun consume(a0: Shape): Double {\n  val s = a0; return area(s)\n}",
+        "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Shape {\n    Circle { radius: f64 },\n    Square { side: f64 },\n}\n\nfn area(s: &Shape) -> f64 {\n    match s {\n        Shape::Circle { radius: r } => 3.14159 * r * r,\n        Shape::Square { side: s } => s * s,\n    }\n}\n\nfn consume(s: Shape) -> f64 {\n    match s {\n        s => area(s),\n    }\n}"
+      },
+      "reach": {
+        "area": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "consume": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "source": "type Shape := Circle(radius Float64) | Square(side Float64)\n\ndef area(s val Shape) Float64\ndef area(Circle(r)) := 3.14159 * r * r\ndef area(Square(s)) := s * s\n\n# `iso`: owned, consumed exactly once\ndef consume(s iso Shape) Float64 := area(s)",
+      "title": "Capabilities"
+    }
+  ],
+  "reachExamples": [
+    {
+      "blurb": "Pure, portable — reaches every target.",
+      "name": "area",
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "sig": "area(s val Shape) Float64"
+    },
+    {
+      "blurb": "`ref` (&mut) is BEAM-rejected (no process-local proof in the PoC).",
+      "name": "scale",
+      "reach": [
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "sig": "scale(s ref Vec(Float64), k Float64) Vec(Float64)"
+    },
+    {
+      "blurb": "Host FFI is native-per-target, so it pins to the BEAM.",
+      "name": "shout",
+      "reach": [
+        "ex"
+      ],
+      "sig": "shout(s String) String := String.upcase(s)"
+    }
+  ],
+  "targets": [
+    "ex",
+    "rs",
+    "js",
+    "jvm"
+  ]
+}
