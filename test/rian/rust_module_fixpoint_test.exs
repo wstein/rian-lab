@@ -17,10 +17,12 @@ defmodule Rian.RustModuleFixpointTest do
   # `<T: Clone>` signatures + bare-tvar-return clone, list PATTERNS (`[h | t]`
   # → slice `[h, t @ ..]`) with the slice-element clone rebind, and the non-generic
   # call-site owned→borrow coercion (an owned `vec![…]` arg to a `&`-typed param is
-  # `&`-wrapped) are now covered; the rest of the owned↔borrow coercion (the generic
-  # borrowed-set branch, owned-String/owned-returning-call producers, mid-body list
-  # clones), parametric monomorphization, maps, String-returns, the Elixir target,
-  # and struct *patterns* (a reference gap — Rian.Lower raises) are out of scope.
+  # `&`-wrapped), and the generic borrowed-set Vec-element clone (a borrowed `&T` binder
+  # in a closed list / cons head is `.clone()`d) are now covered; the rest of the
+  # owned↔borrow coercion (borrowed `&T` in a variant payload, owned-String/owned-
+  # returning-call producers, borrowed args at generic call sites), parametric
+  # monomorphization, maps, String-returns, the Elixir target, and struct *patterns*
+  # (a reference gap — Rian.Lower raises) are out of scope.
 
   setup_all do
     {:ok, mod} =
@@ -202,7 +204,11 @@ defmodule Rian.RustModuleFixpointTest do
     # `vec![…]` arg passed to a `&[i64]` param is `&`-wrapped — `takes(&vec![1, 2])`.
     # A scalar `val Int64` param is by-value `i64` (not `&`), so its arg is NOT wrapped.
     "def takes(xs val Vec(Int64)) Int64 := 0\ndef build() Int64 := takes([1, 2])",
-    "def add1(a Int64, b Int64) Int64 := a + b\ndef use2() Int64 := add1(1, 2)"
+    "def add1(a Int64, b Int64) Int64 := a + b\ndef use2() Int64 := add1(1, 2)",
+    # generic borrowed-set branch: a borrowed `&T` binder stored into an owned Vec
+    # element is `.clone()`d — closed list elements and a cons head.
+    "def dup(x val T) Vec(T) forall T := [x, x]",
+    "def pre(x val T, xs iso Vec(T)) Vec(T) forall T := [x | xs]"
   ]
 
   describe "self-hosting Rust-module fixpoint — Rian emitter vs Rian.Lower.rust_program" do
@@ -310,6 +316,19 @@ defmodule Rian.RustModuleFixpointTest do
                "def add1(a Int64, b Int64) Int64 := a + b\ndef use2() Int64 := add1(1, 2)"
              ) =~
                "add1(1, 2)"
+    end
+
+    test "a generic borrowed `&T` binder is `.clone()`d into owned Vec elements", %{mod: mod} do
+      # closed Vec elements
+      assert ported(mod, "def dup(x val T) Vec(T) forall T := [x, x]") =~
+               "vec![x.clone(), x.clone()]"
+
+      # a cons head prepended onto the owned tail
+      pre = ported(mod, "def pre(x val T, xs iso Vec(T)) Vec(T) forall T := [x | xs]")
+      assert pre =~ "{ let mut __v = xs.to_vec(); __v.insert(0, x.clone()); __v }"
+
+      # a non-generic identity over a Vec does NOT clone (no borrowed-set)
+      refute ported(mod, "def keep(xs iso Vec(Int64)) Vec(Int64) := xs") =~ ".clone()"
     end
   end
 end

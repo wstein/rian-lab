@@ -18,10 +18,13 @@
 # binder is `let h = h.clone();`-rebound to an owned value). The non-generic
 # call-site owned→borrow coercion is also in: an owned `vec![…]` argument passed to
 # a `&`-typed parameter is `&`-wrapped (`takes(&vec![1, 2])`, via `borrow_prog`). The
-# REST of the owned↔borrow coercion — the generic `borrowed`-set branch (clone-or-`&`
-# over a clause's `&`-bound vars), owned-`String`/owned-returning-call arg producers,
-# and mid-body clones of borrowed values in list elements — and parametric-type
-# monomorphization (`Vec(Pair)` -> `Vec<Pair<K, V>>`, see `render_inst` below), plus
+# generic borrowed-set element clone (`clone_owned`) covers the `Vec`-element case: a
+# borrowed `&T` binder stored into a closed list (`[x, x]` -> `vec![x.clone(), …]`) or
+# a cons head (`[x | xs]` -> `__v.insert(0, x.clone())`) is `.clone()`d. The REST of the
+# owned↔borrow coercion — borrowed `&T` in a VARIANT payload (`Some(x)`), owned-`String`/
+# owned-returning-call arg producers, and the `borrow_value` clone-or-`&` for borrowed
+# args at generic call sites — and parametric-type monomorphization (`Vec(Pair)` ->
+# `Vec<Pair<K, V>>`, see `render_inst` below; the variant-payload clone needs it), plus
 # maps, String-return coercion, the Elixir text target, and struct *patterns* (a
 # reference gap — `Rian.Lower` raises) remain out of scope.
 # ---------------------------------------------------------------------------
@@ -41,6 +44,10 @@ mod SelfhostRust do
              | CStruct(String, Vec(VPair))
              | CDot(Core, String)
              | CList(Vec(Core), LTail)
+             # a `.clone()` of a borrowed value used in an owned position — a
+             # port-internal node produced by the generic borrowed-set pre-pass
+             # (`clone_owned`), never injected from surface Core.
+             | CClone(Core)
 
   type VPair := VP(String, Core)
   # a list is closed (`[…]` -> `vec![…]`) or has a cons tail (`[e | t]` -> a block
@@ -158,7 +165,7 @@ mod SelfhostRust do
   def borrow_func(Func(n, p, [], params, ret, clauses), all) :=
     Func(n, p, [], params, ret, borrow_clauses(clauses, all))
   def borrow_func(Func(n, p, tvars, params, ret, clauses), _) :=
-    Func(n, p, tvars, params, ret, clauses)
+    Func(n, p, tvars, params, ret, clone_clauses(clauses, params))
 
   def borrow_clauses(Vec(Clause), Vec(Func)) Vec(Clause)
   def borrow_clauses([], _) := []
@@ -237,6 +244,50 @@ mod SelfhostRust do
   def is_owned(Core) Bool
   def is_owned(CList(_, _)) := true
   def is_owned(_) := false
+
+  # GENERIC borrowed-set branch (`Rian.Lower.rust_owned_elem`): in a `forall` function
+  # a parameter binder is borrowed (`&T`), so when it is stored into an owned `Vec`
+  # ELEMENT position — a closed list (`[x, x]` → `vec![x.clone(), x.clone()]`) or a cons
+  # head (`[x | xs]` → `__v.insert(0, x.clone())`) — it is `.clone()`d back to an owned
+  # `T`. The borrowed set is the clause's `&`-typed plain-var params plus any cons-TAIL
+  # binder (slice ELEMENT binders are excluded — `arm_rebinds` already made them owned).
+  # Variant payloads (`Some(x)` → `.clone()` in the reference) and `Ok`/`Err` (which keep
+  # the borrow) are deferred — a generic variant payload needs the parametric-enum
+  # monomorphization that is itself out of scope.
+  def clone_clauses(Vec(Clause), Vec(Param)) Vec(Clause)
+  def clone_clauses([], _) := []
+  def clone_clauses([Clause(pats, g, body) | rest], params) :=
+    [Clause(pats, g, clone_owned(body, bset(pats, params))) | clone_clauses(rest, params)]
+
+  # the borrowed binders of a clause: a plain-var param of `&`-type, plus list-pattern
+  # cons-tail binders (always a borrowed slice).
+  def bset(Vec(RPat), Vec(Param)) Vec(String)
+  def bset([], _) := []
+  def bset(_, []) := []
+  def bset([pat | ps], [Param(_, t) | prest]) := app(pat_bset(pat, t), bset(ps, prest))
+
+  def pat_bset(RPat, String) Vec(String)
+  def pat_bset(RVar(n), t) := if borrow_type(t) do [n] else [] end
+  def pat_bset(RListP(_, LpVar(n)), _) := [n]
+  def pat_bset(_, _) := []
+
+  # rewrite owned `Vec`-element uses of a borrowed binder to `.clone()`; recurse through
+  # control structure to reach nested lists. A bare borrowed var elsewhere (a return, an
+  # operand) is left alone — the return clone is `ret_coerce`'s job.
+  def clone_owned(Core, Vec(String)) Core
+  def clone_owned(CList(es, LClose), bs) := CList(clone_elems(es, bs), LClose)
+  def clone_owned(CList(es, LCons(t)), bs) := CList(clone_elems(es, bs), LCons(clone_owned(t, bs)))
+  def clone_owned(CIf(c, t, e), bs) := CIf(clone_owned(c, bs), clone_owned(t, bs), clone_owned(e, bs))
+  def clone_owned(leaf, _) := leaf
+
+  # an owned element: a borrowed bare var here is `.clone()`d; anything else recurses.
+  def clone_elems(Vec(Core), Vec(String)) Vec(Core)
+  def clone_elems([], _) := []
+  def clone_elems([e | rest], bs) := [clone_elem(e, bs) | clone_elems(rest, bs)]
+
+  def clone_elem(Core, Vec(String)) Core
+  def clone_elem(CId(n), bs) := if member(n, bs) do CClone(CId(n)) else CId(n) end
+  def clone_elem(e, bs) := clone_owned(e, bs)
 
   # `rust_program` emits plain `fn` for every top-level function (a single Rust
   # module; the `pub?` flag is not a Rust visibility here), so it is ignored.
@@ -350,6 +401,7 @@ mod SelfhostRust do
   def used_ids(CDot(h, _)) := used_ids(h)
   def used_ids(CList(es, LClose)) := used_each(es)
   def used_ids(CList(es, LCons(t))) := app(used_each(es), used_ids(t))
+  def used_ids(CClone(x)) := used_ids(x)
 
   def used_each(Vec(Core)) Vec(String)
   def used_each([]) := []
@@ -502,6 +554,8 @@ mod SelfhostRust do
   pub def emit(CStruct(name, pairs)) := Em(s: name <> " { " <> named_vals(pairs) <> " }", pr: 12)
   # field access `p.x` (postfix, prec 12)
   pub def emit(CDot(h, f)) := Em(s: paren(emit(h), 12) <> "." <> f, pr: 12)
+  # `.clone()` an owned-needed borrowed value (`x.clone()`, postfix prec 12)
+  pub def emit(CClone(x)) := Em(s: paren(emit(x), 12) <> ".clone()", pr: 12)
   # closed list `vec![…]`; cons `[e1, … | tail]` prepends onto an owned copy of the
   # tail (`{ let mut __v = tail.to_vec(); __v.insert(0, en); … __v }`, ADR-0047)
   pub def emit(CList(es, LClose)) := Em(s: "vec![" <> args_str(es) <> "]", pr: 12)
