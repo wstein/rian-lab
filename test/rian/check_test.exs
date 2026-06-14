@@ -916,6 +916,34 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "integer literals are width-flexible in arithmetic & branches (ADR-0064)" do
+    test "a literal operand takes the typed operand's width, even nested" do
+      # `13 - lvl` over an `Int53` var is `Int53` (13 adopts lvl); `(13 - lvl) * 10`
+      # then stays `Int53` instead of the literal's default `Int64`.
+      assert Check.check("def bp(lvl Int53) Int53 := (13 - lvl) * 10") == :ok
+      assert Check.check("def f(n Int32) Int32 := n * 2 + 1") == :ok
+    end
+
+    test "an `if` with an Int53 branch + a literal branch stays Int53" do
+      assert Check.check("def step(n Int53) Int53 := if n > 0 do a := n * 2; a + 1 else 0 end") ==
+               :ok
+    end
+
+    test "flexibility is integer-only — no int→float, no int→bool coercion" do
+      # `1 + 2.0` stays mixed/`:unknown` (ADR-0035, no implicit coercion), and an
+      # `if` with an int-literal and a Bool branch stays `:unknown` (not Bool).
+      assert Check.infer(Pratt.parse("1 + 2.0")) == :unknown
+      assert Check.infer(Pratt.parse("if c do 1 else true end")) == :unknown
+    end
+
+    test "an unknown operand + a literal keeps the literal's default Int64" do
+      # only a *concrete* integer neighbour is adopted; an `:unknown` one is not, so
+      # `x + 1` (x unknown) stays `Int64` and `(x) -> x + 1` is `Fn(_,Int64)`.
+      assert Check.infer(Pratt.parse("x + 1"), %{}) == "Int64"
+      assert Check.infer(Pratt.parse("(x) -> x + 1")) == "Fn(_,Int64)"
+    end
+  end
+
   describe "range bindings — non-integer ordinal kinds & runtime values" do
     test "a Char literal against an Int64-based range is a kind mismatch naming `Char`" do
       assert {:error, msg} =

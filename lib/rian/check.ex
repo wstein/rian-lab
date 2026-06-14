@@ -166,7 +166,7 @@ defmodule Rian.Check do
         "Int64"
 
       op in @arith ->
-        conservative(unify(ordinal_base(infer(l, env, ic)), ordinal_base(infer(r, env, ic))))
+        arith_type(l, r, infer(l, env, ic), infer(r, env, ic))
 
       true ->
         :unknown
@@ -235,7 +235,7 @@ defmodule Rian.Check do
   # uninferable arm resolve to `:unknown`. `join` is commutative & associative, so
   # the N-ary `case`/list reductions below are fold-order-independent.
   def infer(%EIf{then: t, else: e}, env, ic),
-    do: join(infer(t, env, ic), infer(e, env, ic))
+    do: branch_join([{t, infer(t, env, ic)}, {e, infer(e, env, ic)}])
 
   # `case` — flow narrowing: each arm body is inferred under an env where the
   # arm pattern's bindings are refined against the scrutinee's type. The case's
@@ -244,9 +244,8 @@ defmodule Rian.Check do
     st = infer(scrut, env, ic)
 
     arms
-    |> Enum.map(fn {pat, _guard, body} -> infer(body, narrow(pat, st, ic, env), ic) end)
-    |> Enum.reduce(:bottom, fn t, acc -> join(acc, t) end)
-    |> debottom()
+    |> Enum.map(fn {pat, _guard, body} -> {body, infer(body, narrow(pat, st, ic, env), ic)} end)
+    |> branch_join()
   end
 
   # a list literal infers `Vec(T)` (the family list type) when its elements — and
@@ -508,6 +507,67 @@ defmodule Rian.Check do
   defp ordinal_base("Char"), do: "Int64"
   defp ordinal_base(t), do: t
 
+  # Arithmetic result type. An integer *literal* operand is width-flexible (a
+  # literal adopts any same-kind width), so `typed op literal` — and a nested
+  # `(13 - lvl) * 10` over an `Int53` var — takes the typed operand's width instead
+  # of forcing the literal's default `Int64`. Without this, `unify(:unknown, Int64)`
+  # resolved a literal-bearing arithmetic to `Int64`, spuriously clashing with an
+  # `Int53`/`Int32` return (ADR-0064). Two non-literal operands unify as before.
+  defp arith_type(l, r, lt, rt) do
+    cond do
+      int_lit_expr?(l) and adoptable_int?(rt) -> ordinal_base(rt)
+      int_lit_expr?(r) and adoptable_int?(lt) -> ordinal_base(lt)
+      true -> conservative(unify(ordinal_base(lt), ordinal_base(rt)))
+    end
+  end
+
+  # An integer literal may adopt a *concrete integer* neighbour, but NOT a
+  # `Float`/`Bool`/`String` (`1 + 2.0` stays mixed/`:unknown` — no implicit int→float
+  # coercion, ADR-0035) nor an `:unknown` one (`x + 1` with `x` unknown stays
+  # `Int64`, the literal's default — the prior conservative behaviour). Because the
+  # literal adopts a concrete width, a chain like `13 - lvl` over an `Int53` already
+  # resolves to `Int53`, so a nested `(13 - lvl) * 10` never needs `:unknown`.
+  defp adoptable_int?(t), do: int_type?(t)
+
+  # a constant *integer* expression of literals — a bare int literal, a negation, or
+  # arithmetic of such. (Mirrors `lit_expr_adopts?`, but as a type-flexibility test.)
+  defp int_lit_expr?(%ENum{text: t}), do: int_literal?(t)
+  defp int_lit_expr?(%EUnary{op: "-", arg: a}), do: int_lit_expr?(a)
+
+  defp int_lit_expr?(%EBin{op: op, left: l, right: r}) when op in @arith,
+    do: int_lit_expr?(l) and int_lit_expr?(r)
+
+  # an `if`/`case` branch is a single-expression block (`do 0 end` → `{block, [0]}`)
+  defp int_lit_expr?(%EBlock{stmts: [{:expr, e}]}), do: int_lit_expr?(e)
+  defp int_lit_expr?(_), do: false
+
+  # Join branch/arm types into the LUB — but an integer-*literal* branch is
+  # width-flexible (it adopts any width), so it does NOT drag the join up to its
+  # default `Int64`: when at least one branch is a non-literal, the result is the
+  # join of only the non-literal branches (an `Int53` `then` with a literal `0`
+  # `else` stays `Int53`, ADR-0064). All-literal branches join as usual (and a
+  # literal return body is then handled by `body_literal_adopts?`).
+  defp branch_join(typed) do
+    all = Enum.map(typed, &elem(&1, 1))
+    non_lit = for {e, t} <- typed, not int_lit_expr?(e), do: t
+
+    cond do
+      # all branches are integer literals — join them (a literal return body is then
+      # handled by `body_literal_adopts?`); nothing to adopt from
+      non_lit == [] -> join_all(all)
+      # the non-literal branches join to an integer — the literal branches adopt it
+      # (an `Int53` `then` with a literal `0` `else` stays `Int53`)
+      int_type?(join_all(non_lit)) -> join_all(non_lit)
+      # otherwise (a `Bool`/`String`/`Float` or uninferable non-literal branch) the
+      # int literal cannot adopt it — join ALL branches as before (mismatch →
+      # `:unknown`, so `if c do 1 else true end` stays `:unknown`, not `Bool`)
+      true -> join_all(all)
+    end
+  end
+
+  defp join_all(types),
+    do: types |> Enum.reduce(:bottom, fn t, acc -> join(acc, t) end) |> debottom()
+
   # ── function checking ──────────────────────────────────────────────────
   @doc """
   Check one function. `ic` is the inference context (`:tdefs`/`:funs`/`:ctors`);
@@ -720,8 +780,8 @@ defmodule Rian.Check do
   defp literal_adopts?(_e, _ann), do: false
 
   defp int_literal?(n), do: not (String.contains?(n, ".") or String.match?(n, ~r/[eE]/))
-  defp int_type?(t), do: String.match?(t, ~r/^U?Int\d*$/)
-  defp float_type?(t), do: String.match?(t, ~r/^Float\d*$/)
+  defp int_type?(t), do: is_binary(t) and String.match?(t, ~r/^U?Int\d*$/)
+  defp float_type?(t), do: is_binary(t) and String.match?(t, ~r/^Float\d*$/)
 
   # ── lossless numeric widening (ADR-0034 §1 amendment) ──────────────────
   # Directional compatibility: may a value of type `from` stand where `to` is
