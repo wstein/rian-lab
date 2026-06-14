@@ -1,6 +1,6 @@
 # ADR-0068 — `@external`: target-scoped FFI bodies, Reach-honest
 
-**Status:** Accepted (direction) — unimplemented; gated on the declaration parser (ADR-0031 Stage 0.1) and `Rian.Reach`
+**Status:** Accepted — **implemented (2026-06-14)** across `Rian.Decl` (parse), `Rian.Reach` (honest target set), `Rian.Check` (signature + `val`/`tag` restriction), and all four emitters (`Rian.Beam`/`Rian.JS`/`Rian.JVM`/`Rian.Lower`); `test/rian/external_test.exs`
 **Refs:** ADR-0057 (concurrency & FFI are native-per-target — the principle this gives a surface), ADR-0058 (configurable target environments; **inferred** reachability, *not* a binary `@shared` flag), ADR-0056 (`comptime if target` — the *adjacent but distinct* mechanism; see §4), ADR-0041 §2 (an unmapped host call is a compile error, never a silent stub), ADR-0035 (no hidden control flow / what-you-read-is-what-runs), ADR-0050 (one typed Core IR)
 **Owners:** Elena Rostova (FFI / lowering) · Maya Lin (emitters / the anti-`#if` position) · Samir Patel (no-silent-stub guard) · Arthur Pendelton (Reach) · Kira Neri (honesty) · Rachel Okafor (PM)
 **Origin:** the Gleam/Haxe borrow debate (2026-06-14) — consensus #2, rated **4/5**. Borrow Gleam's disciplined `@external`, explicitly **reject** Haxe's `#if` scattered through bodies.
@@ -98,12 +98,25 @@ They do not overlap: one is "which Rian code", the other is "which host call".
 - **`Rian.Check`** verifies the signature once; it does **not** check host-body equivalence (FFI is
   trusted, per ADR-0026/0027 free-FFI).
 
+## Resolved (in the 2026-06-14 implementation)
+
+- **Spec string format per target** — chose a **raw host expression** string per target, with the
+  function's parameters in scope by name. `:ex` is a *Rian-surface* FFI expression (an atom-head
+  remote call like `:erlang.float_to_list(x, …)`), spliced as the BEAM function body and lowered
+  through the normal Core → abstract-forms path (reusing the existing FFI lowering — no Erlang parser).
+  `:js`/`:jvm`/`:rs` are *raw target source* injected verbatim (JS/Kotlin bind `const x = a0;`/`val x
+  = a0;`; Rust names params directly). Flexible over the structured `module`/`function` form; the
+  spec's correctness is the author's obligation, as for any FFI.
+- **Capabilities through an external** — restricted to `val`/`tag` (an `iso`/`ref` param is a
+  `Rian.Check` error): linearity cannot be enforced across a foreign boundary.
+- **Partial-coverage ergonomics** — handled by the existing **`@targets` gate** (ADR-0058): a `pub`
+  external whose body set is narrower than the module's required targets fails `Reach.check_contracts`
+  with a clear "cannot reach […]" error, surfaced at the gate, before emit.
+
 ## Open items
 
-- **Spec string format per target** — a raw expression (as above) vs a structured `module`/`function`
-  reference (Gleam uses the latter for Erlang/JS). Raw is more flexible but less checkable; decide per
-  target.
-- **Capabilities through an external** — what `iso`/`ref` mean across an FFI boundary (linearity is not
-  enforced in foreign code); likely restrict `@external` params to `val`/`tag` initially.
-- **Partial-coverage ergonomics** — a lint when an `@external` set is narrower than the module's
-  `@targets(…)` (ADR-0058) build default, so a missing target body is surfaced early, not at emit.
+- **Embedded quotes in a spec** — a spec containing `"` (e.g. a Rust `format!("{:.6}", x)`) needs the
+  Rian lexer to support `\"` string escapes (a separate, general lexer gap; tracked). Until then specs
+  must be quote-free.
+- **Structured spec form** — a `module`/`function` reference (Gleam-style) as an optional, more
+  checkable alternative to the raw expression, if a need appears.

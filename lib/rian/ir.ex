@@ -139,6 +139,11 @@ defmodule Rian.IR do
     (they lower as plain functions) but skips the `:dispatcher` and regenerates it
     with JS-native guards. **Rust** skips both and emits `trait`s + `impl`s from
     the protocol IR (`prog.protocols`/`prog.impl_decls`).
+
+    `externals` is the `@external` target-scoped FFI bodies (ADR-0068): a map
+    `%{target => "host expression"}`. A function with a non-empty `externals` has no
+    portable Rian body (`clauses: []`) — its reach is exactly the declared targets
+    (`Rian.Reach`), and each emitter lowers its own target's spec.
     """
     @enforce_keys [:name, :params, :ret, :clauses]
     defstruct name: nil,

@@ -39,6 +39,9 @@ defmodule Rian.Decl do
     * `@moduledoc`/`@doc`/`@typedoc "…"` doc comments (ADR-0051, heredoc-capable)
       attach to the following declaration and lower to `@moduledoc`/`@doc` (BEAM)
       / rustdoc `//!`/`///` (Rust).
+    * `@external(:target, "host expression")` (ADR-0068) — one-or-more precede a
+      *bodiless* `def` to give it per-target host (FFI) bodies and no portable body;
+      `Rian.Reach` reads them for an honest target set, each emitter lowers its spec.
     * `protocol Name do … end` / `impl Protocol for Type do … end` (ADR-0042 §3)
       — desugar to a guarded dispatcher + mangled impl functions via
       `Rian.Protocol`; coherence-checked. Dispatch over primitive / sum / struct
