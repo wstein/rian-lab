@@ -42,11 +42,16 @@ jobs:
       # Portability gate, scoped to the shared core (ADR-0058 §"CI default scope").
       # Default-ON for prelude/shared-core, which must reach every Tier-1 target;
       # BEAM-pinned application code stays opt-in (it declares `@targets`, or nothing).
+      # `prelude_int.rian`'s explicit `Int64` overflow ops (`wrapping_add`/`saturating_add`/
+      # `checked_add`) carry 64-bit overflow prims and so are honestly off `:js` (ADR-0064
+      # §2a) — they are gated against the targets they *can* reach, never silently dropped.
       - name: Gate shared-core portability (ex,rs,js)
         run: |
           for f in examples/rian/prelude_*.rian; do
-            echo "== $f =="
-            mix rian.targets "$f" --require ex,rs,js
+            req=ex,rs,js
+            [ "$f" = examples/rian/prelude_int.rian ] && req=ex,rs
+            echo "== $f (require $req) =="
+            mix rian.targets "$f" --require "$req"
           done
 
       - name: Run the component suite (incl. the self-hosting fixpoint diff)
