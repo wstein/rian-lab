@@ -157,14 +157,14 @@ defmodule Rian.SelfHost do
   # bootstrap terminus (Stage 3: v1==v2) is gated on this reaching the whole
   # pipeline — not on `percent`.
   @composition %{
-    rung: "lex → parse → group → lower → assemble",
+    rung: "lex → parse → group → lower → assemble → compile → load",
     stages: 4,
     subset:
-      "a whole multi-function module over arithmetic (several functions incl. multi-clause + mutual recursion; literal/variable head patterns, calls, `+ - *`, parens)",
-    source: "selfhost_compose_mod.rian",
-    test: "test/rian/compose_mod_fixpoint_test.exs",
+      "a whole multi-function module over arithmetic, compiled AND loaded by a Rian driver (several functions incl. multi-clause + mutual recursion; literal/variable head patterns, calls, `+ - *`, parens)",
+    source: "selfhost_compose_driver.rian",
+    test: "test/rian/compose_driver_fixpoint_test.exs",
     note:
-      "four stages wired directly over shared types (no projection glue). Rung 1 (selfhost_compose.rian) composed an expression; rung 2 (selfhost_compose_decl.rian) a single-clause declaration; rung 3 (selfhost_compose_multi.rian) a multi-clause recursive function; rung 4 emits a WHOLE module — `group` folds the clause stream into per-function groups and `compile_module(src, modname)` assembles the entire :compile.forms input (the :module/:export attributes AND every {:function,…} form) as native Rian tuple literals. The fixpoint authors NO Erlang form by hand: it passes the Rian-produced list straight to :compile.forms and RUNS it, identical to the full Elixir toolchain across multi-function, multi-clause, and mutually-recursive modules"
+      "the stages are wired directly over shared types (no projection glue), and a Rian DRIVER now owns the whole loop. Rung 1 (selfhost_compose.rian) composed an expression; rung 2 (selfhost_compose_decl.rian) a single-clause declaration; rung 3 (selfhost_compose_multi.rian) a multi-clause recursive function; rung 4 (selfhost_compose_mod.rian) emitted a whole module's form list; rung 5 (capstone) closes the loop — `build(src, modname)` calls :compile.forms + :code.load_binary (the two irreducible BEAM toolchain calls, declared as @external(:ex) FFI and counted in the ledger) and returns a LOADED, runnable module, with all orchestration in Rian. The fixpoint calls only build/2 — no Elixir compile/load anywhere — and runs the result identically to the full Elixir toolchain. This is the BEAM-bootstrap terminus shape (ADR-0063 §4): feed build a slice of the compiler's own source and the loop closes"
   }
 
   @doc """
@@ -280,7 +280,11 @@ defmodule Rian.SelfHost do
     "selfhost_codegen.rian" => ["Map.get", "Map.put"],
     "selfhost_eval.rian" => ["Map.get", "Map.put"],
     "selfhost_funcs.rian" => ["Map.get", "Map.put"],
-    "selfhost_modules.rian" => ["String.to_charlist"]
+    "selfhost_modules.rian" => ["String.to_charlist"],
+    # the composition-driver capstone owns the whole source->loaded-module loop in
+    # Rian; the two irreducible BEAM toolchain calls are @external(:ex) FFI (ADR-0068),
+    # counted here. Everything between them is portable Rian (ADR-0063 §4).
+    "selfhost_compose_driver.rian" => [":code.load_binary", ":compile.forms"]
   }
 
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."
@@ -294,21 +298,45 @@ defmodule Rian.SelfHost do
   @doc """
   The *actual* host-FFI constructs a self-host source leans on — the `:ffi`/
   `:concurrency` blocker constructs `Rian.Reach` finds (Erlang `:mod.fun` / non-Rian
-  `Mod.fun` calls), deduped and sorted. This is the measurement the ledger is checked
+  `Mod.fun` calls in bodies) **plus** the host calls inside `@external(:target, …)`
+  bodies (ADR-0068), deduped and sorted. This is the measurement the ledger is checked
   against; `Prim.*` intrinsics are the sanctioned primitive layer, not FFI, so they do
   not appear.
+
+  `@external` needs explicit handling: a bodiless `@external` def reaches exactly its
+  declared targets and carries *no* Reach blocker (ADR-0068 §2), so the host call it
+  splices would otherwise be invisible to the ledger — under-reporting the crutch.
+  We scan each external spec for `:mod.fun` host MFAs so the toolchain FFI a BEAM
+  bootstrap driver leans on (`:compile.forms`, `:code.load_binary`) is counted.
   """
   @spec ffi_in_file(String.t()) :: [String.t()]
   def ffi_in_file(path) do
-    path
-    |> File.read!()
-    |> Rian.Decl.parse()
-    |> Rian.Reach.analyze()
-    |> Map.values()
-    |> Enum.flat_map(& &1.blockers)
-    |> Enum.filter(&(&1.kind in [:ffi, :concurrency]))
-    |> Enum.map(& &1.construct)
-    |> Enum.uniq()
-    |> Enum.sort()
+    prog = path |> File.read!() |> Rian.Decl.parse()
+
+    body_ffi =
+      prog
+      |> Rian.Reach.analyze()
+      |> Map.values()
+      |> Enum.flat_map(& &1.blockers)
+      |> Enum.filter(&(&1.kind in [:ffi, :concurrency]))
+      |> Enum.map(& &1.construct)
+
+    (body_ffi ++ external_host_calls(prog)) |> Enum.uniq() |> Enum.sort()
+  end
+
+  # the `:mod.fun` host MFAs spliced by every `@external(:target, spec)` body in a
+  # program (top-level + every module's funcs). A spec like `:compile.forms(forms, …)`
+  # yields `":compile.forms"`; plain atoms (`:return_errors`) carry no `.fun` and are
+  # ignored. Surfacing these keeps the ledger honest about `@external` FFI (ADR-0068).
+  defp external_host_calls(prog) do
+    funcs =
+      Map.get(prog, :funcs, []) ++
+        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :funcs, []))
+
+    for f <- funcs,
+        {_target, spec} <- Map.get(f, :externals, %{}),
+        [_, m, fun] <- Regex.scan(~r/:([a-z_]\w*)\.([a-z_]\w*)/, spec) do
+      ":#{m}.#{fun}"
+    end
   end
 end

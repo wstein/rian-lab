@@ -211,6 +211,18 @@ compile + run on real BEAM bytecode:
   **runs** it, identical to `Rian.Beam` across multi-function, multi-clause, and
   mutually-recursive (`even`/`odd`) modules. Host-FFI-free. This is the last rung
   before a Rian *driver* owns the `:compile.forms` call itself.
+- [selfhost_compose_driver.rian](selfhost_compose_driver.rian) — **COMPOSITION rung 5
+  / capstone** (ADR-0063 Step 3 / §4): a Rian **driver** owns the whole loop, source
+  string → a loaded, runnable module: `build(src, modname) =
+  load(compile_forms(compile_module(src, modname)), modname)`. The two irreducible
+  BEAM toolchain calls — `:compile.forms` and `:code.load_binary` — are declared as
+  `@external(:ex, …)` FFI (ADR-0068) and **counted** in `@selfhost_ffi`; everything
+  between them (destructuring `{:ok, _, _}`, threading the binary, returning the
+  module atom) is ordinary Rian. `test/rian/compose_driver_fixpoint_test.exs` calls
+  **only** `build/2` — no Elixir compile/load anywhere — and runs the returned module,
+  identical to `Rian.Beam`. This is the **BEAM-bootstrap terminus shape** (§4): feed
+  `build` a slice of the compiler's own source and the loop closes. (The portable
+  terminus — compiling the compiler to Rust/JS — is separate and further.)
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
