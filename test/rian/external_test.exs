@@ -7,7 +7,7 @@ defmodule Rian.ExternalTest do
   """
   use ExUnit.Case, async: false
 
-  alias Rian.{Decl, Reach}
+  alias Rian.{Check, Decl, Reach}
 
   describe "parsing (ADR-0068 §1)" do
     test "one-or-more `@external` attrs attach a per-target body map to a bodiless def" do
@@ -91,4 +91,80 @@ defmodule Rian.ExternalTest do
   end
 
   defp targets(rep, name), do: rep[name][:reach] |> MapSet.to_list() |> Enum.sort()
+
+  describe "check (ADR-0068 §3 — signature only, val/tag params)" do
+    test "a `val`/`tag` external passes the type gate (the body is trusted FFI)" do
+      assert Check.gate!(Decl.parse(~S|@external(:ex, ":os.system_time()") def now() Int64|)) ==
+               :ok
+
+      assert Check.gate!(Decl.parse(~S|@external(:ex, ":f.g(x)") def f(x tag Vec(Int64)) Int64|)) ==
+               :ok
+    end
+
+    test "an `iso`/`ref` external parameter is rejected (linearity not enforceable over FFI)" do
+      for cap <- ~w(iso ref) do
+        assert_raise Check.Error, ~r/must be `val` or `tag`/, fn ->
+          Check.gate!(Decl.parse(~s|@external(:ex, ":f.g(x)") def f(x #{cap} Int64) Int64|))
+        end
+      end
+    end
+  end
+
+  describe "emit (ADR-0068 §3 — each emitter lowers its target's spec)" do
+    test "BEAM: the `:ex` spec runs as the function body" do
+      {:ok, mod} =
+        Rian.Beam.load(
+          ~S|@external(:ex, ":erlang.float_to_list(x, [{:decimals, 2}])") pub def fmt(x val Float64) String|,
+          :"rian_ext_#{System.unique_integer([:positive])}"
+        )
+
+      assert apply(mod, :fmt, [3.14159]) == ~c"3.14"
+    end
+
+    test "JS: the `:js` spec is emitted verbatim with params bound, and runs under node" do
+      js = Rian.JS.compile(~S|@external(:js, "x + 1") pub def inc(x val Int53) Int53|)
+      assert js =~ "function inc(a0) { const x = a0; return (x + 1); }"
+
+      case node_run(js, "inc(41)") do
+        :no_node -> :ok
+        out -> assert out == "42"
+      end
+    end
+
+    test "Rust: the `:rs` spec is the function body (params named directly)" do
+      rust =
+        Rian.Lower.rust_program(
+          Decl.parse(~S|@external(:rs, "x.abs()") pub def mag(x val Int64) Int64|)
+        )
+
+      assert rust =~ "fn mag(x: i64) -> i64 { x.abs() }"
+    end
+
+    test "JVM: the `:jvm` spec is emitted with params bound" do
+      kt = Rian.JVM.compile(~S|@external(:jvm, "Math.abs(x)") pub def mag(x val Int64) Int64|)
+      assert kt =~ "fun mag(a0: Long): Long { val x = a0; return Math.abs(x) }"
+    end
+
+    test "an emitter asked for a target the function has no body for raises (ADR-0041 §2)" do
+      # `inc` has only an `:ex` body -> off `:js`; compiling it to JS is an error,
+      # never a silent stub. (Reach pins it off `:js` so this can't arise after a gate.)
+      assert_raise Rian.JS.Unsupported, ~r/no `@external\(:js/, fn ->
+        Rian.JS.compile(~S|@external(:ex, ":os.system_time()") pub def inc() Int64|)
+      end
+    end
+  end
+
+  defp node_run(js, expr) do
+    case System.find_executable("node") do
+      nil ->
+        :no_node
+
+      node ->
+        path = Path.join(System.tmp_dir!(), "rian_ext_#{System.unique_integer([:positive])}.mjs")
+        File.write!(path, js <> "\nconsole.log(String(#{expr}));\n")
+        {out, 0} = System.cmd(node, [path])
+        File.rm(path)
+        String.trim(out)
+    end
+  end
 end

@@ -267,6 +267,28 @@ defmodule Rian.JS do
   end
 
   # ── function / clause dispatch ──────────────────────────────────────────
+  # an `@external` function (ADR-0068): emit the `:js` host body verbatim, binding
+  # each Rian param to its positional argument by name so the spec can reference it.
+  # No `:js` body -> the function is off `:js` (Reach pins it); reaching here means an
+  # off-target compile, a clear error (ADR-0041 §2 — never a silent stub).
+  defp function_js(%{externals: ext} = f) when map_size(ext) > 0 do
+    case Map.get(ext, :js) do
+      nil ->
+        raise Unsupported, "`#{f.name}`: no `@external(:js, …)` body — not reachable on :js"
+
+      spec ->
+        args = Enum.map_join(0..(length(f.params) - 1)//1, ", ", &"a#{&1}")
+
+        binds =
+          f.params
+          |> Enum.with_index()
+          |> Enum.map_join(" ", fn {p, i} -> "const #{p.name} = a#{i};" end)
+
+        export = if f.pub?, do: "export ", else: ""
+        "#{export}function #{f.name}(#{args}) { #{binds} return (#{spec}); }"
+    end
+  end
+
   defp function_js(%{name: name, clauses: clauses, pub?: pub?} = f) do
     reject_wide_int!(name, f)
     arity = length(hd(clauses).pats)

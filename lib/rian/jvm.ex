@@ -206,6 +206,29 @@ defmodule Rian.JVM do
   end
 
   # ── function / clause dispatch ──────────────────────────────────────────
+  # an `@external` function (ADR-0068): emit the `:jvm` host body verbatim, binding
+  # each param to its positional argument by name. No `:jvm` body -> off `:jvm`.
+  defp function_kt(%{externals: ext} = f) when map_size(ext) > 0 do
+    case Map.get(ext, :jvm) do
+      nil ->
+        raise Unsupported, "`#{f.name}`: no `@external(:jvm, …)` body — not reachable on :jvm"
+
+      spec ->
+        sig =
+          f.params
+          |> Enum.with_index()
+          |> Enum.map_join(", ", fn {p, i} -> "a#{i}: #{kt_type(p.type)}" end)
+
+        binds =
+          f.params
+          |> Enum.with_index()
+          |> Enum.map_join(" ", fn {p, i} -> "val #{p.name} = a#{i};" end)
+
+        vis = if f.pub?, do: "", else: "private "
+        "#{vis}fun #{f.name}(#{sig}): #{kt_type(f.ret)} { #{binds} return #{spec} }"
+    end
+  end
+
   defp function_kt(%{name: name, clauses: clauses, ret: ret, params: params, pub?: pub?}) do
     sig_params =
       params

@@ -220,6 +220,7 @@ defmodule Rian.Beam do
   # `%IR.Range{}`) lets `Name.of(n)` construction desugar (ADR-0036). `types` and
   # `structs` let `-spec` attributes expand sum/struct types (Stage 0.5).
   defp beam_for(module, funcs, ranges, types, structs) do
+    funcs = Enum.flat_map(funcs, &beam_func/1)
     rtable = Rian.Range.table(ranges)
     tctx = type_ctx(types, ranges, structs)
 
@@ -244,6 +245,23 @@ defmodule Rian.Beam do
   # the functions to compile: a single `mod`'s, else the top-level ones
   defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
   defp funcs_of(%{funcs: funcs}), do: funcs
+
+  # an `@external` function (ADR-0068): on the BEAM the `:ex` spec is a Rian-surface
+  # host expression, so splice it as the function body — a synthetic clause whose
+  # head binds the params — and reuse the normal Core -> abstract-forms FFI lowering.
+  # An `@external` with no `:ex` body is honestly off `:ex` and emits nothing.
+  defp beam_func(%{externals: ext} = f) when map_size(ext) > 0 do
+    case Map.get(ext, :ex) do
+      nil ->
+        []
+
+      spec ->
+        clause = %{pats: Enum.map(f.params, &{:var, &1.name}), body: spec, guard: nil}
+        [%{f | clauses: [clause], externals: %{}}]
+    end
+  end
+
+  defp beam_func(f), do: [f]
 
   # the type/struct declarations in the same scope as `funcs_of/1`
   defp types_of(%{funcs: [], mods: [m]}), do: Map.get(m, :types, [])

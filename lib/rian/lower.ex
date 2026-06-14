@@ -844,6 +844,25 @@ defmodule Rian.Lower do
   defp pcommas(s), do: Rian.TypeStr.split_top_commas(s)
 
   # One Rust `fn` (no type/struct preamble). `vis` is `""` or `"pub "`.
+  # an `@external` function (ADR-0068): emit the `:rs` host body verbatim. Rust uses
+  # named params, so the spec references them directly — no positional binding. No
+  # `:rs` body -> the function is off `:rs` (Reach pins it); reaching here is an
+  # off-target compile error (ADR-0041 §2).
+  defp rust_fn(%{externals: ext} = func, _ctx, vis) when map_size(ext) > 0 do
+    case Map.get(ext, :rs) do
+      nil ->
+        raise "`#{func.name}`: no `@external(:rs, …)` body — not reachable on :rs"
+
+      spec ->
+        param_decls =
+          Enum.map_join(func.params, ", ", fn p ->
+            "#{p.name}: #{Rian.Capability.rust_param(p.cap, p.type)}"
+          end)
+
+        "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} { #{spec} }"
+    end
+  end
+
   defp rust_fn(func, ctx, vis) do
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->

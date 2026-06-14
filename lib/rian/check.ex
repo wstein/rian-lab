@@ -590,10 +590,29 @@ defmodule Rian.Check do
   def check_func(func, ic \\ %{}, eset \\ %{tsets: %{}, table: %{}})
 
   def check_func(%Func{} = f, ic, eset) do
-    with :ok <- check_return(f, ic),
+    with :ok <- check_external_caps(f),
+         :ok <- check_return(f, ic),
          :ok <- check_binds(f, ic),
          :ok <- check_bounds(f, ic),
          do: check_error_set(f, eset)
+  end
+
+  # An `@external` function (ADR-0068) is trusted FFI: its signature is checked but
+  # its host bodies are not. Linearity (`iso`/`ref`, ADR-0055) cannot be enforced
+  # across a foreign boundary, so an `@external` param must be `val` or `tag`
+  # (ADR-0068 open item — restrict initially). Non-external functions are unaffected.
+  defp check_external_caps(%Func{externals: ext}) when map_size(ext) == 0, do: :ok
+
+  defp check_external_caps(%Func{name: name, params: params}) do
+    case Enum.find(params, &(&1.cap in [:iso, :ref])) do
+      nil ->
+        :ok
+
+      p ->
+        {:error,
+         "`#{name}`: an `@external` parameter must be `val` or `tag` — `#{p.name}` is `#{p.cap}` " <>
+           "(linearity is not enforceable across an FFI boundary, ADR-0068/0055)"}
+    end
   end
 
   # ADR-0042 §2 — protocol bounds. At each call to a bounded generic, instantiate
