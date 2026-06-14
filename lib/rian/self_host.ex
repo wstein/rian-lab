@@ -67,11 +67,11 @@ defmodule Rian.SelfHost do
       id: :core_ir,
       name: "Typed Core IR (from_expr/from_pat)",
       role: :frontend,
-      status: :partial,
+      status: :self_hosted,
       source: "selfhost_core.rian",
       test: "test/rian/core_fixpoint_test.exs",
       note:
-        "surface→Core lowering equals Rian.Core.from_expr over the literal/unary/binary slice; calls/lists/blocks/lambdas remain"
+        "the full surface→Core lowering — every Pratt-produced expression (literals/unary/binary/call/label/dot/if/tuple/list/map/block/case/lambda/capture/with) and pattern (wild/var/lit/char/atom/tuple/ctor/list/struct/map) — equals Rian.Core.from_expr/from_pat; the Lower-internal resolved nodes + never-parsed as/pin patterns are not surface-reachable"
     },
     %{
       id: :checker,

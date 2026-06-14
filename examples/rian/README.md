@@ -64,13 +64,15 @@ compile + run on real BEAM bytecode:
   projection — diffed over a corpus (`test/rian/parse_fixpoint_test.exs`), the
   parser analog of the lexer fixpoint. Covers the full binary precedence table
   (precedence climbing), prefix `-`/`not`, and function calls.
-- [selfhost_core.rian](selfhost_core.rian) — the **surface→Core lowering** port
-  (the pipeline stage after the parser, ADR-0063): translates the parser's surface
-  tuples into the typed **Core IR** node sum, **fixpoint-locked** against the
-  reference `Rian.Core.from_expr` term-for-term over a corpus
-  (`test/rian/core_fixpoint_test.exs`). Covers the literal/identifier/atom/unary/
-  binary slice — the same vocabulary the parser port emits; calls, lists, blocks,
-  `if`/`case`, and lambdas remain.
+- [selfhost_core.rian](selfhost_core.rian) — the **surface→Core lowering**, fully
+  self-hosted (the pipeline stage after the parser, ADR-0063/0050): translates the
+  whole `Rian.Pratt` surface AST into the typed **Core IR**. Every expression node
+  (literals, unary/binary, calls with labelled args, dot, `if`, tuples, lists with
+  tails, maps, blocks, `case` with guards, lambdas, captures, `with`) and every
+  pattern (wild/var/lit/char/atom/tuple/ctor/list/struct/map) is rendered to a
+  canonical s-expression and **equivalence-locked** against `Rian.Core.from_expr`/
+  `from_pat` (`test/rian/core_fixpoint_test.exs`). The Lower-internal resolved
+  nodes and the never-parsed `as`/pin patterns are not surface-reachable.
 - [selfhost_decl.rian](selfhost_decl.rian) — a Rian **declaration** front-end
   (self-hosting **Stage 2**, ADR-0063): parses `type` sums and `def` functions
   into a `Decl` representation that, projected to `Rian.IR`, **equals what
