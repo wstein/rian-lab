@@ -102,11 +102,17 @@ architectural cost.
   two's-complement wrap contract. **On JS only `Int`, `Int53`, and `Int32`-and-smaller are valid**:
   `Int53` is the portable all-target integer (native JS `number`, `i64` elsewhere); `Int64`/`Int128`/
   `UInt64`/`UInt128` exceed 2^53 and are *rejected* on JS (`Rian.JS.reject_wide_int!`, pinned off `:js`
-  by Reach) — never silently elevated to `BigInt`. Caveat: integer **literals still infer `Int64`**
-  (the ADR-0064 default-`Int` migration is unfinished). A *constant of literals* adopts a narrower
-  declared width (`def g() Int53 := 0`, `if …`-chains — `check_return`), but a type variable inferred
-  purely from literals (`contains([1,2,3], 2)` → `T = Int64`) does **not** yet — so generic stdlib over
-  integer literals (`17_stdlib_eq_ord`) is not JS-portable. That's the open literal-polymorphism work.
+  by Reach) — never silently elevated to `BigInt`. Reach also pins a function off `:js` when its **body
+  calls a 64-bit overflow prim** (`__prim_wrapping_add` …) even if its signature is JS-valid, so the
+  gate matches the emitter (`wide_prim_blocker`). Caveat: integer **literals still infer `Int64`** (the
+  ADR-0064 default-`Int` migration is unfinished), but a **constant of literals is width-flexible** —
+  it adopts a narrower declared/neighbour width across return bodies, arithmetic (`(13 - lvl) * 10`),
+  `div`/`rem`, `if`/`case` branches, and list literals (`[2,3,5,7] : Vec(Int53)`); a generic return that
+  ignores its tvar infers concretely through recursion (`length … Int53 forall T`). The portable corpus
+  is now `Int53`. **Still open:** a type variable inferred *purely* from literals (`contains([1,2,3], 2)`
+  → `T = Int64`) — no JS-valid `impl Eq` can match — so the integer-generic stdlib
+  (`13_protocols`/`17_stdlib_eq_ord`/`18_dict_eq`) stays `Int64`/off-`:js`. That's the remaining
+  literal-polymorphism gap.
 - **Self-hosting** (`SELFHOST.md`, `examples/rian/selfhost_*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.
