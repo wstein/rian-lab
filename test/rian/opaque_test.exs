@@ -220,4 +220,54 @@ defmodule Rian.OpaqueTest do
       refute kt =~ "Meters"
     end
   end
+
+  describe "erasure of an opaque referenced inside other declarations" do
+    test "an opaque inside a sum variant's field erases to the base" do
+      prog = Opaque.erase(Decl.parse("opaque Token := String\ntype Wrap := W(Token)"))
+      [%Rian.IR.Type{variants: [%Rian.IR.Variant{ctor: "W", fields: [field]}]}] = prog.types
+      assert field.type == "String"
+    end
+
+    test "an opaque inside a struct field erases to the base" do
+      prog = Opaque.erase(Decl.parse("opaque Token := String\nstruct S(t Token)"))
+      [%Rian.IR.Struct{fields: [field]}] = prog.structs
+      assert %Rian.IR.Field{label: "t", type: "String"} = field
+    end
+
+    test "an opaque as a `const`'s declared type erases to the base" do
+      src = "opaque Token := String\nmod M do\n  const C Token := x\nend"
+      prog = Opaque.erase(Decl.parse(src))
+      [%Rian.IR.Const{name: "C", type: type}] = hd(prog.mods).consts
+      assert type == "String"
+    end
+  end
+
+  describe "erasure edge cases (nil slots, non-cast dot-calls)" do
+    test "a signature-only clause (nil body) and a nil return type are passed through" do
+      # Built directly: the parser rejects a signature-only top-level `def`, but the
+      # IR can carry a `%Clause{body: nil}` (and a `nil` ret) which erasure must leave intact.
+      f = %Rian.IR.Func{
+        name: "f",
+        params: [%Rian.IR.Param{name: "s", type: "Token"}],
+        ret: nil,
+        clauses: [%Rian.IR.Clause{pats: [], body: nil}]
+      }
+
+      prog = %{opaques: [%Rian.IR.Opaque{name: "Token", base: "String"}], funcs: [f]}
+      [out] = Opaque.erase(prog).funcs
+
+      # param type still substitutes; the nil body and nil ret survive untouched.
+      assert [%Rian.IR.Param{type: "String"}] = out.params
+      assert out.ret == nil
+      assert [%Rian.IR.Clause{body: nil}] = out.clauses
+    end
+
+    test "a non-cast, non-`.of` zero-arg dot-call is preserved (generic recursion)" do
+      # `x.foo()` is neither an opaque `.of` constructor nor a declared cast, so it
+      # must fall through `strip_into` and survive erasure unchanged.
+      prog = Opaque.erase(Decl.parse("opaque Token := String\ndef g(x Int64) Int64 := x.foo()"))
+      body = hd(hd(prog.funcs).clauses).body
+      assert {:block, [expr: {:call, {:dot, {:id, "x"}, "foo"}, []}]} = body
+    end
+  end
 end

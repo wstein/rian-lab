@@ -396,7 +396,10 @@ defmodule Rian.JS do
         {ts ++ t, bs ++ b}
       end)
 
-    inner = bind_lines(binds) ++ [guarded_return(body, guard)]
+    # the clause's parameters are `const`-bound in this same JS scope, so a `:=`
+    # that rebinds a parameter name shadows them — seed the rename with the params
+    param_names = Enum.map(binds, fn {n, _} -> n end)
+    inner = bind_lines(binds) ++ [guarded_return(body, guard, param_names)]
     body_str = Enum.join(inner, " ")
 
     guarded =
@@ -408,10 +411,10 @@ defmodule Rian.JS do
     "  { #{guarded} }"
   end
 
-  defp guarded_return(body, nil), do: clause_return(body)
+  defp guarded_return(body, nil, params), do: clause_return(body, params)
 
-  defp guarded_return(body, g),
-    do: "if (#{expr_js(Core.from_expr(Pratt.parse(g)))}) { #{clause_return(body)} }"
+  defp guarded_return(body, g, params),
+    do: "if (#{expr_js(Core.from_expr(Pratt.parse(g)))}) { #{clause_return(body, params)} }"
 
   # Match `pat` against the JS access path `acc` -> `{tests, binds}`. A sum
   # variant is a tagged array `["Ctor", arg0, …]` (ADR-0049), so a constructor
@@ -495,9 +498,11 @@ defmodule Rian.JS do
   defp arm_return(body, g), do: "if (#{expr_js(g)}) { return #{branch_js(body)}; }"
 
   # a clause body parses to a block: emit `let`s then `return` the final value
-  defp clause_return(src) do
+  defp clause_return(src, params) do
     %EBlock{stmts: stmts} = Core.from_expr(Pratt.parse_body(src))
-    block_return(ded_block(stmts, %{}))
+    # seed the version map with the params so a `:=` rebinding a parameter (which
+    # is already `const`-bound in this scope) is renamed rather than re-declared
+    block_return(ded_block(stmts, %{}, Map.new(params, &{&1, 1})))
   end
 
   # `:=` shadowing -> fresh `$`-suffixed JS vars (ADR-0034). JS `let`/`const`
@@ -508,9 +513,9 @@ defmodule Rian.JS do
   # only rebinds within one block need renaming; references thread through `r`.
   # (Erlang needs a different scheme — `@`, in `Rian.Beam` — there is no marker
   # valid on every target.)
-  defp ded_block(stmts, r) do
+  defp ded_block(stmts, r, ver \\ %{}) do
     {rev, _r, _ver} =
-      Enum.reduce(stmts, {[], r, %{}}, fn
+      Enum.reduce(stmts, {[], r, ver}, fn
         {:bind, n, e}, acc -> ded_bind(n, nil, e, acc)
         {:typed_bind, n, t, e}, acc -> ded_bind(n, t, e, acc)
         {:expr, e}, {acc, r, ver} -> {[{:expr, ded_expr(e, r)} | acc], r, ver}

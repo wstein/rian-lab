@@ -660,5 +660,175 @@ defmodule Rian.JSTest do
         out -> assert out == "9,34,36,7"
       end
     end
+
+    test "backslash, newline and CR escape to `\\\\` / `\\n` / `\\r` (js_str_cp)" do
+      # the remaining `js_str_cp` arms: `\\` -> `\\\\`, LF -> `\\n`, CR -> `\\r`
+      # (the quote/`$`/control arms are exercised by the test above).
+      js = JS.compile(~S|def s() String := "a\\b\nc\rd"|)
+      assert js =~ ~S|"a\\b\nc\rd"|
+
+      case node_eval(js, ~S|[...s()].map(c => c.charCodeAt(0)).join(",")|) do
+        :no_node -> :ok
+        # a=97 \=92 b=98 LF=10 c=99 CR=13 d=100
+        out -> assert out == "97,92,98,10,99,13,100"
+      end
+    end
+  end
+
+  describe "further protocol-dispatch, prim, and pattern edge cases" do
+    test "a `Char` impl dispatches on `typeof === number` in whole-program number-mode (ADR-0064)" do
+      # `int_typeof()` -> "number" when the program is number-mode: a `Char` value is
+      # its codepoint `number`, so `impl Show for Char` guards on `typeof === "number"`
+      # (not "bigint"). An `Int53` function elsewhere pins the whole program to
+      # number-mode without colliding with `Char` on the integer discriminator.
+      js =
+        JS.compile("""
+        protocol Show do
+          def show(self Self) String
+        end
+
+        impl Show for Char do
+          def show(c) := "char"
+        end
+
+        impl Show for Bool do
+          def show(b) := "bool"
+        end
+
+        def force(n Int53) Int53 := n + 1
+        """)
+
+      assert js =~ ~s|if (typeof a0 === "number") return impl_show_char_show(a0);|
+      refute js =~ ~s|typeof a0 === "bigint"|
+
+      assert node_eval(js, "show(65)") in [:no_node, "char"]
+      assert node_eval(js, "show(true)") in [:no_node, "bool"]
+    end
+
+    test "an explicit 64-bit overflow prim raises in expression position (Int64-only, ADR-0064)" do
+      # `Prim.wrapping_add` operates on `Int64`, which has no JS representation. A
+      # non-wide signature (`Int`) slips past `reject_wide_int!`, so the refusal must
+      # also fire at the call site in `expr_js` — naming the prim and `Int64`.
+      err =
+        assert_raise JS.Unsupported, fn ->
+          JS.compile("def f(a Int, b Int) Int := Prim.wrapping_add(a, b)")
+        end
+
+      assert Exception.message(err) =~ "__prim_wrapping_add"
+      assert Exception.message(err) =~ "Int64"
+    end
+
+    test "a clause pattern the emitter cannot lower raises a clear Unsupported (pat_match default)" do
+      # a map pattern `%{a: x}` in a clause head has no `pat_match` clause yet, so it
+      # must raise rather than emit garbage (mirrors the expression/operator defaults).
+      assert_raise JS.Unsupported, ~r/clause pattern/, fn ->
+        JS.compile("def f(m Map) Int\ndef f(%{a: x}) := x")
+      end
+    end
+
+    test "`:=` shadowing threads a rename through a struct-pattern `case` arm (pat_var_names/PStruct)" do
+      # a rebind `k := k + 1` renames the second `k` to `k$1`; descending into the
+      # `case` arm, `pat_var_names(%PStruct{})` collects the arm's bound names so the
+      # rename map is correctly restricted before the arm body is rewritten.
+      js =
+        JS.compile("""
+        struct Pt(x Int53, y Int53)
+        def f(p Pt) Int53
+        def f(p) do
+          k := 1
+          k := k + 1
+          case p do
+            Pt(x: a, y: b) -> a + b + k
+          end
+        end
+        """)
+
+      assert js =~ "let k$1 = (k + 1);"
+      assert js =~ ~s(_s.__struct__ === "Pt")
+      assert js =~ "(a + b) + k$1"
+
+      assert node_eval(js, "f({__struct__:'Pt',x:3,y:4})") in [:no_node, "9"]
+    end
+  end
+
+  describe "`@external` FFI, mixed-int-mode, and interpolation lowering (ADR-0068 / ADR-0064 / ADR-0069)" do
+    test "an `@external(:js, …)` function emits its host body, binding params by name" do
+      # the `:js` spec is emitted verbatim; each Rian param is bound to its positional
+      # argument by name (`const a = a0;`) so the spec can reference it.
+      js =
+        JS.compile(~S|@external(:js, "a + b")
+        def add(a Int53, b Int53) Int53|)
+
+      assert js =~ "function add(a0, a1) {"
+      assert js =~ "const a = a0;"
+      assert js =~ "const b = a1;"
+      assert js =~ "return (a + b);"
+
+      assert node_eval(js, "add(2, 3)") in [:no_node, "5"]
+    end
+
+    test "a `pub` `@external` inside a `mod` is exported" do
+      js =
+        JS.compile(~S|mod M do
+          @external(:js, "a * 2")
+          pub def dbl(a Int53) Int53
+        end|)
+
+      assert js =~ "export function dbl(a0) {"
+      assert js =~ "return (a * 2);"
+    end
+
+    test "an `@external` function with no `:js` body raises (off `:js`, never a silent stub)" do
+      # a `:rs`-only external has no JS host body, so reaching the JS emitter is an
+      # off-target compile — a clear error naming the function (ADR-0068 / ADR-0041 §2).
+      err =
+        assert_raise JS.Unsupported, fn ->
+          JS.compile(~S|@external(:rs, "a + b")
+          def onlyrs(a Int53, b Int53) Int53|)
+        end
+
+      assert Exception.message(err) =~ "onlyrs"
+      assert Exception.message(err) =~ "not reachable on :js"
+    end
+
+    test "mixing `Int` (BigInt) and a JS-number width in one module is rejected (ADR-0064 §2a)" do
+      # BigInt and `number` are incompatible in a JS expression and number-mode would
+      # silently truncate `Int`, so a module mixing the two integer representations
+      # must raise rather than miscompile (`reject_mixed_int_mode!`).
+      err =
+        assert_raise JS.Unsupported, fn ->
+          JS.compile("def a(n Int53) Int53 := n\ndef b(n Int) Int := n")
+        end
+
+      assert Exception.message(err) =~ "cannot mix `Int`"
+    end
+
+    test "string interpolation `\\(n)` lowers an `Int53` hole via `String(n)` (ADR-0069)" do
+      # `__prim_int_to_string` lowers to `String(n)` — stringifies a `number` or BigInt
+      # with no suffix, so an interpolated integer hole reaches JS.
+      js = JS.compile(~S|def shw(n Int53) String := "n=\(n)"|)
+      assert js =~ "String(n)"
+
+      assert node_eval(js, "shw(7)") in [:no_node, "n=7"]
+    end
+  end
+
+  describe "`:=` shadowing renames (no JS re-declaration SyntaxError)" do
+    test "rebinding a clause parameter renames it (the param is `const`-bound)" do
+      # regression: `const n = a0; let n = …` is a re-declaration SyntaxError, so a
+      # `:=` rebinding the parameter must take a fresh `n$1` (RHS reads the param).
+      js = JS.compile("def f(n Int53) Int53\n  n := n + 1\n  n * 2\nend")
+      assert js =~ "const n = a0;"
+      assert js =~ "let n$1 = (n + 1);"
+      assert js =~ "return (n$1 * 2);"
+      assert node_eval(js, "f(5)") in [:no_node, "12"]
+    end
+
+    test "rebinding a local binding renames the shadow" do
+      js = JS.compile("def g(n Int53) Int53\n  x := n\n  x := x * 10\n  x\nend")
+      assert js =~ "let x = n;"
+      assert js =~ "let x$1 = (x * 10);"
+      assert node_eval(js, "g(2)") in [:no_node, "20"]
+    end
   end
 end

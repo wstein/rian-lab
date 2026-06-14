@@ -374,5 +374,60 @@ defmodule Rian.JVMTest do
         out -> assert out == "9,34,36,7"
       end
     end
+
+    test "backslash, newline and carriage-return escape to `\\\\`, `\\n`, `\\r`" do
+      # exercises kt_str_cp/1 for ?\\, ?\n, ?\r (jvm.ex:375/378/379) — distinct
+      # from the \t/\"/$ test above. A literal backslash doubles; LF/CR become
+      # the two-char Kotlin escapes (not the \uHHHH control fallback).
+      kt = JVM.compile(~S|def s() String := "a\\b\nc\rd"|)
+      assert kt =~ ~S|"a\\b\nc\rd"|
+
+      case kotlin_run(kt, ~S|println(s().map { it.code }.joinToString(","))|) do
+        :no_jvm -> :ok
+        # 'a'=97 '\'=92 'b'=98 '\n'=10 'c'=99 '\r'=13 'd'=100
+        out -> assert out == "97,92,98,10,99,13,100"
+      end
+    end
+  end
+
+  describe "string interpolation (ADR-0069) — integer and bool holes" do
+    test "an Int64 hole lowers via `(n).toString()` and concatenation" do
+      # `"\(n)"` rewrites (Rian.Interp) to a `<>`/stringify chain; the Int64 hole
+      # uses `__prim_int_to_string`, which the JVM emitter lowers to Kotlin
+      # `(<expr>).toString()` (jvm.ex:345).
+      kt = JVM.compile(~S|def f(n Int64) String := "v\(n)"|)
+      assert kt =~ "(n).toString()"
+
+      case kotlin_run(kt, ~S|println(f(42L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "v42"
+      end
+    end
+
+    test "a Bool hole rewrites to a single-expr-block `if` (branch_kt block path)" do
+      # `"\(b)"` with a Bool hole rewrites (Rian.Interp) to `if (b) "true" else
+      # "false"`; each branch is a single-expression `EBlock`, lowered through
+      # `branch_kt(%EBlock{stmts: [{:expr, e}]})` (jvm.ex:359).
+      kt = JVM.compile(~S|def f(b Bool) String := "\(b)"|)
+      assert kt =~ ~S|if (b) "true" else "false"|
+
+      case kotlin_run(kt, ~S|println(f(true)); println(f(false))|) do
+        :no_jvm -> :ok
+        out -> assert out == "true\nfalse"
+      end
+    end
+  end
+
+  describe "@external lowering edge (ADR-0068)" do
+    test "an @external fn with no `:jvm` body raises (off :jvm, never a stub)" do
+      # an `:ex`-only external is not reachable on :jvm; asking the JVM emitter for
+      # it raises ONE clear error rather than emitting a stub (jvm.ex:217).
+      err =
+        assert_raise JVM.Unsupported, fn ->
+          JVM.compile(~S|@external(:ex, ":os.system_time()") pub def now() Int64|)
+        end
+
+      assert Exception.message(err) =~ "no `@external(:jvm"
+    end
   end
 end
