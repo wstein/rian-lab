@@ -6,14 +6,14 @@ self-hosting (ADR-0063 §4) — the Rian compiler compiling its own source to `.
 **Portable** self-hosting (the compiler lowered to Rust/JS) is a separate, further
 terminus and is *not* measured here.
 
-**68% self-hosted** — 4 stage(s) self-hosted,
-7 partial, 0 not started, of 11.
+**73% self-hosted** — 5 stage(s) self-hosted,
+6 partial, 0 not started, of 11.
 
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | Lexer | frontend | ✅ yes | `examples/rian/selfhost_lexer_v2.rian` · `test/rian/fixpoint_test.exs` | token stream equals Rian.Lexer over slices 1-5 (incl. tokenize/1, {:nl}) |
 | Declaration parser | frontend | 🟡 partial | `examples/rian/selfhost_decl.rian` · `test/rian/decl_fixpoint_test.exs` | IR equals Rian.Decl over type/struct/mod/def slice; alias/protocol/generics remain |
-| Expression/pattern parser | frontend | 🟡 partial | `examples/rian/selfhost_parse.rian` · `test/rian/parse_fixpoint_test.exs` | AST equals Rian.Pratt over an arithmetic/precedence slice |
+| Expression/pattern parser | frontend | ✅ yes | `examples/rian/selfhost_parse.rian` · `test/rian/parse_fixpoint_test.exs` | the full Rian.Pratt grammar — prefix/primary (if/case/with/list/map/tuple/lambda/capture/atom/str/char/num/id), postfix dot/call, labelled args, precedence climbing, AND the full pattern grammar + blocks — equals Rian.Pratt.parse with no projection; string-interpolation/`<-`-propagation sugar is out of scope; `:if`/`:case`/`:with`/`:struct` keyword-atom tags need a counted String.to_atom crutch |
 | Typed Core IR (from_expr/from_pat) | frontend | ✅ yes | `examples/rian/selfhost_core.rian` · `test/rian/core_fixpoint_test.exs` | the full surface→Core lowering — every Pratt-produced expression (literals/unary/binary/call/label/dot/if/tuple/list/map/block/case/lambda/capture/with) and pattern (wild/var/lit/char/atom/tuple/ctor/list/struct/map) — equals Rian.Core.from_expr/from_pat; the Lower-internal resolved nodes + never-parsed as/pin patterns are not surface-reachable |
 | Type checker (inference + error sets) | checker | 🟡 partial | `examples/rian/selfhost_checker.rian` · `test/rian/checker_infer_fixpoint_test.exs` | type inference agrees with the REAL Rian.Check.infer over closed integer expressions; env/floats/calls/lambdas/case remain (selfhost_check.rian is a separate TOY-language spike) |
 | Exhaustiveness gate | checker | ✅ yes | `examples/rian/selfhost_exhaust.rian` · `test/rian/exhaust_fixpoint_test.exs` | the complete Maranget useful?/3 (specialize/default/signature over single+multi-column matrices, ctors-with-args, finite/infinite types) reproduces Rian.Exhaustiveness.useful? — the gate decision; only the witness/counterexample diagnostic (algorithm I) is unported |

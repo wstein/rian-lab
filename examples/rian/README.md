@@ -57,13 +57,20 @@ compile + run on real BEAM bytecode:
   `Vec(Token)`, builds its own `Expr` sum, and threads `(Expr, Vec(Token))` as a
   `Parse` pair. It exercises higher-order-free recursion, sum construction,
   nested list/variant patterns, and `case` — and hits **no** backend wall.
-- [selfhost_parse.rian](selfhost_parse.rian) — the parser port **fixpoint-locked**
-  against `Rian.Pratt` (self-hosting rung 2). Its AST constructors are named so the
-  BEAM lowering *is* Pratt's surface tuples (`Num(s)`→`{:num,s}`, `Bin(op,l,r)`→
-  `{:bin,op,l,r}`), so the parser's output term-equals `Rian.Pratt.parse` with no
-  projection — diffed over a corpus (`test/rian/parse_fixpoint_test.exs`), the
-  parser analog of the lexer fixpoint. Covers the full binary precedence table
-  (precedence climbing), prefix `-`/`not`, and function calls.
+- [selfhost_parse.rian](selfhost_parse.rian) — the expression/pattern parser,
+  fully self-hosted: a port of the **whole `Rian.Pratt` grammar** (self-hosting
+  rung 2, ADR-0063). It builds Pratt's exact surface tuples as raw Rian tuples/
+  atoms threaded through a parametric `R(node, rest)`, so the output term-equals
+  `Rian.Pratt.parse` with **no projection** (`test/rian/parse_fixpoint_test.exs`).
+  Covers prefix (`-`/`not`/`&`-capture), primaries (if/case/with, list/map/tuple,
+  paren-or-lambda, atom/str/char/num/id), postfix (dot/call), labelled args,
+  precedence climbing, AND the full pattern grammar (wild/var/lit/char/atom/tuple/
+  list+tail/map/ctor/struct) + blocks. Found two real Rian limits along the way:
+  the closed-list tail `nil` is produced as `:nil` (== Elixir `nil`), and the
+  keyword-named tags `:if`/`:case`/`:with`/`:struct` can't be spelled as atoms, so
+  they're built via a single counted `String.to_atom` crutch (the only FFI).
+  String-interpolation and `<-`-propagation sugar (resolved by later passes) are
+  out of scope.
 - [selfhost_core.rian](selfhost_core.rian) — the **surface→Core lowering**, fully
   self-hosted (the pipeline stage after the parser, ADR-0063/0050): translates the
   whole `Rian.Pratt` surface AST into the typed **Core IR**. Every expression node
