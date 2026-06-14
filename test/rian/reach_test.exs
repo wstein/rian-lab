@@ -40,6 +40,17 @@ defmodule Rian.ReachTest do
       end
     end
 
+    test "a JS-valid signature whose BODY calls a 64-bit prim is still off :js (no gate lie)" do
+      # An `Int53` wrapper around `Prim.wrapping_add` has a JS-valid signature, but
+      # its body calls a 64-bit overflow prim the JS emitter refuses (ADR-0064 §2a).
+      # The body-call must pin it off `:js` — otherwise the gate reports
+      # `:js`-reachable and the emitter then raises, the gate lying.
+      rep = reach("def w(a Int53, b Int53) Int53 := Prim.wrapping_add(a, b)")
+
+      assert targets(rep, "w") == [:ex, :jvm, :rs]
+      assert Enum.any?(rep["w"].blockers, &(&1.kind == :numeric and &1.kills == [:js]))
+    end
+
     test "a Rian cross-module call is portable (not host FFI)" do
       rep =
         reach("""

@@ -261,6 +261,14 @@ defmodule Rian.Reach do
       kills: [:js]
     }
 
+  defp wide_prim_blocker,
+    do: %{construct: "64-bit overflow op (no JS representation)", kind: :numeric, kills: [:js]}
+
+  # the explicit 64-bit overflow prims carry the fixed-width-64 contract — the JS
+  # emitter refuses them (ADR-0064 §2a), so a body that *calls* one is off `:js`
+  # even when the function's own signature is JS-valid (e.g. an `Int53` wrapper).
+  @wide_prims ~w(__prim_wrapping_add __prim_saturating_add __prim_checked_add)
+
   # Fixed-width integers too wide for a JS `Number` (the 2^53-exact double): the
   # 64- and 128-bit widths. `Int53` and `Int32`/smaller fit and are JS-native.
   @js_wide_int ~r/^(Int|UInt)(64|128)$/
@@ -302,6 +310,15 @@ defmodule Rian.Reach do
       true -> {[ffi("#{m}.#{fun}", m in @conc_ex) | bl], ca}
     end
   end
+
+  # an explicit 64-bit overflow prim (`__prim_wrapping_add` …) — off `:js` (ADR-0064
+  # §2a, `Rian.JS` refuses it) even when the enclosing function's *signature* is
+  # JS-valid, e.g. an `Int53` wrapper whose body calls `wrapping_add`. Without this
+  # the prim falls through to the local-call edge below (no local def of that name),
+  # so the gate would report `:js`-reachable and the JS emitter would then raise —
+  # the gate lying. Must precede the generic `EId` clause.
+  defp classify(%Core.ECall{fun: %Core.EId{name: f}}, _modnames, {bl, ca}) when f in @wide_prims,
+    do: {[wide_prim_blocker() | bl], ca}
 
   # local function application — a call-graph edge
   defp classify(%Core.ECall{fun: %Core.EId{name: f}}, _modnames, {bl, ca}),
