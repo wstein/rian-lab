@@ -14,11 +14,13 @@ defmodule Rian.RustModuleFixpointTest do
   # upstream work (parse, build the ctor→enum + struct meta, `Capability.rust_param`,
   # resolve variant/struct construction) and injects, then the port emits the
   # module. Structs (decl/construct/field), closed + cons lists, generic
-  # `<T: Clone>` signatures + bare-tvar-return clone, and list PATTERNS (`[h | t]`
-  # → slice `[h, t @ ..]`) with the slice-element clone rebind are now covered; the
-  # rest of the owned↔borrow coercion, parametric monomorphization, maps,
-  # String-returns, the Elixir target, and struct *patterns* (a reference gap —
-  # Rian.Lower raises) are out of scope.
+  # `<T: Clone>` signatures + bare-tvar-return clone, list PATTERNS (`[h | t]`
+  # → slice `[h, t @ ..]`) with the slice-element clone rebind, and the non-generic
+  # call-site owned→borrow coercion (an owned `vec![…]` arg to a `&`-typed param is
+  # `&`-wrapped) are now covered; the rest of the owned↔borrow coercion (the generic
+  # borrowed-set branch, owned-String/owned-returning-call producers, mid-body list
+  # clones), parametric monomorphization, maps, String-returns, the Elixir target,
+  # and struct *patterns* (a reference gap — Rian.Lower raises) are out of scope.
 
   setup_all do
     {:ok, mod} =
@@ -195,7 +197,12 @@ defmodule Rian.RustModuleFixpointTest do
     # non-generic and generic (the generic also gets the bare-tvar return clone).
     "def hd(xs val Vec(Int64), d Int64) Int64\ndef hd([], d) := d\ndef hd([h | t], _) := h",
     "def hd2(xs val Vec(Int64), d Int64) Int64\ndef hd2([], d) := d\ndef hd2([h | _], _) := h",
-    "def first(xs Vec(T)) T forall T\ndef first([h | t]) := h"
+    "def first(xs Vec(T)) T forall T\ndef first([h | t]) := h",
+    # owned→borrow coercion at a call site (non-generic `insert_borrows`): an owned
+    # `vec![…]` arg passed to a `&[i64]` param is `&`-wrapped — `takes(&vec![1, 2])`.
+    # A scalar `val Int64` param is by-value `i64` (not `&`), so its arg is NOT wrapped.
+    "def takes(xs val Vec(Int64)) Int64 := 0\ndef build() Int64 := takes([1, 2])",
+    "def add1(a Int64, b Int64) Int64 := a + b\ndef use2() Int64 := add1(1, 2)"
   ]
 
   describe "self-hosting Rust-module fixpoint — Rian emitter vs Rian.Lower.rust_program" do
@@ -286,6 +293,23 @@ defmodule Rian.RustModuleFixpointTest do
       first = ported(mod, "def first(xs Vec(T)) T forall T\ndef first([h | t]) := h")
       assert first =~ "fn first<T: Clone>(xs: &[T]) -> T {"
       assert first =~ "[h, t @ ..] => ({ let h = h.clone(); h }).clone(),"
+    end
+
+    test "an owned arg to a `&`-typed param is `&`-wrapped; a by-value scalar arg is not",
+         %{mod: mod} do
+      out =
+        ported(mod, "def takes(xs val Vec(Int64)) Int64 := 0\ndef build() Int64 := takes([1, 2])")
+
+      # `xs val Vec(Int64)` lowers to `&[i64]`, so the owned `vec![1, 2]` is borrowed
+      assert out =~ "takes(&vec![1, 2])"
+      refute out =~ "takes(vec![1, 2])"
+
+      # a scalar `Int64` param is by-value `i64` — its literal arg is NOT borrowed
+      assert ported(
+               mod,
+               "def add1(a Int64, b Int64) Int64 := a + b\ndef use2() Int64 := add1(1, 2)"
+             ) =~
+               "add1(1, 2)"
     end
   end
 end

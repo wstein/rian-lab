@@ -15,11 +15,14 @@
 # now covered, as are generic `<T: Clone>` signatures + a bare-tvar return clone
 # (`-> T` clones the borrowed body) and list PATTERNS (`[h | t]` -> the slice
 # rest-pattern `[h, t @ ..]`) with the slice-element clone rebind (a used head
-# binder is `let h = h.clone();`-rebound to an owned value). The REST of the
-# owned↔borrow coercion (`&`-wrapping owned args to `&T` params, cloning borrowed
-# values mid-body in calls/list elements) and parametric-type monomorphization
-# (`Vec(Pair)` -> `Vec<Pair<K, V>>`, see `render_inst` below), plus maps,
-# String-return coercion, the Elixir text target, and struct *patterns* (a
+# binder is `let h = h.clone();`-rebound to an owned value). The non-generic
+# call-site owned→borrow coercion is also in: an owned `vec![…]` argument passed to
+# a `&`-typed parameter is `&`-wrapped (`takes(&vec![1, 2])`, via `borrow_prog`). The
+# REST of the owned↔borrow coercion — the generic `borrowed`-set branch (clone-or-`&`
+# over a clause's `&`-bound vars), owned-`String`/owned-returning-call arg producers,
+# and mid-body clones of borrowed values in list elements — and parametric-type
+# monomorphization (`Vec(Pair)` -> `Vec<Pair<K, V>>`, see `render_inst` below), plus
+# maps, String-return coercion, the Elixir text target, and struct *patterns* (a
 # reference gap — `Rian.Lower` raises) remain out of scope.
 # ---------------------------------------------------------------------------
 
@@ -75,7 +78,7 @@ mod SelfhostRust do
 
   # `Rian.Lower.rust_program` emits structs, then enums, then functions.
   pub def compile_prog(structs Vec(StructDef), enums Vec(EnumDef), funcs Vec(Func)) String :=
-    join_nn(join_nn(struct_decls(structs), enum_decls(enums)), fn_decls(funcs))
+    join_nn(join_nn(struct_decls(structs), enum_decls(enums)), fn_decls(borrow_prog(funcs)))
 
   # ── struct decl ──
   def struct_decls(Vec(StructDef)) String
@@ -133,6 +136,107 @@ mod SelfhostRust do
   def fn_decls([]) := ""
   def fn_decls([f]) := function_rs(f)
   def fn_decls([f | rest]) := function_rs(f) <> "\n\n" <> fn_decls(rest)
+
+  # OWNED→BORROW coercion at call sites (`Rian.Lower.insert_borrows`, the non-generic
+  # `borrowed = nil` branch): an owned-producing argument (here a list literal →
+  # `vec![…]`) passed to a `&`-typed parameter is `&`-wrapped (`takes(&vec![1, 2])`).
+  # This is a Core→Core pre-pass keyed on the CALLEE's lowered parameter types, so it
+  # needs every function's signature — `borrow_prog` threads the whole `Vec(Func)` as
+  # the lookup. GENERIC functions are skipped: the reference takes the `borrowed`-SET
+  # branch there (clone-or-`&` over the clause's `&`-bound vars), which is not yet
+  # ported, so leaving generic bodies untouched keeps the port honest rather than
+  # half-coercing them. The owned-`String`/owned-returning-call producers and scalar
+  # literals are likewise deferred (this slice coerces list literals only).
+  def borrow_prog(Vec(Func)) Vec(Func)
+  def borrow_prog(funcs) := borrow_each(funcs, funcs)
+
+  def borrow_each(Vec(Func), Vec(Func)) Vec(Func)
+  def borrow_each([], _) := []
+  def borrow_each([f | rest], all) := [borrow_func(f, all) | borrow_each(rest, all)]
+
+  def borrow_func(Func, Vec(Func)) Func
+  def borrow_func(Func(n, p, [], params, ret, clauses), all) :=
+    Func(n, p, [], params, ret, borrow_clauses(clauses, all))
+  def borrow_func(Func(n, p, tvars, params, ret, clauses), _) :=
+    Func(n, p, tvars, params, ret, clauses)
+
+  def borrow_clauses(Vec(Clause), Vec(Func)) Vec(Clause)
+  def borrow_clauses([], _) := []
+  def borrow_clauses([Clause(pats, g, body) | rest], all) :=
+    [Clause(pats, g, borrow_core(body, all)) | borrow_clauses(rest, all)]
+
+  # rewrite calls anywhere in a Core expression; recurse every compound node.
+  def borrow_core(Core, Vec(Func)) Core
+  def borrow_core(CCall(f, args), all) := CCall(f, coerce_args(borrow_list(args, all), func_ptypes(f, all)))
+  def borrow_core(CUnary(op, x), all) := CUnary(op, borrow_core(x, all))
+  def borrow_core(CBin(op, l, r), all) := CBin(op, borrow_core(l, all), borrow_core(r, all))
+  def borrow_core(CIf(c, t, e), all) := CIf(borrow_core(c, all), borrow_core(t, all), borrow_core(e, all))
+  def borrow_core(CTuple(es), all) := CTuple(borrow_list(es, all))
+  def borrow_core(COk(v), all) := COk(borrow_core(v, all))
+  def borrow_core(CErr(e), all) := CErr(borrow_core(e, all))
+  def borrow_core(CVariant(en, ct, nm, pairs), all) := CVariant(en, ct, nm, borrow_pairs(pairs, all))
+  def borrow_core(CStruct(nm, pairs), all) := CStruct(nm, borrow_pairs(pairs, all))
+  def borrow_core(CDot(h, fld), all) := CDot(borrow_core(h, all), fld)
+  def borrow_core(CList(es, LClose), all) := CList(borrow_list(es, all), LClose)
+  def borrow_core(CList(es, LCons(t)), all) := CList(borrow_list(es, all), LCons(borrow_core(t, all)))
+  def borrow_core(leaf, _) := leaf
+
+  def borrow_list(Vec(Core), Vec(Func)) Vec(Core)
+  def borrow_list([], _) := []
+  def borrow_list([c | rest], all) := [borrow_core(c, all) | borrow_list(rest, all)]
+
+  def borrow_pairs(Vec(VPair), Vec(Func)) Vec(VPair)
+  def borrow_pairs([], _) := []
+  def borrow_pairs([VP(l, v) | rest], all) := [VP(l, borrow_core(v, all)) | borrow_pairs(rest, all)]
+
+  # the callee's lowered parameter types, or None when the callee is unknown (a prim
+  # or external) — then its args are left as-is.
+  def func_ptypes(String, Vec(Func)) Option(Vec(String))
+  def func_ptypes(_, []) := None
+  def func_ptypes(name, [Func(n, _, _, params, _, _) | rest])
+    if name == n do
+      Some(ptype_list(params))
+    else
+      func_ptypes(name, rest)
+    end
+  end
+
+  def ptype_list(Vec(Param)) Vec(String)
+  def ptype_list([]) := []
+  def ptype_list([Param(_, t) | rest]) := [t | ptype_list(rest)]
+
+  def coerce_args(Vec(Core), Option(Vec(String))) Vec(Core)
+  def coerce_args(args, None) := args
+  def coerce_args(args, Some(pts)) := zip_coerce(args, pts)
+
+  # zip args with the callee's param types; surplus args (none here) pass through.
+  def zip_coerce(Vec(Core), Vec(String)) Vec(Core)
+  def zip_coerce([], _) := []
+  def zip_coerce(args, []) := args
+  def zip_coerce([a | as], [pt | pts]) := [coerce1(a, pt) | zip_coerce(as, pts)]
+
+  def coerce1(Core, String) Core
+  def coerce1(a, pt)
+    if borrow_type(pt) and is_owned(a) do
+      CUnary("&", a)
+    else
+      a
+    end
+  end
+
+  # a `&`-typed parameter (a borrow): its lowered type string starts with `&`.
+  def borrow_type(String) Bool
+  def borrow_type(t) := starts_amp(Prim.str_chars(t))
+
+  def starts_amp(Vec(Char)) Bool
+  def starts_amp([]) := false
+  def starts_amp([c | _]) := c == '&'
+
+  # an owned-producing argument: a list literal (`vec![…]`). Owned-`String` builders
+  # and owned-returning calls are deferred.
+  def is_owned(Core) Bool
+  def is_owned(CList(_, _)) := true
+  def is_owned(_) := false
 
   # `rust_program` emits plain `fn` for every top-level function (a single Rust
   # module; the `pub?` flag is not a Rust visibility here), so it is ignored.
@@ -371,6 +475,7 @@ mod SelfhostRust do
   def udisp(String) String
   def udisp("not") := "!"
   def udisp("-") := "-"
+  def udisp("&") := "&"
 
   def paren(e Em, ctx Int53) String
     if e.pr < ctx do
