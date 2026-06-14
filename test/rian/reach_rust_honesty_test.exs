@@ -146,7 +146,9 @@ defmodule Rian.ReachRustHonestyTest do
 
             try do
               {out, code} =
-                System.cmd(rustc, ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", f],
+                System.cmd(
+                  rustc,
+                  ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", f],
                   stderr_to_stdout: true
                 )
 
@@ -211,7 +213,9 @@ defmodule Rian.ReachRustHonestyTest do
 
           try do
             {_out, code} =
-              System.cmd(rustc, ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", src],
+              System.cmd(
+                rustc,
+                ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", src],
                 stderr_to_stdout: true
               )
 

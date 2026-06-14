@@ -814,7 +814,11 @@ defmodule Rian.Lower do
     copy_recv? = Rian.Capability.copy?(type)
 
     bodies =
-      Enum.map_join(methods, "\n", &rust_impl_method(&1, sig_for[&1.name], rust_type, c, copy_recv?))
+      Enum.map_join(
+        methods,
+        "\n",
+        &rust_impl_method(&1, sig_for[&1.name], rust_type, c, copy_recv?)
+      )
 
     "impl Rian#{proto} for #{rust_type} {\n#{bodies}\n}"
   end
@@ -842,6 +846,7 @@ defmodule Rian.Lower do
     # single-receiver method (`show`) is exactly the value case.
     other_self? = Enum.any?(rest_sig, fn p -> elem(name_type(p), 1) == "Self" end)
     recv_rhs = if copy_recv? and not other_self?, do: "*self", else: "self"
+
     "    fn #{method.name}(#{params}) -> #{rust_ret(ret_ty)} { let #{recv} = #{recv_rhs}; #{body} }"
   end
 
