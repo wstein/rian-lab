@@ -224,6 +224,17 @@ defmodule Rian.JSTest do
       assert_raise Rian.Check.Error, fn -> JS.compile("def f() Int := true") end
     end
 
+    test "a not-yet-implemented construct fails early with a clear message (naming the fn)" do
+      # the emitter-capability pre-check raises ONE clear error up front (Reach stays
+      # architectural per ADR-0041 — this is an implementation-status check).
+      err =
+        assert_raise JS.Unsupported, fn ->
+          JS.compile("def f(x Int) Int := with {:ok, v} <- g(x) do v end")
+        end
+
+      assert Exception.message(err) =~ "`f`: a `with` expression is not yet supported on :js"
+    end
+
     test "a `ref` param is lowered to value semantics (sound: return-based surface)" do
       # `ref` (&mut) has no JS analog; it only ever changed the Rust signature, so
       # JS emits an ordinary positional binding and the result is correct. Reach

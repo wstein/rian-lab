@@ -78,11 +78,63 @@ defmodule Rian.JVM do
     # the BEAM `:dispatcher` is a guarded runtime type-test, not the Kotlin shape;
     # protocol lowering for the JVM is a later increment.
     funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
+    reject_unsupported!(funcs)
     type_decls = Enum.map_join(types_of(prog), "\n\n", &sum_decl/1)
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt/1)
 
     [type_decls, fn_decls] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
   end
+
+  # Fast-fail diagnostic (parity with `Rian.JS`): before emitting, scan each
+  # function body for a construct the Tier-2 JVM emitter does not yet implement and
+  # raise ONE clear error naming the function and construct, rather than a deep
+  # `inspect`-dump mid-emission. Reach stays *architectural* (ADR-0041); this is an
+  # *implementation-status* check over the constructs the emitter handles in NO
+  # context. (Type-level gaps — `Vec`/`Map` params, etc. — are left to `kt_type`.)
+  @jvm_unsupported %{
+    Core.EWith => "a `with` expression",
+    Core.ELambda => "a lambda",
+    Core.ECapture => "a function capture (`&(…)`)",
+    Core.ECaptureNamed => "a function capture (`&name/arity`)",
+    Core.ETuple => "a tuple",
+    Core.EList => "a list / `Vec`",
+    Core.EMap => "a map",
+    Core.ECase => "a `case` expression",
+    Core.EStruct => "a struct construction"
+  }
+  defp reject_unsupported!(funcs) do
+    Enum.each(funcs, fn f ->
+      Enum.each(f.clauses, fn c ->
+        body = c.body |> Pratt.parse_body() |> Core.from_expr()
+
+        case first_unsupported(body, @jvm_unsupported) do
+          nil -> :ok
+          label -> raise Unsupported, "`#{f.name}`: #{label} is not yet supported on :jvm"
+        end
+      end)
+    end)
+  end
+
+  defp first_unsupported(node, unsup) when is_struct(node) do
+    case Map.get(unsup, node.__struct__) do
+      nil ->
+        node
+        |> Map.from_struct()
+        |> Map.values()
+        |> Enum.find_value(&first_unsupported(&1, unsup))
+
+      label ->
+        label
+    end
+  end
+
+  defp first_unsupported(l, unsup) when is_list(l),
+    do: Enum.find_value(l, &first_unsupported(&1, unsup))
+
+  defp first_unsupported(t, unsup) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.find_value(&first_unsupported(&1, unsup))
+
+  defp first_unsupported(_node, _unsup), do: nil
 
   @doc """
   Assemble `src` into a JVM `.jar` at `jar_path` by emitting Kotlin (`compile/1`)

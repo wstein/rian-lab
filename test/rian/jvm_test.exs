@@ -40,6 +40,17 @@ defmodule Rian.JVMTest do
       assert_raise Rian.Check.Error, fn -> JVM.compile("def f() Int64 := true") end
     end
 
+    test "a not-yet-implemented construct fails early with a clear message (naming the fn)" do
+      # the emitter-capability pre-check: lists/`Vec` aren't on the Tier-2 JVM subset
+      # yet, so a list literal raises ONE clear error up front (naming `f`).
+      err =
+        assert_raise JVM.Unsupported, fn ->
+          JVM.compile("def f() Vec(Int64) := [1, 2]")
+        end
+
+      assert Exception.message(err) =~ "`f`: a list / `Vec` is not yet supported on :jvm"
+    end
+
     test "float `/` lowers to Kotlin Double division (integer `div` stays `/` on Long)" do
       kt = JVM.compile("def half(x Float64) Float64 := x / 2.0")
       assert kt =~ "fun half(a0: Double): Double"

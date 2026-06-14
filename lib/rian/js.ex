@@ -114,11 +114,61 @@ defmodule Rian.JS do
     # JS keeps the `:impl` methods (they lower as plain functions) and regenerates
     # the dispatcher with JS-native guards (ADR-0061 §3).
     funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
+    reject_unsupported!(funcs)
     fn_js = Enum.map_join(funcs, "\n\n", &function_js/1)
     disp_js = protocol_dispatchers_js(prog)
 
     [fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
   end
+
+  # Fast-fail diagnostic: before emitting, scan each function body for a construct
+  # the JS emitter does not yet implement and raise ONE clear error naming the
+  # function and construct — instead of a deep `inspect`-dump surfacing mid-emission.
+  # Reach stays *architectural* (atoms/Result are portable per ADR-0041); this is an
+  # *implementation-status* check, so it covers only constructs the emitter handles
+  # in NO context (a bare atom is left to the emitter's own `Unsupported`, since an
+  # atom inside an FFI call like `:lists.reverse` IS lowered).
+  @js_unsupported %{
+    Core.EWith => "a `with` expression",
+    Core.ELambda => "a lambda",
+    Core.ECapture => "a function capture (`&(…)`)",
+    Core.ECaptureNamed => "a function capture (`&name/arity`)"
+  }
+  defp reject_unsupported!(funcs) do
+    Enum.each(funcs, fn f ->
+      Enum.each(f.clauses, fn c ->
+        body = c.body |> Pratt.parse_body() |> Core.from_expr()
+
+        case first_unsupported(body, @js_unsupported) do
+          nil -> :ok
+          label -> raise Unsupported, "`#{f.name}`: #{label} is not yet supported on :js"
+        end
+      end)
+    end)
+  end
+
+  # generic typed-core walk: the friendly label of the first node whose struct is in
+  # `unsup`, else nil (mirrors `Rian.Reach.scan/3`'s shape).
+  defp first_unsupported(node, unsup) when is_struct(node) do
+    case Map.get(unsup, node.__struct__) do
+      nil ->
+        node
+        |> Map.from_struct()
+        |> Map.values()
+        |> Enum.find_value(&first_unsupported(&1, unsup))
+
+      label ->
+        label
+    end
+  end
+
+  defp first_unsupported(l, unsup) when is_list(l),
+    do: Enum.find_value(l, &first_unsupported(&1, unsup))
+
+  defp first_unsupported(t, unsup) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.find_value(&first_unsupported(&1, unsup))
+
+  defp first_unsupported(_node, _unsup), do: nil
 
   defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
   defp funcs_of(%{funcs: funcs}), do: funcs
