@@ -477,6 +477,20 @@ defmodule Rian.Decl do
   defp take_decl([{:annot, "targets"} | _]),
     do: raise(Error, "expected `@targets(ex, rs, js)`")
 
+  # `@external(:target, "host expression")` — a target-scoped FFI body (ADR-0068).
+  # One or more precede a *bodiless* `def`; the function has no portable Rian body,
+  # only per-target host bodies. `Rian.Reach` reads the externals for an honest
+  # target set; each emitter lowers the spec for its target.
+  defp take_decl([{:annot, "external"}, {:lparen} | rest]) do
+    {arg_toks, rest} = take_parens(rest, 0, [])
+    {target, spec} = parse_external(arg_toks)
+    {decl, rest} = take_decl(skip_nl(rest))
+    {attach_external(decl, target, spec), rest}
+  end
+
+  defp take_decl([{:annot, "external"} | _]),
+    do: raise(Error, ~S|expected `@external(:target, "host expression")`|)
+
   defp take_decl([{:annot, a} | _]),
     do:
       raise(
@@ -620,6 +634,43 @@ defmodule Rian.Decl do
       else: Enum.uniq(targets)
   end
 
+  # `@external(:target, "spec")` args -> `{target_atom, spec_string}` (ADR-0068).
+  # The target is validated against the closed vocabulary; the spec is a raw
+  # host-expression string the matching emitter lowers (FFI is trusted, not parsed).
+  defp parse_external([{:op, ":"}, {:id, t}, {:comma}, {:str, spec}]) do
+    atom = String.to_atom(t)
+
+    unless atom in Rian.Reach.targets() do
+      raise(
+        Error,
+        "unknown target `:#{t}` in `@external`; known: #{inspect(Rian.Reach.targets())}"
+      )
+    end
+
+    {atom, spec}
+  end
+
+  defp parse_external(_other),
+    do: raise(Error, ~S|`@external` takes a target atom and a string: `@external(:js, "expr")`|)
+
+  # attach one `@external(:target, spec)` to the bodiless `def` that follows. An
+  # `@external` function must have NO portable body for that target (ADR-0068 §1),
+  # and no two `@external`s may name the same target.
+  defp attach_external({:def, %{body: body} = raw}, target, spec) do
+    if not is_nil(body) do
+      raise(Error, "`#{raw.name}`: `@external(:#{target}, …)` cannot accompany a portable body")
+    end
+
+    if Map.has_key?(raw.externals, target) do
+      raise(Error, "`#{raw.name}`: duplicate `@external(:#{target}, …)`")
+    end
+
+    {:def, %{raw | externals: Map.put(raw.externals, target, spec)}}
+  end
+
+  defp attach_external(_other, _target, _spec),
+    do: raise(Error, "`@external(…)` may only precede a `def`")
+
   # attach a doc string to the declaration that follows the `@doc`/… annotation
   defp attach_doc({:type, s, pub, _}, doc), do: {:type, s, pub, doc}
   defp attach_doc({:range, s, pub, _}, doc), do: {:range, s, pub, doc}
@@ -696,7 +747,8 @@ defmodule Rian.Decl do
       body: body,
       pub: false,
       tvars: tvars,
-      bounds: bounds
+      bounds: bounds,
+      externals: %{}
     }
   end
 
@@ -971,6 +1023,23 @@ defmodule Rian.Decl do
       synthetic: d[:synthetic] == true,
       test?: d[:test] == true,
       dispatch: d[:dispatch]
+    }
+  end
+
+  # an `@external` function (ADR-0068): a bodiless signature with one or more
+  # per-target host bodies and NO portable clauses. The signature is checked once;
+  # `Rian.Reach` reads `externals` for the target set; each emitter lowers its spec.
+  defp build_func([%{body: nil, externals: ext} = sig]) when map_size(ext) > 0 do
+    %Func{
+      name: sig.name,
+      params: parse_params(sig.params),
+      ret: req_ret(sig),
+      clauses: [],
+      externals: ext,
+      pub?: sig[:pub] == true,
+      tvars: sig[:tvars] || [],
+      bounds: sig[:bounds] || %{},
+      doc: sig[:doc]
     }
   end
 

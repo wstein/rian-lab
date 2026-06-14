@@ -151,6 +151,7 @@ defmodule Rian.IR do
               doc: nil,
               synthetic: false,
               test?: false,
-              dispatch: nil
+              dispatch: nil,
+              externals: %{}
   end
 end
