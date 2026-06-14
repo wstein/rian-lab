@@ -280,4 +280,81 @@ mod SelfhostRust do
     e := emit(c)
     e.s
   end
+
+  # ── parametric type rendering (toward the whole-module Rust port) ──────────
+  # The reference `Rian.Lower` lowers a type to an owned Rust string (`Capability
+  # .owned`) and then splices `<K, V>` onto each parametric name via a `Regex`
+  # (`rustify_parametric`). Rian has no regex — so model the type STRUCTURALLY and
+  # substitute by recursion: `instantiate` applies a parametric name to its args
+  # (`Pair` -> `Pair(K, V)`), then `render_ty` renders the owned Rust. This kills
+  # the regex dependency and is the foundation of the parametric-generics part of
+  # the Rust backend. Fixpoint-locked against the public `Rian.Capability.owned/1`
+  # (`test/rian/rust_ty_fixpoint_test.exs`).
+  type Ty := TName(String) | TApp(String, Vec(Ty))
+
+  # a parametric type name -> the type arguments to apply (`Pair -> [K, V]`).
+  type Inst := Inst(String, Vec(Ty))
+
+  # the Copy-primitive scalar map (`Rian.Capability.rust_name`): an `@copy` name
+  # gets its Rust spelling, everything else (String, a tvar, a nominal) passes
+  # through unchanged.
+  def rust_scalar(String) String
+  def rust_scalar("Int53") := "i64"
+  def rust_scalar("Int8") := "i8"
+  def rust_scalar("Int16") := "i16"
+  def rust_scalar("Int32") := "i32"
+  def rust_scalar("Int64") := "i64"
+  def rust_scalar("Int128") := "i128"
+  def rust_scalar("UInt8") := "u8"
+  def rust_scalar("UInt16") := "u16"
+  def rust_scalar("UInt32") := "u32"
+  def rust_scalar("UInt64") := "u64"
+  def rust_scalar("UInt128") := "u128"
+  def rust_scalar("Float32") := "f32"
+  def rust_scalar("Float64") := "f64"
+  def rust_scalar("Bool") := "bool"
+  def rust_scalar("Char") := "char"
+  def rust_scalar(other) := other
+
+  # look a name up in the instantiation map: its args, or `None` if not parametric.
+  def lookup_inst(String, Vec(Inst)) Option(Vec(Ty))
+  def lookup_inst(_, []) := None
+  def lookup_inst(n, [Inst(m, args) | rest])
+    if n == m do
+      Some(args)
+    else
+      lookup_inst(n, rest)
+    end
+  end
+
+  # substitute: a parametric leaf `TName("Pair")` becomes `TApp("Pair", [K, V])`;
+  # a container's element types are instantiated in turn; a non-parametric name is
+  # left alone.
+  def inst_ty(Ty, Vec(Inst)) Ty
+  def inst_ty(TName(n), pinst)
+    case lookup_inst(n, pinst) do
+      Some(args) -> TApp(n, args)
+      None -> TName(n)
+    end
+  end
+  def inst_ty(TApp(name, args), pinst) := TApp(name, inst_args(args, pinst))
+
+  def inst_args(Vec(Ty), Vec(Inst)) Vec(Ty)
+  def inst_args([], _) := []
+  def inst_args([t | rest], pinst) := [inst_ty(t, pinst) | inst_args(rest, pinst)]
+
+  # render an (already-instantiated) type to its owned Rust spelling: a leaf maps
+  # via the scalar table; an application is `Name<arg, …>`.
+  def render_ty(Ty) String
+  def render_ty(TName(n)) := rust_scalar(n)
+  def render_ty(TApp(name, args)) := name <> "<" <> join_tys(args) <> ">"
+
+  def join_tys(Vec(Ty)) String
+  def join_tys([]) := ""
+  def join_tys([t]) := render_ty(t)
+  def join_tys([t | rest]) := render_ty(t) <> ", " <> join_tys(rest)
+
+  # instantiate then render — the regex-free counterpart of
+  # `rustify_parametric(Capability.owned(type), pinst)`.
+  pub def render_inst(t Ty, pinst Vec(Inst)) String := render_ty(inst_ty(t, pinst))
 end
