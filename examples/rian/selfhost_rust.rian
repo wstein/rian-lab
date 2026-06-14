@@ -11,9 +11,11 @@
 # RESOLVED (variant construction -> `Enum::Ctor`, ctor patterns carry their enum)
 # and capability-LOWERED (params carry their Rust type) — resolution is the
 # parser/Core stage's job and capability lowering is the (self-hosted) capability
-# stage's. Generics (parametric tvars + owned↔borrow coercion), iso/cons lists,
-# String-return coercion, structs/maps, and the Elixir text target are out of
-# scope (the corpus is non-generic, non-cons).
+# stage's. Structs (decl/construction/field access) and closed + cons lists are
+# now covered. Generics (parametric tvars + owned↔borrow coercion), maps,
+# String-return coercion, and the Elixir text target remain out of scope (the
+# corpus is non-generic; struct *patterns* are a reference gap — `Rian.Lower`
+# raises on them).
 # ---------------------------------------------------------------------------
 
 mod SelfhostRust do
@@ -28,8 +30,16 @@ mod SelfhostRust do
              | COk(Core)
              | CErr(Core)
              | CVariant(String, String, Bool, Vec(VPair))
+             | CStruct(String, Vec(VPair))
+             | CDot(Core, String)
+             | CList(Vec(Core), LTail)
 
   type VPair := VP(String, Core)
+  # a list is closed (`[…]` -> `vec![…]`) or has a cons tail (`[e | t]` -> a block
+  # that `to_vec()`s the tail and prepends).
+  type LTail := LClose | LCons(Core)
+  # a `struct` declaration: name + (label, Rust-type) fields (reuses `Param`).
+  type StructDef := StructDef(String, Vec(Param))
 
   # resolved patterns (ctor patterns carry their enum/ctor/named + labels).
   type RPat := RWild
@@ -50,8 +60,19 @@ mod SelfhostRust do
 
   struct Em(s String, pr Int53)
 
-  pub def compile_prog(enums Vec(EnumDef), funcs Vec(Func)) String :=
-    join_nn(enum_decls(enums), fn_decls(funcs))
+  # `Rian.Lower.rust_program` emits structs, then enums, then functions.
+  pub def compile_prog(structs Vec(StructDef), enums Vec(EnumDef), funcs Vec(Func)) String :=
+    join_nn(join_nn(struct_decls(structs), enum_decls(enums)), fn_decls(funcs))
+
+  # ── struct decl ──
+  def struct_decls(Vec(StructDef)) String
+  def struct_decls([]) := ""
+  def struct_decls([s]) := struct_decl(s)
+  def struct_decls([s | rest]) := struct_decl(s) <> "\n\n" <> struct_decls(rest)
+
+  def struct_decl(StructDef) String
+  def struct_decl(StructDef(name, fields)) :=
+    "#[derive(Clone, Debug, PartialEq)]\nstruct " <> name <> " { " <> param_decls(fields) <> " }"
 
   def join_nn(String, String) String
   def join_nn("", b) := b
@@ -235,6 +256,20 @@ mod SelfhostRust do
   pub def emit(CVariant(enum, ctor, named, pairs)) := variant_em(enum, ctor, named, pairs)
   pub def emit(CIf(c, th, el)) :=
     Em(s: "if " <> args0(c) <> " { " <> args0(th) <> " } else { " <> args0(el) <> " }", pr: 0)
+  # struct construction `Name { l: v, … }` (no `Enum::` prefix — a record, not a variant)
+  pub def emit(CStruct(name, pairs)) := Em(s: name <> " { " <> named_vals(pairs) <> " }", pr: 12)
+  # field access `p.x` (postfix, prec 12)
+  pub def emit(CDot(h, f)) := Em(s: paren(emit(h), 12) <> "." <> f, pr: 12)
+  # closed list `vec![…]`; cons `[e1, … | tail]` prepends onto an owned copy of the
+  # tail (`{ let mut __v = tail.to_vec(); __v.insert(0, en); … __v }`, ADR-0047)
+  pub def emit(CList(es, LClose)) := Em(s: "vec![" <> args_str(es) <> "]", pr: 12)
+  pub def emit(CList(es, LCons(t))) :=
+    Em(s: "{ let mut __v = " <> paren(emit(t), 12) <> ".to_vec(); " <> inserts(es) <> "__v }", pr: 0)
+
+  # one `__v.insert(0, e);` per element, in reverse so the result order is e1, …, en, tail…
+  def inserts(Vec(Core)) String
+  def inserts([]) := ""
+  def inserts([e | rest]) := inserts(rest) <> "__v.insert(0, " <> args0(e) <> "); "
 
   def variant_em(enum String, ctor String, named Bool, pairs Vec(VPair)) Em
     if named do

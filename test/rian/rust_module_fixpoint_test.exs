@@ -11,10 +11,11 @@ defmodule Rian.RustModuleFixpointTest do
   # `match`-tuple multi-clause dispatch, operators, `if`, variant construct+match.
   #
   # The emitter consumes RESOLVED + capability-LOWERED Core: this test does the
-  # upstream work (parse, build the ctor→enum meta, `Rian.Capability.rust_param`,
-  # resolve variant construction/patterns) and injects, then the port emits the
-  # module. Generics, iso/cons lists, String-returns, structs/maps, and the Elixir
-  # target are out of scope (the corpus is non-generic, non-cons).
+  # upstream work (parse, build the ctor→enum + struct meta, `Capability.rust_param`,
+  # resolve variant/struct construction) and injects, then the port emits the
+  # module. Structs (decl/construct/field) and closed + cons lists are now covered;
+  # generics, maps, String-returns, the Elixir target, and struct *patterns* (a
+  # reference gap — Rian.Lower raises) are out of scope (the corpus is non-generic).
 
   setup_all do
     {:ok, mod} =
@@ -23,15 +24,23 @@ defmodule Rian.RustModuleFixpointTest do
     {:ok, mod: mod}
   end
 
-  # ctor (snake) -> %{enum, ctor, named, labels} over a program's sum types.
-  defp build_meta(types) do
-    for t <- types, v <- t.variants, into: %{} do
-      labels = Enum.map(v.fields, & &1.label)
-      named = v.fields != [] and Enum.all?(labels, & &1)
+  # ctor (snake) -> %{enum, ctor, named, labels} over a program's sum types, plus a
+  # struct-name (snake) -> %{struct: name} marker so `ic` can tell a struct
+  # construction (`Point { … }`) from a named-variant construction.
+  defp build_meta(types, structs) do
+    variants =
+      for t <- types, v <- t.variants, into: %{} do
+        labels = Enum.map(v.fields, & &1.label)
+        named = v.fields != [] and Enum.all?(labels, & &1)
 
-      {Rian.PatternLower.to_snake(v.ctor),
-       %{enum: t.name, ctor: v.ctor, named: named, labels: labels}}
-    end
+        {Rian.PatternLower.to_snake(v.ctor),
+         %{enum: t.name, ctor: v.ctor, named: named, labels: labels}}
+      end
+
+    structs_meta =
+      for s <- structs, into: %{}, do: {Rian.PatternLower.to_snake(s.name), %{struct: s.name}}
+
+    Map.merge(variants, structs_meta)
   end
 
   # ── resolved body Core -> the port's Core ──
@@ -49,12 +58,27 @@ defmodule Rian.RustModuleFixpointTest do
   defp ic(%Core.ETuple{elems: es}, m), do: {:c_tuple, Enum.map(es, &ic(&1, m))}
 
   defp ic(%Core.ECall{fun: %Core.EId{name: f}, args: args}, m) do
-    if pascal?(f),
-      do: variant(f, Enum.map(args, fn a -> {"", a} end), m),
-      else: {:c_call, f, Enum.map(args, &ic(&1, m))}
+    cond do
+      match?(%{struct: _}, Map.get(m, Rian.PatternLower.to_snake(f))) ->
+        {:c_struct, f,
+         Enum.map(args, fn %Core.ELabel{name: l, expr: e} -> {:vp, l, ic(e, m)} end)}
+
+      pascal?(f) ->
+        variant(f, Enum.map(args, fn a -> {"", a} end), m)
+
+      true ->
+        {:c_call, f, Enum.map(args, &ic(&1, m))}
+    end
   end
 
   defp ic(%Core.EId{name: n}, m), do: if(pascal?(n), do: variant(n, [], m), else: {:c_id, n})
+  defp ic(%Core.EDot{head: h, name: f}, m), do: {:c_dot, ic(h, m), f}
+
+  defp ic(%Core.EList{elems: es, tail: :close}, m),
+    do: {:c_list, Enum.map(es, &ic(&1, m)), :l_close}
+
+  defp ic(%Core.EList{elems: es, tail: t}, m),
+    do: {:c_list, Enum.map(es, &ic(&1, m)), {:l_cons, ic(t, m)}}
 
   defp ibranch(%Core.EBlock{stmts: [{:expr, e}]}, m), do: ic(e, m)
   defp ibranch(e, m), do: ic(e, m)
@@ -93,6 +117,11 @@ defmodule Rian.RustModuleFixpointTest do
     {:enum_def, t.name, vs}
   end
 
+  defp istruct(s) do
+    {:struct_def, s.name,
+     Enum.map(s.fields, fn f -> {:param, f.label, Capability.owned(f.type)} end)}
+  end
+
   defp ifunc(f, m) do
     params =
       Enum.map(f.params, fn p -> {:param, p.name, Capability.rust_param(p.cap, p.type)} end)
@@ -113,9 +142,14 @@ defmodule Rian.RustModuleFixpointTest do
 
   defp ported(mod, src) do
     prog = src |> Decl.parse() |> Rian.Opaque.erase()
-    m = build_meta(prog.types)
+    m = build_meta(prog.types, prog.structs)
     funcs = prog.funcs |> Enum.reject(& &1.dispatch)
-    mod.compile_prog(Enum.map(prog.types, &ienum/1), Enum.map(funcs, fn f -> ifunc(f, m) end))
+
+    mod.compile_prog(
+      Enum.map(prog.structs, &istruct/1),
+      Enum.map(prog.types, &ienum/1),
+      Enum.map(funcs, fn f -> ifunc(f, m) end)
+    )
   end
 
   @corpus [
@@ -129,7 +163,13 @@ defmodule Rian.RustModuleFixpointTest do
     # sum type -> enum; variant construct + ctor-pattern match
     "type Opt := None | Some(Int64)\npub def mk(n Int64) Opt\ndef mk(0) := None\ndef mk(n) := Some(n)",
     "type Opt := None | Some(Int64)\npub def get(o Opt, d Int64) Int64\ndef get(None, d) := d\ndef get(Some(v), _) := v",
-    "type RGB := Red | Green | Blue\npub def code(c RGB) Int64\ndef code(Red) := 1\ndef code(Green) := 2\ndef code(Blue) := 3"
+    "type RGB := Red | Green | Blue\npub def code(c RGB) Int64\ndef code(Red) := 1\ndef code(Green) := 2\ndef code(Blue) := 3",
+    # structs: decl → `struct N { … }`, named construction, field access
+    "struct Point(x Int64, y Int64)\ndef mk(a Int64, b Int64) Point := Point(x: a, y: b)\ndef getx(p val Point) Int64 := p.x",
+    # closed list + cons construction (iso tail owns the Vec)
+    "def two() Vec(Int64) := [1, 2]",
+    "def pre(x Int64, xs iso Vec(Int64)) Vec(Int64) := [x | xs]",
+    "def pre2(a Int64, b Int64, xs iso Vec(Int64)) Vec(Int64) := [a, b | xs]"
   ]
 
   describe "self-hosting Rust-module fixpoint — Rian emitter vs Rian.Lower.rust_program" do
@@ -165,6 +205,27 @@ defmodule Rian.RustModuleFixpointTest do
     test "discriminates structure", %{mod: mod} do
       refute ported(mod, "def f(a Int64, b Int64) Int64 := a + b") ==
                ported(mod, "def f(a Int64, b Int64) Int64 := a - b")
+    end
+
+    test "a struct emits a derive'd record, named construction, and field access", %{mod: mod} do
+      out =
+        ported(
+          mod,
+          "struct Point(x Int64, y Int64)\ndef mk(a Int64, b Int64) Point := Point(x: a, y: b)\ndef getx(p val Point) Int64 := p.x"
+        )
+
+      assert out =~ "#[derive(Clone, Debug, PartialEq)]\nstruct Point { x: i64, y: i64 }"
+      # a record construction is `Name { … }` — NO `Enum::` prefix
+      assert out =~ "Point { x: a, y: b }"
+      refute out =~ "Point::"
+      assert out =~ "=> p.x,"
+    end
+
+    test "a cons list prepends onto an owned tail; a closed list is `vec![…]`", %{mod: mod} do
+      assert ported(mod, "def two() Vec(Int64) := [1, 2]") =~ "vec![1, 2]"
+
+      cons = ported(mod, "def pre(x Int64, xs iso Vec(Int64)) Vec(Int64) := [x | xs]")
+      assert cons =~ "{ let mut __v = xs.to_vec(); __v.insert(0, x); __v }"
     end
   end
 end

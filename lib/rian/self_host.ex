@@ -123,7 +123,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_rust.rian",
       test: "test/rian/rust_module_fixpoint_test.exs",
       note:
-        "the whole-module Rust emitter — sum types → derive'd enums, functions with match-over-param-tuple multi-clause dispatch (capability-lowered signatures), operators, if, variant construct+match, guards — equals Rian.Lower.rust_program; the emitter consumes RESOLVED + capability-LOWERED Core (resolution = parser/Core stage, capability lowering = the self-hosted capability stage). Generics (tvars + owned↔borrow coercion), iso/cons lists, String-return coercion, structs/maps, and the Elixir text target are out of scope"
+        "the whole-module Rust emitter — sum types → derive'd enums, structs → derive'd records (construct + field access), functions with match-over-param-tuple multi-clause dispatch (capability-lowered signatures), operators, if, variant construct+match, guards, closed + cons lists — equals Rian.Lower.rust_program; the emitter consumes RESOLVED + capability-LOWERED Core (resolution = parser/Core stage, capability lowering = the self-hosted capability stage). Generics (tvars + owned↔borrow coercion), maps, String-return coercion, the Elixir text target, and struct *patterns* (a reference gap — Rian.Lower raises) remain out of scope"
     },
     %{
       id: :js_backend,
