@@ -6,15 +6,15 @@ self-hosting (ADR-0063 §4) — the Rian compiler compiling its own source to `.
 **Portable** self-hosting (the compiler lowered to Rust/JS) is a separate, further
 terminus and is *not* measured here.
 
-**18% self-hosted** — 1 stage(s) self-hosted,
-2 partial, 8 not started, of 11.
+**23% self-hosted** — 1 stage(s) self-hosted,
+3 partial, 7 not started, of 11.
 
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | Lexer | frontend | ✅ yes | `examples/rian/selfhost_lexer_v2.rian` · `test/rian/fixpoint_test.exs` | token stream equals Rian.Lexer over slices 1-5 (incl. tokenize/1, {:nl}) |
 | Declaration parser | frontend | 🟡 partial | `examples/rian/selfhost_decl.rian` · `test/rian/decl_fixpoint_test.exs` | IR equals Rian.Decl over type/struct/mod/def slice; alias/protocol/generics remain |
 | Expression/pattern parser | frontend | 🟡 partial | `examples/rian/selfhost_parse.rian` · `test/rian/parse_fixpoint_test.exs` | AST equals Rian.Pratt over an arithmetic/precedence slice |
-| Typed Core IR (from_expr/from_pat) | frontend | — | — | not ported |
+| Typed Core IR (from_expr/from_pat) | frontend | 🟡 partial | `examples/rian/selfhost_core.rian` · `test/rian/core_fixpoint_test.exs` | surface→Core lowering equals Rian.Core.from_expr over the literal/unary/binary slice; calls/lists/blocks/lambdas remain |
 | Type checker (inference + error sets) | checker | — | — | selfhost_check.rian checks a TOY language, not Rian.Check — not a port |
 | Exhaustiveness gate | checker | — | — | not ported |
 | Capability checker | checker | — | — | not ported |

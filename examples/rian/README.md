@@ -64,6 +64,13 @@ compile + run on real BEAM bytecode:
   projection — diffed over a corpus (`test/rian/parse_fixpoint_test.exs`), the
   parser analog of the lexer fixpoint. Covers the full binary precedence table
   (precedence climbing), prefix `-`/`not`, and function calls.
+- [selfhost_core.rian](selfhost_core.rian) — the **surface→Core lowering** port
+  (the pipeline stage after the parser, ADR-0063): translates the parser's surface
+  tuples into the typed **Core IR** node sum, **fixpoint-locked** against the
+  reference `Rian.Core.from_expr` term-for-term over a corpus
+  (`test/rian/core_fixpoint_test.exs`). Covers the literal/identifier/atom/unary/
+  binary slice — the same vocabulary the parser port emits; calls, lists, blocks,
+  `if`/`case`, and lambdas remain.
 - [selfhost_decl.rian](selfhost_decl.rian) — a Rian **declaration** front-end
   (self-hosting **Stage 2**, ADR-0063): parses `type` sums and `def` functions
   into a `Decl` representation that, projected to `Rian.IR`, **equals what

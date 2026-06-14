@@ -1,0 +1,44 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — the surface→Core lowering pass, written in Rian
+# ===========================================================================
+# Goal (ADR-0063 §2, the stage after the parser): translate the parser's surface
+# expression AST (the `Rian.Pratt` tuples) into the typed **Core IR** node sum —
+# the spine every downstream pass consumes (ADR-0050). This is the Rian-written
+# counterpart of `Rian.Core.from_expr`, fixpoint-locked against it in
+# `test/rian/core_fixpoint_test.exs`.
+#
+# Slice (the expression-parser slice's exact vocabulary): number / string /
+# identifier / atom literals, prefix unary, and binary operators — recursively.
+# Remaining `Rian.Core.from_expr` vocabulary (calls, lists, tuples, maps, `if`/
+# `case`/`with` blocks, lambdas, captures, char, construction nodes) is the
+# `:partial` tail — see ADR-0063 / docs/self-host-status.md.
+# ---------------------------------------------------------------------------
+
+mod SelfhostCore do
+  # The surface expression AST the parser produces (mirrors the `Rian.Pratt`
+  # tuples one-for-one for this slice).
+  type Surface := SNum(String)
+                | SStr(String)
+                | SId(String)
+                | SAtom(String)
+                | SUnary(String, Surface)
+                | SBin(String, Surface, Surface)
+
+  # The typed Core IR node (mirrors the `Rian.Core` E* structs for this slice).
+  type Core := CNum(String)
+             | CStr(String)
+             | CId(String)
+             | CAtom(String)
+             | CUnary(String, Core)
+             | CBin(String, Core, Core)
+
+  # Lower a surface node into its Core node, recursing into sub-expressions —
+  # the surface→Core translation `Rian.Core.from_expr` performs.
+  pub def lower(Surface) Core
+  pub def lower(SNum(t)) := CNum(t)
+  pub def lower(SStr(v)) := CStr(v)
+  pub def lower(SId(n)) := CId(n)
+  pub def lower(SAtom(a)) := CAtom(a)
+  pub def lower(SUnary(op, x)) := CUnary(op, lower(x))
+  pub def lower(SBin(op, l, r)) := CBin(op, lower(l), lower(r))
+end

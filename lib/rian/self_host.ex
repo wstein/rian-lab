@@ -67,10 +67,11 @@ defmodule Rian.SelfHost do
       id: :core_ir,
       name: "Typed Core IR (from_expr/from_pat)",
       role: :frontend,
-      status: :not_started,
-      source: nil,
-      test: nil,
-      note: "not ported"
+      status: :partial,
+      source: "selfhost_core.rian",
+      test: "test/rian/core_fixpoint_test.exs",
+      note:
+        "surface→Core lowering equals Rian.Core.from_expr over the literal/unary/binary slice; calls/lists/blocks/lambdas remain"
     },
     %{
       id: :checker,
