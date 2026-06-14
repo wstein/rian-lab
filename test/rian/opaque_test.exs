@@ -219,6 +219,21 @@ defmodule Rian.OpaqueTest do
       assert kt =~ "fun add(a0: Double, a1: Double): Double"
       refute kt =~ "Meters"
     end
+
+    test "a cast `.base()` strips only on the declaring abstract's value (type-scoped, §2)" do
+      # `m : Meters` declares `base`, so `m.base()` strips to `m`.
+      src = "abstract Meters := Float64 do\n  to base() Float64\nend\ndef raw(m Meters) Float64 := m.base()"
+      body = hd(hd(Opaque.erase(Decl.parse(src)).funcs).clauses).body
+      assert {:block, [expr: {:id, "m"}]} = body
+    end
+
+    test "a cast name matched on an unrelated type is NOT stripped (name match alone is insufficient)" do
+      # `s : String` does not declare `base`; only the name collides. The cast must
+      # survive — stripping it by name would silently miscompile `something.base()`.
+      src = "abstract Meters := Float64 do\n  to base() Float64\nend\ndef raw(s String) String := s.base()"
+      body = hd(hd(Opaque.erase(Decl.parse(src)).funcs).clauses).body
+      assert {:block, [expr: {:call, {:dot, {:id, "s"}, "base"}, []}]} = body
+    end
   end
 
   describe "erasure of an opaque referenced inside other declarations" do
@@ -239,6 +254,21 @@ defmodule Rian.OpaqueTest do
       prog = Opaque.erase(Decl.parse(src))
       [%Rian.IR.Const{name: "C", type: type}] = hd(prog.mods).consts
       assert type == "String"
+    end
+
+    test "opaque-over-opaque resolves transitively to the concrete base (order-independent)" do
+      # `A := B`, `B := Int64`: a single simultaneous pass would leave `A` at `B`.
+      # The fixpoint resolves `A` straight to `Int64` regardless of declaration order.
+      [out] = Opaque.erase(Decl.parse("opaque A := B\nopaque B := Int64\ndef f(x A) A := x")).funcs
+      assert [%Rian.IR.Param{type: "Int64"}] = out.params
+      assert out.ret == "Int64"
+    end
+
+    test "transitive erasure reaches compound types regardless of declaration order" do
+      # Reverse order (base-first), inside a `Vec(...)`: still collapses to `Vec(Int64)`.
+      src = "opaque B := Int64\nopaque A := B\nstruct S(xs Vec(A))"
+      [%Rian.IR.Struct{fields: [field]}] = Opaque.erase(Decl.parse(src)).structs
+      assert field.type == "Vec(Int64)"
     end
   end
 

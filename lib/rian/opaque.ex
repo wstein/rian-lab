@@ -20,7 +20,7 @@ defmodule Rian.Opaque do
   `opaque Token := String` reaches every target exactly as `String` would. A
   program with no opaques is returned unchanged (the common, zero-overhead case).
   """
-  alias Rian.{IR, Pratt}
+  alias Rian.{Check, IR, Pratt}
   alias Rian.IR.{Clause, Const, Func, Struct, Type, Variant}
 
   @doc "Erase all opaque types from a parsed program. A no-op when it has none."
@@ -35,11 +35,19 @@ defmodule Rian.Opaque do
       for(m <- Map.get(prog, :mods, []), o <- Map.get(m, :opaques, []), do: o)
   end
 
-  # The erasure context: `names` is name->base for type substitution; `casts` is the
-  # set of declared cast names, so `v.castname()` erases to `v` (ADR-0067 §2).
+  # The erasure context: `names` is name->base for type substitution; `casts` maps
+  # a declared cast name to the **set of abstracts that declare it**, so a cast
+  # `v.castname()` erases to `v` (ADR-0067 §2) **only when `v`'s type is one of
+  # those abstracts** — not merely because the name matches (an unrelated
+  # `other.base()` on a different type must not be stripped).
   defp erase_ctx(all) do
     names = Map.new(all, fn o -> {o.name, o.base} end)
-    casts = for(o <- all, c <- Map.get(o, :casts, []), into: MapSet.new(), do: c.name)
+
+    casts =
+      for o <- all, c <- Map.get(o, :casts, []), reduce: %{} do
+        acc -> Map.update(acc, c.name, MapSet.new([o.name]), &MapSet.put(&1, o.name))
+      end
+
     {names, casts}
   end
 
@@ -63,12 +71,15 @@ defmodule Rian.Opaque do
 
   defp erase_func(%Func{} = f, {names, _casts} = ctx) do
     params = Enum.map(f.params, fn p -> %{p | type: subst(p.type, names)} end)
+    # name->type from the *original* (pre-substitution) params, so a cast's head
+    # variable infers its abstract type for the type-scoped cast erasure in `strip`
+    env = Map.new(f.params, &{&1.name, &1.type})
 
     %Func{
       f
       | params: params,
         ret: subst(f.ret, names),
-        clauses: Enum.map(f.clauses, &erase_clause(&1, ctx))
+        clauses: Enum.map(f.clauses, &erase_clause(&1, ctx, env))
     }
   end
 
@@ -86,39 +97,59 @@ defmodule Rian.Opaque do
 
   defp erase_const(%Const{} = c, {names, _} = _ctx), do: %Const{c | type: subst(c.type, names)}
 
-  defp erase_clause(%Clause{body: nil} = c, _ctx), do: c
+  defp erase_clause(%Clause{body: nil} = c, _ctx, _env), do: c
 
-  defp erase_clause(%Clause{body: body} = c, ctx),
-    do: %Clause{c | body: strip(Pratt.parse_body(body), ctx)}
+  defp erase_clause(%Clause{body: body} = c, ctx, env),
+    do: %Clause{c | body: strip(Pratt.parse_body(body), ctx, env)}
 
   # Substitute opaque names -> base in a type string. `\b…\b` keeps `Token` from
   # matching inside `TokenList`; the substitution covers compound types
   # (`Vec(Token)`, `Token | E`, tuples) since it is a plain word replacement.
+  #
+  # Each pass replaces **all** opaque names *simultaneously* (one alternation regex
+  # whose replacement reads the matched name), so the result is order-independent —
+  # unlike a sequential per-name `reduce`, where `opaque A := B`, `opaque B := Int64`
+  # could collapse `A` straight to `Int64` or stall at `B` depending on Map order.
+  # The pass repeats to a fixpoint so opaque-over-opaque (and `Vec(B)`) resolve
+  # transitively to the concrete base; a `fuel` cap (chain length) stops a cyclic
+  # definition from looping forever.
   defp subst(nil, _names), do: nil
 
   defp subst(type, names) when is_binary(type) do
-    Enum.reduce(names, type, fn {name, base}, acc ->
-      Regex.replace(~r/\b#{Regex.escape(name)}\b/, acc, base)
-    end)
+    case names |> Map.keys() |> Enum.map(&Regex.escape/1) |> Enum.join("|") do
+      "" -> type
+      alts -> subst_fix(type, names, ~r/\b(#{alts})\b/, map_size(names) + 1)
+    end
+  end
+
+  defp subst_fix(type, _names, _re, 0), do: type
+
+  defp subst_fix(type, names, re, fuel) do
+    next = Regex.replace(re, type, fn _whole, name -> Map.fetch!(names, name) end)
+    if next == type, do: type, else: subst_fix(next, names, re, fuel - 1)
   end
 
   # Rewrite the two opaque constructs that are runtime identities, recursively over
   # the expr AST: the constructor `T.of(x)` -> `x` (opaque `T`), and a declared cast
-  # `v.castname()` -> `v` (ADR-0067 §2). A non-opaque `.of` (a `range` constructor)
-  # and any other dot-call fall through to the generic tuple/list recursion.
-  defp strip({:call, {:dot, {:id, n}, "of"}, [arg]}, {names, _} = ctx) when is_map_key(names, n),
-    do: strip(arg, ctx)
+  # `v.castname()` -> `v` (ADR-0067 §2) **when `v`'s type is the abstract that
+  # declares the cast**. A non-opaque `.of` (a `range` constructor) and any other
+  # dot-call fall through to the generic recursion.
+  defp strip({:call, {:dot, {:id, n}, "of"}, [arg]}, {names, _} = ctx, env)
+       when is_map_key(names, n),
+       do: strip(arg, ctx, env)
 
-  defp strip({:call, {:dot, head, cn}, []}, {_, casts} = ctx) do
-    if MapSet.member?(casts, cn),
-      do: strip(head, ctx),
-      else: strip_into({:call, {:dot, head, cn}, []}, ctx)
+  defp strip({:call, {:dot, head, cn}, []} = node, {_, casts} = ctx, env) do
+    decls = Map.get(casts, cn)
+
+    if decls && MapSet.member?(decls, Check.infer(head, env, %{})),
+      do: strip(head, ctx, env),
+      else: strip_into(node, ctx, env)
   end
 
-  defp strip(ast, ctx) when is_tuple(ast), do: strip_into(ast, ctx)
-  defp strip(list, ctx) when is_list(list), do: Enum.map(list, &strip(&1, ctx))
-  defp strip(other, _ctx), do: other
+  defp strip(ast, ctx, env) when is_tuple(ast), do: strip_into(ast, ctx, env)
+  defp strip(list, ctx, env) when is_list(list), do: Enum.map(list, &strip(&1, ctx, env))
+  defp strip(other, _ctx, _env), do: other
 
-  defp strip_into(ast, ctx),
-    do: ast |> Tuple.to_list() |> Enum.map(&strip(&1, ctx)) |> List.to_tuple()
+  defp strip_into(ast, ctx, env),
+    do: ast |> Tuple.to_list() |> Enum.map(&strip(&1, ctx, env)) |> List.to_tuple()
 end
