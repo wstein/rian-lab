@@ -1,0 +1,244 @@
+# ===========================================================================
+# SELF-HOSTING — COMPOSITION rung 10: the WHOLE front-end is verified ports
+# ===========================================================================
+# Rung 9 parsed declarations with the verified `selfhost_decl` port but still
+# tokenized with a driver-local lexer. This rung replaces that last front-end
+# glue with the equivalence-locked `selfhost_lexer_v2` port. The driver now owns
+# NO part of lexing or parsing — the full front-end is verified ports, called
+# cross-module, and so is the backend:
+#
+#   SelfhostLexerV2.tokenize(src)        ← the REAL lexer        (cross-module)
+#     → SelfhostDecl.parse_program(toks) ← the REAL decl parser  (cross-module)
+#     → normalize/group + surface→Core lowering   (driver glue — lowers, doesn't parse)
+#     → SelfhostBeam.compile_forms(funcs)← the REAL backend      (cross-module)
+#     → inflate Form → abstract-form tuples (driver glue)
+#     → :compile.forms / :code.load_binary
+#
+# THREE verified ports (lexer, declaration parser, backend) composed end to end,
+# with identical token tags across the lexer→parser boundary (no projection): the
+# lexer's Tok sum is a superset of the parser's, same tags. The only driver-local
+# code is the surface→Core lowering and the Form inflater — neither reimplements a
+# verified stage.
+#
+# Surface: selfhost_decl's slice (arithmetic + calls + multi-clause patterns incl.
+# cons-LISTS; no `if`/strings/sum-types yet — widening selfhost_decl off :partial
+# is the path to compiling a real selfhost_*.rian slice / the v1==v2 fixed point).
+# All three ports load under their :"Elixir.Selfhost*" atoms (Pascal calls,
+# ADR-0041); sibling-port calls are composition, not host crutches (excluded from
+# the FFI ledger). Only host FFI: :compile.forms / :code.load_binary.
+# ---------------------------------------------------------------------------
+
+mod SelfhostComposeRealLex do
+  # ── selfhost_beam's INPUT IR (the shared contract — structurally identical) ──
+  type Core := CNum(String)
+             | CId(String)
+             | CAtom(String)
+             | CUnary(String, Core)
+             | CBin(String, Core, Core)
+             | CCall(String, Vec(Core))
+             | CTuple(Vec(Core))
+             | CList(Vec(Core), Tail)
+             | CIf(Core, Block, Block)
+             | CCase(Core, Vec(Arm))
+
+  type Tail := TClose | TTail(Core)
+  type Block := Block(Vec(Stmt))
+  type Stmt := SBind(String, Core) | STypedBind(String, String, Core) | SExpr(Core)
+  type Arm := Arm(Pat, Guard, Block)
+
+  type Pat := PWild
+            | PVar(String)
+            | PInt(Int53)
+            | PAtom(String)
+            | PCtor(String, Vec(Pat))
+            | PTuple(Vec(Pat))
+            | PList(Vec(Pat), PTail)
+
+  type PTail := PtlClose | PtlTail(Pat)
+  type Guard := GNone | GSome(Core)
+  type Clause := Clause(Vec(Pat), Guard, Block)
+  type Func := Func(String, Int53, Vec(Clause))
+
+  # ── selfhost_beam's OUTPUT (the string-carrying Form sum we inflate) ──
+  type Form := FInt(Int53)
+             | FVar(String)
+             | FAtom(String)
+             | FCtorN(String)
+             | FCtor(String, Vec(Form))
+             | FOp1(String, Form)
+             | FOp2(String, Form, Form)
+             | FCall(String, Vec(Form))
+             | FTuple(Vec(Form))
+             | FNil
+             | FCons(Form, Form)
+             | FIf(Form, Vec(Form), Vec(Form))
+             | FCase(Form, Vec(FClause))
+             | FMatch(String, Form)
+
+  type GForm := GfNone | GfSome(Form)
+  type FClause := FClause(Vec(Form), GForm, Vec(Form))
+  type FFunc := FFunc(String, Int53, Vec(FClause))
+
+  # ── driver-local types ──
+  type NClause := NC(String, Vec(Pat), Core)
+  type Grp := Grp(String, Int53, Vec(NClause))
+
+  # ── the BEAM toolchain boundary: two @external(:ex) host calls (counted FFI) ──
+  @external(:ex, ":compile.forms(forms, [:return_errors])")
+  def compile_forms_host(forms Vec(Tuple)) Tuple
+
+  @external(:ex, ":code.load_binary(name, chars, bin)")
+  def load_binary(name Symbol, chars Vec(Int53), bin String) Tuple
+
+  # ── the driver: source -> a loaded, runnable module ──
+  pub def build(src String, modname Symbol) Symbol
+  pub def build(src, modname)
+    case compile_forms_host(compile_module(src, modname)) do
+      {:ok, m, bin} -> loaded(load_binary(m, Prim.str_chars("nofile"), bin))
+    end
+  end
+
+  def loaded(Tuple) Symbol
+  def loaded({:module, m}) := m
+
+  # ── source -> a full :compile.forms input, via the REAL lexer + parser + backend ──
+  # the front-end is entirely verified ports: SelfhostLexerV2.tokenize feeds
+  # SelfhostDecl.parse_program directly (same token tags, no projection).
+  pub def compile_module(src String, modname Symbol) Vec(Tuple)
+  pub def compile_module(src, modname) := assemble(modname, funcs(group(normalize(SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src))))))
+
+  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
+
+  def exports(Vec(Func)) Vec(Tuple)
+  def exports([]) := []
+  def exports([Func(name, arity, _) | rest]) := [{Prim.str_to_atom(name), arity} | exports(rest)]
+
+  # ── normalize: selfhost_decl's Decl IR -> a flat list of (name, pats, body) ──
+  def normalize(ds) Vec(NClause)
+  def normalize([]) := []
+  def normalize([{:d_clause, name, pats, expr} | rest]) := [NC(name, lower_pats(pats), lower_surface(expr)) | normalize(rest)]
+  def normalize([_ | rest]) := normalize(rest)
+
+  # ── the surface→Core lowering: selfhost_decl Pat/Expr -> selfhost_beam Pat/Core ──
+  def lower_pats(ps) Vec(Pat)
+  def lower_pats([]) := []
+  def lower_pats([p | rest]) := [lower_pat(p) | lower_pats(rest)]
+
+  def lower_pat(p) Pat
+  def lower_pat(:wild) := PWild
+  def lower_pat(:nil_p) := PList([], PtlClose)
+  def lower_pat({:var, n}) := PVar(n)
+  def lower_pat({:lit, k}) := PInt(k)
+  def lower_pat({:ctor, c, ps}) := PCtor(c, lower_pats(ps))
+  def lower_pat({:cons_p, h, t}) := cons_pat([lower_pat(h)], t)
+
+  # flatten a cons-pattern chain `[a, b | tl]` into PList([a, b], tail).
+  def cons_pat(acc Vec(Pat), t) Pat
+  def cons_pat(acc, :nil_p) := PList(rev_pats(acc, []), PtlClose)
+  def cons_pat(acc, {:cons_p, h, t}) := cons_pat([lower_pat(h) | acc], t)
+  def cons_pat(acc, other) := PList(rev_pats(acc, []), PtlTail(lower_pat(other)))
+
+  def rev_pats(Vec(Pat), Vec(Pat)) Vec(Pat)
+  def rev_pats([], out) := out
+  def rev_pats([p | rest], out) := rev_pats(rest, [p | out])
+
+  def lower_surface(e) Core
+  def lower_surface({:num, s}) := CNum(s)
+  def lower_surface({:id, x}) := CId(x)
+  def lower_surface({:bin, op, l, r}) := CBin(op, lower_surface(l), lower_surface(r))
+  def lower_surface({:unary, op, x}) := CUnary(op, lower_surface(x))
+  def lower_surface({:call, callee, args}) := CCall(callee_name(callee), lower_all(args))
+
+  def callee_name(c) String
+  def callee_name({:id, f}) := f
+
+  def lower_all(es) Vec(Core)
+  def lower_all([]) := []
+  def lower_all([e | rest]) := [lower_surface(e) | lower_all(rest)]
+
+  # ── group consecutive same-name clauses, wrap each as a beam Func ──
+  def group(Vec(NClause)) Vec(Grp)
+  def group([]) := []
+  def group([NC(name, pats, body) | rest]) := group_run(name, plen(pats), [NC(name, pats, body)], rest)
+
+  def group_run(name String, arity Int53, acc Vec(NClause), Vec(NClause)) Vec(Grp)
+  def group_run(name, arity, acc, []) := [Grp(name, arity, rev_ncs(acc, []))]
+  def group_run(name, arity, acc, [NC(n2, p2, b2) | rest])
+    if name == n2 do
+      group_run(name, arity, [NC(n2, p2, b2) | acc], rest)
+    else
+      [Grp(name, arity, rev_ncs(acc, [])) | group([NC(n2, p2, b2) | rest])]
+    end
+  end
+
+  def rev_ncs(Vec(NClause), Vec(NClause)) Vec(NClause)
+  def rev_ncs([], out) := out
+  def rev_ncs([c | rest], out) := rev_ncs(rest, [c | out])
+
+  def funcs(Vec(Grp)) Vec(Func)
+  def funcs([]) := []
+  def funcs([Grp(name, arity, ncs) | rest]) := [Func(name, arity, clauses_of(ncs)) | funcs(rest)]
+
+  def clauses_of(Vec(NClause)) Vec(Clause)
+  def clauses_of([]) := []
+  def clauses_of([NC(_, pats, body) | rest]) := [Clause(pats, GNone, Block([SExpr(body)])) | clauses_of(rest)]
+
+  def plen(Vec(Pat)) Int53
+  def plen([]) := 0
+  def plen([_ | rest]) := 1 + plen(rest)
+
+  # ── inflate selfhost_beam's Form sum -> real abstract-form tuples ──
+  def inflate_funcs(Vec(FFunc)) Vec(Tuple)
+  def inflate_funcs([]) := []
+  def inflate_funcs([f | rest]) := [inflate_func(f) | inflate_funcs(rest)]
+
+  def inflate_func(FFunc) Tuple
+  def inflate_func(FFunc(name, arity, clauses)) := {:function, 0, Prim.str_to_atom(name), arity, inflate_clauses(clauses)}
+
+  def inflate_clauses(Vec(FClause)) Vec(Tuple)
+  def inflate_clauses([]) := []
+  def inflate_clauses([c | rest]) := [inflate_clause(c) | inflate_clauses(rest)]
+
+  def inflate_clause(FClause) Tuple
+  def inflate_clause(FClause(pats, guard, body)) := {:clause, 0, inflate_all(pats), guard_seq(guard), inflate_all(body)}
+
+  def guard_seq(GForm) Vec(Vec(Tuple))
+  def guard_seq(GfNone) := []
+  def guard_seq(GfSome(g)) := [[inflate(g)]]
+
+  def inflate_all(Vec(Form)) Vec(Tuple)
+  def inflate_all([]) := []
+  def inflate_all([f | rest]) := [inflate(f) | inflate_all(rest)]
+
+  def inflate(Form) Tuple
+  def inflate(FInt(v)) := {:integer, 0, v}
+  def inflate(FVar(n)) := {:var, 0, var_atom(n)}
+  def inflate(FAtom(a)) := {:atom, 0, Prim.str_to_atom(a)}
+  def inflate(FNil) := {:nil, 0}
+  def inflate(FCons(h, t)) := {:cons, 0, inflate(h), inflate(t)}
+  def inflate(FOp1(op, x)) := {:op, 0, op_atom(op), inflate(x)}
+  def inflate(FOp2(op, l, r)) := {:op, 0, op_atom(op), inflate(l), inflate(r)}
+  def inflate(FCall(f, args)) := {:call, 0, {:atom, 0, Prim.str_to_atom(f)}, inflate_all(args)}
+
+  def var_atom(n String) Symbol := Prim.str_to_atom(cap(n))
+
+  def op_atom(String) Symbol
+  def op_atom("+") := :"+"
+  def op_atom("-") := :"-"
+  def op_atom("*") := :"*"
+
+  def cap(s String) String
+    case Prim.str_chars(s) do
+      [c | rest] -> Prim.str_from_chars([up(c) | rest])
+      [] -> s
+    end
+  end
+
+  def up(c Int53) Int53
+    if c >= 97 and c <= 122 do
+      c - 32
+    else
+      c
+    end
+  end
+end

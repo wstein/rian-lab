@@ -279,6 +279,19 @@ compile + run on real BEAM bytecode:
   **`sum`**/**`len`** (over lists), identical to `Rian.Beam`. Both ports load under
   `:"Elixir.Selfhost*"` atoms (ADR-0041); sibling-port calls are composition, not
   host crutches. Path to `v1==v2`: widen `selfhost_decl` past its `:partial` slice.
+- [selfhost_compose_real_lex.rian](selfhost_compose_real_lex.rian) — **COMPOSITION
+  rung 10** (ADR-0063 Step 3): wires the verified lexer too, so the driver owns **no
+  lexing or parsing** — the whole front-end is verified ports. The
+  [selfhost_lexer_v2.rian](selfhost_lexer_v2.rian) port (`SelfhostLexerV2.tokenize`)
+  feeds [selfhost_decl.rian](selfhost_decl.rian) directly (its token tags are a
+  superset of the parser's — **no projection**), whose IR is lowered to
+  `selfhost_beam` Core and compiled by `SelfhostBeam.compile_forms`. **Three verified
+  ports** (lexer, declaration parser, backend) composed cross-module; the only
+  driver-local code is the surface→Core lowering and the Form inflater.
+  `test/rian/compose_real_lex_fixpoint_test.exs` runs `fib`/`fact`/`even`/`odd`/`sum`/
+  `len` — incl. a source with `#` comments and blank lines that only the real lexer
+  handles — identical to `Rian.Beam`. Path to `v1==v2`: widen `selfhost_decl` off
+  `:partial` (it lacks `if`/`case`/strings/sum-types) and the lowering to match.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
