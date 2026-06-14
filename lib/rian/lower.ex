@@ -1049,17 +1049,17 @@ defmodule Rian.Lower do
         # Resolve construction (struct + variant), constant references, and `case`
         # patterns on the surface (where the meta is available), then translate to
         # the typed core IR the emitter consumes (ADR-0050).
-        ast =
+        surface =
           c.body
           |> body_ast(ctx)
           |> widen_char_arith(char_vars(func.params, c.pats))
           |> rewrite_proto_calls(proto_methods())
           |> resolve_rust_pats(ctx.meta)
           |> insert_borrows(Map.get(ctx, :funs, %{}), borrowed)
-          |> Core.from_expr()
 
+        ast = Core.from_expr(surface)
         body = emit(ast, :rust) |> elem(0)
-        rebinds = arm_rebinds(c.pats, iso)
+        rebinds = arm_rebinds(c.pats, iso, used_ids(surface))
 
         arm =
           if rebinds == [],
@@ -1283,12 +1283,21 @@ defmodule Rian.Lower do
   # alike); this applies to *every* cons clause. A **tail** is a `&[T]` slice;
   # only `iso` (owned-`Vec`) params rebind it via `to_vec()`, since `val` params
   # keep the slice for zero-copy recursion.
-  defp arm_rebinds(pats, iso) do
+  defp arm_rebinds(pats, iso, used) do
     pats
     |> Enum.with_index()
     |> Enum.flat_map(fn {pat, i} ->
       core = Core.from_pat(pat)
-      heads = Enum.map(slice_elem_vars(core), &"let #{&1} = #{&1}.clone();")
+
+      # Only rebind a head the body actually uses: a binder used solely by the
+      # guard (`*c == 32`) needs no owned `let c = c.clone();`, which `rustc`
+      # would flag as an unused variable.
+      heads =
+        core
+        |> slice_elem_vars()
+        |> Enum.filter(&MapSet.member?(used, &1))
+        |> Enum.map(&"let #{&1} = #{&1}.clone();")
+
       tails = if MapSet.member?(iso, i), do: cons_tail_rebinds(core), else: []
       heads ++ tails
     end)
@@ -1296,6 +1305,16 @@ defmodule Rian.Lower do
 
   defp cons_tail_rebinds(%PList{tail: %PVar{name: n}}), do: ["let #{n} = #{n}.to_vec();"]
   defp cons_tail_rebinds(_), do: []
+
+  # identifier names referenced anywhere in a surface-tuple expression
+  defp used_ids(ast), do: collect_ids(ast, MapSet.new())
+  defp collect_ids({:id, n}, acc), do: MapSet.put(acc, n)
+
+  defp collect_ids(t, acc) when is_tuple(t),
+    do: Enum.reduce(Tuple.to_list(t), acc, &collect_ids/2)
+
+  defp collect_ids(l, acc) when is_list(l), do: Enum.reduce(l, acc, &collect_ids/2)
+  defp collect_ids(_, acc), do: acc
 
   # variables bound inside the *element* positions of a list pattern — under a
   # slice match they are `&T` borrows, so a guard comparing them needs `*`
