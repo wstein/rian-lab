@@ -13,9 +13,11 @@ defmodule Rian.RustModuleFixpointTest do
   # The emitter consumes RESOLVED + capability-LOWERED Core: this test does the
   # upstream work (parse, build the ctor→enum + struct meta, `Capability.rust_param`,
   # resolve variant/struct construction) and injects, then the port emits the
-  # module. Structs (decl/construct/field) and closed + cons lists are now covered;
-  # generics, maps, String-returns, the Elixir target, and struct *patterns* (a
-  # reference gap — Rian.Lower raises) are out of scope (the corpus is non-generic).
+  # module. Structs (decl/construct/field), closed + cons lists, and generic
+  # `<T: Clone>` signatures + bare-tvar-return clone are now covered; the rest of the
+  # owned↔borrow coercion, parametric monomorphization, maps, String-returns, the
+  # Elixir target, and struct *patterns* (a reference gap — Rian.Lower raises) are
+  # out of scope.
 
   setup_all do
     {:ok, mod} =
@@ -137,7 +139,8 @@ defmodule Rian.RustModuleFixpointTest do
         {:clause, pats, guard, body}
       end)
 
-    {:func, f.name, Map.get(f, :pub?, false), params, Capability.owned(f.ret), clauses}
+    {:func, f.name, Map.get(f, :pub?, false), Map.get(f, :tvars, []), params,
+     Capability.owned(f.ret), clauses}
   end
 
   defp ported(mod, src) do
@@ -169,7 +172,13 @@ defmodule Rian.RustModuleFixpointTest do
     # closed list + cons construction (iso tail owns the Vec)
     "def two() Vec(Int64) := [1, 2]",
     "def pre(x Int64, xs iso Vec(Int64)) Vec(Int64) := [x | xs]",
-    "def pre2(a Int64, b Int64, xs iso Vec(Int64)) Vec(Int64) := [a, b | xs]"
+    "def pre2(a Int64, b Int64, xs iso Vec(Int64)) Vec(Int64) := [a, b | xs]",
+    # generics rung 1: `<T: Clone>` signature + bare-tvar-return `.clone()` (the body
+    # is a returned param). The owned↔borrow coercion for calls/lists/slice-binders
+    # is NOT yet ported, so the corpus is bare-var-return generics only.
+    "def id(x val T) T forall T := x",
+    "def fst(a val A, b val B) A forall A, B := a",
+    "def k(x val T, y val T) T forall T := x"
   ]
 
   describe "self-hosting Rust-module fixpoint — Rian emitter vs Rian.Lower.rust_program" do
@@ -226,6 +235,18 @@ defmodule Rian.RustModuleFixpointTest do
 
       cons = ported(mod, "def pre(x Int64, xs iso Vec(Int64)) Vec(Int64) := [x | xs]")
       assert cons =~ "{ let mut __v = xs.to_vec(); __v.insert(0, x); __v }"
+    end
+
+    test "a generic fn gets a `<T: Clone>` signature and a bare-tvar return clones", %{mod: mod} do
+      out = ported(mod, "def id(x val T) T forall T := x")
+      assert out =~ "fn id<T: Clone>(x: &T) -> T {"
+      # the returned borrowed param is cloned to the owned `T` the signature promises
+      assert out =~ "x => (x).clone(),"
+      # multi-tvar: each binder is `Clone`-bounded; a non-generic fn keeps a bare sig
+      assert ported(mod, "def fst(a val A, b val B) A forall A, B := a") =~
+               "fn fst<A: Clone, B: Clone>(a: &A, b: &B) -> A {"
+
+      refute ported(mod, "def add(a Int64, b Int64) Int64 := a + b") =~ "<"
     end
   end
 end

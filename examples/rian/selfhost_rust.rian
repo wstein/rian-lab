@@ -12,10 +12,13 @@
 # and capability-LOWERED (params carry their Rust type) — resolution is the
 # parser/Core stage's job and capability lowering is the (self-hosted) capability
 # stage's. Structs (decl/construction/field access) and closed + cons lists are
-# now covered. Generics (parametric tvars + owned↔borrow coercion), maps,
-# String-return coercion, and the Elixir text target remain out of scope (the
-# corpus is non-generic; struct *patterns* are a reference gap — `Rian.Lower`
-# raises on them).
+# now covered, as are generic `<T: Clone>` signatures + a bare-tvar return clone
+# (`-> T` clones the borrowed body). The REST of the owned↔borrow coercion
+# (`&`-wrapping owned args to `&T` params, cloning borrowed values mid-body,
+# slice-element rebinds) and parametric-type monomorphization (`Vec(Pair)` ->
+# `Vec<Pair<K, V>>`, see `render_inst` below), plus maps, String-return coercion,
+# the Elixir text target, and struct *patterns* (a reference gap — `Rian.Lower`
+# raises) remain out of scope.
 # ---------------------------------------------------------------------------
 
 mod SelfhostRust do
@@ -54,7 +57,9 @@ mod SelfhostRust do
   type Guard := GNone | GSome(Core)
   type Param := Param(String, String)
   type Clause := Clause(Vec(RPat), Guard, Core)
-  type Func := Func(String, Bool, Vec(Param), String, Vec(Clause))
+  # a function carries its `forall` type variables (names); a bare-tvar return
+  # (`-> T`) clones the borrowed arm body (`T: Clone`, ADR-0061).
+  type Func := Func(String, Bool, Vec(String), Vec(Param), String, Vec(Clause))
   type EVar := EVar(String, Vec(String), Bool, Vec(String))
   type EnumDef := EnumDef(String, Vec(EVar))
 
@@ -124,9 +129,29 @@ mod SelfhostRust do
   # `rust_program` emits plain `fn` for every top-level function (a single Rust
   # module; the `pub?` flag is not a Rust visibility here), so it is ignored.
   def function_rs(Func) String
-  def function_rs(Func(name, _, params, ret, clauses)) :=
-    "fn " <> name <> "(" <> param_decls(params) <> ") -> " <> ret <> " {\n    match " <>
-      scrut(params) <> " {\n" <> arms(clauses) <> "    }\n}"
+  def function_rs(Func(name, _, tvars, params, ret, clauses)) :=
+    "fn " <> name <> generics(tvars) <> "(" <> param_decls(params) <> ") -> " <> ret <>
+      " {\n    match " <> scrut(params) <> " {\n" <> arms(clauses, ret, tvars) <> "    }\n}"
+
+  # `<T: Clone, U: Clone>` for a generic fn (every tvar is `Clone`-bounded so a
+  # borrowed `&T` can be cloned to the owned `T` a return wants); empty otherwise.
+  def generics(Vec(String)) String
+  def generics([]) := ""
+  def generics(tvars) := "<" <> clone_bounds(tvars) <> ">"
+
+  def clone_bounds(Vec(String)) String
+  def clone_bounds([t]) := t <> ": Clone"
+  def clone_bounds([t | rest]) := t <> ": Clone, " <> clone_bounds(rest)
+
+  def member(String, Vec(String)) Bool
+  def member(_, []) := false
+  def member(x, [y | rest])
+    if x == y do
+      true
+    else
+      member(x, rest)
+    end
+  end
 
   def param_decls(Vec(Param)) String
   def param_decls([]) := ""
@@ -143,13 +168,25 @@ mod SelfhostRust do
   def param_names([Param(n, _)]) := n
   def param_names([Param(n, _) | rest]) := n <> ", " <> param_names(rest)
 
-  def arms(Vec(Clause)) String
-  def arms([]) := ""
-  def arms([c | rest]) := arm(c) <> arms(rest)
+  def arms(Vec(Clause), String, Vec(String)) String
+  def arms([], _, _) := ""
+  def arms([c | rest], ret, tvars) := arm(c, ret, tvars) <> arms(rest, ret, tvars)
 
-  def arm(Clause) String
-  def arm(Clause(pats, guard, body)) :=
-    "        " <> arm_pat(pats) <> guard_str(guard) <> " => " <> render(body) <> ",\n"
+  def arm(Clause, String, Vec(String)) String
+  def arm(Clause(pats, guard, body), ret, tvars) :=
+    "        " <> arm_pat(pats) <> guard_str(guard) <> " => " <>
+      ret_coerce(render(body), ret, tvars) <> ",\n"
+
+  # a bare owned-tvar return (`-> T`) yields a borrowed `&T` in the base arms (a
+  # returned param), so `.clone()` it to the owned `T` the signature promises.
+  def ret_coerce(String, String, Vec(String)) String
+  def ret_coerce(s, ret, tvars)
+    if member(ret, tvars) do
+      "(" <> s <> ").clone()"
+    else
+      s
+    end
+  end
 
   # one pattern matches directly; N>1 a tuple pattern.
   def arm_pat(Vec(RPat)) String
