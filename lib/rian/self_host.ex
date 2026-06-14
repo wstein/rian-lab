@@ -86,10 +86,11 @@ defmodule Rian.SelfHost do
       id: :exhaustiveness,
       name: "Exhaustiveness gate",
       role: :checker,
-      status: :not_started,
-      source: nil,
-      test: nil,
-      note: "not ported"
+      status: :partial,
+      source: "selfhost_exhaust.rian",
+      test: "test/rian/exhaust_fixpoint_test.exs",
+      note:
+        "single-column nullary-constructor verdict agrees with Maranget useful?/3; ctors-with-args, multi-column, list/literal/range patterns remain"
     },
     %{
       id: :capability,

@@ -1,0 +1,61 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — the exhaustiveness gate, written in Rian
+# ===========================================================================
+# Goal (ADR-0063 §2, the exhaustiveness checker; the gate that has most earned
+# its keep): decide whether a `case` is exhaustive. This is the Rian-written
+# counterpart of `Rian.Exhaustiveness`, fixpoint-locked against it in
+# `test/rian/exhaust_fixpoint_test.exs`.
+#
+# Slice: a **single-column** match over a finite sum of **nullary** constructors
+# — the heart of the Maranget usefulness check. A column of constructor patterns
+# is exhaustive iff it contains a wildcard, or its constructors cover the whole
+# signature. (For this slice, `not useful?(rows, [_], env)` reduces to exactly
+# this — see the fixpoint test, which diffs against the real `useful?`.)
+#
+# Remaining vocabulary (constructors with arguments, multi-column matrices, list/
+# tuple/literal/range patterns, redundancy) is the `:partial` tail — ADR-0063.
+# ---------------------------------------------------------------------------
+
+mod SelfhostExhaust do
+  # A pattern in the single column: a wildcard, or a nullary constructor by name.
+  type Pat := PWild | PCtor(String)
+
+  # Does the column contain a wildcard? (A wildcard alone is exhaustive.)
+  def has_wild(Vec(Pat)) Bool
+  def has_wild([]) := false
+  def has_wild([PWild | _]) := true
+  def has_wild([PCtor(_) | t]) := has_wild(t)
+
+  # Is constructor `name` present among the column's patterns?
+  def covers(Vec(Pat), String) Bool
+  def covers([], _) := false
+  def covers([PWild | t], name) := covers(t, name)
+  def covers([PCtor(c) | t], name)
+    if c == name do
+      true
+    else
+      covers(t, name)
+    end
+  end
+
+  # Is every constructor of the signature covered by the column?
+  def all_covered(Vec(Pat), Vec(String)) Bool
+  def all_covered(_, []) := true
+  def all_covered(pats, [s | rest])
+    if covers(pats, s) do
+      all_covered(pats, rest)
+    else
+      false
+    end
+  end
+
+  # The verdict: a single-column match over `sig` is exhaustive iff it has a
+  # wildcard, or its constructors cover the whole signature.
+  pub def exhaustive(pats Vec(Pat), sig Vec(String)) Bool
+    if has_wild(pats) do
+      true
+    else
+      all_covered(pats, sig)
+    end
+  end
+end

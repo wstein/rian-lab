@@ -97,6 +97,13 @@ compile + run on real BEAM bytecode:
   value, `ref` is the BEAM-illegal `&mut` excluded from the portable core (P5).
   Covers the scalar/`String`/`Vec`/nominal slice; deep generics and the linearity
   check remain.
+- [selfhost_exhaust.rian](selfhost_exhaust.rian) — the **exhaustiveness gate**
+  port (ADR-0063): decides whether a single-column `case` over a finite sum of
+  nullary constructors is exhaustive — a column is exhaustive iff it has a
+  wildcard or covers the whole signature, the heart of the Maranget usefulness
+  check. **Fixpoint-locked** against the real `Rian.Exhaustiveness.useful?`
+  (`test/rian/exhaust_fixpoint_test.exs`). Constructors with arguments,
+  multi-column matrices, and list/literal/range patterns remain.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via

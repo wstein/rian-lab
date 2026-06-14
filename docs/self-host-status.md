@@ -6,8 +6,8 @@ self-hosting (ADR-0063 §4) — the Rian compiler compiling its own source to `.
 **Portable** self-hosting (the compiler lowered to Rust/JS) is a separate, further
 terminus and is *not* measured here.
 
-**27% self-hosted** — 1 stage(s) self-hosted,
-4 partial, 6 not started, of 11.
+**32% self-hosted** — 1 stage(s) self-hosted,
+5 partial, 5 not started, of 11.
 
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
@@ -16,7 +16,7 @@ terminus and is *not* measured here.
 | Expression/pattern parser | frontend | 🟡 partial | `examples/rian/selfhost_parse.rian` · `test/rian/parse_fixpoint_test.exs` | AST equals Rian.Pratt over an arithmetic/precedence slice |
 | Typed Core IR (from_expr/from_pat) | frontend | 🟡 partial | `examples/rian/selfhost_core.rian` · `test/rian/core_fixpoint_test.exs` | surface→Core lowering equals Rian.Core.from_expr over the literal/unary/binary slice; calls/lists/blocks/lambdas remain |
 | Type checker (inference + error sets) | checker | — | — | selfhost_check.rian checks a TOY language, not Rian.Check — not a port |
-| Exhaustiveness gate | checker | — | — | not ported |
+| Exhaustiveness gate | checker | 🟡 partial | `examples/rian/selfhost_exhaust.rian` · `test/rian/exhaust_fixpoint_test.exs` | single-column nullary-constructor verdict agrees with Maranget useful?/3; ctors-with-args, multi-column, list/literal/range patterns remain |
 | Capability checker | checker | 🟡 partial | `examples/rian/selfhost_cap.rian` · `test/rian/cap_fixpoint_test.exs` | capability→Rust lowering + ref-rejecting BEAM legality equal Rian.Capability over the scalar/String/Vec/nominal slice; deep generics + linearity remain |
 | BEAM abstract-forms backend | backend | — | — | selfhost_codegen.rian is a toy stack VM, not the Rian.Beam emitter |
 | Rust/Elixir text backend | backend | — | — | not ported |
