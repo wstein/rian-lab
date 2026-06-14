@@ -124,6 +124,31 @@ defmodule Rian.DeclTest do
       assert apply(mod, :classify, [7]) == 200
     end
 
+    test "a block body's statement split tracks bracket depth, not just `do`/`end`" do
+      # Regression: `block_seps` split statements on newlines by `do`/`end` depth
+      # only, so a single expression wrapped across lines inside `(`/`[`/`{` took a
+      # spurious `;` ("unexpected token `semi`"). A newline inside unbalanced
+      # brackets must be a continuation, not a statement break (P1, like `:=` bodies).
+      one_body = fn src ->
+        Decl.parse(src).funcs |> hd() |> Map.fetch!(:clauses) |> hd() |> Map.fetch!(:body)
+      end
+
+      # the wrapped `P(x: a, y: b)` is ONE statement — no spurious `;` inside the
+      # parens (the construction is intact; only a trailing block terminator remains)
+      body = one_body.("struct P(x Int53, y Int53)\ndef mk(a Int53) P\n  P(x: a,\n    y: a)\nend")
+      assert String.trim(String.trim_trailing(body, ";")) == "P ( x : a , y : a )"
+
+      # and a multi-line list/call block body compiles and runs on the BEAM
+      src =
+        "def g(a Int53) Vec(Int53)\n  cons(a,\n       [a + 1,\n        a + 2])\nend\ndef cons(x Int53, xs Vec(Int53)) Vec(Int53) := [x | xs]"
+
+      {:ok, mod, bin} =
+        Rian.Beam.compile(src, :"rian_blk_paren_#{System.unique_integer([:positive])}")
+
+      {:module, ^mod} = :code.load_binary(mod, ~c"#{mod}.beam", bin)
+      assert apply(mod, :g, [10]) == [10, 11, 12]
+    end
+
     test "multi-line declarations are joined by continuation" do
       %{types: [t]} =
         Decl.parse("""

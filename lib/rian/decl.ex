@@ -1015,25 +1015,37 @@ defmodule Rian.Decl do
   defp take_parens([t | rest], d, acc), do: take_parens(rest, d, [t | acc])
   defp take_parens([], _, _), do: raise(Error, "unbalanced `(` in the parameter list")
 
-  # Detokenize a block body: a newline at block level (depth 0) separates
-  # statements (`;`); a newline inside a nested `do … end` (a `case`/`if`) is
-  # insignificant (those arms self-delimit), so it becomes whitespace.
-  defp detok_block(tokens), do: tokens |> block_seps(0, 0, []) |> Lexer.detokenize()
+  # Detokenize a block body: a newline at block level separates statements (`;`);
+  # a newline inside a nested `do … end` (a `case`/`if`), a `with`-header, OR
+  # unbalanced `(`/`[`/`{`/`%{` is insignificant (those self-delimit or continue),
+  # so it becomes whitespace. The paren depth `p` keeps a multi-line expression —
+  # `Em(s: …,\n pr: …)`, a wrapped call/list/map — from taking a spurious `;`
+  # (symmetric with the `:=`-body `take_line` newline-tolerance).
+  defp detok_block(tokens), do: tokens |> block_seps(0, 0, 0, []) |> Lexer.detokenize()
 
-  # `w` counts open `with`-headers: between `with` and its `do`, newlines separate
-  # comma-joined clauses, not statements, so they stay insignificant (the `do`
-  # that closes a header transitions it into the with-body depth).
-  defp block_seps([], _d, _w, acc), do: Enum.reverse(acc)
-  defp block_seps([{:kw, "with"} = t | r], d, w, acc), do: block_seps(r, d, w + 1, [t | acc])
+  # `d` = `do`/`end` depth, `w` = open `with`-headers (between `with` and its `do`,
+  # newlines separate comma-joined clauses, not statements), `p` = bracket depth.
+  defp block_seps([], _d, _w, _p, acc), do: Enum.reverse(acc)
 
-  defp block_seps([{:kw, "do"} = t | r], d, w, acc) when w > 0,
-    do: block_seps(r, d + 1, w - 1, [t | acc])
+  defp block_seps([{:kw, "with"} = t | r], d, w, p, acc),
+    do: block_seps(r, d, w + 1, p, [t | acc])
 
-  defp block_seps([{:kw, "do"} = t | r], d, w, acc), do: block_seps(r, d + 1, w, [t | acc])
-  defp block_seps([{:kw, "end"} = t | r], d, w, acc), do: block_seps(r, d - 1, w, [t | acc])
-  defp block_seps([{:nl} | r], 0, 0, acc), do: block_seps(r, 0, 0, [{:semi} | acc])
-  defp block_seps([{:nl} | r], d, w, acc), do: block_seps(r, d, w, acc)
-  defp block_seps([t | r], d, w, acc), do: block_seps(r, d, w, [t | acc])
+  defp block_seps([{:kw, "do"} = t | r], d, w, p, acc) when w > 0,
+    do: block_seps(r, d + 1, w - 1, p, [t | acc])
+
+  defp block_seps([{:kw, "do"} = t | r], d, w, p, acc), do: block_seps(r, d + 1, w, p, [t | acc])
+  defp block_seps([{:kw, "end"} = t | r], d, w, p, acc), do: block_seps(r, d - 1, w, p, [t | acc])
+
+  defp block_seps([{open} = t | r], d, w, p, acc)
+       when open in [:lparen, :lbracket, :lbrace, :mapopen],
+       do: block_seps(r, d, w, p + 1, [t | acc])
+
+  defp block_seps([{close} = t | r], d, w, p, acc) when close in [:rparen, :rbracket, :rbrace],
+    do: block_seps(r, d, w, max(p - 1, 0), [t | acc])
+
+  defp block_seps([{:nl} | r], 0, 0, 0, acc), do: block_seps(r, 0, 0, 0, [{:semi} | acc])
+  defp block_seps([{:nl} | r], d, w, p, acc), do: block_seps(r, d, w, p, acc)
+  defp block_seps([t | r], d, w, p, acc), do: block_seps(r, d, w, p, [t | acc])
 
   # ── `type` declarations ────────────────────────────────────────────────
   defp parse_type(rest, pub?, doc) do
