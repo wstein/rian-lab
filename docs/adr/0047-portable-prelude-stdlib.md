@@ -48,6 +48,14 @@ unknown `Prim.x` is a hard compile error, never a silently-bogus `__prim_x`. Use
 are the stdlib-in-Rian over the primitives. The bare `__prim_*` form is legacy and no longer appears
 in tour or self-hosting `.rian` source.
 
+**Not every intrinsic is all-target.** Most primitives lower on every Tier-1 target, but a few are
+intentionally target-restricted and `Rian.Reach` pins a caller off the targets that cannot lower them
+— keeping the gate honest against the emitters (ADR-0058): the 64-bit overflow ops
+(`Prim.wrapping_add`/`saturating_add`/`checked_add`) are off `:js` (no `Int64` representation, ADR-0064 §2a),
+and `Prim.str_to_atom` (string→atom interning) is **BEAM-only** — atoms have no Rust/JS/JVM value, so a
+body that calls it reaches `:ex` alone. These power the BEAM self-hosting backends (`selfhost_compose*.rian`),
+which emit Erlang abstract forms and are BEAM-pinned by construction.
+
 ### 3. No `nil` — absence is `Option(T) = Some(T) | None`
 
 Rian has **no `nil`**. Absence is the nominal sealed sum **`Option(T) = Some(T) | None`** (ADR-0034).

@@ -306,6 +306,16 @@ defmodule Rian.Reach do
   defp wide_prim_blocker,
     do: %{construct: "64-bit overflow op (no JS representation)", kind: :numeric, kills: [:js]}
 
+  # `__prim_str_to_atom` interns a string to a BEAM atom — only the BEAM emitter
+  # lowers it (Rust/JS/JVM have no atom value). A body that calls it is BEAM-only,
+  # so the gate matches the emitters (off `:rs`/`:js`/`:jvm`), never lying.
+  defp atom_prim_blocker,
+    do: %{
+      construct: "`Prim.str_to_atom` (atom is BEAM-only)",
+      kind: :atom,
+      kills: [:rs, :js, :jvm]
+    }
+
   defp fn_type_blocker,
     do: %{
       construct: "Fn(...) function type in a signature (no Rust closure-as-value lowering)",
@@ -570,6 +580,11 @@ defmodule Rian.Reach do
   # the gate lying. Must precede the generic `EId` clause.
   defp classify(%Core.ECall{fun: %Core.EId{name: f}}, _modnames, {bl, ca}) when f in @wide_prims,
     do: {[wide_prim_blocker() | bl], ca}
+
+  # `__prim_str_to_atom` — atom interning, only the BEAM lowers it (off non-BEAM).
+  # Must precede the generic `EId` local-call edge below (no local def of that name).
+  defp classify(%Core.ECall{fun: %Core.EId{name: "__prim_str_to_atom"}}, _modnames, {bl, ca}),
+    do: {[atom_prim_blocker() | bl], ca}
 
   # local function application — a call-graph edge
   defp classify(%Core.ECall{fun: %Core.EId{name: f}}, _modnames, {bl, ca}),

@@ -549,6 +549,19 @@ defmodule Rian.BeamTest do
       assert m.scale(0) == 0.0
     end
 
+    test "a quoted atom literal `:\"+\"` lowers to the BEAM operator atom" do
+      {:ok, m} = Beam.load(~s|def plus() Symbol := :"+"|, :rian_beam_qatom)
+      assert m.plus() == :+
+    end
+
+    test "`Prim.str_to_atom` interns a runtime string to a BEAM atom" do
+      {:ok, m} =
+        Beam.load("def a(s String) Symbol := Prim.str_to_atom(s)", :rian_beam_str_to_atom)
+
+      assert m.a("hello") == :hello
+      assert m.a("Foo") == :Foo
+    end
+
     test "the self-hosting lexer is FFI-free: `__prim_str_chars`, runs on BEAM" do
       {:ok, m} =
         Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_lex_ffifree)

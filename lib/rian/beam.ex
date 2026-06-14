@@ -555,6 +555,12 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, s),
     do: {:bin, @ln, [bin_seg(expr_form(a, s)), bin_seg(expr_form(b, s))]}
 
+  # string → atom (the BEAM-native interning the self-host backend needs to build
+  # Erlang variable/operator atoms; atoms are BEAM-only, so `Rian.Reach` pins a
+  # caller off `:rs`/`:js`/`:jvm`).
+  defp expr_form(%ECall{fun: %EId{name: "__prim_str_to_atom"}, args: [s_]}, s),
+    do: remote_call(:"Elixir.String", "to_atom", [s_], s)
+
   # a `Char`'s codepoint — identity on the BEAM, where a `Char` *is* its integer
   defp expr_form(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}, s),
     do: expr_form(c, s)

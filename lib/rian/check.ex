@@ -227,6 +227,10 @@ defmodule Rian.Check do
   # programmer's choice, exactly like Rust's `n as f64`.
   def infer(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [_]}, _env, _ic), do: "Float64"
 
+  # `__prim_str_to_atom(s) : Symbol` — string interning to a BEAM atom (ADR-0047).
+  # Atoms are BEAM-only; `Rian.Reach` pins a caller off `:rs`/`:js`/`:jvm`.
+  def infer(%ECall{fun: %EId{name: "__prim_str_to_atom"}, args: [_]}, _env, _ic), do: "Symbol"
+
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)

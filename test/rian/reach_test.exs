@@ -51,6 +51,16 @@ defmodule Rian.ReachTest do
       assert Enum.any?(rep["w"].blockers, &(&1.kind == :numeric and &1.kills == [:js]))
     end
 
+    test "a body that calls `Prim.str_to_atom` is BEAM-only (atoms have no Rust/JS/JVM value)" do
+      # string→atom interning is lowered only by the BEAM emitter (ADR-0047). The
+      # body-call must pin the function to `:ex` alone — otherwise the gate reports
+      # a non-BEAM target reachable and that emitter then raises, the gate lying.
+      rep = reach("def s(x String) Symbol := Prim.str_to_atom(x)")
+
+      assert targets(rep, "s") == [:ex]
+      assert Enum.any?(rep["s"].blockers, &(&1.kind == :atom and &1.kills == [:rs, :js, :jvm]))
+    end
+
     test "a Rian cross-module call is portable (not host FFI)" do
       rep =
         reach("""
