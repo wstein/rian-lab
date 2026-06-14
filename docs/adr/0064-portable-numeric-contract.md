@@ -189,12 +189,19 @@ explicitly rather than leave them silently open):*
   conservative checker *accepts* something it can prove wrong. Decision: add a bounds check to
   `literal_adopts?`/`lit_expr_adopts?` (reject a literal provably outside the declared width's range);
   not blocking, but tracked as a real soundness item, not "acceptable."
-- **Generic type-var inferred purely from literals — OUT OF SCOPE for now (documented limitation).**
-  `contains([1,2,3], 2)` makes `T = Int64` from the literals, so no `impl` for a JS-valid width matches,
-  and integer-generic stdlib stays `Int64` (off `:js`, honestly reported by Reach). Closing it needs
-  literals to carry a flexible integer type that unifies with the bound's impl width — a larger
-  inference change. Until then portable all-target code uses `Int53` explicitly (see the
-  literal-polymorphism section above).
+- **Generic type-var inferred purely from literals — OUT OF SCOPE for now (documented limitation,
+  measured 2026-06-14).** `contains([1,2,3], 2)` makes `T = Int64` from the literals, so no `impl` for a
+  JS-valid width matches, and integer-generic stdlib stays `Int64` (off `:js`, honestly reported by
+  Reach). **There is no contained fix.** A *narrow* "tvar-from-literals → `Int53`" change is inconsistent
+  with the corpus's *direct* literal usage (`eq(1,1)`, `demo_get_hit() Int64 := get(…, 2, 0)`): the
+  literal default and the `impl` width must agree, so the only consistent fix is finishing the global
+  **default-integer-literal migration** `Int64 → Int53`. That migration was **measured**: flipping the
+  one-line default (`Rian.Check.infer(%ENum{})`) turns **~46 tests red across 11 files**
+  (`check`/`decl`/`repl`/`features`/`macro`/`ffi`/…) — it changes what every bare `5` *means*, including
+  flipping bare-literal JS programs from BigInt to number mode (ADR-0064 §2a). It is a **dedicated
+  migration project**, not an increment, and was reverted twice before for exactly this reason. Until it
+  is scheduled as its own focused effort, portable all-target code uses `Int53` explicitly (see the
+  literal-polymorphism section above), and Reach reports the integer-generic stdlib off `:js` honestly.
 - **Default-precision ergonomics on Rust** — when can an `Int` provably fit `i64` (small-loop induction
   vars, indices) so we emit native `i64` not a bignum? A range/escape analysis, future.
 - **Mixed-width arithmetic** — `Int + Int64`: require an explicit cast (no implicit coercion, ADR-0035),
