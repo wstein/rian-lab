@@ -264,6 +264,21 @@ compile + run on real BEAM bytecode:
   ledger). `test/rian/compose_real_front_fixpoint_test.exs` runs `fib`/`max`/`gcd`/
   `poly` — with the **real** Pratt precedence and surface — identical to `Rian.Beam`.
   The remaining toy piece is the declaration layer (`selfhost_decl` is `:partial`).
+- [selfhost_compose_real_decl.rian](selfhost_compose_real_decl.rian) — **COMPOSITION
+  rung 9** (ADR-0063 Step 3): replaces the front-end's last toy piece — declaration
+  splitting — with the equivalence-locked [selfhost_decl.rian](selfhost_decl.rian).
+  The whole program is parsed by a cross-module `SelfhostDecl.parse_program`, its
+  `Decl`/`Expr`/`Pat` IR lowered to `selfhost_beam` Core/Pat (the **surface→Core
+  lowering** — incl. cons-list patterns → `PList`), then compiled by the cross-module
+  `SelfhostBeam.compile_forms`. **Both front-end (lex→SelfhostDecl) and back-end
+  (SelfhostBeam) are now verified ports**; the only driver-local glue is the lexer,
+  the lowering, and the Form inflater — none reimplementing a verified stage.
+  `selfhost_decl`'s surface has no `if` (that was rung 8) but **does** have cons-list
+  patterns, so this rung compiles list-pattern recursion —
+  `test/rian/compose_real_decl_fixpoint_test.exs` runs `fib`/`fact`/`even`/`odd`/
+  **`sum`**/**`len`** (over lists), identical to `Rian.Beam`. Both ports load under
+  `:"Elixir.Selfhost*"` atoms (ADR-0041); sibling-port calls are composition, not
+  host crutches. Path to `v1==v2`: widen `selfhost_decl` past its `:partial` slice.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
