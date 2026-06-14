@@ -13,11 +13,12 @@ defmodule Rian.RustModuleFixpointTest do
   # The emitter consumes RESOLVED + capability-LOWERED Core: this test does the
   # upstream work (parse, build the ctor→enum + struct meta, `Capability.rust_param`,
   # resolve variant/struct construction) and injects, then the port emits the
-  # module. Structs (decl/construct/field), closed + cons lists, and generic
-  # `<T: Clone>` signatures + bare-tvar-return clone are now covered; the rest of the
-  # owned↔borrow coercion, parametric monomorphization, maps, String-returns, the
-  # Elixir target, and struct *patterns* (a reference gap — Rian.Lower raises) are
-  # out of scope.
+  # module. Structs (decl/construct/field), closed + cons lists, generic
+  # `<T: Clone>` signatures + bare-tvar-return clone, and list PATTERNS (`[h | t]`
+  # → slice `[h, t @ ..]`) with the slice-element clone rebind are now covered; the
+  # rest of the owned↔borrow coercion, parametric monomorphization, maps,
+  # String-returns, the Elixir target, and struct *patterns* (a reference gap —
+  # Rian.Lower raises) are out of scope.
 
   setup_all do
     {:ok, mod} =
@@ -105,6 +106,15 @@ defmodule Rian.RustModuleFixpointTest do
     {:r_ctor_p, info.enum, info.ctor, info.named, info.labels || [], Enum.map(args, &rp(&1, m))}
   end
 
+  defp rp(%Core.PList{elems: ps, tail: :close}, m),
+    do: {:r_list_p, Enum.map(ps, &rp(&1, m)), :lp_close}
+
+  defp rp(%Core.PList{elems: ps, tail: %Core.PVar{name: n}}, m),
+    do: {:r_list_p, Enum.map(ps, &rp(&1, m)), {:lp_var, n}}
+
+  defp rp(%Core.PList{elems: ps, tail: %Core.PWild{}}, m),
+    do: {:r_list_p, Enum.map(ps, &rp(&1, m)), :lp_wild}
+
   defp pascal?(<<c, _::binary>>), do: c in ?A..?Z
 
   # ── IR -> the port's program shape ──
@@ -178,7 +188,14 @@ defmodule Rian.RustModuleFixpointTest do
     # is NOT yet ported, so the corpus is bare-var-return generics only.
     "def id(x val T) T forall T := x",
     "def fst(a val A, b val B) A forall A, B := a",
-    "def k(x val T, y val T) T forall T := x"
+    "def k(x val T, y val T) T forall T := x",
+    # list PATTERNS + the slice-element clone rebind: `[h | t]` matches a `&[T]`
+    # slice as `[h, t @ ..]`, and a used head binder is cloned back to an owned
+    # value (`{ let h = h.clone(); h }`). Closed `[]`, cons, var/wildcard tail,
+    # non-generic and generic (the generic also gets the bare-tvar return clone).
+    "def hd(xs val Vec(Int64), d Int64) Int64\ndef hd([], d) := d\ndef hd([h | t], _) := h",
+    "def hd2(xs val Vec(Int64), d Int64) Int64\ndef hd2([], d) := d\ndef hd2([h | _], _) := h",
+    "def first(xs Vec(T)) T forall T\ndef first([h | t]) := h"
   ]
 
   describe "self-hosting Rust-module fixpoint — Rian emitter vs Rian.Lower.rust_program" do
@@ -247,6 +264,28 @@ defmodule Rian.RustModuleFixpointTest do
                "fn fst<A: Clone, B: Clone>(a: &A, b: &B) -> A {"
 
       refute ported(mod, "def add(a Int64, b Int64) Int64 := a + b") =~ "<"
+    end
+
+    test "a list pattern matches a slice and clones the used head binder", %{mod: mod} do
+      out =
+        ported(
+          mod,
+          "def hd(xs val Vec(Int64), d Int64) Int64\ndef hd([], d) := d\ndef hd([h | t], _) := h"
+        )
+
+      # `[]` stays a slice pattern; `[h | t]` becomes the Rust rest-pattern
+      assert out =~ "([], d) => d,"
+      assert out =~ "([h, t @ ..], _) => { let h = h.clone(); h },"
+      # a wildcard tail drops the binder name
+      assert ported(
+               mod,
+               "def hd2(xs val Vec(Int64), d Int64) Int64\ndef hd2([], d) := d\ndef hd2([h | _], _) := h"
+             ) =~ "([h, ..], _) =>"
+
+      # generic + slice: the head clone AND the bare-tvar return clone both fire
+      first = ported(mod, "def first(xs Vec(T)) T forall T\ndef first([h | t]) := h")
+      assert first =~ "fn first<T: Clone>(xs: &[T]) -> T {"
+      assert first =~ "[h, t @ ..] => ({ let h = h.clone(); h }).clone(),"
     end
   end
 end

@@ -13,12 +13,14 @@
 # parser/Core stage's job and capability lowering is the (self-hosted) capability
 # stage's. Structs (decl/construction/field access) and closed + cons lists are
 # now covered, as are generic `<T: Clone>` signatures + a bare-tvar return clone
-# (`-> T` clones the borrowed body). The REST of the owned↔borrow coercion
-# (`&`-wrapping owned args to `&T` params, cloning borrowed values mid-body,
-# slice-element rebinds) and parametric-type monomorphization (`Vec(Pair)` ->
-# `Vec<Pair<K, V>>`, see `render_inst` below), plus maps, String-return coercion,
-# the Elixir text target, and struct *patterns* (a reference gap — `Rian.Lower`
-# raises) remain out of scope.
+# (`-> T` clones the borrowed body) and list PATTERNS (`[h | t]` -> the slice
+# rest-pattern `[h, t @ ..]`) with the slice-element clone rebind (a used head
+# binder is `let h = h.clone();`-rebound to an owned value). The REST of the
+# owned↔borrow coercion (`&`-wrapping owned args to `&T` params, cloning borrowed
+# values mid-body in calls/list elements) and parametric-type monomorphization
+# (`Vec(Pair)` -> `Vec<Pair<K, V>>`, see `render_inst` below), plus maps,
+# String-return coercion, the Elixir text target, and struct *patterns* (a
+# reference gap — `Rian.Lower` raises) remain out of scope.
 # ---------------------------------------------------------------------------
 
 mod SelfhostRust do
@@ -53,6 +55,12 @@ mod SelfhostRust do
              | RTupleP(Vec(RPat))
              | ROkP(RPat)
              | RErrP(RPat)
+             | RListP(Vec(RPat), LPTail)
+
+  # the tail of a list pattern: `[]`/`[a, b]` is LpClose; `[h | t]` is LpVar("t");
+  # `[h | _]` is LpWild (the binder is dropped). A non-empty tail becomes the Rust
+  # slice rest-pattern `t @ ..` / `..`.
+  type LPTail := LpClose | LpVar(String) | LpWild
 
   type Guard := GNone | GSome(Core)
   type Param := Param(String, String)
@@ -175,7 +183,86 @@ mod SelfhostRust do
   def arm(Clause, String, Vec(String)) String
   def arm(Clause(pats, guard, body), ret, tvars) :=
     "        " <> arm_pat(pats) <> guard_str(guard) <> " => " <>
-      ret_coerce(render(body), ret, tvars) <> ",\n"
+      ret_coerce(wrap_rebinds(rebind_strs(pats, used_ids(body)), render(body)), ret, tvars) <>
+      ",\n"
+
+  # A list pattern matches against a `&[T]` slice, so its element binders are
+  # borrowed (`&T`). Any binder the body USES is cloned back to an owned `T` with
+  # a `let h = h.clone();` prepended inside a block — mirroring `Rian.Lower`'s
+  # `arm_rebinds`. A binder used only by the guard needs no rebind (rustc would
+  # flag it unused), so we filter on the body's used identifiers.
+  def wrap_rebinds(Vec(String), String) String
+  def wrap_rebinds([], body) := body
+  def wrap_rebinds(rs, body) := "{ " <> space_join(rs) <> " " <> body <> " }"
+
+  def rebind_strs(Vec(RPat), Vec(String)) Vec(String)
+  def rebind_strs([], _) := []
+  def rebind_strs([p | rest], used) := app(clones(slice_elem_vars(p), used), rebind_strs(rest, used))
+
+  def clones(Vec(String), Vec(String)) Vec(String)
+  def clones([], _) := []
+  def clones([v | rest], used)
+    if member(v, used) do
+      ["let " <> v <> " = " <> v <> ".clone();" | clones(rest, used)]
+    else
+      clones(rest, used)
+    end
+  end
+
+  # binders sitting in slice-ELEMENT position of a list pattern (the cons tail is
+  # excluded — it stays a borrowed slice). Non-list patterns contribute nothing.
+  def slice_elem_vars(RPat) Vec(String)
+  def slice_elem_vars(RListP(ps, _)) := pat_vars_list(ps)
+  def slice_elem_vars(_) := []
+
+  def pat_vars_list(Vec(RPat)) Vec(String)
+  def pat_vars_list([]) := []
+  def pat_vars_list([p | rest]) := app(pat_vars(p), pat_vars_list(rest))
+
+  def pat_vars(RPat) Vec(String)
+  def pat_vars(RVar(n)) := [n]
+  def pat_vars(RCtorP(_, _, _, _, args)) := pat_vars_list(args)
+  def pat_vars(RTupleP(ps)) := pat_vars_list(ps)
+  def pat_vars(ROkP(p)) := pat_vars(p)
+  def pat_vars(RErrP(p)) := pat_vars(p)
+  def pat_vars(RListP(ps, _)) := pat_vars_list(ps)
+  def pat_vars(_) := []
+
+  # identifiers the body references (an over-approximation, like `collect_ids`):
+  # the call callee counts, so a binder shadowing a callee name is still seen.
+  def used_ids(Core) Vec(String)
+  def used_ids(CNum(_)) := []
+  def used_ids(CStr(_)) := []
+  def used_ids(CId(n)) := [n]
+  def used_ids(CUnary(_, x)) := used_ids(x)
+  def used_ids(CBin(_, l, r)) := app(used_ids(l), used_ids(r))
+  def used_ids(CCall(f, args)) := [f | used_each(args)]
+  def used_ids(CIf(c, t, e)) := app(used_ids(c), app(used_ids(t), used_ids(e)))
+  def used_ids(CTuple(es)) := used_each(es)
+  def used_ids(COk(v)) := used_ids(v)
+  def used_ids(CErr(e)) := used_ids(e)
+  def used_ids(CVariant(_, _, _, pairs)) := used_pairs(pairs)
+  def used_ids(CStruct(_, pairs)) := used_pairs(pairs)
+  def used_ids(CDot(h, _)) := used_ids(h)
+  def used_ids(CList(es, LClose)) := used_each(es)
+  def used_ids(CList(es, LCons(t))) := app(used_each(es), used_ids(t))
+
+  def used_each(Vec(Core)) Vec(String)
+  def used_each([]) := []
+  def used_each([c | rest]) := app(used_ids(c), used_each(rest))
+
+  def used_pairs(Vec(VPair)) Vec(String)
+  def used_pairs([]) := []
+  def used_pairs([VP(_, v) | rest]) := app(used_ids(v), used_pairs(rest))
+
+  def app(Vec(String), Vec(String)) Vec(String)
+  def app([], ys) := ys
+  def app([x | rest], ys) := [x | app(rest, ys)]
+
+  def space_join(Vec(String)) String
+  def space_join([]) := ""
+  def space_join([s]) := s
+  def space_join([s | rest]) := s <> " " <> space_join(rest)
 
   # a bare owned-tvar return (`-> T`) yields a borrowed `&T` in the base arms (a
   # returned param), so `.clone()` it to the owned `T` the signature promises.
@@ -212,6 +299,19 @@ mod SelfhostRust do
   def rpat(RErrP(p)) := "Err(" <> rpat(p) <> ")"
   def rpat(RTupleP(ps)) := "(" <> rpat_list(ps) <> ")"
   def rpat(RCtorP(enum, ctor, named, labels, args)) := ctor_pat(enum, ctor, named, labels, args)
+  def rpat(RListP(ps, LpClose)) := "[" <> rpat_list(ps) <> "]"
+  def rpat(RListP(ps, LpVar(n))) := "[" <> comma_join(snoc(rpat_each(ps), n <> " @ ..")) <> "]"
+  def rpat(RListP(ps, LpWild)) := "[" <> comma_join(snoc(rpat_each(ps), "..")) <> "]"
+
+  # render each element pattern (so the cons tail can be comma-appended).
+  def rpat_each(Vec(RPat)) Vec(String)
+  def rpat_each([]) := []
+  def rpat_each([p | rest]) := [rpat(p) | rpat_each(rest)]
+
+  # append one element to the end of a string vector.
+  def snoc(Vec(String), String) Vec(String)
+  def snoc([], x) := [x]
+  def snoc([y | rest], x) := [y | snoc(rest, x)]
 
   def ctor_pat(enum String, ctor String, named Bool, labels Vec(String), args Vec(RPat)) String
     if named do
