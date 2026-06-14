@@ -120,8 +120,9 @@ architectural cost.
   signature rewritten to its instantiation — generic functions reuse the param names, non-generic
   builders infer concrete args from the body). All gated on generic functions, so non-generic code is
   untouched. The integer Eq/Ord/Dict stdlib compiles to and runs on Rust (`reach_rust_honesty_test`,
-  `rustc --test`). The only Rust-generic residual is a compound owned-tvar return (a tuple/`Fn` of a
-  tvar), still honestly pinned off `:rs` (ADR-0061).
+  `rustc --test`). `Option(T)`/`T | E`/user-sum-over-`T` generic returns also reach `:rs` (the payload is
+  cloned at construction). The only Rust-generic residual is an **`Fn(...)`-typed** return mentioning a
+  tvar (a returned closure — needs `impl Fn`/`Box<dyn Fn>`), still honestly pinned off `:rs` (ADR-0061).
 - **Self-hosting** (`SELFHOST.md`, `examples/rian/selfhost_*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.

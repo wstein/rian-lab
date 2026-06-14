@@ -858,13 +858,16 @@ defmodule Rian.Lower do
     Process.put(:rian_rust_err_string, err?)
   end
 
+  # the payload of `Ok(_)`/`Err(_)` must be owned: a borrowed `&T` (a generic ok-type,
+  # `def f() T | E := {:ok, x}`) is `.clone()`d like any owned-position value
+  # (`rust_owned_elem`), and a `&str` for a `String` ok/err-type additionally `.to_string()`s.
   defp ok_payload(v) do
-    s = p(v, 0, :rust)
+    s = rust_owned_elem(v)
     if Process.get(:rian_rust_ok_string, false), do: "(#{s}).to_string()", else: s
   end
 
   defp err_payload(e) do
-    s = p(e, 0, :rust)
+    s = rust_owned_elem(e)
     if Process.get(:rian_rust_err_string, false), do: "(#{s}).to_string()", else: s
   end
 

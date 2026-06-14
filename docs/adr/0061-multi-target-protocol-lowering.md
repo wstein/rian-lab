@@ -158,8 +158,12 @@ Consequences of target-relativity:
        owned `String`) becomes `&format!("{}{}", "a", "")` (`owned_str_arg`). **`18_dict_eq` compiles to and
        runs on Rust** (`rustc --test`). *Known limit:* the concrete-instantiation inference handles a
        builder whose tail is a generic constructor call; an un-inferrable builder falls back to `i64`.
-  The remaining Rust-generic residual is only a **compound** owned-tvar return (a tuple/`Fn` mentioning a
-  tvar), still pinned off `:rs` by `sig_returns_tvar?`.
+    3. **compound owned-tvar returns — DONE (2026-06-14).** `Option(T)`, `T | E` (a generic ok-type), and
+       a user sum over a tvar now reach `:rs`: the payload is `.clone()`d at construction
+       (`rust_owned_elem` on variant fields and on `Ok`/`Err`). Verified on rustc (`reach_rust_honesty_test`).
+  The **only** Rust-generic residual is an **`Fn(...)`-typed return** that mentions a tvar (a returned
+  closure capturing a `&T` needs `impl Fn`/`Box<dyn Fn>`, rustc E0782) — `sig_returns_tvar?` pins just
+  that off `:rs`.
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
   `Self`-returning methods (`def add(a Self, b Self) Self`) and associated types are a further Rust
   mapping question (return-position `Self`, generic associated types).

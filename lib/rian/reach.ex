@@ -320,29 +320,20 @@ defmodule Rian.Reach do
   # already implies the function is generic. The Rust emitter borrows every generic
   # param (`&T`) and never coerces back to an owned `T`/`Vec<T>`, so such a function
   # cannot lower (ADR-0061/0047). A `Bool`/`Int64` return is unaffected.
-  # A generic owned-tvar return blocks `:rs` only for shapes the emitter's owned↔borrow
-  # coercion does NOT handle. A **bare** tvar return (`T`) and a `Vec(<tvar>)` return are
-  # now handled (`Rian.Lower`: clone a returned `&T`, `&`-borrow owned call/element args,
-  # clone elements stored into an owned `Vec`) — verified by `17_stdlib_eq_ord` on rustc.
-  # A compound owned-tvar return (a tuple/`Fn` mentioning a tvar) is not yet handled, so
-  # it still blocks (ADR-0061).
+  # A generic owned-tvar return blocks `:rs` only for the shape the emitter's owned↔borrow
+  # coercion still cannot lower: an **`Fn(...)` closure** mentioning a tvar (a returned
+  # closure capturing a `&T` needs `impl Fn`/`Box<dyn Fn>`, rustc E0782). Every other
+  # owned-tvar return is handled (`Rian.Lower`): a bare `T` and a `Vec(<tvar>)` clone the
+  # returned `&T`/elements, and `Option(T)`/`T | E`/a user sum over `T` clone the payload
+  # at construction (`rust_owned_elem` on variant/`Ok`/`Err`). Verified on rustc.
   defp sig_returns_tvar?(f) do
     ret = Map.get(f, :ret)
-    type_has_tvar?(ret) and not handled_owned_tvar_ret?(ret, Map.get(f, :tvars, []))
+    type_has_tvar?(ret) and fn_returns_tvar?(ret)
   end
 
-  defp handled_owned_tvar_ret?(ret, tvars) do
-    cond do
-      ret in tvars ->
-        true
-
-      match?("Vec(" <> _, ret) ->
-        String.trim_trailing(String.replace_prefix(ret, "Vec(", ""), ")") in tvars
-
-      true ->
-        false
-    end
-  end
+  # an `Fn(...)`-typed return that mentions a type variable — the one owned-tvar return
+  # shape the Rust emitter does not yet lower.
+  defp fn_returns_tvar?(ret), do: match?("Fn(" <> _, ret)
 
   # Does a type string contain a type-variable token? `tvar?` is the compiler-wide
   # convention (`Rian.Check`): a single capital optionally followed by a digit.
