@@ -202,21 +202,7 @@ defmodule Rian.JS do
 
   # split a parameter string on top-level commas (respecting nested `(`/`)`), to
   # count a protocol method's arity (`a Self, b Vec(T)` -> 2)
-  defp split_top_commas(""), do: []
-
-  defp split_top_commas(s) do
-    {parts, cur, _} =
-      s
-      |> String.graphemes()
-      |> Enum.reduce({[], "", 0}, fn
-        ",", {ps, cur, 0} -> {[cur | ps], "", 0}
-        "(", {ps, cur, d} -> {ps, cur <> "(", d + 1}
-        ")", {ps, cur, d} -> {ps, cur <> ")", d - 1}
-        ch, {ps, cur, d} -> {ps, cur <> ch, d}
-      end)
-
-    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
-  end
+  defp split_top_commas(s), do: Rian.TypeStr.split_top_commas(s)
 
   defp sum_ctor_map(prog) do
     types =

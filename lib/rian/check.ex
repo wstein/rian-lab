@@ -453,19 +453,7 @@ defmodule Rian.Check do
 
   # split a type string on top-level commas, respecting nested `(`/`)` (so a
   # nested `Fn(Int64,Int64)` argument is one component, not two)
-  defp split_top_commas(s) do
-    {parts, cur, _} =
-      s
-      |> String.graphemes()
-      |> Enum.reduce({[], "", 0}, fn
-        ",", {parts, cur, 0} -> {[cur | parts], "", 0}
-        "(", {parts, cur, d} -> {parts, cur <> "(", d + 1}
-        ")", {parts, cur, d} -> {parts, cur <> ")", d - 1}
-        ch, {parts, cur, d} -> {parts, cur <> ch, d}
-      end)
-
-    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1)
-  end
+  defp split_top_commas(s), do: Rian.TypeStr.split_top_commas(s)
 
   defp infer_block([], _env, _ic, value), do: value
 

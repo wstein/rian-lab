@@ -80,18 +80,7 @@ defmodule Rian.Capability do
     end
   end
 
-  defp split_top_level(s) do
-    {parts, last, _} =
-      String.graphemes(s)
-      |> Enum.reduce({[], "", 0}, fn
-        "(", {acc, cur, d} -> {acc, cur <> "(", d + 1}
-        ")", {acc, cur, d} -> {acc, cur <> ")", d - 1}
-        ",", {acc, cur, 0} -> {[String.trim(cur) | acc], "", 0}
-        c, {acc, cur, d} -> {acc, cur <> c, d}
-      end)
-
-    Enum.reverse([String.trim(last) | parts])
-  end
+  defp split_top_level(s), do: Rian.TypeStr.split_top_commas(s)
 
   def borrowed("String"), do: "&str"
 

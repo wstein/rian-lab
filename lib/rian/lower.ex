@@ -841,21 +841,7 @@ defmodule Rian.Lower do
   defp rust_generics(_), do: ""
 
   # paren-aware top-level comma split of a parameter string
-  defp pcommas(""), do: []
-
-  defp pcommas(s) do
-    {parts, cur, _} =
-      s
-      |> String.graphemes()
-      |> Enum.reduce({[], "", 0}, fn
-        ",", {ps, cur, 0} -> {[cur | ps], "", 0}
-        "(", {ps, cur, d} -> {ps, cur <> "(", d + 1}
-        ")", {ps, cur, d} -> {ps, cur <> ")", d - 1}
-        ch, {ps, cur, d} -> {ps, cur <> ch, d}
-      end)
-
-    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
-  end
+  defp pcommas(s), do: Rian.TypeStr.split_top_commas(s)
 
   # One Rust `fn` (no type/struct preamble). `vis` is `""` or `"pub "`.
   defp rust_fn(func, ctx, vis) do

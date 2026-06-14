@@ -297,19 +297,5 @@ defmodule Rian.Protocol do
   # split a parameter list on **top-level** commas only — a comma inside a
   # parametric type (`Map(String, Int64)`, `Result(A, E)`, `Fn(A, B)`) is part of
   # that one parameter's type, not a parameter separator.
-  defp split_commas(""), do: []
-
-  defp split_commas(s) do
-    {parts, cur, _depth} =
-      s
-      |> String.graphemes()
-      |> Enum.reduce({[], "", 0}, fn
-        ",", {parts, cur, 0} -> {[cur | parts], "", 0}
-        "(", {parts, cur, d} -> {parts, cur <> "(", d + 1}
-        ")", {parts, cur, d} -> {parts, cur <> ")", d - 1}
-        ch, {parts, cur, d} -> {parts, cur <> ch, d}
-      end)
-
-    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
-  end
+  defp split_commas(s), do: Rian.TypeStr.split_top_commas(s)
 end
