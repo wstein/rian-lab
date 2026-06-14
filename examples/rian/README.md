@@ -127,12 +127,17 @@ compile + run on real BEAM bytecode:
   surface (`test/rian/js_module_fixpoint_test.exs`). Protocol dispatch, the
   whole-program int-mode, and `Rian.Shadow` are out of scope (program-level /
   separate-subsystem concerns).
-- [selfhost_rust.rian](selfhost_rust.rian) — the **Rust text backend** port
-  (ADR-0063, ADR-0049): emits Rust source from Core. Unlike JS, it is
-  **precedence-aware** — it threads each node's precedence and parenthesises only
-  when a child binds looser than its context — matching `Rian.Lower.emit_expr(_,
-  :rust)` term-for-term (`test/rian/rust_emit_fixpoint_test.exs`). Atoms are
-  BEAM-only; calls/lists/structs remain.
+- [selfhost_rust.rian](selfhost_rust.rian) — the **Rust text backend**, fully
+  self-hosted (ADR-0063, ADR-0049/0055/0061): a whole-module emitter — sum types →
+  `#[derive(…)] enum`, functions with `match`-over-the-param-tuple multi-clause
+  dispatch (capability-lowered signatures like `o: &Opt`), the precedence-aware
+  expression emitter, `if`, variant construct (`Enum::Ctor`) + ctor-pattern match,
+  guards. **Equivalence-locked** against `Rian.Lower.rust_program`
+  (`test/rian/rust_module_fixpoint_test.exs`). The emitter consumes *resolved* +
+  *capability-lowered* Core — resolution is the parser/Core stage's job and
+  capability lowering is the (self-hosted) capability stage's. Generics (tvars +
+  owned↔borrow coercion), iso/cons lists, String-returns, structs/maps, and the
+  Elixir text target are out of scope.
 - [selfhost_jvm.rian](selfhost_jvm.rian) — the **Kotlin/JVM backend**, fully
   self-hosted (ADR-0063, ADR-0049 Tier 2): a whole-module emitter — sum types →
   `sealed interface` + `object`/`data class`, functions with **multi-clause

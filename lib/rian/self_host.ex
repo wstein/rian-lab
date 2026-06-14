@@ -116,13 +116,13 @@ defmodule Rian.SelfHost do
     },
     %{
       id: :text_backend,
-      name: "Rust/Elixir text backend",
+      name: "Rust text backend",
       role: :backend,
-      status: :partial,
+      status: :self_hosted,
       source: "selfhost_rust.rian",
-      test: "test/rian/rust_emit_fixpoint_test.exs",
+      test: "test/rian/rust_module_fixpoint_test.exs",
       note:
-        "precedence-aware emitter equals Rian.Lower.emit_expr over BOTH :rust and :elixir for literals/unary/binary/call/if/tuple/closed-list (prec/assoc shared; only operator spelling + if/tuple/list shape differ by target); dot, cons-lists, structs, case, maps remain"
+        "the whole-module Rust emitter — sum types → derive'd enums, functions with match-over-param-tuple multi-clause dispatch (capability-lowered signatures), operators, if, variant construct+match, guards — equals Rian.Lower.rust_program; the emitter consumes RESOLVED + capability-LOWERED Core (resolution = parser/Core stage, capability lowering = the self-hosted capability stage). Generics (tvars + owned↔borrow coercion), iso/cons lists, String-return coercion, structs/maps, and the Elixir text target are out of scope"
     },
     %{
       id: :js_backend,
