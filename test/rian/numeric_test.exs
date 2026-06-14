@@ -73,4 +73,22 @@ defmodule Rian.NumericTest do
       assert m.exact(max64, 1) == max64 + 1
     end
   end
+
+  describe "JS rejects a module mixing `Int` (BigInt) with `Int53`/`Int32` (number) (ADR-0064 §2a)" do
+    # Regression: number-mode is whole-program, so a mixed module used to silently
+    # demote `Int` to a bounded JS `number` (e.g. `big()` emitted `2`, not `2n`).
+    # That is the precision change ADR-0064 forbids — reject the mix loudly.
+    test "an Int + Int53 module is refused" do
+      assert_raise JS.Unsupported, ~r/cannot mix `Int`.*`Int53`/, fn ->
+        JS.compile("def depth(n Int53) Int53 := n\ndef big() Int := 2")
+      end
+    end
+
+    test "a pure-Int module still emits BigInt; a pure-Int53 module still emits number" do
+      assert JS.compile("def big() Int := 2") =~ "return 2n"
+      js53 = JS.compile("def inc(n Int53) Int53 := n + 1")
+      assert js53 =~ "(n + 1)"
+      refute js53 =~ "1n"
+    end
+  end
 end

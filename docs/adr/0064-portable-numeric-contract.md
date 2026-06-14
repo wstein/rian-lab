@@ -88,6 +88,9 @@ wrap prelude (`Int.wrapping_add` etc.) is therefore portable across BEAM/Rust/JV
 elsewhere — the integer that reaches every target. `Int` reaches `[:ex, :js]` only (the bignum gap on
 Rust/JVM); wide fixed-width reaches `[:ex, :rs, :jvm]` only (no JS). Integer mode on JS is whole-program:
 a module that mentions any `number`-width type emits all integers as `number`, never mixing with `BigInt`.
+Because the two carriers cannot coexist, a module that mixes `Int` (BigInt) with a `number`-width type
+(`Int53`/`Int32`) is **refused by the JS emitter** (`Rian.JS.reject_mixed_int_mode!`) rather than silently
+demoting `Int` to a bounded `number` — the same "never change a type's precision" rule as §2a.
 
 **No type is cheap on every target** — that is inherent (the BEAM has no fixed width; Rust has no free
 bignum). The resolution is **intent**: `Int` is cheap where math is native (BEAM/JS) and the default;

@@ -63,7 +63,9 @@ The statement form is implemented and runs on the BEAM: `Rian.Pratt` parses a ba
 statement (outside a `with`) into a `{:bind_arrow, name, expr}`, and `parse_block` **desugars** a block
 carrying one into a `Result` `case` — `{:ok, name}` binds and continues; `{:error, e}` short-circuits,
 returning `{:error, e}` unchanged. It is pure surface→surface sugar over the same `case` `with` already
-produces, so the existing checker/exhaustiveness/BEAM machinery handle it with no new node. Verified
+produces, so the existing checker/exhaustiveness/BEAM machinery handle it with no new node. Because a
+`<-` "binds and continues," a **trailing** `<-` (nothing follows it) is a compile error rather than
+silently evaluating its ok branch to `nil` — use `:=` to just return a `Result`. Verified
 end-to-end (`test/rian/propagation_test.exs`): a two-step `calc` returns the value when both binds
 succeed and propagates the first `{:error, …}` otherwise. **Remaining:** the `try` prefix (option A,
 inline form); the **pub-boundary error-set check** (the desugared `case` types the error, but the

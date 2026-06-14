@@ -55,4 +55,21 @@ defmodule Rian.PropagationTest do
       assert mod.calc(100, 5, 0) == {:error, :divzero}
     end
   end
+
+  describe "a trailing `<-` is a compile error (ADR-0066: it binds and continues)" do
+    # Regression: a `<-` with nothing after it used to compile and silently return
+    # `nil` on the ok branch (while the error branch returned `{:error, e}`). It is
+    # meaningless — reject it instead of mis-running.
+    test "a `<-` as the last statement of a block is rejected" do
+      assert_raise ArgumentError, ~r/must be followed by an expression/, fn ->
+        Pratt.parse_body("x <- f(a)")
+      end
+    end
+
+    test "a `<-` after earlier statements but still last is rejected" do
+      assert_raise ArgumentError, ~r/must be followed by an expression/, fn ->
+        Pratt.parse_body("y := 1 ; x <- f(a)")
+      end
+    end
+  end
 end

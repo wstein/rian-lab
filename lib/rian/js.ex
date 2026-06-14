@@ -103,6 +103,7 @@ defmodule Rian.JS do
     # its own signature would otherwise default to BigInt and pass `0n` into a
     # number-mode callee. So if the program uses a JS-number width (`Int53`/`Int32`)
     # anywhere, the entire module emits in number-mode (ADR-0064).
+    reject_mixed_int_mode!(prog)
     Process.put(:rian_js_int53, program_number_mode?(prog))
     # the BEAM `:dispatcher` is a guarded runtime type-test — not the JS shape.
     # JS keeps the `:impl` methods (they lower as plain functions) and regenerates
@@ -251,6 +252,31 @@ defmodule Rian.JS do
   end
 
   defp js_number_int?(t), do: is_binary(t) and Regex.match?(@js_number_int, t)
+
+  # `Int` (arbitrary precision -> BigInt) and a fixed-width JS-number type
+  # (`Int53`/`Int32`/smaller) cannot coexist in one JS module: BigInt and number
+  # never mix in a JS expression, and the whole-program number-mode would silently
+  # demote `Int` to a bounded `number` — exactly the precision change ADR-0064
+  # forbids. Refuse the mix loudly rather than miscompile. (`\bInt\b` matches bare
+  # `Int` only — not `Int53`/`Int64`/`UInt8`.)
+  @js_bigint_int ~r/\bInt\b/
+  defp reject_mixed_int_mode!(prog) do
+    sig_types =
+      (Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs))
+      |> Enum.flat_map(fn f -> [f.ret | Enum.map(f.params, & &1.type)] end)
+      |> Enum.filter(&is_binary/1)
+
+    if Enum.any?(sig_types, &Regex.match?(@js_number_int, &1)) and
+         Enum.any?(sig_types, &Regex.match?(@js_bigint_int, &1)) do
+      raise(
+        Unsupported,
+        "ecmascript: a module cannot mix `Int` (arbitrary precision -> BigInt) with a " <>
+          "fixed-width JS-number type (`Int53`/`Int32`) — BigInt and `number` are incompatible " <>
+          "in JS, and number-mode would silently truncate `Int` (ADR-0064 §2a). " <>
+          "Split them into separate modules or pick one integer representation."
+      )
+    end
+  end
 
   # Wide fixed-width integers (`Int64/128`, `UInt64/128`) exceed the JS safe-integer
   # range and have no faithful `number` representation; we refuse to silently

@@ -489,6 +489,16 @@ defmodule Rian.Pratt do
       [] ->
         {:block, before}
 
+      [{:bind_arrow, name, _e}] ->
+        # A bare `<-` "binds and continues" (ADR-0066): it must be followed by an
+        # expression that uses the bound value. A *trailing* `<-` has nothing to
+        # continue to — the ok branch would silently evaluate to `nil` while the
+        # error branch returns `{:error, e}` — so it is a mistake, not sugar.
+        raise ArgumentError,
+              "a bare `<-` propagation bind (`#{name} <- …`) must be followed by an " <>
+                "expression; nothing may follow it as the block's last statement " <>
+                "(it binds and continues — use `:=` to just return the Result)"
+
       [{:bind_arrow, name, e} | after_arrow] ->
         prop_case =
           {:case, e,
