@@ -149,6 +149,32 @@ defmodule Rian.SelfHost do
 
   @weights %{self_hosted: 1.0, partial: 0.5, not_started: 0.0}
 
+  # COMPOSITION axis (ADR-0063 Step 3) — measured SEPARATELY from per-stage
+  # equivalence. `percent/0` above counts how many stages match the reference in
+  # ISOLATION (each fixpoint uses Elixir projection glue). That can reach 100% and
+  # still not be a self-hosting LOOP. This tracks the orthogonal question: how many
+  # stages hand their Rian output to the next Rian stage DIRECTLY, no glue. The full
+  # bootstrap terminus (Stage 3: v1==v2) is gated on this reaching the whole
+  # pipeline — not on `percent`.
+  @composition %{
+    rung: "lex → parse → lower → forms",
+    stages: 4,
+    subset: "arithmetic expressions (identifiers, integers, `+ - *`, parens)",
+    source: "selfhost_compose.rian",
+    test: "test/rian/compose_fixpoint_test.exs",
+    note:
+      "four stages wired directly over shared types (no projection glue); the composed output is real Erlang abstract forms that compile via :compile.forms and RUN identically to the full Elixir toolchain"
+  }
+
+  @doc """
+  The composition rung (ADR-0063 Step 3) — measured separately from `percent/0`.
+  Per-stage equivalence (`percent`) verifies each stage against the reference in
+  isolation; composition verifies that stages connect end-to-end with no glue. The
+  bootstrap loop (Stage 3) is gated on composition, not on the per-stage number.
+  """
+  @spec composition() :: map()
+  def composition, do: @composition
+
   @doc "The declared pipeline stages with their self-host state."
   @spec stages() :: [map()]
   def stages, do: @stages
@@ -199,6 +225,16 @@ defmodule Rian.SelfHost do
     **#{percent()}% self-hosted** — #{count(:self_hosted)} stage(s) self-hosted,
     #{count(:partial)} partial, #{count(:not_started)} not started, of #{length(@stages)}.
 
+    **Composition (ADR-0063 Step 3) — a separate axis.** The percentage above counts
+    stages verified against the reference *in isolation* (each fixpoint uses Elixir
+    projection glue); it can reach 100% without the pipeline ever closing a loop. The
+    composition rung measures the orthogonal question — stages handing their Rian output
+    to the next Rian stage with **no glue**. Current rung: **#{@composition.rung}**
+    (#{@composition.stages} stages), over the #{@composition.subset}. #{@composition.note}.
+    Source: `#{@composition.source}`, fixpoint: `#{@composition.test}`. The bootstrap
+    terminus (Stage 3, v1==v2) is gated on this reaching the whole pipeline — not on the
+    per-stage percentage.
+
     | Stage | Role | Self-hosted | Evidence | Notes |
     | --- | --- | --- | --- | --- |
     #{rows}
@@ -246,7 +282,10 @@ defmodule Rian.SelfHost do
     "selfhost_modules.rian" => ["String.to_charlist"],
     # the parser builds the keyword-named surface tags `:if`/`:case`/`:with`/
     # `:struct` (reserved words Rian can't spell as atoms) via String.to_atom.
-    "selfhost_parse.rian" => ["String.to_atom"]
+    "selfhost_parse.rian" => ["String.to_atom"],
+    # the COMPOSITION rung's `forms` stage builds the Erlang operator/variable
+    # atoms (`:+`/`:A`) Rian can't spell, via String.to_atom (ADR-0063 Step 3).
+    "selfhost_compose.rian" => ["String.to_atom"]
   }
 
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."

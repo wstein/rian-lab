@@ -163,6 +163,18 @@ compile + run on real BEAM bytecode:
   against `Rian.Check.infer` (`test/rian/checker_infer_fixpoint_test.exs`). It is
   conservative — an unbound identifier is `unknown`, not a guess. Env, floats,
   calls, lambdas, and `case` remain.
+- [selfhost_compose.rian](selfhost_compose.rian) — the first **COMPOSITION** rung
+  (ADR-0063 Step 3): the per-stage ports above are each verified in *isolation*
+  (diffed against the Elixir reference via projection glue). This module instead
+  **wires four stages directly** over shared types — `compile(s) =
+  forms(lower(parse(lex(s))))` — with no Elixir glue between them. Its output IS
+  Erlang abstract forms (`{:op, _, :+, …}`), so `test/rian/compose_fixpoint_test.exs`
+  feeds them to `:compile.forms`, **runs** the module, and asserts it behaves
+  identically to the full Elixir toolchain. Real Rian source (arithmetic
+  expressions over variables), not a toy language; the one host crutch is
+  `String.to_atom` (the operator/variable atoms Rian can't spell), counted in the
+  ledger. Widening the subset and closing the `v1==v2` loop (Stage 3) are the next
+  rungs.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via

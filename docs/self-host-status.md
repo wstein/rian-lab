@@ -9,6 +9,16 @@ terminus and is *not* measured here.
 **91% self-hosted** — 9 stage(s) self-hosted,
 2 partial, 0 not started, of 11.
 
+**Composition (ADR-0063 Step 3) — a separate axis.** The percentage above counts
+stages verified against the reference *in isolation* (each fixpoint uses Elixir
+projection glue); it can reach 100% without the pipeline ever closing a loop. The
+composition rung measures the orthogonal question — stages handing their Rian output
+to the next Rian stage with **no glue**. Current rung: **lex → parse → lower → forms**
+(4 stages), over the arithmetic expressions (identifiers, integers, `+ - *`, parens). four stages wired directly over shared types (no projection glue); the composed output is real Erlang abstract forms that compile via :compile.forms and RUN identically to the full Elixir toolchain.
+Source: `selfhost_compose.rian`, fixpoint: `test/rian/compose_fixpoint_test.exs`. The bootstrap
+terminus (Stage 3, v1==v2) is gated on this reaching the whole pipeline — not on the
+per-stage percentage.
+
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
 | Lexer | frontend | ✅ yes | `examples/rian/selfhost_lexer_v2.rian` · `test/rian/fixpoint_test.exs` | token stream equals Rian.Lexer over slices 1-5 (incl. tokenize/1, {:nl}) |
