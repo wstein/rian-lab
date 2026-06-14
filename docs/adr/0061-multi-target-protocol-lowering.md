@@ -167,10 +167,14 @@ Consequences of target-relativity:
        blocker (`reach_rust_honesty_test`, incl. a `@tag :rust` case proving the pinned shape fails rustc).
     3. **compound owned-tvar returns — DONE (2026-06-14).** `Option(T)`, `T | E` (a generic ok-type), and
        a user sum over a tvar now reach `:rs`: the payload is `.clone()`d at construction
-       (`rust_owned_elem` on variant fields and on `Ok`/`Err`). Verified on rustc (`reach_rust_honesty_test`).
-  The remaining Rust-generic residuals are an **`Fn(...)`-typed return** that mentions a tvar (a returned
-  closure capturing a `&T` needs `impl Fn`/`Box<dyn Fn>`, rustc E0782 — `sig_returns_tvar?` pins just that),
-  plus every **parametric** shape outside the monomorphic subset above.
+       (`rust_owned_elem` on variant fields and on `Ok`/`Err`) — **including a payload reached via a `:=`
+       binding** (`y := x; Some(y)`), where the rebind clones the borrowed `&T` to an owned `T`. Nested
+       generic returns (`Vec(Option(T))` → `Vec<Option<T>>`) lower correctly too (`Rian.Capability.owned`
+       strips exactly the one closing paren per layer). Verified on rustc (`reach_rust_honesty_test`).
+  The remaining Rust-generic residual is an **`Fn(...)` anywhere in the return** that mentions a tvar (a
+  returned closure capturing a `&T` needs `impl Fn`/`Box<dyn Fn>`, rustc E0782 — `returns_unlowerable_fn?`
+  pins it whether the `Fn(` is the whole return or nested, e.g. `Option(Fn(Int53, T))`), plus every
+  **parametric** shape outside the monomorphic subset above.
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
   `Self`-returning methods (`def add(a Self, b Self) Self`) and associated types are a further Rust
   mapping question (return-position `Self`, generic associated types).

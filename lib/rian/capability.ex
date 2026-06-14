@@ -58,7 +58,11 @@ defmodule Rian.Capability do
       )
 
   def owned("Vec(" <> rest) do
-    inner = String.trim_trailing(rest, ")")
+    # strip exactly the one `)` that closes this `Vec(`, not every trailing paren —
+    # `trim_trailing/2` would eat both in `Vec(Option(T))`, leaving `Option(T` and
+    # emitting the malformed `Vec<Option(T>`. The inner type is then lowered in turn,
+    # so nested generics (`Vec(Option(T))` -> `Vec<Option<T>>`) round-trip.
+    inner = String.replace_suffix(rest, ")", "")
     "Vec<" <> owned(inner) <> ">"
   end
 
@@ -85,7 +89,9 @@ defmodule Rian.Capability do
   def borrowed("String"), do: "&str"
 
   def borrowed("Vec(" <> rest) do
-    inner = String.trim_trailing(rest, ")")
+    # strip only the closing `)` of this `Vec(` (see `owned/1`), so a nested element
+    # type (`Vec(Option(T))` -> `&[Option<T>]`) lowers correctly.
+    inner = String.replace_suffix(rest, ")", "")
     "&[" <> owned(inner) <> "]"
   end
 

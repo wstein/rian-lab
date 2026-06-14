@@ -345,12 +345,14 @@ defmodule Rian.Reach do
   # at construction (`rust_owned_elem` on variant/`Ok`/`Err`). Verified on rustc.
   defp sig_returns_tvar?(f) do
     ret = Map.get(f, :ret)
-    type_has_tvar?(ret) and fn_returns_tvar?(ret)
+    type_has_tvar?(ret) and returns_unlowerable_fn?(ret)
   end
 
-  # an `Fn(...)`-typed return that mentions a type variable — the one owned-tvar return
-  # shape the Rust emitter does not yet lower.
-  defp fn_returns_tvar?(ret), do: match?("Fn(" <> _, ret)
+  # A return type that contains an `Fn(...)` closure **anywhere** — not just as a
+  # prefix: a nested `Option(Fn(Int53, T))` is just as unlowerable as a bare
+  # `Fn(Int53, T)` return (Rust `Fn` is a trait, so it needs `impl Fn`/`Box<dyn Fn>`,
+  # rustc E0782). A prefix-only match let the nested form escape and claim `:rs`.
+  defp returns_unlowerable_fn?(ret), do: String.contains?(ret, "Fn(")
 
   # Does a type string contain a type-variable token? `tvar?` is the compiler-wide
   # convention (`Rian.Check`): a single capital optionally followed by a digit.

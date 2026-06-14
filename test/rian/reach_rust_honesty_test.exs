@@ -88,6 +88,57 @@ defmodule Rian.ReachRustHonestyTest do
       refute :rs in (rep["mk"].reach |> MapSet.to_list())
       assert :generic in (rep["mk"].blockers |> Enum.map(& &1.kind))
     end
+
+    test "an `Fn(...)` *nested* in the return type is also off :rs (not just a prefix)" do
+      rep = reach_src("def mk(x T) Option(Fn(Int53, T)) forall T := Some((n) -> x)")
+      refute :rs in (rep["mk"].reach |> MapSet.to_list())
+      assert :generic in (rep["mk"].blockers |> Enum.map(& &1.kind))
+    end
+
+    test "an owned-tvar payload reached via a `:=` binding still reaches :rs (binder cloned)" do
+      rep =
+        reach_src("def wrap(x T) Option(T) forall T\n  y := x\n  Some(y)\nend")
+
+      assert :rs in (rep["wrap"].reach |> MapSet.to_list())
+    end
+
+    test "a nested-generic owned-tvar return (`Vec(Option(T))`) reaches :rs" do
+      rep = reach_src("def wrap(x T) Vec(Option(T)) forall T := [Some(x)]")
+      assert :rs in (rep["wrap"].reach |> MapSet.to_list())
+    end
+
+    # The widened :rs claims are load-bearing: these shapes — a `:=`-indirected
+    # payload and a nested-generic return — were over-claimed before (rustc rejected
+    # the emitted Rust). Compile the emitted Rust to prove the matrix is now honest.
+    @tag :rust
+    test "the binding-indirected and nested-generic returns genuinely compile on rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          for src <- [
+                "def wrap(x T) Option(T) forall T\n  y := x\n  Some(y)\nend",
+                "def wrap(x T) Vec(Option(T)) forall T := [Some(x)]",
+                "type E := Bad\ndef ok1(x T) T | E forall T\n  y := x\n  {:ok, y}\nend"
+              ] do
+            rust = Rian.Lower.rust_program(Decl.parse(src))
+            f = Path.join(System.tmp_dir!(), "rian_pos_#{System.unique_integer([:positive])}.rs")
+            File.write!(f, rust)
+
+            try do
+              {out, code} =
+                System.cmd(rustc, ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", f],
+                  stderr_to_stdout: true
+                )
+
+              assert code == 0, "Reach claims :rs, so the emitted Rust must compile:\n#{out}"
+            after
+              File.rm(f)
+            end
+          end
+      end
+    end
   end
 
   defp reach_src(src), do: Decl.parse(src) |> Reach.analyze()

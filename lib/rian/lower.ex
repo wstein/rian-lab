@@ -1854,9 +1854,15 @@ defmodule Rian.Lower do
   end
 
   defp emit_block(%EBlock{stmts: stmts}, :rust) do
+    # A `:=` binding to a borrowed `&T` param (`y := x`, generic `x: &T`) makes the
+    # binder a reference too, so a later owned construction over it (`Some(y)`,
+    # `Ok(y)`) would store `&T` where `T` is expected (rustc E0308). Clone such a
+    # rebind to an owned `T` here — `rust_owned_elem` clones a borrowed-var RHS and
+    # passes everything else through — so the binder is owned and downstream
+    # construction needs no further coercion (mirrors destructured-binder cloning).
     Enum.map_join(stmts, " ", fn
-      {:bind, n, e} -> "let #{n} = #{p(e, 0, :rust)};"
-      {:typed_bind, n, _t, e} -> "let #{n} = #{p(e, 0, :rust)};"
+      {:bind, n, e} -> "let #{n} = #{rust_owned_elem(e)};"
+      {:typed_bind, n, _t, e} -> "let #{n} = #{rust_owned_elem(e)};"
       {:expr, e} -> p(e, 0, :rust)
     end)
   end
