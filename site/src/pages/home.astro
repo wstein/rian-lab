@@ -1,0 +1,468 @@
+---
+import SiteShell from "../layouts/SiteShell.astro";
+import LoweredCell from "../components/site/LoweredCell.astro";
+import { TARGET_META } from "../lib/highlight";
+import tour from "../data/tour.json";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const hero = tour.cells.find((c) => c.id === "types")!;
+const order = ["ex", "rs", "js", "jvm"];
+
+const features = [
+  {
+    k: "CAPABILITIES",
+    h: "Ownership without lifetimes",
+    p: "A parameter's reference capability — val · iso · tag — drives its Rust signature and BEAM-side linearity. You get ownership-checked Rust without writing a single lifetime.",
+  },
+  {
+    k: "GATES",
+    h: "Refuse to emit on failure",
+    p: "Type inference, Maranget exhaustiveness, and capability checks each gate the pipeline. A non-total match or a leaked capability is a compile error, never a runtime surprise.",
+  },
+  {
+    k: "PORTABILITY",
+    h: "Inferred, not annotated",
+    p: "A function is portable iff it reaches every target. The compiler infers that set; host FFI and concurrency pin to the BEAM by design. The matrix is honest, not a promise.",
+  },
+];
+
+const pipeline = [".rian", "parse", "check", "gate", "BEAM", "Rust", "JS", "JVM"];
+const stats = [
+  ["1", "typed core"],
+  ["4", "back ends"],
+  ["3", "emit gates"],
+  ["~30", "ADRs"],
+];
+---
+
+<SiteShell title="Rian — one core, four targets" active="home">
+  <!-- hero -->
+  <section class="hp-hero">
+    <div class="hp-hero-grid">
+      <div class="hp-hero-copy">
+        <div class="rl-eyebrow">TYPED · CAPABILITY-DISCIPLINED · MULTI-TARGET</div>
+        <h1 class="hp-h1">One core. <span style="color:var(--accent);">Four back ends.</span></h1>
+        <p class="hp-lede">
+          Rian is a typed, capability-disciplined language that lowers the <em>same</em> source to the BEAM, Rust, JS,
+          and the JVM. Write the logic once; the compiler proves it and emits idiomatic code per target.
+        </p>
+        <div class="hp-cta">
+          <a class="rl-btn rl-btn-primary" href={`${base}/by-example`}>Read by example →</a>
+          <a class="rl-btn rl-btn-ghost" href={`${base}/playground`}>Open the playground</a>
+        </div>
+        <div class="hp-stats">
+          {
+            stats.map(([n, l]) => (
+              <div>
+                <div class="hp-stat-n">{n}</div>
+                <div class="hp-stat-l">{l}</div>
+              </div>
+            ))
+          }
+        </div>
+      </div>
+
+      <div class="hp-code">
+        <div class="hp-tabs" role="tablist" aria-label="Target">
+          {
+            order.map((t) => (
+              <button class="hp-tab" data-set={t} type="button">
+                <span class="rl-dot" style={`width:7px;height:7px;background:${TARGET_META[t].dot};`} />
+                {t === "ex" ? "BEAM" : t === "rs" ? "Rust" : t === "js" ? "JS" : "JVM"}
+              </button>
+            ))
+          }
+        </div>
+        <LoweredCell cell={hero} heading={false} />
+      </div>
+    </div>
+  </section>
+
+  <!-- why -->
+  <section class="hp-band">
+    <div class="rl-wrap">
+      <div class="rl-eyebrow">WHY RIAN</div>
+      <h2 class="hp-h2">Discipline you can lower</h2>
+      <div class="hp-features">
+        {
+          features.map((f) => (
+            <div class="hp-feat">
+              <div class="hp-feat-k">{f.k}</div>
+              <h3>{f.h}</h3>
+              <p>{f.p}</p>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- how it works -->
+  <section id="how" class="rl-wrap hp-how">
+    <div class="rl-eyebrow">HOW IT WORKS</div>
+    <h2 class="hp-h2">One pipeline, four emitters</h2>
+    <p class="hp-sub">
+      The typed Core IR is the spine (ADR-0050): every emitter consumes it, so a new feature is threaded once and
+      lowered everywhere.
+    </p>
+    <div class="hp-pipe">
+      {
+        pipeline.map((p) => {
+          const dot = { BEAM: "ex", Rust: "rs", JS: "js", JVM: "jvm" }[p];
+          const color = dot ? TARGET_META[dot].dot : undefined;
+          return (
+            <>
+              <span
+                class="rl-mono hp-chip"
+                style={p === "gate" ? "color:#fff;background:var(--accent);" : color ? `color:${color};` : "color:#e2e8f0;"}>
+                {p}
+              </span>
+              {(p === ".rian" || p === "parse" || p === "check") && <span class="hp-arrow">→</span>}
+            </>
+          );
+        })
+      }
+    </div>
+  </section>
+
+  <!-- targets / capability matrix -->
+  <section id="targets" class="hp-band">
+    <div class="rl-wrap">
+      <div class="rl-eyebrow">TARGETS</div>
+      <h2 class="hp-h2">Reachability is inferred and honest</h2>
+      <p class="hp-sub">Portability is a property the compiler computes (ADR-0057) — not a flag a developer sets.</p>
+      <div class="hp-matrix">
+        <div class="hp-matrix-head rl-mono">
+          <span>function</span>
+          {order.map((t) => <span style={`color:${TARGET_META[t].dot};`}>:{t}</span>)}
+          <span>why</span>
+        </div>
+        {
+          tour.reachExamples.map((r) => (
+            <div class="hp-matrix-row">
+              <code class="rl-mono">{r.name}</code>
+              {order.map((t) => (
+                <span class="rl-mono" style={`color:${r.reach.includes(t) ? TARGET_META[t].dot : "var(--dim)"};`}>
+                  {r.reach.includes(t) ? "✓" : "·"}
+                </span>
+              ))}
+              <span class="hp-why">{r.blurb}</span>
+            </div>
+          ))
+        }
+      </div>
+    </div>
+  </section>
+
+  <!-- examples teaser -->
+  <section class="rl-wrap hp-how">
+    <div class="rl-eyebrow">EXAMPLES</div>
+    <h2 class="hp-h2">Learn it by reading the lowerings</h2>
+    <div class="hp-ex">
+      {
+        tour.cells.map((c) => (
+          <a class="hp-ex-card" href={`${base}/by-example#${c.id}`}>
+            <code class="rl-mono">{c.file}</code>
+            <h4>{c.title}</h4>
+            <div class="hp-ex-covers">{c.covers.join(" · ")}</div>
+          </a>
+        ))
+      }
+    </div>
+    <a class="hp-browse" href={`${base}/by-example`}>Read the full tour →</a>
+  </section>
+
+  <!-- cta -->
+  <section class="hp-cta-band">
+    <div class="rl-wrap hp-cta-inner">
+      <h2>Read the corpus, not the marketing.</h2>
+      <p>The ADRs are the source of truth; the compiler is the proof. Start where the decisions live.</p>
+      <div class="hp-cta">
+        <a class="rl-btn rl-btn-primary" href={`${base}/docs-reader`}>Browse the ADRs →</a>
+        <a class="rl-btn rl-btn-ghost" href={`${base}/by-example`}>Or start by example</a>
+      </div>
+    </div>
+  </section>
+</SiteShell>
+
+<script is:inline>
+  (function () {
+    document.querySelectorAll(".hp-tab[data-set]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const t = b.dataset.set;
+        document.documentElement.dataset.target = t;
+        try {
+          localStorage.setItem("rian-target", t);
+        } catch (e) {}
+      });
+    });
+  })();
+</script>
+
+<style>
+  .hp-hero {
+    padding: clamp(40px, 7vw, 84px) clamp(18px, 4vw, 36px) clamp(30px, 5vw, 60px);
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  .hp-hero-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: clamp(28px, 4vw, 56px);
+    align-items: center;
+  }
+  .hp-h1 {
+    font-size: clamp(38px, 6vw, 62px);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.02;
+    margin: 14px 0 20px;
+  }
+  .hp-lede {
+    font-size: clamp(16px, 2.2vw, 19px);
+    line-height: 1.6;
+    color: var(--ink);
+    margin: 0 0 28px;
+    max-width: 540px;
+  }
+  .hp-cta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .hp-stats {
+    display: flex;
+    gap: clamp(20px, 4vw, 40px);
+    margin-top: 34px;
+  }
+  .hp-stat-n {
+    font-size: 28px;
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    color: var(--text-strong);
+  }
+  .hp-stat-l {
+    font-size: 12.5px;
+    color: var(--dim);
+    margin-top: 2px;
+  }
+  .hp-code {
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    overflow: hidden;
+    background: var(--code-bg);
+    box-shadow: 0 30px 60px -40px rgba(0, 0, 0, 0.6);
+  }
+  .hp-tabs {
+    display: flex;
+    gap: 2px;
+    padding: 8px 10px 0;
+    background: var(--code-chrome);
+    border-bottom: 1px solid var(--border);
+  }
+  .hp-tab {
+    font-family: "JetBrains Mono", monospace;
+    cursor: pointer;
+    border: none;
+    background: transparent;
+    color: var(--dim);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 9px 13px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-bottom: 2px solid transparent;
+  }
+  [data-target="ex"] .hp-tab[data-set="ex"],
+  [data-target="rs"] .hp-tab[data-set="rs"],
+  [data-target="js"] .hp-tab[data-set="js"],
+  [data-target="jvm"] .hp-tab[data-set="jvm"] {
+    color: var(--text-strong);
+    border-bottom-color: var(--accent);
+  }
+  .hp-code :global(.rl-grid) {
+    border: none;
+    border-radius: 0;
+  }
+  .hp-band {
+    background: var(--raise);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: clamp(40px, 6vw, 72px) 0;
+  }
+  .hp-how {
+    padding: clamp(40px, 6vw, 72px) clamp(18px, 4vw, 36px);
+  }
+  .hp-h2 {
+    font-size: clamp(26px, 3.6vw, 34px);
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    margin: 10px 0 14px;
+  }
+  .hp-sub {
+    font-size: 16px;
+    line-height: 1.6;
+    color: var(--ink);
+    max-width: 660px;
+    margin: 0 0 26px;
+  }
+  .hp-features {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+    gap: 16px;
+    margin-top: 24px;
+  }
+  .hp-feat {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 24px;
+  }
+  .hp-feat-k {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 10px;
+  }
+  .hp-feat h3 {
+    font-size: 18px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .hp-feat p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink);
+    margin: 0;
+  }
+  .hp-pipe {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+  }
+  .hp-chip {
+    font-size: 13px;
+    font-weight: 600;
+    background: #1e293b;
+    border-radius: 7px;
+    padding: 8px 14px;
+  }
+  .hp-arrow {
+    color: #64748b;
+  }
+  .hp-matrix {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    overflow: hidden;
+    background: var(--card);
+  }
+  .hp-matrix-head,
+  .hp-matrix-row {
+    display: grid;
+    grid-template-columns: 1.2fr repeat(4, 44px) 2fr;
+    gap: 12px;
+    align-items: center;
+    padding: 13px 18px;
+  }
+  .hp-matrix-head {
+    font-size: 11.5px;
+    color: var(--dim);
+    border-bottom: 1px solid var(--border);
+    text-transform: lowercase;
+  }
+  .hp-matrix-row {
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+  }
+  .hp-matrix-row:last-child {
+    border-bottom: none;
+  }
+  .hp-why {
+    font-size: 12.5px;
+    color: var(--dim);
+  }
+  .hp-ex {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    gap: 14px;
+    margin-top: 22px;
+  }
+  .hp-ex-card {
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    padding: 18px;
+    text-decoration: none;
+    color: inherit;
+    background: var(--card);
+    display: block;
+  }
+  .hp-ex-card:hover {
+    border-color: var(--accent);
+  }
+  .hp-ex-card code {
+    font-size: 11.5px;
+    color: var(--accent);
+  }
+  .hp-ex-card h4 {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 8px 0 6px;
+  }
+  .hp-ex-covers {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: var(--dim);
+  }
+  .hp-browse {
+    display: inline-block;
+    margin-top: 20px;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .hp-cta-band {
+    background: var(--accent);
+    padding: clamp(44px, 6vw, 72px) 0;
+  }
+  .hp-cta-inner h2 {
+    font-size: clamp(26px, 3.6vw, 34px);
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: #fff;
+    margin: 0 0 10px;
+  }
+  .hp-cta-inner p {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.88);
+    margin: 0 0 22px;
+    max-width: 540px;
+  }
+  .hp-cta-band .rl-btn-primary {
+    background: #fff;
+    color: var(--accent);
+  }
+  .hp-cta-band .rl-btn-ghost {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+  @media (max-width: 880px) {
+    .hp-hero-grid {
+      grid-template-columns: 1fr;
+    }
+    .hp-matrix-head,
+    .hp-matrix-row {
+      grid-template-columns: 1fr repeat(4, 30px);
+    }
+    .hp-why {
+      display: none;
+    }
+  }
+</style>
