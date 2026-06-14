@@ -265,12 +265,16 @@ defmodule Rian.Reach do
     # emitter *does* lower (`contains`/`sort`/`maximum`, and parametric `Pair` over
     # `enum Pair<K,V>`) keep `:rs`.
     #
-    # A generic whose RETURN type is a *compound* owned type variable (a tuple/`Fn`
-    # mentioning a tvar): the owned↔borrow coercion (`Rian.Lower`) handles a bare `T`
-    # and `Vec(T)` return, but not these — so they still fail rustc E0308 (ADR-0061).
-    # The owned-from-borrowed coercion for `T`/`Vec(T)` and parametric `enum Pair<K,V>`
-    # (with monomorphic instantiation inference) both landed (2026-06-14).
-    owned_gen = if sig_returns_tvar?(f), do: [owned_generic_blocker()], else: []
+    # An `Fn(...)` function type anywhere in the signature (a parameter or the return)
+    # has no Rust lowering: a closure-as-value needs `impl Fn`/`Box<dyn Fn>` and the
+    # text emitter spells it as the bare trait `Fn<...>` (rustc E0782) — and an `Fn`
+    # *parameter* additionally mangles to an undeclared type (E0425). This holds
+    # whether the `Fn` mentions a tvar or not (`adder() Fn(Int53, Int53)`,
+    # `apply_twice(f Fn(Int53, Int53), …)`, generic `map(f Fn(T, U), …)` all fail), so
+    # the gate pins any `Fn(`-bearing signature off `:rs`. (The owned↔borrow coercion
+    # for bare `T`/`Vec(T)` returns and `Option(T)`/`T | E`/sum-over-`T` landed
+    # 2026-06-14, so those are *not* blocked — only `Fn` remains unlowerable.)
+    owned_gen = if sig_uses_fn_type?(f), do: [fn_type_blocker()], else: []
     # A function whose signature touches a *parametric* user type (`Pair`, `enum
     # Pair<K,V>`) reaches `:rs` only for the narrow shape the emitter actually lowers
     # (`Rian.Lower`): the type's tvar fields are all *bare* tvars, and the function
@@ -302,9 +306,9 @@ defmodule Rian.Reach do
   defp wide_prim_blocker,
     do: %{construct: "64-bit overflow op (no JS representation)", kind: :numeric, kills: [:js]}
 
-  defp owned_generic_blocker,
+  defp fn_type_blocker,
     do: %{
-      construct: "generic returning an owned type variable (no Rust borrow→owned coercion)",
+      construct: "Fn(...) function type in a signature (no Rust closure-as-value lowering)",
       kind: :generic,
       kills: [:rs]
     }
@@ -332,27 +336,19 @@ defmodule Rian.Reach do
   defp result_value_blocker,
     do: %{construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: :result, kills: [:jvm]}
 
-  # A function is generic-in-its-result iff its declared return type mentions a type
-  # variable (`T`/`Vec(T)`/`V`) — only a `forall` tvar can appear there, so this
-  # already implies the function is generic. The Rust emitter borrows every generic
-  # param (`&T`) and never coerces back to an owned `T`/`Vec<T>`, so such a function
-  # cannot lower (ADR-0061/0047). A `Bool`/`Int64` return is unaffected.
-  # A generic owned-tvar return blocks `:rs` only for the shape the emitter's owned↔borrow
-  # coercion still cannot lower: an **`Fn(...)` closure** mentioning a tvar (a returned
-  # closure capturing a `&T` needs `impl Fn`/`Box<dyn Fn>`, rustc E0782). Every other
-  # owned-tvar return is handled (`Rian.Lower`): a bare `T` and a `Vec(<tvar>)` clone the
-  # returned `&T`/elements, and `Option(T)`/`T | E`/a user sum over `T` clone the payload
-  # at construction (`rust_owned_elem` on variant/`Ok`/`Err`). Verified on rustc.
-  defp sig_returns_tvar?(f) do
-    ret = Map.get(f, :ret)
-    type_has_tvar?(ret) and returns_unlowerable_fn?(ret)
+  # Does any signature position — a parameter type or the return type — contain an
+  # `Fn(...)` function type? The Rust emitter has no closure-as-value lowering: it
+  # spells the type as the bare trait `Fn<...>` (rustc E0782) and an `Fn` *parameter*
+  # mangles to an undeclared type (E0425). This is independent of type variables —
+  # a concrete `Fn(Int53, Int53)` fails just as a generic `Fn(T, U)` does — and of
+  # position (param or return), so a substring check over the whole signature is the
+  # honest gate. Every *non-`Fn`* owned-tvar return (bare `T`, `Vec(T)`, `Option(T)`,
+  # `T | E`, a user sum over `T`) is lowered by the owned↔borrow coercion and is not
+  # blocked here (ADR-0061, landed 2026-06-14).
+  defp sig_uses_fn_type?(f) do
+    types = Enum.map(Map.get(f, :params, []), & &1.type) ++ [Map.get(f, :ret)]
+    Enum.any?(types, fn t -> is_binary(t) and String.contains?(t, "Fn(") end)
   end
-
-  # A return type that contains an `Fn(...)` closure **anywhere** — not just as a
-  # prefix: a nested `Option(Fn(Int53, T))` is just as unlowerable as a bare
-  # `Fn(Int53, T)` return (Rust `Fn` is a trait, so it needs `impl Fn`/`Box<dyn Fn>`,
-  # rustc E0782). A prefix-only match let the nested form escape and claim `:rs`.
-  defp returns_unlowerable_fn?(ret), do: String.contains?(ret, "Fn(")
 
   # Does a type string contain a type-variable token? `tvar?` is the compiler-wide
   # convention (`Rian.Check`): a single capital optionally followed by a digit.

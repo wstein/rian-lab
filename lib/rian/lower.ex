@@ -811,7 +811,11 @@ defmodule Rian.Lower do
       |> Map.new(&{&1.name, &1})
 
     rust_type = rust_proto_type!(type)
-    bodies = Enum.map_join(methods, "\n", &rust_impl_method(&1, sig_for[&1.name], rust_type, c))
+    copy_recv? = Rian.Capability.copy?(type)
+
+    bodies =
+      Enum.map_join(methods, "\n", &rust_impl_method(&1, sig_for[&1.name], rust_type, c, copy_recv?))
+
     "impl Rian#{proto} for #{rust_type} {\n#{bodies}\n}"
   end
 
@@ -819,7 +823,7 @@ defmodule Rian.Lower do
   # a sum/struct keeps its (PascalCase) name.
   defp rust_proto_type!(type), do: Rian.Capability.rust_name(type)
 
-  defp rust_impl_method(method, sig, rust_type, c) do
+  defp rust_impl_method(method, sig, rust_type, c, copy_recv?) do
     [recv | rest_names] = method.params |> pcommas() |> Enum.map(&String.trim/1)
     rest_sig = tl(pcommas(sig.params))
 
@@ -830,7 +834,15 @@ defmodule Rian.Lower do
     ret_ty = self_subst(sig.ret, rust_type)
     put_result_str_flags(ret_ty)
     body = method.body |> rust_proto_body(c) |> coerce_ret(ret_ty)
-    "    fn #{method.name}(#{params}) -> #{rust_ret(ret_ty)} { let #{recv} = self; #{body} }"
+    # A Copy-primitive receiver used as a *value* — an `if` condition, arithmetic —
+    # needs an owned binding: `&self` cannot stand where `bool`/`i64` is expected
+    # (rustc E0308, e.g. `Show for Bool`'s `if b`). Deref-copy it when the impl target
+    # is Copy AND no *other* param is `Self`: a comparison method (`eq(a Self, b Self)`)
+    # keeps both operands borrowed so `&T == &T` still type-checks, while a
+    # single-receiver method (`show`) is exactly the value case.
+    other_self? = Enum.any?(rest_sig, fn p -> elem(name_type(p), 1) == "Self" end)
+    recv_rhs = if copy_recv? and not other_self?, do: "*self", else: "self"
+    "    fn #{method.name}(#{params}) -> #{rust_ret(ret_ty)} { let #{recv} = #{recv_rhs}; #{body} }"
   end
 
   # a Rian string literal lowers to a Rust `&str`, so a function (or impl method)

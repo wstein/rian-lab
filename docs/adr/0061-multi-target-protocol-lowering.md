@@ -171,10 +171,14 @@ Consequences of target-relativity:
        binding** (`y := x; Some(y)`), where the rebind clones the borrowed `&T` to an owned `T`. Nested
        generic returns (`Vec(Option(T))` → `Vec<Option<T>>`) lower correctly too (`Rian.Capability.owned`
        strips exactly the one closing paren per layer). Verified on rustc (`reach_rust_honesty_test`).
-  The remaining Rust-generic residual is an **`Fn(...)` anywhere in the return** that mentions a tvar (a
-  returned closure capturing a `&T` needs `impl Fn`/`Box<dyn Fn>`, rustc E0782 — `returns_unlowerable_fn?`
-  pins it whether the `Fn(` is the whole return or nested, e.g. `Option(Fn(Int53, T))`), plus every
-  **parametric** shape outside the monomorphic subset above.
+  The remaining Rust-generic residual is an **`Fn(...)` function type anywhere in a signature** — a
+  parameter *or* the return, concrete *or* generic. The emitter has no closure-as-value lowering (it
+  spells the bare trait `Fn<…>`, rustc E0782, and an `Fn` parameter mangles to an undeclared type,
+  E0425), so `sig_uses_fn_type?` pins any `Fn(`-bearing signature off `:rs` — a returned closure
+  (`adder() Fn(Int53, Int53)`), a higher-order parameter (`apply_twice(f Fn(Int53, Int53), …)`,
+  `map(f Fn(T, U), …)`), and a nested `Option(Fn(Int53, T))` alike. Plus every **parametric** shape
+  outside the monomorphic subset above. (A Copy-primitive *protocol-impl receiver* used as a value —
+  `Show for Bool`'s `if b` — now derefs correctly and reaches `:rs`; it was a silent over-claim.)
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
   `Self`-returning methods (`def add(a Self, b Self) Self`) and associated types are a further Rust
   mapping question (return-position `Self`, generic associated types).

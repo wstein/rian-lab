@@ -95,6 +95,24 @@ defmodule Rian.ReachRustHonestyTest do
       assert :generic in (rep["mk"].blockers |> Enum.map(& &1.kind))
     end
 
+    test "a *concrete* `Fn(...)` return (no tvar) is off :rs — `Fn` is a trait, not a type" do
+      rep = reach_src("def adder(n Int53) Fn(Int53, Int53) := (x) -> x + n")
+      refute :rs in (rep["adder"].reach |> MapSet.to_list())
+      assert :generic in (rep["adder"].blockers |> Enum.map(& &1.kind))
+    end
+
+    test "an `Fn(...)` *parameter* is off :rs (concrete and generic)" do
+      conc = reach_src("def apply_twice(f Fn(Int53, Int53), x Int53) Int53 := f(f(x))")
+      refute :rs in (conc["apply_twice"].reach |> MapSet.to_list())
+
+      gen =
+        reach_src(
+          "def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U\ndef map(_, []) := []\ndef map(f, [h | t]) := [f(h) | map(f, t)]"
+        )
+
+      refute :rs in (gen["map"].reach |> MapSet.to_list())
+    end
+
     test "an owned-tvar payload reached via a `:=` binding still reaches :rs (binder cloned)" do
       rep =
         reach_src("def wrap(x T) Option(T) forall T\n  y := x\n  Some(y)\nend")

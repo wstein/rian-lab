@@ -490,6 +490,25 @@ defmodule Rian.ProtocolTest do
     end
 
     @tag :rust
+    test "a Copy-primitive receiver used as a value (`Show for Bool`'s `if b`) derefs and runs" do
+      # `&self` is `&bool`; the method binds `let b = *self` so `if b` sees a `bool`,
+      # not the `&bool` that would be rustc E0308. Regression for the 13_protocols
+      # over-claim (Reach said :rs while the emitted Rust did not compile).
+      rustc_run(
+        """
+        protocol Show do
+          def show(self Self) String
+        end
+        impl Show for Bool do
+          def show(b) := if b do "yes" else "no" end
+        end
+        """,
+        ~s|println!("{} {}", true.show(), false.show());|,
+        "yes no"
+      )
+    end
+
+    @tag :rust
     test "Lower.rust_program assembles a whole program into one rustc module (#1, ADR-0061)" do
       # types/traits/impls emitted once; sum + 2 protocols + cons-recursive bounded
       # generic compose in ONE module (the per-unit emitter repeats type defs)
