@@ -526,4 +526,58 @@ defmodule Rian.LowerTest do
       end
     end
   end
+
+  describe "String-returning functions lower to an owned Rust `String` (coerce_ret)" do
+    @str_src ~S|mod S do
+  pub def s() String := "hi"
+  pub def label(n Int64) String
+  pub def label(0) := "zero"
+  pub def label(_) := "other"
+  pub def greet(name String) String := "hi " <> name
+end|
+
+    test "each clause arm is coerced to String, leaving non-String returns alone" do
+      [{_, %{rust: rust}}] = Rian.Decl.compile(@str_src)
+      # &str-literal arms gain `.to_string()`; the owned-String return type holds
+      assert rust =~ ~S|() => ("hi").to_string(),|
+      assert rust =~ ~S|0 => ("zero").to_string(),|
+      assert rust =~ "pub fn greet(name: &str) -> String"
+      # an Int64-returning function is untouched (no spurious coercion)
+      [{_, %{rust: r2}}] = Rian.Decl.compile("def dbl(n Int64) Int64 := n * 2")
+      refute r2 =~ "to_string()"
+    end
+
+    test "Reach claims :rs and the emitter now produces it (matrix matches emitter)" do
+      rep = @str_src |> Rian.Decl.parse() |> Rian.Reach.analyze()
+      for f <- ~w(s label greet), do: assert(:rs in MapSet.to_list(rep[f].reach))
+    end
+
+    @tag :rust
+    test "the emitted Rust compiles and runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          [{_, %{rust: rust}}] = Rian.Decl.compile(@str_src)
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_coerce_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <>
+              "\nfn main() { println!(\"{} {} {}\", s::s(), s::label(0), s::greet(\"bob\")); }"
+          )
+
+          {_, 0} =
+            System.cmd(rustc, ["--edition", "2021", path, "-o", bin], stderr_to_stdout: true)
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "hi zero hi bob"
+      end
+    end
+  end
 end

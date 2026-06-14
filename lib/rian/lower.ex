@@ -742,8 +742,11 @@ defmodule Rian.Lower do
     "    fn #{method.name}(#{params}) -> #{rust_ret(ret_ty)} { let #{recv} = self; #{body} }"
   end
 
-  # a Rian string literal lowers to a Rust `&str`; coerce an impl method that
-  # returns `String` (`.to_string()` is a no-op clone if the body is already one).
+  # a Rian string literal lowers to a Rust `&str`, so a function (or impl method)
+  # declared to return `String` must coerce its body to the owned type the
+  # signature promises. Applied per clause arm in `rust_fn` and to impl-method
+  # bodies in `rust_impl_method`; `.to_string()` is a no-op clone when the body
+  # already yields a `String` (e.g. a `<>` concat that lowered to `format!`).
   defp coerce_ret(body, "String"), do: "(#{body}).to_string()"
   defp coerce_ret(body, _ret), do: body
 
@@ -900,6 +903,12 @@ defmodule Rian.Lower do
           if rebinds == [],
             do: rust_arm_body(ast, body),
             else: "{ #{Enum.join(rebinds, " ")} #{body} }"
+
+        # a `String`-returning function lowers its clause bodies to `&str`; coerce
+        # the arm so the owned `String` the signature promises is produced (a
+        # no-op clone if the arm already yields a `String`). Mirrors the protocol
+        # method path (`rust_impl_method`).
+        arm = coerce_ret(arm, func.ret)
 
         # binders bound inside a list/slice element are `&T` — a guard over them
         # must deref (`*c`); the arm body's arithmetic works on `&T` directly

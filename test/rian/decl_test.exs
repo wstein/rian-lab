@@ -193,7 +193,9 @@ defmodule Rian.DeclTest do
         """)
 
       assert out.elixir =~ "def classify(n) when n > 0 do \"positive\" end"
-      assert out.rust =~ "n if n > 0 => \"positive\","
+      # the `&str` arm is coerced to the owned `String` the signature returns
+      assert out.rust =~ "fn classify(n: i64) -> String"
+      assert out.rust =~ "n if n > 0 => (\"positive\").to_string(),"
 
       Code.eval_string("defmodule ClassifyFromSource do\n#{out.elixir}\nend")
       assert ClassifyFromSource.classify(0) == "zero"
