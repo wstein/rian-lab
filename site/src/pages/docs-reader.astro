@@ -1,0 +1,349 @@
+---
+import SiteShell from "../layouts/SiteShell.astro";
+import TargetToggle from "../components/site/TargetToggle.astro";
+import LoweredCell from "../components/site/LoweredCell.astro";
+import tour from "../data/tour.json";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const docsBase = base || "";
+const capCell = tour.cells.find((c) => c.id === "capabilities")!;
+
+const articles = [
+  {
+    id: "adr-0025",
+    adr: "ADR-0025",
+    status: "Accepted",
+    title: "Memory capabilities: val / iso / ref / tag",
+    slug: "0025-memory-capabilities",
+    sections: [
+      {
+        id: "cap-intro",
+        h: "The portable core",
+        body: "A parameter's reference capability classifies how it may be used. The portable core is <code>val</code> (shared borrow → <code>&T</code>), <code>iso</code> (owned, use-once → moved <code>Vec&lt;T&gt;</code>/value), and <code>tag</code> (identity-only borrow). These are BEAM-legal: they map to ownership on Rust and to linearity on the BEAM, so the same source is ownership-checked without a single hand-written lifetime.",
+      },
+      {
+        id: "cap-ref",
+        h: "Why ref is not portable",
+        body: "<code>ref</code> (&amp;mut) needs a process-local mutation proof the proof-of-concept does not carry on the BEAM, so it is BEAM-rejected. A <code>ref</code> parameter therefore pins its function off <code>:ex</code> — the reachability matrix reports it honestly rather than pretending to a tidy four-target row.",
+      },
+      {
+        id: "cap-live",
+        h: "Lowered live",
+        body: "Below: the same definition, lowered for the target you pick in the toggle. <code>area</code> takes <code>val Shape</code> → <code>&amp;Shape</code>; <code>consume</code> takes <code>iso Shape</code> → an owned <code>Shape</code>.",
+        cell: true,
+      },
+    ],
+  },
+  {
+    id: "adr-0050",
+    adr: "ADR-0050",
+    status: "Accepted (direction)",
+    title: "One typed Core IR",
+    slug: "0050-typed-core-ir",
+    sections: [
+      {
+        id: "ir-spine",
+        h: "A single contract",
+        body: "The typed, sealed-sum Core IR is the spine of the compiler: surface tuples translate into core structs, and <em>every</em> downstream pass — checks, gates, and each emitter — consumes that one contract. Emitters are pure consumers; there is no second fork of the AST.",
+      },
+      {
+        id: "ir-tax",
+        h: "The drift tax, made explicit",
+        body: "A new language feature is one node threaded through parser → Core → check → exhaustiveness → emitters. Miss a stage and it surfaces as a clear failure, not silent miscompilation. The IR makes that cost visible and bounded instead of diffuse.",
+      },
+    ],
+  },
+  {
+    id: "adr-0049",
+    adr: "ADR-0049",
+    status: "Accepted (direction)",
+    title: "Backend target roadmap & tiers",
+    slug: "0049-backend-target-roadmap",
+    sections: [
+      {
+        id: "tgt-tiers",
+        h: "Four back ends, tiered",
+        body: "The BEAM and Rust are the reference targets; JS is Tier 1 and the JVM (Kotlin) is Tier 2. Each emitter lowers the same Core IR to idiomatic code for its host — a tagged match on the BEAM, an <code>enum</code> + <code>match</code> on Rust, a tag switch on JS, a sealed <code>when</code> on Kotlin.",
+      },
+      {
+        id: "tgt-prims",
+        h: "A small primitive layer",
+        body: "A handful of intrinsics (the reserved <code>Prim.*</code> namespace) is what each emitter lowers natively; the portable <code>List</code>/<code>Dict</code>/<code>Str</code> library is written once in Rian over them, so target parity is a property of a small core rather than four hand-maintained stdlibs.",
+      },
+    ],
+  },
+  {
+    id: "adr-0057",
+    adr: "ADR-0057",
+    status: "Accepted (direction)",
+    title: "Concurrency is native-per-target",
+    slug: "0057-concurrency-and-otp-are-native-per-target",
+    sections: [
+      {
+        id: "conc-inferred",
+        h: "Portability is inferred",
+        body: "Rian is the <em>sequential</em> logic shared across hosts. A binary portable flag was rejected: a function's target set is inferred from what it touches. Host FFI and all concurrency pin a function to the BEAM by design — concurrency/OTP is native-per-target, not a portable Rian surface.",
+      },
+      {
+        id: "conc-honest",
+        h: "An honest matrix",
+        body: "Because reachability is computed, the matrix never over-promises. <code>mix rian.targets</code> reports it and can gate on it; the shared core is held to all Tier-1 targets in CI, while BEAM-pinned application code opts in.",
+      },
+    ],
+  },
+];
+---
+
+<SiteShell title="Rian Docs — ADR reader" active="docs">
+  <TargetToggle slot="subheader" caption="— code cells re-lower" />
+
+  <div class="dr-wrap">
+    <!-- corpus nav -->
+    <aside class="dr-nav">
+      <div class="rl-kicker">ARCHITECTURE DECISIONS</div>
+      <nav id="dr-corpus">
+        {
+          articles.map((a, i) => (
+            <button class={`dr-corpus-btn ${i === 0 ? "on" : ""}`} data-art={a.id}>
+              <span class="rl-mono dr-adr">{a.adr}</span>
+              <span>{a.title}</span>
+            </button>
+          ))
+        }
+      </nav>
+      <a class="dr-all" href={`${docsBase}/architecture-decisions/0025-memory-capabilities/`}>Browse all ~30 ADRs →</a>
+    </aside>
+
+    <!-- article -->
+    <main class="dr-main">
+      {
+        articles.map((a, i) => (
+          <article class={`dr-article ${i === 0 ? "on" : ""}`} data-art={a.id}>
+            <div class="dr-art-head">
+              <span class="rl-mono dr-adr-big">{a.adr}</span>
+              <span class="dr-status">{a.status}</span>
+            </div>
+            <h1>{a.title}</h1>
+            {a.sections.map((s) => (
+              <section id={s.id} class="dr-section">
+                <h3>{s.h}</h3>
+                <p set:html={s.body} />
+                {s.cell && (
+                  <div class="dr-cell">
+                    <LoweredCell cell={capCell} heading={false} />
+                  </div>
+                )}
+              </section>
+            ))}
+            <a class="dr-readfull" href={`${docsBase}/architecture-decisions/${a.slug}/`}>
+              Read the full {a.adr} →
+            </a>
+          </article>
+        ))
+      }
+    </main>
+
+    <!-- on this page -->
+    <aside class="dr-toc">
+      <div class="rl-kicker">ON THIS PAGE</div>
+      {
+        articles.map((a, i) => (
+          <nav class={`dr-toc-nav ${i === 0 ? "on" : ""}`} data-art={a.id}>
+            {a.sections.map((s) => (
+              <a href={`#${s.id}`}>{s.h}</a>
+            ))}
+          </nav>
+        ))
+      }
+    </aside>
+  </div>
+</SiteShell>
+
+<script is:inline>
+  (function () {
+    const show = (id) => {
+      document.querySelectorAll(".dr-article").forEach((e) => e.classList.toggle("on", e.dataset.art === id));
+      document.querySelectorAll(".dr-toc-nav").forEach((e) => e.classList.toggle("on", e.dataset.art === id));
+      document.querySelectorAll(".dr-corpus-btn").forEach((e) => e.classList.toggle("on", e.dataset.art === id));
+      window.scrollTo({ top: 0, behavior: "smooth" });
+    };
+    document.querySelectorAll(".dr-corpus-btn").forEach((b) => b.addEventListener("click", () => show(b.dataset.art)));
+  })();
+</script>
+
+<style>
+  .dr-wrap {
+    max-width: 1320px;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: 248px minmax(0, 1fr) 220px;
+    gap: clamp(24px, 3vw, 44px);
+    padding: 0 clamp(18px, 4vw, 36px);
+  }
+  .dr-nav,
+  .dr-toc {
+    position: sticky;
+    top: 132px;
+    align-self: start;
+    height: calc(100vh - 132px);
+    overflow-y: auto;
+    padding: 40px 0;
+  }
+  .dr-nav nav {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-top: 13px;
+  }
+  .dr-corpus-btn {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    text-align: left;
+    background: transparent;
+    border: none;
+    border-left: 2px solid var(--border);
+    padding: 8px 12px;
+    cursor: pointer;
+    color: var(--ink);
+    font-size: 13.5px;
+    font-family: inherit;
+  }
+  .dr-corpus-btn:hover {
+    color: var(--text-strong);
+  }
+  .dr-corpus-btn.on {
+    border-left-color: var(--accent);
+    color: var(--text-strong);
+    background: var(--active);
+  }
+  .dr-adr {
+    font-size: 10.5px;
+    color: var(--dim);
+  }
+  .dr-all {
+    display: inline-block;
+    margin-top: 22px;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .dr-main {
+    min-width: 0;
+    padding: 44px 0 90px;
+    max-width: 760px;
+  }
+  .dr-article {
+    display: none;
+  }
+  .dr-article.on {
+    display: block;
+  }
+  .dr-art-head {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 12px;
+  }
+  .dr-adr-big {
+    font-size: 12px;
+    font-weight: 700;
+    color: var(--accent);
+  }
+  .dr-status {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--dim);
+    border: 1px solid var(--border);
+    border-radius: 99px;
+    padding: 3px 10px;
+  }
+  .dr-main h1 {
+    font-size: clamp(28px, 4vw, 38px);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.08;
+    margin: 0 0 24px;
+  }
+  .dr-section {
+    margin-bottom: 30px;
+    scroll-margin-top: 132px;
+  }
+  .dr-section h3 {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    margin: 0 0 10px;
+  }
+  .dr-section p {
+    font-size: 16px;
+    line-height: 1.7;
+    color: var(--ink);
+    margin: 0;
+    max-width: 640px;
+  }
+  .dr-section :global(code) {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 13.5px;
+    background: var(--active);
+    padding: 1px 5px;
+    border-radius: 4px;
+    color: var(--text-strong);
+  }
+  .dr-cell {
+    margin-top: 18px;
+    border: 1px solid var(--border);
+    border-radius: 13px;
+    overflow: hidden;
+  }
+  .dr-cell :global(.rl-grid) {
+    border: none;
+    border-radius: 0;
+  }
+  .dr-readfull {
+    display: inline-block;
+    margin-top: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+  }
+  .dr-toc-nav {
+    display: none;
+    flex-direction: column;
+    gap: 7px;
+    margin-top: 13px;
+  }
+  .dr-toc-nav.on {
+    display: flex;
+  }
+  .dr-toc-nav a {
+    font-size: 12.5px;
+    color: var(--dim);
+    text-decoration: none;
+    border-left: 2px solid var(--border);
+    padding: 3px 11px;
+  }
+  .dr-toc-nav a:hover {
+    color: var(--text-strong);
+    border-left-color: var(--accent);
+  }
+  @media (max-width: 1080px) {
+    .dr-wrap {
+      grid-template-columns: 232px minmax(0, 1fr);
+    }
+    .dr-toc {
+      display: none;
+    }
+  }
+  @media (max-width: 860px) {
+    .dr-wrap {
+      grid-template-columns: 1fr;
+    }
+    .dr-nav {
+      position: static;
+      height: auto;
+      padding: 20px 0;
+    }
+  }
+</style>

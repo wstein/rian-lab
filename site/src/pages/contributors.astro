@@ -1,0 +1,265 @@
+---
+import SiteShell from "../layouts/SiteShell.astro";
+
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+const threads = [
+  {
+    tag: "JVM · Tier 2",
+    diff: "approachable",
+    h: "Grow the Kotlin subset",
+    p: "Lists/Vec, maps, structs, and case still raise Unsupported on the JVM emitter. Each is one node threaded through the Core IR and verified with kotlinc + java.",
+  },
+  {
+    tag: "JS · Tier 1",
+    diff: "approachable",
+    h: "Close the ECMAScript gaps",
+    p: "struct, with, and FFI raise on the JS target. Match the existing tagged-dispatch shape and add a node-run conformance check.",
+  },
+  {
+    tag: "Rust · generics",
+    diff: "deep",
+    h: "Compound owned-tvar returns",
+    p: "A tuple/Fn of a type variable is still honestly pinned off :rs. The owned↔borrow coercion is the lever; the reach gate already tells the truth.",
+  },
+  {
+    tag: "Prelude",
+    diff: "approachable",
+    h: "Portable library over primitives",
+    p: "List/Dict/Str are written once in Rian over the Prim.* intrinsics. New portable ops must reach :ex, :rs and :js — the CI gate enforces it.",
+  },
+];
+
+const loop = [
+  ["Read the ADR", "Behaviour lives in docs/adr/*.md. The ADRs are the source of truth — start there, not in the code."],
+  ["Thread the node", "Parser → Core → check → exhaustiveness → emitters. The typed Core IR makes the path explicit (ADR-0050)."],
+  ["Prove it", "mix test is the real signal; @tag :rust / kotlinc tests run the emitted code. Gates refuse to emit on failure."],
+  ["Match the docs", "A change isn't done until the ADR, specs, and examples match it — update them in the same phase."],
+  ["Commit per phase", "Conventional Commits, one logical phase each, citing the governing ADR in the body."],
+];
+---
+
+<SiteShell title="Contributing to Rian" active="contributors">
+  <section class="ct-hero">
+    <div class="rl-wrap">
+      <div class="rl-eyebrow">CONTRIBUTING</div>
+      <h1>The ADR is the unit of change.</h1>
+      <p>
+        Rian is a reference implementation and a design corpus. Decisions live in the ADRs; the compiler implements
+        them; the tests prove them. Contributing means moving one of those three forward — and keeping the other two in
+        step.
+      </p>
+      <div class="ct-cta">
+        <a class="rl-btn rl-btn-primary" href="https://github.com/wstein/rian-lab">Open the repo →</a>
+        <a class="rl-btn rl-btn-ghost" href={`${base}/docs-reader`}>Read the ADRs</a>
+      </div>
+    </div>
+  </section>
+
+  <section class="rl-wrap ct-section">
+    <div class="rl-eyebrow">GOOD THREADS TO PULL</div>
+    <h2>Where the work is</h2>
+    <div class="ct-threads">
+      {
+        threads.map((t) => (
+          <div class="ct-thread">
+            <div class="ct-thread-top">
+              <span class="rl-mono ct-tag">{t.tag}</span>
+              <span class={`ct-diff ct-diff-${t.diff}`}>{t.diff}</span>
+            </div>
+            <h3>{t.h}</h3>
+            <p>{t.p}</p>
+          </div>
+        ))
+      }
+    </div>
+  </section>
+
+  <section class="ct-band">
+    <div class="rl-wrap">
+      <div class="rl-eyebrow">THE LOOP</div>
+      <h2>How a change lands</h2>
+      <ol class="ct-loop">
+        {
+          loop.map(([h, p], i) => (
+            <li>
+              <span class="ct-loop-n">{i + 1}</span>
+              <div>
+                <h4>{h}</h4>
+                <p>{p}</p>
+              </div>
+            </li>
+          ))
+        }
+      </ol>
+    </div>
+  </section>
+
+  <section class="ct-cta-band">
+    <div class="rl-wrap ct-cta-inner">
+      <h2>Start where the decisions live.</h2>
+      <p>Pick a thread, read its ADR, thread the node, prove it, and match the docs.</p>
+      <div class="ct-cta">
+        <a class="rl-btn rl-btn-primary" href="https://github.com/wstein/rian-lab">Browse issues on GitHub →</a>
+        <a class="rl-btn rl-btn-ghost" href={`${base}/by-example`}>Learn the surface first</a>
+      </div>
+    </div>
+  </section>
+</SiteShell>
+
+<style>
+  .ct-hero {
+    padding: clamp(48px, 7vw, 88px) 0 clamp(32px, 4vw, 52px);
+  }
+  .ct-hero h1 {
+    font-size: clamp(34px, 5.4vw, 54px);
+    font-weight: 800;
+    letter-spacing: -0.035em;
+    line-height: 1.04;
+    margin: 14px 0 18px;
+  }
+  .ct-hero p {
+    font-size: clamp(16px, 2.2vw, 19px);
+    line-height: 1.6;
+    color: var(--ink);
+    max-width: 600px;
+    margin: 0 0 26px;
+  }
+  .ct-cta {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .ct-section {
+    padding: clamp(36px, 5vw, 64px) clamp(18px, 4vw, 36px);
+  }
+  .ct-section h2,
+  .ct-band h2 {
+    font-size: clamp(24px, 3.4vw, 32px);
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    margin: 10px 0 22px;
+  }
+  .ct-threads {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 16px;
+  }
+  .ct-thread {
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    padding: 22px;
+    background: var(--card);
+  }
+  .ct-thread-top {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+  }
+  .ct-tag {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .ct-diff {
+    font-size: 10.5px;
+    font-weight: 600;
+    border-radius: 99px;
+    padding: 3px 9px;
+  }
+  .ct-diff-approachable {
+    color: #34d399;
+    background: rgba(52, 211, 153, 0.12);
+  }
+  .ct-diff-deep {
+    color: #fb923c;
+    background: rgba(251, 146, 60, 0.12);
+  }
+  .ct-thread h3 {
+    font-size: 17px;
+    font-weight: 700;
+    margin: 0 0 8px;
+    letter-spacing: -0.01em;
+  }
+  .ct-thread p {
+    font-size: 14px;
+    line-height: 1.6;
+    color: var(--ink);
+    margin: 0;
+  }
+  .ct-band {
+    background: var(--raise);
+    border-top: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    padding: clamp(40px, 6vw, 68px) 0;
+  }
+  .ct-loop {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 760px;
+  }
+  .ct-loop li {
+    display: flex;
+    gap: 16px;
+    align-items: flex-start;
+    padding: 16px 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .ct-loop li:last-child {
+    border-bottom: none;
+  }
+  .ct-loop-n {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 8px;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .ct-loop h4 {
+    font-size: 16px;
+    font-weight: 700;
+    margin: 2px 0 5px;
+  }
+  .ct-loop p {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--ink);
+    margin: 0;
+    max-width: 600px;
+  }
+  .ct-cta-band {
+    background: var(--accent);
+    padding: clamp(44px, 6vw, 72px) 0;
+  }
+  .ct-cta-inner h2 {
+    font-size: clamp(26px, 3.6vw, 34px);
+    font-weight: 800;
+    letter-spacing: -0.025em;
+    color: #fff;
+    margin: 0 0 10px;
+  }
+  .ct-cta-inner p {
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.88);
+    margin: 0 0 22px;
+  }
+  .ct-cta-band .rl-btn-primary {
+    background: #fff;
+    color: var(--accent);
+  }
+  .ct-cta-band .rl-btn-ghost {
+    color: #fff;
+    border-color: rgba(255, 255, 255, 0.5);
+  }
+</style>
