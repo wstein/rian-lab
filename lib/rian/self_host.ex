@@ -63,7 +63,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_parse.rian",
       test: "test/rian/parse_fixpoint_test.exs",
       note:
-        "the full Rian.Pratt grammar — prefix/primary (if/case/with/list/map/tuple/lambda/capture/atom/str/char/num/id), postfix dot/call, labelled args, precedence climbing, AND the full pattern grammar + blocks — equals Rian.Pratt.parse with no projection; string-interpolation/`<-`-propagation sugar is out of scope; `:if`/`:case`/`:with`/`:struct` keyword-atom tags need a counted String.to_atom crutch"
+        "the full Rian.Pratt grammar — prefix/primary (if/case/with/list/map/tuple/lambda/capture/atom/str/char/num/id), postfix dot/call, labelled args, precedence climbing, AND the full pattern grammar + blocks — equals Rian.Pratt.parse with no projection; string-interpolation/`<-`-propagation sugar is out of scope; FFI-free — the `:if`/`:case`/`:with`/`:struct` keyword-atom tags are quoted-atom literals (`:\"if\"`)"
     },
     %{
       id: :core_ir,
@@ -280,16 +280,7 @@ defmodule Rian.SelfHost do
     "selfhost_codegen.rian" => ["Map.get", "Map.put"],
     "selfhost_eval.rian" => ["Map.get", "Map.put"],
     "selfhost_funcs.rian" => ["Map.get", "Map.put"],
-    "selfhost_modules.rian" => ["String.to_charlist"],
-    # the parser builds the keyword-named surface tags `:if`/`:case`/`:with`/
-    # `:struct` (reserved words Rian can't spell as atoms) via String.to_atom.
-    "selfhost_parse.rian" => ["String.to_atom"],
-    # the COMPOSITION rung's `forms` stage builds the Erlang operator/variable
-    # atoms (`:+`/`:A`) Rian can't spell, via String.to_atom (ADR-0063 Step 3).
-    "selfhost_compose.rian" => ["String.to_atom"],
-    # composition rung 2 — same crutch: the function-name/operator/variable atoms
-    # (`:f`/`:+`/`:A`) for the emitted {:function, …} form (ADR-0063 Step 3).
-    "selfhost_compose_decl.rian" => ["String.to_atom"]
+    "selfhost_modules.rian" => ["String.to_charlist"]
   }
 
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."

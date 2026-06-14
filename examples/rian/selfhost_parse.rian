@@ -45,11 +45,6 @@ mod SelfhostParse do
     end
   end
 
-  # The surface tags `:if`/`:case`/`:with` are reserved KEYWORDS, so Rian cannot
-  # spell them as atoms (bare or quoted) — build them from a string via host FFI.
-  # This is the parser's only non-portable crutch (counted in @selfhost_ffi).
-  def kw(s String) Symbol := String.to_atom(s)
-
   # ── integers / casing (portable, FFI-free) ──
   def parse_int(s String) Int53 := digits(Prim.str_chars(s), 0)
 
@@ -294,17 +289,17 @@ mod SelfhostParse do
   def finish_if(cnd N, then_b N, ts Vec(Tok)) R
   def finish_if(cnd, then_b, [TKw("else") | rest])
     case parse_block(rest) do
-      R(else_b, rest2) -> R({kw("if"), cnd, then_b, else_b}, drop_kw(rest2, "end"))
+      R(else_b, rest2) -> R({:"if", cnd, then_b, else_b}, drop_kw(rest2, "end"))
     end
   end
-  def finish_if(cnd, then_b, ts) := R({kw("if"), cnd, then_b, {:block, []}}, drop_kw(ts, "end"))
+  def finish_if(cnd, then_b, ts) := R({:"if", cnd, then_b, {:block, []}}, drop_kw(ts, "end"))
 
   def parse_case(Vec(Tok)) R
   def parse_case(ts)
     case parse_bp(0, ts) do
       R(scrut, rest) ->
         case parse_arms(drop_kw(rest, "do"), []) do
-          R(arms, rest2) -> R({kw("case"), scrut, arms}, drop_kw(rest2, "end"))
+          R(arms, rest2) -> R({:"case", scrut, arms}, drop_kw(rest2, "end"))
         end
     end
   end
@@ -345,10 +340,10 @@ mod SelfhostParse do
   def finish_with(clauses N, body N, ts Vec(Tok)) R
   def finish_with(clauses, body, [TKw("else") | rest])
     case parse_arms(rest, []) do
-      R(arms, rest2) -> R({kw("with"), clauses, body, arms}, drop_kw(rest2, "end"))
+      R(arms, rest2) -> R({:"with", clauses, body, arms}, drop_kw(rest2, "end"))
     end
   end
-  def finish_with(clauses, body, ts) := R({kw("with"), clauses, body, []}, drop_kw(ts, "end"))
+  def finish_with(clauses, body, ts) := R({:"with", clauses, body, []}, drop_kw(ts, "end"))
 
   def parse_with_clauses(Vec(Tok), Vec(N)) R
   def parse_with_clauses(ts, acc)
@@ -457,7 +452,7 @@ mod SelfhostParse do
   def pat_ctor(name String, ts Vec(Tok)) R
   def pat_ctor(name, [TLP, TId(f0), TOp(":") | rest])
     case parse_pat_fields([TId(f0), TOp(":") | rest], []) do
-      R(fields, rest2) -> R({kw("struct"), name, fields}, rest2)
+      R(fields, rest2) -> R({:"struct", name, fields}, rest2)
     end
   end
   def pat_ctor(name, [TLP | rest])

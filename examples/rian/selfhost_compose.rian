@@ -14,8 +14,9 @@
 # `compile(s) = forms(lower(parse(lex(s))))` — each stage hands its output to the
 # next with NO Elixir glue between them. `ErlForm` IS Erlang's abstract-form
 # grammar (`{:integer,_,N}` / `{:var,_,V}` / `{:op,_,Op,L,R}`), so the result feeds
-# `:compile.forms` directly. The only host FFI is `String.to_atom` (Rian can't
-# spell the operator/variable atoms `:+`/`:A`), counted in @selfhost_ffi.
+# `:compile.forms` directly. This module is **host-FFI-free**: operator atoms are
+# quoted-atom literals (`:"+"`) and the dynamic variable atom is interned with the
+# BEAM-native `Prim.str_to_atom` intrinsic — no `String.to_atom` crutch.
 #
 # `test/rian/compose_fixpoint_test.exs` compiles this composed output and RUNS it,
 # asserting it behaves identically to the full Elixir toolchain (`Rian.Beam`).
@@ -164,12 +165,21 @@ mod SelfhostCompose do
   pub def lower(SBin(op, l, r)) := CBin(op, lower(l), lower(r))
 
   # ── stage 4: forms (Core -> Erlang abstract forms) ──
-  # `String.to_atom` is the one host FFI: Rian cannot spell the operator atoms
-  # (`:+`) or capitalised Erlang variable atoms (`:A`) — counted in @selfhost_ffi.
+  # No host FFI: operator atoms are written as quoted-atom *literals* (`:"+"`), and
+  # the variable atom — a dynamic identifier, so not a literal — is interned with
+  # the BEAM-native `Prim.str_to_atom` intrinsic (ADR-0047). Both are BEAM-only, so
+  # `Rian.Reach` pins this module off `:rs`/`:js`/`:jvm` — which it already was
+  # (it emits Erlang abstract forms).
   pub def forms(Core) ErlForm
   pub def forms(CNum(t)) := Integer(1, parse_int(t))
-  pub def forms(CId(n)) := Var(1, String.to_atom(cap(n)))
-  pub def forms(CBin(op, l, r)) := Op(1, String.to_atom(op), forms(l), forms(r))
+  pub def forms(CId(n)) := Var(1, Prim.str_to_atom(cap(n)))
+  pub def forms(CBin(op, l, r)) := Op(1, op_atom(op), forms(l), forms(r))
+
+  # the operator string -> its Erlang operator atom, spelled as a quoted-atom literal.
+  def op_atom(String) Symbol
+  def op_atom("+") := :"+"
+  def op_atom("-") := :"-"
+  def op_atom("*") := :"*"
 
   def parse_int(s String) Int53 := digits(Prim.str_chars(s), 0)
   def digits(Vec(Int53), Int53) Int53

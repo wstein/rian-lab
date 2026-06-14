@@ -18,9 +18,9 @@
 # module-level attribute forms (`{:attribute,_,:module,_}` / `:export`) — the
 # export list needs a *tagless* `{name, arity}` tuple, which Rian's variant
 # lowering (every ctor injects a tag atom) cannot spell. Everything that depends
-# on the SOURCE — name, arity, params, body — comes from Rian. The host FFI is
-# still just `String.to_atom` (the operator/variable/function-name atoms),
-# counted in @selfhost_ffi.
+# on the SOURCE — name, arity, params, body — comes from Rian. This module is
+# **host-FFI-free**: operator atoms are quoted-atom literals (`:"+"`) and the
+# dynamic name/variable atoms are interned with the BEAM-native `Prim.str_to_atom`.
 #
 # Scope grows from "expression" to "single-clause function over arithmetic".
 # Multi-clause heads, patterns, and guards are the next widening.
@@ -200,13 +200,15 @@ mod SelfhostComposeDecl do
 
   # ── stage 4: emit (Decl -> Erlang function form) ──
   # the function NAME stays a lowercase atom (`:f`); parameters and body
-  # identifiers become capitalised Erlang variables (`a` -> `:A`).
+  # identifiers become capitalised Erlang variables (`a` -> `:A`). The name and
+  # variable atoms are dynamic identifiers, interned with the BEAM-native
+  # `Prim.str_to_atom`; operator atoms are quoted-atom literals (`:"+"`) — no FFI.
   def emit_def(Decl) Func
-  def emit_def(Def(name, params, body)) := Function(1, String.to_atom(name), len(params), [Clause(1, param_vars(params), [], [forms(lower(body))])])
+  def emit_def(Def(name, params, body)) := Function(1, Prim.str_to_atom(name), len(params), [Clause(1, param_vars(params), [], [forms(lower(body))])])
 
   def param_vars(Vec(String)) Vec(ErlForm)
   def param_vars([]) := []
-  def param_vars([p | rest]) := [Var(1, String.to_atom(cap(p))) | param_vars(rest)]
+  def param_vars([p | rest]) := [Var(1, Prim.str_to_atom(cap(p))) | param_vars(rest)]
 
   def len(Vec(String)) Int53
   def len([]) := 0
@@ -215,8 +217,14 @@ mod SelfhostComposeDecl do
   # expression -> Erlang abstract form (identifiers capitalise to Erlang vars).
   def forms(Core) ErlForm
   def forms(CNum(t)) := Integer(1, parse_int(t))
-  def forms(CId(n)) := Var(1, String.to_atom(cap(n)))
-  def forms(CBin(op, l, r)) := Op(1, String.to_atom(op), forms(l), forms(r))
+  def forms(CId(n)) := Var(1, Prim.str_to_atom(cap(n)))
+  def forms(CBin(op, l, r)) := Op(1, op_atom(op), forms(l), forms(r))
+
+  # operator string -> Erlang operator atom, spelled as a quoted-atom literal.
+  def op_atom(String) Symbol
+  def op_atom("+") := :"+"
+  def op_atom("-") := :"-"
+  def op_atom("*") := :"*"
 
   def parse_int(s String) Int53 := digits(Prim.str_chars(s), 0)
   def digits(Vec(Int53), Int53) Int53
