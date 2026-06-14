@@ -144,6 +144,24 @@ defmodule Rian.ReplTest do
       assert {{:error, message}, ^s} = eval(s, "1 + true")
       assert message != ""
     end
+
+    test "a rejected entry does not purge the session's loaded module (gate before purge)" do
+      # `reload/2` runs `Check.gate!` BEFORE `:code.purge`/`:code.delete` (commit
+      # 6b6dbf9, ADR-0053). A gate-failing entry must therefore leave the currently
+      # loaded module intact — purging-then-gating would unload it on a typo.
+      s = Repl.new()
+      module = String.to_atom("rian_repl_#{s.base}")
+
+      {{:defined, ["f"]}, s} = eval(s, "def f(n Int64) Int64\ndef f(n) := n + 1")
+      assert :code.is_loaded(module), "the good def should load the session module"
+
+      # a typed-bind the gate rejects — reaches `reload`, which gates before purging
+      assert {{:error, _}, _} = eval(s, "x Bool := 66")
+      assert :code.is_loaded(module), "a rejected entry must not unload the module"
+
+      # and the prior definition still runs
+      assert {{:value, 4, _}, _} = eval(s, "f(3)")
+    end
   end
 
   describe "no REPL/compile divergence (ADR-0053)" do

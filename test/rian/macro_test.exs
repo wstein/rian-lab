@@ -245,6 +245,34 @@ defmodule Rian.MacroTest do
       assert {:map_lit, [{"a", {:id, ^t}}, {"b", {:bin, "+", {:id, ^t}, {:num, "1"}}}]} =
                mapnode
     end
+
+    test "with: a binder in the body is renamed; the clause pattern var is left free" do
+      # the `:with` map_node clause walks each clause source and the body. A block
+      # binder `t` in the body is gensym-renamed; the with-clause pattern var `v`
+      # (not a collected binder) and the macro param `x` stay as written.
+      out = expand1("m", ["x"], "with {:ok, v} <- f(x) do t := v; t + x end", "m(99)")
+
+      assert {:with,
+              [{{:tuple, [{:atom, "ok"}, {:var, "v"}]}, {:call, {:id, "f"}, [{:num, "99"}]}}],
+              {:block, [{:bind, t, {:id, "v"}}, {:expr, body}]}, []} = out
+
+      assert t =~ ~r/^t__h\d+$/
+      assert {:bin, "+", {:id, ^t}, {:num, "99"}} = body
+    end
+
+    test "label: a binder nested inside a `k: …` labeled argument is renamed" do
+      # the `:label` map_node clause walks the labeled value. A block binder `t`
+      # inside it (here in a labeled call argument — the struct-construction surface
+      # form) is renamed; the label name `k` and macro param `x` are preserved.
+      out = expand1("m", ["x"], "g(k: if true do t := 5; t + x else 0 end)", "m(99)")
+
+      assert {:call, {:id, "g"},
+              [{:label, "k", {:if, _, {:block, [{:bind, t, _}, {:expr, body}]}, _}}]} =
+               out
+
+      assert t =~ ~r/^t__h\d+$/
+      assert {:bin, "+", {:id, ^t}, {:num, "99"}} = body
+    end
   end
 
   describe "@max_depth runaway backstop (ADR-0030)" do
