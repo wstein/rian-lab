@@ -9,7 +9,7 @@ defmodule Mix.Tasks.Rian.ReplTest do
 
   describe "--eval (one-shot)" do
     test "evaluates an expression with its type" do
-      assert capture_io(fn -> Task.run(["--eval", "1 + 1"]) end) =~ "2 : Int64"
+      assert capture_io(fn -> Task.run(["--eval", "1 + 1"]) end) =~ "2 : Int53"
     end
 
     test "reports a definition" do
@@ -31,13 +31,13 @@ defmodule Mix.Tasks.Rian.ReplTest do
     defp session_output(input), do: capture_io(input, fn -> Task.loop(Repl.new()) end)
 
     test "an expression evaluates on Enter" do
-      assert session_output("1 + 2\n") =~ "3 : Int64"
+      assert session_output("1 + 2\n") =~ "3 : Int53"
     end
 
     test "a binding is visible to a later expression" do
       out = session_output("x := 5\nx + 1\n")
-      assert out =~ "x := 5 : Int64"
-      assert out =~ "6 : Int64"
+      assert out =~ "x := 5 : Int53"
+      assert out =~ "6 : Int53"
     end
 
     test "a multi-clause definition is entered until a blank line, then called" do
@@ -56,7 +56,7 @@ defmodule Mix.Tasks.Rian.ReplTest do
     test "an error is reported and the loop continues" do
       out = session_output("1 +\n2 + 2\n")
       assert out =~ "error:"
-      assert out =~ "4 : Int64"
+      assert out =~ "4 : Int53"
     end
   end
 
@@ -71,7 +71,7 @@ defmodule Mix.Tasks.Rian.ReplTest do
     test "\\env shows defined functions with signatures and binds with types" do
       out = session_output("x := 7\ndef sq(n Int64) Int64\ndef sq(n) := n * n\n\n\\env\n")
       assert out =~ "defined: sq/1 : Int64"
-      assert out =~ "bound: x : Int64"
+      assert out =~ "bound: x : Int53"
     end
 
     test "\\env shows a typed binding's declared type" do
@@ -83,11 +83,11 @@ defmodule Mix.Tasks.Rian.ReplTest do
     end
 
     test "\\type infers a type without evaluating" do
-      assert session_output("\\type 1 + 2\n") =~ "1 + 2 : Int64"
+      assert session_output("\\type 1 + 2\n") =~ "1 + 2 : Int53"
     end
 
     test "\\type uses the session bindings" do
-      assert session_output("x := 10\n\\type x + 1\n") =~ "x + 1 : Int64"
+      assert session_output("x := 10\n\\type x + 1\n") =~ "x + 1 : Int53"
     end
 
     test "\\reset clears the session" do
@@ -104,8 +104,8 @@ defmodule Mix.Tasks.Rian.ReplTest do
 
     test "\\quit ends the loop — later input is not evaluated" do
       out = session_output("1 + 1\n\\quit\n2 + 2\n")
-      assert out =~ "2 : Int64"
-      refute out =~ "4 : Int64"
+      assert out =~ "2 : Int53"
+      refute out =~ "4 : Int53"
     end
   end
 
@@ -148,7 +148,7 @@ defmodule Mix.Tasks.Rian.ReplTest do
       s = Repl.new()
       {_, s} = Repl.eval(s, "total := 42")
 
-      assert {:yes, ~c"al", [{~c"total", [ending: ~c" : Int64"]}]} =
+      assert {:yes, ~c"al", [{~c"total", [ending: ~c" : Int53"]}]} =
                Task.completion_for(before("tot"), s)
     end
 

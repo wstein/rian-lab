@@ -216,6 +216,10 @@ defmodule Rian.JS do
     do: "impl_#{String.downcase(proto)}_#{String.downcase(type)}_#{method}"
 
   # JS guard selecting the impl for `type` by the first argument's runtime shape.
+  # the `typeof` an integer/`Char` value carries in this program's whole-program
+  # int mode: `number` in number-mode (`Int53`/`Int32`), else `bigint` (`Int`).
+  defp int_typeof, do: if(Process.get(:rian_js_int53, false), do: "number", else: "bigint")
+
   defp js_guard!(type, proto, reg) do
     cond do
       type == "Bool" ->
@@ -224,11 +228,15 @@ defmodule Rian.JS do
       type == "String" ->
         ~s(typeof a0 === "string")
 
+      # a `Char` is its codepoint and an `Int*` is an integer — both lower to a JS
+      # `number` in whole-program number-mode (`Int53`/`Int32`) or a `BigInt` in
+      # BigInt-mode (`Int`). The dispatch guard must match the mode the values carry,
+      # or `lt(3, 1)` (a `number`) misses a `typeof === "bigint"` guard (ADR-0064 §2a).
       type == "Char" ->
-        ~s(typeof a0 === "bigint")
+        ~s(typeof a0 === "#{int_typeof()}")
 
       String.match?(type, ~r/^U?Int\d*$/) ->
-        ~s(typeof a0 === "bigint")
+        ~s(typeof a0 === "#{int_typeof()}")
 
       String.match?(type, ~r/^Float\d*$/) ->
         ~s(typeof a0 === "number")

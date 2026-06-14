@@ -12,7 +12,7 @@
 # (protocol, type) — duplicate impls, method-set mismatches, and two impl types
 # sharing a runtime guard are all rejected at compile time.
 #
-# Impls dispatch over PRIMITIVE types (Int64 / Bool / String / Float64 / Char),
+# Impls dispatch over PRIMITIVE types (Int53 / Bool / String / Float64 / Char),
 # SUM types (by constructor tag), and STRUCTS (by `:__struct__`). The generic
 # `forall T: Bound` call path and the Rust/JS lowerings are deferred (BEAM-first).
 #
@@ -30,7 +30,7 @@ impl Show for Bool do
   def show(b) := if b do "true" else "false" end
 end
 
-impl Show for Int64 do
+impl Show for Int53 do
   def show(n) := "an integer"
 end
 
@@ -43,7 +43,7 @@ protocol Eq do
   def eq(a Self, b Self) Bool
 end
 
-impl Eq for Int64 do
+impl Eq for Int53 do
   def eq(a, b) := a == b
 end
 
@@ -53,18 +53,18 @@ end
 
 # A BOUNDED generic (ADR-0042 §2): `forall T: Eq` means "T has an `Eq` impl". The
 # compiler ENFORCES it at the call site — `members(xs, x)` below type-checks only
-# because `Int64` has `impl Eq`. Calling it with a type that lacks `Eq` is a
+# because `Int53` has `impl Eq`. Calling it with a type that lacks `Eq` is a
 # compile error (`requires T: Eq, but … has no impl Eq for …`). Bounds add no
 # case-arms and touch no exhaustiveness (ADR-0042 §6).
 def equal3(a T, b T, c T) Bool forall T: Eq := eq(a, b) and eq(b, c)
 
-# `equal3(1, 1, 1)` type-checks (Int64: Eq) and runs to `true`.
+# `equal3(1, 1, 1)` type-checks (Int53: Eq) and runs to `true`.
 def all_one() Bool := equal3(1, 1, 1)
 
 # Dispatch also works over a SUM type — by the runtime constructor tag. This is
 # the shape the compiler's own data takes (`Token`, `Expr`), so a real `Show`
 # can be written over it.
-type Expr := Num(n Int64) | Add(a Int64, b Int64) | Zero
+type Expr := Num(n Int53) | Add(a Int53, b Int53) | Zero
 
 impl Show for Expr do
   def show(e)
@@ -78,4 +78,4 @@ end
 
 # `show(true)` -> "true" · `show(42)` -> "an integer" · `eq(3, 3)` -> true ·
 # `show(Num(5))` -> "num" · `show(Zero)` -> "zero". One BEAM module; the `show`
-# dispatcher now selects Bool / Int64 / String / Expr by runtime shape.
+# dispatcher now selects Bool / Int53 / String / Expr by runtime shape.

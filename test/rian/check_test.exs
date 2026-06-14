@@ -18,7 +18,7 @@ defmodule Rian.CheckTest do
     defp t(src), do: Check.infer(Pratt.parse(src))
 
     test "literals" do
-      assert t("42") == "Int64"
+      assert t("42") == "Int53"
       assert t("3.14") == "Float64"
       assert t("\"hi\"") == "String"
       assert t("true") == "Bool"
@@ -49,8 +49,8 @@ defmodule Rian.CheckTest do
       assert Check.infer(Pratt.parse("x + 1"), %{"x" => "Int64"}) == "Int64"
       # mixing int and float does not crash the checker — it infers `:unknown`
       assert t("1 + 2.0") == :unknown
-      # an unknown operand keeps the known type
-      assert t("x + 1") == "Int64"
+      # an unknown operand + a literal keeps the literal's default width (`Int53`)
+      assert t("x + 1") == "Int53"
     end
 
     test "calls and unknown names infer :unknown (conservative)" do
@@ -102,7 +102,7 @@ defmodule Rian.CheckTest do
     test "an integer literal does not adopt a non-numeric annotation" do
       assert {:error, msg} = Check.check("def f(n Int64) Int64 := b Bool := 66 ; n")
       assert msg =~ "declared `Bool`"
-      assert msg =~ "type `Int64`"
+      assert msg =~ "type `Int53`"
     end
 
     test "an integer literal does not adopt a float annotation (write an explicit float)" do
@@ -152,7 +152,7 @@ defmodule Rian.CheckTest do
 
       assert {:error, msg} = Check.check("def f(n Int64) Int64 := xs Vec(Bool) := [1, 2, 3] ; n")
       assert msg =~ "declared `Vec(Bool)`"
-      assert msg =~ "type `Vec(Int64)`"
+      assert msg =~ "type `Vec(Int53)`"
     end
 
     test "a parametric binding displays at its declared type" do
@@ -161,19 +161,19 @@ defmodule Rian.CheckTest do
   end
 
   describe "Char type (ADR-0036)" do
-    test "a char literal is the `Char` primitive, distinct from `Int64`" do
+    test "a char literal is the `Char` primitive, distinct from `Int53`" do
       assert Check.infer(Pratt.parse_body("'A'")) == "Char"
-      assert Check.infer(Pratt.parse_body("65")) == "Int64"
+      assert Check.infer(Pratt.parse_body("65")) == "Int53"
     end
 
     test "`__prim_char_code` converts a Char to its Int53 codepoint (portable, incl. JS)" do
       assert Check.infer(Pratt.parse_body("__prim_char_code('0')")) == "Int53"
     end
 
-    test "ordinal arithmetic widens Char to its Int64 base (ADR-0036)" do
-      # `'9' - '0' = 9` is an Int64, not a Char
-      assert Check.infer(Pratt.parse_body("'9' - '0'")) == "Int64"
-      assert Check.infer(Pratt.parse_body("'a' + 1")) == "Int64"
+    test "ordinal arithmetic widens Char to its Int53 base (ADR-0036/0064)" do
+      # `'9' - '0' = 9` is an Int53 (the portable codepoint width), not a Char
+      assert Check.infer(Pratt.parse_body("'9' - '0'")) == "Int53"
+      assert Check.infer(Pratt.parse_body("'a' + 1")) == "Int53"
       # a Char-typed param flows through: `c - '0' : Int64`
       assert Check.check("def dval(c Char) Int64 := c - '0'") == :ok
     end
@@ -427,7 +427,7 @@ defmodule Rian.CheckTest do
     test "a list literal infers Vec(elem); a wrong declared list type is caught" do
       assert Check.check("def xs(n Int64) Vec(Int64) := [1, 2, 3]") == :ok
       assert {:error, msg} = Check.check("def xs(n Int64) Vec(Bool) := [1, 2, 3]")
-      assert msg =~ "Vec(Int64)"
+      assert msg =~ "Vec(Int53)"
       assert msg =~ "Vec(Bool)"
     end
 
@@ -472,7 +472,7 @@ defmodule Rian.CheckTest do
   describe "function types & higher-order inference (ADR-0042)" do
     test "a lambda infers an arrow type `Fn(args.., body)`; un-annotated args are `_`" do
       assert Check.infer(Pratt.parse("(x) -> x and false")) == "Fn(_,Bool)"
-      assert Check.infer(Pratt.parse("(x) -> x + 1")) == "Fn(_,Int64)"
+      assert Check.infer(Pratt.parse("(x) -> x + 1")) == "Fn(_,Int53)"
     end
 
     test "Fn types unify structurally — wildcard slots reconcile, real clashes don't" do
@@ -494,7 +494,7 @@ defmodule Rian.CheckTest do
       assert Check.check("def mk(n Int64) Fn(Int64, Int64) := (x) -> x + 1") == :ok
 
       assert {:error, msg} = Check.check("def mk(n Int64) Fn(Int64, Bool) := (x) -> x + 1")
-      assert msg =~ "Fn(_,Int64)"
+      assert msg =~ "Fn(_,Int53)"
       assert msg =~ "Fn(Int64,Bool)"
     end
 
@@ -539,13 +539,13 @@ defmodule Rian.CheckTest do
       assert %Core.EBin{
                type: "Int64",
                left: %Core.EId{name: "a", type: "Int64"},
-               right: %Core.ENum{text: "1", type: "Int64"}
+               right: %Core.ENum{text: "1", type: "Int53"}
              } = typed
     end
 
     test "a block threads its bindings and is typed by its final value" do
       typed = Check.annotate(Pratt.parse_body("n := 2; n * n"), %{})
-      assert %Core.EBlock{type: "Int64"} = typed
+      assert %Core.EBlock{type: "Int53"} = typed
     end
 
     test "a node inference cannot pin down is `:unknown`, not crashing" do
@@ -642,7 +642,7 @@ defmodule Rian.CheckTest do
 
   describe "inference — unary, fallthroughs & nested callables" do
     test "a unary negation of a literal infers the literal's type" do
-      assert Check.infer(Pratt.parse("-5")) == "Int64"
+      assert Check.infer(Pratt.parse("-5")) == "Int53"
       assert Check.infer(Pratt.parse("-3.5")) == "Float64"
     end
 
@@ -662,7 +662,7 @@ defmodule Rian.CheckTest do
     end
 
     test "an if expression unifies its two arm types" do
-      assert Check.infer(Pratt.parse("if c do 1 else 2 end")) == "Int64"
+      assert Check.infer(Pratt.parse("if c do 1 else 2 end")) == "Int53"
       # differing concrete arms are conservative, not an error
       assert Check.infer(Pratt.parse("if c do 1 else true end")) == :unknown
     end
@@ -706,7 +706,7 @@ defmodule Rian.CheckTest do
         fsigs: %{"id" => %{params: ["T"], ret: "T", tvars: ["T"]}}
       }
 
-      assert Check.infer(Pratt.parse("id(5)"), %{}, ic) == "Int64"
+      assert Check.infer(Pratt.parse("id(5)"), %{}, ic) == "Int53"
       # an un-pinnable tvar (no informative argument) stays :unknown
       assert Check.infer(Pratt.parse("id(x)"), %{}, ic) == :unknown
     end
@@ -717,7 +717,7 @@ defmodule Rian.CheckTest do
         fsigs: %{"head" => %{params: ["Vec(T)"], ret: "T", tvars: ["T"]}}
       }
 
-      assert Check.infer(Pratt.parse("head([1, 2, 3])"), %{}, ic) == "Int64"
+      assert Check.infer(Pratt.parse("head([1, 2, 3])"), %{}, ic) == "Int53"
     end
   end
 
@@ -728,7 +728,7 @@ defmodule Rian.CheckTest do
 
     test "a unary node annotates its argument and carries its type" do
       typed = Check.annotate(Pratt.parse("-5"))
-      assert %Core.EUnary{type: "Int64", arg: %Core.ENum{type: "Int64"}} = typed
+      assert %Core.EUnary{type: "Int53", arg: %Core.ENum{type: "Int53"}} = typed
     end
 
     test "a tuple annotates each element; the tuple itself is :unknown" do
@@ -736,7 +736,7 @@ defmodule Rian.CheckTest do
 
       assert %Core.ETuple{
                type: :unknown,
-               elems: [%Core.ENum{type: "Int64"}, %Core.ENum{type: "Int64"}]
+               elems: [%Core.ENum{type: "Int53"}, %Core.ENum{type: "Int53"}]
              } = typed
     end
 
@@ -754,9 +754,9 @@ defmodule Rian.CheckTest do
       typed = Check.annotate(Pratt.parse("if c do 1 else 2 end"))
 
       assert %Core.EIf{
-               type: "Int64",
-               then: %Core.EBlock{type: "Int64"},
-               else: %Core.EBlock{type: "Int64"}
+               type: "Int53",
+               then: %Core.EBlock{type: "Int53"},
+               else: %Core.EBlock{type: "Int53"}
              } = typed
     end
 
@@ -776,7 +776,7 @@ defmodule Rian.CheckTest do
 
     test "a `with` expression annotates its body and is typed by it" do
       typed = Check.annotate(Pratt.parse("with {:ok, x} <- f(n) do 1 end"))
-      assert %Core.EWith{type: "Int64"} = typed
+      assert %Core.EWith{type: "Int53"} = typed
     end
 
     test "a node annotate has no rule for is returned unchanged" do
@@ -972,11 +972,11 @@ defmodule Rian.CheckTest do
       assert Check.infer(Pratt.parse("if c do 1 else true end")) == :unknown
     end
 
-    test "an unknown operand + a literal keeps the literal's default Int64" do
+    test "an unknown operand + a literal keeps the literal's default Int53" do
       # only a *concrete* integer neighbour is adopted; an `:unknown` one is not, so
-      # `x + 1` (x unknown) stays `Int64` and `(x) -> x + 1` is `Fn(_,Int64)`.
-      assert Check.infer(Pratt.parse("x + 1"), %{}) == "Int64"
-      assert Check.infer(Pratt.parse("(x) -> x + 1")) == "Fn(_,Int64)"
+      # `x + 1` (x unknown) stays `Int53` and `(x) -> x + 1` is `Fn(_,Int53)`.
+      assert Check.infer(Pratt.parse("x + 1"), %{}) == "Int53"
+      assert Check.infer(Pratt.parse("(x) -> x + 1")) == "Fn(_,Int53)"
     end
 
     test "a list literal of constant elements adopts `Vec(Int53)`" do

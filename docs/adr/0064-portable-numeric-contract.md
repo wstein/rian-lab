@@ -1,7 +1,7 @@
 # ADR-0064 — Portable numeric contract: `Int` (arbitrary precision) + fixed-width wrap
 
 **Status:** Proposed · **`Int` (arbitrary precision) implemented for BEAM + JS** (2026-06-14) · **Supersedes:** the numeric/overflow decision of **ADR-0034 §1** ("Int* declare intent, not a portable overflow contract"), **ADR-0041 §"native-per-target representation"** *as applied to integers*, and the **ADR-0035** overflow-scope clarification
-**Implemented:** partial — `Int` arbitrary precision adopted for BEAM + JS (BigInt) (`Rian.Check`, `Rian.JS`; `test/rian/numeric_test.exs`); the **fixed-width literal range-check is in** (`width_bounds/1` + `lit_range_error/3`, `Rian.Check`; `test/rian/check_test.exs`) — a literal outside a declared width's two's-complement range is a compile error. Open by explicit scope decision: the **generic-from-literals** case is OUT (a tvar inferred purely from literals stays `Int64`, the literal-polymorphism gap); fixed-width wrap helpers and Rust/JVM/Go contract gaps remain
+**Implemented:** partial — `Int` arbitrary precision on BEAM + JS (BigInt); a bare integer literal now infers the portable **`Int53`** (`Rian.Check`); the **fixed-width literal range-check is in** (`width_bounds/1` + `lit_range_error/3`); and the **literal-polymorphism gap is closed** — a tvar inferred purely from literals is `Int53`, so the integer-generic stdlib (`13`/`17`/`18`) compiles to and runs on `:js` (node-verified). Tests: `test/rian/{check,numeric,js,repl}_test.exs`, `test/mix/tasks/rian_repl_test.exs`. Remaining: fixed-width wrap helpers and Rust/JVM/Go contract gaps
 **Refs:** ADR-0036 (subrange types), ADR-0047 (portable prelude — `Int.checked/saturating/wrapping_add` live here), ADR-0049/0050 (emitters / core IR), ADR-0057/0058 (portability is the thesis)
 **Owners:** Samir Patel (numeric rigor) · Maya Lin (emitters) · Tomás (BEAM performance) · Mira (totality/semantics) · Kira Neri (honesty) · Rachel Okafor (PM)
 
@@ -150,9 +150,10 @@ the **default integer literal `Int`** (a breaking migration — currently still 
 fixed-width `Int64` *implicitly* wrap on the BEAM (the ~15× change — today the wrap is opt-in via the
 `wrapping_*` ops).
 
-**Integer-literal polymorphism (mostly landed).** A literal still *infers* `Int64`, but a **constant of
-literals is width-flexible** and adopts a narrower declared/neighbour width across the contexts the
-corpus needs (`Rian.Check`):
+**Integer-literal polymorphism (landed, 2026-06-14).** A bare integer literal **infers the portable
+`Int53`** (`Rian.Check.infer(%ENum{})`) — the all-target default (JS `number`, `i64` elsewhere), not the
+off-`:js` `Int64`. A **constant of literals is also width-flexible** and adopts a narrower
+declared/neighbour width across the contexts the corpus needs (`Rian.Check`):
 
 - return bodies — a bare literal, an arithmetic of literals, an `if`/`case` of literal branches, or a
   list literal (`def small_primes() Vec(Int53) := [2,3,5,7]`) — via `lit_expr_adopts?`;
@@ -163,8 +164,11 @@ corpus needs (`Rian.Check`):
 - generic returns — a return that doesn't use a tvar infers concretely even when that tvar is unbound,
   so `length(xs Vec(T)) Int53 forall T` recurses as `Int53` (`instantiate_ret`).
 
-All bounded for soundness: adoption is integer-only (`1 + 2.0` stays `:unknown`), and only a *constant
-of literals* adopts — a real `Int64` value is never flexible. So the **portable corpus is now `Int53`**.
+All bounded for soundness: adoption is integer-only — a bare integer literal does **not** silently
+become a float (`x Float64 := 66` is still a compile error; write `66.0`), even though `Int53 ⊑ Float64`
+is lossless — and only a *constant of literals* adopts; a real `Int64` value is never flexible. So the
+**portable corpus is `Int53`**, and a literal list adopts a declared `Vec(W)` in a bind too
+(`xs Vec(Int8) := [1,2,3]`, via `lit_expr_adopts?`).
 
 A literal that adopts a fixed-width type must also **fit that width's two's-complement range**
 (`width_bounds/1` + `lit_range_error/3`): `def f() Int8 := 9999` is rejected (`literal 9999 is out of
@@ -172,11 +176,13 @@ range for Int8 (-128..127)`), as are out-of-range negated literals, list element
 branches — the same check ADR-0036 applies to subrange types. Arithmetic of literals is left to the
 runtime wrap contract (a `wrapping_*` op), not range-scanned.
 
-**Still open:** a type variable inferred *purely* from literals — `contains([1, 2, 3], 2)` makes
-`T = Int64`, and no `impl Eq` for a JS-valid width can match — so the integer-generic stdlib
-(`13_protocols` / `17_stdlib_eq_ord` / `18_dict_eq`) stays `Int64` and off `:js`. Closing it needs
-literals to carry a flexible integer type that unifies with the bound's impl width; until then those
-files are honestly reported off-`:js` by `Rian.Reach`.
+**Closed (2026-06-14):** a type variable inferred *purely* from literals — `contains([1, 2, 3], 2)` now
+makes `T = Int53`, so `impl Eq/Ord for Int53` matches and the integer-generic stdlib
+(`13_protocols` / `17_stdlib_eq_ord` / `18_dict_eq`) **compiles to and runs on `:js`** (node-verified:
+`sort([3,1,2]) = [1,2,3]`, `contains([1,2,3],2) = true`). The corpus impls moved `Int64 → Int53`, and the
+JS protocol dispatcher now guards integers on the program's int mode (`typeof === "number"` in
+number-mode, not a hardcoded `"bigint"`). `Char`'s ordinal base is likewise `Int53` (`'a' + 1 : Int53`),
+matching its `__prim_char_code` codepoint width, so char arithmetic is JS-portable too.
 
 ## Open items
 
@@ -189,19 +195,16 @@ explicitly rather than leave them silently open):*
   conservative checker *accepts* something it can prove wrong. Decision: add a bounds check to
   `literal_adopts?`/`lit_expr_adopts?` (reject a literal provably outside the declared width's range);
   not blocking, but tracked as a real soundness item, not "acceptable."
-- **Generic type-var inferred purely from literals — OUT OF SCOPE for now (documented limitation,
-  measured 2026-06-14).** `contains([1,2,3], 2)` makes `T = Int64` from the literals, so no `impl` for a
-  JS-valid width matches, and integer-generic stdlib stays `Int64` (off `:js`, honestly reported by
-  Reach). **There is no contained fix.** A *narrow* "tvar-from-literals → `Int53`" change is inconsistent
-  with the corpus's *direct* literal usage (`eq(1,1)`, `demo_get_hit() Int64 := get(…, 2, 0)`): the
-  literal default and the `impl` width must agree, so the only consistent fix is finishing the global
-  **default-integer-literal migration** `Int64 → Int53`. That migration was **measured**: flipping the
-  one-line default (`Rian.Check.infer(%ENum{})`) turns **~46 tests red across 11 files**
-  (`check`/`decl`/`repl`/`features`/`macro`/`ffi`/…) — it changes what every bare `5` *means*, including
-  flipping bare-literal JS programs from BigInt to number mode (ADR-0064 §2a). It is a **dedicated
-  migration project**, not an increment, and was reverted twice before for exactly this reason. Until it
-  is scheduled as its own focused effort, portable all-target code uses `Int53` explicitly (see the
-  literal-polymorphism section above), and Reach reports the integer-generic stdlib off `:js` honestly.
+- **Generic type-var inferred purely from literals — DONE (2026-06-14, the `Int64 → Int53` default
+  migration).** `contains([1,2,3], 2)` now makes `T = Int53`, so `impl Eq/Ord for Int53` matches and the
+  integer-generic stdlib (`13`/`17`/`18`) compiles to and runs on `:js`. This *was* the dedicated
+  migration the earlier draft scoped (flipping `Rian.Check.infer(%ENum{})` touched ~46 tests across 11
+  files — it changes what every bare `5` means, incl. JS number-vs-BigInt mode). It landed with a small
+  set of accompanying type-system fixes rather than a one-line flip: `Vec(W)` adopts a literal list in
+  binds and widens covariantly; an int literal still refuses a float annotation (ADR-0035); `Fn`
+  components reconcile to their numeric LUB (`Fn(_,Int53)` ↔ `Fn(Int64,Int64)`); `Char`'s ordinal base is
+  `Int53`; and the JS protocol dispatcher guards integers on the program int mode (`number` vs `bigint`).
+  The corpus impls moved `Int64 → Int53`.
 - **Default-precision ergonomics on Rust** — when can an `Int` provably fit `i64` (small-loop induction
   vars, indices) so we emit native `i64` not a bignum? A range/escape analysis, future.
 - **Mixed-width arithmetic** — `Int + Int64`: require an explicit cast (no implicit coercion, ADR-0035),

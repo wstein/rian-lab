@@ -104,15 +104,17 @@ architectural cost.
   `UInt64`/`UInt128` exceed 2^53 and are *rejected* on JS (`Rian.JS.reject_wide_int!`, pinned off `:js`
   by Reach) — never silently elevated to `BigInt`. Reach also pins a function off `:js` when its **body
   calls a 64-bit overflow prim** (`__prim_wrapping_add` …) even if its signature is JS-valid, so the
-  gate matches the emitter (`wide_prim_blocker`). Caveat: integer **literals still infer `Int64`** (the
-  ADR-0064 default-`Int` migration is unfinished), but a **constant of literals is width-flexible** —
+  gate matches the emitter (`wide_prim_blocker`). A bare integer **literal infers the portable `Int53`**
+  (the ADR-0064 default — JS `number`, `i64` elsewhere), and a **constant of literals is width-flexible**:
   it adopts a narrower declared/neighbour width across return bodies, arithmetic (`(13 - lvl) * 10`),
-  `div`/`rem`, `if`/`case` branches, and list literals (`[2,3,5,7] : Vec(Int53)`); a generic return that
-  ignores its tvar infers concretely through recursion (`length … Int53 forall T`). The portable corpus
-  is now `Int53`. **Still open:** a type variable inferred *purely* from literals (`contains([1,2,3], 2)`
-  → `T = Int64`) — no JS-valid `impl Eq` can match — so the integer-generic stdlib
-  (`13_protocols`/`17_stdlib_eq_ord`/`18_dict_eq`) stays `Int64`/off-`:js`. That's the remaining
-  literal-polymorphism gap. **`17`/`18` are also off-`:rs`** — `Rian.Reach` honestly pins them with a
+  `div`/`rem`, `if`/`case` branches, and list literals incl. in binds (`xs Vec(Int8) := [1,2,3]`); a
+  generic return that ignores its tvar infers concretely through recursion (`length … Int53 forall T`).
+  Adoption is integer-only — an int literal never silently becomes a float (`x Float64 := 66` is an
+  error; write `66.0`). **Literal-polymorphism gap closed:** a tvar inferred *purely* from literals
+  (`contains([1,2,3], 2)`) is `T = Int53`, so the integer-generic stdlib
+  (`13_protocols`/`17_stdlib_eq_ord`/`18_dict_eq`) compiles to and runs on `:js` (the JS protocol
+  dispatcher guards integers on the program int mode — `number` in number-mode, `bigint` for `Int`).
+  **`17`/`18` are still off-`:rs`** — `Rian.Reach` honestly pins them with a
   `:generic` blocker for two Rust-emitter gaps (a generic returning an owned tvar needs
   borrow→owned `.clone()`; a parametric user type like `Pair(K,V)` emits an `enum` with no `<K,V>`
   params), so the gate doesn't green-light Rust the emitter can't produce (ADR-0061 Open items).

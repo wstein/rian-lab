@@ -300,18 +300,16 @@ defmodule Rian.JSTest do
       assert node_eval(js, ~s/show(["Zero"])/) in [:no_node, "zero"]
     end
 
-    test "the integer Eq/Ord stdlib is not JS-portable yet — Int64 from literals is off :js" do
-      # `contains([1, 2, 3], 2)` derives `T = Int64` purely from the integer
-      # literals (the literal default), and `impl Eq for Int64` is off `:js`
-      # (ADR-0064 §2a). Making this stdlib JS-portable needs integer-literal
-      # polymorphism (the literal would adopt `Int53`) — a checker follow-up. Until
-      # then JS compilation honestly refuses rather than silently using BigInt.
-      err =
-        assert_raise JS.Unsupported, fn ->
-          JS.compile(File.read!("examples/rian/17_stdlib_eq_ord.rian"))
-        end
+    test "the integer Eq/Ord stdlib is JS-portable (literals are Int53) and runs in node" do
+      # `contains([1, 2, 3], 2)` derives `T = Int53` from the integer literals (the
+      # portable default, ADR-0064), so `impl Eq/Ord for Int53` matches and the whole
+      # stdlib compiles to JS — number-mode, with the dispatcher guarding on `number`.
+      js = JS.compile(File.read!("examples/rian/17_stdlib_eq_ord.rian"))
+      refute js =~ "Int64"
 
-      assert Exception.message(err) =~ "Int64"
+      assert node_eval(js, "JSON.stringify(sort([3, 1, 2]))") in [:no_node, "[1,2,3]"]
+      assert node_eval(js, "contains([1, 2, 3], 2)") in [:no_node, "true"]
+      assert node_eval(js, "contains([1, 2, 3], 9)") in [:no_node, "false"]
     end
 
     test "struct construction, field access, patterns, and dispatch run in node" do

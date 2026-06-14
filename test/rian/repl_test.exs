@@ -10,7 +10,7 @@ defmodule Rian.ReplTest do
 
   describe "expressions" do
     test "evaluates arithmetic with its inferred type" do
-      assert {{:value, 2, "Int64"}, _s} = eval(Repl.new(), "1 + 1")
+      assert {{:value, 2, "Int53"}, _s} = eval(Repl.new(), "1 + 1")
     end
 
     test "evaluates lists, tuples, and atoms" do
@@ -55,7 +55,7 @@ defmodule Rian.ReplTest do
       {{:defined, ["id"]}, s} = eval(s, "def id(x T) T forall T\ndef id(x) := x")
       # `forall T` no longer collapses to bare `:unknown` at the prompt —
       # `id(5)` reads its `T` from the argument's `Int64` (ADR-0042).
-      assert {{:value, 5, "Int64"}, _} = eval(s, "id(5)")
+      assert {{:value, 5, "Int53"}, _} = eval(s, "id(5)")
     end
 
     test "redefines a function (shadowing, not duplication)" do
@@ -80,8 +80,8 @@ defmodule Rian.ReplTest do
   describe "top-level bindings" do
     test "binds a value, visible to a later expression" do
       s = Repl.new()
-      assert {{:bound, "x", 5, "Int64"}, s} = eval(s, "x := 5")
-      assert {{:value, 6, "Int64"}, _} = eval(s, "x + 1")
+      assert {{:bound, "x", 5, "Int53"}, s} = eval(s, "x := 5")
+      assert {{:value, 6, "Int53"}, _} = eval(s, "x + 1")
     end
 
     test "a later bind of the same name shadows the earlier" do
@@ -106,7 +106,7 @@ defmodule Rian.ReplTest do
     test "a literal whose annotation is not a matching width is a binding-site error" do
       assert {{:error, msg}, s} = eval(Repl.new(), "x Bool := 66")
       assert msg =~ "declared `Bool`"
-      assert msg =~ "Int64"
+      assert msg =~ "Int53"
       # the failed binding does not advance the session
       assert {{:error, _}, ^s} = eval(s, "x")
     end
@@ -129,7 +129,7 @@ defmodule Rian.ReplTest do
     end
 
     test "untyped bindings are unaffected" do
-      assert {{:bound, "x", 66, "Int64"}, _} = eval(Repl.new(), "x := 66")
+      assert {{:bound, "x", 66, "Int53"}, _} = eval(Repl.new(), "x := 66")
     end
   end
 
@@ -274,13 +274,13 @@ defmodule Rian.ReplTest do
 
   describe "type_of/2 — type without evaluation" do
     test "infers an expression's type" do
-      assert Repl.type_of(Repl.new(), "1 + 2") == "Int64"
+      assert Repl.type_of(Repl.new(), "1 + 2") == "Int53"
     end
 
     test "uses the session's bindings" do
       s = Repl.new()
       {_, s} = eval(s, "x := 10")
-      assert Repl.type_of(s, "x + 1") == "Int64"
+      assert Repl.type_of(s, "x + 1") == "Int53"
     end
 
     test "returns nil when no type can be inferred" do
@@ -293,7 +293,7 @@ defmodule Rian.ReplTest do
       assert capture_io(run) == ""
       assert capture_io(:stderr, run) == ""
       # Purely a read: the same session still answers the same way.
-      assert Repl.type_of(s, "1 + 1") == "Int64"
+      assert Repl.type_of(s, "1 + 1") == "Int53"
     end
   end
 
@@ -359,7 +359,7 @@ defmodule Rian.ReplTest do
     test "reports a bind's inferred type" do
       s = Repl.new()
       {_, s} = eval(s, "total := 42")
-      assert %{binds: %{"total" => "Int64"}} = Repl.describe(s)
+      assert %{binds: %{"total" => "Int53"}} = Repl.describe(s)
     end
 
     test "a fresh session has no functions or binds" do
@@ -402,7 +402,7 @@ defmodule Rian.ReplTest do
 
     test "type_of of an untyped bind reflects the RHS inferred type" do
       # exercises the `{:bind, _name, e}` branch with a concrete result
-      assert Repl.type_of(Repl.new(), "x := 1 + 2") == "Int64"
+      assert Repl.type_of(Repl.new(), "x := 1 + 2") == "Int53"
     end
 
     test "type_of of a typed bind returns the annotation (typed_bind branch)" do
@@ -427,7 +427,7 @@ defmodule Rian.ReplTest do
       # session_ic rescues a broken units source to an empty ic; a plain
       # expression still infers without session knowledge.
       s = %Repl.Session{base: :erlang.unique_integer([:positive]), units: [{["x"], "def f(n"}]}
-      assert Repl.type_of(s, "1 + 1") == "Int64"
+      assert Repl.type_of(s, "1 + 1") == "Int53"
     end
 
     test "describe maps a bind whose stmt does not match its recorded name" do

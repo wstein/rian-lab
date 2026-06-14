@@ -114,7 +114,19 @@ defmodule Rian.Check do
       wildcard?(x) -> y
       wildcard?(y) -> x
       fn_type?(x) and fn_type?(y) -> unify_fn(x, y)
+      # two compatible numeric widths reconcile to their LUB — an inferred
+      # `Fn(_, Int53)` (a lambda over literals) matches a declared `Fn(Int64, Int64)`.
+      (j = num_lub(x, y)) != nil -> j
       true -> :mismatch
+    end
+  end
+
+  defp num_lub(x, y) do
+    if num_kind(x) && num_kind(y) do
+      case join(x, y) do
+        :unknown -> nil
+        t -> t
+      end
     end
   end
 
@@ -139,7 +151,7 @@ defmodule Rian.Check do
   def infer(ast, env, ic) when is_tuple(ast), do: infer(Core.from_expr(ast), env, ic)
 
   def infer(%ENum{text: n}, _env, _ic),
-    do: if(String.contains?(n, ".") or String.match?(n, ~r/[eE]/), do: "Float64", else: "Int64")
+    do: if(String.contains?(n, ".") or String.match?(n, ~r/[eE]/), do: "Float64", else: "Int53")
 
   def infer(%EStr{}, _env, _ic), do: "String"
   # a `Char` literal is the `Char` primitive (ADR-0036); ordinal arithmetic on it
@@ -540,7 +552,9 @@ defmodule Rian.Check do
   # ordinal arithmetic widens to the base (ADR-0036): `Char ± _` is `Int64`, not
   # `Char` (`'9' - '0' = 9 ∉ Char`). A `Char` operand contributes its codepoint
   # base; every other type passes through unchanged.
-  defp ordinal_base("Char"), do: "Int64"
+  # `Char`'s ordinal base is `Int53` (its codepoint width, `__prim_char_code`) — the
+  # portable all-target integer, so `'a' + 1` is `Int53`, JS-reachable (ADR-0036/0064).
+  defp ordinal_base("Char"), do: "Int53"
   defp ordinal_base(t), do: t
 
   # Arithmetic result type. An integer *literal* operand is width-flexible (a
@@ -793,8 +807,19 @@ defmodule Rian.Check do
       range = Map.get(Map.get(ic, :ranges, %{}), ann) ->
         range_bind(name, ann, range, ce, env, ic)
 
-      literal_adopts?(ce, ann) ->
+      # a constant-of-literals value adopts the declared width — scalars, but also a
+      # list literal adopting `Vec(W)` (and `if`/`case`/arith of literals), mirroring
+      # the return-body path. It must still FIT the width's range (ADR-0064).
+      lit_expr_adopts?(e, ann) ->
         lit_range_error(e, ann, name)
+
+      # an integer literal does not silently become a float (ADR-0035 / ADR-0034 §1):
+      # `x Float64 := 66` is a compile error even though `Int53 ⊑ Float64` is lossless —
+      # write an explicit float. (The lossless int→float widening still applies to a
+      # *typed* int value.)
+      int_lit_expr?(ce) and float_type?(ann) ->
+        {:error,
+         "`#{name}`: an integer literal does not adopt the float type `#{ann}` — write an explicit float"}
 
       true ->
         t = infer(ce, env, ic)
