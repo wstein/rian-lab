@@ -46,6 +46,7 @@ mix rian.compile examples/area.rian                       # BEAM bytecode + Rust
 mix rian.compile examples/rian/05_modules.rian --rust     # Rust only
 mix rian.compile examples/rian/08_lambdas_collections.rian --beam  # BEAM bytecode only (allows Erlang FFI)
 mix rian.compile examples/area.rian --beam --show-elixir  # + the Elixir-text debug view
+mix rian.tour                                             # regenerate the by-example site dataset from the emitters
 ```
 
 By default both **real** targets are emitted: the BEAM target is compiled to
@@ -104,6 +105,14 @@ Start with the corpus index: **[docs/README.md](docs/README.md)**.
 To read the language *by example*, see the annotated source tour in
 **[examples/rian/](examples/rian/README.md)** — it walks the surface syntax (expressions,
 types, capabilities, modules, macros, FFI) in faithful, spec-checked `.rian`
-files. These are illustrative source, not yet compilable: there is no
-declaration parser yet (ADR-0031), so the verified passes are driven by the
-Elixir scripts in [examples/](examples/) until that lands.
+files that compile through the declaration parser (`Rian.Decl`, ADR-0031) and
+lower to every target.
+
+### Website
+
+The Starlight docs and the bespoke marketing/tutorial pages both live in
+**[site/](site/README.md)**. The interactive *Rian by Example*, homepage,
+playground, and docs-reader pages render their per-target code from
+`site/src/data/tour.json` — a committed dataset produced by `mix rian.tour` from
+the *real* emitters, so what the site shows is exactly what the compiler emits.
+`Rian.TourTest` fails the build if the committed file drifts from `generate/0`.

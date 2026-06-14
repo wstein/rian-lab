@@ -30,6 +30,7 @@ mix rian.compile FILE [--beam|--rust|--js|--jvm] [--show-elixir]  # BEAM bytecod
 mix rian.jar FILE [-o OUT.jar] [--main FUNC]      # runnable JVM .jar via Kotlin+kotlinc (ADR-0049/0062 rung B)
 mix rian.repl                                     # compiling REPL (parse→check→abstract-forms→load→run)
 mix rian.targets FILE [--require ex,rs,js]        # per-function target-reachability report / gate
+mix rian.tour [--check]                           # regenerate site/src/data/tour.json (the by-example dataset) from the real emitters
 mix examples                                      # end-to-end lowering demo
 ```
 

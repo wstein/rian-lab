@@ -41,8 +41,10 @@ oriented, and Kotlin's `sealed interface` + `data class` + smart-cast `is` patte
 map almost 1:1 — far less boilerplate than Java's pre-Valhalla boxing, and consistent with the
 idiomatic-per-target ethos (BEAM/Rust/JS each get their native shape; ADR-0041 already specced sums →
 "JVM enum/sealed"). A Rian sum lowers to a sealed hierarchy (`data class Num(val f0: Long): Expr`),
-a multi-clause `def` to an `if`-dispatcher with smart-cast binds. `Int64` → `Long` (64-bit native,
-no boxing dance). It is a **source emitter on the typed core IR** (`Core.from_expr`/`from_pat`), the
+a multi-clause `def` to an `if`-dispatcher with smart-cast binds. A clause whose only condition is a
+`when` guard (a variable pattern that binds but tests nothing) lowers to a scoped `run { … }` carrying
+the guard as its inner `if` — never an empty `if () { … }`, which is not valid Kotlin. `Int64` →
+`Long` (64-bit native, no boxing dance). It is a **source emitter on the typed core IR** (`Core.from_expr`/`from_pat`), the
 fourth backend with no new fork (ADR-0050) and the second proof of that thesis after `Rian.JS`.
 
 **Scope (MVP):** functions (single/multi-clause), `Int64`/`Float64`/`Bool`/`String`, operators,
