@@ -15,6 +15,11 @@ const basedRedirects = Object.fromEntries(
   Object.entries(redirects).map(([from, to]) => [from, to.startsWith("/") ? prefix + to : to]),
 );
 
+// Land the site root on the bespoke homepage instead of the generated docs index
+// (the formatter emits "/" -> "/overview/readme/"). The docs index stays reachable
+// at its own slug and from the homepage's CTAs.
+basedRedirects["/"] = prefix + "/home";
+
 // Astro does NOT base-prefix root-relative links inside Markdown/MDX content,
 // and our generated cross-page hrefs are absolute (`/api/...`). This rehype pass
 // prepends the deploy base so those links resolve under a Pages subpath. Starlight
@@ -46,7 +51,21 @@ export default defineConfig({
   integrations: [
     starlight({
       title: "RianLab",
-      sidebar,
+      // Surface the bespoke pages (built from src/pages/, outside the generated
+      // docs) at the top of the docs sidebar. Starlight base-prefixes these links.
+      sidebar: [
+        {
+          label: "The site",
+          items: [
+            { label: "Home", link: "/home" },
+            { label: "Rian by Example", link: "/by-example" },
+            { label: "Playground", link: "/playground" },
+            { label: "Docs reader", link: "/docs-reader" },
+            { label: "Contributors", link: "/contributors" },
+          ],
+        },
+        ...sidebar,
+      ],
       components: { Footer: "./src/components/Footer.astro" },
     }),
   ],
