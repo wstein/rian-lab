@@ -105,11 +105,8 @@ mod SelfhostCore do
 
   def emit_pairs(Vec(SPair)) String
   def emit_pairs([]) := ""
-  def emit_pairs([p]) := one_pair(p)
-  def emit_pairs([p | rest]) := one_pair(p) <> " " <> emit_pairs(rest)
-
-  def one_pair(SPair) String
-  def one_pair(SP(k, v)) := "(" <> k <> " " <> emit(v) <> ")"
+  def emit_pairs([SP(k, v)]) := "(" <> k <> " " <> emit(v) <> ")"
+  def emit_pairs([SP(k, v) | rest]) := "(" <> k <> " " <> emit(v) <> ") " <> emit_pairs(rest)
 
   def emit_stmts(Vec(SStmt)) String
   def emit_stmts([]) := ""
@@ -175,9 +172,6 @@ mod SelfhostCore do
 
   def emit_ppairs(Vec(PPair)) String
   def emit_ppairs([]) := ""
-  def emit_ppairs([p]) := one_ppair(p)
-  def emit_ppairs([p | rest]) := one_ppair(p) <> " " <> emit_ppairs(rest)
-
-  def one_ppair(PPair) String
-  def one_ppair(PPr(k, p)) := "(" <> k <> " " <> emit_pat(p) <> ")"
+  def emit_ppairs([PPr(k, p)]) := "(" <> k <> " " <> emit_pat(p) <> ")"
+  def emit_ppairs([PPr(k, p) | rest]) := "(" <> k <> " " <> emit_pat(p) <> ") " <> emit_ppairs(rest)
 end
