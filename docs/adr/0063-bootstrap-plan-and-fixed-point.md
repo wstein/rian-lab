@@ -1,7 +1,7 @@
 # ADR-0063 — Bootstrap plan: the self-hosting boundary and the fixed-point criterion
 
 **Status:** Proposed
-**Implemented:** partial — Stage 0/1 equivalence-locked (ported lexer + parser slice; `Rian.Fixpoint`, `examples/rian/selfhost_*.rian`; `test/rian/fixpoint_test.exs`, `test/rian/parse_fixpoint_test.exs`); Stage 2/3 (full self-compile, fixed point) not
+**Implemented:** partial — **BEAM** self-hosting (§4): Stage 0/1 equivalence-locked (ported lexer + parser slice; `Rian.Fixpoint`, `examples/rian/selfhost_*.rian`; `test/rian/fixpoint_test.exs`, `parse_fixpoint_test.exs`), Stage 2 near-complete (decl front-end IR-equals `Rian.Decl`), Stage 3 (`v1==v2` `.beam`) not. The marching boundary is **measured** (`Rian.SelfHost` → `docs/self-host-status.md`, `test/rian/self_host_status_test.exs`), FFI crutches are **counted+enforced** (`@selfhost_ffi` ledger, `self_host_ffi_test.exs`), and the two untested-fragility areas now have fixpoints with teeth (`checker_fixpoint_test.exs`, `string_emit_fixpoint_test.exs`). **Portable** self-hosting (compile-the-compiler to Rust/JS) is a *separate, further* terminus, gated on ADR-0047 breadth + the `Fn` Reach gap — not near.
 **Refs:** ADR-0027 (fast track to self-hosting), ADR-0031 (reuse the runtime, not the compiler; abstract-forms backend), ADR-0050 (typed core IR — one IR, many front/back ends), ADR-0047 (portable prelude — the stdlib the ported compiler leans on), SELFHOST.md (the blocker ledger + the lexer/parser fixpoints)
 **Owners:** Arthur Pendelton (compilers) · Chloe Bennett (parser) · Maya Lin (architecture) · Samir Patel (conformance) · Kira Neri (honesty) · Rachel Okafor (PM)
 
@@ -50,11 +50,41 @@ gating library work and blocks Stage 2 below.
 **"Real self-hosting" = Stage 2** (the front-end genuinely self-hosts, reusing a trusted backend);
 **Stage 3** is the canonical bootstrap fixed point that retires the Elixir host entirely.
 
+**This whole ladder is the BEAM terminus** — Stage 2 feeds `Rian.Beam.compile_ir/2` and Stage 3 asserts
+`v1 == v2` over `.beam` bytecode. It says nothing about lowering the compiler to Rust or JS; that is a
+*separate, further* terminus (§4).
+
 ### 3. Honesty rule (Kira)
 
 Do not call Stage 1 a "bootstrap fixed point." It is **self-application**: a ported stage lexing real
 Rian source (including its own) and matching the reference. The genuine vN==vN+1 fixed point is Stage 3
 and requires the compiler in Rian. Each stage's claim is bounded to what its proof actually shows.
+
+### 4. Two termini: BEAM self-hosting vs portable self-hosting (do not conflate)
+
+The debate kept tripping over a contradiction: the docs imply "self-hosting" is one finish line, but
+there are **two**, and the portable one is much further out than the prose suggested. Name them apart.
+
+- **BEAM self-hosting** — the Stages 0–3 ladder above. The Rian compiler compiles its own source to
+  `.beam` and the result is a stable fixed point *on the BEAM*. This is the reachable, on-the-critical-
+  path goal; the host language being retired is Elixir, the target staying the BEAM. The blockers are
+  parser/checker/backend coverage + ADR-0047 stdlib breadth — **not** target portability.
+- **Portable self-hosting** — compiling *the compiler itself* to **Rust and/or JS** (`mix rian.build
+  --rust`/`--js` over the Rian-written compiler), so Rian's toolchain runs off the BEAM entirely. This
+  is the headline once `v1==v2` holds, but it is **gated on strictly more**:
+  1. **ADR-0047 prelude breadth** — every `Enum`/`Map`/`String`/`List` op the compiler uses must be
+     written in portable Rian, not host FFI (the `@selfhost_ffi` ledger measures the remaining debt).
+  2. **The parametric / `Fn` Reach gaps** — a real compiler is saturated with `Vec(Token)`, `Map(K,V)`,
+     and higher-order passes; `Rian.Reach` still **honestly pins** the `Fn(...)`-signature shapes (and,
+     until recently, owned-generic/parametric returns) off `:rs`. Portable self-hosting cannot precede
+     those landing — the recent Rust-generic work (ADR-0061: owned↔borrow coercion, `enum Pair<K,V>`,
+     `Option(T)`/`T|E` returns) closed most of them, leaving returned closures (`Fn`) as the live gap.
+
+**Sequencing trap to avoid (consensus):** do **not** port the checker on top of host-FFI crutches and
+then swap the stdlib underneath it — the diff becomes unverifiable. A small **P5 portable core** lands
+*before* the checker port (P3), and each crutch is **counted** in the `@selfhost_ffi` ledger so every
+swap deletes a line. The marching boundary is **measured** (`Rian.SelfHost`, `self-host-status.md`),
+not asserted — "% of the pipeline self-hosted" is a number, not a vibe.
 
 ## Rationale
 
@@ -72,6 +102,11 @@ and requires the compiler in Rian. Each stage's claim is bounded to what its pro
 - **Next:** widen the parser slice → port `Rian.Decl` → Stage 2 (front-end self-host), gated on the
   portable stdlib (ADR-0047). Stage 3 follows once the backend is in Rian.
 - SELFHOST.md becomes the *ledger of blockers per stage*; this ADR is the *plan*.
+- **The boundary is instrumented (not narrated):** `Rian.SelfHost` declares each pipeline stage's
+  self-host state and renders `docs/self-host-status.md` (a `% self-hosted` headline + per-stage table),
+  snapshot-gated so it can't drift; the `@selfhost_ffi` ledger enumerates every host-FFI crutch in the
+  self-host sources and a test (via `Rian.Reach`) fails on an **unlisted** crutch *or* a **stale** ledger
+  line — so each P5 swap must delete both the call and its ledger entry.
 
 ## Open items
 
