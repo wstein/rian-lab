@@ -497,85 +497,16 @@ defmodule Rian.JS do
   defp arm_return(body, nil), do: "return #{branch_js(body)};"
   defp arm_return(body, g), do: "if (#{expr_js(g)}) { return #{branch_js(body)}; }"
 
-  # a clause body parses to a block: emit `let`s then `return` the final value
+  # a clause body parses to a block: emit `let`s then `return` the final value.
+  # `:=` shadowing is resolved on the Core IR by `Rian.Shadow` first (JS `let`/
+  # `const` forbid same-scope re-declaration); `$` is JS-valid and never appears
+  # in a Rian identifier, so a `$`-suffixed fresh name cannot collide.
   defp clause_return(src, params) do
     %EBlock{stmts: stmts} = Core.from_expr(Pratt.parse_body(src))
-    # seed the version map with the params so a `:=` rebinding a parameter (which
-    # is already `const`-bound in this scope) is renamed rather than re-declared
-    block_return(ded_block(stmts, %{}, Map.new(params, &{&1, 1})))
+    block_return(Rian.Shadow.dedup(stmts, params, &js_fresh/2))
   end
 
-  # `:=` shadowing -> fresh `$`-suffixed JS vars (ADR-0034). JS `let`/`const`
-  # forbid re-declaration in a scope, so a rebind `x := …; x := …` would be a
-  # SyntaxError; this capture-avoiding rename makes each *same-scope* binding
-  # unique (`$` is JS-valid and never appears in a Rian identifier, so a fresh
-  # name cannot collide). Each Rian nested block is its own JS scope (an IIFE), so
-  # only rebinds within one block need renaming; references thread through `r`.
-  # (Erlang needs a different scheme — `@`, in `Rian.Beam` — there is no marker
-  # valid on every target.)
-  defp ded_block(stmts, r, ver \\ %{}) do
-    {rev, _r, _ver} =
-      Enum.reduce(stmts, {[], r, ver}, fn
-        {:bind, n, e}, acc -> ded_bind(n, nil, e, acc)
-        {:typed_bind, n, t, e}, acc -> ded_bind(n, t, e, acc)
-        {:expr, e}, {acc, r, ver} -> {[{:expr, ded_expr(e, r)} | acc], r, ver}
-      end)
-
-    Enum.reverse(rev)
-  end
-
-  defp ded_bind(n, t, e, {acc, r, ver}) do
-    e2 = ded_expr(e, r)
-    count = Map.get(ver, n, 0)
-
-    {name, r2} =
-      if count == 0,
-        # first binding in this block shadows any outer rename of the same name
-        do: {n, Map.delete(r, n)},
-        else:
-          {n <> "$" <> Integer.to_string(count),
-           Map.put(r, n, n <> "$" <> Integer.to_string(count))}
-
-    stmt = if t, do: {:typed_bind, name, t, e2}, else: {:bind, name, e2}
-    {[stmt | acc], r2, Map.put(ver, n, count + 1)}
-  end
-
-  # rename free references through `r`, descending into nested binders with the
-  # shadowed names removed (lambda params, `case` arm patterns, nested blocks)
-  defp ded_expr(%EId{name: x} = node, r), do: %{node | name: Map.get(r, x, x)}
-  defp ded_expr(%EBlock{stmts: stmts} = node, r), do: %{node | stmts: ded_block(stmts, r)}
-
-  defp ded_expr(%ECase{scrut: s, arms: arms} = node, r) do
-    arms2 =
-      Enum.map(arms, fn {pat, g, b} ->
-        inner = Map.drop(r, pat_var_names(pat))
-        {pat, g && ded_expr(g, inner), ded_expr(b, inner)}
-      end)
-
-    %{node | scrut: ded_expr(s, r), arms: arms2}
-  end
-
-  defp ded_expr(node, r) when is_struct(node) do
-    node
-    |> Map.from_struct()
-    |> Enum.reduce(node, fn {k, v}, acc -> %{acc | k => ded_expr(v, r)} end)
-  end
-
-  defp ded_expr(list, r) when is_list(list), do: Enum.map(list, &ded_expr(&1, r))
-
-  defp ded_expr(tuple, r) when is_tuple(tuple),
-    do: tuple |> Tuple.to_list() |> Enum.map(&ded_expr(&1, r)) |> List.to_tuple()
-
-  defp ded_expr(other, _r), do: other
-
-  defp pat_var_names(%PVar{name: n}), do: [n]
-  defp pat_var_names(%PCtor{args: ps}), do: Enum.flat_map(ps, &pat_var_names/1)
-  defp pat_var_names(%PList{elems: ps, tail: t}), do: Enum.flat_map([t | ps], &pat_var_names/1)
-
-  defp pat_var_names(%PStruct{fields: fs}),
-    do: Enum.flat_map(fs, fn {_l, p} -> pat_var_names(p) end)
-
-  defp pat_var_names(_), do: []
+  defp js_fresh(base, count), do: base <> "$" <> Integer.to_string(count)
 
   defp block_return([{:expr, e}]), do: "return #{expr_js(e)};"
 

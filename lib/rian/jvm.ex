@@ -257,7 +257,8 @@ defmodule Rian.JVM do
     {acc, closed?} =
       Enum.reduce_while(clauses, {[], false}, fn c, {acc, _} ->
         {tests, binds} = clause_match(c.pats)
-        body = bind_str(binds) <> guarded_return(c.body, c.guard)
+        param_names = Enum.map(binds, fn {n, _} -> n end)
+        body = bind_str(binds) <> guarded_return(c.body, c.guard, param_names)
 
         case {tests, c.guard} do
           {[], nil} -> {:halt, {["  #{body}\n" | acc], true}}
@@ -278,10 +279,10 @@ defmodule Rian.JVM do
     end)
   end
 
-  defp guarded_return(body, nil), do: "return #{clause_value(body)}"
+  defp guarded_return(body, nil, params), do: "return #{clause_value(body, params)}"
 
-  defp guarded_return(body, g),
-    do: "if (#{expr_kt(Core.from_expr(Pratt.parse(g)))}) { return #{clause_value(body)} }"
+  defp guarded_return(body, g, params),
+    do: "if (#{expr_kt(Core.from_expr(Pratt.parse(g)))}) { return #{clause_value(body, params)} }"
 
   # Match `pat` against the Kotlin access path `acc` -> `{tests, binds}`. A sum
   # value is a `data class`, so a ctor pattern smart-casts (`acc is Ctor`) and
@@ -308,11 +309,17 @@ defmodule Rian.JVM do
   defp bind_str([]), do: ""
   defp bind_str(binds), do: Enum.map_join(binds, "", fn {n, a} -> "val #{n} = #{a}; " end)
 
-  # a clause body parses to a block: `val`s then the final value expression
-  defp clause_value(src) do
+  # a clause body parses to a block: `val`s then the final value expression.
+  # `:=` shadowing is resolved on the Core IR by `Rian.Shadow` first — a Kotlin
+  # `val`/`var` cannot be re-declared in a scope. Kotlin forbids `$`/`@` in a
+  # plain identifier, so the fresh name is backtick-quoted (`` `x$1` ``): a valid
+  # Kotlin identifier that a Rian source name can never collide with.
+  defp clause_value(src, params) do
     %EBlock{stmts: stmts} = Core.from_expr(Pratt.parse_body(src))
-    block_value(stmts)
+    block_value(Rian.Shadow.dedup(stmts, params, &kt_fresh/2))
   end
+
+  defp kt_fresh(base, count), do: "`" <> base <> "$" <> Integer.to_string(count) <> "`"
 
   defp block_value([{:expr, e}]), do: expr_kt(e)
 

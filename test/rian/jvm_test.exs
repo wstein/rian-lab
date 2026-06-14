@@ -80,6 +80,41 @@ defmodule Rian.JVMTest do
       end
     end
 
+    test "`:=` shadowing renames to a backtick-quoted fresh `val` (no Kotlin redeclaration)" do
+      # Kotlin forbids re-declaring a `val` in a scope, and `$`/`@` are illegal in
+      # plain identifiers, so a shadow `x := …; x := …` becomes a backtick-quoted
+      # fresh name. Shared rename pass: `Rian.Shadow` (ADR-0034).
+      kt =
+        JVM.compile("""
+        def shadowed(n Int64) Int64
+          x := n + 1
+          x := x * 10
+          x
+        end
+        """)
+
+      assert kt =~ "val x = (n + 1L)"
+      assert kt =~ "val `x$1` = (x * 10L)"
+      refute kt =~ "val x = (x * 10L)"
+
+      case kotlin_run(kt, ~s|println(shadowed(1L)); println(shadowed(4L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "20\n50"
+      end
+    end
+
+    test "a `:=` rebinding a parameter is renamed, not re-declared" do
+      # the param `n` is already bound (`val n = a0`); rebinding it must rename.
+      kt = JVM.compile("def f(n Int64) Int64\n  n := n + 1\n  n * 2\nend")
+      assert kt =~ "val `n$1` = (n + 1L)"
+      refute kt =~ "val n = (n + 1L)"
+
+      case kotlin_run(kt, ~s|println(f(5L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "12"
+      end
+    end
+
     test "a `ref` param is lowered to value semantics (sound: return-based surface)" do
       # `ref` (&mut) has no Kotlin analog; it only ever changed the Rust signature,
       # so JVM emits an ordinary `val` binding. Reach reports `ref` as reaching :jvm,
