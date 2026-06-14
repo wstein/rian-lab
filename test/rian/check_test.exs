@@ -1095,4 +1095,26 @@ defmodule Rian.CheckTest do
       assert Check.check(@eq_protocol <> "def caller(a Int64) Bool := equal3(a, a, a)") == :ok
     end
   end
+
+  describe "labeled arguments are construction-only (ADR-0065 freeze)" do
+    test "a labeled struct construction (PascalCase callee) is allowed" do
+      src = "struct Point(x Int64, y Int64)\ndef f() Point := Point(x: 1, y: 2)"
+      assert Check.check(src) == :ok
+    end
+
+    test "a labeled argument on a plain (lowercase) function call is rejected" do
+      assert {:error, msg} =
+               Check.check("def g(a Int64) Int64 := a\ndef f() Int64 := g(a: 1)")
+
+      assert msg =~ "labeled arguments"
+      assert msg =~ "ADR-0065"
+    end
+
+    test "a nested labeled plain call (inside an arithmetic expr) is also caught" do
+      assert {:error, msg} =
+               Check.check("def g(a Int64) Int64 := a\ndef f() Int64 := 1 + g(a: 1)")
+
+      assert msg =~ "labeled arguments"
+    end
+  end
 end

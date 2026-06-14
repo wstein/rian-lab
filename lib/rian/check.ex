@@ -622,11 +622,42 @@ defmodule Rian.Check do
 
   def check_func(%Func{} = f, ic, eset) do
     with :ok <- check_external_caps(f),
+         :ok <- check_labels(f),
          :ok <- check_return(f, ic),
          :ok <- check_binds(f, ic),
          :ok <- check_bounds(f, ic),
          do: check_error_set(f, eset)
   end
+
+  # Labeled arguments (`name: value`) are valid ONLY in struct/variant *construction*
+  # — a PascalCase constructor callee (ADR-0043 / types-match §2). On a plain
+  # (lowercase) function call they are rejected: labeled call args are frozen out by
+  # ADR-0065 ("adopt later, not now"), and without this gate the BEAM emitter would
+  # silently miscompile `foo(x: 1)` into a bogus `%{__struct__: :foo, x: 1}`.
+  defp check_labels(%Func{clauses: clauses}) do
+    Enum.find_value(clauses, :ok, fn
+      %{body: nil} -> nil
+      %{body: body} -> label_error(Pratt.parse_body(body))
+    end) || :ok
+  end
+
+  defp label_error({:call, {:id, f}, args} = node) when is_list(args) do
+    if Enum.any?(args, &match?({:label, _, _}, &1)) and not pascal?(f) do
+      {:error,
+       "`#{f}(…)`: labeled arguments (`name: value`) are only for struct/variant construction " <>
+         "(a PascalCase constructor), not plain function calls (ADR-0065 — labeled call args are " <>
+         "not yet a surface feature)"}
+    else
+      label_error_children(node)
+    end
+  end
+
+  defp label_error(node) when is_tuple(node), do: label_error_children(node)
+  defp label_error(list) when is_list(list), do: Enum.find_value(list, &label_error/1)
+  defp label_error(_other), do: nil
+
+  defp label_error_children(node),
+    do: node |> Tuple.to_list() |> Enum.find_value(&label_error/1)
 
   # An `@external` function (ADR-0068) is trusted FFI: its signature is checked but
   # its host bodies are not. Linearity (`iso`/`ref`, ADR-0055) cannot be enforced
