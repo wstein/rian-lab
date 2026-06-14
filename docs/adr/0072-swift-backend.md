@@ -1,6 +1,7 @@
 # ADR-0072 — Swift backend (the mobile-completion target)
 
 **Status:** Proposed (direction agreed) · **Gated — not adopted until `swiftc` runs in CI** · debated 2026-06-14. Sequenced *after* ADR-0071 (Python).
+**Implemented:** no — proposed direction only; gated until `swiftc` runs in CI. No `Rian.Swift` emitter exists and `:swift` is not in the `Rian.Reach` target vocabulary.
 **Refines:** ADR-0049 (backend tiers — adds Swift beyond the original list), ADR-0026 (target list).
 **Refs:** ADR-0041 (target model), ADR-0042 (dispatch), ADR-0050 (Core IR is the emitter spine), ADR-0058 (reachability + `@targets`; **CI parity**), ADR-0064 (portable numeric contract), ADR-0069 (interpolation), ADR-0036 (`Char`), ADR-0034 (`Option(T)`, no `nil`), ADR-0000 (honesty: the matrix matches what is *verified*).
 **Owners:** Arthur Pendelton (dispatch / sum lowering) · Maya Lin (emitter/tiers) · Kira Neri (CI parity / Reach honesty) · Elena Rostova (numerics) · Mira (totality) · Rachel Okafor (PM)

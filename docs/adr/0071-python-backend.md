@@ -1,6 +1,7 @@
 # ADR-0071 — Python backend (the reach target)
 
 **Status:** Accepted (direction) · **Not yet implemented** — debated 2026-06-14; the first new backend after the original ADR-0026 six. Sequenced *before* ADR-0072 (Swift).
+**Implemented:** no — design/direction only; no `Rian.Python` emitter exists and `:py` is not in the `Rian.Reach` target vocabulary.
 **Refines:** ADR-0049 (backend tiers — adds Python as a new tier beyond the original JVM/Rust/Go/BEAM/JS/WASM list), ADR-0026 (target list).
 **Refs:** ADR-0041 (target model), ADR-0042 (dispatch), ADR-0047 (Prim layer / stdlib), ADR-0050 (Core IR is the emitter spine), ADR-0058 (reachability + `@targets`), ADR-0064 (portable numeric contract), ADR-0069 (interpolation / `__prim_*_to_string`), ADR-0035 (no hidden control flow), ADR-0034 (no `nil`; `Option(T)`), ADR-0000 (honesty: the matrix matches the emitters).
 **Owners:** Liam Davis (dynamic-target emitter) · Maya Lin (tiers) · Samir Patel (conformance / type hints) · Kira Neri (CI parity / Reach honesty) · Elena Rostova (numerics/prims) · Mira (totality) · Rachel Okafor (PM)
