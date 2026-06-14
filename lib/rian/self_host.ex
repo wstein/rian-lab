@@ -171,9 +171,17 @@ defmodule Rian.SelfHost do
   `% self-hosted` headline plus a per-stage table. Generated, never hand-edited.
   """
   @spec status_markdown() :: String.t()
-  def status_markdown do
+  def status_markdown, do: status_markdown(@stages)
+
+  @doc """
+  Render the report for an explicit stage list — the `/0` form passes `@stages`.
+  The list parameter is the test seam that exercises every status badge (incl.
+  `:not_started`, which no real stage currently carries) without faking the data.
+  """
+  @spec status_markdown([map()]) :: String.t()
+  def status_markdown(stages) do
     rows =
-      Enum.map_join(@stages, "\n", fn s ->
+      Enum.map_join(stages, "\n", fn s ->
         "| #{s.name} | #{s.role} | #{badge(s.status)} | #{evidence(s)} | #{s.note} |"
       end)
 

@@ -40,6 +40,23 @@ defmodule Rian.SelfHostStatusTest do
            "not every stage is fully self-hosted; 100% would be dishonest"
   end
 
+  test "the report renders every status badge — incl. `:not_started` and a source-less stage" do
+    # No real stage currently sits at `:not_started`, but the reporter must still
+    # render that vocabulary (a future stage could regress/be added). Drive the row
+    # renderer with a synthetic source-less, not-started stage via `status_markdown/1`.
+    synthetic = [
+      %{name: "Synthetic", role: "test seam", status: :not_started, source: nil, test: nil, note: "n/a"}
+    ]
+
+    row = SelfHost.status_markdown(synthetic)
+    # not-started badge is `—`, and a source-less stage's evidence is also `—`
+    assert row =~ "| Synthetic | test seam | — | — | n/a |"
+
+    # and the real badges render too (sanity over the live pipeline)
+    live = SelfHost.status_markdown()
+    assert live =~ "🟡 partial" or live =~ "✅ yes"
+  end
+
   test "only stages with an equivalence/fixpoint test are marked self_hosted (teeth)" do
     # a `:self_hosted` claim must cite both a Rian source AND a test — a port with no
     # equivalence lock is at most `:partial`. Guards against inflating the number.
