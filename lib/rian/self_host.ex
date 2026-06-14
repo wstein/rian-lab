@@ -157,13 +157,14 @@ defmodule Rian.SelfHost do
   # bootstrap terminus (Stage 3: v1==v2) is gated on this reaching the whole
   # pipeline — not on `percent`.
   @composition %{
-    rung: "lex → parse → lower → forms",
+    rung: "lex → parse → lower → emit",
     stages: 4,
-    subset: "arithmetic expressions (identifiers, integers, `+ - *`, parens)",
-    source: "selfhost_compose.rian",
-    test: "test/rian/compose_fixpoint_test.exs",
+    subset:
+      "a single-clause `def` over arithmetic (def head + parameter list + `:=` body; identifiers, integers, `+ - *`, parens)",
+    source: "selfhost_compose_decl.rian",
+    test: "test/rian/compose_decl_fixpoint_test.exs",
     note:
-      "four stages wired directly over shared types (no projection glue); the composed output is real Erlang abstract forms that compile via :compile.forms and RUN identically to the full Elixir toolchain"
+      "four stages wired directly over shared types (no projection glue); rung 1 (selfhost_compose.rian) composed an expression, rung 2 widens to a whole declaration — Rian now parses the def head and assembles the complete {:function, …} abstract form (name, arity, params, body all from source). The composed output compiles via :compile.forms and RUNS identically to the full Elixir toolchain"
   }
 
   @doc """
@@ -285,7 +286,10 @@ defmodule Rian.SelfHost do
     "selfhost_parse.rian" => ["String.to_atom"],
     # the COMPOSITION rung's `forms` stage builds the Erlang operator/variable
     # atoms (`:+`/`:A`) Rian can't spell, via String.to_atom (ADR-0063 Step 3).
-    "selfhost_compose.rian" => ["String.to_atom"]
+    "selfhost_compose.rian" => ["String.to_atom"],
+    # composition rung 2 — same crutch: the function-name/operator/variable atoms
+    # (`:f`/`:+`/`:A`) for the emitted {:function, …} form (ADR-0063 Step 3).
+    "selfhost_compose_decl.rian" => ["String.to_atom"]
   }
 
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."

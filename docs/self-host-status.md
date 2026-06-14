@@ -13,9 +13,9 @@ terminus and is *not* measured here.
 stages verified against the reference *in isolation* (each fixpoint uses Elixir
 projection glue); it can reach 100% without the pipeline ever closing a loop. The
 composition rung measures the orthogonal question — stages handing their Rian output
-to the next Rian stage with **no glue**. Current rung: **lex → parse → lower → forms**
-(4 stages), over the arithmetic expressions (identifiers, integers, `+ - *`, parens). four stages wired directly over shared types (no projection glue); the composed output is real Erlang abstract forms that compile via :compile.forms and RUN identically to the full Elixir toolchain.
-Source: `selfhost_compose.rian`, fixpoint: `test/rian/compose_fixpoint_test.exs`. The bootstrap
+to the next Rian stage with **no glue**. Current rung: **lex → parse → lower → emit**
+(4 stages), over the a single-clause `def` over arithmetic (def head + parameter list + `:=` body; identifiers, integers, `+ - *`, parens). four stages wired directly over shared types (no projection glue); rung 1 (selfhost_compose.rian) composed an expression, rung 2 widens to a whole declaration — Rian now parses the def head and assembles the complete {:function, …} abstract form (name, arity, params, body all from source). The composed output compiles via :compile.forms and RUNS identically to the full Elixir toolchain.
+Source: `selfhost_compose_decl.rian`, fixpoint: `test/rian/compose_decl_fixpoint_test.exs`. The bootstrap
 terminus (Stage 3, v1==v2) is gated on this reaching the whole pipeline — not on the
 per-stage percentage.
 

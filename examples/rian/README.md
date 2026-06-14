@@ -175,6 +175,18 @@ compile + run on real BEAM bytecode:
   `String.to_atom` (the operator/variable atoms Rian can't spell), counted in the
   ledger. Widening the subset and closing the `v1==v2` loop (Stage 3) are the next
   rungs.
+- [selfhost_compose_decl.rian](selfhost_compose_decl.rian) — **COMPOSITION rung 2**
+  (ADR-0063 Step 3): widens the composed subset from an *expression* to a whole
+  single-clause **`def` declaration**. The pipeline now parses the def head +
+  parameter list + `:=` body and assembles the **complete** Erlang function form —
+  `compile_def(s) = emit_def(parse_def(lex(s)))` — so name, arity, params, and body
+  all come from the source, in Rian. `test/rian/compose_decl_fixpoint_test.exs`
+  loads + **runs** it and asserts behaviour identical to `Rian.Beam` on the same
+  `def`. The only Elixir residual is the two module-level attribute forms
+  (`:module`/`:export`) — the export list needs a *tagless* `{name, arity}` tuple
+  that Rian's tag-injecting variant lowering can't spell; even there the name and
+  arity are read back out of the Rian-produced form. Multi-clause heads, patterns,
+  and guards are the next widening.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
