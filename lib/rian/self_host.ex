@@ -124,10 +124,11 @@ defmodule Rian.SelfHost do
       id: :js_backend,
       name: "ECMAScript backend",
       role: :backend,
-      status: :not_started,
-      source: nil,
-      test: nil,
-      note: "not ported"
+      status: :partial,
+      source: "selfhost_js.rian",
+      test: "test/rian/js_fixpoint_test.exs",
+      note:
+        "expression emitter equals Rian.JS term-for-term over the literal/unary/binary slice; calls/lists/if/case/structs/prims remain"
     },
     %{
       id: :jvm_backend,

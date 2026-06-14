@@ -104,6 +104,14 @@ compile + run on real BEAM bytecode:
   check. **Fixpoint-locked** against the real `Rian.Exhaustiveness.useful?`
   (`test/rian/exhaust_fixpoint_test.exs`). Constructors with arguments,
   multi-column matrices, and list/literal/range patterns remain.
+- [selfhost_js.rian](selfhost_js.rian) — the **ECMAScript backend** port
+  (ADR-0063, ADR-0049 Tier 1): emits JS source text from the Core IR, with the
+  operator remapping that is the point (`and`→`&&`, `==`→`===`, `<>`→`+`,
+  atoms→quoted strings, binary always parenthesised). **Fixpoint-locked** against
+  the reference `Rian.JS` emitter — the port's output equals the `return`
+  expression `Rian.JS.compile` produces, term-for-term
+  (`test/rian/js_fixpoint_test.exs`). Covers the literal/unary/binary slice;
+  calls, lists, `if`/`case`, structs, and prims remain.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via

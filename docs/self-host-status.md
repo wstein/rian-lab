@@ -6,8 +6,8 @@ self-hosting (ADR-0063 §4) — the Rian compiler compiling its own source to `.
 **Portable** self-hosting (the compiler lowered to Rust/JS) is a separate, further
 terminus and is *not* measured here.
 
-**32% self-hosted** — 1 stage(s) self-hosted,
-5 partial, 5 not started, of 11.
+**36% self-hosted** — 1 stage(s) self-hosted,
+6 partial, 4 not started, of 11.
 
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
@@ -20,7 +20,7 @@ terminus and is *not* measured here.
 | Capability checker | checker | 🟡 partial | `examples/rian/selfhost_cap.rian` · `test/rian/cap_fixpoint_test.exs` | capability→Rust lowering + ref-rejecting BEAM legality equal Rian.Capability over the scalar/String/Vec/nominal slice; deep generics + linearity remain |
 | BEAM abstract-forms backend | backend | — | — | selfhost_codegen.rian is a toy stack VM, not the Rian.Beam emitter |
 | Rust/Elixir text backend | backend | — | — | not ported |
-| ECMAScript backend | backend | — | — | not ported |
+| ECMAScript backend | backend | 🟡 partial | `examples/rian/selfhost_js.rian` · `test/rian/js_fixpoint_test.exs` | expression emitter equals Rian.JS term-for-term over the literal/unary/binary slice; calls/lists/if/case/structs/prims remain |
 | Kotlin/JVM backend | backend | — | — | not ported |
 
 A stage is `self-hosted` only when a Rian port is **equivalence-locked** against the
