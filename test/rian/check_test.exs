@@ -945,6 +945,25 @@ defmodule Rian.CheckTest do
       assert Check.infer(Pratt.parse("x + 1"), %{}) == "Int64"
       assert Check.infer(Pratt.parse("(x) -> x + 1")) == "Fn(_,Int64)"
     end
+
+    test "a list literal of constant elements adopts `Vec(Int53)`" do
+      assert Check.check("def small_primes() Vec(Int53) := [2, 3, 5, 7]") == :ok
+      # soundness: a list of REAL Int64 values is still rejected against Vec(Int53)
+      assert {:error, m} = Check.check("def f(n Int64) Vec(Int53) := [n, n]")
+      assert m =~ "Vec(Int53)"
+    end
+
+    test "a generic fn whose return ignores its tvar infers concretely through recursion" do
+      # `length(xs Vec(T)) Int53 forall T` returns `Int53` regardless of `T`, so the
+      # recursive `length(t)` over an unknown tail stays `Int53` (not `:unknown`).
+      assert Check.check("""
+             mod L do
+               pub def length(xs Vec(T)) Int53 forall T
+               pub def length([]) := 0
+               pub def length([_ | t]) := 1 + length(t)
+             end
+             """) == :ok
+    end
   end
 
   describe "range bindings — non-integer ordinal kinds & runtime values" do

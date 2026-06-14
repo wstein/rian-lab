@@ -974,6 +974,15 @@ defmodule Rian.Check do
   defp lit_expr_adopts?({:bin, op, l, r}, ret) when op in ~w(+ - * div rem),
     do: lit_expr_adopts?(l, ret) and lit_expr_adopts?(r, ret)
 
+  # a closed list literal of constant elements adopts `Vec(ElemT)` — every element
+  # adopts the element type (`[2, 3, 5, 7] : Vec(Int53)`, ADR-0064).
+  defp lit_expr_adopts?({:list_lit, elems, nil}, ret) do
+    case Regex.run(~r/^Vec\((.+)\)$/, ret) do
+      [_, et] -> Enum.all?(elems, &lit_expr_adopts?(&1, et))
+      _ -> false
+    end
+  end
+
   defp lit_expr_adopts?(e, ret), do: literal_adopts?(Core.from_expr(e), ret)
 
   defp generic_ret?(_ret, []), do: false
