@@ -93,4 +93,18 @@ defmodule Rian.PrimTest do
       assert m.tokenize("1 + 2") == [{:t_num, 1}, :t_plus, {:t_num, 2}]
     end
   end
+
+  describe "the canonical 64-bit-overflow op list (single-sourced for Reach + JS)" do
+    test "overflow_ops/0 are the `__prim_`-prefixed wrap/saturate/check ops" do
+      assert Prim.overflow_ops() ==
+               ~w(__prim_wrapping_add __prim_saturating_add __prim_checked_add)
+    end
+
+    test "every overflow op is a real intrinsic (a `__prim_` form of a `names/0` entry)" do
+      for op <- Prim.overflow_ops() do
+        assert "__prim_" <> bare = op
+        assert bare in Prim.names()
+      end
+    end
+  end
 end

@@ -267,7 +267,8 @@ defmodule Rian.Reach do
   # the explicit 64-bit overflow prims carry the fixed-width-64 contract — the JS
   # emitter refuses them (ADR-0064 §2a), so a body that *calls* one is off `:js`
   # even when the function's own signature is JS-valid (e.g. an `Int53` wrapper).
-  @wide_prims ~w(__prim_wrapping_add __prim_saturating_add __prim_checked_add)
+  # Canonical list lives in `Rian.Prim` so it and the JS emitter never drift.
+  @wide_prims Rian.Prim.overflow_ops()
 
   # Fixed-width integers too wide for a JS `Number` (the 2^53-exact double): the
   # 64- and 128-bit widths. `Int53` and `Int32`/smaller fit and are JS-native.

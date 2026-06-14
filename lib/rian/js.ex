@@ -229,6 +229,11 @@ defmodule Rian.JS do
   # `Vec(Int53)`/`Map(Int53,…)`. (`Int`, arbitrary precision, never matches, so
   # BigInt stays the default; the two are not mixed within one program, ADR-0064.)
   @js_number_int ~r/\b(Int53|(Int|UInt)(8|16|32))\b/
+
+  # the 64-bit-overflow prims this emitter refuses (ADR-0064 §2a); canonical in
+  # `Rian.Prim` so the list here and `Rian.Reach`'s `:js` blocker never drift.
+  @overflow_prims Rian.Prim.overflow_ops()
+
   defp program_number_mode?(prog) do
     funcs = Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
 
@@ -476,7 +481,7 @@ defmodule Rian.JS do
   # function off `:js`, so the gate catches it first). A function reaching this is
   # one that bypassed the signature gate via an untyped call site.
   defp expr_js(%ECall{fun: %EId{name: prim}, args: [_, _]})
-       when prim in ~w(__prim_wrapping_add __prim_saturating_add __prim_checked_add),
+       when prim in @overflow_prims,
        do:
          raise(
            Unsupported,

@@ -31,8 +31,17 @@ defmodule Rian.Prim do
     wrapping_add saturating_add checked_add
   )
 
+  # The explicit 64-bit-overflow ops (ADR-0035 §3 / ADR-0064 §2a): they carry the
+  # fixed-width-64 two's-complement contract, so the JS emitter refuses them and
+  # `Rian.Reach` pins a function that calls one off `:js`. Canonical here (in the
+  # `__prim_*` form both consumers use) so the two never drift apart.
+  @overflow_ops Enum.map(~w(wrapping_add saturating_add checked_add), &("__prim_" <> &1))
+
   @doc "The intrinsic names the reserved `Prim.*` surface exposes."
   def names, do: @prims
+
+  @doc "The canonical `__prim_*` 64-bit-overflow ops (JS-unsupported; off `:js`)."
+  def overflow_ops, do: @overflow_ops
 
   @doc """
   Walk a tuple-form expression AST and rewrite `Prim.<name>(args)` calls into
