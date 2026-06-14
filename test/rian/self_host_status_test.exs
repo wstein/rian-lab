@@ -45,7 +45,14 @@ defmodule Rian.SelfHostStatusTest do
     # render that vocabulary (a future stage could regress/be added). Drive the row
     # renderer with a synthetic source-less, not-started stage via `status_markdown/1`.
     synthetic = [
-      %{name: "Synthetic", role: "test seam", status: :not_started, source: nil, test: nil, note: "n/a"}
+      %{
+        name: "Synthetic",
+        role: "test seam",
+        status: :not_started,
+        source: nil,
+        test: nil,
+        note: "n/a"
+      }
     ]
 
     row = SelfHost.status_markdown(synthetic)

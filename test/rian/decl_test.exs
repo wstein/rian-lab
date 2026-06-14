@@ -88,7 +88,10 @@ defmodule Rian.DeclTest do
       # body opening `case x do` ended at the next newline and each arm line leaked
       # as a bogus declaration ("expected a declaration, got {pattern}"). A `do … end`
       # block must continue the body to its matching `end`.
-      one = fn src -> %{funcs: fs} = Decl.parse(src); fs end
+      one = fn src ->
+        %{funcs: fs} = Decl.parse(src)
+        fs
+      end
 
       assert [%{name: "f"}] =
                one.("def f(x Int53) Int53 := case x do\n  0 -> 1\n  _ -> 2\nend")
@@ -112,7 +115,10 @@ defmodule Rian.DeclTest do
 
     test "a `:=` multi-line `case` body compiles and runs on the BEAM" do
       src = "def classify(n Int53) Int53 := case n do\n  0 -> 100\n  _ -> 200\nend"
-      {:ok, mod, bin} = Rian.Beam.compile(src, :"rian_case_body_#{System.unique_integer([:positive])}")
+
+      {:ok, mod, bin} =
+        Rian.Beam.compile(src, :"rian_case_body_#{System.unique_integer([:positive])}")
+
       {:module, ^mod} = :code.load_binary(mod, ~c"#{mod}.beam", bin)
       assert apply(mod, :classify, [0]) == 100
       assert apply(mod, :classify, [7]) == 200
