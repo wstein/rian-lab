@@ -122,7 +122,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_rust.rian",
       test: "test/rian/rust_emit_fixpoint_test.exs",
       note:
-        "precedence-aware Rust emitter equals Rian.Lower.emit_expr(_, :rust) over the literal/unary/binary/call slice; lists/structs/Elixir-text remain"
+        "precedence-aware emitter equals Rian.Lower.emit_expr over BOTH :rust and :elixir for literals/unary/binary/call/if/tuple/closed-list (prec/assoc shared; only operator spelling + if/tuple/list shape differ by target); dot, cons-lists, structs, case, maps remain"
     },
     %{
       id: :js_backend,
