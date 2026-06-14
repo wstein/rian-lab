@@ -131,11 +131,14 @@ compile + run on real BEAM bytecode:
   when a child binds looser than its context — matching `Rian.Lower.emit_expr(_,
   :rust)` term-for-term (`test/rian/rust_emit_fixpoint_test.exs`). Atoms are
   BEAM-only; calls/lists/structs remain.
-- [selfhost_kotlin.rian](selfhost_kotlin.rian) — the **Kotlin/JVM backend** port
-  (ADR-0063, ADR-0049 Tier 2): emits Kotlin from Core (always-parenthesised, `==`
-  stays structural `==` not JS's `===`, integer literals carry the `L` suffix),
-  **fixpoint-locked** against `Rian.JVM` (`test/rian/kotlin_emit_fixpoint_test.exs`).
-  Floats, calls, lists, and structs remain.
+- [selfhost_jvm.rian](selfhost_jvm.rian) — the **Kotlin/JVM backend**, fully
+  self-hosted (ADR-0063, ADR-0049 Tier 2): a whole-module emitter — sum types →
+  `sealed interface` + `object`/`data class`, functions with **multi-clause
+  pattern dispatch** (`is` smart-cast tests + `val` binds + the trailing throw),
+  `if`, operators, primitives — **equivalence-locked** against `Rian.JVM.compile`
+  over its full supported surface (`test/rian/jvm_module_fixpoint_test.exs`). The
+  stage consumes Core (parsing is the parser/Core stage's job); lists/maps/case/
+  lambda/`@external`/`Rian.Shadow` are reference gaps, not port gaps.
 - [selfhost_beam.rian](selfhost_beam.rian) — the **BEAM abstract-forms backend**
   port (ADR-0063): builds the Erlang abstract forms `:compile.forms` consumes,
   doing the real `erl_op` mapping (`!=`→`/=`, `<=`→`=<`, `and`→`andalso`).

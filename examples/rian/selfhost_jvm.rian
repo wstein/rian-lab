@@ -1,0 +1,316 @@
+# ===========================================================================
+# SELF-HOSTING — the Kotlin/JVM backend (whole module), written in Rian
+# ===========================================================================
+# Goal (ADR-0063 §2 backend rung; ADR-0049 Tier 2): emit a whole Kotlin
+# compilation unit from the IR — the Rian-written counterpart of `Rian.JVM`'s
+# `compile/1` emission, fixpoint-locked against it in
+# `test/rian/jvm_module_fixpoint_test.exs`.
+#
+# Coverage is `Rian.JVM`'s full SUPPORTED surface (it is a Tier-2 emitter that
+# raises Unsupported for lists/maps/case/lambda/tuple/struct/with): sum types →
+# `sealed interface` + `object`/`data class`; functions with multi-clause pattern
+# dispatch (`when`/`is` smart-casts via tests + binds, the trailing throw); `if`;
+# operators; primitives; `int_to_string`/`int_to_float`. The stage consumes Core
+# (parsing of clause bodies/patterns is the parser/Core stage's job — fed in
+# already-lowered). `@external(:jvm)` bodies and `Rian.Shadow` rename of shadowed
+# `:=` binds are out of scope (the corpus is shadow-free).
+# ---------------------------------------------------------------------------
+
+mod SelfhostJvm do
+  # ── Core (the supported expression subset) ──
+  type Core := CNum(String)
+             | CChar(Int53)
+             | CStr(String)
+             | CId(String)
+             | CUnary(String, Core)
+             | CBin(String, Core, Core)
+             | CCall(String, Vec(Core))
+             | CIf(Core, Block, Block)
+
+  type Block := Block(Vec(Stmt))
+  type Stmt := SBind(String, Core) | STypedBind(String, String, Core) | SExpr(Core)
+
+  type Pat := PWild
+            | PVar(String)
+            | PLitInt(Int53)
+            | PLitStr(String)
+            | PChar(Int53)
+            | PCtor(String, Vec(Pat))
+
+  # ── IR (program shape) ──
+  type Variant := V(String, Vec(String))
+  type TypeDef := TypeDef(String, Vec(Variant))
+  type Param := Param(String, String)
+  type Guard := GNone | GSome(Core)
+  type Clause := Clause(Vec(Pat), Guard, Block)
+  type Func := Func(String, Bool, Vec(Param), String, Vec(Clause))
+
+  # a clause-match result: the structural `tests` and the `binds` it introduces.
+  # Match/CA are structs (field access); Bind is a sum (positional destructure).
+  type Bind := B(String, String)
+  struct Match(tests Vec(String), binds Vec(Bind))
+  # accumulated clause lines + whether an unconditional clause closed the function.
+  struct CA(lines String, closed Bool)
+
+  # generic append (used for both test-string and bind lists).
+  def app(Vec(T), Vec(T)) Vec(T)
+  def app([], ys) := ys
+  def app([x | xs], ys) := [x | app(xs, ys)]
+
+  pub def compile_prog(types Vec(TypeDef), funcs Vec(Func)) String :=
+    join_nn(type_decls(types), fn_decls(funcs))
+
+  def join_nn(String, String) String
+  def join_nn("", b) := b
+  def join_nn(a, "") := a
+  def join_nn(a, b) := a <> "\n\n" <> b
+
+  # ── sum type -> sealed hierarchy ──
+  def type_decls(Vec(TypeDef)) String
+  def type_decls([]) := ""
+  def type_decls([t]) := sum_decl(t)
+  def type_decls([t | rest]) := sum_decl(t) <> "\n\n" <> type_decls(rest)
+
+  def sum_decl(TypeDef) String
+  def sum_decl(TypeDef(name, variants)) :=
+    "sealed interface " <> name <> "\n" <> variant_lines(variants, name)
+
+  def variant_lines(Vec(Variant), String) String
+  def variant_lines([], _) := ""
+  def variant_lines([v], name) := variant_decl(v, name)
+  def variant_lines([v | rest], name) := variant_decl(v, name) <> "\n" <> variant_lines(rest, name)
+
+  def variant_decl(Variant, String) String
+  def variant_decl(V(ctor, []), tname) := "object " <> ctor <> " : " <> tname
+  def variant_decl(V(ctor, ftypes), tname) :=
+    "data class " <> ctor <> "(" <> field_params(ftypes, 0) <> ") : " <> tname
+
+  def field_params(Vec(String), Int53) String
+  def field_params([], _) := ""
+  def field_params([t], i) := "val f" <> Prim.int_to_string(i) <> ": " <> kt_type(t)
+  def field_params([t | rest], i) :=
+    "val f" <> Prim.int_to_string(i) <> ": " <> kt_type(t) <> ", " <> field_params(rest, i + 1)
+
+  # ── functions / clause dispatch ──
+  def fn_decls(Vec(Func)) String
+  def fn_decls([]) := ""
+  def fn_decls([f]) := function_kt(f)
+  def fn_decls([f | rest]) := function_kt(f) <> "\n\n" <> fn_decls(rest)
+
+  def function_kt(Func) String
+  def function_kt(Func(name, pb, params, ret, clauses)) :=
+    emit_fn(name, vis(pb), sig_params(params, 0), kt_type(ret), clause_lines(clauses))
+
+  def emit_fn(name String, v String, sig String, ret String, ca CA) String :=
+    v <> "fun " <> name <> "(" <> sig <> "): " <> ret <> " {\n" <> ca.lines <> tail(name, ca.closed) <> "}"
+
+  # `true`/`false` are variable patterns in a clause head, not literal matches —
+  # branch on the Bool with `if`.
+  def vis(pb Bool) String
+    if pb do
+      ""
+    else
+      "private "
+    end
+  end
+
+  def tail(name String, closed Bool) String
+    if closed do
+      ""
+    else
+      "  throw RuntimeException(" <> kt_str(name <> ": no clause matched") <> ")\n"
+    end
+  end
+
+  def sig_params(Vec(Param), Int53) String
+  def sig_params([], _) := ""
+  def sig_params([Param(_, t)], i) := "a" <> Prim.int_to_string(i) <> ": " <> kt_type(t)
+  def sig_params([Param(_, t) | rest], i) :=
+    "a" <> Prim.int_to_string(i) <> ": " <> kt_type(t) <> ", " <> sig_params(rest, i + 1)
+
+  # Emit clauses top-to-bottom; an unconditional one (no tests, no guard) always
+  # matches, so it closes the function (drop the rest + the trailing throw).
+  def clause_lines(Vec(Clause)) CA
+  def clause_lines([]) := CA(lines: "", closed: false)
+  def clause_lines([Clause(pats, guard, body) | rest])
+    m := clause_match(pats)
+    line := bind_str(m.binds) <> guarded_return(body, guard)
+    case guard do
+      GNone -> closed_or_cond(m.tests, line, rest)
+      GSome(_) -> run_or_cond(m.tests, line, rest)
+    end
+  end
+
+  # no guard: empty tests -> unconditional (closes); else a conditional `if`.
+  def closed_or_cond(Vec(String), String, Vec(Clause)) CA
+  def closed_or_cond([], line, _) := CA(lines: "  " <> line <> "\n", closed: true)
+  def closed_or_cond(tests, line, rest) := prepend_if(tests, line, rest)
+
+  # guarded: empty tests -> `run { … }` (the guard lives in guarded_return); else `if`.
+  def run_or_cond(Vec(String), String, Vec(Clause)) CA
+  def run_or_cond([], line, rest) := prepend("  run { " <> line <> " }\n", clause_lines(rest))
+  def run_or_cond(tests, line, rest) := prepend_if(tests, line, rest)
+
+  def prepend_if(tests Vec(String), line String, rest Vec(Clause)) CA :=
+    prepend("  if (" <> join_and(tests) <> ") { " <> line <> " }\n", clause_lines(rest))
+
+  def prepend(s String, ca CA) CA := CA(lines: s <> ca.lines, closed: ca.closed)
+
+  def join_and(Vec(String)) String
+  def join_and([]) := ""
+  def join_and([t]) := t
+  def join_and([t | rest]) := t <> " && " <> join_and(rest)
+
+  def clause_match(Vec(Pat)) Match
+  def clause_match(pats) := cm(pats, 0, [], [])
+
+  def cm(Vec(Pat), Int53, Vec(String), Vec(Bind)) Match
+  def cm([], _, ts, bs) := Match(tests: ts, binds: bs)
+  def cm([p | rest], i, ts, bs)
+    m := pat_match(p, "a" <> Prim.int_to_string(i))
+    cm(rest, i + 1, app(ts, m.tests), app(bs, m.binds))
+  end
+
+  def pat_match(Pat, String) Match
+  def pat_match(PWild, _) := Match(tests: [], binds: [])
+  def pat_match(PVar(n), acc) := Match(tests: [], binds: [B(n, acc)])
+  def pat_match(PLitInt(v), acc) := Match(tests: [acc <> " == " <> Prim.int_to_string(v) <> "L"], binds: [])
+  def pat_match(PLitStr(v), acc) := Match(tests: [acc <> " == " <> kt_str(v)], binds: [])
+  def pat_match(PChar(cp), acc) := Match(tests: [acc <> " == " <> Prim.int_to_string(cp) <> "L"], binds: [])
+  def pat_match(PCtor(ctor, args), acc)
+    inner := ctor_args(args, acc, 0, [], [])
+    Match(tests: [acc <> " is " <> ctor | inner.tests], binds: inner.binds)
+  end
+
+  def ctor_args(Vec(Pat), String, Int53, Vec(String), Vec(Bind)) Match
+  def ctor_args([], _, _, ts, bs) := Match(tests: ts, binds: bs)
+  def ctor_args([p | rest], acc, i, ts, bs)
+    m := pat_match(p, acc <> ".f" <> Prim.int_to_string(i))
+    ctor_args(rest, acc, i + 1, app(ts, m.tests), app(bs, m.binds))
+  end
+
+  def bind_str(Vec(Bind)) String
+  def bind_str([]) := ""
+  def bind_str([B(n, a) | rest]) := "val " <> n <> " = " <> a <> "; " <> bind_str(rest)
+
+  def guarded_return(Block, Guard) String
+  def guarded_return(body, GNone) := "return " <> clause_value(body)
+  def guarded_return(body, GSome(g)) := "if (" <> expr_kt(g) <> ") { return " <> clause_value(body) <> " }"
+
+  def clause_value(Block) String
+  def clause_value(Block(stmts)) := block_value(stmts)
+
+  def block_value(Vec(Stmt)) String
+  def block_value([SExpr(e)]) := expr_kt(e)
+  def block_value(stmts) := "run { " <> lets_of(init_of(stmts)) <> " " <> stmt_value(last_of(stmts)) <> " }"
+
+  def init_of(Vec(Stmt)) Vec(Stmt)
+  def init_of([_]) := []
+  def init_of([x | rest]) := [x | init_of(rest)]
+
+  def last_of(Vec(Stmt)) Stmt
+  def last_of([x]) := x
+  def last_of([_ | rest]) := last_of(rest)
+
+  def lets_of(Vec(Stmt)) String
+  def lets_of([]) := ""
+  def lets_of([s]) := stmt_kt(s)
+  def lets_of([s | rest]) := stmt_kt(s) <> " " <> lets_of(rest)
+
+  def stmt_kt(Stmt) String
+  def stmt_kt(SBind(n, e)) := "val " <> n <> " = " <> expr_kt(e) <> ";"
+  def stmt_kt(STypedBind(n, _, e)) := "val " <> n <> " = " <> expr_kt(e) <> ";"
+  def stmt_kt(SExpr(e)) := expr_kt(e) <> ";"
+
+  def stmt_value(Stmt) String
+  def stmt_value(SExpr(e)) := expr_kt(e)
+  def stmt_value(SBind(_, e)) := expr_kt(e)
+  def stmt_value(STypedBind(_, _, e)) := expr_kt(e)
+
+  # ── expression emission ──
+  def expr_kt(Core) String
+  def expr_kt(CNum(n)) := num_kt(n)
+  def expr_kt(CChar(cp)) := Prim.int_to_string(cp) <> "L"
+  def expr_kt(CStr(s)) := kt_str(s)
+  def expr_kt(CId(b)) := b
+  def expr_kt(CUnary("-", x)) := "-" <> expr_kt(x)
+  def expr_kt(CUnary("not", x)) := "!" <> expr_kt(x)
+  def expr_kt(CBin(op, l, r)) := "(" <> expr_kt(l) <> " " <> kt_op(op) <> " " <> expr_kt(r) <> ")"
+  def expr_kt(CCall("__prim_int_to_string", [n])) := "(" <> expr_kt(n) <> ").toString()"
+  def expr_kt(CCall("__prim_int_to_float", [n])) := "(" <> expr_kt(n) <> ").toDouble()"
+  def expr_kt(CCall(f, args)) := f <> "(" <> join_args(args) <> ")"
+  def expr_kt(CIf(c, t, e)) := "if (" <> expr_kt(c) <> ") " <> branch_kt(t) <> " else " <> branch_kt(e)
+
+  def branch_kt(Block) String
+  def branch_kt(Block([SExpr(e)])) := expr_kt(e)
+  def branch_kt(Block(stmts)) := block_value(stmts)
+
+  def join_args(Vec(Core)) String
+  def join_args([]) := ""
+  def join_args([a]) := expr_kt(a)
+  def join_args([a | rest]) := expr_kt(a) <> ", " <> join_args(rest)
+
+  # ── leaf rendering ──
+  def num_kt(n String) String
+    if floaty(Prim.str_chars(n)) do
+      n
+    else
+      n <> "L"
+    end
+  end
+
+  def floaty(Vec(Int53)) Bool
+  def floaty([]) := false
+  def floaty([c | rest])
+    if c == 46 or c == 101 or c == 69 do
+      true
+    else
+      floaty(rest)
+    end
+  end
+
+  # Kotlin string literal with the reference's escapes (\, ", $, control chars).
+  def kt_str(s String) String := "\"" <> kt_chars(Prim.str_chars(s)) <> "\""
+
+  def kt_chars(Vec(Int53)) String
+  def kt_chars([]) := ""
+  def kt_chars([c | rest]) := kt_cp(c) <> kt_chars(rest)
+
+  def kt_cp(Int53) String
+  def kt_cp(92) := "\\\\"
+  def kt_cp(34) := "\\\""
+  def kt_cp(36) := "\\$"
+  def kt_cp(10) := "\\n"
+  def kt_cp(13) := "\\r"
+  def kt_cp(9) := "\\t"
+  def kt_cp(c) := Prim.str_from_chars([c])
+
+  def kt_op(String) String
+  def kt_op("==") := "=="
+  def kt_op("!=") := "!="
+  def kt_op("and") := "&&"
+  def kt_op("or") := "||"
+  def kt_op("<>") := "+"
+  def kt_op("div") := "/"
+  def kt_op("rem") := "%"
+  def kt_op(op) := op
+
+  def kt_type(String) String
+  def kt_type("Int53") := "Long"
+  def kt_type("Int64") := "Long"
+  def kt_type("Int8") := "Long"
+  def kt_type("Int16") := "Long"
+  def kt_type("Int32") := "Long"
+  def kt_type("Int128") := "Long"
+  def kt_type("UInt8") := "Long"
+  def kt_type("UInt16") := "Long"
+  def kt_type("UInt32") := "Long"
+  def kt_type("UInt64") := "Long"
+  def kt_type("UInt128") := "Long"
+  def kt_type("Float32") := "Double"
+  def kt_type("Float64") := "Double"
+  def kt_type("Bool") := "Boolean"
+  def kt_type("String") := "String"
+  def kt_type("Char") := "Long"
+  def kt_type(t) := t
+end

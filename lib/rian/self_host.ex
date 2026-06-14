@@ -138,11 +138,11 @@ defmodule Rian.SelfHost do
       id: :jvm_backend,
       name: "Kotlin/JVM backend",
       role: :backend,
-      status: :partial,
-      source: "selfhost_kotlin.rian",
-      test: "test/rian/kotlin_emit_fixpoint_test.exs",
+      status: :self_hosted,
+      source: "selfhost_jvm.rian",
+      test: "test/rian/jvm_module_fixpoint_test.exs",
       note:
-        "Kotlin emitter equals Rian.JVM term-for-term over the integer-literal/unary/binary slice; floats/calls/lists/structs remain"
+        "the whole-module Kotlin emitter — sum types (sealed interface + object/data class), functions with multi-clause pattern dispatch (is/smart-cast tests + binds + trailing throw), if, operators, prims — equals Rian.JVM.compile over its full SUPPORTED surface; lists/maps/case/lambda/@external/Shadow are reference gaps, not port gaps"
     }
   ]
 
