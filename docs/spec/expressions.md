@@ -139,6 +139,19 @@ quote, newline, or control codepoint is never mis-emitted: `Rian.Lower` (Elixir 
 additionally escapes `$` (string templates) and uses fixed four-digit `\uHHHH`. `Rian.Beam` builds
 the BEAM binary from the raw bytes directly, so it needs no textual escaping.
 
+### Atom literals — `Symbol`
+
+An **atom** (type `Symbol`, ADR-0041) is written `:name` for a bare identifier (`:ok`, `:error`,
+`:Foo`) or in **quoted** form `:"…"` for any other name — operators (`:"+"`), reserved keywords
+(`:"if"`), or names with non-identifier characters. The quoted form reuses the string-escape
+vocabulary above and accepts an empty atom (`:""`); an *interpolated* `:"\(e)"` is not a literal and
+is a parse error. Both forms also appear in pattern position (`case t do :"+" -> … end`).
+
+A `Symbol` is **equality-only** — there is no portable ordering (atom term-order is BEAM-specific,
+ADR-0041 §1). It lowers per target: a native interned atom on the BEAM, a string elsewhere (Rust
+`&'static str`, JS string, JVM interned `String`). To build an atom from a **runtime** string, use
+the BEAM-only intrinsic `Prim.str_to_atom` (ADR-0047) — `Rian.Reach` pins a caller to `:ex`.
+
 ### `&` — function captures
 
 A prefix `&` builds a function value, in the BEAM-consonant style (not Haskell operator sections):

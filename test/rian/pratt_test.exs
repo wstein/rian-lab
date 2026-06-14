@@ -218,6 +218,29 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "atom literals — bare `:id` and quoted `:\"…\"`" do
+    test "a bare identifier atom `:foo` is an `{:atom, _}` node" do
+      assert p(":foo") == ":foo"
+    end
+
+    test "a quoted atom `:\"+\"` spells an operator-named atom (no bare form)" do
+      assert Pratt.parse(~s|:"+"|) == {:atom, "+"}
+      assert p(~s|:"+"|) == ":+"
+    end
+
+    test "a quoted atom can name a reserved keyword `:\"if\"` (subsumes the parser's old crutch)" do
+      assert Pratt.parse(~s|:"if"|) == {:atom, "if"}
+    end
+
+    test "a quoted atom works in pattern position too" do
+      assert Pratt.parse_pats(~s|:"+"|) == [{:atom, "+"}]
+    end
+
+    test "a bare operator atom `:+` is still a parse error (use the quoted form)" do
+      assert_raise ArgumentError, fn -> Pratt.parse(":+") end
+    end
+  end
+
   describe "`.` is the sole qualifier (ADR-0029; no `::` alias)" do
     test "dot lowers to a single {:dot} node" do
       assert p("Geometry.area(x)") == "(call (. Geometry area) x)"

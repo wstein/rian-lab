@@ -167,6 +167,7 @@ defmodule Rian.Pratt do
   end
 
   defp parse_path([{:op, ":"}, {:id, name} | rest]), do: collect_dots({:atom, name}, rest)
+  defp parse_path([{:op, ":"}, {:str, s} | rest]), do: collect_dots({:atom, s}, rest)
   defp parse_path([{:id, name} | rest]), do: collect_dots({:id, name}, rest)
   defp parse_path(other), do: raise(ArgumentError, "bad capture path: #{inspect(other)}")
 
@@ -195,6 +196,11 @@ defmodule Rian.Pratt do
   end
 
   defp parse_primary([{:op, ":"}, {:id, name} | rest]), do: parse_postfix({:atom, name}, rest)
+  # a quoted atom `:"+"` / `:"hello world"` (Elixir-style): any atom whose name is
+  # not a bare identifier — operators, mixed case, reserved words. The lexer emits
+  # `:` + a plain string; an *interpolated* `:"\(x)"` is not a literal and falls
+  # through to an error.
+  defp parse_primary([{:op, ":"}, {:str, s} | rest]), do: parse_postfix({:atom, s}, rest)
   defp parse_primary([{:str, s} | rest]), do: parse_postfix({:str, s}, rest)
   # an interpolated string `"… \(expr) …"` (ADR-0069): each hole's raw source is
   # re-parsed as an expression. The node is resolved to a `<>`/stringify chain by
@@ -379,6 +385,7 @@ defmodule Rian.Pratt do
   # match a `Char` by value (codepoint on BEAM/JS, native `char` on Rust)
   defp parse_pat([{:char, cp} | rest]), do: {{:char_lit, cp}, rest}
   defp parse_pat([{:op, ":"}, {:id, name} | rest]), do: {{:atom, name}, rest}
+  defp parse_pat([{:op, ":"}, {:str, s} | rest]), do: {{:atom, s}, rest}
   defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
   defp parse_pat([{:lbrace} | rest]), do: parse_pat_tuple(rest, [])
   defp parse_pat([{:lbracket} | rest]), do: parse_pat_list(rest, [])
