@@ -67,10 +67,11 @@ defmodule Rian.Reach do
     funs = all_funcs(prog)
     modnames = MapSet.new(Enum.map(Map.get(prog, :mods, []), & &1.name))
     local_names = MapSet.new(Enum.map(funs, & &1.name))
+    pctx = parametric_ctx(prog, funs)
 
     facts =
       Map.new(funs, fn f ->
-        {blockers, callees} = scan_func(f, modnames)
+        {blockers, callees} = scan_func(f, modnames, pctx)
         # local reach = the closed vocabulary minus every target any blocker kills.
         # Host FFI/concurrency kill the non-BEAM targets; a `ref` capability kills
         # `:ex` (BEAM-rejected, ADR-0055/P5) — so the two compose correctly.
@@ -242,7 +243,7 @@ defmodule Rian.Reach do
     do: Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
 
   # scan every clause body (and guard) of one function for ex-only constructs + local-call edges
-  defp scan_func(f, modnames) do
+  defp scan_func(f, modnames, pctx) do
     # the `ref` capability (`&mut`) is BEAM-rejected (ADR-0055/0025, P5): a `ref`
     # parameter pins the function off `:ex` — it is outside the portable capability
     # core, so the reach report says so instead of overselling a tidy four.
@@ -270,8 +271,17 @@ defmodule Rian.Reach do
     # The owned-from-borrowed coercion for `T`/`Vec(T)` and parametric `enum Pair<K,V>`
     # (with monomorphic instantiation inference) both landed (2026-06-14).
     owned_gen = if sig_returns_tvar?(f), do: [owned_generic_blocker()], else: []
+    # A function whose signature touches a *parametric* user type (`Pair`, `enum
+    # Pair<K,V>`) reaches `:rs` only for the narrow shape the emitter actually lowers
+    # (`Rian.Lower`): the type's tvar fields are all *bare* tvars, and the function
+    # either only matches/passes the value, constructs it with positionally-aligned
+    # tvar args, or is a non-generic builder whose tail is a direct call to a generic
+    # helper (so the concrete instantiation is inferable). Everything else emits
+    # undeclared generics or the wrong `i64` instantiation, so it pins off `:rs` —
+    # the matrix stays honest rather than green-lighting code rustc rejects (ADR-0061).
+    param = if parametric_rs_ok?(f, pctx), do: [], else: [parametric_blocker()]
 
-    Enum.reduce(f.clauses, {ref ++ int ++ width ++ owned_gen, MapSet.new()}, fn c, acc ->
+    Enum.reduce(f.clauses, {ref ++ int ++ width ++ owned_gen ++ param, MapSet.new()}, fn c, acc ->
       acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
       if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
     end)
@@ -295,6 +305,13 @@ defmodule Rian.Reach do
   defp owned_generic_blocker,
     do: %{
       construct: "generic returning an owned type variable (no Rust borrow→owned coercion)",
+      kind: :generic,
+      kills: [:rs]
+    }
+
+  defp parametric_blocker,
+    do: %{
+      construct: "parametric user type beyond the Rust emitter's monomorphic subset",
       kind: :generic,
       kills: [:rs]
     }
@@ -345,6 +362,145 @@ defmodule Rian.Reach do
   defp type_idents(t) when is_binary(t), do: Regex.scan(~r/[A-Za-z_]\w*/, t) |> Enum.map(&hd/1)
 
   defp tvar?(t), do: String.match?(t, ~r/^[A-Z][0-9]?$/)
+
+  # ── parametric user types: the Rust monomorphic-emit subset (ADR-0061) ──────
+  # Program-wide facts the parametric `:rs` gate needs: which user types are
+  # parametric and which of those the emitter can lower, each parametric
+  # constructor's ordered field tvars, and which local functions are generic (a
+  # non-generic builder is lowerable only when its tail calls a generic helper).
+  defp parametric_ctx(prog, funs) do
+    types =
+      Map.get(prog, :types, []) ++
+        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :types, []))
+
+    ptypes = Enum.filter(types, &parametric_type?/1)
+
+    %{
+      names: MapSet.new(ptypes, & &1.name),
+      emittable: Map.new(ptypes, fn t -> {t.name, emittable_parametric?(t)} end),
+      ctors:
+        for(
+          t <- ptypes,
+          v <- t.variants,
+          into: %{},
+          do: {v.ctor, Enum.map(v.fields, &Map.get(&1, :type))}
+        ),
+      generics: MapSet.new(for f <- funs, Map.get(f, :tvars, []) != [], do: f.name)
+    }
+  end
+
+  # A user `type` is parametric iff some variant field's type mentions a tvar.
+  defp parametric_type?(t) do
+    Enum.any?(t.variants, fn v -> Enum.any?(v.fields, &type_has_tvar?(Map.get(&1, :type))) end)
+  end
+
+  # The Rust emitter lowers a parametric type only when every tvar-bearing field is
+  # a *bare* tvar (`k K`) — that becomes a declared `enum Pair<K, V>` param. A field
+  # nesting a tvar in a compound (`items Vec(T)`) emits an undeclared `T` (rustc
+  # E0412), so such a type is not emittable.
+  defp emittable_parametric?(t) do
+    t.variants
+    |> Enum.flat_map(& &1.fields)
+    |> Enum.map(&Map.get(&1, :type))
+    |> Enum.filter(&type_has_tvar?/1)
+    |> Enum.all?(&tvar?/1)
+  end
+
+  # Does the function's signature (params or return) name a parametric type?
+  defp uses_parametric?(f, names) do
+    f
+    |> sig_idents()
+    |> Enum.any?(&MapSet.member?(names, &1))
+  end
+
+  defp sig_idents(f) do
+    sig = Enum.map(Map.get(f, :params, []), & &1.type) ++ [Map.get(f, :ret)]
+    for t <- sig, is_binary(t), id <- type_idents(t), do: id
+  end
+
+  # The parametric `:rs` allow-list. A function reaches `:rs` (parametric-wise) iff
+  # it uses no parametric type, or every used type is emittable AND its construction
+  # / builder shape is one the emitter monomorphizes correctly. Default-deny: any
+  # shape outside the verified subset pins off `:rs` so the matrix never oversells.
+  defp parametric_rs_ok?(f, pctx) do
+    cond do
+      not uses_parametric?(f, pctx.names) ->
+        true
+
+      # F2: a used parametric type has a non-bare-tvar field → undeclared generics.
+      not all_emittable?(f, pctx) ->
+        false
+
+      Map.get(f, :tvars, []) != [] ->
+        # F3: a generic builder is correct only when every construction's args match
+        # the field tvars positionally (`P(key, value)` with key:K, value:V).
+        Enum.all?(parametric_constructions(f, pctx.ctors), &ctor_aligned?(&1, f))
+
+      true ->
+        # F1: a non-generic function must not construct a parametric type directly
+        # (no instantiation to infer) and must tail-call a generic helper, the only
+        # shape `Rian.Lower.infer_concrete_params` binds to a concrete `Pair<…>`.
+        parametric_constructions(f, pctx.ctors) == [] and builder_tail_ok?(f, pctx.generics)
+    end
+  end
+
+  defp all_emittable?(f, pctx) do
+    f
+    |> sig_idents()
+    |> Enum.filter(&MapSet.member?(pctx.names, &1))
+    |> Enum.uniq()
+    |> Enum.all?(&Map.get(pctx.emittable, &1, false))
+  end
+
+  # Every parametric construction `P(args)` reachable in the body, as
+  # `{ordered_field_tvars, args}` (args are core nodes).
+  defp parametric_constructions(f, ctors) do
+    Enum.flat_map(f.clauses, fn c -> collect_ctors(core(c.body, &Pratt.parse_body/1), ctors) end)
+  end
+
+  defp collect_ctors(%Core.ECall{fun: %Core.EId{name: n}, args: args}, ctors) do
+    here = if Map.has_key?(ctors, n), do: [{Map.fetch!(ctors, n), args}], else: []
+    here ++ Enum.flat_map(args, &collect_ctors(&1, ctors))
+  end
+
+  defp collect_ctors(node, ctors) when is_struct(node),
+    do: node |> Map.from_struct() |> Map.values() |> Enum.flat_map(&collect_ctors(&1, ctors))
+
+  defp collect_ctors(list, ctors) when is_list(list),
+    do: Enum.flat_map(list, &collect_ctors(&1, ctors))
+
+  defp collect_ctors(tuple, ctors) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.flat_map(&collect_ctors(&1, ctors))
+
+  defp collect_ctors(_other, _ctors), do: []
+
+  # A construction is emittable iff each positional arg is a bare parameter
+  # reference whose declared type is exactly the field's tvar — the emitter assigns
+  # the field type (`K`) to the arg with no coercion, so a mismatch is rustc E0308.
+  defp ctor_aligned?({field_tvars, args}, f) do
+    ptypes = Map.new(Map.get(f, :params, []), &{&1.name, &1.type})
+
+    length(field_tvars) == length(args) and
+      field_tvars
+      |> Enum.zip(args)
+      |> Enum.all?(fn {tv, arg} ->
+        match?(%Core.EId{}, arg) and Map.get(ptypes, arg.name) == tv
+      end)
+  end
+
+  defp builder_tail_ok?(f, generics) do
+    Enum.all?(f.clauses, fn c ->
+      case core(c.body, &Pratt.parse_body/1) do
+        %Core.EBlock{stmts: stmts} -> tail_calls_generic?(List.last(stmts), generics)
+        _ -> false
+      end
+    end)
+  end
+
+  defp tail_calls_generic?({:expr, %Core.ECall{fun: %Core.EId{name: h}}}, generics),
+    do: MapSet.member?(generics, h)
+
+  defp tail_calls_generic?(_stmt, _generics), do: false
 
   # the explicit 64-bit overflow prims carry the fixed-width-64 contract — the JS
   # emitter refuses them (ADR-0064 §2a), so a body that *calls* one is off `:js`

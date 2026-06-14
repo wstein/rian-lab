@@ -92,6 +92,68 @@ defmodule Rian.ReachRustHonestyTest do
 
   defp reach_src(src), do: Decl.parse(src) |> Reach.analyze()
 
+  describe "parametric shapes beyond the emitter's monomorphic subset are pinned off :rs" do
+    # The `enum Pair<K,V>` support is narrow: the Reach matrix must pin off `:rs`
+    # every parametric shape `Rian.Lower` cannot monomorphize, or `mix rian.targets`
+    # green-lights code rustc rejects (ADR-0061). Each case below emits broken Rust.
+    defp analyze(src), do: src |> Decl.parse() |> Reach.analyze()
+
+    test "F2: a parametric type with a non-bare-tvar field (Vec(T)) — undeclared generic" do
+      rep = analyze("type Box := B(items Vec(T))\ndef wrap(x T) Box forall T := B([x])")
+      refute :rs in targets(rep, "wrap")
+      assert :generic in blocker_kinds(rep, "wrap")
+    end
+
+    test "F3: a generic builder whose construction args don't match the field tvars" do
+      rep =
+        analyze("type Pair := P(k K, v V)\ndef mk(a A, b B) Pair forall A, B := P(a, b)")
+
+      refute :rs in targets(rep, "mk")
+      assert :generic in blocker_kinds(rep, "mk")
+    end
+
+    test "F1: a non-generic builder that can't infer its concrete instantiation" do
+      src = """
+      type Pair := P(k K, v V)
+      def put(d Vec(Pair), key K, value V) Vec(Pair) forall K, V := [P(key, value) | d]
+      def names(flag Bool) Vec(Pair) := if flag do put([], 1, 10) else put([], 2, 20) end
+      def direct() Vec(Pair) := [P(1, 2)]
+      """
+
+      rep = analyze(src)
+      # the aligned generic constructor `put` stays on :rs; the two builders don't.
+      assert :rs in targets(rep, "put")
+      refute :rs in targets(rep, "names")
+      refute :rs in targets(rep, "direct")
+    end
+
+    # Honesty in both directions: the shape Reach now pins off :rs genuinely fails
+    # rustc, so the blocker is load-bearing, not a guess.
+    @tag :rust
+    test "the pinned-off shape genuinely does not compile on rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust = Test.rust("type Box := B(items Vec(T))\ndef wrap(x T) Box forall T := B([x])")
+          src = Path.join(System.tmp_dir!(), "rian_neg_#{System.unique_integer([:positive])}.rs")
+          File.write!(src, rust)
+
+          try do
+            {_out, code} =
+              System.cmd(rustc, ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", src],
+                stderr_to_stdout: true
+              )
+
+            refute code == 0, "the Vec(T)-field shape must NOT compile (Reach is right to pin it)"
+          after
+            File.rm(src)
+          end
+      end
+    end
+  end
+
   # The :rs claims are justified — rustc compiles AND runs each slice's `@test`s.
   @tag :rust
   test "rustc compiles and runs the @tests of both Rust-portable stdlib slices" do
