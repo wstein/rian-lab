@@ -6,8 +6,8 @@
 # over them (`forall T: Eq` / `forall T: Ord`) and reused for every type that
 # implements the bound. The compiler ENFORCES the bound at the call site
 # (ADR-0042 §2) and DISPATCHES the protocol method on the value's runtime shape
-# (ADR-0042 §3) — so `sort([3, 1, 2])` type-checks because `Int53` has `Ord`, and
-# `eq`/`lt` resolve to the `Int53` impls at run time.
+# (ADR-0042 §3) — so `sort([3, 1, 2])` type-checks because `Int64` has `Ord`, and
+# `eq`/`lt` resolve to the `Int64` impls at run time.
 #
 # This is portable sequential logic (ADR-0047): the same source reaches every
 # target the impls reach. The `@test`s and `@doc` doctests below run it.
@@ -20,7 +20,7 @@ protocol Eq do
   def eq(a Self, b Self) Bool
 end
 
-impl Eq for Int53 do
+impl Eq for Int64 do
   def eq(a, b) := a == b
 end
 
@@ -36,7 +36,7 @@ protocol Ord do
   def lt(a Self, b Self) Bool
 end
 
-impl Ord for Int53 do
+impl Ord for Int64 do
   def lt(a, b) := a < b
 end
 
@@ -86,7 +86,7 @@ def maximum([h | t], acc) := if lt(acc, h) do maximum(t, h) else maximum(t, acc)
 @test def maximum_folds() Bool := maximum([3, 7, 2, 5], 0) == 7
 
 # a tiny concrete list-equality helper for the test assertions above
-def eq3(xs Vec(Int53), ys Vec(Int53)) Bool
+def eq3(xs Vec(Int64), ys Vec(Int64)) Bool
 def eq3([], []) := true
 def eq3([a | xs], [b | ys]) := if a == b do eq3(xs, ys) else false end
 def eq3(xs, ys) := false
