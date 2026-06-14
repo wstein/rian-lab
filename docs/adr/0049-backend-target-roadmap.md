@@ -98,6 +98,30 @@ exception that isn't even its own emitter yet: it is `Rust → rustc wasm32`.
 - **Tier 2** (JVM, WASM): CI runs **non-blocking** until promoted.
 - **Tier 3** (Go): best-effort, no CI promise.
 
+### 5a. Tier-1 admission gate + a target budget (the anti-sprawl rule)
+
+*Added 2026-06-14, from the Gleam/Haxe borrow debate — consensus #3, rated 4/5.*
+
+Haxe's cautionary lesson is not a feature; it is a **failure mode**: ~10 backends with no admission
+discipline, so the common std lib frayed toward the lowest common denominator and per-target escape
+hatches multiplied until "write once" became marketing. Gleam's counter-discipline (two targets, a
+frozen small core) is exactly why its portable surface holds. Rian sits between — and must steer by an
+explicit rule, not by momentum:
+
+1. **A target is Tier 1 *iff* the portable-core conformance suite (the ADR-0041 matrix + the tour
+   examples) is green on it on every commit.** Greenness is the gate, not a roadmap promise. A target
+   that cannot pass the portable core stays Tier 2/3, honestly.
+2. **New targets enter at Tier 2 and *graduate* on sustained green**, never the reverse. A Tier-1
+   target that regresses the matrix is **demoted**, not waived.
+3. **The portable-core contract is frozen-by-default**: widening what "portable" must mean (a new
+   prelude op, a new intrinsic) is a deliberate change reviewed against *all* Tier-1 targets at once —
+   never a unilateral "add it for the target that's easy."
+4. **Target budget.** Adding target N+1 is a decision with a cost (it can only *narrow* the LCD), made
+   explicitly — not a default. The current order of business is **self-hosting the Gleam-proven
+   BEAM+JS core** (ADR-0063) before widening; **JVM stays Tier 2** under rule 1 (its MVP does not claim
+   portable-core parity — lists/maps/`case`/FFI raise `Unsupported`), which is the rule working as
+   intended, not a gap to paper over.
+
 ### 6. Roadmap sequence
 
 1. **Now:** BEAM (bootstrap) + Rust (parallel) — component-tested.

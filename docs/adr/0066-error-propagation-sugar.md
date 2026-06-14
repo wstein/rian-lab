@@ -80,3 +80,15 @@ explicit "propagated error ⊆ declared `| E`" gate is the checker follow-up); a
   a `pub` one must *declare* it — propagation tightens the case for requiring `| E` on `pub` fallibles.
 - **Interaction with `with`** — once `<-` is a bare statement (C), is `with` still needed, or does it
   become the multi-clause/`else`-handling form only? Likely the latter.
+- **Generalized continuation form (Gleam `use`) — spike only, do not commit.** *(2026-06-14
+  Gleam/Haxe borrow debate, consensus #5, rated 3/5.)* Gleam's `use x <- f(...)` rewrites the rest of
+  the block into a callback passed to `f`, so it generalizes to **any** callback-taking function —
+  resource acquisition (`use file <- with_file(...)`), `defer`, iteration — not just `Result`. Our
+  bare `<-` (option C) solves only the `Result` slice. The tension the debate surfaced and did **not**
+  resolve: `use` is strictly more general, but the early-return-on-error it desugars is **hidden
+  control flow** (ADR-0035) unless the continuation is constrained — visible at the call site (it is,
+  via the leading `use`), tail-position-only, and with the callback's effect carried in the type.
+  Samir argues a typed, restricted form clears ADR-0035; Kira is unconvinced the rewrite is ever
+  "what-you-read-is-what-runs." **Action: spike a typed/visible continuation form; keep `<-` as the
+  `Result`-only statement; commit nothing until it provably satisfies ADR-0035** (reuses ADR-0039's
+  `<-` bind, so no new token either way).

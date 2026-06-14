@@ -107,9 +107,37 @@ Macros are scope-local and emit no IR. In a `@targets` module the `portable:` gu
 (a failable-bind template is rejected at parse). Verified end-to-end on the BEAM (`Beam.load`) and to
 Rust (`Decl.compile`). Still open: macro *fragment kinds* and macro calls inside clause *guards*.
 
+## Direction: derivation is comptime's job, not AST macros (2026-06-14 Gleam/Haxe debate)
+
+The Gleam/Haxe borrow debate (consensus #4, rated 4/5) settled a standing tension between two
+established macro cultures, and it bears on *which way this ADR grows*:
+
+- **Gleam ships with no macros at all** — and pays for it in user-side boilerplate (hand-written
+  JSON encoders/decoders per type; no derivation). Its minimalism is honest but moves work onto users.
+- **Haxe has fully reified AST macros** (write Haxe to rewrite typed Haxe) — powerful, and the single
+  largest source of "miscompile" / IDE-breakage reports in that ecosystem. A hygiene minefield.
+
+The synthesis the team reached: **kill the boilerplate (Gleam's weakness) without importing AST
+surgery (Haxe's hazard).** The boilerplate use-cases — `derive` for equality/ordering/show/encode —
+are a **comptime** problem (run code *over a type* at compile time) routed through **protocols**
+(ADR-0042), **not** a pattern→template macro problem. Concretely:
+
+1. **Macros stay minimal** (the Gleam restraint): declarative pattern→template, hygienic, scope-local,
+   no reified-AST host API. We explicitly **do not** adopt Haxe-style "manipulate the typed AST in
+   Rian." Every macro remains a place where what-you-read and what-runs diverge, so the surface is
+   kept deliberately small.
+2. **Derivation grows on comptime + protocols, not macros.** A future `derive Eq`/`derive Show`
+   reflects over a type's fields at compile time (the `comptime`-as-generics evaluator below is the
+   foundation) and emits a protocol `impl` — checkable, hygienic-by-construction, no AST rewrite.
+3. The likely consequence: as derivation moves to comptime, **the macro surface may shrink toward
+   near-nothing** — a partial move toward Gleam's no-macros position without losing the power, which
+   is the outcome to aim for, not to resist.
+
 ## Open items
 - **`comptime`-as-generics**: monomorphize a function over a comptime type/const parameter
   (emit one specialized fn per instantiation). The evaluator built here is the foundation.
+- **`derive` via comptime + protocols** (the direction above): reflect over fields at compile time,
+  emit an `impl` — the boilerplate-killer that keeps macros minimal (ADR-0042).
 - **Macro fragment kinds** (expr vs pattern vs type position), à la `macro_rules!`
   `$x:expr`/`$t:ty`, once the declaration parser exists.
 - **Build capability** to allow a vetted, effectful `comptime` (currently always pure).

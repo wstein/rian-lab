@@ -85,3 +85,17 @@ error-propagation — that's P4's job to spell *without* `?`/`!`), and the dot i
   later amendment.
 - **Formatter conformance** — a test that the formatter round-trips every frozen operator at its
   precedence, so a precedence change can't slip in unnoticed.
+
+## Post-thaw additive candidates (not frozen, not yet adopted)
+
+The freeze is **additive-only** (see Consequences): adding surface later is permitted; *changing*
+frozen surface is not. Candidates parked here are recorded so they are not re-litigated from scratch,
+but they are **deliberately deferred** until the higher-priority work lands.
+
+- **Labeled arguments (Gleam-style).** *(2026-06-14 Gleam/Haxe borrow debate, consensus #6, rated
+  3/5 — cheap ergonomic win, low risk, but pure surface and the surface is frozen.)* Gleam's
+  `f(name: value)` call form (and labeled parameters at the definition) reads well and removes
+  positional-argument ambiguity. It is **additive** (new call/param syntax, no change to existing
+  tokens), so it is admissible without violating this ADR — but it touches ADR-0033 (surface
+  vocabulary) and waits behind the higher-priority mechanism work (ADR-0067 abstract types, ADR-0068
+  `@external`). **Adopt later, not now.**
