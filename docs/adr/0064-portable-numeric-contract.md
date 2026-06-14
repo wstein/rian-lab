@@ -63,8 +63,31 @@ A fixed-width type has a **portable wrap contract**: arithmetic wraps two's-comp
 |---|---|
 | Rust | native `i64` — **free** |
 | JVM/Go | native 64-bit — free |
-| JS | `BigInt.asIntN(64, …)` per op |
+| JS | **unsupported** — see §2a |
 | BEAM | `band` + sign-fixup per op — **the ~15× cost the spike measured** |
+
+### 2a. JS supports only the integer types it can represent natively
+
+A JS `number` is an IEEE-754 double: integers are exact only to **2^53**. JS has exactly two integer
+carriers — `number` and `BigInt` — so only three Rian integer types are JS-valid:
+
+| Rian type | JS representation |
+|---|---|
+| `Int` (arbitrary precision) | `BigInt` (literals `42n`) |
+| `Int53` (the portable fixed-width ceiling) | native `number` (`42`) — exact to 2^53, lowers to `i64` off-JS |
+| `Int32` and smaller (`Int8/16/32`, `UInt8/16/32`) | native `number` |
+
+**`Int64`/`Int128`/`UInt64`/`UInt128` are NOT supported on JS.** Their two's-complement-at-width contract
+can't fit in a `number`, and an earlier draft lowered them to `BigInt.asIntN(64, …)`. That is rejected:
+silently promoting a *bounded* fixed-width type to *arbitrary-precision* BigInt changes its type. So a
+function whose signature names a wide fixed-width type is **refused by the JS emitter**
+(`Rian.JS.reject_wide_int!`) and **pinned off `:js` by `Rian.Reach`** (a `:numeric` blocker). The 64-bit
+wrap prelude (`Int.wrapping_add` etc.) is therefore portable across BEAM/Rust/JVM but not JS.
+
+**Portable all-target integer code uses `Int53`** (or `Int32`): a native `number` on JS, an `i64`/`Long`
+elsewhere — the integer that reaches every target. `Int` reaches `[:ex, :js]` only (the bignum gap on
+Rust/JVM); wide fixed-width reaches `[:ex, :rs, :jvm]` only (no JS). Integer mode on JS is whole-program:
+a module that mentions any `number`-width type emits all integers as `number`, never mixing with `BigInt`.
 
 **No type is cheap on every target** — that is inherent (the BEAM has no fixed width; Rust has no free
 bignum). The resolution is **intent**: `Int` is cheap where math is native (BEAM/JS) and the default;
@@ -90,7 +113,8 @@ the in-domain idiom over either.
   with *identical* semantics; the divergence ADR-0035 documented is gone (paid in representation cost,
   not behaviour).
 - **Implementation (follow-up, large):** add `Int` to the checker/emitters (BEAM/JS native; **Rust
-  bignum** is the real new work); add fixed-width wrap lowering (BEAM `band`/sign-fixup; JS `asIntN`).
+  bignum** is the real new work); add fixed-width wrap lowering (BEAM `band`/sign-fixup). **JS does NOT
+  get fixed-width-64 lowering** (§2a) — wide fixed-width is rejected on JS, not `asIntN`-masked.
   The Rust-bignum and BEAM-masking emitters are each gated on their own conformance tests.
 - Supersedes the numeric clauses of ADR-0034 §1 / ADR-0041 / ADR-0035; those get a "superseded by
   ADR-0064" note rather than deletion.
@@ -107,6 +131,15 @@ the in-domain idiom over either.
   `[:ex, :js]` and the portability gate says so.
 - **Fixed-width contract:** already realized by the explicit ops — `__prim_wrapping_add` two's-complement
   wraps on the BEAM (`wrap(MAX64, 1) == MIN64`), distinct from `Int`'s exactness, both verified.
+
+**JS integer types are implemented (§2a, `test/rian/js_test.exs` · `reach_test.exs`):**
+- **JS-valid:** `Int` → `BigInt`; `Int53` / `Int32`-and-smaller → native `number`. Mode is whole-program
+  (a module mentioning a `number`-width emits all integers as `number`, never mixed with `BigInt`); a bare
+  literal base case (`count([]) := 0`) adopts the declared `Int53`/`Int32` return width in the checker.
+- **JS-rejected:** `Int64`/`Int128`/`UInt64`/`UInt128` raise in `Rian.JS` (`reject_wide_int!`) and are
+  pinned **off `:js`** by `Rian.Reach` (a `:numeric` `width_blocker`). The portable corpus that targets all
+  four backends (`prelude_str`/`prelude_dict`/`selfhost_*`/stdlib) now uses **`Int53`**, not `Int64`; the
+  64-bit `wrapping_*` prelude stays `Int64` and is honestly off-`:js`.
 
 **Not yet done (the larger follow-ups the ADR itself scoped):** the **Rust/JVM bignum emitters**; making
 the **default integer literal `Int`** (a breaking migration — currently still `Int64`); and making

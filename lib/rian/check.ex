@@ -888,9 +888,10 @@ defmodule Rian.Check do
       :ok
     else
       Enum.find_value(clauses, :ok, fn c ->
-        body_t = infer(Pratt.parse_body(c.body), clause_env(c.pats, ps, ic), ic)
+        body_ast = Pratt.parse_body(c.body)
+        body_t = infer(body_ast, clause_env(c.pats, ps, ic), ic)
 
-        if assignable?(body_t, ret),
+        if assignable?(body_t, ret) or body_literal_adopts?(body_ast, ret),
           do: nil,
           else:
             {:error,
@@ -898,6 +899,16 @@ defmodule Rian.Check do
       end)
     end
   end
+
+  # A clause whose body is a bare numeric literal (`count([]) := 0`) adopts the
+  # declared integer/float return *width*, exactly as a typed binding does
+  # (`literal_adopts?`). Without this the literal infers the default `Int64` and
+  # spuriously clashes with an `Int53`/`Int32` return — so a function returning the
+  # portable `Int53` could not have a literal base case (ADR-0064).
+  defp body_literal_adopts?({:block, [{:expr, e}]}, ret),
+    do: literal_adopts?(Core.from_expr(e), ret)
+
+  defp body_literal_adopts?(_ast, _ret), do: false
 
   defp generic_ret?(_ret, []), do: false
   defp generic_ret?(ret, tvars), do: Enum.any?(tvars, &Regex.match?(~r/\b#{&1}\b/, ret))

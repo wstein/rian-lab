@@ -16,13 +16,13 @@
 
 mod SelfhostParser do
   # The token stream this parser consumes (same shape the lexer emits).
-  type Token := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
+  type Token := TNum(Int53) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
 
   # The parser's own typed output — a sealed expression tree (ADR-0034). `EErr`
   # makes the parser **total**: an unexpected/leftover token yields `EErr` rather
   # than a missing clause, so every `def` is exhaustive (and lowers to Rust,
   # whose `match` must be total — there is no partial path).
-  type Expr := Num(Int64)
+  type Expr := Num(Int53)
              | Add(Expr, Expr)
              | Sub(Expr, Expr)
              | Mul(Expr, Expr)

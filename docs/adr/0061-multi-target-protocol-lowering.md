@@ -61,7 +61,8 @@ directly and emits traits.)
 ### 3. JS — a runtime dispatcher (mirrors BEAM)
 
 JS has no static types, so dispatch is runtime, structurally identical to BEAM: a dispatcher function
-selects the impl by the first argument's shape — `typeof x === "bigint"` (Int64), `=== "string"`
+selects the impl by the first argument's shape — `typeof x === "bigint"` (`Int`; `Int64` is off-JS per
+ADR-0064), `=== "string"`
 (String), `=== "boolean"` (Bool), the tagged-array head (a sum, ADR-0049 `["Ctor", …]`), or
 `__struct__`. A bounded generic is a plain function; the bound is **erased** at runtime (it was
 checked statically). This reuses the BEAM dispatcher *strategy* with JS guard expressions.
@@ -136,8 +137,9 @@ Consequences of target-relativity:
   `dyn` path is deferred.
 - **`std`-trait bridging.** Whether/when a Rian `Ord` should also `impl std::cmp::Ord` so Rian values
   drop into Rust's `sort`/`BTreeMap` — a future opt-in with its own coherence design.
-- **JS BigInt vs number for the receiver test.** `Int64 → bigint`, but `Int53 → number` (ADR-0049):
-  the JS dispatcher's numeric guard must match the chosen representation per function.
+- **JS BigInt vs number for the receiver test.** `Int → bigint`, but `Int53`/`Int32 → number`
+  (ADR-0064 §2a; `Int64` is off-JS): the JS dispatcher's numeric guard must match the chosen
+  representation per function.
 - **Generic monomorphization blow-up on Rust.** Heavily-bounded generics over many types monomorphize
   widely; whether to offer a `dyn`-backed mode for code size is a perf decision, not a correctness one.
 - **Migration order.** JS dispatcher first (reuses the BEAM strategy, low risk), then the Rust trait

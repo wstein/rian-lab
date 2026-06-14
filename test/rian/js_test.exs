@@ -20,8 +20,8 @@ defmodule Rian.JSTest do
   end
 
   describe "ECMAScript emitter on the typed core IR (ADR-0049 / ADR-0050)" do
-    test "a one-liner: Int64 -> BigInt, local function" do
-      js = JS.compile("def double(n Int64) Int64 := n * 2")
+    test "a one-liner: Int -> BigInt, local function" do
+      js = JS.compile("def double(n Int) Int := n * 2")
       assert js =~ "function double(a0)"
       assert js =~ "n * 2n"
 
@@ -37,8 +37,8 @@ defmodule Rian.JSTest do
       assert js53 =~ "(n + 1)"
       refute js53 =~ "1n"
 
-      # Int64 is unchanged (BigInt)
-      assert JS.compile("def inc(n Int64) Int64 := n + 1") =~ "(n + 1n)"
+      # Int is unchanged (BigInt)
+      assert JS.compile("def inc(n Int) Int := n + 1") =~ "(n + 1n)"
 
       case node_eval(js53, "[inc(41), typeof inc(41)].join(',')") do
         :no_node -> :ok
@@ -49,7 +49,7 @@ defmodule Rian.JSTest do
     test "multi-clause with a guard lowers to a dispatcher (binds precede the guard)" do
       js =
         JS.compile("""
-        def max2(a Int64, b Int64) Int64
+        def max2(a Int, b Int) Int
         def max2(a, b) when a >= b := a
         def max2(_, b) := b
         """)
@@ -68,7 +68,7 @@ defmodule Rian.JSTest do
     test "literal clause patterns + recursion (factorial)" do
       js =
         JS.compile("""
-        def fact(n Int64) Int64
+        def fact(n Int) Int
         def fact(0) := 1
         def fact(n) := n * fact(n - 1)
         """)
@@ -82,17 +82,17 @@ defmodule Rian.JSTest do
     end
 
     test "a `pub` function is exported" do
-      assert JS.compile("def f(n Int64) Int64 := n") =~ "function f("
+      assert JS.compile("def f(n Int) Int := n") =~ "function f("
       # pub only meaningful inside a mod; emit `export` there
-      js = JS.compile("mod M do\n  pub def g(n Int64) Int64 := n\nend")
+      js = JS.compile("mod M do\n  pub def g(n Int) Int := n\nend")
       assert js =~ "export function g("
     end
 
     test "sum variants: construction + nested clause patterns (ADR-0049)" do
       js =
         JS.compile("""
-        type Expr := Num(Int64) | Add(Expr, Expr)
-        pub def evalexpr(e Expr) Int64
+        type Expr := Num(Int) | Add(Expr, Expr)
+        pub def evalexpr(e Expr) Int
         pub def evalexpr(Num(n)) := n
         pub def evalexpr(Add(a, b)) := evalexpr(a) + evalexpr(b)
         """)
@@ -131,25 +131,18 @@ defmodule Rian.JSTest do
       end
     end
 
-    test "explicit overflow ops (ADR-0035 §3) project the BigInt sum onto Int64" do
-      js = JS.compile(File.read!("examples/rian/prelude_int.rian"))
+    test "the explicit 64-bit overflow ops (ADR-0035 §3) are rejected on JS (ADR-0064)" do
+      # `Int.wrapping_add`/`saturating_add`/`checked_add` operate on `Int64`, whose
+      # two's-complement-at-64 contract has no JS representation. We refuse to
+      # silently elevate to `BigInt` (the old `asIntN` lowering), so compiling the
+      # 64-bit wrap prelude to JS raises — naming the offending fixed-width type.
+      err =
+        assert_raise JS.Unsupported, fn ->
+          JS.compile(File.read!("examples/rian/prelude_int.rian"))
+        end
 
-      # Int64 is a BigInt in JS; `BigInt.asIntN(64, …)` is the native wrap
-      assert js =~ "BigInt.asIntN(64,"
-      # checked -> the `Option` tagged array
-      assert js =~ ~s|["Some", s]|
-      assert js =~ ~s|["None"]|
-
-      probe =
-        "[wrapping_add(9223372036854775807n, 1n) === -9223372036854775808n, " <>
-          "saturating_add(9223372036854775807n, 100n) === 9223372036854775807n, " <>
-          "checked_add(2n, 3n)[1] === 5n, checked_add(9223372036854775807n, 1n)[0] === 'None'" <>
-          "].every(Boolean)"
-
-      case node_eval(js, probe) do
-        :no_node -> :ok
-        out -> assert out == "true"
-      end
+      assert Exception.message(err) =~ "Int64"
+      assert Exception.message(err) =~ "not supported on JS"
     end
 
     test "the self-hosting optimizer spike lowers to JS and folds under node (multi-target)" do
@@ -211,7 +204,7 @@ defmodule Rian.JSTest do
     test "constructs outside this increment raise a clear Unsupported" do
       # atom/`Symbol` literals have no JS lowering yet (strings/lists/maps now do)
       assert_raise JS.Unsupported, fn ->
-        JS.compile("def tag(n Int64) Bool := :ok")
+        JS.compile("def tag(n Int) Bool := :ok")
       end
     end
 
@@ -221,7 +214,7 @@ defmodule Rian.JSTest do
       # reports `ref` as reaching :js, so this MUST compile (not raise) — and the
       # cap must not leak into the emitted parameter. Locks the documented decision:
       # if in-place mutation is ever added, this assertion forces JS to handle it.
-      js = JS.compile("def bump(x ref Int64) Int64 := x + 1")
+      js = JS.compile("def bump(x ref Int) Int := x + 1")
       assert js =~ "function bump(a0)"
       assert js =~ "const x = a0"
 
@@ -234,13 +227,13 @@ defmodule Rian.JSTest do
 
   describe "protocol dispatch on JS (ADR-0061 §3)" do
     @show """
-    type Expr := Num(n Int64) | Zero
+    type Expr := Num(n Int) | Zero
 
     protocol Show do
       def show(self Self) String
     end
 
-    impl Show for Int64 do
+    impl Show for Int do
       def show(n) := "int"
     end
 
@@ -294,12 +287,12 @@ defmodule Rian.JSTest do
     test "struct construction, field access, patterns, and dispatch run in node" do
       js =
         JS.compile("""
-        struct Point(x Int64, y Int64)
+        struct Point(x Int, y Int)
 
-        def mk(a Int64, b Int64) Point := Point(x: a, y: b)
-        def getx(p Point) Int64 := p.x
+        def mk(a Int, b Int) Point := Point(x: a, y: b)
+        def getx(p Point) Int := p.x
 
-        def sumxy(p Point) Int64
+        def sumxy(p Point) Int
         def sumxy(Point(x: a, y: b)) := a + b
 
         protocol Kind do
@@ -310,7 +303,7 @@ defmodule Rian.JSTest do
           def kind(p) := "point"
         end
 
-        impl Kind for Int64 do
+        impl Kind for Int do
           def kind(n) := "int"
         end
         """)
@@ -330,7 +323,7 @@ defmodule Rian.JSTest do
     test "the empty-list clause and a cons clause lower to length tests + slice" do
       js =
         JS.compile("""
-        def sum(xs Vec(Int64)) Int64
+        def sum(xs Vec(Int)) Int
         def sum([]) := 0
         def sum([h | t]) := h + sum(t)
         """)
@@ -346,7 +339,7 @@ defmodule Rian.JSTest do
     end
 
     test "a tuple literal lowers to a JS array; unary minus negates in place" do
-      js = JS.compile("def pair(n Int64) Tup := {-n, n}")
+      js = JS.compile("def pair(n Int) Tup := {-n, n}")
       assert js =~ "return [-n, n];"
 
       assert node_eval(js, "JSON.stringify(pair(5n).map(String))") in [
@@ -369,7 +362,7 @@ defmodule Rian.JSTest do
   describe "block bodies, guards, and branches (ADR-0050)" do
     test "a multi-statement body emits lets and expr-statements then returns a value" do
       # `;`-separated statements: a bind (`let`), an expr statement, a returned value
-      js = JS.compile("def f(n Int64) Int64 := x := n + 1; g(x); x * 2")
+      js = JS.compile("def f(n Int) Int := x := n + 1; g(x); x * 2")
       assert js =~ "let x = (n + 1n);"
       assert js =~ "g(x);"
       assert js =~ "return (x * 2n);"
@@ -377,7 +370,7 @@ defmodule Rian.JSTest do
 
     test "a block whose last statement is a bind returns the bound value" do
       # stmt_return({:bind, …}) — the final `x := …` yields its rhs as the return
-      js = JS.compile("def f(n Int64) Int64 := y := n - 1; x := n + 1")
+      js = JS.compile("def f(n Int) Int := y := n - 1; x := n + 1")
       assert js =~ "let y = (n - 1n);"
       assert js =~ "return (n + 1n);"
       assert node_eval(js, "f(4n)") in [:no_node, "5"]
@@ -386,7 +379,7 @@ defmodule Rian.JSTest do
     test "a guarded `case` arm wraps the return in an `if`" do
       js =
         JS.compile("""
-        def classify(n Int64) String
+        def classify(n Int) String
         def classify(n) do
           case n do
             x when x > 0 -> "pos"
@@ -404,11 +397,11 @@ defmodule Rian.JSTest do
     end
 
     test "a multi-statement `if` branch lowers to an IIFE; an empty branch is `undefined`" do
-      iife = JS.compile("def f(n Int64) Int64 := if n > 0 do y := n + 1; y else 0 end")
+      iife = JS.compile("def f(n Int) Int := if n > 0 do y := n + 1; y else 0 end")
       assert iife =~ "(() => { let y = (n + 1n); return y; })()"
       assert node_eval(iife, "f(4n)") in [:no_node, "5"]
 
-      empty = JS.compile("def g(b Bool) Int64 := if b do else 2 end")
+      empty = JS.compile("def g(b Bool) Int := if b do else 2 end")
       assert empty =~ "(b ? undefined : 2n)"
       assert node_eval(empty, "String(g(false))") in [:no_node, "2"]
     end
@@ -423,10 +416,10 @@ defmodule Rian.JSTest do
 
   describe "operators map to their JS equivalents (js_op)" do
     test "!=, or, <>, rem lower to their JS operators" do
-      assert JS.compile("def f(a Int64, b Int64) Bool := a != b") =~ "(a !== b)"
+      assert JS.compile("def f(a Int, b Int) Bool := a != b") =~ "(a !== b)"
       assert JS.compile("def f(a Bool, b Bool) Bool := a or b") =~ "(a || b)"
       assert JS.compile("def f(a String, b String) String := a <> b") =~ "(a + b)"
-      assert JS.compile("def f(a Int64, b Int64) Int64 := a rem b") =~ "(a % b)"
+      assert JS.compile("def f(a Int, b Int) Int := a rem b") =~ "(a % b)"
     end
 
     test "a bare boolean literal and `not` lower to JS booleans/negation" do
@@ -443,7 +436,7 @@ defmodule Rian.JSTest do
       # `/` is a parsed infix op (ADR float division) but has no js_op clause —
       # JS uses `div`/`rem`; the bare `/` must raise rather than emit garbage.
       assert_raise JS.Unsupported, ~r/operator `\/`/, fn ->
-        JS.compile("def f(a Int64, b Int64) Int64 := a / b")
+        JS.compile("def f(a Int, b Int) Int := a / b")
       end
     end
   end
@@ -471,7 +464,7 @@ defmodule Rian.JSTest do
     end
 
     test "`Prim.char_code` is identity in JS (a Char is already a BigInt codepoint)" do
-      js = JS.compile("def code(c Char) Int64 := Prim.char_code(c)")
+      js = JS.compile("def code(c Char) Int := Prim.char_code(c)")
       assert js =~ "const c = a0;"
       assert js =~ "return c;"
       assert node_eval(js, "String(code(65n))") in [:no_node, "65"]
@@ -506,16 +499,16 @@ defmodule Rian.JSTest do
 
   describe "block typed binds and unsupported clause patterns (ADR-0034 / ADR-0050)" do
     test "a typed bind in a block erases its type (stmt_js typed_bind)" do
-      # `x Int64 := …;` mid-block -> a plain `let`; the type is erased at lowering
-      js = JS.compile("def f(n Int64) Int64 := x Int64 := n + 1; x * 2")
+      # `x Int := …;` mid-block -> a plain `let`; the type is erased at lowering
+      js = JS.compile("def f(n Int) Int := x Int := n + 1; x * 2")
       assert js =~ "let x = (n + 1n);"
       assert js =~ "return (x * 2n);"
       assert node_eval(js, "String(f(4n))") in [:no_node, "10"]
     end
 
     test "a block whose last statement is a typed bind returns the bound value" do
-      # stmt_return({:typed_bind, …}) — the final `y Int64 := …` yields its rhs
-      js = JS.compile("def g(n Int64) Int64 := y Int64 := n + 1")
+      # stmt_return({:typed_bind, …}) — the final `y Int := …` yields its rhs
+      js = JS.compile("def g(n Int) Int := y Int := n + 1")
       assert js =~ "return (n + 1n);"
       assert node_eval(js, "String(g(4n))") in [:no_node, "5"]
     end
@@ -523,7 +516,7 @@ defmodule Rian.JSTest do
     test "a tuple clause pattern has no JS lowering yet — raises Unsupported" do
       # pat_match has no PTuple clause -> the catch-all raise (pat_match other)
       assert_raise JS.Unsupported, ~r/clause pattern/, fn ->
-        JS.compile("def f(p Tup) Int64\ndef f({a, b}) := a + b")
+        JS.compile("def f(p Tup) Int\ndef f({a, b}) := a + b")
       end
     end
   end
@@ -562,7 +555,7 @@ defmodule Rian.JSTest do
           def n(self Self) String
         end
 
-        def f(x Int64) Int64 := x
+        def f(x Int) Int := x
         """)
 
       refute js =~ "function n("

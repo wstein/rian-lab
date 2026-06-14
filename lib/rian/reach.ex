@@ -235,8 +235,15 @@ defmodule Rian.Reach do
     # on Rust/JVM (not yet implemented), so it pins the function off `:rs`/`:jvm`.
     sig_types = Enum.map(Map.get(f, :params, []), & &1.type) ++ [Map.get(f, :ret)]
     int = if Enum.any?(sig_types, &(&1 == "Int")), do: [int_blocker()], else: []
+    # fixed-width integers wider than the JS safe-integer range — `Int64`/`Int128`/
+    # `UInt64`/`UInt128` (ADR-0064) — have no faithful JS representation (a 2^53
+    # `Number` can't hold them, and we decline to silently elevate to `BigInt`). So
+    # they pin the function off `:js`. `Int53` is the portable fixed-width ceiling
+    # (JS `Number`, `i64` elsewhere) and `Int32`/smaller stay JS-native — neither
+    # blocks.
+    width = if Enum.any?(sig_types, &js_wide_int?/1), do: [width_blocker()], else: []
 
-    Enum.reduce(f.clauses, {ref ++ int, MapSet.new()}, fn c, acc ->
+    Enum.reduce(f.clauses, {ref ++ int ++ width, MapSet.new()}, fn c, acc ->
       acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
       if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
     end)
@@ -246,6 +253,18 @@ defmodule Rian.Reach do
 
   defp int_blocker,
     do: %{construct: "Int (arbitrary precision)", kind: :numeric, kills: [:rs, :jvm]}
+
+  defp width_blocker,
+    do: %{
+      construct: "fixed-width integer >2^53 (no JS representation)",
+      kind: :numeric,
+      kills: [:js]
+    }
+
+  # Fixed-width integers too wide for a JS `Number` (the 2^53-exact double): the
+  # 64- and 128-bit widths. `Int53` and `Int32`/smaller fit and are JS-native.
+  @js_wide_int ~r/^(Int|UInt)(64|128)$/
+  defp js_wide_int?(t), do: is_binary(t) and Regex.match?(@js_wide_int, t)
 
   defp core(src, parser), do: src |> parser.() |> Core.from_expr()
 

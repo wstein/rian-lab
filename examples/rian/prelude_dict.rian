@@ -30,7 +30,7 @@ mod Dict do
   # look up `k`, or return `d` if absent
   pub def get_or(m Map(K, V), k K, d V) V forall K, V := if has(m, k) do get(m, k) else d end
 
-  # increment an Int64 counter at `k` (0 if absent) — the symbol-table shape a
+  # increment an Int53 counter at `k` (0 if absent) — the symbol-table shape a
   # compiler reaches for, built from the primitives, not from host FFI
-  pub def inc(m Map(String, Int64), k String) Map(String, Int64) := put(m, k, get_or(m, k, 0) + 1)
+  pub def inc(m Map(String, Int53), k String) Map(String, Int53) := put(m, k, get_or(m, k, 0) + 1)
 end

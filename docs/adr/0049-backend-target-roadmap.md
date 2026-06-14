@@ -69,7 +69,9 @@ PureScript's value is that its type system is the closest typed-FP model to Rian
 
 Most of the ECMAScript target is already specified across the corpus:
 
-- `Int64` → **`BigInt`** (ADR-0034/0041); `Symbol`/opaque → **branded types** (ADR-0041/0043).
+- `Int` → **`BigInt`**, `Int53`/`Int32` → native `number`; **`Int64` is NOT supported on JS**
+  (superseded by **ADR-0064 §2a** — the old `Int64 → BigInt` mapping silently widened a bounded type).
+  `Symbol`/opaque → **branded types** (ADR-0041/0043).
 - Effects **erase** to ambient JS IO (ADR-0048); the event loop **fits the sequential core** (ADR-0031 —
   no OTP off-BEAM).
 - Protocol dispatch → **dictionary/vtable objects** (ADR-0042 JS note, confirmed by the PureScript study).

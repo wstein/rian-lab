@@ -10,7 +10,7 @@
 # ---------------------------------------------------------------------------
 
 mod SelfhostOpt do
-  type Expr := Num(Int64)
+  type Expr := Num(Int53)
              | Var(String)
              | Add(Expr, Expr)
              | Sub(Expr, Expr)

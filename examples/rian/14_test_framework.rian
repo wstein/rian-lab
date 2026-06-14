@@ -16,9 +16,9 @@
 # ---------------------------------------------------------------------------
 
 # the unit under test (ordinary Rian functions)
-def double(n Int64) Int64 := n * 2
+def double(n Int53) Int53 := n * 2
 
-def fib(n Int64) Int64
+def fib(n Int53) Int53
 def fib(0) := 0
 def fib(1) := 1
 def fib(n) := fib(n - 1) + fib(n - 2)

@@ -9,18 +9,18 @@
 #     run("(2 + 3) * 4")      =  20
 #
 # This is the front-to-back pipeline as one artifact, written entirely in Rian:
-#   String -> Vec(Token) -> Expr -> Expr(folded) -> Vec(Instr) -> Int64
+#   String -> Vec(Token) -> Expr -> Expr(folded) -> Vec(Instr) -> Int53
 # ---------------------------------------------------------------------------
 
 mod SelfhostCalc do
   # ── tokens ────────────────────────────────────────────────────────────
-  type Token := TNum(Int64)
+  type Token := TNum(Int53)
               | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
               | TIdent(String) | TLet | TIn | TEq | TDef | TSemi
 
   # ── the expression tree (the parser builds the arithmetic subset; the
   #    optimizer/codegen also handle variables and `let`) ─────────────────
-  type Expr := Num(Int64)
+  type Expr := Num(Int53)
              | Var(String)
              | Add(Expr, Expr)
              | Sub(Expr, Expr)
@@ -32,16 +32,16 @@ mod SelfhostCalc do
   type Parse := P(Expr, Vec(Token))
 
   # ── stack-machine instructions ────────────────────────────────────────
-  type Instr := Push(Int64) | Load(Int64) | Store(Int64) | IAdd | ISub | IMul | IDiv
+  type Instr := Push(Int53) | Load(Int53) | Store(Int53) | IAdd | ISub | IMul | IDiv
 
   # ── the driver: source text straight to a value ───────────────────────
-  pub def run(src String) Int64 := vm(compile(fold(parse(lex(String.to_charlist(src))))))
+  pub def run(src String) Int53 := vm(compile(fold(parse(lex(String.to_charlist(src))))))
 
   # compile to instructions (constant-folded first), for inspection
   pub def emit(src String) Vec(Instr) := compile(fold(parse(lex(String.to_charlist(src)))))
 
-  # ── lexer:  Vec(Int64 codepoints) -> Vec(Token) ───────────────────────
-  def lex(cs Vec(Int64)) Vec(Token)
+  # ── lexer:  Vec(Int53 codepoints) -> Vec(Token) ───────────────────────
+  def lex(cs Vec(Int53)) Vec(Token)
   def lex([]) := []
   def lex([c | rest]) when c == 32 := lex(rest)
   def lex([43 | rest]) := [TPlus | lex(rest)]
@@ -56,13 +56,13 @@ mod SelfhostCalc do
   def lex([c | rest]) when c >= 97 and c <= 122 := lex_ident([c | rest], [])
   def lex([_ | rest]) := lex(rest)
 
-  def lex_num(cs Vec(Int64), acc Int64) Vec(Token)
+  def lex_num(cs Vec(Int53), acc Int53) Vec(Token)
   def lex_num([c | rest], acc) when c >= 48 and c <= 57 := lex_num(rest, acc * 10 + c - 48)
   def lex_num(cs, acc) := [TNum(acc) | lex(cs)]
 
   # accumulate a run of letters/digits (reversed) into one identifier token;
   # `let`/`in` are keywords, anything else is a plain `TIdent`
-  def lex_ident(cs Vec(Int64), acc Vec(Int64)) Vec(Token)
+  def lex_ident(cs Vec(Int53), acc Vec(Int53)) Vec(Token)
   def lex_ident([c | rest], acc) when c >= 97 and c <= 122 := lex_ident(rest, [c | acc])
   def lex_ident([c | rest], acc) when c >= 48 and c <= 57 := lex_ident(rest, [c | acc])
   def lex_ident(cs, acc) := [keyword(List.to_string(:lists.reverse(acc))) | lex(cs)]
@@ -187,7 +187,7 @@ mod SelfhostCalc do
   # ── code generator:  Expr -> Vec(Instr) with load/store slots ─────────
   def compile(e Expr) Vec(Instr) := g(e, %{}, 0)
 
-  def g(e Expr, env Map(String, Int64), depth Int64) Vec(Instr)
+  def g(e Expr, env Map(String, Int53), depth Int53) Vec(Instr)
   def g(Num(n), _, _) := [Push(n)]
   def g(Var(name), env, _) := [Load(Map.get(env, name))]
   def g(Add(a, b), env, d) := gbin(a, b, env, d, IAdd)
@@ -198,17 +198,17 @@ mod SelfhostCalc do
     concat(g(rhs, env, d), concat([Store(d)], g(body, Map.put(env, name, d), d + 1)))
   end
 
-  def gbin(a Expr, b Expr, env Map(String, Int64), d Int64, op Instr) Vec(Instr)
+  def gbin(a Expr, b Expr, env Map(String, Int53), d Int53, op Instr) Vec(Instr)
   def gbin(a, b, env, d, op) := concat(g(a, env, d), concat(g(b, env, d), [op]))
 
   def concat(xs Vec(Instr), ys Vec(Instr)) Vec(Instr)
   def concat([], ys) := ys
   def concat([h | t], ys) := [h | concat(t, ys)]
 
-  # ── stack VM:  Vec(Instr) -> Int64 ────────────────────────────────────
-  def vm(prog Vec(Instr)) Int64 := exec(prog, [], %{})
+  # ── stack VM:  Vec(Instr) -> Int53 ────────────────────────────────────
+  def vm(prog Vec(Instr)) Int53 := exec(prog, [], %{})
 
-  def exec(prog Vec(Instr), stack Vec(Int64), slots Map(Int64, Int64)) Int64
+  def exec(prog Vec(Instr), stack Vec(Int53), slots Map(Int53, Int53)) Int53
   def exec([], [top | _], _) := top
   def exec([Push(n) | r], st, sl) := exec(r, [n | st], sl)
   def exec([Load(i) | r], st, sl) := exec(r, [Map.get(sl, i) | st], sl)

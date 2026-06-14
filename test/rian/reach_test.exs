@@ -14,8 +14,8 @@ defmodule Rian.ReachTest do
       rep =
         reach("""
         mod P do
-          pub def add(a Int64, b Int64) Int64 := a + b
-          pub def sum(xs Vec(Int64)) Int64
+          pub def add(a Int53, b Int53) Int53 := a + b
+          pub def sum(xs Vec(Int53)) Int53
           pub def sum([]) := 0
           pub def sum([h | t]) := h + sum(t)
         end
@@ -26,21 +26,28 @@ defmodule Rian.ReachTest do
       assert rep["add"].blockers == []
     end
 
-    test "the portable prelude `__prim_*` layer stays all-target" do
+    test "the 64-bit wrap prelude reaches every target EXCEPT :js (ADR-0064)" do
+      # `Int.wrapping_add` & friends carry the fixed-width-64 two's-complement
+      # contract — native on Rust/JVM, masked on the BEAM, and *not representable*
+      # on JS (Int64 is off :js; we refuse the silent BigInt elevation). So the
+      # 64-bit wrap layer is portable across BEAM/Rust/JVM but not JS; portable
+      # all-target integer code uses `Int53`/`Int32` instead.
       rep = reach(File.read!("examples/rian/prelude_int.rian"))
 
-      for f <- ~w(wrapping_add saturating_add checked_add),
-          do: assert(targets(rep, f) == [:ex, :js, :jvm, :rs])
+      for f <- ~w(wrapping_add saturating_add checked_add) do
+        assert targets(rep, f) == [:ex, :jvm, :rs]
+        assert Enum.any?(rep[f].blockers, &(&1.kind == :numeric and &1.kills == [:js]))
+      end
     end
 
     test "a Rian cross-module call is portable (not host FFI)" do
       rep =
         reach("""
         mod Lex do
-          pub def lex(n Int64) Int64 := n
+          pub def lex(n Int53) Int53 := n
         end
         mod Driver do
-          pub def run(n Int64) Int64 := Lex.lex(n)
+          pub def run(n Int53) Int53 := Lex.lex(n)
         end
         """)
 
@@ -53,7 +60,7 @@ defmodule Rian.ReachTest do
       rep =
         reach("""
         mod M do
-          pub def total(xs Vec(Int64)) Int64 := :lists.sum(xs)
+          pub def total(xs Vec(Int53)) Int53 := :lists.sum(xs)
         end
         """)
 
@@ -63,7 +70,7 @@ defmodule Rian.ReachTest do
     end
 
     test "a `ref` capability pins a function OFF :ex (P5 — ref is not in the portable core)" do
-      rep = reach("def bump(x ref Int64) Int64 := x + 1")
+      rep = reach("def bump(x ref Int53) Int53 := x + 1")
 
       # ref (&mut) is BEAM-rejected, so the function reaches everything BUT :ex —
       # the reachability report no longer oversells `ref` as portable (ADR-0055/P5).
@@ -80,7 +87,7 @@ defmodule Rian.ReachTest do
 
       assert Reach.symbol_lint!(Rian.Decl.parse("def ok(s Symbol) Bool := s == :foo")) == :ok
       # ordering on non-Symbols is unaffected
-      assert Reach.symbol_lint!(Rian.Decl.parse("def n(a Int64) Bool := a < 5")) == :ok
+      assert Reach.symbol_lint!(Rian.Decl.parse("def n(a Int53) Bool := a < 5")) == :ok
     end
 
     test "an Elixir-module call (non-Rian) is ex-only" do
@@ -101,9 +108,9 @@ defmodule Rian.ReachTest do
       rep =
         reach("""
         mod C do
-          pub def s() Int64 := :erlang.spawn(:m, :f, [])
-          pub def t(k String) Int64 := :ets.lookup(:tab, k)
-          pub def g(pid Int64) Int64 := GenServer.call(pid, :v)
+          pub def s() Int53 := :erlang.spawn(:m, :f, [])
+          pub def t(k String) Int53 := :ets.lookup(:tab, k)
+          pub def g(pid Int53) Int53 := GenServer.call(pid, :v)
         end
         """)
 
@@ -117,7 +124,7 @@ defmodule Rian.ReachTest do
       rep =
         reach("""
         mod M do
-          pub def a(x Int64) Int64 := :erlang.abs(x)
+          pub def a(x Int53) Int53 := :erlang.abs(x)
         end
         """)
 
@@ -130,9 +137,9 @@ defmodule Rian.ReachTest do
       rep =
         reach("""
         mod P do
-          pub def leaf(n Int64) Int64 := :lists.sum([n])
-          pub def mid(n Int64) Int64 := leaf(n) + 1
-          pub def caller(n Int64) Int64 := mid(n) * 2
+          pub def leaf(n Int53) Int53 := :lists.sum([n])
+          pub def mid(n Int53) Int53 := leaf(n) + 1
+          pub def caller(n Int53) Int53 := mid(n) * 2
         end
         """)
 
@@ -150,8 +157,8 @@ defmodule Rian.ReachTest do
       rep =
         reach("""
         mod P do
-          pub def inc(n Int64) Int64 := n + 1
-          pub def twice(n Int64) Int64 := inc(inc(n))
+          pub def inc(n Int53) Int53 := n + 1
+          pub def twice(n Int53) Int53 := inc(inc(n))
         end
         """)
 
@@ -166,7 +173,7 @@ defmodule Rian.ReachTest do
   describe "build-default target set (ADR-0058 §2)" do
     @ffi """
     mod M do
-      pub def total(xs val Vec(Int64)) Int64 := :lists.sum(xs)
+      pub def total(xs val Vec(Int53)) Int53 := :lists.sum(xs)
     end
     """
 

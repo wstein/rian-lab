@@ -10,13 +10,22 @@ defmodule Rian.JS do
   per clause that binds the clause's variables and `return`s its body, falling
   through to the next clause, ending in a `throw` (no clause matched).
 
-  `Int64` lowers to **`BigInt`** (ADR-0049 §3): integer literals are `42n` and
-  integer arithmetic stays in BigInt. **`Int53`** — the ECMAScript-safe integer
-  (a native JS `number` is exact only to 2^53) — instead uses native numbers
-  (`42`, no suffix). The mode is **per-function**: a function whose signature is
-  typed `Int53` emits *all* its integer literals natively, so within one function
-  body BigInt and number never mix (an `Int53` function is uniformly native, an
-  `Int64` one uniformly BigInt).
+  ## Integer types on JS (ADR-0064)
+
+  JS has exactly two integer carriers, so only three Rian integer types are
+  JS-valid:
+
+    * **`Int`** (arbitrary precision, the default) → **`BigInt`**: literals `42n`,
+      arithmetic stays in BigInt.
+    * **`Int53`** (the portable fixed-width ceiling) and **`Int32`/smaller** →
+      native JS **`number`** (`42`, no suffix), exact within 2^53.
+
+  **`Int64`/`Int128`/`UInt64`/`UInt128` are *not* supported on JS** — a `number`
+  can't hold them and we refuse to silently elevate them to `BigInt` (which would
+  widen a bounded type to arbitrary precision). A function whose signature names one
+  is **rejected** (`reject_wide_int!`); `Rian.Reach` pins it off `:js` so the gate
+  catches it first. The number/BigInt mode is **per-function**: a body is uniformly
+  native (`Int53`/`Int32`) or uniformly BigInt (`Int`), the two never mix.
 
   ## Scope (this increment)
 
@@ -88,6 +97,13 @@ defmodule Rian.JS do
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
   def compile(src) do
     prog = Decl.parse(src)
+    # Integer mode is a WHOLE-PROGRAM decision, not per-function: integer values
+    # (a depth counter, a codepoint) flow across function boundaries, and BigInt
+    # and number cannot be combined in JS. A "neutral" function with no integer in
+    # its own signature would otherwise default to BigInt and pass `0n` into a
+    # number-mode callee. So if the program uses a JS-number width (`Int53`/`Int32`)
+    # anywhere, the entire module emits in number-mode (ADR-0064).
+    Process.put(:rian_js_int53, program_number_mode?(prog))
     # the BEAM `:dispatcher` is a guarded runtime type-test — not the JS shape.
     # JS keeps the `:impl` methods (they lower as plain functions) and regenerates
     # the dispatcher with JS-native guards (ADR-0061 §3).
@@ -210,24 +226,55 @@ defmodule Rian.JS do
 
   # ── function / clause dispatch ──────────────────────────────────────────
   defp function_js(%{name: name, clauses: clauses, pub?: pub?} = f) do
+    reject_wide_int!(name, f)
     arity = length(hd(clauses).pats)
     params = Enum.map_join(0..(arity - 1)//1, ", ", &"a#{&1}")
-    # `Int64` lowers to BigInt (64-bit safe); a function typed `Int53` instead
-    # uses native JS numbers (exact to 2^53). The mode is per-function, so a body
-    # is uniformly native or BigInt and the two never mix. Carried via the process
-    # dict (a single sequential emitter pass).
-    Process.put(:rian_js_int53, int53_fn?(f))
+    # integer mode (`:rian_js_int53`) is set once, program-wide, in `compile/1`.
+    # Wide fixed-width (`Int64`+) is rejected above, never silently elevated.
     body = Enum.map_join(clauses, "\n", &clause_js/1)
     export = if pub?, do: "export ", else: ""
 
     "#{export}function #{name}(#{params}) {\n#{body}\n  throw new Error(\"#{name}: no clause matched\");\n}"
   end
 
-  # a function is "Int53-mode" if its signature mentions `Int53` (param or return)
-  defp int53_fn?(%{params: params, ret: ret}),
-    do: ret == "Int53" or Enum.any?(params, &(&1.type == "Int53"))
+  # The program is in number-mode if any function signature mentions a JS-native
+  # integer width — `Int53` or `Int32`/smaller — anywhere, *including nested* in
+  # `Vec(Int53)`/`Map(Int53,…)`. (`Int`, arbitrary precision, never matches, so
+  # BigInt stays the default; the two are not mixed within one program, ADR-0064.)
+  @js_number_int ~r/\b(Int53|(Int|UInt)(8|16|32))\b/
+  defp program_number_mode?(prog) do
+    funcs = Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
 
-  defp int53_fn?(_), do: false
+    Enum.any?(funcs, fn f ->
+      Enum.any?([f.ret | Enum.map(f.params, & &1.type)], &js_number_int?/1)
+    end)
+  end
+
+  defp js_number_int?(t), do: is_binary(t) and Regex.match?(@js_number_int, t)
+
+  # Wide fixed-width integers (`Int64/128`, `UInt64/128`) exceed the JS safe-integer
+  # range and have no faithful `number` representation; we refuse to silently
+  # elevate them to `BigInt` (which would widen a bounded type to arbitrary
+  # precision, the opposite of its contract). Use `Int` (arbitrary precision) or
+  # `Int53` (portable fixed-width) for JS-reachable code (ADR-0064; `Rian.Reach`
+  # pins these off `:js`).
+  @js_wide_int ~r/^(Int|UInt)(64|128)$/
+  defp reject_wide_int!(name, %{params: params, ret: ret}) do
+    types = Enum.map(params, & &1.type) ++ [ret]
+
+    case Enum.find(types, &(is_binary(&1) and Regex.match?(@js_wide_int, &1))) do
+      nil ->
+        :ok
+
+      t ->
+        raise Unsupported,
+              "`#{name}`: fixed-width integer `#{t}` is not supported on JS — it " <>
+                "exceeds the 2^53 safe-integer range and is never elevated to BigInt. " <>
+                "Use `Int` (arbitrary precision) or `Int53` (portable fixed-width, ADR-0064)."
+    end
+  end
+
+  defp reject_wide_int!(_name, _f), do: :ok
 
   # `{ if (<structural tests>) { <binds> <guarded return> } }` — the binds live
   # *inside* the structural test so a nested field access (`a0[1][1]`) only runs
@@ -265,8 +312,9 @@ defmodule Rian.JS do
   defp pat_match(%PWild{}, _acc), do: {[], []}
   defp pat_match(%PVar{name: n}, acc), do: {[], [{n, acc}]}
   defp pat_match(%PLit{value: v}, acc), do: {["#{acc} === #{lit_js(v)}"], []}
-  # a `Char` is its codepoint as a BigInt — `__prim_str_chars` yields BigInt codepoints
-  defp pat_match(%PChar{value: cp}, acc), do: {["#{acc} === #{cp}n"], []}
+  # a `Char` is its codepoint integer, in the function's integer mode (number or
+  # BigInt) so it never mixes with the surrounding codepoints
+  defp pat_match(%PChar{value: cp}, acc), do: {["#{acc} === #{cp_lit(cp)}"], []}
 
   defp pat_match(%PCtor{ctor: ctor, args: args}, acc) do
     {ts, bs} =
@@ -355,8 +403,8 @@ defmodule Rian.JS do
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_js(%ENum{text: n}), do: num_js(n)
-  # a `Char` is its codepoint as a BigInt — matches `__prim_str_chars`'s codepoints
-  defp expr_js(%EChar{value: cp}), do: "#{cp}n"
+  # a `Char` is its codepoint integer, in the function's integer mode
+  defp expr_js(%EChar{value: cp}), do: cp_lit(cp)
   # a Rian `String` is a JS string; `<>` concatenation is `+` (see js_op)
   defp expr_js(%EStr{value: s}), do: inspect(s)
   defp expr_js(%EId{name: b}) when b in ~w(true false), do: b
@@ -398,7 +446,7 @@ defmodule Rian.JS do
 
   # `String` primitives — codepoints are BigInt (Int64); concat is `+`
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_chars"}, args: [s]}),
-    do: "[...#{paren(s)}].map(c => BigInt(c.codePointAt(0)))"
+    do: "[...#{paren(s)}].map(c => #{cp_expr("c.codePointAt(0)")})"
 
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_from_chars"}, args: [cs]}),
     do: "#{paren(cs)}.map(c => String.fromCodePoint(Number(c))).join(\"\")"
@@ -409,22 +457,20 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
     do: "(#{expr_js(a)} + #{expr_js(b)})"
 
-  # explicit overflow ops (ADR-0035 §3) — Int64 is a BigInt in JS (arbitrary
-  # precision, like the BEAM bignum), so each op projects the true sum onto the
-  # signed 64-bit range: `BigInt.asIntN` wraps, an arrow clamps/checks once.
-  defp expr_js(%ECall{fun: %EId{name: "__prim_wrapping_add"}, args: [a, b]}),
-    do: "BigInt.asIntN(64, #{expr_js(a)} + #{expr_js(b)})"
-
-  defp expr_js(%ECall{fun: %EId{name: "__prim_saturating_add"}, args: [a, b]}),
-    do:
-      "(s => s > 9223372036854775807n ? 9223372036854775807n : " <>
-        "(s < -9223372036854775808n ? -9223372036854775808n : s))(#{expr_js(a)} + #{expr_js(b)})"
-
-  # `checked_add` -> `Option(Int64)`, the JS tagged array `["Some", s]` / `["None"]`
-  defp expr_js(%ECall{fun: %EId{name: "__prim_checked_add"}, args: [a, b]}),
-    do:
-      "(s => (s >= -9223372036854775808n && s <= 9223372036854775807n) ? " <>
-        "[\"Some\", s] : [\"None\"])(#{expr_js(a)} + #{expr_js(b)})"
+  # explicit 64-bit overflow ops (ADR-0035 §3) operate on `Int64`, which is NOT
+  # supported on JS (ADR-0064): their two's-complement-at-64 contract has no JS
+  # representation without per-op `BigInt.asIntN` masking — the silent BigInt
+  # elevation we refuse. So they raise here (and `Rian.Reach` pins any `Int64`
+  # function off `:js`, so the gate catches it first). A function reaching this is
+  # one that bypassed the signature gate via an untyped call site.
+  defp expr_js(%ECall{fun: %EId{name: prim}, args: [_, _]})
+       when prim in ~w(__prim_wrapping_add __prim_saturating_add __prim_checked_add),
+       do:
+         raise(
+           Unsupported,
+           "`#{prim}` operates on `Int64`, which is not supported on JS (ADR-0064) — " <>
+             "64-bit two's-complement wrap has no JS representation; use `Int` or `Int53`."
+         )
 
   # the handful of stdlib calls the self-hosting spikes use, mapped to portable
   # JS (a stopgap until the portable prelude, ADR-0047, owns these):
@@ -436,7 +482,7 @@ defmodule Rian.JS do
     do: "{...#{paren(m)}, [#{expr_js(k)}]: #{expr_js(v)}}"
 
   defp expr_js(%ECall{fun: %EDot{head: %EId{name: "String"}, name: "to_charlist"}, args: [s]}),
-    do: "[...#{paren(s)}].map(c => BigInt(c.codePointAt(0)))"
+    do: "[...#{paren(s)}].map(c => #{cp_expr("c.codePointAt(0)")})"
 
   defp expr_js(%ECall{fun: %EDot{head: %EId{name: "List"}, name: "to_string"}, args: [xs]}),
     do: "#{paren(xs)}.map(c => String.fromCodePoint(Number(c))).join(\"\")"
@@ -492,8 +538,9 @@ defmodule Rian.JS do
   defp branch_js(expr), do: expr_js(expr)
 
   # ── helpers ─────────────────────────────────────────────────────────────
-  # Int64 -> BigInt literal (`42n`); a Float64 literal is a plain JS number; in an
-  # `Int53` function, an integer literal is a plain (native) JS number too
+  # `Int` -> BigInt literal (`42n`); a Float64 literal is a plain JS number; in a
+  # number-mode function (`Int53`/`Int32`), an integer literal is a plain (native)
+  # JS number too
   defp num_js(n) do
     cond do
       float?(n) -> n
@@ -506,6 +553,13 @@ defmodule Rian.JS do
     do: if(Process.get(:rian_js_int53, false), do: "#{v}", else: "#{v}n")
 
   defp lit_js(v) when is_binary(v), do: inspect(v)
+
+  # A `Char`/codepoint integer follows the function's integer mode: a plain JS
+  # number in number-mode (`Int53`/`Int32`), a `BigInt` otherwise — so codepoints
+  # never mix with the surrounding integers (JS forbids combining BigInt + number).
+  defp number_mode?, do: Process.get(:rian_js_int53, false)
+  defp cp_lit(cp), do: if(number_mode?(), do: "#{cp}", else: "#{cp}n")
+  defp cp_expr(js), do: if(number_mode?(), do: js, else: "BigInt(#{js})")
 
   defp float?(n), do: String.contains?(n, ".") or String.match?(n, ~r/[eE]/)
 

@@ -25,9 +25,9 @@ mod Str do
 
   # ── composite ops — written ONCE in Rian, portable to every backend ─────
   # length in codepoints: count the char list (cons recursion, no host FFI)
-  pub def length(s String) Int64 := count(Prim.str_chars(s))
+  pub def length(s String) Int53 := count(Prim.str_chars(s))
 
-  def count(cs Vec(Char)) Int64
+  def count(cs Vec(Char)) Int53
   def count([]) := 0
   def count([_ | t]) := 1 + count(t)
 end

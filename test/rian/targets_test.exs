@@ -40,7 +40,7 @@ defmodule Rian.TargetsTest do
       src = """
       @targets(ex, rs, js)
       mod Geo do
-        pub def square(n Int64) Int64 := n * n
+        pub def square(n Int53) Int53 := n * n
       end
       """
 
@@ -78,7 +78,7 @@ defmodule Rian.TargetsTest do
       src = """
       @targets(ex, rs, js)
       mod M do
-        pub def go(n Int64) Int64 := n
+        pub def go(n Int53) Int53 := n
         def helper() Int64 := :erlang.system_time()
       end
       """
