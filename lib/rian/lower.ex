@@ -1618,6 +1618,14 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}, :elixir),
     do: {"<<" <> Enum.map_join(args, ", ", &(p(&1, 0, :elixir) <> "::binary")) <> ">>", 12}
 
+  # a `Char`'s single-character string (ADR-0069 §6): Rust `char` has `.to_string()`;
+  # on Elixir a `Char` is a codepoint integer, so `<<cp::utf8>>` is its encoding.
+  defp emit(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}, :rust),
+    do: {"#{p(c, 12, :rust)}.to_string()", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}, :elixir),
+    do: {"<<#{p(c, 0, :elixir)}::utf8>>", 12}
+
   # explicit overflow ops (ADR-0035 §3) on Rust — the native `i64` methods; this
   # is the target where overflow actually bites (debug panic / release wrap), so
   # `checked_add` returns `Option<i64>` (Rian `Option(Int64)`) directly.

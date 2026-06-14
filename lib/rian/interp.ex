@@ -16,10 +16,13 @@ defmodule Rian.Interp do
     * `String`            → the value itself (identity)
     * `Int`/`Int*`/`UInt*`→ `__prim_int_to_string(value)` (lowered natively per target)
     * `Bool`              → `if value do "true" else "false" end`
+    * `Char`              → `__prim_char_to_string(value)` (the codepoint's single
+                            character; byte-identical per target — the static type
+                            means no runtime Char/Int dispatch, ADR-0069 §6)
 
-  `Char`/`Float64` (ADR-0069 open items: dispatch collision / round-trip
-  divergence) and a hole whose type cannot be inferred are a **compile error at the
-  hole** — never a silent `inspect`-style fallback (ADR-0035).
+  `Float64` (ADR-0069 open item: cross-target round-trip divergence, §6) and a hole
+  whose type cannot be inferred are a **compile error at the hole** — never a silent
+  `inspect`-style fallback (ADR-0035).
   """
   alias Rian.Check
 
@@ -57,9 +60,10 @@ defmodule Rian.Interp do
         {:call, {:id, "__prim_int_to_string"}, [expr]}
 
       type == "Char" ->
-        raise ArgumentError,
-              "interpolation of a `Char` is not supported yet (ADR-0069 open item: " <>
-                "the Char/Int dispatch-guard collision) — convert explicitly"
+        # the hole's type is known statically here, so there is no runtime Char/Int
+        # dispatch (ADR-0069 §6) — emit the codepoint→string prim directly. A Char's
+        # single-character string is byte-identical on every target.
+        {:call, {:id, "__prim_char_to_string"}, [expr]}
 
       type == "Float64" or type == "Float32" ->
         raise ArgumentError,

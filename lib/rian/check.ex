@@ -235,6 +235,10 @@ defmodule Rian.Check do
   # (ADR-0069 §6); every part is already a `String` (stringified by `Rian.Interp`).
   def infer(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: _}, _env, _ic), do: "String"
 
+  # `__prim_char_to_string(c) : String` — a `Char`'s single-character string
+  # (ADR-0069 §6); portable, lowered natively per target.
+  def infer(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [_]}, _env, _ic), do: "String"
+
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)

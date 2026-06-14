@@ -611,6 +611,11 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}),
     do: "(" <> Enum.map_join(args, " + ", &expr_js/1) <> ")"
 
+  # a `Char`'s single-character string (ADR-0069 §6): a `Char` is its codepoint in
+  # the program's integer mode, so `String.fromCodePoint(Number(c))`.
+  defp expr_js(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}),
+    do: "String.fromCodePoint(Number(#{expr_js(c)}))"
+
   # explicit 64-bit overflow ops (ADR-0035 §3) operate on `Int64`, which is NOT
   # supported on JS (ADR-0064): their two's-complement-at-64 contract has no JS
   # representation without per-op `BigInt.asIntN` masking — the silent BigInt

@@ -1,6 +1,6 @@
 # ADR-0069 — String interpolation that auto-stringifies via a portable `Show`
 
-**Status:** Accepted · **Implemented (partial, 2026-06-14)** — the `\(expr)` surface (decision A) + auto-stringify for `Int*`/`Bool`/`String` holes, portable across all four targets. The lowering strategy is settled in §6 (canonical desugar, not target-native interpolation). `Char`/`Float64`/user-type & derived `Show`/runtime dispatch are deferred (see §6, *Open items*, and *Implementation* below).
+**Status:** Accepted · **Implemented (partial, 2026-06-14)** — the `\(expr)` surface (decision A) + auto-stringify for `Char`/`Int*`/`Bool`/`String` holes, portable and byte-identical across all four targets; interpolation lowers to a single-shot join (§6). The lowering strategy is settled in §6 (canonical desugar, not target-native interpolation). `Float64`/user-type & derived `Show`/runtime dispatch are deferred (see §6, *Open items*, and *Implementation* below).
 **Implemented:** partial — `\(expr)` lexing (`{:istr}`), Pratt (`{:str_interp}`), `Rian.Interp` static resolution, `__prim_int_to_string` on Beam/JS/Lower(Rust+Elixir)/JVM; `Int*`/`Bool`/`String` holes reach all four targets, honestly via `Rian.Reach` (an `Int` hole inherits ADR-0064's `[:ex,:js]`). `test/rian/interp_test.exs`. Deferred: `Char` (dispatch-guard collision), `Float64` (round-trip), user/derived `Show`, runtime dispatch.
 **Refs:** ADR-0042 (protocols & bounded generics — the dispatch this leans on), ADR-0061 (multi-target protocol lowering — BEAM/Rust/JS dispatch, the Rust owned-return gap), ADR-0047 (portable prelude/stdlib — the `Prim.*` intrinsic layer), ADR-0051 §"Open items" (interpolation deferred for doc heredocs — "probably no"), ADR-0035 (no hidden control flow — the central tension), ADR-0033 (surface vocabulary), ADR-0064 (portable numeric contract — `Int53` is the portable integer; `Int`/wide ints are off some targets), ADR-0057/0058 (target-environment sets; reachability), ADR-0065 (P7 surface freeze — this surface is *not* frozen).
 **Owners:** Maya Lin (surface / emitters) · Samir Patel (types / protocol bounds) · Kira Neri (honesty) · Mira (totality) · Tomás (BEAM performance) · Rachel Okafor (PM)
@@ -227,25 +227,31 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
   Empty literal segments (the lexer's trailing `{:lit, ""}`, and `""` between
   adjacent holes) are dropped; a single-part interpolation collapses to the bare
   value. The join is portable (no Reach blocker) and `Check` types it `String`.
-- **The one new intrinsic.** `__prim_int_to_string` lowers natively on all four
-  emitters (`erlang:integer_to_binary` / `String(n)` / `n.to_string()` /
-  `.toString()`), so an `Int53`/`Bool`/`String` interpolation reaches **all four
-  targets** — the portability win, replacing the `:ex`-only `Integer.to_string`
-  FFI. `Rian.Reach` needs no new blocker: a hole inherits its value type's reach
-  (an `Int` hole is `[:ex,:js]` per ADR-0064; a wide-int hole is off `:js`).
-- **Deferred (compile errors, never silent):** a `Char` hole, a `Float64` hole,
-  and a hole whose type can't be statically inferred each raise a clear error at
-  the hole — no `inspect`-style fallback (ADR-0035). User-type / derived `Show`
-  through the full protocol (so a sum/struct can be interpolated) is the next
-  increment; until then a user-type hole is the "no `Show`" error.
+- **The stringify intrinsics.** `__prim_int_to_string` and `__prim_char_to_string`
+  lower natively on all four emitters (int: `erlang:integer_to_binary` / `String(n)`
+  / `n.to_string()` / `.toString()`; char: `<<cp/utf8>>` / `String.fromCodePoint` /
+  `char::to_string` / `String(Character.toChars(_))`), so an
+  `Int53`/`Bool`/`String`/`Char` interpolation reaches **all four targets**,
+  byte-identical — the portability win, replacing the `:ex`-only `Integer.to_string`
+  FFI. `Rian.Reach` needs no new blocker: a hole inherits its value type's reach (an
+  `Int` hole is `[:ex,:js]` per ADR-0064; a wide-int hole is off `:js`).
+- **Deferred (compile errors, never silent):** a `Float64` hole and a hole whose
+  type can't be statically inferred each raise a clear error at the hole — no
+  `inspect`-style fallback (ADR-0035). `Float64` needs a single canonical format in
+  `__prim_float_to_string` per §6 (the native formatters diverge); user-type /
+  derived `Show` through the full protocol (so a sum/struct can be interpolated) is
+  the next increment, until which a user-type hole is the "no `Show`" error.
 
 ## Open items
 
 - **Confirm A (`\(expr)`) vs B (`${expr}`).** Lexer-minimalism vs familiarity; decide before any code.
-- **The `Char`/`Int53` dispatch-guard collision on `:ex`/`:js` (the sharpest cost).** Both test
-  `is_integer`; ADR-0061 §5 forbids guard-sharing impls on runtime-dispatch targets. Resolve before
-  implementing — likely the dispatcher needs a finer discriminator (range/tag) for the numeric vs char
-  split, or `Char`'s `Show` routes differently. This is the one place the design could fail to lower.
+- ~~**The `Char`/`Int53` dispatch-guard collision on `:ex`/`:js`.**~~ **Resolved (2026-06-14).** The
+  collision only exists for *runtime* `Show` dispatch; the implemented design resolves each hole by its
+  **static** type (§"Static resolution"), so a `Char` hole emits `__prim_char_to_string` directly with
+  no `is_integer` guard in play. The prim lowers natively on every target (BEAM `<<cp/utf8>>`, Rust
+  `char::to_string`, JS `String.fromCodePoint`, Kotlin `String(Character.toChars(_))`) and is
+  byte-identical (rustc/node/kotlinc-verified, incl. supplementary codepoints). Runtime `Char` dispatch
+  remains open *only* for the (deferred) user-`Show`/runtime-dispatch path.
 - **`Float64` round-trip divergence.** BEAM, JS `String(n)`, and Rust `format!("{}", …)` disagree on
   shortest-round-trip float formatting (`0.1`, `1.0` vs `1`, exponent thresholds). A portable `Show for
   Float64` must *specify* the format (likely shortest-round-trip, ECMAScript `Number.prototype.toString`

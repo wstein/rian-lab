@@ -560,6 +560,11 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}, s),
     do: {:bin, @ln, Enum.map(args, &bin_seg(expr_form(&1, s)))}
 
+  # a `Char`'s single-character string (ADR-0069 §6): a `Char` is a codepoint
+  # integer on the BEAM, so `<<cp/utf8>>` is its UTF-8 encoding.
+  defp expr_form(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}, s),
+    do: {:bin, @ln, [{:bin_element, @ln, expr_form(c, s), :default, [:utf8]}]}
+
   # string → atom (the BEAM-native interning the self-host backend needs to build
   # Erlang variable/operator atoms; atoms are BEAM-only, so `Rian.Reach` pins a
   # caller off `:rs`/`:js`/`:jvm`).

@@ -144,13 +144,35 @@ defmodule Rian.InterpTest do
     end
   end
 
-  describe "un-stringifiable holes are a compile error, never a silent fallback (ADR-0035)" do
-    test "a `Char` hole is rejected (ADR-0069 open item: dispatch-guard collision)" do
-      assert_raise ArgumentError, ~r/`Char` is not supported yet/, fn ->
-        Beam.load(~S|def f(c Char) String := "c=\(c)"|, :interp_char_err)
-      end
+  describe "portable `Char` interpolation (ADR-0069 §6)" do
+    @csrc ~S|def tag(c Char) String := "[\(c)]"|
+
+    test "a `Char` hole stringifies to its single character and runs on the BEAM" do
+      {:ok, m} = Beam.load(@csrc, :interp_char_beam)
+      assert m.tag(?A) == "[A]"
+      # a supplementary codepoint (emoji) round-trips through `<<cp::utf8>>`
+      assert m.tag(0x1F600) == "[😀]"
     end
 
+    test "the `Char` hole reaches all four targets (portable — atoms aside, Char is)" do
+      assert reach(@csrc, "tag").reach |> MapSet.to_list() |> Enum.sort() ==
+               [:ex, :js, :jvm, :rs]
+    end
+
+    test "JS lowers a `Char` hole to `String.fromCodePoint` and runs under node" do
+      js = JS.compile(@csrc)
+      assert js =~ "String.fromCodePoint(Number(c))"
+      # a Char arrives as its codepoint; `tag(65)` → "[A]"
+      assert node_eval(js, "tag(65)") in [:no_node, "[A]"]
+    end
+
+    test "Rust lowers a `Char` hole to `.to_string()` on the native `char`" do
+      rs = Lower.to_rust(hd(Decl.parse(@csrc).funcs), [], %{})
+      assert rs =~ "c.to_string()"
+    end
+  end
+
+  describe "un-stringifiable holes are a compile error, never a silent fallback (ADR-0035)" do
     test "a `Float` hole is rejected (ADR-0069 open item: round-trip divergence)" do
       assert_raise ArgumentError, ~r/`Float` is not supported yet/, fn ->
         Beam.load(~S|def f(x Float64) String := "x=\(x)"|, :interp_float_err)

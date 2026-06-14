@@ -368,6 +368,11 @@ defmodule Rian.JVM do
   defp expr_kt(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}),
     do: "(" <> Enum.map_join(args, " + ", &expr_kt/1) <> ")"
 
+  # a `Char`'s single-character string (ADR-0069 §6): a `Char` is a codepoint `Long`,
+  # so `String(Character.toChars(cp))` (handles supplementary codepoints / surrogates).
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}),
+    do: "String(Character.toChars((#{expr_kt(c)}).toInt()))"
+
   # integer → float (ADR-0035 explicit conversion): Kotlin `Long.toDouble()`
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}),
     do: "(#{expr_kt(n)}).toDouble()"

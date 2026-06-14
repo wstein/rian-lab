@@ -27,7 +27,7 @@ defmodule Rian.Prim do
   # never a silently-bogus `__prim_x` that fails cryptically downstream.
   @prims ~w(
     str_chars str_from_chars str_concat str_concat_all str_to_atom
-    char_code int_to_string int_to_float
+    char_code int_to_string int_to_float char_to_string
     map_new map_get map_put map_has
     wrapping_add saturating_add checked_add
   )
