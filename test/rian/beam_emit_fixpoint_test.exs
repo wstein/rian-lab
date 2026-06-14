@@ -28,6 +28,7 @@ defmodule Rian.BeamEmitFixpointTest do
   defp inj(%Core.EAtom{name: a}), do: {:c_atom, a}
   defp inj(%Core.EUnary{op: op, arg: a}), do: {:c_unary, op, inj(a)}
   defp inj(%Core.EBin{op: op, left: l, right: r}), do: {:c_bin, op, inj(l), inj(r)}
+  defp inj(%Core.ECall{fun: %Core.EId{name: f}, args: as}), do: {:c_call, f, Enum.map(as, &inj/1)}
 
   # the port's string-operator Form sum -> real Erlang abstract forms (anno 0).
   defp to_form({:f_int, t}), do: {:integer, 0, String.to_integer(t)}
@@ -35,6 +36,11 @@ defmodule Rian.BeamEmitFixpointTest do
   defp to_form({:f_atom, a}), do: {:atom, 0, String.to_atom(a)}
   defp to_form({:f_un, op, x}), do: {:op, 0, String.to_atom(op), to_form(x)}
   defp to_form({:f_bin, op, l, r}), do: {:op, 0, String.to_atom(op), to_form(l), to_form(r)}
+
+  # a local call form: the callee name (a string) inflates to an `{atom, _, f}`
+  # head, the args recurse — `{call, 0, {atom, 0, f}, [arg forms]}`.
+  defp to_form({:f_call, f, args}),
+    do: {:call, 0, {:atom, 0, String.to_atom(f)}, Enum.map(args, &to_form/1)}
 
   # Rian.Beam's variable naming: capitalise the first letter (so `a` -> `A`).
   defp var_atom(<<c, rest::binary>>), do: String.to_atom(String.upcase(<<c>>) <> rest)
@@ -77,7 +83,14 @@ defmodule Rian.BeamEmitFixpointTest do
     {"a >= b", "A >= B"},
     {"a < b", "A < B"},
     {"not a and b or c", "not A andalso B orelse C"},
-    {"a or b and c", "A orelse B andalso C"}
+    {"a or b and c", "A orelse B andalso C"},
+    # local function calls -> {call, _, {atom, _, f}, Args}: zero/one/many args,
+    # a binary argument, and a nested call (args recurse)
+    {"f()", "f()"},
+    {"g(a)", "g(A)"},
+    {"g(a, b)", "g(A, B)"},
+    {"g(a + b)", "g(A + B)"},
+    {"g(f(a), b)", "g(f(A), B)"}
   ]
 
   describe "self-hosting BEAM-backend fixpoint — Rian forms vs :erl_parse" do
@@ -120,6 +133,15 @@ defmodule Rian.BeamEmitFixpointTest do
     test "precedence/structure is preserved and discriminates", %{mod: mod} do
       refute ported(mod, "a + b * c") == ported(mod, "(a + b) * c")
       refute ported(mod, "a - b") == ported(mod, "b - a")
+    end
+
+    test "a local call is a `{call, _, {atom, _, f}, args}` form, args recurse", %{mod: mod} do
+      assert ported(mod, "g(a, b)") ==
+               {:call, 0, {:atom, 0, :g}, [{:var, 0, :A}, {:var, 0, :B}]}
+
+      # the callee is an atom head (not a var), and arg order is preserved
+      assert {:call, 0, {:atom, 0, :g}, _} = ported(mod, "g(a)")
+      refute ported(mod, "g(a, b)") == ported(mod, "g(b, a)")
     end
   end
 end

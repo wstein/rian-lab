@@ -29,6 +29,7 @@ defmodule Rian.JsFixpointTest do
   defp inj(%Core.EAtom{name: a}), do: {:c_atom, a}
   defp inj(%Core.EUnary{op: op, arg: a}), do: {:c_unary, op, inj(a)}
   defp inj(%Core.EBin{op: op, left: l, right: r}), do: {:c_bin, op, inj(l), inj(r)}
+  defp inj(%Core.ECall{fun: %Core.EId{name: f}, args: as}), do: {:c_call, f, Enum.map(as, &inj/1)}
 
   defp ported(mod, body), do: mod.emit(inj(Core.from_expr(Pratt.parse(body))))
 
@@ -50,7 +51,14 @@ defmodule Rian.JsFixpointTest do
     {"def f(a Int53, b Int53, c Int53, d Int53) Bool := a == b and c != d", "a == b and c != d"},
     {"def f(a Bool, b Bool, c Bool) Bool := not a and b or c", "not a and b or c"},
     {~S|def f(w String) String := "hi" <> w|, ~S|"hi" <> w|},
-    {"def f() Bool := :ok == :no", ":ok == :no"}
+    {"def f() Bool := :ok == :no", ":ok == :no"},
+    # function calls — self-recursive wrappers keep the def single-function so the
+    # `return …;` extraction is unambiguous; a binary arg is parenthesised like any
+    # binary (JS blanket parens).
+    {"def f() Int53 := f()", "f()"},
+    {"def f(a Int53) Int53 := f(a)", "f(a)"},
+    {"def f(a Int53, b Int53) Int53 := f(a, b)", "f(a, b)"},
+    {"def f(a Int53) Int53 := f(a + 1)", "f(a + 1)"}
   ]
 
   describe "self-hosting JS-backend fixpoint — Rian emitter vs Rian.JS" do
@@ -84,6 +92,14 @@ defmodule Rian.JsFixpointTest do
     test "the emission discriminates different operators/operands", %{mod: mod} do
       refute ported(mod, "a + b") == ported(mod, "a - b")
       refute ported(mod, "a + b") == ported(mod, "b + a")
+    end
+
+    test "a call renders as name(args), comma-joined and recursive", %{mod: mod} do
+      assert ported(mod, "f()") == "f()"
+      assert ported(mod, "f(a, b)") == "f(a, b)"
+      assert ported(mod, "f(g(a), b)") == "f(g(a), b)"
+      # the call shape is distinct from a tagged list and arg order matters.
+      refute ported(mod, "f(a, b)") == ported(mod, "f(b, a)")
     end
   end
 end

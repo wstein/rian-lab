@@ -21,6 +21,7 @@ mod SelfhostRust do
              | CId(String)
              | CUnary(String, Core)
              | CBin(String, Core, Core)
+             | CCall(String, Vec(Core))
 
   # An emitted fragment with its precedence (the reference's `{string, prec}`).
   struct Em(s String, pr Int53)
@@ -85,6 +86,9 @@ mod SelfhostRust do
   pub def emit(CId(n)) := Em(s: n, pr: 12)
   pub def emit(CUnary(op, x)) := Em(s: udisp(op) <> paren(emit(x), 11), pr: 11)
   pub def emit(CBin(op, l, r)) := bin_em(op, l, r)
+  # a call `f(a, b)` binds tightest (prec 12, like a leaf); each argument is a full
+  # expression rendered at context 0 (comma-self-delimited, never parenthesised).
+  pub def emit(CCall(f, args)) := Em(s: f <> "(" <> args_str(args) <> ")", pr: 12)
 
   # Left/right context precedences come from associativity; assemble the binary.
   def bin_em(op String, l Core, r Core) Em
@@ -98,6 +102,12 @@ mod SelfhostRust do
   def mk_bin(op String, l Core, r Core, lc Int53, rc Int53) Em
     Em(s: paren(emit(l), lc) <> " " <> disp(op) <> " " <> paren(emit(r), rc), pr: prec(op))
   end
+
+  # comma-join the rendered arguments (context 0 — an argument never needs parens).
+  def args_str(Vec(Core)) String
+  def args_str([]) := ""
+  def args_str([x]) := paren(emit(x), 0)
+  def args_str([x | rest]) := paren(emit(x), 0) <> ", " <> args_str(rest)
 
   # The rendered Rust expression string.
   pub def render(c Core) String

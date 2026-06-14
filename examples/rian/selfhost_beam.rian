@@ -24,15 +24,18 @@ mod SelfhostBeam do
              | CAtom(String)
              | CUnary(String, Core)
              | CBin(String, Core, Core)
+             | CCall(String, Vec(Core))
 
   # An Erlang abstract form (the operator is carried as a string — see moduledoc):
   #   FInt  -> {integer, _, N}     FVar -> {var, _, Name}   FAtom -> {atom, _, A}
   #   FUn   -> {op, _, Op, Arg}    FBin -> {op, _, Op, L, R}
+  #   FCall -> {call, _, {atom, _, F}, Args}  (a local function call)
   type Form := FInt(String)
              | FVar(String)
              | FAtom(String)
              | FUn(String, Form)
              | FBin(String, Form, Form)
+             | FCall(String, Vec(Form))
 
   # Rian binary operator -> Erlang operator spelling (the reference `erl_op`).
   def eop(String) String
@@ -62,4 +65,14 @@ mod SelfhostBeam do
   pub def emit(CAtom(a)) := FAtom(a)
   pub def emit(CUnary(op, x)) := FUn(uop(op), emit(x))
   pub def emit(CBin(op, l, r)) := FBin(eop(op), emit(l), emit(r))
+  # a local function call `f(args)` -> {call, _, {atom, _, f}, [arg forms]} (the
+  # reference's lowercase-`ECall` branch); the callee name rides as a string, the
+  # fixpoint inflating it to the `{atom, _, f}` head. PascalCase ctor-as-tuple is
+  # the `:partial` tail.
+  pub def emit(CCall(f, args)) := FCall(f, forms_of(args))
+
+  # map `emit` over an argument vector (no FFI — a recursive fold to `Vec(Form)`).
+  def forms_of(Vec(Core)) Vec(Form)
+  def forms_of([]) := []
+  def forms_of([x | rest]) := [emit(x) | forms_of(rest)]
 end

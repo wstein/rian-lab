@@ -26,6 +26,7 @@ defmodule Rian.RustEmitFixpointTest do
   defp inj(%Core.EId{name: n}), do: {:c_id, n}
   defp inj(%Core.EUnary{op: op, arg: a}), do: {:c_unary, op, inj(a)}
   defp inj(%Core.EBin{op: op, left: l, right: r}), do: {:c_bin, op, inj(l), inj(r)}
+  defp inj(%Core.ECall{fun: %Core.EId{name: f}, args: as}), do: {:c_call, f, Enum.map(as, &inj/1)}
 
   defp ported(mod, src), do: mod.render(inj(Core.from_expr(Pratt.parse(src))))
 
@@ -46,7 +47,15 @@ defmodule Rian.RustEmitFixpointTest do
     "a <= b and a >= b",
     "a < b or c > d",
     "a + b * c - d",
-    ~S|"hi"|
+    ~S|"hi"|,
+    # calls: prec 12 (tightest), args rendered at context 0 (a binary arg is NOT
+    # parenthesised), nested calls recurse, and a call as an operand binds tighter
+    "f()",
+    "f(a, b)",
+    "f(a + 1, b)",
+    "f(g(a), b)",
+    "f(a) + b",
+    "g(a - b)"
   ]
 
   describe "self-hosting Rust-backend fixpoint — Rian emitter vs Rian.Lower" do
@@ -77,6 +86,15 @@ defmodule Rian.RustEmitFixpointTest do
     test "the emission discriminates structure", %{mod: mod} do
       refute ported(mod, "1 + 2 * 3") == ported(mod, "(1 + 2) * 3")
       refute ported(mod, "a - b") == ported(mod, "b - a")
+    end
+
+    test "a call binds tightest and its args take no parens", %{mod: mod} do
+      # call (prec 12) on the loose side of `+` needs no parens around itself
+      assert ported(mod, "f(a) + b") == "f(a) + b"
+      # a binary argument is rendered at context 0 — no parens inside the call
+      assert ported(mod, "f(a + 1, b)") == "f(a + 1, b)"
+      # nested calls recurse
+      assert ported(mod, "f(g(a), b)") == "f(g(a), b)"
     end
   end
 end

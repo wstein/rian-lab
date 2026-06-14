@@ -24,6 +24,7 @@ mod SelfhostJs do
              | CAtom(String)
              | CUnary(String, Core)
              | CBin(String, Core, Core)
+             | CCall(String, Vec(Core))
 
   # Wrap a string literal in double quotes (the JS spelling of strings/atoms).
   def dq(s String) String := "\"" <> s <> "\""
@@ -53,4 +54,13 @@ mod SelfhostJs do
   pub def emit(CAtom(a)) := dq(a)
   pub def emit(CUnary(op, x)) := unop(op) <> emit(x)
   pub def emit(CBin(op, l, r)) := "(" <> emit(l) <> " " <> jsop(op) <> " " <> emit(r) <> ")"
+  # a function call `f(a, b)` -> `f(a, b)` (the reference's general `ECall` shape);
+  # variant construction `Ctor(…)` and labelled-arg structs are the `:partial` tail.
+  pub def emit(CCall(f, args)) := f <> "(" <> emit_args(args) <> ")"
+
+  # comma-join the emitted argument expressions (no FFI — a recursive fold).
+  def emit_args(Vec(Core)) String
+  def emit_args([]) := ""
+  def emit_args([x]) := emit(x)
+  def emit_args([x | rest]) := emit(x) <> ", " <> emit_args(rest)
 end

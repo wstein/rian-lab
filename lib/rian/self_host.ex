@@ -112,7 +112,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_beam.rian",
       test: "test/rian/beam_emit_fixpoint_test.exs",
       note:
-        "abstract forms for the literal/unary/binary slice equal :erl_parse's canonical AST and compile via :compile.forms; strings/calls/lists/case remain (selfhost_codegen.rian is a separate toy stack VM)"
+        "abstract forms for the literal/unary/binary/call slice equal :erl_parse's canonical AST and compile via :compile.forms; strings/lists/case remain (selfhost_codegen.rian is a separate toy stack VM)"
     },
     %{
       id: :text_backend,
@@ -122,7 +122,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_rust.rian",
       test: "test/rian/rust_emit_fixpoint_test.exs",
       note:
-        "precedence-aware Rust emitter equals Rian.Lower.emit_expr(_, :rust) over the literal/unary/binary slice; calls/lists/structs/Elixir-text remain"
+        "precedence-aware Rust emitter equals Rian.Lower.emit_expr(_, :rust) over the literal/unary/binary/call slice; lists/structs/Elixir-text remain"
     },
     %{
       id: :js_backend,
@@ -132,7 +132,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_js.rian",
       test: "test/rian/js_fixpoint_test.exs",
       note:
-        "expression emitter equals Rian.JS term-for-term over the literal/unary/binary slice; calls/lists/if/case/structs/prims remain"
+        "expression emitter equals Rian.JS term-for-term over the literal/unary/binary/call slice; lists/if/case/structs/prims remain"
     },
     %{
       id: :jvm_backend,
