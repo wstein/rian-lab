@@ -140,4 +140,84 @@ defmodule Rian.OpaqueTest do
       refute kt =~ "Token"
     end
   end
+
+  describe "abstract — operators (ADR-0067 P1b) and casts (P1c)" do
+    @abs """
+    abstract Meters := Float64 do
+      op +(a Meters, b Meters) Meters
+      to base() Float64
+    end
+
+    def add(a Meters, b Meters) Meters := a + b
+    def raw(m Meters) Float64 := m.base()
+    """
+
+    test "the `do … end` block parses into `op` rules and `to` casts" do
+      [m] = Decl.parse(@abs).opaques
+      assert m.name == "Meters" and m.base == "Float64"
+      assert m.ops == [%{op: "+", params: ["Meters", "Meters"], ret: "Meters"}]
+      assert m.casts == [%{name: "base", ret: "Float64"}]
+    end
+
+    test "a declared operator types `Meters + Meters` as `Meters`" do
+      assert Check.check(@abs) == :ok
+    end
+
+    test "the operator yields the nominal type, not the base (no implicit decay, ADR-0035)" do
+      bad = """
+      abstract Meters := Float64 do
+        op +(a Meters, b Meters) Meters
+      end
+
+      def add(a Meters, b Meters) Float64 := a + b
+      """
+
+      assert {:error, msg} = Check.check(bad)
+      assert msg =~ "Meters" and msg =~ "Float64"
+    end
+
+    test "an abstract over `Int64` (not just Float64) overloads its operator" do
+      src = """
+      abstract Count := Int64 do
+        op +(a Count, b Count) Count
+      end
+
+      def bump(a Count, b Count) Count := a + b
+      """
+
+      assert Check.check(src) == :ok
+    end
+
+    test "an `abstract` without a `do … end` block is an error" do
+      assert_raise Decl.Error, ~r/abstract.*do.*end/, fn ->
+        Decl.parse("abstract Meters := Float64")
+      end
+    end
+
+    test "BEAM: operators and casts erase — `add`/`raw` compute on the base value" do
+      {:ok, mod, bin} = Rian.Beam.compile(@abs, :"rian_abs_#{System.unique_integer([:positive])}")
+      {:module, ^mod} = :code.load_binary(mod, ~c"#{mod}.beam", bin)
+      assert apply(mod, :add, [1.5, 2.0]) == 3.5
+      assert apply(mod, :raw, [3.5]) == 3.5
+    end
+
+    test "Rust: the abstract erases to its base, operator is the native `+`, cast is identity" do
+      rust = Rian.Lower.rust_program(Decl.parse(@abs))
+      assert rust =~ "fn add(a: f64, b: f64) -> f64"
+      assert rust =~ "a + b"
+      assert rust =~ "fn raw(m: f64) -> f64"
+      refute rust =~ "Meters"
+      refute rust =~ ".base("
+    end
+
+    test "JS and JVM: the abstract erases entirely" do
+      js = Rian.JS.compile(@abs)
+      refute js =~ "Meters"
+      refute js =~ ".base("
+
+      kt = Rian.JVM.compile(@abs)
+      assert kt =~ "fun add(a0: Double, a1: Double): Double"
+      refute kt =~ "Meters"
+    end
+  end
 end

@@ -152,7 +152,17 @@ defmodule Rian.Check do
   def infer(%EUnary{op: "not"}, _env, _ic), do: "Bool"
 
   def infer(%EBin{op: op, left: l, right: r}, env, ic) do
+    lt = infer(l, env, ic)
+    rt = infer(r, env, ic)
+
     cond do
+      # A declared `abstract` operator (ADR-0067): `Meters + Meters -> Meters`. Takes
+      # precedence over the default arithmetic rules so the result carries the nominal
+      # abstract type (it erases to the base operator at emit). Falls through when the
+      # operands are not an abstract this `op` is declared for.
+      t = abstract_op_type(op, lt, rt, ic) ->
+        t
+
       op in @bool_ops ->
         "Bool"
 
@@ -163,7 +173,7 @@ defmodule Rian.Check do
         "Float64"
 
       op in @int_ops or op in @arith ->
-        arith_type(l, r, infer(l, env, ic), infer(r, env, ic))
+        arith_type(l, r, lt, rt)
 
       true ->
         :unknown
@@ -223,6 +233,21 @@ defmodule Rian.Check do
       true ->
         ft = infer(call.fun, env, ic)
         if fn_type?(ft), do: fn_ret(ft), else: :unknown
+    end
+  end
+
+  # `m.base()` — an `abstract` cast (ADR-0067 §2): a declared `to base() B` on the
+  # value's abstract type exposes the underlying representation, returning `B`. The
+  # cast is explicit (never implicit, ADR-0035) and erases to the identity at emit.
+  # A zero-arg dot-call that is *not* a cast falls through to the generic logic.
+  def infer(%ECall{fun: %EDot{head: h, name: cn} = fun, args: []}, env, ic) do
+    case abstract_cast_ret(infer(h, env, ic), cn, ic) do
+      nil ->
+        ft = infer(fun, env, ic)
+        if fn_type?(ft), do: fn_ret(ft), else: :unknown
+
+      ret ->
+        ret
     end
   end
 
@@ -1314,7 +1339,41 @@ defmodule Rian.Check do
       Map.get(prog, :opaques, []) ++
         for(m <- Map.get(prog, :mods, []), o <- Map.get(m, :opaques, []), do: o)
 
-    Map.new(opaques, fn o -> {o.name, %{base: o.base}} end)
+    Map.new(opaques, fn o ->
+      {o.name, %{base: o.base, ops: Map.get(o, :ops, []), casts: Map.get(o, :casts, [])}}
+    end)
+  end
+
+  # The declared return type of an `abstract` operator (ADR-0067) matching `op` with
+  # operands of types `lt`/`rt`, or nil if no abstract overloads this operator for
+  # these operands. Scans every abstract's `ops`; the first match wins.
+  defp abstract_op_type(op, lt, rt, ic) do
+    ic
+    |> Map.get(:opaques, %{})
+    |> Enum.find_value(fn {_name, info} ->
+      Enum.find_value(Map.get(info, :ops, []), fn
+        %{op: ^op, params: [p1, p2], ret: ret} ->
+          if assignable?(lt, p1) and assignable?(rt, p2), do: ret
+
+        _ ->
+          nil
+      end)
+    end)
+  end
+
+  # The return type of an `abstract` cast named `cn` on a value of type `ht`, or nil
+  # if `ht` is not an abstract with such a cast (ADR-0067 §2).
+  defp abstract_cast_ret(ht, cn, ic) do
+    case Map.get(Map.get(ic, :opaques, %{}), ht) do
+      %{casts: casts} ->
+        Enum.find_value(casts, fn
+          %{name: ^cn, ret: ret} -> ret
+          _ -> nil
+        end)
+
+      _ ->
+        nil
+    end
   end
 
   # the ordinal base of a `range` named `n`, or nil if `n` is not a range

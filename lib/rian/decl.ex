@@ -29,8 +29,12 @@ defmodule Rian.Decl do
     * `opaque Name := Base` (ADR-0043 / ADR-0067) — an **abstract** type: nominally
       distinct from `Base` in the checker (so `Name`≠`Base`) but **erased to `Base`**
       at zero cost on every target by `Rian.Opaque.erase/1` (after the gates).
-      Constructed by the total `Name.of(x)` (`x : Base`). The `abstract` keyword (its
-      operator/cast superset, ADR-0067 P1b/P1c) is reserved but not yet parsed.
+      Constructed by the total `Name.of(x)` (`x : Base`).
+    * `abstract Name := Base do op +(a Name, b Name) Name … ; to base() Base end`
+      (ADR-0067 P1b/P1c) — `opaque` plus an **operator** surface (`op` rules forward
+      to the base operator: `Name + Name` types as `Name`, no implicit decay) and
+      explicit **casts** (`to base() Base` → `v.base()` exposes the underlying value,
+      erased to the identity). Same zero-cost erasure as `opaque`.
     * `struct Name(field Type, …)` — product types; lower to `defstruct` (BEAM) /
       `struct {…}` (Rust) and are built with positional `Name(v1, v2)` or named
       `Name(field: v, …)` constructor calls.
@@ -220,7 +224,9 @@ defmodule Rian.Decl do
 
     ranges = for {:range, r, pub?, doc} <- decls, do: parse_range(r, pub?, doc)
 
-    opaques = for {:opaque, o, pub?, doc} <- decls, do: parse_opaque(o, pub?, doc)
+    opaques =
+      for({:opaque, o, pub?, doc} <- decls, do: parse_opaque(o, pub?, doc)) ++
+        for {:abstract, h, b, pub?, doc} <- decls, do: parse_abstract(h, b, pub?, doc)
 
     structs =
       for({:struct, s, pub?, doc} <- decls, do: parse_struct(s, pub?, doc))
@@ -420,6 +426,60 @@ defmodule Rian.Decl do
     end
   end
 
+  # `abstract Name := Base do … end` (ADR-0067): an `opaque` (same nominal,
+  # zero-cost erasure) carrying declared `op` operator rules and `to` casts. The
+  # operators forward to the base operator on the underlying representation, so
+  # erasure needs only the type substitution `Rian.Opaque.erase/1` already does.
+  defp parse_abstract(head, body_toks, pub?, doc) do
+    {name, base} =
+      case split_once(head, ":=") do
+        {l, r} -> {strip_type_params(l), collapse_parens(String.trim(r))}
+        :none -> raise Error, "abstract declaration needs `:=`: #{head}"
+      end
+
+    {ops, casts} = parse_abstract_members(body_toks)
+    %Opaque{name: name, base: base, pub?: pub?, doc: doc, ops: ops, casts: casts}
+  end
+
+  # Split the `do … end` token body into `op` rules and `to` casts, one per line.
+  defp parse_abstract_members(toks) do
+    toks
+    |> Enum.chunk_by(&match?({:nl}, &1))
+    |> Enum.reject(fn [h | _] -> match?({:nl}, h) end)
+    |> Enum.map(&String.trim(Lexer.detokenize(&1)))
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.reduce({[], []}, fn line, {ops, casts} ->
+      cond do
+        String.starts_with?(line, "op ") -> {ops ++ [parse_op_rule(line)], casts}
+        String.starts_with?(line, "to ") -> {ops, casts ++ [parse_cast_rule(line)]}
+        true -> raise Error, "unexpected `abstract` member (need `op`/`to`): #{line}"
+      end
+    end)
+  end
+
+  # `op +(a T, b T) Ret` -> %{op: "+", params: ["T", "T"], ret: "Ret"}.
+  defp parse_op_rule("op " <> rest) do
+    case Regex.run(~r/^(\S+?)\s*\((.*)\)\s*(.*)$/, String.trim(rest)) do
+      [_, op_sym, params, ret] ->
+        %{op: op_sym, params: Enum.map(parse_params(params), & &1.type), ret: String.trim(ret)}
+
+      _ ->
+        raise Error, "malformed `op` in abstract: op #{rest}"
+    end
+  end
+
+  # `to base() Type` -> %{name: "base", ret: "Type"} (ADR-0067 §2 explicit cast).
+  defp parse_cast_rule("to " <> rest) do
+    case Regex.run(~r/^(\w+)\s*\(\s*\)\s*(.*)$/, String.trim(rest)) do
+      [_, cast_name, ret] -> %{name: cast_name, ret: String.trim(ret)}
+      _ -> raise Error, "malformed `to` cast in abstract: to #{rest}"
+    end
+  end
+
+  defp take_until_do([{:kw, "do"} | _] = rest, acc), do: {Enum.reverse(acc), rest}
+  defp take_until_do([t | rest], acc), do: take_until_do(rest, [t | acc])
+  defp take_until_do([], _acc), do: raise(Error, "`abstract` needs a `do … end` block")
+
   defp parse_bounds(text) do
     case String.split(text, "..", parts: 2) do
       [lo_s, hi_s] ->
@@ -598,6 +658,16 @@ defmodule Rian.Decl do
     {{:opaque, Lexer.detokenize(toks), false, nil}, rest}
   end
 
+  # `abstract Name := Base do op …(…) Ret … ; to base() Type end` (ADR-0067):
+  # `opaque` plus an operator/cast surface. The header (`Name := Base`) parses
+  # like `opaque`; the `do … end` block holds `op`/`to` members.
+  defp take_decl([{:kw, "abstract"} | rest]) do
+    {head, rest} = take_until_do(rest, [])
+    [{:kw, "do"} | inner] = rest
+    {body, rest} = take_block(inner, 1, [])
+    {{:abstract, Lexer.detokenize(head), body, false, nil}, rest}
+  end
+
   defp take_decl([{:kw, "struct"} | rest]) do
     {toks, rest} = take_type(rest, [])
     {{:struct, Lexer.detokenize(toks), false, nil}, rest}
@@ -684,6 +754,7 @@ defmodule Rian.Decl do
   defp mark_pub({:type, s, _, doc}), do: {:type, s, true, doc}
   defp mark_pub({:range, s, _, doc}), do: {:range, s, true, doc}
   defp mark_pub({:opaque, s, _, doc}), do: {:opaque, s, true, doc}
+  defp mark_pub({:abstract, h, b, _, doc}), do: {:abstract, h, b, true, doc}
   defp mark_pub({:struct, s, _, doc}), do: {:struct, s, true, doc}
   defp mark_pub({:const, s, _, doc}), do: {:const, s, true, doc}
   defp mark_pub({:def, raw}), do: {:def, Map.put(raw, :pub, true)}
