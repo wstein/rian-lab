@@ -114,10 +114,12 @@ architectural cost.
   (`contains([1,2,3], 2)`) is `T = Int53`, so the integer-generic stdlib
   (`13_protocols`/`17_stdlib_eq_ord`/`18_dict_eq`) compiles to and runs on `:js` (the JS protocol
   dispatcher guards integers on the program int mode — `number` in number-mode, `bigint` for `Int`).
-  **`17`/`18` are still off-`:rs`** — `Rian.Reach` honestly pins them with a
-  `:generic` blocker for two Rust-emitter gaps (a generic returning an owned tvar needs
-  borrow→owned `.clone()`; a parametric user type like `Pair(K,V)` emits an `enum` with no `<K,V>`
-  params), so the gate doesn't green-light Rust the emitter can't produce (ADR-0061 Open items).
+  **`17` now reaches `:rs`** — the Rust owned↔borrow coercion landed (`Rian.Lower` clones a returned
+  `&T`, `&`-borrows owned call/element args, clones elements stored into an owned `Vec`; gated on a
+  generic function so non-generic code is untouched), so the integer Eq/Ord stdlib compiles to and runs
+  on Rust (`reach_rust_honesty_test`). **`18` is still off-`:rs`** — `Rian.Reach` honestly pins it with a
+  `:generic` blocker for the one remaining gap: a parametric user type like `Pair(K,V)` emits an `enum`
+  with no `<K,V>` params and needs monomorphic instantiation inference (ADR-0061 Open items).
 - **Self-hosting** (`SELFHOST.md`, `examples/rian/selfhost_*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.

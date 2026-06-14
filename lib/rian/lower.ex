@@ -497,26 +497,89 @@ defmodule Rian.Lower do
   # value (a `Vec`/`String` from a constructor or a value-returning call) but the
   # callee's parameter is a borrow (`&[T]`/`&str`), wrap it in `&` so it coerces.
   # A bare variable is left alone — it is already the borrow the param expects.
-  defp insert_borrows({:call, {:id, name} = fun, args}, funs) do
-    args = Enum.map(args, &insert_borrows(&1, funs))
+  defp insert_borrows(node, funs, borrowed \\ nil)
+
+  defp insert_borrows({:call, {:id, name} = fun, args}, funs, borrowed) do
+    args = Enum.map(args, &insert_borrows(&1, funs, borrowed))
 
     case param_rtypes(name, funs) do
       nil ->
         {:call, fun, args}
 
       ptypes ->
-        borrowed =
+        coerced =
           args
           |> Enum.zip(ptypes)
-          |> Enum.map(fn {a, pt} ->
-            if borrow_type?(pt) and owned_arg?(a, funs), do: {:unary, "&", a}, else: a
-          end)
+          |> Enum.map(fn {a, pt} -> borrow_arg(a, pt, funs, borrowed) end)
 
-        {:call, fun, borrowed}
+        {:call, fun, coerced}
     end
   end
 
-  defp insert_borrows(node, funs), do: Rian.Macro.map_node(node, &insert_borrows(&1, funs))
+  # a protocol-method call `recv.m(rest…)` (post-`rewrite_proto_calls`): the receiver
+  # auto-refs, but each `rest` arg goes to a `&T`/`&Self` method param — in a generic
+  # function an owned value among them needs `&` (the same owned→borrow coercion).
+  defp insert_borrows({:call, {:dot, recv, m}, rest}, funs, borrowed) do
+    recv = insert_borrows(recv, funs, borrowed)
+    rest = Enum.map(rest, &insert_borrows(&1, funs, borrowed))
+    rest = if borrowed, do: Enum.map(rest, &borrow_value(&1, borrowed)), else: rest
+    {:call, {:dot, recv, m}, rest}
+  end
+
+  defp insert_borrows(node, funs, borrowed),
+    do: Rian.Macro.map_node(node, &insert_borrows(&1, funs, borrowed))
+
+  # coerce one call argument to the borrow its (`&`-typed) parameter expects. The
+  # decision keys on the *callee* param: a `&T`/`&[T]`/`&str` param fed an owned value
+  # needs `&`. An owned `Vec`/`String` producer and a scalar literal need `&` from
+  # *any* caller (a literal `0` to a generic `&T` is `&0`); inside a generic function
+  # an owned *var* (a cloned binder, not a `&`-ref) does too.
+  defp borrow_arg(a, pt, funs, borrowed) do
+    cond do
+      not borrow_type?(pt) -> a
+      borrowed != nil -> borrow_value(a, borrowed)
+      owned_arg?(a, funs) -> {:unary, "&", a}
+      scalar_literal?(a) -> {:unary, "&", a}
+      true -> a
+    end
+  end
+
+  # `&`-borrow a value unless it is already a `&`-reference: a var bound to a `&`-param
+  # or cons-tail (`borrowed`), an already-inserted `&`, or a string literal (`&str`).
+  defp borrow_value({:unary, "&", _} = a, _borrowed), do: a
+  defp borrow_value({:str, _} = a, _borrowed), do: a
+
+  defp borrow_value({:id, v} = a, borrowed),
+    do: if(MapSet.member?(borrowed, v), do: a, else: {:unary, "&", a})
+
+  defp borrow_value(a, _borrowed), do: {:unary, "&", a}
+
+  # a numeric / char literal is an owned value (`i64`/`char`); fed to a `&T` param it
+  # needs `&`. A string literal is already `&str`, so it is not included here.
+  defp scalar_literal?({:num, _}), do: true
+  defp scalar_literal?({:char_lit, _}), do: true
+  defp scalar_literal?({:unary, "-", a}), do: scalar_literal?(a)
+  defp scalar_literal?(_), do: false
+
+  # the clause vars that are a runtime `&`-reference (see `rust_fn`): a pattern var
+  # binding a `&`-typed param, plus any cons-tail (`@..`) binder. Cloned element/field
+  # binders and literals are owned and excluded.
+  defp borrowed_vars(params, pats) do
+    direct =
+      Enum.zip(params, pats)
+      |> Enum.flat_map(fn {p, pat} ->
+        ref? = borrow_type?(Rian.Capability.rust_param(p.cap, p.type))
+        borrowed_in_pat(Core.from_pat(pat), ref?)
+      end)
+
+    MapSet.new(direct)
+  end
+
+  # a plain var bound to a `&`-param is a reference; a cons-tail binder is `&[T]`;
+  # destructured element/field binders are cloned to owned, so excluded.
+  defp borrowed_in_pat(%PVar{name: n}, true), do: [n]
+  defp borrowed_in_pat(%PList{tail: %PVar{name: n}}, _ref?), do: [n]
+  defp borrowed_in_pat(_pat, _ref?), do: []
 
   # the callee's parameter Rust types, or nil when the callee is unknown (an
   # external/primitive call — leave its args untouched)
@@ -915,9 +978,23 @@ defmodule Rian.Lower do
     # `String` (an `Ok("hi")` is `Result<&str, _>`); flag it for the `Ok`/`Err` emit.
     put_result_str_flags(func.ret)
 
+    # A generic function (ADR-0061) borrows its `T`/`Vec(T)`/`String` params as
+    # `&T`/`&[T]`/`&str`, so an *owned* value (a literal, a cloned slice/field binder,
+    # an owned-returning call) passed to a `&T` param needs `&`, and a *borrowed* value
+    # returned/constructed where an owned `T` is wanted needs `.clone()`. The owned↔
+    # borrow coercion below is gated on `tvars != []`: a non-generic function keeps the
+    # existing path exactly (it never had this gap), so this cannot regress it.
+    generic? = Map.get(func, :tvars, []) != []
+
     arms =
       Enum.map_join(func.clauses, "\n", fn c ->
         pat = tuple_or_one(c.pats, &core_pat_rs(&1, ctx.meta))
+        # `borrowed`: the clause vars that are a `&`-reference at runtime — a pattern
+        # var binding a `&`-typed param, and a cons-tail (`@..`) binder. Every other
+        # value (literal, cloned element/field binder, owned call) is owned.
+        borrowed = if generic?, do: borrowed_vars(func.params, c.pats), else: nil
+        Process.put(:rian_rust_borrowed, borrowed || MapSet.new())
+
         # Resolve construction (struct + variant), constant references, and `case`
         # patterns on the surface (where the meta is available), then translate to
         # the typed core IR the emitter consumes (ADR-0050).
@@ -927,7 +1004,7 @@ defmodule Rian.Lower do
           |> widen_char_arith(char_vars(func.params, c.pats))
           |> rewrite_proto_calls(proto_methods())
           |> resolve_rust_pats(ctx.meta)
-          |> insert_borrows(Map.get(ctx, :funs, %{}))
+          |> insert_borrows(Map.get(ctx, :funs, %{}), borrowed)
           |> Core.from_expr()
 
         body = emit(ast, :rust) |> elem(0)
@@ -943,6 +1020,12 @@ defmodule Rian.Lower do
         # no-op clone if the arm already yields a `String`). Mirrors the protocol
         # method path (`rust_impl_method`).
         arm = coerce_ret(arm, func.ret)
+
+        # a generic function returning a bare owned type variable (`T`) yields a
+        # borrowed `&T` in its base arms (a returned param); `.clone()` to the owned
+        # `T` the signature promises (`T: Clone`, `rust_generics`). A no-op clone when
+        # the arm already owns its `T`. `Vec(T)` returns are owned constructions already.
+        arm = if generic? and func.ret in func.tvars, do: "(#{arm}).clone()", else: arm
 
         # binders bound inside a list/slice element are `&T` — a guard over them
         # must deref (`*c`); the arm body's arithmetic works on `&T` directly
@@ -1465,7 +1548,7 @@ defmodule Rian.Lower do
     do: {"[#{Enum.map_join(elems, ", ", &p(&1, 0, :elixir))} | #{p(tl, 0, :elixir)}]", 12}
 
   defp emit(%EList{elems: elems, tail: :close}, :rust),
-    do: {"vec![#{Enum.map_join(elems, ", ", &p(&1, 0, :rust))}]", 12}
+    do: {"vec![#{Enum.map_join(elems, ", ", &rust_owned_elem/1)}]", 12}
 
   # cons `[e1, …, en | tail]` -> prepend onto an owned copy of the tail
   # (`.to_vec()` turns the `&[T]` slice — or a `Vec` — into an owned `Vec`), in
@@ -1474,7 +1557,7 @@ defmodule Rian.Lower do
     prepends =
       elems
       |> Enum.reverse()
-      |> Enum.map_join(" ", fn e -> "__v.insert(0, #{p(e, 0, :rust)});" end)
+      |> Enum.map_join(" ", fn e -> "__v.insert(0, #{rust_owned_elem(e)});" end)
 
     {"{ let mut __v = #{p(tl, 12, :rust)}.to_vec(); #{prepends} __v }", 0}
   end
@@ -1579,6 +1662,19 @@ defmodule Rian.Lower do
 
     {p(l, lc, t) <> " " <> disp(op, t) <> " " <> p(r, rc, t), pr}
   end
+
+  # an element stored into an owned `Vec<T>` must be owned `T`; a borrowed `&T`
+  # element (a var bound to a `&`-param, in a generic function — `:rian_rust_borrowed`)
+  # is `.clone()`d. Literals and cloned binders are already owned (no clone).
+  defp rust_owned_elem(%EId{name: n} = e) do
+    s = p(e, 0, :rust)
+
+    if MapSet.member?(Process.get(:rian_rust_borrowed, MapSet.new()), n),
+      do: "#{s}.clone()",
+      else: s
+  end
+
+  defp rust_owned_elem(e), do: p(e, 0, :rust)
 
   defp emit_block(%EBlock{stmts: []}, :elixir), do: "nil"
   defp emit_block(%EBlock{stmts: []}, :rust), do: "()"

@@ -130,26 +130,29 @@ Consequences of target-relativity:
 
 ## Open items
 
-- **Two Rust-generic emitter gaps, with `Rian.Reach` pinning honestly off `:rs` until they land.**
+- **Rust-generic emitter gaps, `Rian.Reach` pinning honestly off `:rs` until each lands.**
   The reach matrix would otherwise green-light `:rs` for code `rustc` rejects (`mix rian.targets`/the
-  conformance gate lying), so `Rian.Reach` reports a `:generic` blocker that kills `:rs` for:
-    1. **owned-from-borrowed coercion** — a generic whose *return type mentions a type variable*
-       (`insert`/`sort`/`maximum` → `Vec(T)`/`T`, `get` → `V`) must `.clone()` its `&T` params into the
-       owned result and re-borrow an owned local at a `&Self` protocol-method arg (rustc E0308). The
-       Bool-returning bounded generics (`contains`/`equal3`) the emitter *does* lower keep `:rs`.
-       *(Investigated 2026-06-14: cloning only the directly-returned arm — and narrowing the blocker to
-       compound `Vec(T)` returns — is **unsound**. A bare-`T` return like `maximum(xs Vec(T), acc T) T`
-       still fails rustc: the recursive `maximum(t, h)` passes an owned cloned `h` where the `acc: &T`
-       param is expected. Toy bare-`T` returns (`id`/`pair_first`) compile, but signature shape alone
-       can't tell them from `maximum`, so the blocker stays conservative until the **full** owned↔borrow
-       coercion — clone on return AND re-borrow at every `&T` call arg — is implemented. Reverted; not a
-       contained increment.)*
-    2. **parametric user types** — `type Pair := P(k K, v V)` (and `Tree(T)`) lower to `enum Pair {`
-       with no `<K, V>` params, and the per-unit emitter repeats the def (duplicate `enum Pair`,
-       E0428). Any signature touching a parametric type is pinned off `:rs`.
-  Both are emitter *coverage* gaps (not architectural); when fixed, lift the blockers and promote
-  `17_stdlib_eq_ord`/`18_dict_eq` into the Tier-1 conformance corpus. Locked by
-  `test/rian/reach_rust_honesty_test.exs` (the `@tag :rust` case fails the day rustc accepts them).
+  conformance gate lying), so `Rian.Reach` reports a `:generic` blocker that kills `:rs`:
+    1. **owned-from-borrowed coercion — DONE (2026-06-14).** A generic borrows its `T`/`Vec(T)`/`String`
+       params as `&T`/`&[T]`/`&str`, so `Rian.Lower` now inserts the owned↔borrow coercion (gated on a
+       generic function, so non-generic code is untouched): a returned bare `&T` is `.clone()`d
+       (`coerce_owned_tvar`); an owned value (literal, cloned element/field binder, owned-returning call)
+       passed to a `&T`/`&[T]`/`&str` param gets `&` (`borrow_arg`/`borrow_value`, keyed on the clause's
+       *borrowed-var* set = pattern vars of `&`-params ∪ cons-tail binders); a `&T` element stored into an
+       owned `Vec` is `.clone()`d (`rust_owned_elem`); and protocol-method args borrow likewise. This is
+       the full coercion the earlier investigation found necessary (`maximum`'s recursive `maximum(t, &h)`
+       needs the re-borrow, not just a return clone). **`17_stdlib_eq_ord` now compiles to and runs on
+       Rust** (`rustc --test`, `reach_rust_honesty_test`); Reach claims `:rs` for it. `Test.rust` routes
+       through the whole-program assembly (`rust_program`) so the cross-function signature table the
+       borrow pass needs is present. The Reach blocker now fires only for a **compound** owned-tvar return
+       (a tuple/`Fn` mentioning a tvar) — still uncoerced.
+    2. **parametric user types — still open.** `type Pair := P(k K, v V)` (and `Tree(T)`) lower to
+       `enum Pair {` with no `<K, V>` params (rustc E0425/E0428), and a non-generic builder
+       (`sample() -> Vec<Pair>`) needs its concrete instantiation (`Pair<i64, i64>` / `Pair<String, i64>`)
+       inferred from the construction — a monomorphic type-arg inference the checker does not yet track.
+       Any signature touching a parametric type is pinned off `:rs`, so the **`18_dict_eq`** slice stays
+       off `:rs`. This is the sole remaining Rust gap; `reach_rust_honesty_test` (the `@tag :rust` case)
+       fails the day rustc accepts 18, flagging "lift the blocker + promote to the conformance corpus."
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
   `Self`-returning methods (`def add(a Self, b Self) Self`) and associated types are a further Rust
   mapping question (return-position `Self`, generic associated types).

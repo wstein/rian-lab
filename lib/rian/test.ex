@@ -73,11 +73,11 @@ defmodule Rian.Test do
   `rustc --test`.
   """
   def rust(src) do
-    fns =
-      Decl.compile(src)
-      |> Enum.map(fn {_n, o} -> o[:rust] end)
-      |> Enum.reject(&is_nil/1)
-      |> Enum.join("\n\n")
+    # Use the **whole-program** Rust assembly (`rust_program`), not the per-function
+    # `Decl.compile` path: it threads the cross-function signature table the call-site
+    # borrow pass needs (ADR-0061), so generic functions that call one another
+    # (`sort`→`insert`) lower with correct `&`/`.clone()` ownership coercion.
+    fns = Rian.Lower.rust_program(Decl.parse(src))
 
     wrappers =
       Enum.map_join(tests(src), "\n", fn n ->
