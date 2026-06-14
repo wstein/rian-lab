@@ -22,15 +22,18 @@
 # stored into an owned position: a closed list (`[x, x]` -> `vec![x.clone(), …]`), a
 # cons head (`[x | xs]` -> `__v.insert(0, x.clone())`), or a non-`Result` variant payload
 # (`P(k: a, …)` -> `Pair::P { k: a.clone(), … }`). Parametric-enum monomorphization
-# (ADR-0061) is in for the common case: a parametric sum lowers to `enum Name<K: Clone,
-# …>` (`generics`), and a GENERIC builder's bare parametric return is instantiated with
-# the type's params (`Pair` -> `Pair<K, V>`, via `inst_ret`). The REST — a NON-generic
-# builder's concrete instantiation (`Box` -> `Box<i64>`, inferred from the body) and
-# NESTED/param-position parametric types (`Vec(Pair)` -> `Vec<Pair<K, V>>`, the
-# structured-`Ty` `render_inst` below) — plus owned-`String`/owned-returning-call arg
-# producers, the `borrow_value` clone-or-`&` for borrowed args at generic call sites,
-# maps, String-return coercion, the Elixir text target, and struct *patterns* (a
-# reference gap — `Rian.Lower` raises) remain out of scope.
+# (ADR-0061) is in: a parametric sum lowers to `enum Name<K: Clone, …>` (`generics`), and
+# every parametric type name in a signature is spliced to its instantiation at identifier
+# boundaries (`mono_ty`/`splice_one`, a char-scan port of `Rian.Lower.rustify_parametric`)
+# — in param AND nested positions (`&Pair` -> `&Pair<K, V>`, `Vec<Box>` -> `Vec<Box<T>>`).
+# A GENERIC function uses the type's own params; a NON-generic builder uses the reference's
+# `i64`-per-param default (`Box` -> `Box<i64>`). (The structured-`Ty` `render_inst` below
+# is an equivalent renderer kept under its own type-render fixpoint, not the module path.)
+# The REST — concrete instantiation INFERRED from a generic-CALL builder tail (`sample()`
+# calling a generic `put`), owned-`String`/owned-returning-call arg producers, the
+# `borrow_value` clone-or-`&` for borrowed args at generic call sites, maps, String-return
+# coercion, the Elixir text target, and struct *patterns* (a reference gap — `Rian.Lower`
+# raises) remain out of scope.
 # ---------------------------------------------------------------------------
 
 mod SelfhostRust do
@@ -162,10 +165,14 @@ mod SelfhostRust do
   # half-coercing them. The owned-`String`/owned-returning-call producers and scalar
   # literals are likewise deferred (this slice coerces list literals only).
   #
-  # `borrow_prog` also threads the enums so a GENERIC function's bare parametric return
-  # type is instantiated (`Pair` -> `Pair<K, V>`, ADR-0061 monomorphization) using the
-  # type's own params. A non-generic builder's concrete instantiation (`Box` -> `Box<i64>`,
-  # inferred from the body) and nested/param-position parametric types are deferred.
+  # `borrow_prog` also threads the enums for parametric-type monomorphization (ADR-0061,
+  # `Rian.Lower.rustify_parametric`): every parametric type name in a signature (param or
+  # return, at any nesting) is spliced to its instantiation. A GENERIC function uses the
+  # type's own params (`&Pair` -> `&Pair<K, V>`, `Vec<Box>` -> `Vec<Box<T>>`); a
+  # NON-generic builder uses the reference's `i64` default per param (`Box` -> `Box<i64>`,
+  # matching `infer_concrete_params` on a variant-construction body, which binds nothing).
+  # Inference from a generic-CALL builder tail (`sample()` calling a generic `put`) is the
+  # one piece still deferred.
   def borrow_prog(Vec(Func), Vec(EnumDef)) Vec(Func)
   def borrow_prog(funcs, enums) := borrow_each(funcs, funcs, enums)
 
@@ -174,24 +181,66 @@ mod SelfhostRust do
   def borrow_each([f | rest], all, enums) := [borrow_func(f, all, enums) | borrow_each(rest, all, enums)]
 
   def borrow_func(Func, Vec(Func), Vec(EnumDef)) Func
-  def borrow_func(Func(n, p, [], params, ret, clauses), all, _) :=
-    Func(n, p, [], params, ret, borrow_clauses(clauses, all))
+  def borrow_func(Func(n, p, [], params, ret, clauses), all, enums) :=
+    Func(n, p, [], mono_each(params, enums, false), mono_ty(ret, enums, false),
+      borrow_clauses(clauses, all))
   def borrow_func(Func(n, p, tvars, params, ret, clauses), _, enums) :=
-    Func(n, p, tvars, params, inst_ret(ret, enums), clone_clauses(clauses, params))
+    Func(n, p, tvars, mono_each(params, enums, true), mono_ty(ret, enums, true),
+      clone_clauses(clauses, params))
 
-  # instantiate a generic function's bare parametric return type with the type's params
-  # (`Pair` + `Pair => [K, V]` -> `Pair<K, V>`); a non-parametric return is unchanged.
-  def inst_ret(String, Vec(EnumDef)) String
-  def inst_ret(ret, enums) := inst_with(ret, enum_tvars(ret, enums))
+  # splice every parametric enum's instantiation into a Rust type string, at identifier
+  # boundaries: `Vec<Pair>` + `Pair=>[K,V]` -> `Vec<Pair<K, V>>`. `generic?` chooses the
+  # args: the type's own params, or `i64` per param for a non-generic builder.
+  def mono_ty(String, Vec(EnumDef), Bool) String
+  def mono_ty(t, [], _) := t
+  def mono_ty(t, [EnumDef(_, [], _) | rest], g) := mono_ty(t, rest, g)
+  def mono_ty(t, [EnumDef(name, tvs, _) | rest], g) :=
+    mono_ty(splice_one(t, name, name <> "<" <> comma_join(mono_args(tvs, g)) <> ">"), rest, g)
 
-  def inst_with(String, Vec(String)) String
-  def inst_with(ret, []) := ret
-  def inst_with(ret, tvs) := ret <> "<" <> comma_join(tvs) <> ">"
+  def mono_each(Vec(Param), Vec(EnumDef), Bool) Vec(Param)
+  def mono_each([], _, _) := []
+  def mono_each([Param(n, t) | rest], enums, g) := [Param(n, mono_ty(t, enums, g)) | mono_each(rest, enums, g)]
 
-  def enum_tvars(String, Vec(EnumDef)) Vec(String)
-  def enum_tvars(_, []) := []
-  def enum_tvars(name, [EnumDef(n, tvs, _) | rest]) :=
-    if name == n do tvs else enum_tvars(name, rest) end
+  # `true`/`false` are variable patterns in a clause head, so dispatch with `if`.
+  def mono_args(Vec(String), Bool) Vec(String)
+  def mono_args(tvs, g) := if g do tvs else i64s(tvs) end
+
+  def i64s(Vec(String)) Vec(String)
+  def i64s([]) := []
+  def i64s([_ | rest]) := ["i64" | i64s(rest)]
+
+  # replace whole-word occurrences of `name` with `repl` in `t` (a word-boundary string
+  # substitution — `Rian.Lower`'s `\bname\b` regex, char-scanned since Rian has no regex).
+  def splice_one(String, String, String) String
+  def splice_one(t, name, repl) := splice_scan(Prim.str_chars(t), Prim.str_chars(name), repl, false)
+
+  def splice_scan(Vec(Char), Vec(Char), String, Bool) String
+  def splice_scan([], _, _, _) := ""
+  def splice_scan([c | cs], name, repl, prev) :=
+    splice_try(strip_prefix([c | cs], name), [c | cs], name, repl, prev)
+
+  def strip_prefix(Vec(Char), Vec(Char)) Option(Vec(Char))
+  def strip_prefix(rest, []) := Some(rest)
+  def strip_prefix([], _) := None
+  def strip_prefix([c | cs], [p | ps]) := if c == p do strip_prefix(cs, ps) else None end
+
+  def splice_try(Option(Vec(Char)), Vec(Char), Vec(Char), String, Bool) String
+  def splice_try(None, [c | cs], name, repl, _) :=
+    Prim.str_from_chars([c]) <> splice_scan(cs, name, repl, is_word_char(c))
+  def splice_try(Some(rest), [c | cs], name, repl, prev) :=
+    if not prev and head_not_word(rest) do
+      repl <> splice_scan(rest, name, repl, true)
+    else
+      Prim.str_from_chars([c]) <> splice_scan(cs, name, repl, is_word_char(c))
+    end
+
+  def head_not_word(Vec(Char)) Bool
+  def head_not_word([]) := true
+  def head_not_word([c | _]) := not is_word_char(c)
+
+  def is_word_char(Char) Bool
+  def is_word_char(c) :=
+    (c >= 'a' and c <= 'z') or (c >= 'A' and c <= 'Z') or (c >= '0' and c <= '9') or c == '_'
 
   def borrow_clauses(Vec(Clause), Vec(Func)) Vec(Clause)
   def borrow_clauses([], _) := []

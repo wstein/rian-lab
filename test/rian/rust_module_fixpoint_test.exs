@@ -19,9 +19,11 @@ defmodule Rian.RustModuleFixpointTest do
   # call-site owned→borrow coercion (an owned `vec![…]` arg to a `&`-typed param is
   # `&`-wrapped), the generic borrowed-set element clone (a borrowed `&T` binder in a
   # closed list / cons head / non-Result variant payload is `.clone()`d), and parametric-
-  # enum monomorphization (a parametric sum → `enum Name<K: Clone, …>`; a generic
-  # builder's bare return `Pair` → `Pair<K, V>`) are now covered; the rest (a non-generic
-  # builder's concrete `Box`→`Box<i64>`, nested `Vec(Pair)`→`Vec<Pair<K,V>>`, owned-String/
+  # enum monomorphization (a parametric sum → `enum Name<K: Clone, …>`; parametric type
+  # names spliced to their instantiation in param AND nested positions — `&Pair`→
+  # `&Pair<K,V>`, `Vec<Box>`→`Vec<Box<T>>` — generic fns using the type's params, a
+  # non-generic builder the `i64`-per-param default `Box`→`Box<i64>`) are now covered; the
+  # rest (concrete instantiation inferred from a generic-CALL builder tail, owned-String/
   # owned-returning-call producers, borrowed args at generic call sites, maps,
   # String-returns, the Elixir target, struct *patterns* — a reference gap) are out of scope.
 
@@ -235,7 +237,14 @@ defmodule Rian.RustModuleFixpointTest do
     # generic builder of a parametric type (ADR-0061 monomorphization): the bare return
     # `Pair` is instantiated `Pair<K, V>`, and the borrowed `&K`/`&V` payloads are cloned.
     "type Pair := P(k K, v V)\ndef mk(a val K, b val V) Pair forall K, V := P(k: a, v: b)",
-    "type Box := Bx(v T)\ndef wrap(x val T) Box forall T := Bx(v: x)"
+    "type Box := Bx(v T)\ndef wrap(x val T) Box forall T := Bx(v: x)",
+    # parametric type in a PARAM position and NESTED in a return (generic):
+    # `&Pair` -> `&Pair<K, V>`, `Vec<Box>` -> `Vec<Box<T>>`.
+    "type Pair := P(k K, v V)\ndef getk(p val Pair) K forall K, V := p.k",
+    "type Box := Bx(v T)\ndef many(x val T) Vec(Box) forall T := [Bx(v: x)]",
+    # NON-generic builder: the parametric return is instantiated with the reference's
+    # `i64` default per param (`Box` -> `Box<i64>`), and the owned payload is not cloned.
+    "type Box := Bx(v T)\ndef mkb(n Int64) Box := Bx(v: n)"
   ]
 
   describe "self-hosting Rust-module fixpoint — Rian emitter vs Rian.Lower.rust_program" do
@@ -384,6 +393,24 @@ defmodule Rian.RustModuleFixpointTest do
       wrap = ported(mod, "type Box := Bx(v T)\ndef wrap(x val T) Box forall T := Bx(v: x)")
       assert wrap =~ "-> Box<T> {"
       assert wrap =~ "Box::Bx { v: x.clone() }"
+    end
+
+    test "parametric types instantiate in param and nested positions (generic)", %{mod: mod} do
+      # a parametric PARAM: `p val Pair` -> `&Pair<K, V>`
+      assert ported(mod, "type Pair := P(k K, v V)\ndef getk(p val Pair) K forall K, V := p.k") =~
+               "fn getk<K: Clone, V: Clone>(p: &Pair<K, V>) -> K {"
+
+      # NESTED in a Vec return: `Vec<Box>` -> `Vec<Box<T>>`
+      assert ported(mod, "type Box := Bx(v T)\ndef many(x val T) Vec(Box) forall T := [Bx(v: x)]") =~
+               "-> Vec<Box<T>> {"
+    end
+
+    test "a non-generic builder instantiates the return with the i64 default", %{mod: mod} do
+      out = ported(mod, "type Box := Bx(v T)\ndef mkb(n Int64) Box := Bx(v: n)")
+      assert out =~ "fn mkb(n: i64) -> Box<i64> {"
+      # non-generic: the owned payload is NOT cloned
+      assert out =~ "Box::Bx { v: n }"
+      refute out =~ "v: n.clone()"
     end
   end
 end
