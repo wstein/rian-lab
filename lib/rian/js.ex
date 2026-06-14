@@ -61,7 +61,7 @@ defmodule Rian.JS do
   breaks and `ref` would need real handling here — `test/rian/js_test.exs` locks the
   current value-lowering so that change can't pass silently.
   """
-  alias Rian.{Core, Decl, Pratt}
+  alias Rian.{Check, Core, Decl, Pratt}
 
   alias Rian.Core.{
     EAtom,
@@ -97,6 +97,11 @@ defmodule Rian.JS do
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
   def compile(src) do
     prog = Decl.parse(src)
+    # Run the full type gate first — parity with the BEAM path (`Decl.compile`),
+    # which gates before emitting. Without this a real `Rian.Check` error stayed
+    # latent on the JS path (commit 80f6929). A type error is now caught here, not
+    # discovered as malformed JS downstream.
+    :ok = Check.gate!(prog)
     # Integer mode is a WHOLE-PROGRAM decision, not per-function: integer values
     # (a depth counter, a codepoint) flow across function boundaries, and BigInt
     # and number cannot be combined in JS. A "neutral" function with no integer in

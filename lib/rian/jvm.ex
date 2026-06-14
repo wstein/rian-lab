@@ -46,7 +46,7 @@ defmodule Rian.JVM do
   would need real handling here — `test/rian/jvm_test.exs` locks the current
   value-lowering so that change can't pass silently.
   """
-  alias Rian.{Core, Decl, Pratt}
+  alias Rian.{Check, Core, Decl, Pratt}
 
   alias Rian.Core.{
     EBin,
@@ -72,6 +72,9 @@ defmodule Rian.JVM do
   @doc "Compile `src`'s types + functions to a single Kotlin source module (a string)."
   def compile(src) do
     prog = Decl.parse(src)
+    # Run the full type gate first — parity with the BEAM path (`Decl.compile`); a
+    # `Rian.Check` error is caught here rather than emitted as malformed Kotlin.
+    :ok = Check.gate!(prog)
     # the BEAM `:dispatcher` is a guarded runtime type-test, not the Kotlin shape;
     # protocol lowering for the JVM is a later increment.
     funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))

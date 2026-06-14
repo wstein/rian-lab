@@ -35,6 +35,11 @@ defmodule Rian.JVMTest do
       assert kt =~ "(n * 2L)"
     end
 
+    test "a type error is caught by the gate, not emitted as malformed Kotlin (parity)" do
+      # JVM.compile now runs `Check.gate!` before emitting (parity with the BEAM path).
+      assert_raise Rian.Check.Error, fn -> JVM.compile("def f() Int64 := true") end
+    end
+
     test "float `/` lowers to Kotlin Double division (integer `div` stays `/` on Long)" do
       kt = JVM.compile("def half(x Float64) Float64 := x / 2.0")
       assert kt =~ "fun half(a0: Double): Double"
@@ -276,9 +281,11 @@ defmodule Rian.JVMTest do
 
   describe "type lowering" do
     test "an unknown (lowercase) type annotation raises" do
-      # a lowercase, non-builtin type reaches the fall-through (jvm.ex:256)
+      # a lowercase, non-builtin type reaches the `kt_type` fall-through. The body is
+      # `n` (typed `widget` from the param) so the type gate — now run by
+      # `JVM.compile` — passes conservatively, leaving `kt_type` to reject the type.
       assert_raise JVM.Unsupported, fn ->
-        JVM.compile("def lc(n Int64) widget := 0")
+        JVM.compile("def lc(n widget) widget := n")
       end
     end
   end

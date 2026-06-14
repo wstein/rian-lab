@@ -193,9 +193,11 @@ defmodule Rian.Check do
   # call to a known named function infers that function's declared return type
   # (concretized from the call's argument types when the return is generic —
   # `def id(x T) T forall T` called with `id(5)` infers `Int64`, ADR-0042)
-  # `__prim_char_code(c) : Int64` — a `Char`'s codepoint as an integer, the
-  # explicit Char→Int conversion for arithmetic (ADR-0036, no hidden widening)
-  def infer(%ECall{fun: %EId{name: "__prim_char_code"}, args: [_]}, _env, _ic), do: "Int64"
+  # `__prim_char_code(c) : Int53` — a `Char`'s codepoint as an integer (ADR-0036, no
+  # hidden widening). `Int53` (not `Int64`) so it is portable to *every* target incl.
+  # JS (a codepoint ≤ 0x10FFFF fits comfortably); an `Int64` codepoint would be
+  # off-`:js`, which a char primitive must not be.
+  def infer(%ECall{fun: %EId{name: "__prim_char_code"}, args: [_]}, _env, _ic), do: "Int53"
 
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do

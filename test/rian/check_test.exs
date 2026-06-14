@@ -166,8 +166,8 @@ defmodule Rian.CheckTest do
       assert Check.infer(Pratt.parse_body("65")) == "Int64"
     end
 
-    test "`__prim_char_code` converts a Char to its Int64 codepoint" do
-      assert Check.infer(Pratt.parse_body("__prim_char_code('0')")) == "Int64"
+    test "`__prim_char_code` converts a Char to its Int53 codepoint (portable, incl. JS)" do
+      assert Check.infer(Pratt.parse_body("__prim_char_code('0')")) == "Int53"
     end
 
     test "ordinal arithmetic widens Char to its Int64 base (ADR-0036)" do

@@ -218,6 +218,12 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a type error is caught by the gate, not emitted as malformed JS (parity)" do
+      # JS.compile now runs `Check.gate!` before emitting (parity with the BEAM
+      # `Decl.compile` path) — a proven type mismatch raises here, not downstream.
+      assert_raise Rian.Check.Error, fn -> JS.compile("def f() Int := true") end
+    end
+
     test "a `ref` param is lowered to value semantics (sound: return-based surface)" do
       # `ref` (&mut) has no JS analog; it only ever changed the Rust signature, so
       # JS emits an ordinary positional binding and the result is correct. Reach
@@ -475,11 +481,11 @@ defmodule Rian.JSTest do
       assert node_eval(js, "String(z())") in [:no_node, "122"]
     end
 
-    test "`Prim.char_code` is identity in JS (a Char is already a BigInt codepoint)" do
-      js = JS.compile("def code(c Char) Int := Prim.char_code(c)")
+    test "`Prim.char_code` is identity in JS (a Char is its codepoint number; Int53)" do
+      js = JS.compile("def code(c Char) Int53 := Prim.char_code(c)")
       assert js =~ "const c = a0;"
       assert js =~ "return c;"
-      assert node_eval(js, "String(code(65n))") in [:no_node, "65"]
+      assert node_eval(js, "String(code(65))") in [:no_node, "65"]
     end
 
     test "the Dict prelude lowers `__prim_map_*` to JS object ops" do
