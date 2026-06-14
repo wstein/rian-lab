@@ -165,6 +165,12 @@ corpus needs (`Rian.Check`):
 All bounded for soundness: adoption is integer-only (`1 + 2.0` stays `:unknown`), and only a *constant
 of literals* adopts — a real `Int64` value is never flexible. So the **portable corpus is now `Int53`**.
 
+A literal that adopts a fixed-width type must also **fit that width's two's-complement range**
+(`width_bounds/1` + `lit_range_error/3`): `def f() Int8 := 9999` is rejected (`literal 9999 is out of
+range for Int8 (-128..127)`), as are out-of-range negated literals, list elements, and `if`/`case`
+branches — the same check ADR-0036 applies to subrange types. Arithmetic of literals is left to the
+runtime wrap contract (a `wrapping_*` op), not range-scanned.
+
 **Still open:** a type variable inferred *purely* from literals — `contains([1, 2, 3], 2)` makes
 `T = Int64`, and no `impl Eq` for a JS-valid width can match — so the integer-generic stdlib
 (`13_protocols` / `17_stdlib_eq_ord` / `18_dict_eq`) stays `Int64` and off `:js`. Closing it needs

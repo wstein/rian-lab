@@ -711,7 +711,7 @@ defmodule Rian.Check do
         range_bind(name, ann, range, ce, env, ic)
 
       literal_adopts?(ce, ann) ->
-        nil
+        lit_range_error(e, ann, name)
 
       true ->
         t = infer(ce, env, ic)
@@ -782,6 +782,76 @@ defmodule Rian.Check do
 
   defp literal_adopts?(%EUnary{op: "-", arg: arg}, ann), do: literal_adopts?(arg, ann)
   defp literal_adopts?(_e, _ann), do: false
+
+  # ── fixed-width literal range check (ADR-0064 soundness) ───────────────────
+  # A constant integer literal adopting a fixed-width type must fit that width's
+  # two's-complement range — `def f() Int8 := 9999` is a compile error (it would
+  # wrap/truncate at runtime). Mirrors the ADR-0036 subrange check (`range_bind`).
+  # `lit_range_error/3` takes a SURFACE expression + the declared type + the owner
+  # name, and returns `{:error, msg}` for the first out-of-range literal in a
+  # constant body (a bare/negated literal, a list element, or an `if`/`case`/block
+  # branch), else `nil`. Arithmetic of literals is left to the runtime wrap
+  # contract (a `wrapping_*` op), so it is not scanned.
+  defp lit_range_error(expr, "Vec(" <> _ = type, name) do
+    case Regex.run(~r/^Vec\((.+)\)$/, type) do
+      [_, et] -> list_elems(expr) |> Enum.find_value(&lit_range_error(&1, et, name))
+      _ -> nil
+    end
+  end
+
+  defp lit_range_error(expr, type, name) do
+    case width_bounds(type) do
+      nil -> nil
+      {lo, hi} -> oor_scan(expr, type, lo, hi, name)
+    end
+  end
+
+  defp list_elems({:list_lit, elems, _}), do: elems
+  defp list_elems({:block, [{:expr, e}]}), do: list_elems(e)
+  defp list_elems(_), do: []
+
+  defp oor_scan({:if, _c, t, e}, ty, lo, hi, n),
+    do: oor_scan(t, ty, lo, hi, n) || oor_scan(e, ty, lo, hi, n)
+
+  defp oor_scan({:case, _s, arms}, ty, lo, hi, n),
+    do: Enum.find_value(arms, fn {_p, _g, b} -> oor_scan(b, ty, lo, hi, n) end)
+
+  defp oor_scan({:block, [{:expr, e}]}, ty, lo, hi, n), do: oor_scan(e, ty, lo, hi, n)
+
+  defp oor_scan(expr, ty, lo, hi, n) do
+    case const_int(expr) do
+      {:ok, v} when v < lo or v > hi ->
+        {:error, "`#{n}`: literal #{v} is out of range for `#{ty}` (#{lo}..#{hi})"}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp const_int({:num, t}),
+    do:
+      if(int_literal?(t),
+        do: {:ok, t |> String.replace("_", "") |> String.to_integer()},
+        else: :no
+      )
+
+  defp const_int({:unary, "-", e}), do: with({:ok, v} <- const_int(e), do: {:ok, -v})
+  defp const_int(_), do: :no
+
+  # Two's-complement bounds for the fixed-width integer types; `nil` for the
+  # arbitrary-precision `Int` (and any non-integer type) — no range to enforce.
+  defp width_bounds("Int8"), do: {-128, 127}
+  defp width_bounds("Int16"), do: {-32_768, 32_767}
+  defp width_bounds("Int32"), do: {-2_147_483_648, 2_147_483_647}
+  defp width_bounds("Int53"), do: {-9_007_199_254_740_991, 9_007_199_254_740_991}
+  defp width_bounds("Int64"), do: {-9_223_372_036_854_775_808, 9_223_372_036_854_775_807}
+  defp width_bounds("Int128"), do: {-Integer.pow(2, 127), Integer.pow(2, 127) - 1}
+  defp width_bounds("UInt8"), do: {0, 255}
+  defp width_bounds("UInt16"), do: {0, 65_535}
+  defp width_bounds("UInt32"), do: {0, 4_294_967_295}
+  defp width_bounds("UInt64"), do: {0, Integer.pow(2, 64) - 1}
+  defp width_bounds("UInt128"), do: {0, Integer.pow(2, 128) - 1}
+  defp width_bounds(_), do: nil
 
   defp int_literal?(n), do: not (String.contains?(n, ".") or String.match?(n, ~r/[eE]/))
   defp int_type?(t), do: is_binary(t) and String.match?(t, ~r/^U?Int\d*$/)
@@ -943,11 +1013,19 @@ defmodule Rian.Check do
         body_ast = Pratt.parse_body(c.body)
         body_t = infer(body_ast, clause_env(c.pats, ps, ic), ic)
 
-        if assignable?(body_t, ret) or body_literal_adopts?(body_ast, ret),
-          do: nil,
-          else:
+        cond do
+          # a constant-of-literals body adopts the declared width — but it must FIT
+          # the width's range (`def f() Int8 := 9999` is rejected, ADR-0064)
+          body_literal_adopts?(body_ast, ret) ->
+            lit_range_error(body_ast, ret, name)
+
+          assignable?(body_t, ret) ->
+            nil
+
+          true ->
             {:error,
              "`#{name}`: body has type `#{body_t}` but the declared return type is `#{ret}`"}
+        end
       end)
     end
   end

@@ -929,6 +929,29 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "a fixed-width literal must fit the declared width (ADR-0064 soundness)" do
+    test "a return-body literal out of the width's range is rejected" do
+      assert {:error, m} = Check.check("def f() Int8 := 9999")
+      assert m =~ "literal 9999 is out of range for `Int8` (-128..127)"
+
+      assert {:error, _} = Check.check("def f() UInt8 := 300")
+      assert {:error, _} = Check.check("def f(b Bool) Int8 := if b do 1 else 9999 end")
+    end
+
+    test "a typed binding (incl. negated) and a list element are range-checked" do
+      assert {:error, m} = Check.check("def f(n Int64) Int64 := x Int8 := -200 ; n")
+      assert m =~ "out of range for `Int8`"
+
+      assert {:error, _} = Check.check("def f() Vec(Int8) := [1, 9999]")
+    end
+
+    test "in-range literals pass; arbitrary-precision `Int` has no bound" do
+      assert Check.check("def f() Int8 := 100") == :ok
+      assert Check.check("def f() Int53 := 1000") == :ok
+      assert Check.check("def f() Int := 999999999999999999999999") == :ok
+    end
+  end
+
   describe "integer literals are width-flexible in arithmetic & branches (ADR-0064)" do
     test "a literal operand takes the typed operand's width, even nested" do
       # `13 - lvl` over an `Int53` var is `Int53` (13 adopts lvl); `(13 - lvl) * 10`
