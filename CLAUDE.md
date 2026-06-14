@@ -112,7 +112,10 @@ architectural cost.
   is now `Int53`. **Still open:** a type variable inferred *purely* from literals (`contains([1,2,3], 2)`
   → `T = Int64`) — no JS-valid `impl Eq` can match — so the integer-generic stdlib
   (`13_protocols`/`17_stdlib_eq_ord`/`18_dict_eq`) stays `Int64`/off-`:js`. That's the remaining
-  literal-polymorphism gap.
+  literal-polymorphism gap. **`17`/`18` are also off-`:rs`** — `Rian.Reach` honestly pins them with a
+  `:generic` blocker for two Rust-emitter gaps (a generic returning an owned tvar needs
+  borrow→owned `.clone()`; a parametric user type like `Pair(K,V)` emits an `enum` with no `<K,V>`
+  params), so the gate doesn't green-light Rust the emitter can't produce (ADR-0061 Open items).
 - **Self-hosting** (`SELFHOST.md`, `examples/rian/selfhost_*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.
