@@ -89,6 +89,14 @@ compile + run on real BEAM bytecode:
   error** via a `struct Mismatch(op, expected, got)`. The diagnostic record is
   the first place a checker wants a `struct`; it drove the BEAM **struct**
   increment (a struct value is a tagged map, read by field access).
+- [selfhost_cap.rian](selfhost_cap.rian) — the **capability checker** port
+  (ADR-0063, ADR-0055): maps a reference capability (`val`/`iso`/`tag`/`ref`) +
+  type to its Rust parameter spelling and decides BEAM legality, **fixpoint-locked**
+  against `Rian.Capability` (`test/rian/cap_fixpoint_test.exs`). Shows the real
+  capability logic — `val` borrows a non-`Copy` type but passes a `Copy` scalar by
+  value, `ref` is the BEAM-illegal `&mut` excluded from the portable core (P5).
+  Covers the scalar/`String`/`Vec`/nominal slice; deep generics and the linearity
+  check remain.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via

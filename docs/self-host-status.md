@@ -6,8 +6,8 @@ self-hosting (ADR-0063 §4) — the Rian compiler compiling its own source to `.
 **Portable** self-hosting (the compiler lowered to Rust/JS) is a separate, further
 terminus and is *not* measured here.
 
-**23% self-hosted** — 1 stage(s) self-hosted,
-3 partial, 7 not started, of 11.
+**27% self-hosted** — 1 stage(s) self-hosted,
+4 partial, 6 not started, of 11.
 
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
@@ -17,7 +17,7 @@ terminus and is *not* measured here.
 | Typed Core IR (from_expr/from_pat) | frontend | 🟡 partial | `examples/rian/selfhost_core.rian` · `test/rian/core_fixpoint_test.exs` | surface→Core lowering equals Rian.Core.from_expr over the literal/unary/binary slice; calls/lists/blocks/lambdas remain |
 | Type checker (inference + error sets) | checker | — | — | selfhost_check.rian checks a TOY language, not Rian.Check — not a port |
 | Exhaustiveness gate | checker | — | — | not ported |
-| Capability checker | checker | — | — | not ported |
+| Capability checker | checker | 🟡 partial | `examples/rian/selfhost_cap.rian` · `test/rian/cap_fixpoint_test.exs` | capability→Rust lowering + ref-rejecting BEAM legality equal Rian.Capability over the scalar/String/Vec/nominal slice; deep generics + linearity remain |
 | BEAM abstract-forms backend | backend | — | — | selfhost_codegen.rian is a toy stack VM, not the Rian.Beam emitter |
 | Rust/Elixir text backend | backend | — | — | not ported |
 | ECMAScript backend | backend | — | — | not ported |

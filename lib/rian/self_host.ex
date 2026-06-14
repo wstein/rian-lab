@@ -95,10 +95,11 @@ defmodule Rian.SelfHost do
       id: :capability,
       name: "Capability checker",
       role: :checker,
-      status: :not_started,
-      source: nil,
-      test: nil,
-      note: "not ported"
+      status: :partial,
+      source: "selfhost_cap.rian",
+      test: "test/rian/cap_fixpoint_test.exs",
+      note:
+        "capability→Rust lowering + ref-rejecting BEAM legality equal Rian.Capability over the scalar/String/Vec/nominal slice; deep generics + linearity remain"
     },
     %{
       id: :beam_backend,

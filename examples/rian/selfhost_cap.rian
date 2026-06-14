@@ -1,0 +1,93 @@
+# ===========================================================================
+# SELF-HOSTING SPIKE — the capability→Rust lowering, written in Rian
+# ===========================================================================
+# Goal (ADR-0063 §2, the capability checker stage; ADR-0055/0025): map a Rian
+# reference capability (`val`/`iso`/`tag`/`ref`) + a type to its Rust parameter
+# spelling, and decide BEAM legality. This is the Rian-written counterpart of
+# `Rian.Capability.rust_param/2` and the `ref`-rejecting `beam_legal!/1`,
+# fixpoint-locked against them in `test/rian/cap_fixpoint_test.exs`.
+#
+# The capability logic is the point: `val` borrows a non-`Copy` type but passes a
+# `Copy` scalar by value; `iso` owns/moves; `tag` is a shared borrow; `ref` is
+# `&mut` and is **rejected on the BEAM** (the portable core is val/iso/tag, P5).
+#
+# Slice: the scalar `Copy` types, `String`, one level of `Vec(...)`, and a bare
+# nominal type. Deep nested generics (`Vec(Option(T))`), `Int` (bignum, no Rust
+# lowering), and the BEAM linearity check are the `:partial` tail — see ADR-0063.
+# ---------------------------------------------------------------------------
+
+mod SelfhostCap do
+  # A reference capability (ADR-0055).
+  type Cap := Iso | Val | Ref | Tag
+
+  # A type, at the granularity this slice lowers (mirrors source spellings).
+  type Ty := TInt53
+           | TInt32
+           | TBool
+           | TFloat64
+           | TStr
+           | TVecInt53
+           | TVecStr
+           | TNom(String)
+
+  # The `Copy` set — the width-explicit scalars + Bool/Float; String/Vec/nominal
+  # are not `Copy` (so `val` borrows them).
+  def copyt(Ty) Bool
+  def copyt(TInt53) := true
+  def copyt(TInt32) := true
+  def copyt(TBool) := true
+  def copyt(TFloat64) := true
+  def copyt(TStr) := false
+  def copyt(TVecInt53) := false
+  def copyt(TVecStr) := false
+  def copyt(TNom(_)) := false
+
+  # The owned Rust spelling (`iso`/`ref`/`tag` base, and `val` of a `Copy` type):
+  # a scalar maps to its Rust name, `String`/`Vec` to their owned forms, a nominal
+  # passes through.
+  def owned(Ty) String
+  def owned(TInt53) := "i64"
+  def owned(TInt32) := "i32"
+  def owned(TBool) := "bool"
+  def owned(TFloat64) := "f64"
+  def owned(TStr) := "String"
+  def owned(TVecInt53) := "Vec<i64>"
+  def owned(TVecStr) := "Vec<String>"
+  def owned(TNom(s)) := s
+
+  # The borrowed Rust spelling (`val` of a non-`Copy` type): `&str`, `&[T]`, or
+  # `&<name>`.
+  def borrowed(Ty) String
+  def borrowed(TStr) := "&str"
+  def borrowed(TVecInt53) := "&[i64]"
+  def borrowed(TVecStr) := "&[String]"
+  def borrowed(TInt53) := "&i64"
+  def borrowed(TInt32) := "&i32"
+  def borrowed(TBool) := "&bool"
+  def borrowed(TFloat64) := "&f64"
+  def borrowed(TNom(s)) := "&" <> s
+
+  # `val` lowers by value when the type is `Copy`, else by shared borrow.
+  def val_param(t Ty) String
+    if copyt(t) do
+      owned(t)
+    else
+      borrowed(t)
+    end
+  end
+
+  # capability + type -> Rust parameter spelling.
+  pub def rust_param(Cap, Ty) String
+  pub def rust_param(Iso, t) := owned(t)
+  pub def rust_param(Val, t) := val_param(t)
+  pub def rust_param(Ref, t) := "&mut " <> owned(t)
+  pub def rust_param(Tag, t) := "&" <> owned(t)
+
+  # BEAM legality: the portable core is val/iso/tag; `ref` (`&mut`) is rejected
+  # (P5). Reported as a Bool here (the reference raises on `ref`).
+  pub def beam_legal(Cap) Bool
+  pub def beam_legal(Ref) := false
+  pub def beam_legal(Iso) := true
+  pub def beam_legal(Val) := true
+  pub def beam_legal(Tag) := true
+end
