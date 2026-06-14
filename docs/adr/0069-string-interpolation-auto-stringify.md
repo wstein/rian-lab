@@ -1,6 +1,6 @@
 # ADR-0069 — String interpolation that auto-stringifies via a portable `Show`
 
-**Status:** Accepted · **Implemented (partial, 2026-06-14)** — the `\(expr)` surface (decision A) + auto-stringify for `Int*`/`Bool`/`String` holes, portable across all four targets. `Char`/`Float64`/user-type & derived `Show`/runtime dispatch are deferred (see *Open items* and *Implementation* below).
+**Status:** Accepted · **Implemented (partial, 2026-06-14)** — the `\(expr)` surface (decision A) + auto-stringify for `Int*`/`Bool`/`String` holes, portable across all four targets. The lowering strategy is settled in §6 (canonical desugar, not target-native interpolation). `Char`/`Float64`/user-type & derived `Show`/runtime dispatch are deferred (see §6, *Open items*, and *Implementation* below).
 **Implemented:** partial — `\(expr)` lexing (`{:istr}`), Pratt (`{:str_interp}`), `Rian.Interp` static resolution, `__prim_int_to_string` on Beam/JS/Lower(Rust+Elixir)/JVM; `Int*`/`Bool`/`String` holes reach all four targets, honestly via `Rian.Reach` (an `Int` hole inherits ADR-0064's `[:ex,:js]`). `test/rian/interp_test.exs`. Deferred: `Char` (dispatch-guard collision), `Float64` (round-trip), user/derived `Show`, runtime dispatch.
 **Refs:** ADR-0042 (protocols & bounded generics — the dispatch this leans on), ADR-0061 (multi-target protocol lowering — BEAM/Rust/JS dispatch, the Rust owned-return gap), ADR-0047 (portable prelude/stdlib — the `Prim.*` intrinsic layer), ADR-0051 §"Open items" (interpolation deferred for doc heredocs — "probably no"), ADR-0035 (no hidden control flow — the central tension), ADR-0033 (surface vocabulary), ADR-0064 (portable numeric contract — `Int53` is the portable integer; `Int`/wide ints are off some targets), ADR-0057/0058 (target-environment sets; reachability), ADR-0065 (P7 surface freeze — this surface is *not* frozen).
 **Owners:** Maya Lin (surface / emitters) · Samir Patel (types / protocol bounds) · Kira Neri (honesty) · Mira (totality) · Tomás (BEAM performance) · Rachel Okafor (PM)
@@ -134,6 +134,44 @@ in tension with "what you read is what runs" (ADR-0035). The defense: the *hole 
 which ADR-0035 has never objected to (every operator desugars to a call). The line we hold:
 interpolation may hide a **pure `Show.show`** and nothing else — never an effectful or partial
 operation, never an `inspect`-style reflective fallback for un-`Show`-able types.
+
+### 6. Lowering strategy — canonical desugar, not target-native interpolation (amended 2026-06-14)
+
+A recurring proposal is to lower a hole to each target's **native interpolation** — Kotlin
+`"hi $name"`, JS `` `hi ${name}` ``, Rust `format!("hi {name}")` — for idiomatic output. **Rejected
+as a *semantic* path; admitted only as a cosmetic emitter peephole.** Two facts decide it:
+
+1. **Native interpolation delegates stringification to the target's formatter, and those formatters
+   diverge** — which would make the *output string itself* target-dependent and break the equivalence
+   contract that is the language's reason to exist (shared logic *and tests* across targets). The
+   divergence is not hypothetical; for `Float64`:
+
+   | value | BEAM `float_to_binary(_,[:short])` | Kotlin `toString()` | Rust `format!("{}")` (`Display`) | JS `String(_)` |
+   |-------|------|------|------|------|
+   | `1.0` | `1.0` | `1.0` | **`1`** | **`1`** |
+   | `100.0` | `100.0` | `100.0` | **`100`** | **`100`** |
+   | `1.0e21` | `1.0e21` | `1.0E21` | **`1000000000000000000000`** | **`1e+21`** |
+   | `1.0e-7` | `1.0e-7` | `1.0E-7` | **`0.0000001`** | **`1e-7`** |
+
+   A shared `@test` asserting `greet(1.0) == "v=1.0"` would pass on BEAM/JVM and **fail on Rust/JS**.
+   `Bool`/`Int`/`String` happen to agree, but the rule must hold for the whole type universe.
+
+2. **The BEAM backend emits Erlang abstract forms, which have no interpolation syntax at all** — so a
+   native lowering could *never* be universal; the concat/`__prim_*` path is always required on at
+   least one target. Maintaining both is pure cost.
+
+**Decision.** Stringification stays Rian-controlled (the `__prim_*_to_string`/`Show` layer), computed
+by `Rian.Interp` *before* the checker and `Rian.Reach`, guaranteeing byte-identical output. Reach
+sees the real `__prim_*` nodes, so it never claims a portability it cannot verify. Target-native
+interpolation *syntax* is a legitimate but purely cosmetic emitter concern; if ever built it must be
+an emitter-stage peephole that (a) runs *after* `Interp`/`Reach` on resolved Core, (b) fires only on
+holes whose static type is in the proven-identity set `{String, Int*, UInt*, Bool}` and falls back to
+the canonical chain otherwise, (c) skips the BEAM. It leads nothing and is the lowest priority.
+
+This also pins the **`Float64` deferral as principled, not incidental**: portable float interpolation
+needs a *single canonical format* implemented inside `__prim_float_to_string` on every target (its own
+shortest-round-trip formatter), explicitly *not* delegating to `Display`/`toString`. That is the hard,
+valuable unlock; until it lands, a `Float64` hole stays a compile error at the hole (§"Open items").
 
 ## Ratings
 
