@@ -6,8 +6,8 @@ self-hosting (ADR-0063 §4) — the Rian compiler compiling its own source to `.
 **Portable** self-hosting (the compiler lowered to Rust/JS) is a separate, further
 terminus and is *not* measured here.
 
-**82% self-hosted** — 7 stage(s) self-hosted,
-4 partial, 0 not started, of 11.
+**86% self-hosted** — 8 stage(s) self-hosted,
+3 partial, 0 not started, of 11.
 
 | Stage | Role | Self-hosted | Evidence | Notes |
 | --- | --- | --- | --- | --- |
@@ -18,7 +18,7 @@ terminus and is *not* measured here.
 | Type checker (inference + error sets) | checker | 🟡 partial | `examples/rian/selfhost_checker.rian` · `test/rian/checker_infer_fixpoint_test.exs` | type inference agrees with the REAL Rian.Check.infer over closed integer expressions; env/floats/calls/lambdas/case remain (selfhost_check.rian is a separate TOY-language spike) |
 | Exhaustiveness gate | checker | ✅ yes | `examples/rian/selfhost_exhaust.rian` · `test/rian/exhaust_fixpoint_test.exs` | the complete Maranget useful?/3 (specialize/default/signature over single+multi-column matrices, ctors-with-args, finite/infinite types) reproduces Rian.Exhaustiveness.useful? — the gate decision; only the witness/counterexample diagnostic (algorithm I) is unported |
 | Capability checker | checker | ✅ yes | `examples/rian/selfhost_cap.rian` · `test/rian/cap_fixpoint_test.exs` | the full capability→Rust mapping (every Copy width, String, nominal, nested Vec, parametric generics incl. the val-generic quirk) + ref-rejecting BEAM legality equal Rian.Capability over the whole matrix; type-string tokenisation is the type-parser's stage, the BEAM linearity check is native typestate |
-| BEAM abstract-forms backend | backend | 🟡 partial | `examples/rian/selfhost_beam.rian` · `test/rian/beam_emit_fixpoint_test.exs` | abstract forms for the literal/unary/binary/call slice equal :erl_parse's canonical AST and compile via :compile.forms; strings/lists/case remain (selfhost_codegen.rian is a separate toy stack VM) |
+| BEAM abstract-forms backend | backend | ✅ yes | `examples/rian/selfhost_beam.rian` · `test/rian/beam_module_fixpoint_test.exs` | the whole-module abstract-forms emitter — functions with native multi-clause dispatch (patterns ARE the forms), operators, if, case, variants/tuples/lists, guards — compiles via :compile.forms and RUNS identically to Rian.Beam; strings/prims/maps/structs/shadowed-binds are out of scope (selfhost_codegen.rian is a separate toy stack VM) |
 | Rust/Elixir text backend | backend | 🟡 partial | `examples/rian/selfhost_rust.rian` · `test/rian/rust_emit_fixpoint_test.exs` | precedence-aware emitter equals Rian.Lower.emit_expr over BOTH :rust and :elixir for literals/unary/binary/call/if/tuple/closed-list (prec/assoc shared; only operator spelling + if/tuple/list shape differ by target); dot, cons-lists, structs, case, maps remain |
 | ECMAScript backend | backend | ✅ yes | `examples/rian/selfhost_js.rian` · `test/rian/js_module_fixpoint_test.exs` | the whole-module JS emitter — functions with multi-clause pattern dispatch, sum variants (tagged arrays), structs/tuples/lists/maps, .field, if (ternary), case (IIFE), operators, atoms, prims — equals Rian.JS.compile; protocol dispatch + whole-program int-mode + Shadow are out of scope (program-level / separate-subsystem concerns) |
 | Kotlin/JVM backend | backend | ✅ yes | `examples/rian/selfhost_jvm.rian` · `test/rian/jvm_module_fixpoint_test.exs` | the whole-module Kotlin emitter — sum types (sealed interface + object/data class), functions with multi-clause pattern dispatch (is/smart-cast tests + binds + trailing throw), if, operators, prims — equals Rian.JVM.compile over its full SUPPORTED surface; lists/maps/case/lambda/@external/Shadow are reference gaps, not port gaps |

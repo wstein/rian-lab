@@ -108,11 +108,11 @@ defmodule Rian.SelfHost do
       id: :beam_backend,
       name: "BEAM abstract-forms backend",
       role: :backend,
-      status: :partial,
+      status: :self_hosted,
       source: "selfhost_beam.rian",
-      test: "test/rian/beam_emit_fixpoint_test.exs",
+      test: "test/rian/beam_module_fixpoint_test.exs",
       note:
-        "abstract forms for the literal/unary/binary/call slice equal :erl_parse's canonical AST and compile via :compile.forms; strings/lists/case remain (selfhost_codegen.rian is a separate toy stack VM)"
+        "the whole-module abstract-forms emitter — functions with native multi-clause dispatch (patterns ARE the forms), operators, if, case, variants/tuples/lists, guards — compiles via :compile.forms and RUNS identically to Rian.Beam; strings/prims/maps/structs/shadowed-binds are out of scope (selfhost_codegen.rian is a separate toy stack VM)"
     },
     %{
       id: :text_backend,

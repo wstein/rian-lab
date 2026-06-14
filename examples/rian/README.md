@@ -141,13 +141,16 @@ compile + run on real BEAM bytecode:
   over its full supported surface (`test/rian/jvm_module_fixpoint_test.exs`). The
   stage consumes Core (parsing is the parser/Core stage's job); lists/maps/case/
   lambda/`@external`/`Rian.Shadow` are reference gaps, not port gaps.
-- [selfhost_beam.rian](selfhost_beam.rian) — the **BEAM abstract-forms backend**
-  port (ADR-0063): builds the Erlang abstract forms `:compile.forms` consumes,
-  doing the real `erl_op` mapping (`!=`→`/=`, `<=`→`=<`, `and`→`andalso`).
-  **Fixpoint-locked** against Erlang's own parser — the forms equal `:erl_parse`'s
-  canonical AST and compile+run (`test/rian/beam_emit_fixpoint_test.exs`).
-  Operators are carried as strings (Rian can't spell `:+`); strings/calls/lists
-  remain.
+- [selfhost_beam.rian](selfhost_beam.rian) — the **BEAM abstract-forms backend**,
+  fully self-hosted (ADR-0063, the default self-host target): builds the Erlang
+  abstract forms for a whole module's functions. BEAM uses Erlang's **native**
+  clause matching, so the patterns ARE the dispatch forms (no test/bind generation
+  like JVM/JS). Covers functions, multi-clause dispatch, operators, `if`, `case`,
+  variants/tuples/lists, guards. The fixpoint compiles via `:compile.forms` and
+  **RUNS** the module, asserting it behaves identically to `Rian.Beam`
+  (`test/rian/beam_module_fixpoint_test.exs`). Operators/names ride as strings
+  (Rian can't spell `:+` or Erlang var atoms), inflated by the fixpoint;
+  strings/prims/maps/structs/shadowed-binds are out of scope.
 - [selfhost_checker.rian](selfhost_checker.rian) — the **real type checker**
   (inference) port (ADR-0063, ADR-0064): a slice of the REAL `Rian.Check.infer`
   (not the toy-language `selfhost_check`), inferring `Int53`/`Bool`/`String`/

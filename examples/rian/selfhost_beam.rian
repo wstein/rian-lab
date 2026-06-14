@@ -1,78 +1,180 @@
 # ===========================================================================
-# SELF-HOSTING SPIKE — the BEAM abstract-forms backend, written in Rian
+# SELF-HOSTING — the BEAM abstract-forms backend (whole module), in Rian
 # ===========================================================================
-# Goal (ADR-0063 §2, the default BEAM/self-host target): emit Erlang **abstract
-# forms** from the Core IR — the input to `:compile.forms`. This is the
-# Rian-written counterpart of `Rian.Beam`'s `expr_form`, fixpoint-locked against
-# Erlang's OWN parser (`:erl_parse`) in `test/rian/beam_emit_fixpoint_test.exs`:
-# the forms the port builds equal the canonical AST `:erl_parse` produces for the
-# equivalent Erlang expression, term-for-term (annotations normalised).
+# Goal (ADR-0063 §2, the default self-host target): build the Erlang abstract
+# forms for a whole module from the IR — the Rian-written counterpart of
+# `Rian.Beam`'s form generation. BEAM uses Erlang's NATIVE clause matching, so a
+# clause is just `{:clause, [pat forms], guard, body}` — no explicit test/bind
+# generation (unlike the JVM/JS ports); the patterns ARE the dispatch.
 #
-# Because Rian's atom syntax cannot spell operator atoms (`:+`, `:"=<"`), the
-# port carries the Erlang operator as a **string** (it still does the real
-# `erl_op` mapping: `!=`→`/=`, `<=`→`=<`, `and`→`andalso`, `or`→`orelse`); the
-# fixpoint inflates those strings to atoms — a serialisation detail, not the
-# operator logic.
-#
-# Slice: integer/atom/identifier leaves, prefix unary, binary operators. Strings,
-# calls, lists, maps, `case`, and prims are the `:partial` tail — see ADR-0063.
+# Because Rian cannot spell operator atoms (`:+`/`:"=<"`) or Erlang variable atoms,
+# the port emits a `Form` sum carrying the Rian op / name / ctor as STRINGS; the
+# fixpoint (`test/rian/beam_module_fixpoint_test.exs`) inflates them to real forms
+# (the `erl_op`/`var_atom`/`to_snake` conventions), compiles the module via
+# `:compile.forms`, and RUNS it — asserting it behaves identically to
+# `Rian.Beam`. Strings, prims, maps/structs, blocks-with-shadowed-binds, and
+# variable-application are out of scope (the corpus avoids them).
 # ---------------------------------------------------------------------------
 
 mod SelfhostBeam do
+  # ── Core (supported subset) ──
   type Core := CNum(String)
              | CId(String)
              | CAtom(String)
              | CUnary(String, Core)
              | CBin(String, Core, Core)
              | CCall(String, Vec(Core))
+             | CTuple(Vec(Core))
+             | CList(Vec(Core), Tail)
+             | CIf(Core, Block, Block)
+             | CCase(Core, Vec(Arm))
 
-  # An Erlang abstract form (the operator is carried as a string — see moduledoc):
-  #   FInt  -> {integer, _, N}     FVar -> {var, _, Name}   FAtom -> {atom, _, A}
-  #   FUn   -> {op, _, Op, Arg}    FBin -> {op, _, Op, L, R}
-  #   FCall -> {call, _, {atom, _, F}, Args}  (a local function call)
-  type Form := FInt(String)
+  type Tail := TClose | TTail(Core)
+  type Block := Block(Vec(Stmt))
+  type Stmt := SBind(String, Core) | STypedBind(String, String, Core) | SExpr(Core)
+  type Arm := Arm(Pat, Guard, Block)
+
+  type Pat := PWild
+            | PVar(String)
+            | PInt(Int53)
+            | PAtom(String)
+            | PCtor(String, Vec(Pat))
+            | PTuple(Vec(Pat))
+            | PList(Vec(Pat), PTail)
+
+  type PTail := PtlClose | PtlTail(Pat)
+  type Guard := GNone | GSome(Core)
+  type Clause := Clause(Vec(Pat), Guard, Block)
+  type Func := Func(String, Int53, Vec(Clause))
+
+  # ── Form (output; strings inflated by the fixpoint) ──
+  type Form := FInt(Int53)
              | FVar(String)
              | FAtom(String)
-             | FUn(String, Form)
-             | FBin(String, Form, Form)
+             | FCtorN(String)
+             | FCtor(String, Vec(Form))
+             | FOp1(String, Form)
+             | FOp2(String, Form, Form)
              | FCall(String, Vec(Form))
+             | FTuple(Vec(Form))
+             | FNil
+             | FCons(Form, Form)
+             | FIf(Form, Vec(Form), Vec(Form))
+             | FCase(Form, Vec(FClause))
+             | FMatch(String, Form)
 
-  # Rian binary operator -> Erlang operator spelling (the reference `erl_op`).
-  def eop(String) String
-  def eop("==") := "=="
-  def eop("!=") := "/="
-  def eop("<=") := "=<"
-  def eop(">=") := ">="
-  def eop("<") := "<"
-  def eop(">") := ">"
-  def eop("and") := "andalso"
-  def eop("or") := "orelse"
-  def eop("+") := "+"
-  def eop("-") := "-"
-  def eop("*") := "*"
-  def eop("div") := "div"
-  def eop("rem") := "rem"
+  type GForm := GfNone | GfSome(Form)
+  type FClause := FClause(Vec(Form), GForm, Vec(Form))
+  type FFunc := FFunc(String, Int53, Vec(FClause))
 
-  # Prefix unary operator -> Erlang spelling.
-  def uop(String) String
-  def uop("-") := "-"
-  def uop("not") := "not"
+  pub def compile_forms(Vec(Func)) Vec(FFunc)
+  pub def compile_forms([]) := []
+  pub def compile_forms([f | rest]) := [func_form(f) | compile_forms(rest)]
 
-  # Emit a Core node to its Erlang abstract form.
-  pub def emit(Core) Form
-  pub def emit(CNum(t)) := FInt(t)
-  pub def emit(CId(n)) := FVar(n)
-  pub def emit(CAtom(a)) := FAtom(a)
-  pub def emit(CUnary(op, x)) := FUn(uop(op), emit(x))
-  pub def emit(CBin(op, l, r)) := FBin(eop(op), emit(l), emit(r))
-  # a local function call `f(args)` -> {call, _, {atom, _, f}, [arg forms]} (the
-  # reference's lowercase-`ECall` branch); the callee name rides as a string, the
-  # fixpoint inflating it to the `{atom, _, f}` head. PascalCase ctor-as-tuple is
-  # the `:partial` tail.
-  pub def emit(CCall(f, args)) := FCall(f, forms_of(args))
+  def func_form(Func) FFunc
+  def func_form(Func(name, arity, clauses)) := FFunc(name, arity, clause_forms(clauses))
 
-  # map `emit` over an argument vector (no FFI — a recursive fold to `Vec(Form)`).
-  def forms_of(Vec(Core)) Vec(Form)
-  def forms_of([]) := []
-  def forms_of([x | rest]) := [emit(x) | forms_of(rest)]
+  def clause_forms(Vec(Clause)) Vec(FClause)
+  def clause_forms([]) := []
+  def clause_forms([c | rest]) := [clause_form(c) | clause_forms(rest)]
+
+  def clause_form(Clause) FClause
+  def clause_form(Clause(pats, guard, body)) :=
+    FClause(pat_forms(pats), gform(guard), block_forms(body))
+
+  # ── patterns -> forms (native Erlang dispatch) ──
+  def pat_forms(Vec(Pat)) Vec(Form)
+  def pat_forms([]) := []
+  def pat_forms([p | rest]) := [pat_form(p) | pat_forms(rest)]
+
+  def pat_form(Pat) Form
+  def pat_form(PWild) := FVar("_")
+  def pat_form(PVar(n)) := FVar(n)
+  def pat_form(PInt(v)) := FInt(v)
+  def pat_form(PAtom(a)) := FAtom(a)
+  def pat_form(PCtor(c, [])) := FCtorN(c)
+  def pat_form(PCtor(c, args)) := FCtor(c, pat_forms(args))
+  def pat_form(PTuple(es)) := FTuple(pat_forms(es))
+  def pat_form(PList(es, PtlClose)) := list_form(pat_forms(es), FNil)
+  def pat_form(PList(es, PtlTail(t))) := list_form(pat_forms(es), pat_form(t))
+
+  def list_form(Vec(Form), Form) Form
+  def list_form([], tail) := tail
+  def list_form([x | rest], tail) := FCons(x, list_form(rest, tail))
+
+  def gform(Guard) GForm
+  def gform(GNone) := GfNone
+  def gform(GSome(g)) := GfSome(expr_form(g))
+
+  # ── body / statements ──
+  def block_forms(Block) Vec(Form)
+  def block_forms(Block(stmts)) := stmt_forms(stmts)
+
+  def stmt_forms(Vec(Stmt)) Vec(Form)
+  def stmt_forms([]) := []
+  def stmt_forms([s | rest]) := [stmt_form(s) | stmt_forms(rest)]
+
+  def stmt_form(Stmt) Form
+  def stmt_form(SBind(n, e)) := FMatch(n, expr_form(e))
+  def stmt_form(STypedBind(n, _, e)) := FMatch(n, expr_form(e))
+  def stmt_form(SExpr(e)) := expr_form(e)
+
+  # ── expressions -> forms ──
+  def expr_form(Core) Form
+  def expr_form(CNum(t)) := FInt(parse_int(t))
+  def expr_form(CId("true")) := FAtom("true")
+  def expr_form(CId("false")) := FAtom("false")
+  def expr_form(CId(x))
+    if pascal(x) do
+      FCtorN(x)
+    else
+      FVar(x)
+    end
+  end
+  def expr_form(CAtom(a)) := FAtom(a)
+  def expr_form(CUnary(op, x)) := FOp1(op, expr_form(x))
+  def expr_form(CBin(op, l, r)) := FOp2(op, expr_form(l), expr_form(r))
+  def expr_form(CCall(f, args))
+    if pascal(f) do
+      FCtor(f, expr_forms(args))
+    else
+      FCall(f, expr_forms(args))
+    end
+  end
+  def expr_form(CTuple(es)) := FTuple(expr_forms(es))
+  def expr_form(CList(es, TClose)) := list_form(expr_forms(es), FNil)
+  def expr_form(CList(es, TTail(t))) := list_form(expr_forms(es), expr_form(t))
+  def expr_form(CIf(c, t, e)) := FIf(expr_form(c), block_forms(t), block_forms(e))
+  def expr_form(CCase(scrut, arms)) := FCase(expr_form(scrut), arm_forms(arms))
+
+  def arm_forms(Vec(Arm)) Vec(FClause)
+  def arm_forms([]) := []
+  def arm_forms([a | rest]) := [arm_form(a) | arm_forms(rest)]
+
+  def arm_form(Arm) FClause
+  def arm_form(Arm(pat, guard, body)) := FClause([pat_form(pat)], gform(guard), block_forms(body))
+
+  def expr_forms(Vec(Core)) Vec(Form)
+  def expr_forms([]) := []
+  def expr_forms([x | rest]) := [expr_form(x) | expr_forms(rest)]
+
+  # ── helpers (portable, FFI-free) ──
+  def parse_int(s String) Int53 := digits(Prim.str_chars(s), 0)
+
+  def digits(Vec(Int53), Int53) Int53
+  def digits([], acc) := acc
+  def digits([c | rest], acc)
+    if c == 95 do
+      digits(rest, acc)
+    else
+      digits(rest, acc * 10 + c - 48)
+    end
+  end
+
+  def pascal(s String) Bool
+    case Prim.str_chars(s) do
+      [c | _] -> c >= 65 and c <= 90
+      [] -> false
+    end
+  end
 end
