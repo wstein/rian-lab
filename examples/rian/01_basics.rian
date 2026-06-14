@@ -11,12 +11,12 @@
 
 # Single-clause function. The typed head IS the type boundary — no separate
 # signature line is needed when there is exactly one clause.
-def add(x Int64, y Int64) Int64 := x + y
+def add(x Int53, y Int53) Int53 := x + y
 
 # Block body: a `;`/newline-separated sequence of bindings whose value is the
 # LAST expression (implicit return). Bodies open after the return type and
 # close with `end`.
-def double_then_inc(n Int64) Int64
+def double_then_inc(n Int53) Int53
   d := n * 2          # `:=` is a single-assignment binding, never mutation
   d + 1               # the final expression is the function's value
 end
@@ -24,7 +24,7 @@ end
 # `:=` is single-assignment and irrefutable. Re-using a name SHADOWS the old
 # binding (a fresh value), it does not mutate it. Mutation is a different
 # operator, `<~`, and is capability-gated (see 04_capabilities.rian).
-def shadow_demo(n Int64) Int64
+def shadow_demo(n Int53) Int53
   x := n + 1
   x := x * 10         # shadow: a NEW `x`, the old one is untouched
   x
@@ -32,10 +32,10 @@ end
 
 # A value-position `if` REQUIRES `else` (both arms must have the same type),
 # exactly like Rust. An `else`-less `if` would be a unit-typed effect.
-def sign(n Int64) Int64 := if n >= 0 do 1 else -1 end
+def sign(n Int53) Int53 := if n >= 0 do 1 else -1 end
 
 # else-if chains read top to bottom.
-def grade(s Int64) String :=
+def grade(s Int53) String :=
   if s >= 90 do "A"
   else if s >= 80 do "B"
   else "C" end
@@ -49,8 +49,8 @@ def grade(s Int64) String :=
 #   ==  !=                also non-associative
 #   and  or  not          short-circuit boolean operators
 def mean(total Float64, count Float64) Float64 := total / count    # float div
-def idiv(a Int64, b Int64) Int64         := a div b           # integer div
-def parity(n Int64) Int64              := n rem 2
+def idiv(a Int53, b Int53) Int53         := a div b           # integer div
+def parity(n Int53) Int53              := n rem 2
 
 # Concatenation and the pipe. `x |> f(y)` is exactly `f(x, y)`.
 # There is NO method-call syntax (`x.f(y)`); `.` accesses fields only.
@@ -61,4 +61,4 @@ def loud_greeting(name String) String := name |> greet |> String.upcase
 # emitter parenthesizes correctly on both targets:
 #   a + b |> f   parses as  (a + b) |> f
 #   not a and b  parses as  (not a) and b
-def worked(a Int64, b Int64, c Int64) Int64 := a + b * c        # == a + (b * c)
+def worked(a Int53, b Int53, c Int53) Int53 := a + b * c        # == a + (b * c)

@@ -41,7 +41,7 @@ mod SelfhostDecl do
   # (:wild / {:var,n} / {:lit,k} / {:ctor,c,ps}); list patterns are nil/cons
   # (NilP / ConsP), flattened to `{:list, elems, :close | {:tail,p}}` by the test.
   type Pat :=
-      Wild | Var(String) | Lit(Int64) | Ctor(String, Vec(Pat))
+      Wild | Var(String) | Lit(Int53) | Ctor(String, Vec(Pat))
     | NilP | ConsP(Pat, Pat)
 
   type Variant := V(String, Vec(String))
@@ -121,7 +121,7 @@ mod SelfhostDecl do
   def take_mod_body([], acc) := MB(rev_tok(acc, []), [])
 
   # inside a nested do-block: track depth so the block's `end` doesn't close the mod.
-  def take_mod_body_do(ts Vec(Tok), acc Vec(Tok), depth Int64) ModBody
+  def take_mod_body_do(ts Vec(Tok), acc Vec(Tok), depth Int53) ModBody
   def take_mod_body_do([TKw("do") | rest], acc, depth) := take_mod_body_do(rest, [TKw("do") | acc], depth + 1)
   def take_mod_body_do([TKw("end") | rest], acc, 1) := take_mod_body(rest, [TKw("end") | acc])
   def take_mod_body_do([TKw("end") | rest], acc, depth) := take_mod_body_do(rest, [TKw("end") | acc], depth - 1)
@@ -177,7 +177,7 @@ mod SelfhostDecl do
   def parse_def(pb, ts) := DR(DErr, ts)
 
   # collect tokens up to the matching `)` (depth 0), returning (inside, rest).
-  def take_parens(ts Vec(Tok), depth Int64, acc Vec(Tok)) Paren
+  def take_parens(ts Vec(Tok), depth Int53, acc Vec(Tok)) Paren
   def take_parens([TRP | rest], 0, acc) := Paren(rev_tok(acc, []), rest)
   def take_parens([TRP | rest], depth, acc) := take_parens(rest, depth - 1, [TRP | acc])
   def take_parens([TLP | rest], depth, acc) := take_parens(rest, depth + 1, [TLP | acc])
@@ -223,7 +223,7 @@ mod SelfhostDecl do
   end
 
   # `name [cap] Type` where cap in val/iso/ref/tag (default val) and Type may be a
-  # simple id or a single-arg parametric type `Base(Arg)` (e.g. `Vec(Int64)`).
+  # simple id or a single-arg parametric type `Base(Arg)` (e.g. `Vec(Int53)`).
   def parse_param(ts Vec(Tok)) ParamRes
   def parse_param([TId(n), TId("val") | rest])
     case parse_ptype(rest) do
@@ -321,14 +321,14 @@ mod SelfhostDecl do
   end
 
   # ── expression parser (precedence climbing — mirrors Rian.Pratt) ──────────
-  def parse_bp(min_bp Int64, ts Vec(Tok)) Parse
+  def parse_bp(min_bp Int53, ts Vec(Tok)) Parse
   def parse_bp(min_bp, ts)
     case parse_prefix(ts) do
       P(lhs, rest) -> climb(min_bp, lhs, rest)
     end
   end
 
-  def climb(min_bp Int64, lhs Expr, ts Vec(Tok)) Parse
+  def climb(min_bp Int53, lhs Expr, ts Vec(Tok)) Parse
   def climb(min_bp, lhs, [TOp(op) | rest])
     if lbp(op) >= min_bp do
       case parse_bp(rbp(op), rest) do
@@ -419,19 +419,19 @@ mod SelfhostDecl do
   def finish_arg(a, ts) := AP([a], ts)
 
   # ── binding powers (mirror Rian.Pratt.bp) ────────────────────────────────
-  def lbp(op String) Int64 := bp_base(level(op)) + left_off(op)
-  def rbp(op String) Int64 := bp_base(level(op)) + right_off(op)
-  def bp_base(lvl Int64) Int64 := (13 - lvl) * 10
+  def lbp(op String) Int53 := bp_base(level(op)) + left_off(op)
+  def rbp(op String) Int53 := bp_base(level(op)) + right_off(op)
+  def bp_base(lvl Int53) Int53 := (13 - lvl) * 10
 
-  def left_off(op String) Int64
+  def left_off(op String) Int53
   def left_off("<>") := 1
   def left_off(op) := 0
 
-  def right_off(op String) Int64
+  def right_off(op String) Int53
   def right_off("<>") := 0
   def right_off(op) := 1
 
-  def level(op String) Int64
+  def level(op String) Int53
   def level("*") := 3
   def level("/") := 3
   def level("rem") := 3
@@ -456,9 +456,9 @@ mod SelfhostDecl do
   def upper_first([c | _]) := c >= 'A' and c <= 'Z'
   def upper_first([]) := false
 
-  def str_to_int(s String) Int64 := digits(Prim.str_chars(s), 0)
+  def str_to_int(s String) Int53 := digits(Prim.str_chars(s), 0)
 
-  def digits(cs Vec(Char), acc Int64) Int64
+  def digits(cs Vec(Char), acc Int53) Int53
   def digits([], acc) := acc
   def digits([c | rest], acc) := digits(rest, acc * 10 + c - '0')
 

@@ -23,7 +23,7 @@ mod ListLib do
   def rev_onto([], acc) := acc
   def rev_onto([h | t], acc) := rev_onto(t, [h | acc])
 
-  pub def length(xs Vec(T)) Int64 forall T
+  pub def length(xs Vec(T)) Int53 forall T
   pub def length([]) := 0
   pub def length([_ | t]) := 1 + length(t)
 
@@ -31,7 +31,7 @@ mod ListLib do
   pub def append([], ys) := ys
   pub def append([h | t], ys) := [h | append(t, ys)]
 
-  pub def sum(xs Vec(Int64)) Int64
+  pub def sum(xs Vec(Int53)) Int53
   pub def sum([]) := 0
   pub def sum([h | t]) := h + sum(t)
 end

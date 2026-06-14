@@ -12,7 +12,7 @@
 # ---------------------------------------------------------------------------
 
 mod SelfhostCheck do
-  type Expr := Num(Int64)
+  type Expr := Num(Int53)
              | Bln(Bool)
              | Var(String)
              | Add(Expr, Expr)

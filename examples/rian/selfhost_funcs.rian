@@ -17,7 +17,7 @@
 mod SelfhostFuncs do
   # The expression language: arithmetic, variables, `<` (as 1/0), an `if` that
   # tests "non-zero", and a call `App(name, args)` to a user function.
-  type Expr := Num(Int64)
+  type Expr := Num(Int53)
              | Var(String)
              | Add(Expr, Expr)
              | Sub(Expr, Expr)
@@ -30,7 +30,7 @@ mod SelfhostFuncs do
   type Fun := F(Vec(String), Expr)
 
   # Evaluate `e` under `env` (variable -> value) and `funcs` (name -> Fun).
-  pub def evalx(e Expr, env Map(String, Int64), funcs Map(String, Fun)) Int64
+  pub def evalx(e Expr, env Map(String, Int53), funcs Map(String, Fun)) Int53
   pub def evalx(Num(n), _, _) := n
   pub def evalx(Var(x), env, _) := Map.get(env, x)
   pub def evalx(Add(a, b), env, fs) := evalx(a, env, fs) + evalx(b, env, fs)
@@ -44,21 +44,21 @@ mod SelfhostFuncs do
   pub def evalx(App(name, args), env, fs) := apply(Map.get(fs, name), args, env, fs)
 
   # `<` yields 1 / 0 — this mini-language has no separate boolean type
-  def lt(a Int64, b Int64) Int64
+  def lt(a Int53, b Int53) Int53
   def lt(a, b) when a < b := 1
   def lt(a, b) := 0
 
   # `if` branches on non-zero
-  def branch(c Int64, t Expr, e Expr, env Map(String, Int64), fs Map(String, Fun)) Int64
+  def branch(c Int53, t Expr, e Expr, env Map(String, Int53), fs Map(String, Fun)) Int53
   def branch(0, _, e, env, fs) := evalx(e, env, fs)
   def branch(_, t, _, env, fs) := evalx(t, env, fs)
 
-  def apply(f Fun, args Vec(Expr), caller Map(String, Int64), fs Map(String, Fun)) Int64
+  def apply(f Fun, args Vec(Expr), caller Map(String, Int53), fs Map(String, Fun)) Int53
   def apply(F(params, body), args, caller, fs) := evalx(body, bind(params, args, caller, fs, %{}), fs)
 
   # bind each param to the value of its argument (arguments evaluated in the
   # CALLER's environment — call-by-value — into a fresh callee environment)
-  def bind(ps Vec(String), args Vec(Expr), caller Map(String, Int64), fs Map(String, Fun), acc Map(String, Int64)) Map(String, Int64)
+  def bind(ps Vec(String), args Vec(Expr), caller Map(String, Int53), fs Map(String, Fun), acc Map(String, Int53)) Map(String, Int53)
   def bind([], [], _, _, acc) := acc
   def bind([p | ps], [a | as], caller, fs, acc)
     bind(ps, as, caller, fs, Map.put(acc, p, evalx(a, caller, fs)))

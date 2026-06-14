@@ -2,19 +2,19 @@
 # SELF-HOSTING SPIKE — a Rian expression evaluator with a symbol table
 # ===========================================================================
 # Goal (ADR-0027/0031): the layer after the parser. Walk the `Expr` sum the
-# parser builds and fold it to an `Int64`, threading an **environment** (a
+# parser builds and fold it to an `Int53`, threading an **environment** (a
 # symbol table mapping variable names to values) — the first place a real
 # compiler-in-Rian reaches for a `Map`. `let x = e in body` binds; `Var(name)`
 # looks up. Evidence for SELFHOST.md.
 #
-# The environment is a `Map(String, Int64)`: lookups/inserts go through the
+# The environment is a `Map(String, Int53)`: lookups/inserts go through the
 # `Map` FFI (free BEAM remote calls), and the empty starting environment is the
 # map literal `%{}` — the construct that drove the next backend increment.
 # ---------------------------------------------------------------------------
 
 mod SelfhostEval do
   # An expression tree, extended from the parser's with variables and `let`.
-  type Expr := Num(Int64)
+  type Expr := Num(Int53)
              | Var(String)
              | Add(Expr, Expr)
              | Sub(Expr, Expr)
@@ -22,9 +22,9 @@ mod SelfhostEval do
              | Div(Expr, Expr)
              | Let(String, Expr, Expr)
 
-  # Fold an expression to its value under `env` (name -> Int64). `let` evaluates
+  # Fold an expression to its value under `env` (name -> Int53). `let` evaluates
   # its right-hand side, extends the environment, then evaluates the body in it.
-  pub def eval(e Expr, env Map(String, Int64)) Int64
+  pub def eval(e Expr, env Map(String, Int53)) Int53
   pub def eval(Num(n), _) := n
   pub def eval(Var(name), env) := Map.get(env, name)
   pub def eval(Add(a, b), env) := eval(a, env) + eval(b, env)
@@ -35,5 +35,5 @@ mod SelfhostEval do
 
   # Run an expression in an empty starting environment — the symbol table is a
   # map, and an empty map is the literal `%{}`.
-  pub def run(e Expr) Int64 := eval(e, %{})
+  pub def run(e Expr) Int53 := eval(e, %{})
 end

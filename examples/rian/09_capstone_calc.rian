@@ -15,7 +15,7 @@ mod Calc do
   # auto-boxed (`Box<Expr>`); on the BEAM these are tagged tuples. Because the
   # sum is sealed, the exhaustiveness gate can prove `eval` is total.
   pub type Expr :=
-      Lit(Int64)
+      Lit(Int53)
     | Add(Expr, Expr)
     | Mul(Expr, Expr)
     | Neg(Expr)
@@ -23,7 +23,7 @@ mod Calc do
   # `iso` Expr: the evaluator consumes the tree it is given (owned `Expr` on
   # Rust, a use-once handle on the BEAM). Each recursive sub-tree is itself
   # consumed exactly once along every path — the linearity model is satisfied.
-  pub def eval(e iso Expr) Int64
+  pub def eval(e iso Expr) Int53
   pub def eval(Lit(n))    := n
   pub def eval(Add(a, b)) := eval(a) + eval(b)
   pub def eval(Mul(a, b)) := eval(a) * eval(b)
@@ -33,14 +33,14 @@ mod Calc do
 
   # `depth` reads the tree without consuming it -> `val` (borrow on Rust,
   # freely shareable on the BEAM, so `a`/`b` may each be used more than once).
-  pub def depth(e val Expr) Int64
+  pub def depth(e val Expr) Int53
   pub def depth(Lit(_))    := 1
   pub def depth(Neg(x))    := 1 + depth(x)
   pub def depth(Add(a, b)) := 1 + max2(depth(a), depth(b))
   pub def depth(Mul(a, b)) := 1 + max2(depth(a), depth(b))
 
   # Guarded clause backed by an unguarded fallback -> total on both targets.
-  def max2(Int64, Int64) Int64
+  def max2(Int53, Int53) Int53
   def max2(a, b) when a >= b := a
   def max2(a, b)             := b
 

@@ -8,7 +8,7 @@
 # Char literals (ADR-0036): clauses match `'+'`/`'('`/`'0'` directly — `Char` is
 # a distinct type, lowered native per target (codepoint integer on BEAM, BigInt
 # in JS, native `char` on Rust). Ordinal comparisons (`==`/`>=`/`<=`) work on
-# every target; codepoint arithmetic is an explicit `Prim.char_code(c) : Int64`
+# every target; codepoint arithmetic is an explicit `Prim.char_code(c) : Int53`
 # (no hidden widening). (Former B2 crutch removed.)
 #
 # `String -> Vec(Char)` goes through the **portable prelude primitive**
@@ -19,7 +19,7 @@
 
 mod SelfhostLexer do
   # The lexer's own typed token stream — a sealed sum (ADR-0034).
-  type Token := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
+  type Token := TNum(Int53) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
 
   pub def tokenize(src String) Vec(Token) := lex(Prim.str_chars(src))
 
@@ -39,9 +39,9 @@ mod SelfhostLexer do
   def lex([_ | rest]) := lex(rest)
 
   # Accumulate a run of digits into one `TNum`, then resume lexing the rest.
-  # `Prim.char_code(c) : Int64` is the explicit `Char` → codepoint conversion
+  # `Prim.char_code(c) : Int53` is the explicit `Char` → codepoint conversion
   # (ADR-0036 — arithmetic widens to the base, no hidden coercion).
-  def lex_num(cs Vec(Char), acc Int64) Vec(Token)
+  def lex_num(cs Vec(Char), acc Int53) Vec(Token)
   def lex_num([c | rest], acc) when c >= '0' and c <= '9' := lex_num(rest, acc * 10 + Prim.char_code(c) - Prim.char_code('0'))
   def lex_num(cs, acc) := [TNum(acc) | lex(cs)]
 end

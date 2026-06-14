@@ -28,7 +28,7 @@ mod SelfhostLexerV2 do
   # punctuation and the significant newline get their own nullary variants.
   type Tok :=
       TNum(String) | TId(String) | TKw(String) | TOp(String) | TStr(String)
-    | TChar(Int64) | TAnnot(String)
+    | TChar(Int53) | TAnnot(String)
     | TLP | TRP | TLBracket | TRBracket | TLBrace | TRBrace | TMapOpen
     | TComma | TSemi | TNL
 

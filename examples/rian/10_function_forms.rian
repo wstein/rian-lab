@@ -17,7 +17,7 @@
 # --- (1) single-expression body: `:= expr` --------------------------------
 # Best when the whole function is one expression. This is the form `show`
 # uses in the capstone.
-def double(n Int64) Int64 := n * 2
+def double(n Int53) Int53 := n * 2
 
 # --- (2) block body: multiline, implicit return ---------------------------
 # Opens after the return type, closes with `end`. Statements are `:=`
@@ -32,7 +32,7 @@ end
 # A block body can contain `if`/`case` expressions, more bindings, and
 # (capability permitting) local mutation with `<~`. Here a running total is
 # threaded through bindings — shadowing, the immutable default.
-def stats(xs val Vec(Int64)) Int64
+def stats(xs val Vec(Int53)) Int53
   s := :lists.sum(xs)
   n := len(xs)
   if n == 0 do 0 else s div n end   # the `if` expression is the value
@@ -43,7 +43,7 @@ end
 # one-liners; the recursive arm uses a block body to introduce a local binding.
 type Tree(T) := Leaf | Node(left Tree(T), value T, right Tree(T))
 
-def depth(Tree(T)) Int64
+def depth(Tree(T)) Int53
 def depth(Leaf) := 0                 # (1) one-liner clause
 def depth(Node(l, _, r))             # (2) block-body clause
   dl := depth(l)
@@ -51,7 +51,7 @@ def depth(Node(l, _, r))             # (2) block-body clause
   1 + max2(dl, dr)
 end
 
-def max2(Int64, Int64) Int64
+def max2(Int53, Int53) Int53
 def max2(a, b) when a >= b := a
 def max2(a, b)             := b
 
@@ -59,8 +59,8 @@ def max2(a, b)             := b
 # Anonymous, single-expression. Passed to higher-order functions (usually via
 # FFI). For multi-step logic inside a lambda, the body can be a block
 # EXPRESSION (`if .. do a := ..; .. end`), or factor it into a named `def`.
-def map_double(xs val Vec(Int64)) Vec(Int64) := Enum.map(xs, (x) -> x * 2)
-def clamp_each(xs val Vec(Int64)) Vec(Int64) :=
+def map_double(xs val Vec(Int53)) Vec(Int53) := Enum.map(xs, (x) -> x * 2)
+def clamp_each(xs val Vec(Int53)) Vec(Int53) :=
   Enum.map(xs, (x) -> if x < 0 do 0 else x end)   # block-expression lambda body
 
 # --- the same `show`, written with block-body clauses ---------------------
@@ -77,8 +77,8 @@ end
 # A function value has a type, written `Fn(Arg1, …, ArgN, Ret)` — the argument
 # types followed by the return type. THE LAST ELEMENT IS ALWAYS THE RETURN.
 #
-#   Fn(Int64, Bool)            a one-arg fn: takes Int64, returns Bool
-#   Fn(Int64, Int64, Int64)    a two-arg fn: (Int64, Int64) -> Int64
+#   Fn(Int53, Bool)            a one-arg fn: takes Int53, returns Bool
+#   Fn(Int53, Int53, Int53)    a two-arg fn: (Int53, Int53) -> Int53
 #   Fn(Bool)                   a NULLARY fn: () -> Bool  (just the return)
 #
 # This is the type you give a parameter that receives a lambda `(x) -> e` or a
@@ -86,8 +86,8 @@ end
 # type, so the checker types higher-order code instead of giving up.
 
 # A higher-order function: `f` is itself a function. Applying it twice is typed
-# end to end — `f(x)` is Int64, so `f(f(x))` is Int64, matching the return.
-def apply_twice(f Fn(Int64, Int64), x Int64) Int64 := f(f(x))
+# end to end — `f(x)` is Int53, so `f(f(x))` is Int53, matching the return.
+def apply_twice(f Fn(Int53, Int53), x Int53) Int53 := f(f(x))
 
 # The canonical generic `map`: `f` maps each `T` to a `U`, `xs` is a `Vec(T)`,
 # the result is a `Vec(U)`. `forall T, U` binds the type variables (ADR-0042).
@@ -97,9 +97,9 @@ def map(f, [h | t]) := [f(h) | map(f, t)]
 
 # A function may RETURN a function (a closure over its parameters). The declared
 # return type is an `Fn(…)`; the lambda body is checked against it.
-def adder(n Int64) Fn(Int64, Int64) := (x) -> x + n
+def adder(n Int53) Fn(Int53, Int53) := (x) -> x + n
 
 # Both a lambda literal and a named-function capture are values of an `Fn(…)`
 # type, so either can be passed where an `Fn(…)` parameter is expected.
-def doubled(xs val Vec(Int64)) Vec(Int64) := map((x) -> x * 2, xs)
-def doubled_cap(xs val Vec(Int64)) Vec(Int64) := map(&double/1, xs)
+def doubled(xs val Vec(Int53)) Vec(Int53) := map((x) -> x * 2, xs)
+def doubled_cap(xs val Vec(Int53)) Vec(Int53) := map(&double/1, xs)

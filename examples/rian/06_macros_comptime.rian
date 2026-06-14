@@ -27,18 +27,18 @@ macro square(x)          := x * x
 # 2. HYGIENE BY DEFAULT. A template's own binders are gensym-renamed, so they
 #    cannot capture the caller's variables. In the macro below, the template's
 #    `tmp` becomes `tmp__h<N>` and will NOT clobber a caller's `tmp`.
-macro add_tmp(x) := if true do tmp Int64 := 100 ; x + tmp else 0 end
+macro add_tmp(x) := if true do tmp Int53 := 100 ; x + tmp else 0 end
 
 # Usage looks like an ordinary call:
-def demo_unless(n Int64) Int64 := unless(n > 5, n * 10)     # n=3 -> 30 ; n=7 -> 0
-def demo_square(a Int64, b Int64) Int64 := square(a + b)    # (a+b)*(a+b): 2,3 -> 25
-def demo_hygiene(tmp Int64) Int64 := add_tmp(tmp)           # 5 -> 105 (NOT 200)
+def demo_unless(n Int53) Int53 := unless(n > 5, n * 10)     # n=3 -> 30 ; n=7 -> 0
+def demo_square(a Int53, b Int53) Int53 := square(a + b)    # (a+b)*(a+b): 2,3 -> 25
+def demo_hygiene(tmp Int53) Int53 := add_tmp(tmp)           # 5 -> 105 (NOT 200)
 
 # `comptime(expr)`: evaluate a constant expression at compile time and replace
 # it with its literal (the Zig model). The evaluator is a PURE SANDBOX:
 # literals, arithmetic, boolean and comparison operators only.
-def table_size() Int64 := comptime(2 + 3 * 4)           # becomes the literal 14
-def scaled() Int64     := comptime((1 + 2) * 5)          # becomes 15
+def table_size() Int53 := comptime(2 + 3 * 4)           # becomes the literal 14
+def scaled() Int53     := comptime((1 + 2) * 5)          # becomes 15
 def always() Bool      := comptime(3 > 5)                # becomes false
 
 # The sandbox REFUSES effects at compile time (each of these is a compile error):

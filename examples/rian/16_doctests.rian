@@ -20,7 +20,7 @@ Double an integer.
     double(21) #=> 42
     double(-5) #=> 0 - 10
 """
-def double(n Int64) Int64 := n * 2
+def double(n Int53) Int53 := n * 2
 
 @doc """
 The n-th Fibonacci number (naive).
@@ -29,7 +29,7 @@ The n-th Fibonacci number (naive).
     fib(1)  #=> 1
     fib(10) #=> 55
 """
-def fib(n Int64) Int64
+def fib(n Int53) Int53
 def fib(0) := 0
 def fib(1) := 1
 def fib(n) := fib(n - 1) + fib(n - 2)

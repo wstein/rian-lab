@@ -24,22 +24,22 @@ type Color := Red | Green | Blue
 # Product / record type. Becomes `%Point{}` on the BEAM and a Rust `struct`.
 struct Point(x Float64, y Float64)
 
-# Transparent synonym. `Id` and `Int64` are interchangeable; no runtime cost.
-alias Id := Int64
+# Transparent synonym. `Id` and `Int53` are interchangeable; no runtime cost.
+alias Id := Int53
 
 # --- `range` — a finite ordinal SUBRANGE type (ADR-0036, proposed) -------
-# A closed, INCLUSIVE ordinal interval over `Int64` or `Char`. Unlike `alias`
+# A closed, INCLUSIVE ordinal interval over `Int53` or `Char`. Unlike `alias`
 # (transparent, interchangeable with its base), a `range` is a DISTINCT,
 # bounds-checked type whose value set is FINITE. Out-of-range construction
 # yields the error set `Digit | RangeError` (ADR-0035) — never a hidden panic.
 #   Digit  -> Elixir `@type digit :: 0..9`    | Rust `i64` + checked ctor
 #   Letter -> Elixir `@type letter :: ?A..?Z` | Rust `char` + checked ctor
-range Digit  := 0..9         # over Int64
+range Digit  := 0..9         # over Int53
 range Letter := 'A'..'Z'     # over Char (the primitive ADR-0036 adds)
 range Bit    := 0..1
 
 # Because a `range` is FINITE, covering its whole interval is exhaustive — so
-# this `case` is TOTAL with NO `_` arm (contrast a bare `Int64`, an open
+# this `case` is TOTAL with NO `_` arm (contrast a bare `Int53`, an open
 # universe, which would require a catch-all). A `_` here would be UNREACHABLE.
 def flip(Bit) Bit
 def flip(b)

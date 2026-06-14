@@ -18,7 +18,7 @@
 # Rust parameter-type matrix this drives (Rian source type -> Rust output;
 # every cell compiled by rustc):
 #
-#   capability | Int64        | String  | Vec(Float64)  | nominal (Shape)
+#   capability | Int53        | String  | Vec(Float64)  | nominal (Shape)
 #   -----------|--------------|---------|---------------|----------------
 #   val        | i64 by value | &str    | &[f64]        | &Shape
 #   iso        | i64 (move)   | String  | Vec<f64>      | Shape
@@ -53,7 +53,7 @@ def same(a tag Shape, b tag Shape) Bool := a == b
 
 # Field capabilities work too: a struct field marked `iso` makes the whole
 # type non-`Clone` on Rust (only `Debug`), because the field is unique.
-struct Buffer(data iso Vec(UInt8), len val Int64)
+struct Buffer(data iso Vec(UInt8), len val Int53)
 
 # NOTE on the BEAM linearity model (PoC scope): the checker is TOTAL over every
 # node the parser produces and is BRANCH-AWARE for `if` — a value consumed once

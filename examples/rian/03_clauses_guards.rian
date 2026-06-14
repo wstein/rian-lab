@@ -12,7 +12,7 @@
 # Multi-clause group: bodiless signature, then pattern clauses sharing the
 # name/arity. First match wins, top to bottom (Elixir `def` order / Rust
 # `match` arm order — identical on both targets).
-def classify(Int64) String
+def classify(Int53) String
 def classify(0)            := "zero"
 def classify(n) when n > 0 := "positive"
 def classify(_)            := "negative"
@@ -21,7 +21,7 @@ def classify(_)            := "negative"
 # Elixir guards and Rust match guards. Arbitrary calls are rejected; only a
 # fixed whitelist (comparisons, arithmetic, `in`, and `is_*`/`len`/`abs`)
 # is allowed, so guards stay portable to both targets.
-def cmp(Int64, Int64) Order
+def cmp(Int53, Int53) Order
 def cmp(a, b) when a <  b := Less
 def cmp(a, b) when a == b := Equal
 def cmp(_, _)             := Greater
@@ -29,14 +29,14 @@ def cmp(_, _)             := Greater
 # Union narrowing: a guard that narrows a union lowers to a GUARD on Elixir
 # but a PATTERN ARM on Rust (Rust narrows enums structurally). Same source,
 # two idiomatic shapes.
-def show(Int64 | String) String
+def show(Int53 | String) String
 def show(x) when is_int(x) := "int: " <> to_str(x)
 def show(x) when is_str(x) := "str: " <> x
 
 # Exhaustiveness is enforced: GUARDED clauses do not count, so a guard-only
 # function needs an unguarded fallback. `max2`'s second clause is the
 # unguarded backstop that makes it total on both targets.
-def max2(Int64, Int64) Int64
+def max2(Int53, Int53) Int53
 def max2(a, b) when a >= b := a
 def max2(a, b)             := b
 

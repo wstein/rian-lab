@@ -13,20 +13,20 @@
 # for `->` after the matching `)`.
 #   (x) -> x * 2        Elixir: fn x -> x * 2 end      Rust: |x| x * 2
 #   (x, acc) -> x + acc Elixir: fn x, acc -> ...        Rust: |x, acc| x + acc
-def map_double(xs val Vec(Int64)) Vec(Int64) := Enum.map(xs, (x) -> x * 2)
-def fold_sum(xs val Vec(Int64)) Int64        := :lists.foldl((x, acc) -> x + acc, 0, xs)
+def map_double(xs val Vec(Int53)) Vec(Int53) := Enum.map(xs, (x) -> x * 2)
+def fold_sum(xs val Vec(Int53)) Int53        := :lists.foldl((x, acc) -> x + acc, 0, xs)
 
 # `if`/block bodies as expressions. Blocks are `;`-separated bindings ending in
 # a value expression.
-def sign(n Int64) Int64 := if n >= 0 do 1 else -1 end
-def step(n Int64) Int64 := if n > 0 do a := n * 2; a + 1 else 0 end
+def sign(n Int53) Int53 := if n >= 0 do 1 else -1 end
+def step(n Int53) Int53 := if n > 0 do a := n * 2; a + 1 else 0 end
 
 # List literals lower to `[..]` on Elixir and `vec![..]` on Rust.
-def small_primes() Vec(Int64) := [2, 3, 5, 7]
+def small_primes() Vec(Int53) := [2, 3, 5, 7]
 
 # Cons CONSTRUCTION `[h | t]` lowers on Elixir (O(1) prepend), but is BEAM-ONLY
 # on Rust (there is no idiomatic `Vec` cons) — the Rust backend refuses it.
-def prepend(p Int64, rest val Vec(Int64)) Vec(Int64) := [p | rest]
+def prepend(p Int53, rest val Vec(Int53)) Vec(Int53) := [p | rest]
 
 # Map literals are BEAM-only in the PoC (Rust lowering via HashMap/BTreeMap is
 # a future item). Used here on a default (Elixir-target) function.

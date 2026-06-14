@@ -39,7 +39,7 @@ mod SelfhostParse do
   end
 
   # an expression whose operators all bind at least as tight as `min_bp`.
-  def parse_bp(min_bp Int64, ts Vec(Tok)) Parse
+  def parse_bp(min_bp Int53, ts Vec(Tok)) Parse
   def parse_bp(min_bp, ts)
     case parse_prefix(ts) do
       P(lhs, rest) -> climb(min_bp, lhs, rest)
@@ -48,7 +48,7 @@ mod SelfhostParse do
 
   # while the next token is a binary operator whose left binding power is >=
   # min_bp, consume it and fold; the RHS is parsed at `rbp(op)`.
-  def climb(min_bp Int64, lhs Expr, ts Vec(Tok)) Parse
+  def climb(min_bp Int53, lhs Expr, ts Vec(Tok)) Parse
   def climb(min_bp, lhs, [TOp(op) | rest])
     if lbp(op) >= min_bp do
       case parse_bp(rbp(op), rest) do
@@ -115,21 +115,21 @@ mod SelfhostParse do
   def finish_arg(a, ts) := AP([a], ts)
 
   # ── binding powers (mirror Rian.Pratt.bp) ────────────────────────────────
-  def lbp(op String) Int64 := bp_base(level(op)) + left_off(op)
-  def rbp(op String) Int64 := bp_base(level(op)) + right_off(op)
-  def bp_base(lvl Int64) Int64 := (13 - lvl) * 10
+  def lbp(op String) Int53 := bp_base(level(op)) + left_off(op)
+  def rbp(op String) Int53 := bp_base(level(op)) + right_off(op)
+  def bp_base(lvl Int53) Int53 := (13 - lvl) * 10
 
-  def left_off(op String) Int64
+  def left_off(op String) Int53
   def left_off("<>") := 1
   def left_off(op) := 0
 
-  def right_off(op String) Int64
+  def right_off(op String) Int53
   def right_off("<>") := 0
   def right_off(op) := 1
 
   # operator precedence level (lower binds tighter); an unknown token gets a level
   # so loose that climbing always stops (the token is left unconsumed).
-  def level(op String) Int64
+  def level(op String) Int53
   def level("*") := 3
   def level("/") := 3
   def level("rem") := 3

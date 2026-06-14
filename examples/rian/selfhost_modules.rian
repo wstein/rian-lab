@@ -16,11 +16,11 @@
 
 # ── front end ─────────────────────────────────────────────────────────────
 mod CalcLex do
-  type Token := TNum(Int64) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
+  type Token := TNum(Int53) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
 
   pub def lex(src String) Vec(Token) := scan(String.to_charlist(src))
 
-  def scan(cs Vec(Int64)) Vec(Token)
+  def scan(cs Vec(Int53)) Vec(Token)
   def scan([]) := []
   def scan([c | rest]) when c == 32 := scan(rest)
   def scan([43 | rest]) := [TPlus | scan(rest)]
@@ -32,14 +32,14 @@ mod CalcLex do
   def scan([c | rest]) when c >= 48 and c <= 57 := scan_num([c | rest], 0)
   def scan([_ | rest]) := scan(rest)
 
-  def scan_num(cs Vec(Int64), acc Int64) Vec(Token)
+  def scan_num(cs Vec(Int53), acc Int53) Vec(Token)
   def scan_num([c | rest], acc) when c >= 48 and c <= 57 := scan_num(rest, acc * 10 + c - 48)
   def scan_num(cs, acc) := [TNum(acc) | scan(cs)]
 end
 
 # ── parser ──────────────────────────────────────────────────────────────────
 mod CalcParse do
-  type Expr := Num(Int64) | Add(Expr, Expr) | Sub(Expr, Expr) | Mul(Expr, Expr) | Div(Expr, Expr)
+  type Expr := Num(Int53) | Add(Expr, Expr) | Sub(Expr, Expr) | Mul(Expr, Expr) | Div(Expr, Expr)
   type Parse := P(Expr, Vec(Token))
 
   pub def parse(ts Vec(Token)) Expr
@@ -100,7 +100,7 @@ end
 
 # ── back end ──────────────────────────────────────────────────────────────
 mod CalcGen do
-  type Instr := Push(Int64) | IAdd | ISub | IMul | IDiv
+  type Instr := Push(Int53) | IAdd | ISub | IMul | IDiv
 
   pub def compile(e Expr) Vec(Instr)
   pub def compile(Num(n)) := [Push(n)]
@@ -115,9 +115,9 @@ mod CalcGen do
   def cat([], ys) := ys
   def cat([h | t], ys) := [h | cat(t, ys)]
 
-  pub def vm(prog Vec(Instr)) Int64 := exec(prog, [])
+  pub def vm(prog Vec(Instr)) Int53 := exec(prog, [])
 
-  def exec(prog Vec(Instr), stack Vec(Int64)) Int64
+  def exec(prog Vec(Instr), stack Vec(Int53)) Int53
   def exec([], [top | _]) := top
   def exec([Push(n) | r], st) := exec(r, [n | st])
   def exec([IAdd | r], [b, a | st]) := exec(r, [a + b | st])
@@ -128,5 +128,5 @@ end
 
 # ── driver: cross-module calls tie the pipeline together ────────────────────
 mod Calc do
-  pub def run(src String) Int64 := CalcGen.vm(CalcGen.compile(CalcParse.parse(CalcLex.lex(src))))
+  pub def run(src String) Int53 := CalcGen.vm(CalcGen.compile(CalcParse.parse(CalcLex.lex(src))))
 end
