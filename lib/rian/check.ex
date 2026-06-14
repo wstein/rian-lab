@@ -900,15 +900,30 @@ defmodule Rian.Check do
     end
   end
 
-  # A clause whose body is a bare numeric literal (`count([]) := 0`) adopts the
+  # A clause whose body is a *constant numeric expression of literals* adopts the
   # declared integer/float return *width*, exactly as a typed binding does
-  # (`literal_adopts?`). Without this the literal infers the default `Int64` and
-  # spuriously clashes with an `Int53`/`Int32` return — so a function returning the
-  # portable `Int53` could not have a literal base case (ADR-0064).
-  defp body_literal_adopts?({:block, [{:expr, e}]}, ret),
-    do: literal_adopts?(Core.from_expr(e), ret)
-
+  # (`literal_adopts?`). "Constant of literals" includes a bare literal
+  # (`count([]) := 0`), a negation/arithmetic of literals (`sign := … 0 - 1 …`),
+  # and an `if`/`case` *all* of whose branches are such (`sign := if … 1 … 0`).
+  # Without this a literal infers the default `Int64` and spuriously clashes with an
+  # `Int53`/`Int32` return — so a function returning the portable `Int53` could not
+  # have a literal base case or a literal `if`-chain (ADR-0064). It only *relaxes*
+  # the return check (an OR with `assignable?`), so it cannot reject valid code.
+  defp body_literal_adopts?({:block, [{:expr, e}]}, ret), do: lit_expr_adopts?(e, ret)
   defp body_literal_adopts?(_ast, _ret), do: false
+
+  defp lit_expr_adopts?({:if, _c, t, e}, ret),
+    do: lit_expr_adopts?(t, ret) and lit_expr_adopts?(e, ret)
+
+  defp lit_expr_adopts?({:case, _s, arms}, ret),
+    do: arms != [] and Enum.all?(arms, fn {_p, _g, b} -> lit_expr_adopts?(b, ret) end)
+
+  defp lit_expr_adopts?({:block, [{:expr, e}]}, ret), do: lit_expr_adopts?(e, ret)
+
+  defp lit_expr_adopts?({:bin, op, l, r}, ret) when op in ~w(+ - * div rem),
+    do: lit_expr_adopts?(l, ret) and lit_expr_adopts?(r, ret)
+
+  defp lit_expr_adopts?(e, ret), do: literal_adopts?(Core.from_expr(e), ret)
 
   defp generic_ret?(_ret, []), do: false
   defp generic_ret?(ret, tvars), do: Enum.any?(tvars, &Regex.match?(~r/\b#{&1}\b/, ret))

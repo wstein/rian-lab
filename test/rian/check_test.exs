@@ -880,6 +880,42 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "constant-of-literals return bodies adopt the declared width (ADR-0064)" do
+    test "a bare-literal base case adopts `Int53`/`Int32` (not the default `Int64`)" do
+      assert Check.check("def g() Int53 := 0") == :ok
+      assert Check.check("def g() Int32 := 7") == :ok
+    end
+
+    test "an arithmetic expression of literals adopts the declared width" do
+      assert Check.check("def f() Int53 := 2 * 3 + 1") == :ok
+      assert Check.check("def f() Int32 := 0 - 1") == :ok
+    end
+
+    test "an `if`/`case` whose branches are all literals adopts the width" do
+      assert Check.check(
+               "def sign(n Int53) Int53 := if n > 0 do 1 else if n < 0 do 0 - 1 else 0 end end"
+             ) == :ok
+    end
+
+    test "a recursive fn with a literal base + literal-augmented step adopts `Int53`" do
+      assert Check.check("""
+             def len(xs Vec(Int53)) Int53
+             def len([]) := 0
+             def len([_ | t]) := 1 + len(t)
+             """) == :ok
+    end
+
+    test "a REAL `Int64` value is still rejected against `Int53` — adoption is literals-only" do
+      # soundness: only a constant of literals adopts; a typed value keeps the
+      # narrowing check, even inside an `if` branch alongside a literal.
+      assert {:error, m1} = Check.check("def bad(n Int64) Int53 := n")
+      assert m1 =~ "declared return type is `Int53`"
+
+      assert {:error, _} =
+               Check.check("def bad(n Int64) Int53 := if true do n else 0 end")
+    end
+  end
+
   describe "range bindings — non-integer ordinal kinds & runtime values" do
     test "a Char literal against an Int64-based range is a kind mismatch naming `Char`" do
       assert {:error, msg} =
