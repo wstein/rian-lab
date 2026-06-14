@@ -157,14 +157,14 @@ defmodule Rian.SelfHost do
   # bootstrap terminus (Stage 3: v1==v2) is gated on this reaching the whole
   # pipeline — not on `percent`.
   @composition %{
-    rung: "parse → selfhost_beam Func → SelfhostBeam.compile_forms → inflate → load",
+    rung: "SelfhostParse.parse → lower → SelfhostBeam.compile_forms → inflate → load",
     stages: 4,
     subset:
-      "a whole multi-function module (arithmetic + `if`/comparison/boolean) compiled by a Rian driver whose BACKEND is the equivalence-locked selfhost_beam port, called CROSS-MODULE — not a toy reimplementation",
-    source: "selfhost_compose_real_beam.rian",
-    test: "test/rian/compose_real_beam_fixpoint_test.exs",
+      "a whole multi-function module (arithmetic + `if`/comparison/boolean) whose BODIES are parsed by the equivalence-locked selfhost_parse port and compiled by the equivalence-locked selfhost_beam port — BOTH called CROSS-MODULE, no toy reimplementation of either",
+    source: "selfhost_compose_real_front.rian",
+    test: "test/rian/compose_real_front_fixpoint_test.exs",
     note:
-      "Rungs 1-6 built a driver that owns the source→loaded-module loop, but over a TOY backend (its own hand-rolled `forms`), separate from the verified ports — two disconnected successes. Rung 7 connects them: the driver builds selfhost_beam's `Func` IR and calls the equivalence-locked `SelfhostBeam.compile_forms` ACROSS MODULES (loaded under :\"Elixir.SelfhostBeam\", a Pascal-qualified call — ADR-0041), so stage N's Rian output is stage N+1's Rian input with no projection glue. The `Form`→abstract-form inflation the beam fixpoint did in Elixir is ported into the driver. The cross-module call is composition, not a host crutch (excluded from the FFI ledger); the only host FFI is still :compile.forms/:code.load_binary. The fixpoint calls only build/2 and runs the result identically to the full Elixir toolchain. Earlier rungs (1 expression … 6 if/comparison) widened the front-end surface; this one swaps the toy backend for the verified one. Widening the front-end to the real parser/core ports (so build compiles a slice of the compiler's own source — the v1==v2 fixed point) is the next cut"
+      "Rungs 1-6 built a driver owning the source→loaded-module loop over a TOY pipeline. Rung 7 made the BACKEND the verified `selfhost_beam` port (cross-module `SelfhostBeam.compile_forms`). Rung 8 makes the FRONT-END's hardest piece verified too: each clause body is parsed by the equivalence-locked `selfhost_parse` port (the full Rian.Pratt grammar) via cross-module `SelfhostParse.parse`, its raw surface lowered to selfhost_beam Core. TWO verified stages now compose end to end — connected only by driver-local lexing, declaration-splitting, and a raw-surface→Core lowering, none of which reimplements either stage. Both ports load under :\"Elixir.Selfhost*\" atoms so the Pascal-qualified calls resolve (ADR-0041); both are sibling self-host ports, so the calls are composition, not host crutches (excluded from the FFI ledger). The only host FFI is still :compile.forms/:code.load_binary. The fixpoint calls only build/2 and runs the result identically to the full Elixir toolchain — now with the REAL parser (real precedence/surface) AND the real backend. Remaining toy piece: the declaration layer (selfhost_decl is :partial); promoting it, then feeding build a slice of the compiler's own source, is the path to the v1==v2 fixed point"
   }
 
   @doc """
@@ -291,7 +291,11 @@ defmodule Rian.SelfHost do
     # rung 7 wires the VERIFIED beam backend into the driver via a cross-module call
     # to SelfhostBeam.compile_forms (composition — excluded from this count, see
     # ffi_in_file/1). Its only host FFI is still the two BEAM toolchain calls.
-    "selfhost_compose_real_beam.rian" => [":code.load_binary", ":compile.forms"]
+    "selfhost_compose_real_beam.rian" => [":code.load_binary", ":compile.forms"],
+    # rung 8 adds the verified FRONT-END: bodies parsed by SelfhostParse.parse, then
+    # the SelfhostBeam backend (both cross-module composition, excluded). Same two
+    # BEAM toolchain calls as the only host FFI.
+    "selfhost_compose_real_front.rian" => [":code.load_binary", ":compile.forms"]
   }
 
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."

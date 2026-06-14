@@ -251,6 +251,19 @@ compile + run on real BEAM bytecode:
   `:compile.forms`/`:code.load_binary`. `test/rian/compose_real_beam_fixpoint_test.exs`
   calls only `build/2` and runs the result, identical to `Rian.Beam`. Widening the
   *front-end* to the real parser/core ports is the next cut.
+- [selfhost_compose_real_front.rian](selfhost_compose_real_front.rian) — **COMPOSITION
+  rung 8** (ADR-0063 Step 3): extends rung 7 to the **front-end**. Each clause body is
+  now parsed by the equivalence-locked [selfhost_parse.rian](selfhost_parse.rian) (the
+  full Rian.Pratt grammar) via a cross-module `SelfhostParse.parse`, its raw surface
+  tuple (`{:bin,op,l,r}`, `{:if,c,{:block,_},{:block,_}}`, …) lowered to `selfhost_beam`
+  Core, then compiled by the cross-module `SelfhostBeam.compile_forms` (rung 7). **Two
+  verified stages composed end to end** — connected only by driver-local lexing,
+  declaration-splitting, and a raw-surface→Core lowering (none reimplementing either
+  port). Both load under `:"Elixir.Selfhost*"` atoms (ADR-0041); both are sibling
+  ports, so the calls are composition, not host crutches (excluded from the FFI
+  ledger). `test/rian/compose_real_front_fixpoint_test.exs` runs `fib`/`max`/`gcd`/
+  `poly` — with the **real** Pratt precedence and surface — identical to `Rian.Beam`.
+  The remaining toy piece is the declaration layer (`selfhost_decl` is `:partial`).
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via

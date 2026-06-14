@@ -1,0 +1,374 @@
+# ===========================================================================
+# SELF-HOSTING — COMPOSITION rung 8: wire the VERIFIED parser AND backend in
+# ===========================================================================
+# Rung 7 made the driver's BACKEND the equivalence-locked `selfhost_beam` port.
+# This rung does the same for the FRONT-END's hardest piece: clause bodies are
+# now parsed by the equivalence-locked `selfhost_parse` port (the full Rian.Pratt
+# grammar), called cross-module — not by a toy expression parser.
+#
+#   lex(src) → driver decl-parse (def head + clause split)
+#            → SelfhostParse.parse(body tokens)   ← the REAL parser (cross-module)
+#            → lower its raw surface tuple → selfhost_beam Core
+#            → SelfhostBeam.compile_forms(funcs)  ← the REAL backend (cross-module)
+#            → inflate Form → abstract-form tuples (in Rian)
+#            → :compile.forms / :code.load_binary (the driver loop)
+#
+# TWO verified stages are now composed end to end, connected only by driver-local
+# glue that itself contains no toy reimplementation of either: a lexer producing
+# `selfhost_parse`'s exact `Tok`, a declaration splitter, and a raw-surface→Core
+# lowering (`{:bin,op,l,r}` → `CBin`, `{:if,c,{:block,_},{:block,_}}` → `CIf`, …).
+#
+# Both `SelfhostParse` and `SelfhostBeam` must be loaded under their
+# `:"Elixir.Selfhost*"` atoms so the Pascal-qualified calls resolve (ADR-0041);
+# both are sibling self-host ports, so the calls are composition, not host crutches
+# (excluded from the FFI ledger). The only host FFI is still :compile.forms /
+# :code.load_binary.
+#
+# Scope: arithmetic + `if`/comparison/boolean over multi-clause defs — but the
+# expression grammar is now the REAL one (real precedence, real surface). The
+# remaining toy piece is the declaration layer (selfhost_decl is :partial).
+# ---------------------------------------------------------------------------
+
+mod SelfhostComposeRealFront do
+  # ── selfhost_parse's Tok (the subset the driver emits; tags must match) ──
+  type Tok := TNum(String) | TId(String) | TKw(String) | TOp(String)
+            | TLP | TRP | TComma
+
+  # ── selfhost_beam's INPUT IR (the shared contract — structurally identical) ──
+  type Core := CNum(String)
+             | CId(String)
+             | CAtom(String)
+             | CUnary(String, Core)
+             | CBin(String, Core, Core)
+             | CCall(String, Vec(Core))
+             | CTuple(Vec(Core))
+             | CList(Vec(Core), Tail)
+             | CIf(Core, Block, Block)
+             | CCase(Core, Vec(Arm))
+
+  type Tail := TClose | TTail(Core)
+  type Block := Block(Vec(Stmt))
+  type Stmt := SBind(String, Core) | STypedBind(String, String, Core) | SExpr(Core)
+  type Arm := Arm(Pat, Guard, Block)
+
+  type Pat := PWild
+            | PVar(String)
+            | PInt(Int53)
+            | PAtom(String)
+            | PCtor(String, Vec(Pat))
+            | PTuple(Vec(Pat))
+            | PList(Vec(Pat), PTail)
+
+  type PTail := PtlClose | PtlTail(Pat)
+  type Guard := GNone | GSome(Core)
+  type Clause := Clause(Vec(Pat), Guard, Block)
+  type Func := Func(String, Int53, Vec(Clause))
+
+  # ── selfhost_beam's OUTPUT (the string-carrying Form sum we inflate) ──
+  type Form := FInt(Int53)
+             | FVar(String)
+             | FAtom(String)
+             | FCtorN(String)
+             | FCtor(String, Vec(Form))
+             | FOp1(String, Form)
+             | FOp2(String, Form, Form)
+             | FCall(String, Vec(Form))
+             | FTuple(Vec(Form))
+             | FNil
+             | FCons(Form, Form)
+             | FIf(Form, Vec(Form), Vec(Form))
+             | FCase(Form, Vec(FClause))
+             | FMatch(String, Form)
+
+  type GForm := GfNone | GfSome(Form)
+  type FClause := FClause(Vec(Form), GForm, Vec(Form))
+  type FFunc := FFunc(String, Int53, Vec(FClause))
+
+  # ── driver-local types ──
+  type Decl := Def(String, Vec(Pat), Core)
+  type Grp := Grp(String, Int53, Vec(Decl))
+  type CR := CR(Decl, Vec(Tok))
+  type BR := BR(Vec(Tok), Vec(Tok))
+
+  # ── the BEAM toolchain boundary: two @external(:ex) host calls (counted FFI) ──
+  @external(:ex, ":compile.forms(forms, [:return_errors])")
+  def compile_forms_host(forms Vec(Tuple)) Tuple
+
+  @external(:ex, ":code.load_binary(name, chars, bin)")
+  def load_binary(name Symbol, chars Vec(Int53), bin String) Tuple
+
+  # ── the driver: source -> a loaded, runnable module ──
+  pub def build(src String, modname Symbol) Symbol
+  pub def build(src, modname)
+    case compile_forms_host(compile_module(src, modname)) do
+      {:ok, m, bin} -> loaded(load_binary(m, Prim.str_chars("nofile"), bin))
+    end
+  end
+
+  def loaded(Tuple) Symbol
+  def loaded({:module, m}) := m
+
+  # ── source -> a full :compile.forms input, via the REAL parser + backend ──
+  pub def compile_module(src String, modname Symbol) Vec(Tuple)
+  pub def compile_module(src, modname) := assemble(modname, funcs(group(parse_clauses(lex(src)))))
+
+  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
+
+  def exports(Vec(Func)) Vec(Tuple)
+  def exports([]) := []
+  def exports([Func(name, arity, _) | rest]) := [{Prim.str_to_atom(name), arity} | exports(rest)]
+
+  # ── stage 1: lex (String -> selfhost_parse Tok) ──
+  pub def lex(s String) Vec(Tok) := lex_chars(Prim.str_chars(s))
+
+  def lex_chars(Vec(Int53)) Vec(Tok)
+  def lex_chars([]) := []
+  def lex_chars([c | rest])
+    if c == 32 or c == 10 or c == 13 do
+      lex_chars(rest)
+    else
+      classify(c, rest)
+    end
+  end
+
+  def classify(c Int53, rest Vec(Int53)) Vec(Tok)
+  def classify(c, rest)
+    if is_digit(c) do
+      take_num([c | rest], [])
+    else
+      lex_alpha_or_op(c, rest)
+    end
+  end
+
+  def lex_alpha_or_op(c Int53, rest Vec(Int53)) Vec(Tok)
+  def lex_alpha_or_op(c, rest)
+    if is_alpha(c) do
+      take_id([c | rest], [])
+    else
+      take_op([c | rest])
+    end
+  end
+
+  def take_num(Vec(Int53), Vec(Int53)) Vec(Tok)
+  def take_num([], acc) := [TNum(text(acc))]
+  def take_num([c | rest], acc)
+    if is_digit(c) do
+      take_num(rest, [c | acc])
+    else
+      [TNum(text(acc)) | lex_chars([c | rest])]
+    end
+  end
+
+  def take_id(Vec(Int53), Vec(Int53)) Vec(Tok)
+  def take_id([], acc) := [id_tok(text(acc))]
+  def take_id([c | rest], acc)
+    if is_alnum(c) do
+      take_id(rest, [c | acc])
+    else
+      [id_tok(text(acc)) | lex_chars([c | rest])]
+    end
+  end
+
+  # `def`/`if`/`do`/`else`/`end` are keywords (TKw); `and`/`or` are operators (TOp,
+  # per selfhost_parse's level table); everything else is an identifier.
+  def id_tok(String) Tok
+  def id_tok("def") := TKw("def")
+  def id_tok("if") := TKw("if")
+  def id_tok("do") := TKw("do")
+  def id_tok("else") := TKw("else")
+  def id_tok("end") := TKw("end")
+  def id_tok("and") := TOp("and")
+  def id_tok("or") := TOp("or")
+  def id_tok(s) := TId(s)
+
+  def take_op(Vec(Int53)) Vec(Tok)
+  def take_op([58, 61 | rest]) := [TOp(":=") | lex_chars(rest)]
+  def take_op([61, 61 | rest]) := [TOp("==") | lex_chars(rest)]
+  def take_op([62, 61 | rest]) := [TOp(">=") | lex_chars(rest)]
+  def take_op([60, 61 | rest]) := [TOp("<=") | lex_chars(rest)]
+  def take_op([44 | rest]) := [TComma | lex_chars(rest)]
+  def take_op([40 | rest]) := [TLP | lex_chars(rest)]
+  def take_op([41 | rest]) := [TRP | lex_chars(rest)]
+  def take_op([c | rest]) := [TOp(Prim.str_from_chars([c])) | lex_chars(rest)]
+
+  def text(acc Vec(Int53)) String := Prim.str_from_chars(rev_codes(acc, []))
+
+  def rev_codes(Vec(Int53), Vec(Int53)) Vec(Int53)
+  def rev_codes([], out) := out
+  def rev_codes([c | rest], out) := rev_codes(rest, [c | out])
+
+  def is_digit(c Int53) Bool := c >= 48 and c <= 57
+  def is_alpha(c Int53) Bool := (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or c == 95
+  def is_alnum(c Int53) Bool := is_alpha(c) or is_digit(c)
+
+  # ── stage 2: parse declarations; delegate each body to the REAL parser ──
+  pub def parse_clauses(Vec(Tok)) Vec(Decl)
+  pub def parse_clauses([]) := []
+  pub def parse_clauses(ts)
+    case parse_one(ts) do
+      CR(d, rest) -> [d | parse_clauses(rest)]
+    end
+  end
+
+  # consume `def NAME ( pats ) :=`, then the body up to the next `def`.
+  def parse_one(Vec(Tok)) CR
+  def parse_one([_ | rest])
+    case rest do
+      [TId(name) | r2] -> parse_head(name, r2)
+    end
+  end
+
+  def parse_head(name String, Vec(Tok)) CR
+  def parse_head(name, [TLP | rest]) := collect_pats(name, [], rest)
+
+  def collect_pats(name String, acc Vec(Pat), Vec(Tok)) CR
+  def collect_pats(name, acc, [TRP | rest]) := finish_clause(name, rev_pats(acc, []), rest)
+  def collect_pats(name, acc, [TComma | rest]) := collect_pats(name, acc, rest)
+  def collect_pats(name, acc, [TNum(n) | rest]) := collect_pats(name, [PInt(parse_int(n)) | acc], rest)
+  def collect_pats(name, acc, [TId(p) | rest]) := collect_pats(name, [PVar(p) | acc], rest)
+
+  # after `)` comes `:=`; the body is everything up to the next `def`. The body
+  # token slice is handed to the REAL parser, whose raw surface is lowered to Core.
+  def finish_clause(name String, pats Vec(Pat), Vec(Tok)) CR
+  def finish_clause(name, pats, [_ | rest])
+    case take_body(rest, []) do
+      BR(body, leftover) -> CR(Def(name, pats, lower_surface(SelfhostParse.parse(body))), leftover)
+    end
+  end
+
+  # collect body tokens until the next `def` keyword (kept out of the body).
+  def take_body(Vec(Tok), Vec(Tok)) BR
+  def take_body([], acc) := BR(rev_toks(acc, []), [])
+  def take_body([TKw("def") | rest], acc) := BR(rev_toks(acc, []), [TKw("def") | rest])
+  def take_body([t | rest], acc) := take_body(rest, [t | acc])
+
+  def rev_toks(Vec(Tok), Vec(Tok)) Vec(Tok)
+  def rev_toks([], out) := out
+  def rev_toks([t | rest], out) := rev_toks(rest, [t | out])
+
+  def rev_pats(Vec(Pat), Vec(Pat)) Vec(Pat)
+  def rev_pats([], out) := out
+  def rev_pats([p | rest], out) := rev_pats(rest, [p | out])
+
+  # ── lower the REAL parser's raw surface tuples -> selfhost_beam Core ──
+  # `{:num,s}` `{:id,x}` `{:bin,op,l,r}` `{:call,{:id,f},args}`
+  # `{:if,c,{:block,_},{:block,_}}` — the subset the corpus produces.
+  def lower_surface(Tuple) Core
+  def lower_surface({:num, s}) := CNum(s)
+  def lower_surface({:id, x}) := CId(x)
+  def lower_surface({:bin, op, l, r}) := CBin(op, lower_surface(l), lower_surface(r))
+  def lower_surface({:call, callee, args}) := CCall(callee_name(callee), lower_all(args))
+  def lower_surface({:"if", c, t, e}) := CIf(lower_surface(c), lower_block(t), lower_block(e))
+
+  def callee_name(Tuple) String
+  def callee_name({:id, f}) := f
+
+  def lower_all(Vec(Tuple)) Vec(Core)
+  def lower_all([]) := []
+  def lower_all([e | rest]) := [lower_surface(e) | lower_all(rest)]
+
+  def lower_block(Tuple) Block
+  def lower_block({:block, stmts}) := Block(lower_stmts(stmts))
+
+  def lower_stmts(Vec(Tuple)) Vec(Stmt)
+  def lower_stmts([]) := []
+  def lower_stmts([{:expr, e} | rest]) := [SExpr(lower_surface(e)) | lower_stmts(rest)]
+  def lower_stmts([{:bind, n, e} | rest]) := [SBind(n, lower_surface(e)) | lower_stmts(rest)]
+
+  # ── group clauses, wrap each group as a beam Func (as in rung 7) ──
+  def group(Vec(Decl)) Vec(Grp)
+  def group([]) := []
+  def group([Def(name, pats, body) | rest]) := group_run(name, plen(pats), [Def(name, pats, body)], rest)
+
+  def group_run(name String, arity Int53, acc Vec(Decl), Vec(Decl)) Vec(Grp)
+  def group_run(name, arity, acc, []) := [Grp(name, arity, rev_decls(acc, []))]
+  def group_run(name, arity, acc, [Def(n2, p2, b2) | rest])
+    if name == n2 do
+      group_run(name, arity, [Def(n2, p2, b2) | acc], rest)
+    else
+      [Grp(name, arity, rev_decls(acc, [])) | group([Def(n2, p2, b2) | rest])]
+    end
+  end
+
+  def rev_decls(Vec(Decl), Vec(Decl)) Vec(Decl)
+  def rev_decls([], out) := out
+  def rev_decls([d | rest], out) := rev_decls(rest, [d | out])
+
+  def funcs(Vec(Grp)) Vec(Func)
+  def funcs([]) := []
+  def funcs([Grp(name, arity, decls) | rest]) := [Func(name, arity, clauses_of(decls)) | funcs(rest)]
+
+  def clauses_of(Vec(Decl)) Vec(Clause)
+  def clauses_of([]) := []
+  def clauses_of([Def(_, pats, body) | rest]) := [Clause(pats, GNone, Block([SExpr(body)])) | clauses_of(rest)]
+
+  def plen(Vec(Pat)) Int53
+  def plen([]) := 0
+  def plen([_ | rest]) := 1 + plen(rest)
+
+  # ── inflate selfhost_beam's Form sum -> real abstract-form tuples (as rung 7) ──
+  def inflate_funcs(Vec(FFunc)) Vec(Tuple)
+  def inflate_funcs([]) := []
+  def inflate_funcs([f | rest]) := [inflate_func(f) | inflate_funcs(rest)]
+
+  def inflate_func(FFunc) Tuple
+  def inflate_func(FFunc(name, arity, clauses)) := {:function, 0, Prim.str_to_atom(name), arity, inflate_clauses(clauses)}
+
+  def inflate_clauses(Vec(FClause)) Vec(Tuple)
+  def inflate_clauses([]) := []
+  def inflate_clauses([c | rest]) := [inflate_clause(c) | inflate_clauses(rest)]
+
+  def inflate_clause(FClause) Tuple
+  def inflate_clause(FClause(pats, guard, body)) := {:clause, 0, inflate_all(pats), guard_seq(guard), inflate_all(body)}
+
+  def guard_seq(GForm) Vec(Vec(Tuple))
+  def guard_seq(GfNone) := []
+  def guard_seq(GfSome(g)) := [[inflate(g)]]
+
+  def inflate_all(Vec(Form)) Vec(Tuple)
+  def inflate_all([]) := []
+  def inflate_all([f | rest]) := [inflate(f) | inflate_all(rest)]
+
+  def inflate(Form) Tuple
+  def inflate(FInt(v)) := {:integer, 0, v}
+  def inflate(FVar(n)) := {:var, 0, var_atom(n)}
+  def inflate(FAtom(a)) := {:atom, 0, Prim.str_to_atom(a)}
+  def inflate(FOp1(op, x)) := {:op, 0, op_atom(op), inflate(x)}
+  def inflate(FOp2(op, l, r)) := {:op, 0, op_atom(op), inflate(l), inflate(r)}
+  def inflate(FCall(f, args)) := {:call, 0, {:atom, 0, Prim.str_to_atom(f)}, inflate_all(args)}
+  def inflate(FIf(c, t, e)) := {:"case", 0, inflate(c), [{:clause, 0, [{:atom, 0, :true}], [], inflate_all(t)}, {:clause, 0, [{:atom, 0, :false}], [], inflate_all(e)}]}
+
+  def var_atom(n String) Symbol := Prim.str_to_atom(cap(n))
+
+  def op_atom(String) Symbol
+  def op_atom("+") := :"+"
+  def op_atom("-") := :"-"
+  def op_atom("*") := :"*"
+  def op_atom("==") := :"=="
+  def op_atom("<") := :"<"
+  def op_atom(">") := :">"
+  def op_atom(">=") := :">="
+  def op_atom("<=") := :"=<"
+  def op_atom("and") := :andalso
+  def op_atom("or") := :orelse
+
+  def parse_int(s String) Int53 := digits(Prim.str_chars(s), 0)
+  def digits(Vec(Int53), Int53) Int53
+  def digits([], acc) := acc
+  def digits([c | rest], acc) := digits(rest, acc * 10 + c - 48)
+
+  def cap(s String) String
+    case Prim.str_chars(s) do
+      [c | rest] -> Prim.str_from_chars([up(c) | rest])
+      [] -> s
+    end
+  end
+
+  def up(c Int53) Int53
+    if c >= 97 and c <= 122 do
+      c - 32
+    else
+      c
+    end
+  end
+end
