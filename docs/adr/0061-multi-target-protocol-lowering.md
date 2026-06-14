@@ -156,14 +156,21 @@ Consequences of target-relativity:
        call (`infer_concrete_params` binds the callee's tvars from its arg literal types). A borrowed
        field at construction is `.clone()`d, and a string literal fed to a generic `&K` (which resolves to
        owned `String`) becomes `&format!("{}{}", "a", "")` (`owned_str_arg`). **`18_dict_eq` compiles to and
-       runs on Rust** (`rustc --test`). *Known limit:* the concrete-instantiation inference handles a
-       builder whose tail is a generic constructor call; an un-inferrable builder falls back to `i64`.
+       runs on Rust** (`rustc --test`). The support is a **narrow monomorphic subset**, and `Rian.Reach`
+       gates `:rs` to *exactly* that subset (`parametric_rs_ok?`, a default-deny allow-list) so the matrix
+       never oversells a shape rustc rejects: the type's tvar fields must all be **bare** tvars (`k K`, not
+       `items Vec(T)` — a nested tvar emits an undeclared generic); a **generic** builder's construction
+       args must match the field tvars *positionally* (`P(key, value)` with `key K`, `value V` — not
+       `P(a, b)` with `a A`, `b B`); and a **non-generic** builder must not construct directly (nothing to
+       infer) and must tail-call a generic helper (the one shape `infer_concrete_params` binds). Anything
+       outside this — including the previously-silent `i64` fallback — pins off `:rs` with a `:generic`
+       blocker (`reach_rust_honesty_test`, incl. a `@tag :rust` case proving the pinned shape fails rustc).
     3. **compound owned-tvar returns — DONE (2026-06-14).** `Option(T)`, `T | E` (a generic ok-type), and
        a user sum over a tvar now reach `:rs`: the payload is `.clone()`d at construction
        (`rust_owned_elem` on variant fields and on `Ok`/`Err`). Verified on rustc (`reach_rust_honesty_test`).
-  The **only** Rust-generic residual is an **`Fn(...)`-typed return** that mentions a tvar (a returned
-  closure capturing a `&T` needs `impl Fn`/`Box<dyn Fn>`, rustc E0782) — `sig_returns_tvar?` pins just
-  that off `:rs`.
+  The remaining Rust-generic residuals are an **`Fn(...)`-typed return** that mentions a tvar (a returned
+  closure capturing a `&T` needs `impl Fn`/`Box<dyn Fn>`, rustc E0782 — `sig_returns_tvar?` pins just that),
+  plus every **parametric** shape outside the monomorphic subset above.
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
   `Self`-returning methods (`def add(a Self, b Self) Self`) and associated types are a further Rust
   mapping question (return-position `Self`, generic associated types).
