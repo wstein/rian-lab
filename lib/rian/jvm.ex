@@ -19,7 +19,9 @@ defmodule Rian.JVM do
   Kotlin has no native multi-clause functions, so a multi-clause `def` lowers to a
   **dispatcher**: positional params `a0, a1, …`, one `if (<structural tests>) { …
   return … }` per clause (binds via Kotlin smart-cast after an `is` test), ending
-  in a `throw` (no clause matched — dropped when a clause is unconditional).
+  in a `throw` (no clause matched — dropped when a clause is unconditional). A
+  clause whose only condition is a `when` guard (no structural test) lowers to a
+  scoped `run { … }` carrying the guard as its inner `if`.
 
   `Int64` lowers to `Long` (JVM has 64-bit ints natively, no boxing dance);
   `Float64` → `Double`, `Bool` → `Boolean`, `String` → `String`, `Char` → `Long`
@@ -261,8 +263,18 @@ defmodule Rian.JVM do
         body = bind_str(binds) <> guarded_return(c.body, c.guard, param_names)
 
         case {tests, c.guard} do
-          {[], nil} -> {:halt, {["  #{body}\n" | acc], true}}
-          _ -> {:cont, {["  if (#{Enum.join(tests, " && ")}) { #{body} }\n" | acc], false}}
+          {[], nil} ->
+            {:halt, {["  #{body}\n" | acc], true}}
+
+          # A guard with no structural tests carries its condition in the inner
+          # `if` that `guarded_return/3` emits; wrap it in a scoped `run { … }`
+          # (an empty `if () { … }` is not valid Kotlin) so the clause's binds
+          # stay local and a matched guard returns non-locally from the function.
+          {[], _guard} ->
+            {:cont, {["  run { #{body} }\n" | acc], false}}
+
+          _ ->
+            {:cont, {["  if (#{Enum.join(tests, " && ")}) { #{body} }\n" | acc], false}}
         end
       end)
 

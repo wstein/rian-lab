@@ -195,10 +195,38 @@ defmodule Rian.JVMTest do
         def classify(n) := 0
         """)
 
-      # the guard becomes an inner `if (..) { return .. }` (jvm.ex:149); the
-      # binding for the guarded clause is emitted alongside it (jvm.ex:155/174)
-      assert kt =~ "if ((n > 0L)) { return 1L }"
-      assert kt =~ "val n = a0;"
+      # a guard-only clause (its variable pattern binds but tests nothing) lowers
+      # to a scoped `run { val n = a0; if (guard) { return .. } }` — never an
+      # invalid empty `if () { .. }`
+      assert kt =~ "run { val n = a0; if ((n > 0L)) { return 1L } }"
+      refute kt =~ "if ()"
+
+      case kotlin_run(kt, ~s|println(classify(5L)); println(classify(-2L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "1\n0"
+      end
+    end
+
+    test "a guard-only first clause followed by literal and catch-all clauses runs" do
+      kt =
+        JVM.compile("""
+        def classify(n Int64) String
+        def classify(n) when n < 0 := "negative"
+        def classify(0) := "zero"
+        def classify(n) := "positive"
+        """)
+
+      assert kt =~ ~s|run { val n = a0; if ((n < 0L)) { return "negative" } }|
+      assert kt =~ ~s|if (a0 == 0L) { return "zero" }|
+      refute kt =~ "if ()"
+
+      case kotlin_run(
+             kt,
+             ~s|println(classify(-3L)); println(classify(0L)); println(classify(8L))|
+           ) do
+        :no_jvm -> :ok
+        out -> assert out == "negative\nzero\npositive"
+      end
     end
 
     test "a char-literal pattern in a clause head matches on the codepoint" do
