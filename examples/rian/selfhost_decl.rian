@@ -11,15 +11,17 @@
 #   type Name := V1 | V2(T, …)                         sum declarations
 #   struct Name(field Type, …)                         product (record) types
 #   mod Name do … end                                  module nesting (incl. `pub def`)
-#   def name(p [cap] Type, …) Ret := expr              single typed clause
+#   def name(p [cap] Type, …) Ret [forall T, U: Bound] := expr   single typed clause
 #   def name(pat, …) [when g] := expr                  pattern clause (multi-clause)
+#   generics: `Ret forall T` / `Ret forall T, U: Eq + Ord` binders (ADR-0042),
+#             carried as `tvars`/`bounds` on the function head
 #   patterns: _ · var · Int literal · Ctor(pat, …) · cons/list [] / [h | t] (nested)
 #   capabilities: val / iso / ref / tag (default val); parametric types `Vec(T)`
 #   exprs: binops (precedence climbing) · prefix - / not · calls · `.field` access
 #          · labeled construction `Name(f: v)` · list construction `[x | acc]`
 #
 # Out of slice (the remaining long tail of Rian.Decl): string/char clause patterns,
-# negative-literal patterns, `alias`/`const`/`protocol`/`impl`/`forall` generics,
+# negative-literal patterns, `alias`/`const`/`protocol`/`impl`,
 # doc-comments, and block (`do … end`) function bodies.
 # ---------------------------------------------------------------------------
 
@@ -47,13 +49,17 @@ mod SelfhostDecl do
   type Variant := V(String, Vec(String))
   type Param := Par(String, String, String)
   type PType := PT(String, Vec(Tok))
+  # a `forall` binder (ADR-0042): the tvar name + its protocol bounds (empty list
+  # when unconstrained). `forall T: Eq + Ord` -> TV("T", ["Eq", "Ord"]).
+  type TVar := TV(String, Vec(String))
   # `pub?` (a Bool) is carried on the function head (DFunc/DSig) so `pub def`
-  # inside a `mod` projects to `Func.pub? = true` (exported on the BEAM).
+  # inside a `mod` projects to `Func.pub? = true` (exported on the BEAM); the
+  # `Vec(TVar)` carries the `forall` generics (empty when none).
   type Decl :=
       DType(String, Vec(Variant))
     | DStruct(String, Vec(Param))
-    | DFunc(Bool, String, Vec(Param), String, Expr)
-    | DSig(Bool, String, Vec(Param), String)
+    | DFunc(Bool, String, Vec(Param), String, Vec(TVar), Expr)
+    | DSig(Bool, String, Vec(Param), String, Vec(TVar))
     | DClause(String, Vec(Pat), Expr)
     | DClauseG(String, Vec(Pat), Expr, Expr)
     | DMod(String, Vec(Decl))
@@ -71,6 +77,9 @@ mod SelfhostDecl do
   type PatRes := PP(Pat, Vec(Tok))
   type PatList := PL(Vec(Pat), Vec(Tok))
   type ModBody := MB(Vec(Tok), Vec(Tok))
+  type Gen := GR(Vec(TVar), Vec(Tok))
+  type TVarRes := TVR(TVar, Vec(Tok))
+  type BoundRes := BR(Vec(String), Vec(Tok))
 
   # ── program: declarations separated by significant newlines ──────────────
   pub def parse_program(ts Vec(Tok)) Vec(Decl)
@@ -203,14 +212,60 @@ mod SelfhostDecl do
   end
   def classify_def(pb, name, inside, [TId(rb) | rb_rest])
     case parse_ptype([TId(rb) | rb_rest]) do
-      PT(ret, [TOp(":=") | body]) ->
-        case parse_bp(0, body) do
-          P(b, rest) -> DR(DFunc(pb, name, parse_params(inside), ret, b), rest)
-        end
-      PT(ret, rest) -> DR(DSig(pb, name, parse_params(inside), ret), rest)
+      PT(ret, after) -> finish_sig(pb, name, inside, ret, after)
     end
   end
   def classify_def(pb, name, inside, after) := DR(DErr, after)
+
+  # after the return type comes an optional `forall T, U: Bound` binder list, then
+  # either `:= body` (a typed single clause) or nothing (a bodiless signature).
+  def finish_sig(pb Bool, name String, inside Vec(Tok), ret String, after Vec(Tok)) DeclRes
+  def finish_sig(pb, name, inside, ret, after)
+    case parse_forall(after) do
+      GR(tvs, [TOp(":=") | body]) ->
+        case parse_bp(0, body) do
+          P(b, rest) -> DR(DFunc(pb, name, parse_params(inside), ret, tvs, b), rest)
+        end
+      GR(tvs, rest) -> DR(DSig(pb, name, parse_params(inside), ret, tvs), rest)
+    end
+  end
+
+  # `forall T` / `forall T, U: Eq + Ord` -> the binder list (each tvar with its
+  # bounds); absent -> no binders. Mirrors Rian.Decl.split_forall (ADR-0042).
+  def parse_forall(ts Vec(Tok)) Gen
+  def parse_forall([TId("forall") | rest]) := parse_tvars(rest)
+  def parse_forall(ts) := GR([], ts)
+
+  def parse_tvars(ts Vec(Tok)) Gen
+  def parse_tvars(ts)
+    case parse_tvar(ts) do
+      TVR(tv, [TComma | rest]) ->
+        case parse_tvars(rest) do
+          GR(more, r) -> GR([tv | more], r)
+        end
+      TVR(tv, rest) -> GR([tv], rest)
+    end
+  end
+
+  # one binder: `T` (unconstrained) or `T: Proto (+ Proto)*`.
+  def parse_tvar(ts Vec(Tok)) TVarRes
+  def parse_tvar([TId(name), TOp(":") | rest])
+    case parse_bounds(rest) do
+      BR(bs, r) -> TVR(TV(name, bs), r)
+    end
+  end
+  def parse_tvar([TId(name) | rest]) := TVR(TV(name, []), rest)
+  def parse_tvar(ts) := TVR(TV("", []), ts)
+
+  # bounds after a `:` — `Proto` chained with `+`, stopping at `,`/`:=`/end.
+  def parse_bounds(ts Vec(Tok)) BoundRes
+  def parse_bounds([TId(p), TOp("+") | rest])
+    case parse_bounds(rest) do
+      BR(more, r) -> BR([p | more], r)
+    end
+  end
+  def parse_bounds([TId(p) | rest]) := BR([p], rest)
+  def parse_bounds(ts) := BR([], ts)
 
   # ── parameters: `name [cap] Type` (cap in val/iso/ref/tag, default val) ────
   def parse_params(ts Vec(Tok)) Vec(Param)

@@ -16,9 +16,10 @@ defmodule Rian.DeclFixpointTest do
   # Covers: `type` sums; `struct` records; `mod` nesting (incl. `pub def`); `def`
   # functions (single + multi-clause); clause patterns (var/lit/ctor/wildcard/
   # cons-list); capabilities (val/iso/ref/tag); parametric types (`Vec(T)`); list
-  # construction; `.field` access + labeled construction; and `when` guards.
+  # construction; `.field` access + labeled construction; `when` guards; and
+  # `forall` generics (`Ret forall T, U: Eq + Ord` -> Func.tvars/Func.bounds).
   # Remaining long tail of `Rian.Decl`: string/char clause patterns, `alias`/
-  # `protocol`/generics/doc-comments, and the portable stdlib breadth — see ADR-0063.
+  # `protocol`/doc-comments, and the portable stdlib breadth — see ADR-0063.
 
   setup_all do
     {:ok, fe} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :rian_decl_frontend)
@@ -105,15 +106,18 @@ defmodule Rian.DeclFixpointTest do
 
   defp flat_e({:cons_e, h, t}), do: {[h], {:tail, ce(t)}}
 
-  defp func(name, params, ret, clauses, pub) do
+  # the front-end carries `forall` binders as `{:tv, name, bounds}` (ADR-0042);
+  # project them onto Func.tvars (order-preserved) + Func.bounds (constrained only),
+  # mirroring Rian.Decl.split_forall.
+  defp func(name, params, ret, clauses, pub, tvs) do
     %Func{
       name: name,
       params: Enum.map(params, &param/1),
       ret: ret,
       clauses: clauses,
       pub?: pub,
-      tvars: [],
-      bounds: %{},
+      tvars: Enum.map(tvs, fn {:tv, n, _} -> n end),
+      bounds: for({:tv, n, bs} <- tvs, bs != [], into: %{}, do: {n, bs}),
       doc: nil,
       synthetic: false,
       test?: false,
@@ -150,18 +154,18 @@ defmodule Rian.DeclFixpointTest do
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
-  defp group([{:d_func, pub, name, params, ret, body} | rest]) do
+  defp group([{:d_func, pub, name, params, ret, tvs, body} | rest]) do
     pats = Enum.map(params, fn {:par, n, _, _} -> {:var, n} end)
-    [func(name, params, ret, [clause(pats, body)], pub) | group(rest)]
+    [func(name, params, ret, [clause(pats, body)], pub, tvs) | group(rest)]
   end
 
-  defp group([{:d_sig, pub, name, params, ret} | rest]) do
+  defp group([{:d_sig, pub, name, params, ret, tvs} | rest]) do
     {cls, rest2} =
       Enum.split_while(rest, fn d ->
         match?({:d_clause, ^name, _, _}, d) or match?({:d_clause_g, ^name, _, _, _}, d)
       end)
 
-    [func(name, params, ret, Enum.map(cls, &to_clause/1), pub) | group(rest2)]
+    [func(name, params, ret, Enum.map(cls, &to_clause/1), pub, tvs) | group(rest2)]
   end
 
   defp to_clause({:d_clause, _, pats, body}), do: clause(pats, body)
@@ -236,7 +240,13 @@ defmodule Rian.DeclFixpointTest do
       "def origin() Point := Point(x: 0, y: 0)",
     # mod with a pub def
     "mod Calc do\n  pub def double(n Int64) Int64 := n * 2\nend",
-    "mod M do\n  type T := A | B\n  pub def f(n Int64) Int64 := n + 1\nend"
+    "mod M do\n  type T := A | B\n  pub def f(n Int64) Int64 := n + 1\nend",
+    # generics — `forall` binders (ADR-0042): unconstrained, bounded, multi-tvar
+    "def id(x val T) T forall T := x",
+    "def cmp(a val T, b val T) Bool forall T: Eq := a == b",
+    "def srt(xs val Vec(T)) Vec(T) forall T: Ord + Eq\ndef srt(xs) := xs",
+    "def pair(a val A, b val B) A forall A, B := a",
+    "def head(xs val Vec(T)) T forall T\ndef head([h | _]) := h"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}
@@ -380,6 +390,26 @@ defmodule Rian.DeclFixpointTest do
       assert Calc.double(21) == 42
       # quad calls double — a local call within the compiled mod
       assert Calc.quad(5) == 20
+    end
+
+    test "a GENERIC function (forall binders, tvars erased on the BEAM) runs", %{frontend: fe} do
+      # the front-end parses `forall T` / `forall T: Eq`; on the BEAM generics are
+      # erased, so a polymorphic identity + list-head compile and run unchanged.
+      src = """
+      def id(x val T) T forall T := x
+      def head(xs val Vec(T)) T forall T
+      def head([h | _]) := h
+      """
+
+      prog = front_decls(fe, src) |> to_prog()
+      # the binders survived into the IR (not silently dropped)
+      assert Enum.find(prog.funcs, &(&1.name == "id")).tvars == ["T"]
+      assert Enum.find(prog.funcs, &(&1.name == "head")).tvars == ["T"]
+
+      {:ok, mod} = Beam.load_ir(prog, :RianStage2Generic)
+      assert mod.id(42) == 42
+      assert mod.id({:a, :b}) == {:a, :b}
+      assert mod.head([7, 8, 9]) == 7
     end
   end
 end

@@ -52,7 +52,8 @@ defmodule Rian.SelfHost do
       status: :partial,
       source: "selfhost_decl.rian",
       test: "test/rian/decl_fixpoint_test.exs",
-      note: "IR equals Rian.Decl over type/struct/mod/def slice; alias/protocol/generics remain"
+      note:
+        "IR equals Rian.Decl over type/struct/mod/def slice incl. `forall` generics (tvars/bounds, ADR-0042); alias/protocol/doc-comments remain"
     },
     %{
       id: :expr_parser,
