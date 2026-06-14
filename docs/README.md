@@ -39,6 +39,7 @@ individual specs as *component-level* unless the tour exercises them end-to-end.
 
 | ADR | Title | Status |
 | --- | --- | --- |
+| [0000](adr/0000-charter.md) | **Charter** — Rian's thesis (portable sequential logic + tests; concurrency native-per-target; portability inferred), the *borrow surface, never semantics* rule, the one-IR/many-emitters target model, and **how to read statuses** (this corpus states decisions, not shipped code — the Status-at-a-glance table + tests are the shipped-ness index) | Accepted — living |
 | [0026](adr/0026-ecosystem-integration.md) | Erlang/BEAM ecosystem integration (no fork) | Accepted |
 | [0027](adr/0027-fast-track-self-hosting.md) | Fast track to self-hosting (free FFI, bootstrap stages) | Accepted |
 | [0029](adr/0029-dot-syntax.md) | Dot syntax as the universal qualifier | Accepted; implemented |
