@@ -6,11 +6,30 @@ defmodule AdrCorpusTest do
   honest: every ADR carries a Status from the taxonomy and an `Implemented:`
   line, and every `ADR-NNNN` cross-reference resolves to a real file. This is
   the check that would have caught the dangling `ADR-0025` reference.
+
+  Beyond structure, a **claims-vs-reality** gate (corpus-review consensus #3) links
+  a curated set of concrete safety *claims* to the tests that enforce them: each
+  claim's anchor phrase must still be present in its ADR, and each linked test file
+  must still exist. It fails the build if a claim is edited away or its enforcing
+  test deleted — turning a silent doc/code drift into a red test.
   """
   use ExUnit.Case, async: true
 
   @adr_dir Path.join([File.cwd!(), "docs", "adr"])
   @files Path.wildcard(Path.join(@adr_dir, "*.md"))
+
+  # Curated claim -> enforcing-test links (consensus #3). Each entry: an ADR, a short
+  # verbatim *anchor* phrase that must remain in that ADR, and the test file(s) that
+  # enforce the claim. Anchors are deliberately short and structural so an innocuous
+  # reword is unlikely to break them, but deleting the claim outright does.
+  @claims [
+    %{adr: "0064", claim: "fixed-width literal range-check", tests: ["test/rian/check_test.exs"]},
+    %{adr: "0067", claim: "erased to base", tests: ["test/rian/opaque_test.exs"]},
+    %{adr: "0043", claim: "nominally distinct", tests: ["test/rian/opaque_test.exs"]},
+    %{adr: "0041", claim: "Reach is honest about atoms", tests: ["test/rian/reach_test.exs"]},
+    %{adr: "0065", claim: "clean compile error", tests: ["test/rian/check_test.exs"]},
+    %{adr: "0036", claim: "RangeError", tests: ["test/rian/range_test.exs"]}
+  ]
 
   # the taxonomy ADR-0000 §5 defines; a Status line (markdown emphasis stripped)
   # must begin with one of these
@@ -60,6 +79,35 @@ defmodule AdrCorpusTest do
 
     assert missing == [],
            "ADRs missing an `Implemented:` line (add one per ADR-0000 §5): #{inspect(missing)}"
+  end
+
+  test "every curated safety claim is present in its ADR and backed by an existing test (consensus #3)" do
+    problems =
+      Enum.flat_map(@claims, fn %{adr: adr, claim: claim, tests: tests} ->
+        adr_path = Path.wildcard(Path.join(@adr_dir, "#{adr}-*.md")) |> List.first()
+
+        adr_problem =
+          cond do
+            adr_path == nil ->
+              ["ADR-#{adr}: no such ADR file"]
+
+            not String.contains?(File.read!(adr_path), claim) ->
+              ["ADR-#{adr}: claim phrase gone: #{inspect(claim)}"]
+
+            true ->
+              []
+          end
+
+        test_problems =
+          for t <- tests,
+              not File.exists?(Path.join(File.cwd!(), t)),
+              do: "ADR-#{adr}: enforcing test missing: #{t}"
+
+        adr_problem ++ test_problems
+      end)
+
+    assert problems == [],
+           "ADR claim<->test linkage broken (consensus #3):\n  " <> Enum.join(problems, "\n  ")
   end
 
   # drop leading markdown emphasis/strikethrough so a `**Proposed (draft)**` or a

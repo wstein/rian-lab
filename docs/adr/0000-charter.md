@@ -92,6 +92,9 @@ a footnote. Rolling a precise `Implemented:` line onto every ADR is tracked as f
 ## Open items
 
 - **Per-ADR `Implemented:` line + a docs-build check** that the line matches reality (consensus #1).
+  **Done:** `test/adr_corpus_test.exs` gates Status + `Implemented:` lines and cross-references, and
+  (consensus #3) a **claims-vs-reality** check links a curated set of safety claims to their enforcing
+  tests — a claim edited away or its test deleted turns red.
 - ~~**Target-honest Reach** for emitter-unsupported constructs (atoms/`Result` on JS/JVM), so the reach
   matrix matches the emitters rather than ADR-0041's architectural claim (consensus #4).~~ **Done
   (2026-06-14):** `Rian.Reach` now pins a **bare value atom** to `:ex` (no emitter lowers it — JS/JVM
