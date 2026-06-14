@@ -144,10 +144,14 @@ number-mode invariant are precisely why it is **not** one, and stays a compiler 
   rather than erroring (the checker only flags provable mismatches, CLAUDE.md) — it then survives to
   emit as a broken call. Declared casts are precise; rejecting undeclared ones is future strictness work.
 - **P1d — `Int53` demotion (WITHDRAWN).** The originally-planned demotion of `Int53`/fixed-width from
-  compiler builtin to a library abstract is **withdrawn** (§3): `Int53` is per-target (JS `number` /
-  `i64` elsewhere) *and* carries a whole-program JS number-mode invariant, neither expressible by
-  single-base erasure. It stays a compiler builtin; the prerequisite is the per-target-abstract-bases
-  open item (a separate future ADR), and even then the numeric-subsystem risk makes it "not planned".
+  compiler builtin to a library abstract is **withdrawn** (§3). It is **not a clean increment** on the
+  P1a–c mechanism: P1 erasure substitutes an abstract to a **single** base, but `Int53` is **per-target**
+  — JS `number`, `i64`/`Long` on Rust/JVM/BEAM (`Rian.JS` `@js_number_int`, `Rian.JVM` `Int53 → Long`) —
+  *and* it carries whole-program semantics the abstract surface cannot express: JS number-mode infection
+  across function boundaries, BigInt-vs-number mixed-mode rejection, and the `reject_wide_int!` interplay
+  (ADR-0064 §2a). Demoting it would first require **per-target abstract bases** (new design beyond this
+  ADR, the open item below) and would risk the entire load-bearing numeric subsystem for a pure
+  *simplification* (no new capability). `Int53` **stays a compiler builtin**; not planned.
 
 ## Open items
 
@@ -157,9 +161,10 @@ number-mode invariant are precisely why it is **not** one, and stays a compiler 
 - **Implicit casts** — whether *any* implicit cast is ever allowed (ADR-0035 leans hard against). The
   literal-width-adoption case (ADR-0064) is the only candidate; resolve with that work.
 - **Per-target abstract bases (a separate, future ADR — the prerequisite §3 lacks).** An abstract with
-  a *different representation per target* (what `Int53` would need) is net-new design beyond this ADR's
-  single-base model, and would *additionally* need a way to express a whole-program invariant like JS
-  number-mode. Only if that lands — and only if it proves worth the risk to the numeric subsystem —
-  could `Int53` demotion be reconsidered. Not planned.
+  a *different representation per target* (what `Int53` would need: JS `number` / `i64` elsewhere) is
+  net-new design beyond this ADR's single-base model (`abstract Int53 := Int64 with js Float64`-style
+  erasure), and would *additionally* need a way to express a whole-program invariant like JS number-mode.
+  Only if that lands — and only if it proves worth the risk to the numeric subsystem — could `Int53`
+  demotion be reconsidered. Not planned.
 - **Coherence** — an abstract's `op`/`impl` set is module-scoped; confirm the orphan rule (ADR-0042)
   applies unchanged.
