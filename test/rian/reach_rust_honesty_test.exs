@@ -141,20 +141,34 @@ defmodule Rian.ReachRustHonestyTest do
                 "type E := Bad\ndef ok1(x T) T | E forall T\n  y := x\n  {:ok, y}\nend"
               ] do
             rust = Rian.Lower.rust_program(Decl.parse(src))
-            f = Path.join(System.tmp_dir!(), "rian_pos_#{System.unique_integer([:positive])}.rs")
+            base = Path.join(System.tmp_dir!(), "rian_pos_#{System.unique_integer([:positive])}")
+            f = base <> ".rs"
+            out_lib = base <> ".rlib"
             File.write!(f, rust)
 
             try do
+              # -o keeps the .rlib in tmp; without it `--crate-type lib` writes to cwd.
               {out, code} =
                 System.cmd(
                   rustc,
-                  ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", f],
+                  [
+                    "--crate-type",
+                    "lib",
+                    "-A",
+                    "warnings",
+                    "--edition",
+                    "2021",
+                    "-o",
+                    out_lib,
+                    f
+                  ],
                   stderr_to_stdout: true
                 )
 
               assert code == 0, "Reach claims :rs, so the emitted Rust must compile:\n#{out}"
             after
               File.rm(f)
+              File.rm(out_lib)
             end
           end
       end
@@ -208,20 +222,34 @@ defmodule Rian.ReachRustHonestyTest do
 
         rustc ->
           rust = Test.rust("type Box := B(items Vec(T))\ndef wrap(x T) Box forall T := B([x])")
-          src = Path.join(System.tmp_dir!(), "rian_neg_#{System.unique_integer([:positive])}.rs")
+          base = Path.join(System.tmp_dir!(), "rian_neg_#{System.unique_integer([:positive])}")
+          src = base <> ".rs"
+          out_lib = base <> ".rlib"
           File.write!(src, rust)
 
           try do
+            # -o keeps any output in tmp; without it `--crate-type lib` writes to cwd.
             {_out, code} =
               System.cmd(
                 rustc,
-                ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", src],
+                [
+                  "--crate-type",
+                  "lib",
+                  "-A",
+                  "warnings",
+                  "--edition",
+                  "2021",
+                  "-o",
+                  out_lib,
+                  src
+                ],
                 stderr_to_stdout: true
               )
 
             refute code == 0, "the Vec(T)-field shape must NOT compile (Reach is right to pin it)"
           after
             File.rm(src)
+            File.rm(out_lib)
           end
       end
     end
