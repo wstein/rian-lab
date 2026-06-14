@@ -67,11 +67,10 @@ defmodule Rian.Reach do
     funs = all_funcs(prog)
     modnames = MapSet.new(Enum.map(Map.get(prog, :mods, []), & &1.name))
     local_names = MapSet.new(Enum.map(funs, & &1.name))
-    parametric = parametric_type_names(prog)
 
     facts =
       Map.new(funs, fn f ->
-        {blockers, callees} = scan_func(f, modnames, parametric)
+        {blockers, callees} = scan_func(f, modnames)
         # local reach = the closed vocabulary minus every target any blocker kills.
         # Host FFI/concurrency kill the non-BEAM targets; a `ref` capability kills
         # `:ex` (BEAM-rejected, ADR-0055/P5) — so the two compose correctly.
@@ -243,7 +242,7 @@ defmodule Rian.Reach do
     do: Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
 
   # scan every clause body (and guard) of one function for ex-only constructs + local-call edges
-  defp scan_func(f, modnames, parametric) do
+  defp scan_func(f, modnames) do
     # the `ref` capability (`&mut`) is BEAM-rejected (ADR-0055/0025, P5): a `ref`
     # parameter pins the function off `:ex` — it is outside the portable capability
     # core, so the reach report says so instead of overselling a tidy four.
@@ -261,23 +260,18 @@ defmodule Rian.Reach do
     width = if Enum.any?(sig_types, &js_wide_int?/1), do: [width_blocker()], else: []
     # Two Rust-generic emitter gaps (ADR-0061/0047) the reach matrix must own up to,
     # or `mix rian.targets`/the conformance gate green-lights `:rs` for code `rustc`
-    # then rejects (the gate lying). They pin the function off `:rs` only — the
-    # Bool-returning bounded generics (`contains`/`equal3`) and non-parametric sums
-    # that the emitter *does* lower keep `:rs`.
+    # then rejects (the gate lying). It pins the function off `:rs` only — generics the
+    # emitter *does* lower (`contains`/`sort`/`maximum`, and parametric `Pair` over
+    # `enum Pair<K,V>`) keep `:rs`.
     #
-    # (1) A generic whose RETURN type mentions a type variable: its `&T` params
-    # would have to be `.clone()`d into the owned `T`/`Vec<T>` it returns (and an
-    # owned local re-borrowed at a `&Self` protocol-method arg). The Rust emitter
-    # does no such type-directed coercion, so `insert`/`sort`/`maximum` (→ `Vec(T)`
-    # /`T`) fail rustc E0308 while `contains` (→ `Bool`) compiles.
+    # A generic whose RETURN type is a *compound* owned type variable (a tuple/`Fn`
+    # mentioning a tvar): the owned↔borrow coercion (`Rian.Lower`) handles a bare `T`
+    # and `Vec(T)` return, but not these — so they still fail rustc E0308 (ADR-0061).
+    # The owned-from-borrowed coercion for `T`/`Vec(T)` and parametric `enum Pair<K,V>`
+    # (with monomorphic instantiation inference) both landed (2026-06-14).
     owned_gen = if sig_returns_tvar?(f), do: [owned_generic_blocker()], else: []
-    # (2) A signature referencing a PARAMETRIC user type (`type Pair := P(k K, v V)`):
-    # `rust_enum` emits `enum Pair {` with no `<K,V>` params, and the per-unit emitter
-    # repeats the def → duplicate `enum Pair` (E0428) plus undeclared type params.
-    param_ty = if uses_parametric_type?(f, parametric), do: [parametric_type_blocker()], else: []
 
-    Enum.reduce(f.clauses, {ref ++ int ++ width ++ owned_gen ++ param_ty, MapSet.new()}, fn c,
-                                                                                            acc ->
+    Enum.reduce(f.clauses, {ref ++ int ++ width ++ owned_gen, MapSet.new()}, fn c, acc ->
       acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
       if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
     end)
@@ -301,13 +295,6 @@ defmodule Rian.Reach do
   defp owned_generic_blocker,
     do: %{
       construct: "generic returning an owned type variable (no Rust borrow→owned coercion)",
-      kind: :generic,
-      kills: [:rs]
-    }
-
-  defp parametric_type_blocker,
-    do: %{
-      construct: "parametric user type in signature (Rust enum has no generic params)",
       kind: :generic,
       kills: [:rs]
     }
@@ -357,30 +344,6 @@ defmodule Rian.Reach do
     end
   end
 
-  # Does this function's signature (params or return) name a parametric user type?
-  defp uses_parametric_type?(f, parametric) do
-    sig_types = Enum.map(Map.get(f, :params, []), & &1.type) ++ [Map.get(f, :ret)]
-    Enum.any?(sig_types, fn t -> Enum.any?(type_idents(t), &MapSet.member?(parametric, &1)) end)
-  end
-
-  # The set of user `type` names that are parametric — a variant field typed by a
-  # type variable (`type Pair := P(k K, v V)` → K/V). Such an enum needs `<…>`
-  # generic params the Rust emitter does not emit, so any signature touching it is
-  # off `:rs`. Scans top-level and module-local type decls.
-  defp parametric_type_names(prog) do
-    types =
-      Map.get(prog, :types, []) ++
-        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :types, []))
-
-    for t <- types, parametric_type?(t), into: MapSet.new(), do: t.name
-  end
-
-  defp parametric_type?(t) do
-    Enum.any?(t.variants, fn v ->
-      Enum.any?(v.fields, fn fld -> type_has_tvar?(Map.get(fld, :type)) end)
-    end)
-  end
-
   # Does a type string contain a type-variable token? `tvar?` is the compiler-wide
   # convention (`Rian.Check`): a single capital optionally followed by a digit.
   defp type_has_tvar?(t) when is_binary(t), do: Enum.any?(type_idents(t), &tvar?/1)
@@ -389,7 +352,6 @@ defmodule Rian.Reach do
   # the identifier tokens of a type string: `Vec(Pair)` → `["Vec", "Pair"]`,
   # `Tree(T)` → `["Tree", "T"]`.
   defp type_idents(t) when is_binary(t), do: Regex.scan(~r/[A-Za-z_]\w*/, t) |> Enum.map(&hd/1)
-  defp type_idents(_), do: []
 
   defp tvar?(t), do: String.match?(t, ~r/^[A-Z][0-9]?$/)
 

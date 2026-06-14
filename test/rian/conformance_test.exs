@@ -26,12 +26,11 @@ defmodule Rian.ConformanceTest do
 
   # The portable-core conformance corpus: example files whose `@test`s reach ALL of
   # `:ex`/`:rs`/`:js`. Add a file here only once it is green on every Tier-1 target.
-  # (`17_stdlib_eq_ord`/`18_dict_eq` are NOT here — the integer-generic stdlib is
-  # off `:js` by ADR-0064, and its Rust lowering has two open emitter gaps
-  # (owned-from-borrowed coercion + parametric-type generic params, ADR-0061 Open
-  # items) that `Rian.Reach` now honestly pins off `:rs`; see
-  # `reach_rust_honesty_test.exs`. They are exercised on `:ex` by their own tests.)
-  @corpus ~w(14_test_framework conformance_core)
+  # `17_stdlib_eq_ord`/`18_dict_eq` (the integer-generic Eq/Ord/Dict stdlib) joined once
+  # the `Int53` literal default (ADR-0064) made them JS-portable and both Rust-generic
+  # gaps closed (owned-from-borrowed coercion + parametric `enum Pair<K,V>`, ADR-0061),
+  # so they are green on every Tier-1 target — run per target here, every commit.
+  @corpus ~w(14_test_framework conformance_core 17_stdlib_eq_ord 18_dict_eq)
 
   @tier1 [:ex, :rs, :js]
 

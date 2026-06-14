@@ -537,12 +537,25 @@ defmodule Rian.Lower do
   defp borrow_arg(a, pt, funs, borrowed) do
     cond do
       not borrow_type?(pt) -> a
+      # a string literal fed to a *generic* `&K` param (`K` resolves to owned `String`,
+      # which has the `Clone`/`impl`s a tvar needs — `str` does not): `&"a".to_string()`.
+      generic_tvar_borrow?(pt) and match?({:str, _}, a) -> owned_str_arg(elem(a, 1))
       borrowed != nil -> borrow_value(a, borrowed)
       owned_arg?(a, funs) -> {:unary, "&", a}
       scalar_literal?(a) -> {:unary, "&", a}
       true -> a
     end
   end
+
+  # an owned `String`, borrowed for the `&K` param: `&format!("{}{}", "a", "")` via the
+  # `<>` concat (which lowers to `format!` → owned `String`). Cleaner builders
+  # (`String::from`/`.to_string()`) need ident/method emit the `::`-path lowering and
+  # identifier snake-casing get wrong, so the empty-concat is the portable route.
+  defp owned_str_arg(s), do: {:unary, "&", {:bin, "<>", {:str, s}, {:str, ""}}}
+
+  # a borrowed bare type variable (`&K`, not `&str`/`&[T]`): the param is generic.
+  defp generic_tvar_borrow?("&" <> rest), do: tvar_name?(rest)
+  defp generic_tvar_borrow?(_), do: false
 
   # `&`-borrow a value unless it is already a `&`-reference: a var bound to a `&`-param
   # or cons-tail (`borrowed`), an already-inserted `&`, or a string literal (`&str`).
@@ -554,11 +567,16 @@ defmodule Rian.Lower do
 
   defp borrow_value(a, _borrowed), do: {:unary, "&", a}
 
-  # a numeric / char literal is an owned value (`i64`/`char`); fed to a `&T` param it
-  # needs `&`. A string literal is already `&str`, so it is not included here.
+  # a numeric / char literal (or arithmetic of them, `0 - 1`) is an owned value
+  # (`i64`/`char`); fed to a `&T` param it needs `&`. A string literal is already
+  # `&str`, so it is not included here.
   defp scalar_literal?({:num, _}), do: true
   defp scalar_literal?({:char_lit, _}), do: true
   defp scalar_literal?({:unary, "-", a}), do: scalar_literal?(a)
+
+  defp scalar_literal?({:bin, op, l, r}) when op in ~w(+ - * div rem),
+    do: scalar_literal?(l) and scalar_literal?(r)
+
   defp scalar_literal?(_), do: false
 
   # the clause vars that are a runtime `&`-reference (see `rust_fn`): a pattern var
@@ -755,6 +773,12 @@ defmodule Rian.Lower do
 
     Process.put(:rian_proto_methods, proto_method_traits(protocols))
     sigs = Map.new(Map.get(prog, :funcs, []), fn f -> {f.name, f} end)
+    # parametric user types (ADR-0061): `type Pair := P(k K, v V)` -> %{"Pair" => ["K","V"]}.
+    # Rian writes them bare (`Vec(Pair)`); Rust needs `Pair<K, V>`, so the enum is emitted
+    # with `<…>` params and every signature/return mentioning `Pair` is rewritten to its
+    # instantiation (the function's tvars, or concrete args inferred from a builder's body).
+    Process.put(:rian_rust_parametric, parametric_param_map(types))
+    Process.put(:rian_rust_sigs, sigs)
     c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new(), sigs)
 
     [
@@ -961,9 +985,16 @@ defmodule Rian.Lower do
   end
 
   defp rust_fn(func, ctx, vis) do
+    # parametric-type instantiation for this function (ADR-0061): `Pair` -> `Pair<K, V>`
+    # (a generic function reuses `Pair`'s param names) or `Pair<i64, i64>` (a concrete
+    # builder, inferred from its body). `pinst` rewrites the Rust type strings; `gen_func`
+    # carries any free parametric tvars (e.g. `has`'s `V`) into the generic list.
+    pinst = pair_inst(func)
+    gen_func = Map.put(func, :tvars, fn_all_tvars(func, pinst))
+
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
-        "#{p.name}: #{Rian.Capability.rust_param(p.cap, p.type)}"
+        "#{p.name}: #{rustify_parametric(Rian.Capability.rust_param(p.cap, p.type), pinst)}"
       end)
 
     # One param matches the value directly; N>1 match the tuple of arguments
@@ -1041,11 +1072,98 @@ defmodule Rian.Lower do
     shim = if rust_total_shim?(func), do: "\n        _ => unreachable!(),", else: ""
 
     fn_str =
-      "#{vis}fn #{func.name}#{rust_generics(func)}(#{param_decls}) -> #{rust_ret(func.ret)} {\n" <>
+      "#{vis}fn #{func.name}#{rust_generics(gen_func)}(#{param_decls}) -> " <>
+        "#{rustify_parametric(rust_ret(func.ret), pinst)} {\n" <>
         "    match #{scrut} {\n#{arms}#{shim}\n    }\n}"
 
     join_doc(rs_doc(Map.get(func, :doc), "///"), fn_str)
   end
+
+  # the instantiation of each parametric type this function's signature mentions:
+  # `%{"Pair" => "<K, V>"}` (generic — reuse the type's param names) or
+  # `%{"Pair" => "<i64, i64>"}` (a concrete builder — inferred from the body).
+  defp pair_inst(func) do
+    pmap = Process.get(:rian_rust_parametric, %{})
+    generic? = Map.get(func, :tvars, []) != []
+
+    for {name, params} <- pmap, parametric_used?(func, name), into: %{} do
+      args = if generic?, do: params, else: infer_concrete_params(func, params)
+      {name, "<#{Enum.join(args, ", ")}>"}
+    end
+  end
+
+  # does a parametric type `name` appear (as a whole word) in the function's signature?
+  defp parametric_used?(func, name) do
+    sig = Enum.map(func.params, & &1.type) ++ [func.ret]
+    Enum.any?(sig, fn t -> is_binary(t) and String.match?(t, ~r/\b#{Regex.escape(name)}\b/) end)
+  end
+
+  # all generic params for a parametric-using generic function: its own tvars plus any
+  # free param tvars of the parametric types it uses (e.g. `has` over `Pair` gains `V`).
+  defp fn_all_tvars(func, pinst) do
+    tvars = Map.get(func, :tvars, [])
+
+    if tvars == [] do
+      tvars
+    else
+      pmap = Process.get(:rian_rust_parametric, %{})
+      extra = pinst |> Map.keys() |> Enum.flat_map(&Map.get(pmap, &1, [])) |> Enum.uniq()
+      tvars ++ (extra -- tvars)
+    end
+  end
+
+  # rewrite each parametric type name in a Rust type string to its instantiation:
+  # `&[Pair]` + `%{"Pair" => "<K, V>"}` -> `&[Pair<K, V>]`.
+  defp rustify_parametric(rust_type, pinst) do
+    Enum.reduce(pinst, rust_type, fn {name, args}, acc ->
+      Regex.replace(~r/\b#{Regex.escape(name)}\b/, acc, "#{name}#{args}")
+    end)
+  end
+
+  # concrete instantiation for a non-generic builder (`sample`/`names`): infer the
+  # parametric type's args from the body's tail — a call to a generic constructor
+  # (`put`) binds the type's params from its argument literal types.
+  defp infer_concrete_params(func, params) do
+    binding =
+      func.clauses
+      |> hd()
+      |> Map.fetch!(:body)
+      |> Pratt.parse_body()
+      |> tail_expr()
+      |> infer_tvar_binding()
+
+    Enum.map(params, fn tv -> Map.get(binding, tv, "i64") end)
+  end
+
+  defp tail_expr({:block, stmts}) do
+    case List.last(stmts) do
+      {:expr, e} -> e
+      other -> other
+    end
+  end
+
+  defp tail_expr(e), do: e
+
+  defp infer_tvar_binding({:call, {:id, f}, args}) do
+    case Map.get(Process.get(:rian_rust_sigs, %{}), f) do
+      %{params: ps, tvars: tvs} when tvs != [] ->
+        Enum.zip(ps, args)
+        |> Enum.reduce(%{}, fn {p, a}, acc ->
+          if p.type in tvs, do: Map.put(acc, p.type, rust_lit_type(a)), else: acc
+        end)
+
+      _ ->
+        %{}
+    end
+  end
+
+  defp infer_tvar_binding(_), do: %{}
+
+  # the Rust type of a literal argument (for concrete parametric instantiation).
+  defp rust_lit_type({:num, n}), do: if(String.contains?(n, "."), do: "f64", else: "i64")
+  defp rust_lit_type({:str, _}), do: "String"
+  defp rust_lit_type({:char_lit, _}), do: "char"
+  defp rust_lit_type(_), do: "i64"
 
   # A function whose clause heads are literal/`Char` patterns with **no** catch-all
   # clause is total only because a `range`'s finite signature covers them — so the
@@ -1227,9 +1345,35 @@ defmodule Rian.Lower do
 
     join_doc(
       rs_doc(Map.get(t, :doc), "///"),
-      "#[derive(Clone, Debug, PartialEq)]\n#{vis}enum #{t.name} {\n#{variants}\n}"
+      "#[derive(Clone, Debug, PartialEq)]\n#{vis}enum #{t.name}#{enum_generics(t.name)} {\n#{variants}\n}"
     )
   end
+
+  # `<K, V>` for a parametric type (its variant fields are typed by type variables),
+  # else `""`. The params are the distinct field tvars in order of appearance.
+  defp enum_generics(name) do
+    case Map.get(Process.get(:rian_rust_parametric, %{}), name) do
+      nil -> ""
+      [] -> ""
+      params -> "<#{Enum.map_join(params, ", ", &"#{&1}: Clone")}>"
+    end
+  end
+
+  # parametric user types: name -> ordered list of its field type-variable params.
+  defp parametric_param_map(types) do
+    for t <- types, params = type_param_tvars(t), params != [], into: %{}, do: {t.name, params}
+  end
+
+  defp type_param_tvars(t) do
+    t.variants
+    |> Enum.flat_map(fn v -> Enum.map(v.fields, &Map.get(&1, :type)) end)
+    |> Enum.filter(&tvar_name?/1)
+    |> Enum.uniq()
+  end
+
+  # a bare type variable name: a single uppercase letter optionally followed by digits
+  defp tvar_name?(t) when is_binary(t), do: String.match?(t, ~r/^[A-Z][0-9]*$/)
+  defp tvar_name?(_), do: false
 
   # surface pattern -> typed core IR -> Rust (ADR-0050: emitter consumes the core)
   defp core_pat_rs(surface, meta), do: pat_rs(Core.from_pat(surface), meta)
@@ -1415,6 +1559,13 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, :elixir),
     do: {"Integer.to_string(#{p(n, 0, :elixir)})", 12}
 
+  # integer → float (ADR-0035 explicit conversion): Rust `n as f64`, Elixir `n * 1.0`
+  defp emit(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}, :rust),
+    do: {"(#{p(n, 12, :rust)} as f64)", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}, :elixir),
+    do: {"(#{p(n, 0, :elixir)} * 1.0)", 12}
+
   defp emit(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, :rust),
     do: {"format!(\"{}{}\", #{p(a, 0, :rust)}, #{p(b, 0, :rust)})", 12}
 
@@ -1594,12 +1745,12 @@ defmodule Rian.Lower do
   defp emit(%EVariant{enum: enum, ctor: ctor, pairs: []}, :rust), do: {"#{enum}::#{ctor}", 12}
 
   defp emit(%EVariant{enum: enum, ctor: ctor, named: true, pairs: pairs}, :rust) do
-    fields = Enum.map_join(pairs, ", ", fn {l, v} -> "#{l}: #{p(v, 0, :rust)}" end)
+    fields = Enum.map_join(pairs, ", ", fn {l, v} -> "#{l}: #{rust_owned_elem(v)}" end)
     {"#{enum}::#{ctor} { #{fields} }", 12}
   end
 
   defp emit(%EVariant{enum: enum, ctor: ctor, named: false, pairs: pairs}, :rust) do
-    {"#{enum}::#{ctor}(#{Enum.map_join(pairs, ", ", fn {_l, v} -> p(v, 0, :rust) end)})", 12}
+    {"#{enum}::#{ctor}(#{Enum.map_join(pairs, ", ", fn {_l, v} -> rust_owned_elem(v) end)})", 12}
   end
 
   # struct literal — `%Name{x: …}` on the BEAM, `Name { x: … }` on Rust

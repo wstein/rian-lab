@@ -130,10 +130,11 @@ Consequences of target-relativity:
 
 ## Open items
 
-- **Rust-generic emitter gaps, `Rian.Reach` pinning honestly off `:rs` until each lands.**
-  The reach matrix would otherwise green-light `:rs` for code `rustc` rejects (`mix rian.targets`/the
-  conformance gate lying), so `Rian.Reach` reports a `:generic` blocker that kills `:rs`:
-    1. **owned-from-borrowed coercion — DONE (2026-06-14).** A generic borrows its `T`/`Vec(T)`/`String`
+- **Rust-generic emitter gaps — both DONE (2026-06-14); `17`/`18` now reach `:rs`.** Reach previously
+  reported a `:generic` blocker off `:rs` for code `rustc` rejected; both gaps are now closed, so the
+  blocker is gone and the integer-generic stdlib slices compile to and run on Rust (`rustc --test`,
+  `reach_rust_honesty_test`). What landed:
+    1. **owned-from-borrowed coercion — DONE.** A generic borrows its `T`/`Vec(T)`/`String`
        params as `&T`/`&[T]`/`&str`, so `Rian.Lower` now inserts the owned↔borrow coercion (gated on a
        generic function, so non-generic code is untouched): a returned bare `&T` is `.clone()`d
        (`coerce_owned_tvar`); an owned value (literal, cloned element/field binder, owned-returning call)
@@ -146,13 +147,19 @@ Consequences of target-relativity:
        through the whole-program assembly (`rust_program`) so the cross-function signature table the
        borrow pass needs is present. The Reach blocker now fires only for a **compound** owned-tvar return
        (a tuple/`Fn` mentioning a tvar) — still uncoerced.
-    2. **parametric user types — still open.** `type Pair := P(k K, v V)` (and `Tree(T)`) lower to
-       `enum Pair {` with no `<K, V>` params (rustc E0425/E0428), and a non-generic builder
-       (`sample() -> Vec<Pair>`) needs its concrete instantiation (`Pair<i64, i64>` / `Pair<String, i64>`)
-       inferred from the construction — a monomorphic type-arg inference the checker does not yet track.
-       Any signature touching a parametric type is pinned off `:rs`, so the **`18_dict_eq`** slice stays
-       off `:rs`. This is the sole remaining Rust gap; `reach_rust_honesty_test` (the `@tag :rust` case)
-       fails the day rustc accepts 18, flagging "lift the blocker + promote to the conformance corpus."
+    2. **parametric user types — DONE.** `type Pair := P(k K, v V)` lowers to `enum Pair<K, V>`
+       (`enum_generics`/`parametric_param_map`). Rian writes the type bare (`Vec(Pair)`), so `Rian.Lower`
+       rewrites each signature/return to its instantiation (`rustify_parametric`): a **generic** function
+       reuses the type's param names (`Pair<K, V>`, with any free param tvar — e.g. `has`'s `V` — added to
+       the generic list via `fn_all_tvars`); a **non-generic builder** (`sample`/`names`) gets a concrete
+       instantiation (`Pair<i64, i64>` / `Pair<String, i64>`) inferred from the body's tail constructor
+       call (`infer_concrete_params` binds the callee's tvars from its arg literal types). A borrowed
+       field at construction is `.clone()`d, and a string literal fed to a generic `&K` (which resolves to
+       owned `String`) becomes `&format!("{}{}", "a", "")` (`owned_str_arg`). **`18_dict_eq` compiles to and
+       runs on Rust** (`rustc --test`). *Known limit:* the concrete-instantiation inference handles a
+       builder whose tail is a generic constructor call; an un-inferrable builder falls back to `i64`.
+  The remaining Rust-generic residual is only a **compound** owned-tvar return (a tuple/`Fn` mentioning a
+  tvar), still pinned off `:rs` by `sig_returns_tvar?`.
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
   `Self`-returning methods (`def add(a Self, b Self) Self`) and associated types are a further Rust
   mapping question (return-position `Self`, generic associated types).
