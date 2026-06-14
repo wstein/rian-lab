@@ -541,6 +541,14 @@ defmodule Rian.BeamTest do
       assert m.length("héllo") == 5
     end
 
+    test "`Prim.int_to_float` — the explicit Int→Float conversion runs on the BEAM" do
+      {:ok, m} =
+        Beam.load("def scale(a Int64) Float64 := 2.5 * Prim.int_to_float(a)", :rian_beam_itf)
+
+      assert m.scale(4) == 10.0
+      assert m.scale(0) == 0.0
+    end
+
     test "the self-hosting lexer is FFI-free: `__prim_str_chars`, runs on BEAM" do
       {:ok, m} =
         Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_lex_ffifree)

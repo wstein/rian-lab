@@ -221,6 +221,12 @@ defmodule Rian.Check do
   # off-`:js`, which a char primitive must not be.
   def infer(%ECall{fun: %EId{name: "__prim_char_code"}, args: [_]}, _env, _ic), do: "Int53"
 
+  # `__prim_int_to_float(n) : Float64` — the **explicit** Int→Float conversion
+  # (ADR-0035/0034 §1: there is no *implicit* int→float, so the widening is opt-in
+  # and visible at the call site). The lossy precision change (>2^53) is the
+  # programmer's choice, exactly like Rust's `n as f64`.
+  def infer(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [_]}, _env, _ic), do: "Float64"
+
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)
@@ -640,8 +646,63 @@ defmodule Rian.Check do
          :ok <- check_return(f, ic),
          :ok <- check_binds(f, ic),
          :ok <- check_bounds(f, ic),
+         :ok <- check_numeric_mix(f, ic),
          do: check_error_set(f, eset)
   end
+
+  # ADR-0035 / ADR-0034 §1 — **no implicit Int↔Float coercion.** An arithmetic
+  # operator (`+`/`-`/`*`) whose two operands are *concretely* one integer-kind
+  # and one float-kind is a proven error: a value never silently changes numeric
+  # type (the widen is lossy past 2^53), and the construct is non-portable (rustc
+  # rejects `i64 * f64`). The fix is explicit — a float literal (`3.0`) or
+  # `Prim.int_to_float(n)`. Only fires when both kinds are known (an `:unknown`
+  # operand stays conservative), so it reports only what it can prove.
+  defp check_numeric_mix(%Func{params: ps, clauses: clauses}, ic) do
+    Enum.find_value(clauses, :ok, fn c ->
+      env = clause_env(c.pats, ps, ic)
+      scan_num_mix(Pratt.parse_body(c.body), env, ic) || :ok
+    end)
+  end
+
+  defp scan_num_mix({:bin, op, l, r} = node, env, ic) when op in @arith do
+    num_mix_error(op, l, r, env, ic) || scan_num_mix_children(node, env, ic)
+  end
+
+  defp scan_num_mix(node, env, ic) when is_tuple(node),
+    do: scan_num_mix_children(node, env, ic)
+
+  defp scan_num_mix(list, env, ic) when is_list(list),
+    do: Enum.find_value(list, nil, &scan_num_mix(&1, env, ic))
+
+  defp scan_num_mix(_other, _env, _ic), do: nil
+
+  defp scan_num_mix_children(node, env, ic),
+    do: node |> Tuple.to_list() |> Enum.find_value(nil, &scan_num_mix(&1, env, ic))
+
+  defp num_mix_error(op, l, r, env, ic) do
+    lt = ordinal_base(infer(l, env, ic))
+    rt = ordinal_base(infer(r, env, ic))
+
+    if mixed_num?(lt, rt) do
+      {:error,
+       "`#{op}`: no implicit Int↔Float conversion (`#{lt} #{op} #{rt}`) — a value never " <>
+         "silently becomes a float (ADR-0035/0034 §1). Convert explicitly: write a float " <>
+         "literal (e.g. `3.0`) or `Prim.int_to_float(n)`."}
+    end
+  end
+
+  # one operand integer-kind (`Int`/`UInt`, incl. a `Char`'s `Int53` base), the
+  # other float-kind — both concretely known.
+  defp mixed_num?(lt, rt) do
+    case {num_kind(lt), num_kind(rt)} do
+      {{lk, _}, {rk, _}} -> num_mix?(lk, rk)
+      _ -> false
+    end
+  end
+
+  defp num_mix?(:float, k) when k in [:int, :uint], do: true
+  defp num_mix?(k, :float) when k in [:int, :uint], do: true
+  defp num_mix?(_, _), do: false
 
   # Labeled arguments (`name: value`) are valid ONLY in struct/variant *construction*
   # — a PascalCase constructor callee (ADR-0043 / types-match §2). On a plain

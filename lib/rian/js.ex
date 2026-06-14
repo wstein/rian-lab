@@ -667,6 +667,11 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
     do: "String(#{expr_js(n)})"
 
+  # integer → float (ADR-0035 explicit conversion): `Number(n)` widens a `number`
+  # or a `BigInt` (`Number(5n)` === 5) to a JS number (Float64)
+  defp expr_js(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}),
+    do: "Number(#{expr_js(n)})"
+
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
     do: "(#{expr_js(a)} + #{expr_js(b)})"
 

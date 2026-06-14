@@ -59,6 +59,39 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "no implicit Int↔Float coercion (ADR-0035 / ADR-0034 §1)" do
+    test "a float literal times an Int variable is rejected — convert explicitly" do
+      assert {:error, msg} = Check.check("def f(a Int64) Float64 := 10.2 * a")
+      assert msg =~ "no implicit Int↔Float conversion"
+      assert msg =~ "Float64 * Int64"
+      assert msg =~ "Prim.int_to_float"
+    end
+
+    test "a float literal times an int literal is rejected (write a float literal)" do
+      assert {:error, _} = Check.check("def f() Float64 := 10.2 * 3")
+    end
+
+    test "an int literal added to a Float variable is rejected (strict, like the binding rule)" do
+      assert {:error, _} = Check.check("def f(a Float64) Float64 := a + 1")
+    end
+
+    test "all-float and all-int arithmetic pass" do
+      assert Check.check("def f(a Float64, b Float64) Float64 := a * b") == :ok
+      assert Check.check("def f(a Int64, b Int64) Int64 := a * b") == :ok
+      assert Check.check("def area(r Float64) Float64 := 3.14159 * r * r") == :ok
+    end
+
+    test "an :unknown operand stays conservative (no false rejection)" do
+      # `g(a)` is :unknown, so `10.2 * g(a)` is not provably mixed
+      assert Check.check("def f(a Int64) Float64 := 10.2 * g(a)") == :ok
+    end
+
+    test "the explicit `Prim.int_to_float(n)` conversion makes mixed math well-typed" do
+      assert Check.check("def f(a Int64) Float64 := 10.2 * Prim.int_to_float(a)") == :ok
+      assert Check.infer(Pratt.parse("__prim_int_to_float(n)"), %{"n" => "Int64"}) == "Float64"
+    end
+  end
+
   describe "function return-type checking (via parsed source)" do
     test "a consistent return type passes" do
       assert Check.check("def double(n Int64) Int64 := n * 2") == :ok

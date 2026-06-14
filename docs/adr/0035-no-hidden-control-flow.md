@@ -31,6 +31,17 @@ Rian adopts **No Hidden Control Flow** as a standing design principle. Concretel
 5. **No implicit coercions.** `/` is float division, `div` is integer (expressions spec); promotion
    is explicit. Numeric widths convert only via an explicit cast/annotation.
 
+   > **Amended 2026-06-14 — enforced for Int↔Float arithmetic.** `+`/`-`/`*` whose two operands are
+   > concretely one integer-kind and one float-kind is a **compile error** (`Rian.Check.check_numeric_mix`),
+   > not a silent widen — e.g. `10.2 * a` with `a : Int64`. A value never silently becomes a float
+   > (the widen is lossy past 2⁵³), *and* the construct is non-portable (rustc rejects `i64 * f64`),
+   > so allowing it on the BEAM (where Erlang auto-promotes) would be a silent cross-target divergence.
+   > An integer literal does **not** adopt `Float` in arithmetic either (consistent with ADR-0034 §1's
+   > binding rule: `x Float64 := 66` is rejected). The fix is explicit: a float literal (`3.0`) or the
+   > portable conversion **`Prim.int_to_float(n)`** (`erlang:float/1` · `n as f64` · `Number(n)` ·
+   > `.toDouble()`). The gate fires only on a *provable* mix (an `:unknown` operand stays conservative).
+   > The nicer surface `Float64.of(n)` is a future sugar over the same intrinsic.
+
 The litmus test for any future feature: **can a reader predict where control goes and what
 allocates, from the source alone?** If not, it does not enter the portable core.
 

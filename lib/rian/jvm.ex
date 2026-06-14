@@ -344,6 +344,10 @@ defmodule Rian.JVM do
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
     do: "(#{expr_kt(n)}).toString()"
 
+  # integer → float (ADR-0035 explicit conversion): Kotlin `Long.toDouble()`
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}),
+    do: "(#{expr_kt(n)}).toDouble()"
+
   # a PascalCase call is sum-variant construction `Ctor(args)`; a lowercase call
   # is a local function call
   defp expr_kt(%ECall{fun: %EId{name: f}, args: args}) do
