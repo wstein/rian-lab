@@ -606,6 +606,11 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
     do: "(#{expr_js(a)} + #{expr_js(b)})"
 
+  # variadic single-shot join (ADR-0069 §6): a flat `+` chain — every part is
+  # already a string, and V8 builds it as one rope (no per-pair intermediate).
+  defp expr_js(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}),
+    do: "(" <> Enum.map_join(args, " + ", &expr_js/1) <> ")"
+
   # explicit 64-bit overflow ops (ADR-0035 §3) operate on `Int64`, which is NOT
   # supported on JS (ADR-0064): their two's-complement-at-64 contract has no JS
   # representation without per-op `BigInt.asIntN` masking — the silent BigInt

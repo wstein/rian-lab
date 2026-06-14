@@ -210,15 +210,23 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
   `Rian.Pratt` re-parses each hole into a `{:str_interp, parts}` node; an empty
   hole `\()` is a parse error. The detokenizer round-trips `\(…)`.
 - **Static resolution, not runtime dispatch.** Because interpolation is
-  **monomorphic per call site** (§4), `Rian.Interp` resolves each hole to a plain
-  `<>`/stringify chain in the declaration pass — *where the clause's parameter
+  **monomorphic per call site** (§4), `Rian.Interp` resolves each hole to a
+  stringify expression in the declaration pass — *where the clause's parameter
   types are in scope* — by the hole's **statically inferred type**: `String` →
   identity, `Int*`/`UInt*` → `__prim_int_to_string`, `Bool` → an `if`. This is the
   key simplification: no runtime `Show` dispatcher is generated, so **the
   Char/Int53 dispatch-guard collision (the sharpest open cost) does not arise**,
   and Rust gets the monomorphic concrete `impl` for free. There is **no new Core
   node and no per-emitter `{:str_interp}` handling** — the checker and all four
-  emitters see an ordinary `<>` tree.
+  emitters see an ordinary call tree.
+- **Single-shot join (§6).** The stringified parts are combined by *one*
+  `__prim_str_concat_all(parts…)` intrinsic, not a left-nested `<>` cascade that
+  would build N−1 intermediate strings. It lowers to one allocation where it pays
+  — a single BEAM binary (`<<p1/binary, …>>`) and a single Rust `format!` — and to
+  a flat `+` chain on JS/JVM (which their engines already fold into one builder).
+  Empty literal segments (the lexer's trailing `{:lit, ""}`, and `""` between
+  adjacent holes) are dropped; a single-part interpolation collapses to the bare
+  value. The join is portable (no Reach blocker) and `Check` types it `String`.
 - **The one new intrinsic.** `__prim_int_to_string` lowers natively on all four
   emitters (`erlang:integer_to_binary` / `String(n)` / `n.to_string()` /
   `.toString()`), so an `Int53`/`Bool`/`String` interpolation reaches **all four

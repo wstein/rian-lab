@@ -5,8 +5,8 @@ defmodule Rian.Prim do
 
   `Prim` is reserved as the **target-internal** namespace for the compiler
   primitives that each backend lowers natively (ADR-0047 §2 portable prelude):
-  `Prim.str_chars`, `Prim.str_from_chars`, `Prim.str_concat`, `Prim.str_to_atom`,
-  `Prim.char_code`, `Prim.map_new`/`get`/`put`/`has`,
+  `Prim.str_chars`, `Prim.str_from_chars`, `Prim.str_concat`, `Prim.str_concat_all`,
+  `Prim.str_to_atom`, `Prim.char_code`, `Prim.map_new`/`get`/`put`/`has`,
   `Prim.wrapping_add`/`saturating_add`/`checked_add`.
 
   Source code uses `Prim.X(args)`; the legacy `__prim_X(args)` form is still
@@ -26,7 +26,7 @@ defmodule Rian.Prim do
   # is a hard error (a typo, or a collision with a user module named `Prim`),
   # never a silently-bogus `__prim_x` that fails cryptically downstream.
   @prims ~w(
-    str_chars str_from_chars str_concat str_to_atom
+    str_chars str_from_chars str_concat str_concat_all str_to_atom
     char_code int_to_string int_to_float
     map_new map_get map_put map_has
     wrapping_add saturating_add checked_add

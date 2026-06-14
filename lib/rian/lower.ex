@@ -1608,6 +1608,16 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, :rust),
     do: {"format!(\"{}{}\", #{p(a, 0, :rust)}, #{p(b, 0, :rust)})", 12}
 
+  # variadic single-shot join (ADR-0069 §6): one `format!` (Rust, one allocation),
+  # one binary comprehension (Elixir). Every part is already a `String`.
+  defp emit(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}, :rust),
+    do:
+      {"format!(\"#{String.duplicate("{}", length(args))}\", " <>
+         Enum.map_join(args, ", ", &p(&1, 0, :rust)) <> ")", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}, :elixir),
+    do: {"<<" <> Enum.map_join(args, ", ", &(p(&1, 0, :elixir) <> "::binary")) <> ">>", 12}
+
   # explicit overflow ops (ADR-0035 §3) on Rust — the native `i64` methods; this
   # is the target where overflow actually bites (debug panic / release wrap), so
   # `checked_add` returns `Option<i64>` (Rian `Option(Int64)`) directly.

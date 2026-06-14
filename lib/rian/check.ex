@@ -231,6 +231,10 @@ defmodule Rian.Check do
   # Atoms are BEAM-only; `Rian.Reach` pins a caller off `:rs`/`:js`/`:jvm`.
   def infer(%ECall{fun: %EId{name: "__prim_str_to_atom"}, args: [_]}, _env, _ic), do: "Symbol"
 
+  # `__prim_str_concat_all(parts…) : String` — the single-shot interpolation join
+  # (ADR-0069 §6); every part is already a `String` (stringified by `Rian.Interp`).
+  def infer(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: _}, _env, _ic), do: "String"
+
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)

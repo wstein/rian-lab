@@ -73,10 +73,19 @@ defmodule Rian.Interp do
     end
   end
 
-  # left-associative `<>` chain over the resolved parts (always ≥ 1 part: a string
-  # with holes lexes to interleaved lits + holes, so the list is never empty)
-  defp concat_chain([only]), do: only
-  defp concat_chain([h | t]), do: Enum.reduce(t, h, fn p, acc -> {:bin, "<>", acc, p} end)
+  # join the resolved parts into one string. Empty string *literals* (the lexer
+  # emits a trailing `{:lit, ""}`, and adjacent holes leave `""` between them) are
+  # dropped — they are identity for concatenation and only clutter the output.
+  # ≥2 parts lower to a single-shot `__prim_str_concat_all` (one allocation: a
+  # single BEAM binary / `format!` on Rust) rather than a left-nested `<>` cascade
+  # that builds N−1 intermediates (ADR-0069 §6). One part is the value itself.
+  defp concat_chain(parts) do
+    case Enum.reject(parts, &match?({:str, ""}, &1)) do
+      [] -> {:str, ""}
+      [only] -> only
+      many -> {:call, {:id, "__prim_str_concat_all"}, many}
+    end
+  end
 
   defp int_type?(t), do: is_binary(t) and Regex.match?(~r/^U?Int\d*$/, t)
 end

@@ -555,6 +555,11 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, s),
     do: {:bin, @ln, [bin_seg(expr_form(a, s)), bin_seg(expr_form(b, s))]}
 
+  # variadic single-shot join (ADR-0069 §6 — interpolation): build ONE binary from
+  # all parts (one allocation), rather than a nested `<>`/`str_concat` cascade.
+  defp expr_form(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}, s),
+    do: {:bin, @ln, Enum.map(args, &bin_seg(expr_form(&1, s)))}
+
   # string → atom (the BEAM-native interning the self-host backend needs to build
   # Erlang variable/operator atoms; atoms are BEAM-only, so `Rian.Reach` pins a
   # caller off `:rs`/`:js`/`:jvm`).

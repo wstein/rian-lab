@@ -85,15 +85,46 @@ defmodule Rian.InterpTest do
   describe "the same source lowers to JS and Rust (ADR-0069 §3 — portable, no FFI)" do
     @src ~S|def greet(n Int53) String := "n is \(n)!"|
 
-    test "JS emits `String(n)` concat and runs under node" do
+    test "JS emits one flat `+` join (ADR-0069 §6) and runs under node" do
       js = JS.compile(@src)
-      assert js =~ ~s|("n is " + String(n))|
+      # single-shot join: a flat `+` chain over all parts, no nested cascade
+      assert js =~ ~s|("n is " + String(n) + "!")|
       assert node_eval(js, "greet(5)") in [:no_node, "n is 5!"]
     end
 
-    test "Rust lowers the hole to `.to_string()` concatenation" do
+    test "Rust lowers the join to a single `format!` (ADR-0069 §6)" do
       rs = Lower.to_rust(hd(Decl.parse(@src).funcs), [], %{})
-      assert rs =~ ".to_string()"
+      assert rs =~ ~s|format!("{}{}{}", "n is ", n.to_string(), "!")|
+    end
+  end
+
+  describe "single-shot join-lowering (ADR-0069 §6)" do
+    test "interpolation lowers to one `__prim_str_concat_all`, not a `<>` cascade" do
+      assert {:call, {:id, "__prim_str_concat_all"}, parts} =
+               Rian.Interp.resolve(
+                 Pratt.parse(~S|"a \(x) b"|),
+                 %{"x" => "String"},
+                 %{}
+               )
+
+      # empty trailing literal dropped; flat list of parts, no nested `{:bin, "<>"}`
+      assert parts == [{:str, "a "}, {:id, "x"}, {:str, " b"}]
+    end
+
+    test "the BEAM builds one binary; a multi-hole string runs correctly" do
+      {:ok, m} =
+        Beam.load(
+          ~S|def m(a Int53, b Int53, c Int53) String := "\(a)-\(b)-\(c)"|,
+          :interp_join_beam
+        )
+
+      assert m.m(1, 2, 3) == "1-2-3"
+    end
+
+    test "a single-part interpolation stays the bare value (no join prim)" do
+      # `"\(name)"` (name : String) collapses to the identity — no concat at all
+      assert Rian.Interp.resolve(Pratt.parse(~S|"\(name)"|), %{"name" => "String"}, %{}) ==
+               {:id, "name"}
     end
   end
 

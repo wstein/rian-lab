@@ -363,6 +363,11 @@ defmodule Rian.JVM do
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
     do: "(#{expr_kt(n)}).toString()"
 
+  # variadic single-shot join (ADR-0069 §6): a flat `+` chain — every part is
+  # already a String; the Kotlin compiler lowers it to a single StringBuilder.
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}),
+    do: "(" <> Enum.map_join(args, " + ", &expr_kt/1) <> ")"
+
   # integer → float (ADR-0035 explicit conversion): Kotlin `Long.toDouble()`
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}),
     do: "(#{expr_kt(n)}).toDouble()"
