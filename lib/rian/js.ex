@@ -433,6 +433,18 @@ defmodule Rian.JS do
 
   defp expr_js(%EUnary{op: "-", arg: x}), do: "-#{expr_js(x)}"
   defp expr_js(%EUnary{op: "not", arg: x}), do: "!#{expr_js(x)}"
+
+  # ECMAScript has no integer-division operator: `/` is IEEE-754 float division
+  # (a `Number`). So a Rian `div` (integer division, truncate-toward-zero) cannot
+  # lower to a bare `/` in number-mode — `5 div 2` would be `2.5`, not `2`. Truncate
+  # explicitly. In BigInt-mode `/` is already integer division (truncates toward
+  # zero, matching `div`), so it stands as-is (ADR-0049 §JS-numerics).
+  defp expr_js(%EBin{op: "div", left: l, right: r}) do
+    if number_mode?(),
+      do: "Math.trunc(#{expr_js(l)} / #{expr_js(r)})",
+      else: "(#{expr_js(l)} / #{expr_js(r)})"
+  end
+
   defp expr_js(%EBin{op: op, left: l, right: r}), do: "(#{expr_js(l)} #{js_op(op)} #{expr_js(r)})"
   defp expr_js(%ETuple{elems: es}), do: "[#{Enum.map_join(es, ", ", &expr_js/1)}]"
 
@@ -586,7 +598,8 @@ defmodule Rian.JS do
   defp js_op("or"), do: "||"
   defp js_op(op) when op in ~w(+ - * < <= > >= %), do: op
   defp js_op("<>"), do: "+"
-  defp js_op("div"), do: "/"
+  # `div` is handled by a dedicated `expr_js(%EBin{op: "div"})` clause above
+  # (ECMAScript has no integer-division operator — `/` is float), not here.
   defp js_op("rem"), do: "%"
   defp js_op(op), do: raise(Unsupported, "ecmascript: operator `#{op}`")
 

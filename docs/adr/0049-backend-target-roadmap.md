@@ -72,6 +72,13 @@ Most of the ECMAScript target is already specified across the corpus:
 - `Int` → **`BigInt`**, `Int53`/`Int32` → native `number`; **`Int64` is NOT supported on JS**
   (superseded by **ADR-0064 §2a** — the old `Int64 → BigInt` mapping silently widened a bounded type).
   `Symbol`/opaque → **branded types** (ADR-0041/0043).
+- **Integer division has no operator in ECMAScript.** Unlike Pascal/Ada, ECMAScript follows IEEE 754:
+  `/` always returns a `Number` (double) — `5 / 2 === 2.5`. So a Rian **`div`** (integer division,
+  truncate-toward-zero, matching the BEAM) must **not** lower to a bare `/`. The emitter is mode-aware
+  (`expr_js(%EBin{op: "div"})`): **number-mode** (`Int53`/`Int32`) → `Math.trunc(l / r)`; **BigInt-mode**
+  (`Int`) → `l / r` (BigInt `/` already truncates toward zero, so it matches `div` for both signs).
+  Float division (`/`, which the checker types `Float64`) has **no JS lowering yet** and raises
+  `Unsupported` — a gap, not a silent miscompile.
 - Effects **erase** to ambient JS IO (ADR-0048); the event loop **fits the sequential core** (ADR-0031 —
   no OTP off-BEAM).
 - Protocol dispatch → **dictionary/vtable objects** (ADR-0042 JS note, confirmed by the PureScript study).

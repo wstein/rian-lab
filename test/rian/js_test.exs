@@ -564,4 +564,26 @@ defmodule Rian.JSTest do
       assert js =~ "function f(a0)"
     end
   end
+
+  describe "integer `div` lowers to truncating division (ECMAScript has no `div`)" do
+    # Regression: ECMAScript `/` is IEEE-754 float division, so a Rian `div`
+    # (integer division, truncate-toward-zero) must NOT lower to bare `/` in
+    # number-mode — `5 div 2` would be `2.5`. Truncate explicitly. In BigInt-mode
+    # `/` already truncates toward zero, so it stands (ADR-0049 §JS numerics).
+    test "number-mode (Int53): `div` emits `Math.trunc(l / r)` and stays integral" do
+      js = JS.compile("def g(a Int53) Int53 := a div 2")
+      assert js =~ "Math.trunc(a / 2)"
+      # node agrees with the BEAM (`div(5,2)=2`, `div(-5,2)=-2`) — not 2.5
+      assert node_eval(js, "g(5)") in [:no_node, "2"]
+      assert node_eval(js, "g(-5)") in [:no_node, "-2"]
+    end
+
+    test "BigInt-mode (Int): `div` stays `l / r` (BigInt `/` truncates toward zero)" do
+      js = JS.compile("def h(a Int) Int := a div 2")
+      assert js =~ "(a / 2n)"
+      refute js =~ "Math.trunc"
+      assert node_eval(js, "h(5n)") in [:no_node, "2"]
+      assert node_eval(js, "h(-5n)") in [:no_node, "-2"]
+    end
+  end
 end
