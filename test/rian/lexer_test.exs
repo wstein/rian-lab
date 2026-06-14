@@ -19,6 +19,40 @@ defmodule Rian.LexerTest do
       assert Lexer.expr_tokens(~s("hi")) == [{:str, "hi"}]
     end
 
+    test "string escapes: inner quotes, backslash, and \\n/\\t decode to their value" do
+      # `"a\"b"` is the value a"b — the inner quote must not terminate the string
+      assert Lexer.expr_tokens(~S|"a\"b"|) == [{:str, ~s(a"b)}]
+      assert Lexer.expr_tokens(~S|"a\\b"|) == [{:str, ~S(a\b)}]
+      assert Lexer.expr_tokens(~S|"line\nbreak"|) == [{:str, "line\nbreak"}]
+      assert Lexer.expr_tokens(~S|"tab\there"|) == [{:str, "tab\there"}]
+      # a body string literal embedding a quote still lexes as one token
+      assert Lexer.expr_tokens(~S|f("say \"hi\"")|) ==
+               [{:id, "f"}, {:lparen}, {:str, ~s(say "hi")}, {:rparen}]
+    end
+
+    test "string escapes: the full Elixir/Gleam named set decodes to its codepoint" do
+      assert Lexer.expr_tokens(~S|"\a"|) == [{:str, <<0x07>>}]
+      assert Lexer.expr_tokens(~S|"\b"|) == [{:str, <<0x08>>}]
+      assert Lexer.expr_tokens(~S|"\d"|) == [{:str, <<0x7F>>}]
+      assert Lexer.expr_tokens(~S|"\e"|) == [{:str, <<0x1B>>}]
+      assert Lexer.expr_tokens(~S|"\f"|) == [{:str, <<0x0C>>}]
+      assert Lexer.expr_tokens(~S|"\r"|) == [{:str, "\r"}]
+      assert Lexer.expr_tokens(~S|"\s"|) == [{:str, " "}]
+      assert Lexer.expr_tokens(~S|"\v"|) == [{:str, <<0x0B>>}]
+      assert Lexer.expr_tokens(~S|"\0"|) == [{:str, <<0>>}]
+    end
+
+    test "string escapes: \\xHH, \\uHHHH, and \\u{HEX} numeric forms" do
+      assert Lexer.expr_tokens(~S|"\x41"|) == [{:str, "A"}]
+      assert Lexer.expr_tokens(~S|"\x7"|) == [{:str, <<0x07>>}]
+      assert Lexer.expr_tokens(~S|"é"|) == [{:str, "é"}]
+      assert Lexer.expr_tokens(~S|"\u{e9}"|) == [{:str, "é"}]
+      assert Lexer.expr_tokens(~S|"\u00e9"|) == [{:str, "é"}]
+      assert Lexer.expr_tokens(~S|"\u{1F600}"|) == [{:str, "😀"}]
+      # a literal (unescaped) non-ASCII codepoint passes through unchanged
+      assert Lexer.expr_tokens(~S|"café"|) == [{:str, "café"}]
+    end
+
     test "word-operators stay operators (not keywords)" do
       assert Lexer.expr_tokens("a and not b") ==
                [{:id, "a"}, {:op, "and"}, {:op, "not"}, {:id, "b"}]
@@ -39,6 +73,15 @@ defmodule Rian.LexerTest do
       assert Lexer.expr_tokens(~S('\'')) == [{:char, 39}]
       assert Lexer.expr_tokens(~S('\0')) == [{:char, 0}]
       assert Lexer.expr_tokens("'\\u{1F600}'") == [{:char, 0x1F600}]
+    end
+
+    test "char literals honor the full Elixir/Gleam escape set" do
+      assert Lexer.expr_tokens(~S('\a')) == [{:char, 0x07}]
+      assert Lexer.expr_tokens(~S('\e')) == [{:char, 0x1B}]
+      assert Lexer.expr_tokens(~S('\s')) == [{:char, 0x20}]
+      assert Lexer.expr_tokens(~S('\v')) == [{:char, 0x0B}]
+      assert Lexer.expr_tokens(~S('\x41')) == [{:char, 0x41}]
+      assert Lexer.expr_tokens("'\\u00e9'") == [{:char, 0xE9}]
     end
 
     test "a non-ASCII codepoint is one Char" do
@@ -93,6 +136,36 @@ defmodule Rian.LexerTest do
     assert Lexer.detokenize(Lexer.tokenize("'A'")) == "'A'"
     assert Lexer.detokenize(Lexer.tokenize(~S('\n'))) == ~S('\n')
     assert Lexer.expr_tokens(Lexer.detokenize(Lexer.tokenize(~S('\\')))) == [{:char, 92}]
+  end
+
+  test "detokenize re-escapes inner quotes so a string round-trips re-lexably" do
+    # value a"b → `"a\"b"` → re-lexes back to the same value
+    assert Lexer.detokenize(Lexer.tokenize(~S|"a\"b"|)) == ~S|"a\"b"|
+    assert Lexer.expr_tokens(Lexer.detokenize(Lexer.tokenize(~S|"a\"b"|))) == [{:str, ~s(a"b)}]
+    # a body string literal embedding a quote survives the detokenize round-trip
+    src = ~S|f("say \"hi\"")|
+    assert Lexer.expr_tokens(Lexer.detokenize(Lexer.expr_tokens(src))) == Lexer.expr_tokens(src)
+    # backslash and \n re-escape too
+    assert Lexer.expr_tokens(Lexer.detokenize(Lexer.tokenize(~S|"a\\b"|))) == [{:str, ~S(a\b)}]
+    assert Lexer.expr_tokens(Lexer.detokenize(Lexer.tokenize(~S|"a\nb"|))) == [{:str, "a\nb"}]
+  end
+
+  test "detokenize round-trips control codepoints in strings via the `\\u{HEX}` fallback" do
+    # values: bell (7), unit-separator (31), DEL (127) — no named escape for 31
+    original = [{:str, <<0x07, 0x1F, 0x7F>>}]
+    assert Lexer.detokenize(original) == ~S|"\u{7}\u{1F}\u{7F}"|
+    assert Lexer.expr_tokens(Lexer.detokenize(original)) == original
+  end
+
+  test "out-of-range and surrogate codepoints are lex errors" do
+    assert_raise ArgumentError, ~r/out of range/, fn -> Lexer.tokenize(~S|"\u{110000}"|) end
+    assert_raise ArgumentError, ~r/surrogate/, fn -> Lexer.tokenize(~S|"\u{d800}"|) end
+  end
+
+  test "malformed numeric escapes are lex errors" do
+    assert_raise ArgumentError, ~r/`\\x` escape needs/, fn -> Lexer.tokenize(~S|"\xZ"|) end
+    assert_raise ArgumentError, ~r/`\\u` escape needs four/, fn -> Lexer.tokenize(~S|"\uAB"|) end
+    assert_raise ArgumentError, ~r/empty or unterminated/, fn -> Lexer.tokenize(~S|"\u{}"|) end
   end
 
   test "unterminated string is a lex error" do

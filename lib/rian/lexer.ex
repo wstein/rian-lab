@@ -60,7 +60,7 @@ defmodule Rian.Lexer do
   defp tok_str({:id, x}, _), do: x
   defp tok_str({:num, n}, _), do: n
   defp tok_str({:char, cp}, _), do: "'" <> char_source(cp) <> "'"
-  defp tok_str({:str, s}, _), do: ~s("#{s}")
+  defp tok_str({:str, s}, _), do: ~s(") <> escape_str(s) <> ~s(")
   defp tok_str({:op, o}, _), do: o
   defp tok_str({:kw, k}, _), do: k
   defp tok_str({:annot, a}, _), do: "@" <> a
@@ -79,8 +79,8 @@ defmodule Rian.Lexer do
   # `Char` literal body (ADR-0036): the text after the opening `'`. Returns
   # `{codepoint, rest}` where `rest` is the source past the closing `'`. Exactly
   # one codepoint is allowed — `''` and multi-codepoint `'AB'` are lex errors
-  # (Rian has no charlists; use a `"…"` string). Escapes: `\n \t \r \0 \\ \' \"`
-  # and `\u{HEX}`.
+  # (Rian has no charlists; use a `"…"` string). Escapes are the full
+  # Elixir/Gleam set, see `char_escape/1`.
   defp lex_char("\\" <> rest) do
     {cp, after_escape} = char_escape(rest)
     {cp, close_char(after_escape)}
@@ -103,32 +103,126 @@ defmodule Rian.Lexer do
     do:
       raise(ArgumentError, "character literal must be a single codepoint near: #{inspect(other)}")
 
+  # The escape vocabulary, shared by `Char` and `String` literals — the full
+  # Elixir set (a strict superset of Gleam's). Named single-character escapes:
+  defp char_escape("a" <> rest), do: {0x07, rest}
+  defp char_escape("b" <> rest), do: {0x08, rest}
+  defp char_escape("d" <> rest), do: {0x7F, rest}
+  defp char_escape("e" <> rest), do: {0x1B, rest}
+  defp char_escape("f" <> rest), do: {0x0C, rest}
   defp char_escape("n" <> rest), do: {?\n, rest}
-  defp char_escape("t" <> rest), do: {?\t, rest}
   defp char_escape("r" <> rest), do: {?\r, rest}
+  defp char_escape("s" <> rest), do: {0x20, rest}
+  defp char_escape("t" <> rest), do: {?\t, rest}
+  defp char_escape("v" <> rest), do: {0x0B, rest}
   defp char_escape("0" <> rest), do: {0, rest}
   defp char_escape("\\" <> rest), do: {?\\, rest}
   defp char_escape("'" <> rest), do: {?', rest}
   defp char_escape("\"" <> rest), do: {?", rest}
 
+  # `\xH`/`\xHH` — one or two hex digits (Elixir byte escape), read as a codepoint.
+  defp char_escape("x" <> rest) do
+    case take_hex(rest, 2) do
+      {"", _} -> raise ArgumentError, "`\\x` escape needs at least one hex digit"
+      {hex, after_hex} -> {cp!(String.to_integer(hex, 16)), after_hex}
+    end
+  end
+
+  # `\u{HEX}` — braced Unicode codepoint (Elixir + Gleam), 1–6 hex digits.
   defp char_escape("u{" <> rest) do
     case String.split(rest, "}", parts: 2) do
-      [hex, after_brace] -> {String.to_integer(hex, 16), after_brace}
-      [_] -> raise ArgumentError, "unterminated `\\u{...}` escape in character literal"
+      [hex, after_brace] when hex != "" -> {cp!(parse_hex!(hex)), after_brace}
+      _ -> raise ArgumentError, "empty or unterminated `\\u{...}` escape"
+    end
+  end
+
+  # `\uHHHH` — exactly four hex digits (Elixir Unicode escape).
+  defp char_escape("u" <> rest) do
+    case take_hex(rest, 4) do
+      {hex, after_hex} when byte_size(hex) == 4 ->
+        {cp!(String.to_integer(hex, 16)), after_hex}
+
+      _ ->
+        raise ArgumentError, "`\\u` escape needs four hex digits — or use `\\u{...}`"
     end
   end
 
   defp char_escape(other),
     do: raise(ArgumentError, "unknown character escape near: #{inspect(other)}")
 
-  # re-lexable rendering of a codepoint inside `'…'` (the inverse of `lex_char/1`)
+  # take up to `max` leading hex digits; returns `{taken, rest}`.
+  defp take_hex(str, max), do: take_hex(str, max, "")
+
+  defp take_hex(<<c, rest::binary>>, max, acc)
+       when max > 0 and
+              ((c >= ?0 and c <= ?9) or (c >= ?a and c <= ?f) or (c >= ?A and c <= ?F)),
+       do: take_hex(rest, max - 1, <<acc::binary, c>>)
+
+  defp take_hex(str, _max, acc), do: {acc, str}
+
+  defp parse_hex!(hex) do
+    if hex =~ ~r/\A[0-9a-fA-F]+\z/,
+      do: String.to_integer(hex, 16),
+      else: raise(ArgumentError, "invalid hex digits in escape: #{inspect(hex)}")
+  end
+
+  # a valid scalar Unicode codepoint (no surrogates, ≤ U+10FFFF).
+  defp cp!(n) when n in 0..0xD7FF or n in 0xE000..0x10FFFF, do: n
+
+  defp cp!(n),
+    do: raise(ArgumentError, "codepoint out of range or a surrogate: #{inspect(n)}")
+
+  # String literal body scanner (the text after the opening `"`). Returns
+  # `{decoded, rest}` where `decoded` is the string value with escapes resolved
+  # and `rest` is the source past the closing `"`. Honors the same escapes as
+  # `char_escape/1`, so `"a\"b"` lexes to the value `a"b` rather than terminating
+  # early on the inner quote.
+  defp lex_string("", _acc), do: raise(ArgumentError, "unterminated string literal")
+
+  defp lex_string("\"" <> rest, acc),
+    do: {acc |> Enum.reverse() |> IO.iodata_to_binary(), rest}
+
+  defp lex_string("\\" <> rest, acc) do
+    {cp, after_escape} = char_escape(rest)
+    lex_string(after_escape, [<<cp::utf8>> | acc])
+  end
+
+  defp lex_string(str, acc) do
+    {ch, rest} = String.next_codepoint(str)
+    lex_string(rest, [ch | acc])
+  end
+
+  # re-lexable rendering of a codepoint inside `'…'` (the inverse of `lex_char/1`).
+  # Backslash and the single quote must be escaped; other control codepoints fall
+  # back to `\u{HEX}` so any value round-trips.
   defp char_source(?\n), do: "\\n"
   defp char_source(?\t), do: "\\t"
   defp char_source(?\r), do: "\\r"
   defp char_source(0), do: "\\0"
   defp char_source(?\\), do: "\\\\"
   defp char_source(?'), do: "\\'"
+
+  defp char_source(cp) when cp < 0x20 or cp == 0x7F,
+    do: "\\u{" <> Integer.to_string(cp, 16) <> "}"
+
   defp char_source(cp), do: <<cp::utf8>>
+
+  # re-escape a decoded string value for rendering inside `"…"` (the inverse of
+  # `lex_string/2`), one codepoint at a time.
+  defp escape_str(s), do: for(<<cp::utf8 <- s>>, into: "", do: str_cp_source(cp))
+
+  # rendering of a single codepoint inside a `"…"` body. Backslash and the double
+  # quote must be escaped; control codepoints fall back to `\u{HEX}`.
+  defp str_cp_source(?\\), do: "\\\\"
+  defp str_cp_source(?"), do: "\\\""
+  defp str_cp_source(?\n), do: "\\n"
+  defp str_cp_source(?\t), do: "\\t"
+  defp str_cp_source(?\r), do: "\\r"
+
+  defp str_cp_source(cp) when cp < 0x20 or cp == 0x7F,
+    do: "\\u{" <> Integer.to_string(cp, 16) <> "}"
+
+  defp str_cp_source(cp), do: <<cp::utf8>>
 
   defp lex(str, acc) do
     cond do
@@ -163,10 +257,8 @@ defmodule Rian.Lexer do
         end
 
       String.starts_with?(str, "\"") ->
-        case String.split(advance(str, 1), "\"", parts: 2) do
-          [content, rest] -> lex(rest, [{:str, content} | acc])
-          [_] -> raise ArgumentError, "unterminated string literal"
-        end
+        {content, rest} = lex_string(advance(str, 1), [])
+        lex(rest, [{:str, content} | acc])
 
       # `Char` literal `'A'` (ADR-0036) — exactly one codepoint between single
       # quotes (Crystal-style); the parser desugars it to its codepoint integer.

@@ -104,6 +104,35 @@ the "is `/` integer or float?" ambiguity; the Rust lowering makes the promotion 
 keeping the literal's value while staying idiomatic. Floats also flow through the `comptime`
 sandbox (`comptime(3.14 * 2)` ⇒ `6.28`); `div`/`rem` there remain integer-only.
 
+### String & char literals — escapes
+
+A `"…"` `String` and a `'…'` `Char` (ADR-0036) share **one** escape vocabulary — the full Elixir
+set, which is a strict superset of Gleam's. An unescaped `"` ends a string and an unescaped `'`
+ends a char; everything else is a literal codepoint unless introduced by `\`.
+
+| Escape | Codepoint | Meaning |
+|---|---|---|
+| `\a` | `0x07` | alert / bell |
+| `\b` | `0x08` | backspace |
+| `\d` | `0x7F` | delete |
+| `\e` | `0x1B` | escape |
+| `\f` | `0x0C` | form feed |
+| `\n` | `0x0A` | newline |
+| `\r` | `0x0D` | carriage return |
+| `\s` | `0x20` | space |
+| `\t` | `0x09` | tab |
+| `\v` | `0x0B` | vertical tab |
+| `\0` | `0x00` | null |
+| `\\` `\'` `\"` | — | literal backslash / quote |
+| `\xH`, `\xHH` | 1–2 hex | codepoint by hex (Elixir byte escape) |
+| `\uHHHH` | 4 hex | Unicode codepoint |
+| `\u{HEX}` | 1–6 hex | Unicode codepoint (braced; the only Gleam form) |
+
+A codepoint must be a Unicode scalar value — surrogates (`\u{D800}`–`\u{DFFF}`) and anything above
+`\u{10FFFF}` are lex errors, as is a numeric escape with no/too-few hex digits. The same value
+re-renders re-lexably on detokenization (`Rian.Lexer.detokenize/2`): the common escapes round-trip
+by name and any other control codepoint falls back to `\u{HEX}`.
+
 ### `&` — function captures
 
 A prefix `&` builds a function value, in the BEAM-consonant style (not Haskell operator sections):

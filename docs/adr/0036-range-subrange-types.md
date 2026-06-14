@@ -165,7 +165,12 @@ on the `@type` spec and first-match clauses; no shim needed.
 
 - ~~**`Char` literal vs Elixir charlist.**~~ **Resolved 2026-06-12:** `'…'` delimits **exactly one
   `Char`** (Crystal); a multi-codepoint single-quoted literal (`'AB'`) is a **lex error** (use a
-  `"…"` `String`) — Rian has **no charlists**. Escapes `'\n'`, `'\''`, `'\\'`, `'\u{1F600}'`.
+  `"…"` `String`) — Rian has **no charlists**. `Char` and `String` literals share the **full
+  Elixir escape vocabulary** (a strict superset of Gleam's): the named escapes `\a \b \d \e \f \n
+  \r \s \t \v \0`, `\\ \' \"`, the hex byte escape `\xH`/`\xHH`, and the Unicode forms `\uHHHH`
+  and `\u{HEX}` (e.g. `'\u{1F600}'`). Codepoints are validated (no surrogates, ≤ `U+10FFFF`). The
+  scanner and the re-lexable detokenizer/source renderer live in [`Rian.Lexer`](../../lib/rian/lexer.ex);
+  see [the expression spec](../spec/expressions.md) for the canonical table.
 - **Implementation note (`Char` type lands — native per target).** The `Char` literal **and the
   distinct `Char` type** are implemented. `Rian.Lexer` scans `'…'` (the escapes above, single
   codepoint enforced); `Rian.Pratt` parses it to a distinct `{:char, cp}` expression / `{:char_lit,
