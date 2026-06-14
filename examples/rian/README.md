@@ -199,6 +199,18 @@ compile + run on real BEAM bytecode:
   to `Rian.Beam` (recursion, pattern dispatch, and precedence all surviving). Host-
   FFI-free (quoted-atom operator literals + `Prim.str_to_atom`). Guards and multi-
   function modules are the next widening.
+- [selfhost_compose_mod.rian](selfhost_compose_mod.rian) — **COMPOSITION rung 4**
+  (ADR-0063 Step 3): the composed pipeline now emits a whole **multi-function
+  module**, not a single function. `group` folds the flat clause stream into one
+  group per function, and `compile_module(src, modname)` assembles the **entire**
+  `:compile.forms` input — the `:module`/`:export` attributes *and* every
+  `{:function,…}` form — as native Rian **tuple literals** (the export entries are
+  the *tagless* `{name, arity}` tuples a tagged variant ctor can't spell). The
+  decisive step: `test/rian/compose_mod_fixpoint_test.exs` authors **no** Erlang
+  form by hand — it passes the Rian-produced list straight to `:compile.forms` and
+  **runs** it, identical to `Rian.Beam` across multi-function, multi-clause, and
+  mutually-recursive (`even`/`odd`) modules. Host-FFI-free. This is the last rung
+  before a Rian *driver* owns the `:compile.forms` call itself.
 - [selfhost_codegen.rian](selfhost_codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via

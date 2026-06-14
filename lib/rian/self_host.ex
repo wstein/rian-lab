@@ -157,14 +157,14 @@ defmodule Rian.SelfHost do
   # bootstrap terminus (Stage 3: v1==v2) is gated on this reaching the whole
   # pipeline — not on `percent`.
   @composition %{
-    rung: "lex → parse → lower → emit",
+    rung: "lex → parse → group → lower → assemble",
     stages: 4,
     subset:
-      "a multi-clause, self-recursive function over arithmetic (literal/variable head patterns, function calls, `+ - *`, parens)",
-    source: "selfhost_compose_multi.rian",
-    test: "test/rian/compose_multi_fixpoint_test.exs",
+      "a whole multi-function module over arithmetic (several functions incl. multi-clause + mutual recursion; literal/variable head patterns, calls, `+ - *`, parens)",
+    source: "selfhost_compose_mod.rian",
+    test: "test/rian/compose_mod_fixpoint_test.exs",
     note:
-      "four stages wired directly over shared types (no projection glue). Rung 1 (selfhost_compose.rian) composed an expression; rung 2 (selfhost_compose_decl.rian) a single-clause declaration; rung 3 widens to a whole multi-clause recursive function — Rian splits the clause sequence, reads literal/variable head patterns, parses calls, and assembles one multi-clause {:function, …} form. The composed output compiles via :compile.forms and RUNS identically to the full Elixir toolchain (recursion, pattern dispatch, and precedence all survive end to end)"
+      "four stages wired directly over shared types (no projection glue). Rung 1 (selfhost_compose.rian) composed an expression; rung 2 (selfhost_compose_decl.rian) a single-clause declaration; rung 3 (selfhost_compose_multi.rian) a multi-clause recursive function; rung 4 emits a WHOLE module — `group` folds the clause stream into per-function groups and `compile_module(src, modname)` assembles the entire :compile.forms input (the :module/:export attributes AND every {:function,…} form) as native Rian tuple literals. The fixpoint authors NO Erlang form by hand: it passes the Rian-produced list straight to :compile.forms and RUNS it, identical to the full Elixir toolchain across multi-function, multi-clause, and mutually-recursive modules"
   }
 
   @doc """
