@@ -19,12 +19,14 @@
 # ---------------------------------------------------------------------------
 
 # A fully-portable module: pure sequential logic, reaches every target. The
-# `@targets(ex, rs, js)` contract holds, so this compiles.
+# `@targets(ex, rs, js)` contract holds, so this compiles. `Int53` is the portable
+# all-target integer (a native JS `number`, an `i64` elsewhere); a fixed-width
+# `Int64` would be off `:js` and break the contract (ADR-0064 §2a).
 @targets(ex, rs, js)
 mod Geometry do
-  pub def square(n Int64) Int64 := n * n
+  pub def square(n Int53) Int53 := n * n
 
-  pub def area_of_rect(w Int64, h Int64) Int64 := w * h
+  pub def area_of_rect(w Int53, h Int53) Int53 := w * h
 end
 
 # A BEAM-only module: it uses Erlang FFI (`:erlang.system_time/0`), which is
