@@ -95,6 +95,12 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "def d(c) := Prim.char_code(c) - Prim.char_code('0')",
       "def d(c Char) Int64 := Prim.char_code(c) - Prim.char_code('0')",
       [{:d, [?7]}, {:d, [?0]}, {:d, [?9]}]
+    },
+    # `<>` — binary concatenation (the lexer builds token strings this way)
+    {
+      "def wrap(s) := \"[\" <> s <> \"]\"\ndef cat(a, b) := a <> b",
+      "def wrap(s String) String := \"[\" <> s <> \"]\"\ndef cat(a String, b String) String := a <> b",
+      [{:wrap, ["hi"]}, {:cat, ["foo", "bar"]}]
     }
   ]
 

@@ -60,6 +60,7 @@ mod SelfhostBeam do
              | FCtor(String, Vec(Form))
              | FOp1(String, Form)
              | FOp2(String, Form, Form)
+             | FConcat(Form, Form)
              | FCall(String, Vec(Form))
              | FRemote(String, String, Vec(Form))
              | FTuple(Vec(Form))
@@ -143,6 +144,9 @@ mod SelfhostBeam do
   end
   def expr_form(CAtom(a)) := FAtom(a)
   def expr_form(CUnary(op, x)) := FOp1(op, expr_form(x))
+  # `<>` is NOT an Erlang operator — it is binary construction `<<L/binary, R/binary>>`
+  # (Rian.Beam). MUST precede the generic CBin clause (which would emit a bad FOp2).
+  def expr_form(CBin("<>", l, r)) := FConcat(expr_form(l), expr_form(r))
   def expr_form(CBin(op, l, r)) := FOp2(op, expr_form(l), expr_form(r))
   # portable-prelude prims (ADR-0047) — each lowers to the SAME native Erlang form
   # Rian.Beam uses, so the composed build is byte-equivalent: str_chars →

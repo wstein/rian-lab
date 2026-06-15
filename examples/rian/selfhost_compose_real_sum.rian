@@ -76,6 +76,7 @@ mod SelfhostComposeRealSum do
              | FOp2(String, Form, Form)
              | FCall(String, Vec(Form))
              | FRemote(String, String, Vec(Form))
+             | FConcat(Form, Form)
              | FTuple(Vec(Form))
              | FNil
              | FCons(Form, Form)
@@ -249,6 +250,8 @@ mod SelfhostComposeRealSum do
   def inflate(FCall(f, args)) := {:call, 0, {:atom, 0, Prim.str_to_atom(f)}, inflate_all(args)}
   # a Prim lowered to a host remote call (str_chars → String.to_charlist, …).
   def inflate(FRemote(m, fun, args)) := {:call, 0, {:remote, 0, {:atom, 0, Prim.str_to_atom(m)}, {:atom, 0, Prim.str_to_atom(fun)}}, inflate_all(args)}
+  # `<>` — binary construction `<<L/binary, R/binary>>` (Rian.Beam), not an op.
+  def inflate(FConcat(l, r)) := {:bin, 0, [{:bin_element, 0, inflate(l), :default, [:binary]}, {:bin_element, 0, inflate(r), :default, [:binary]}]}
   # a nullary constructor (pattern or value) is its snake_case atom; an applied
   # constructor is a tagged tuple {tag, arg, …} — the BEAM rep of a sum value.
   def inflate(FCtorN(c)) := {:atom, 0, to_snake(c)}

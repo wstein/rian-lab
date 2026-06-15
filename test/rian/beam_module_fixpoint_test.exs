@@ -91,6 +91,15 @@ defmodule Rian.BeamModuleFixpointTest do
   defp inf({:f_op1, op, x}), do: {:op, 0, unary_op(op), inf(x)}
   defp inf({:f_op2, op, l, r}), do: {:op, 0, erl_op(op), inf(l), inf(r)}
 
+  # `<>` is binary construction `<<L/binary, R/binary>>`, not an op (Rian.Beam).
+  defp inf({:f_concat, l, r}),
+    do:
+      {:bin, 0,
+       [
+         {:bin_element, 0, inf(l), :default, [:binary]},
+         {:bin_element, 0, inf(r), :default, [:binary]}
+       ]}
+
   defp inf({:f_call, f, args}),
     do: {:call, 0, {:atom, 0, String.to_atom(f)}, Enum.map(args, &inf/1)}
 
@@ -195,7 +204,10 @@ defmodule Rian.BeamModuleFixpointTest do
     # String.to_charlist, str_from_chars → List.to_string, char_code → identity)
     {"def echo(s String) String := Prim.str_from_chars(Prim.str_chars(s))",
      [{:echo, ["hi"]}, {:echo, ["ok"]}]},
-    {"def d(c Char) Int64 := Prim.char_code(c) - Prim.char_code('0')", [{:d, [?7]}, {:d, [?0]}]}
+    {"def d(c Char) Int64 := Prim.char_code(c) - Prim.char_code('0')", [{:d, [?7]}, {:d, [?0]}]},
+    # `<>` — binary concatenation (string building, as the lexer does)
+    {"def cat(a String, b String) String := a <> b", [{:cat, ["foo", "bar"]}, {:cat, ["", "x"]}]},
+    {"def wrap(s String) String := \"[\" <> s <> \"]\"", [{:wrap, ["hi"]}]}
   ]
 
   describe "self-hosting BEAM-module fixpoint — Rian forms run identically to Rian.Beam" do
