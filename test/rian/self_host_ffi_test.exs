@@ -43,7 +43,7 @@ defmodule Rian.SelfHostFfiTest do
     for {file, _} <- SelfHost.ffi_ledger() do
       assert file in bases, "ledger names #{file}, which is not a self-host source"
 
-      assert SelfHost.ffi_in_file(Path.join(["examples", "rian", file])) != [],
+      assert SelfHost.ffi_in_file(Path.join(["compiler", file])) != [],
              "ledger lists FFI for #{file}, but it has none — remove the stale entry"
     end
   end

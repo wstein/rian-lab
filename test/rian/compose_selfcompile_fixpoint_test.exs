@@ -6,7 +6,7 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
   alias Rian.Beam
 
   # THE LOOP CLOSES ON A WHOLE REAL STAGE (ADR-0063 Step 3/4). This was once a
-  # verbatim SLICE of selfhost_cap.rian (the `Ty` sum + `copyt`); it now feeds the
+  # verbatim SLICE of cap.rian (the `Ty` sum + `copyt`); it now feeds the
   # composed `build` the ENTIRE capability checker — the `Cap`/`Ty` sums, the
   # `rust_param` Rust-signature matrix, `beam_legal`, and `copyt` — and the composed
   # build (verified lexer + decl parser + beam backend, cross-module) compiles it
@@ -18,24 +18,24 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
   # in the loop (see Rian.SelfHost @composition). `self_checking` stays false until
   # type inference is wired too.
 
-  @cap_file "examples/rian/selfhost_cap.rian"
+  @cap_file "compiler/cap.rian"
   @cap_src File.read!(@cap_file)
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_sum.rian"),
+        File.read!("compiler/compose_real_sum.rian"),
         :rian_compose_selfcompile
       )
 
@@ -92,7 +92,7 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
       comp = Rian.SelfHost.composition()
       assert comp.self_compiling == true
       assert comp.self_checking == false
-      assert comp.closed_on_real_source =~ "selfhost_cap.rian"
+      assert comp.closed_on_real_source =~ "cap.rian"
     end
   end
 end

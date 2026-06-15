@@ -1,7 +1,7 @@
 defmodule Rian.CheckerFixpointTest do
   @moduledoc """
   Checker fixpoint with teeth (ADR-0063 §4 / SELFHOST.md — Samir's "inert checker"
-  critique). The Rian-written type-checker (`selfhost_check.rian`) is run, compiled to
+  critique). The Rian-written type-checker (`check.rian`) is run, compiled to
   real `.beam`, over a golden corpus of well- and ill-typed toy `Expr` programs; its
   verdicts must match exactly. The **teeth**: ill-typed programs must be *rejected*
   (`Bad`), so a checker that regressed to "always `Ok`" fails — the verification is not
@@ -16,7 +16,7 @@ defmodule Rian.CheckerFixpointTest do
   # Var→{:var,s}, Add/Lt→{:tag,a,b}, If→{:if,c,t,e}, Let→{:let,name,rhs,body}.
   setup do
     {:ok, chk} =
-      Beam.load(File.read!("examples/rian/selfhost_check.rian"), :rian_checker_fixpoint)
+      Beam.load(File.read!("compiler/check.rian"), :rian_checker_fixpoint)
 
     {:ok, chk: chk}
   end
@@ -40,7 +40,7 @@ defmodule Rian.CheckerFixpointTest do
      "type error in if-branch: expected Int, got Bool"}
   ]
 
-  describe "selfhost_check.rian — the Rian checker agrees with the golden verdicts" do
+  describe "check.rian — the Rian checker agrees with the golden verdicts" do
     test "well-typed programs infer the expected type", %{chk: chk} do
       for {expr, ty} <- @well_typed,
           do: assert(chk.describe(chk.check(expr)) == ty, "for #{inspect(expr)}")

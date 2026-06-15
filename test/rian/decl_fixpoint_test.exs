@@ -6,7 +6,7 @@ defmodule Rian.DeclFixpointTest do
   alias Rian.IR.{Clause, Field, Func, Mod, Param, Struct, Type, Variant}
 
   # Stage 2 of the bootstrap ladder (ADR-0063) for **declarations**: the
-  # Rian-written front-end (examples/rian/selfhost_decl.rian) parses `type` sums
+  # Rian-written front-end (compiler/decl.rian) parses `type` sums
   # and `def` functions into a `Decl` representation that — projected to `Rian.IR`
   # — (1) **matches what `Rian.Decl.parse` builds**, and (2) is handed to the real
   # backend (`Rian.Beam.compile_ir/2`) which **compiles and runs it**. That is the
@@ -25,7 +25,7 @@ defmodule Rian.DeclFixpointTest do
   # clause patterns) + the portable stdlib breadth — see ADR-0063.
 
   setup_all do
-    {:ok, fe} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :rian_decl_frontend)
+    {:ok, fe} = Beam.load(File.read!("compiler/decl.rian"), :rian_decl_frontend)
     {:ok, frontend: fe}
   end
 
@@ -448,7 +448,7 @@ defmodule Rian.DeclFixpointTest do
     # across newlines (P1) — the exact `starts_decl` idiom
     "def sd(k String) Bool :=\n  k == \"a\" or k == \"b\" or\n  k == \"c\" or k == \"d\"",
     # `@external` FFI annotations on a bodiless `def` → Func with empty clauses + an
-    # `externals` map (the driver, selfhost_compose_real_sum.rian, uses these). A
+    # `externals` map (the driver, compose_real_sum.rian, uses these). A
     # bodiless sig followed by `@external` previously HUNG the parser.
     "@external(:ex, \":erlang.binary_to_list(s)\")\ndef str_bytes(s String) Vec(Int53)",
     # two `@external` + bodiless sigs in sequence — the exact driver pattern that hung

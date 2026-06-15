@@ -20,17 +20,17 @@ defmodule Rian.SelfhostBuildTest do
 
   setup_all do
     for {mod, file} <- [
-          {"SelfhostLexerV2", "selfhost_lexer_v2"},
-          {"SelfhostDecl", "selfhost_decl"},
-          {"SelfhostBeam", "selfhost_beam"},
-          {"SelfhostExhaust", "selfhost_exhaust"},
-          {"SelfhostCap", "selfhost_cap"}
+          {"SelfhostLexerV2", "lexer_v2"},
+          {"SelfhostDecl", "decl"},
+          {"SelfhostBeam", "beam"},
+          {"SelfhostExhaust", "exhaust"},
+          {"SelfhostCap", "cap"}
         ] do
-      {:ok, _} = Beam.load(File.read!("examples/rian/#{file}.rian"), :"Elixir.#{mod}")
+      {:ok, _} = Beam.load(File.read!("compiler/#{file}.rian"), :"Elixir.#{mod}")
     end
 
     {:ok, drv} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_real_sum.rian"), :rian_selfhost_build)
+      Beam.load(File.read!("compiler/compose_real_sum.rian"), :rian_selfhost_build)
 
     {:ok, drv: drv}
   end

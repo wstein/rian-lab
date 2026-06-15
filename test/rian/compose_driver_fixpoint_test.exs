@@ -5,7 +5,7 @@ defmodule Rian.ComposeDriverFixpointTest do
   alias Rian.Beam
 
   # COMPOSITION fixpoint rung 5 / capstone (ADR-0063 Step 3 / §4): the BEAM-bootstrap
-  # terminus shape. `selfhost_compose_driver.rian` owns the WHOLE loop in Rian —
+  # terminus shape. `compose_driver.rian` owns the WHOLE loop in Rian —
   # source string -> a loaded, runnable module:
   #
   #     build(src, modname) = load(compile_forms(compile_module(src, modname)), modname)
@@ -21,7 +21,7 @@ defmodule Rian.ComposeDriverFixpointTest do
 
   setup_all do
     {:ok, drv} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_driver.rian"), :rian_compose_driver)
+      Beam.load(File.read!("compiler/compose_driver.rian"), :rian_compose_driver)
 
     {:ok, drv: drv}
   end

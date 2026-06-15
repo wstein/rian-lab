@@ -16,7 +16,7 @@ defmodule Rian.SelfhostFixedpointTest do
 
   setup_all do
     {:ok, lx} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :rian_selfhost_fp_lexer)
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :rian_selfhost_fp_lexer)
 
     {:ok, lexer: lx}
   end
@@ -40,8 +40,8 @@ defmodule Rian.SelfhostFixedpointTest do
   defp project(:t_semi), do: {:semi}
   defp project(:tnl), do: {:nl}
 
-  defp tokens_of(lx, file) do
-    src = File.read!(Path.join(["examples", "rian", file]))
+  defp tokens_of(lx, path) do
+    src = File.read!(path)
     {src, lx.tokenize(src) |> Enum.map(&project/1)}
   end
 
@@ -51,10 +51,10 @@ defmodule Rian.SelfhostFixedpointTest do
   # 27 of the 33 `.rian` sources; the divergent ones use heredoc doc-comments, and
   # the lexer cannot yet lex *its own* source — char escapes `'\n'` — the frontier.)
   @sources ~w(
-    selfhost_parse.rian selfhost_opt.rian selfhost_modules.rian
-    selfhost_calc.rian selfhost_eval.rian selfhost_codegen.rian selfhost_listlib.rian
-    prelude_dict.rian prelude_int.rian prelude_str.rian
-    01_basics.rian 05_modules.rian
+    compiler/parse.rian compiler/opt.rian compiler/modules.rian
+    compiler/calc.rian compiler/eval.rian compiler/codegen.rian compiler/listlib.rian
+    examples/rian/prelude_dict.rian examples/rian/prelude_int.rian examples/rian/prelude_str.rian
+    examples/rian/01_basics.rian examples/rian/05_modules.rian
   )
 
   describe "self-application fixed point (ADR-0063 Stage 1) — Rian lexer over real Rian source" do
@@ -62,13 +62,13 @@ defmodule Rian.SelfhostFixedpointTest do
       for f <- @sources do
         {_src, got} = tokens_of(lx, f)
 
-        assert got == Lexer.tokenize(File.read!(Path.join(["examples", "rian", f]))),
+        assert got == Lexer.tokenize(File.read!(f)),
                "the Rian-written lexer diverged from Rian.Lexer on #{f}"
       end
     end
 
     test "headline: the Rian lexer lexes the Rian PARSER's own source", %{lexer: lx} do
-      {src, got} = tokens_of(lx, "selfhost_parse.rian")
+      {src, got} = tokens_of(lx, "compiler/parse.rian")
       assert got == Lexer.tokenize(src)
       # a non-trivial real module — proves this is not a toy-input result
       assert length(got) > 500
@@ -81,8 +81,8 @@ defmodule Rian.SelfhostFixedpointTest do
   # same source compiles to byte-identical bytecode on every run.
   describe "Stage 3 prerequisite — deterministic emission (ADR-0063)" do
     test "Rian.Beam emits byte-identical bytecode on recompilation" do
-      for f <- ~w(selfhost_opt.rian selfhost_modules.rian selfhost_parse.rian) do
-        src = File.read!(Path.join(["examples", "rian", f]))
+      for f <- ~w(opt.rian modules.rian parse.rian) do
+        src = File.read!(Path.join(["compiler", f]))
 
         assert Beam.compile_program(src) == Beam.compile_program(src),
                "Rian.Beam emission is nondeterministic for #{f} — blocks a bit-identical bootstrap"

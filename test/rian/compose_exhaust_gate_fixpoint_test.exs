@@ -5,7 +5,7 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
   alias Rian.Beam
 
   # SELF-CHECKING (ADR-0063 / ADR-0036) — the exhaustiveness gate, running INSIDE the
-  # Rian compiler. The driver (selfhost_compose_real_sum.rian) builds the usefulness
+  # Rian compiler. The driver (compose_real_sum.rian) builds the usefulness
   # env from a program's `type` declarations, converts each function's clause matrix,
   # and asks the verified `SelfhostExhaust.useful` (locked to `Rian.Exhaustiveness`
   # in exhaust_fixpoint_test) whether a wildcard row is useful — useful ⇒ an uncovered
@@ -18,18 +18,18 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_real_sum.rian"), :rian_exhaust_gate)
+      Beam.load(File.read!("compiler/compose_real_sum.rian"), :rian_exhaust_gate)
 
     {:ok, drv: drv}
   end
@@ -59,8 +59,8 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
   # the compiler's own sources — every checkable function must be exhaustive, or the
   # gate (once wired into build) would refuse to compile the compiler itself.
   @compiler_sources ~w(
-    selfhost_lexer_v2 selfhost_decl selfhost_beam selfhost_core
-    selfhost_cap selfhost_exhaust selfhost_compose_real_sum
+    lexer_v2 decl beam core
+    cap exhaust compose_real_sum
   )
 
   describe "the exhaustiveness gate decides correctly, inside the Rian compiler" do
@@ -75,7 +75,7 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
     test "every compiler source passes the gate (so build can refuse without breaking itself)",
          %{drv: drv} do
       for f <- @compiler_sources do
-        bad = drv.non_exhaustive(File.read!("examples/rian/#{f}.rian"))
+        bad = drv.non_exhaustive(File.read!("compiler/#{f}.rian"))
 
         assert bad == "",
                "#{f}.rian has a non-exhaustive checkable function `#{bad}` — wiring the gate into build would break it"

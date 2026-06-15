@@ -18,11 +18,11 @@ defmodule Rian.ComposeBenchTest do
 
   alias Rian.Beam
 
-  @lexer File.read!("examples/rian/selfhost_lexer_v2.rian")
-  @decl File.read!("examples/rian/selfhost_decl.rian")
-  @beam File.read!("examples/rian/selfhost_beam.rian")
-  @driver File.read!("examples/rian/selfhost_compose_real_sum.rian")
-  @cap File.read!("examples/rian/selfhost_cap.rian")
+  @lexer File.read!("compiler/lexer_v2.rian")
+  @decl File.read!("compiler/decl.rian")
+  @beam File.read!("compiler/beam.rian")
+  @driver File.read!("compiler/compose_real_sum.rian")
+  @cap File.read!("compiler/cap.rian")
 
   @iters 15
 
@@ -44,9 +44,9 @@ defmodule Rian.ComposeBenchTest do
     {:ok, _} = Beam.load(@beam, :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
     {:ok, gen0} = Beam.load(@driver, :rian_bench_gen0)
 
     # gen1 — gen0 compiles the compiler's own sources; load them as the live compiler.

@@ -114,7 +114,7 @@ before freezing the surface** (P7), not a design choice. `Rian.Decl`'s `:=`-body
 unbalanced `(`/`[`/`{`/`%{`, (b) a binary operator trails the line or (c) leads the next, or (d) the
 body simply begins on the next line. A plain one-liner still ends at its newline. This is a *layout*
 relaxation only — tokens and the operator table are unchanged (and are what P7 will freeze). The
-self-host budget the review noted: `examples/rian/selfhost_decl.rian` (which re-parses bodies) and the
+self-host budget the review noted: `compiler/decl.rian` (which re-parses bodies) and the
 `Rian.Fixpoint` anchor will track this when the Rian-written front-end widens to multi-line bodies.
 
 ## Spike finding (P6 — shared-traversal LCD check, 2026-06-14)

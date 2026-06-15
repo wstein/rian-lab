@@ -3,7 +3,7 @@
 # ===========================================================================
 # Goal (ADR-0027/0031): port a slice of `Rian.Pratt` — precedence climbing over
 # `+ - * /` with parentheses — into Rian itself. It consumes the `Vec(Token)`
-# the companion lexer (`selfhost_lexer.rian`) produces, builds its OWN typed
+# the companion lexer (`lexer.rian`) produces, builds its OWN typed
 # `Expr` sum, and threads `(Expr, Vec(Token))` through each step as a `Parse`
 # pair. Evidence for SELFHOST.md — the first `Rian.Beam.Unsupported` it raises
 # is the next real self-hosting increment.

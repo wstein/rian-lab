@@ -5,7 +5,7 @@ defmodule Rian.CoreFixpointTest do
   alias Rian.{Beam, Core, Pratt}
 
   # Self-hosting fixpoint (ADR-0063) for the **typed Core IR** stage (full): a
-  # Rian-written surface→Core lowering (examples/rian/selfhost_core.rian),
+  # Rian-written surface→Core lowering (compiler/core.rian),
   # compiled to real `.beam`, diffed against the reference
   # `Rian.Core.from_expr`/`from_pat` over the FULL surface front-door.
   #
@@ -17,7 +17,7 @@ defmodule Rian.CoreFixpointTest do
   # and the never-parsed `as`/pin patterns are not surface, so they are out of scope.
 
   setup_all do
-    {:ok, mod} = Beam.load(File.read!("examples/rian/selfhost_core.rian"), :rian_core_fixpoint)
+    {:ok, mod} = Beam.load(File.read!("compiler/core.rian"), :rian_core_fixpoint)
     {:ok, mod: mod}
   end
 

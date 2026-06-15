@@ -5,7 +5,7 @@ defmodule Rian.JsModuleFixpointTest do
   alias Rian.{Beam, Core, Decl, JS, Pratt}
 
   # Self-hosting fixpoint (ADR-0063) for the **ECMAScript backend** (whole module):
-  # a Rian-written port of `Rian.JS`'s emission (examples/rian/selfhost_js.rian),
+  # a Rian-written port of `Rian.JS`'s emission (compiler/js.rian),
   # compiled to real `.beam`, diffed against `Rian.JS.compile` over a corpus
   # covering its expression + function surface — sum variants (tagged arrays),
   # structs, tuples/lists/maps, `.field`, `if`, `case`, multi-clause dispatch.
@@ -16,7 +16,7 @@ defmodule Rian.JsModuleFixpointTest do
   # and protocol-free (protocol dispatch / int-mode / Shadow are out of scope).
 
   setup_all do
-    {:ok, mod} = Beam.load(File.read!("examples/rian/selfhost_js.rian"), :rian_js_module_fixpoint)
+    {:ok, mod} = Beam.load(File.read!("compiler/js.rian"), :rian_js_module_fixpoint)
     {:ok, mod: mod}
   end
 

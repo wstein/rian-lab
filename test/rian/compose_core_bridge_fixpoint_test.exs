@@ -7,7 +7,7 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
   # STEP 3 (verification bridge) — the driver's surface→Core lowering is
   # equivalence-locked to `Rian.Core` via the verified `selfhost_core` oracle.
   #
-  # The composition driver (selfhost_compose_real_sum.rian) lowers selfhost_decl's
+  # The composition driver (compose_real_sum.rian) lowers selfhost_decl's
   # surface to `selfhost_beam`'s Core with its own `lower_surface`/`lower_pat` — the
   # last sizeable chunk of driver-local code that reimplements a stage. It was
   # locked only BEHAVIORALLY (the build runs identically to Rian.Beam). This bridge
@@ -26,14 +26,14 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_core.rian"), :"Elixir.SelfhostCore")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/core.rian"), :"Elixir.SelfhostCore")
 
     {:ok, drv} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_real_sum.rian"), :rian_core_bridge)
+      Beam.load(File.read!("compiler/compose_real_sum.rian"), :rian_core_bridge)
 
     {:ok, drv: drv}
   end

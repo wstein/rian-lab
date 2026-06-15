@@ -13,7 +13,8 @@ compiler written in Elixir that parses `.rian` source and emits idiomatic code p
 decisions live; `lib/rian/` implements them. When you change language *behaviour*, update the
 matching ADR — and conversely, an ADR marked "Accepted" may still be unimplemented or partially
 implemented (check the `**Status:**` header and the code before trusting it). `docs/spec/` holds
-prose specs; `examples/rian/` is the annotated by-example tour and the self-hosting spikes.
+prose specs; `examples/rian/` is the annotated by-example tour; `compiler/` holds the self-hosted
+compiler sources (the Rian-in-Rian ports — lexer/decl/beam/checker/… and the composing driver).
 
 ## Commands
 
@@ -140,7 +141,7 @@ architectural cost.
   `rustc --test`). `Option(T)`/`T | E`/user-sum-over-`T` generic returns also reach `:rs` (the payload is
   cloned at construction). The only Rust-generic residual is an **`Fn(...)`-typed** return mentioning a
   tvar (a returned closure — needs `impl Fn`/`Box<dyn Fn>`), still honestly pinned off `:rs` (ADR-0061).
-- **Self-hosting** (`SELFHOST.md`, `examples/rian/selfhost_*.rian`): a compiler pipeline written in
+- **Self-hosting** (`SELFHOST.md`, `compiler/*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.
 

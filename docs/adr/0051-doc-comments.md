@@ -61,7 +61,7 @@ native doc system. This is the ADR-0041 "same source, idiomatic per target" patt
 
 - `@moduledoc`/`@doc`/`@typedoc` **parse with the declaration parser** (ADR-0031 Stage 0.1), not later.
 - The **tour examples** gain module/function docs; the **self-host examples**
-  (`examples/rian/selfhost_lexer.rian`) are documented — demonstrating documented self-hosting code from
+  (`compiler/lexer.rian`) are documented — demonstrating documented self-hosting code from
   day one.
 - The **formatter** (ADR-0045) treats doc attributes as structured CST nodes — preserved and canonically
   formatted (easier than free comments, because they're structured).
@@ -106,7 +106,7 @@ maps those sections to JSDoc `@param`/`@returns` tags** — so the JS target get
 - **Parser (Stage 0.1):** `@moduledoc`/`@doc`/`@typedoc` + heredoc strings; doc attaches to the next
   declaration as the `doc` field (ADR-0050 core IR).
 - **Emitters:** doc lowering per target (EEP-48 / rustdoc / JSDoc), a Tier-1 obligation (ADR-0049).
-- **Examples:** the tour and `selfhost_lexer.rian` get documented as authoritative surface.
+- **Examples:** the tour and `lexer.rian` get documented as authoritative surface.
 
 ## Open items
 

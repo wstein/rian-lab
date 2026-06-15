@@ -6,7 +6,7 @@ defmodule Rian.ComposeDeclFixpointTest do
 
   # COMPOSITION fixpoint rung 2 (ADR-0063 Step 3): widens the composed subset from
   # an *expression* (compose_fixpoint_test) to a full single-clause `def`
-  # DECLARATION. `selfhost_compose_decl.rian` now parses the def head + parameter
+  # DECLARATION. `compose_decl.rian` now parses the def head + parameter
   # list + `:=` body AND assembles the complete Erlang function form in Rian —
   # `compile_def(s) = emit_def(parse_def(lex(s)))` — so name, arity, params, and
   # body all come from the SOURCE, not from Elixir glue.
@@ -22,7 +22,7 @@ defmodule Rian.ComposeDeclFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_decl.rian"), :rian_compose_decl)
+      Beam.load(File.read!("compiler/compose_decl.rian"), :rian_compose_decl)
 
     {:ok, mod: mod}
   end

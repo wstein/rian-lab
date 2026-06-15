@@ -5,7 +5,7 @@ defmodule Rian.CapFixpointTest do
   alias Rian.{Beam, Capability, TypeStr}
 
   # Self-hosting fixpoint (ADR-0063) for the **capability checker** stage: a
-  # Rian-written capability→Rust lowering (examples/rian/selfhost_cap.rian),
+  # Rian-written capability→Rust lowering (compiler/cap.rian),
   # compiled to real `.beam`, diffed against the reference `Rian.Capability` over
   # the FULL type vocabulary — every `Copy` width, `String`, nominal types, nested
   # `Vec(...)`, and parametric generics `Name(A, B, …)`, across all four
@@ -18,7 +18,7 @@ defmodule Rian.CapFixpointTest do
   # IR stores types as strings; the mapping itself is fully self-hosted.
 
   setup_all do
-    {:ok, mod} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :rian_cap_fixpoint)
+    {:ok, mod} = Beam.load(File.read!("compiler/cap.rian"), :rian_cap_fixpoint)
     {:ok, mod: mod}
   end
 

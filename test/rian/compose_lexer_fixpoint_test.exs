@@ -7,7 +7,7 @@ defmodule Rian.ComposeLexerFixpointTest do
 
   # THE LOOP CLOSES ON A WHOLE STAGE (ADR-0063 Step 3 / §4). Every other composition
   # fixpoint feeds `build` a hand-written corpus or a verbatim *slice*. This one feeds
-  # it the ENTIRE `examples/rian/selfhost_lexer_v2.rian` — `mod` wrapper, multi-clause
+  # it the ENTIRE `compiler/lexer_v2.rian` — `mod` wrapper, multi-clause
   # guarded functions, single typed clauses (`pub def tokenize(…) := …`), char/string
   # and escape literals (`'\n'`), `Prim.*`, `<>`, and list construction — and the
   # composed build (verified lexer + decl parser + beam backend, cross-module)
@@ -21,21 +21,21 @@ defmodule Rian.ComposeLexerFixpointTest do
   # Honesty (mirrors Rian.SelfHost @composition): the loop is self-COMPILING, not
   # self-CHECKING — Rian.Check/Exhaustiveness/Capability are not in `build`.
 
-  @lexer_file "examples/rian/selfhost_lexer_v2.rian"
+  @lexer_file "compiler/lexer_v2.rian"
   @lexer_src File.read!(@lexer_file)
 
   setup_all do
     {:ok, _} = Beam.load(@lexer_src, :"Elixir.SelfhostLexerV2")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_real_sum.rian"), :rian_compose_lexer)
+      Beam.load(File.read!("compiler/compose_real_sum.rian"), :rian_compose_lexer)
 
     built = drv.build(@lexer_src, :"RianBuiltLexer_#{System.unique_integer([:positive])}")
     {:ok, built: built, ref: :"Elixir.SelfhostLexerV2"}
@@ -78,7 +78,7 @@ defmodule Rian.ComposeLexerFixpointTest do
     end
 
     test "it is the WHOLE real file (verbatim), not a slice", %{built: built} do
-      # the source compiled is examples/rian/selfhost_lexer_v2.rian unmodified, and
+      # the source compiled is compiler/lexer_v2.rian unmodified, and
       # the built module exports the real entry point.
       assert @lexer_src =~ "mod SelfhostLexerV2 do"
       assert @lexer_src =~ "pub def tokenize(src String) Vec(Tok)"

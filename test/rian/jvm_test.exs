@@ -47,7 +47,7 @@ defmodule Rian.JVMTest do
     %{id: :ref_bump, src: "def bump(x ref Int64) Int64 := x + 1", probe: ~s|println(bump(41L))|},
     %{
       id: :selfhost_opt,
-      src: File.read!("examples/rian/selfhost_opt.rian"),
+      src: File.read!("compiler/opt.rian"),
       probe: """
         println(fold(Mul(Add(Num(2L), Num(3L)), Num(4L))))
         println(fold(Mul(Var("x"), Num(1L))))

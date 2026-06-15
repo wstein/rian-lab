@@ -1,7 +1,7 @@
 # ===========================================================================
 # SELF-HOSTING — COMPOSITION rung 5 (capstone): a Rian DRIVER owns the whole loop
 # ===========================================================================
-# Rung 4 (selfhost_compose_mod.rian) emitted a whole module's `:compile.forms`
+# Rung 4 (compose_mod.rian) emitted a whole module's `:compile.forms`
 # input in Rian, but the fixpoint test still *called* `:compile.forms` and
 # `:code.load_binary` itself — the BEAM toolchain entry points lived in Elixir.
 # This rung pulls that final step into Rian: a driver that takes SOURCE and a

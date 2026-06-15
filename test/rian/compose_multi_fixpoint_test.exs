@@ -6,7 +6,7 @@ defmodule Rian.ComposeMultiFixpointTest do
 
   # COMPOSITION fixpoint rung 3 (ADR-0063 Step 3): widens the composed subset from
   # a single-clause `def` (compose_decl_fixpoint_test) to a whole MULTI-CLAUSE,
-  # self-recursive function. `selfhost_compose_multi.rian` splits the clause
+  # self-recursive function. `compose_multi.rian` splits the clause
   # sequence (`def` is its own token), reads literal/variable head patterns, parses
   # function calls, and assembles ONE multi-clause Erlang function form in Rian —
   # compile_fn(s) = emit_fn(parse_clauses(lex(s))).
@@ -18,7 +18,7 @@ defmodule Rian.ComposeMultiFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_multi.rian"), :rian_compose_multi)
+      Beam.load(File.read!("compiler/compose_multi.rian"), :rian_compose_multi)
 
     {:ok, mod: mod}
   end

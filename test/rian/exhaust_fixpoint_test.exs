@@ -5,7 +5,7 @@ defmodule Rian.ExhaustFixpointTest do
   alias Rian.{Beam, Exhaustiveness}
 
   # Self-hosting fixpoint (ADR-0063) for the **exhaustiveness gate** (full): a
-  # Rian-written Maranget usefulness check (examples/rian/selfhost_exhaust.rian),
+  # Rian-written Maranget usefulness check (compiler/exhaust.rian),
   # compiled to real `.beam`, diffed against the reference
   # `Rian.Exhaustiveness.useful?/3` over the whole algorithm — single- and
   # multi-column matrices, constructors with arguments (arity-specialised),
@@ -18,7 +18,7 @@ defmodule Rian.ExhaustFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :rian_exhaust_fixpoint)
+      Beam.load(File.read!("compiler/exhaust.rian"), :rian_exhaust_fixpoint)
 
     {:ok, mod: mod}
   end

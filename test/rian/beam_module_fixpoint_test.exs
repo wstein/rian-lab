@@ -5,7 +5,7 @@ defmodule Rian.BeamModuleFixpointTest do
   alias Rian.{Beam, Core, Decl, Pratt}
 
   # Self-hosting fixpoint (ADR-0063) for the **BEAM abstract-forms backend** (whole
-  # module): a Rian-written port (examples/rian/selfhost_beam.rian) builds the
+  # module): a Rian-written port (compiler/beam.rian) builds the
   # Erlang abstract forms for a module's functions; this test inflates the port's
   # string-carrying `Form` sum to real forms (the `erl_op`/`var_atom`/`to_snake`
   # conventions), compiles via `:compile.forms`, and RUNS it — asserting it behaves
@@ -14,7 +14,7 @@ defmodule Rian.BeamModuleFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :rian_beam_module_fixpoint)
+      Beam.load(File.read!("compiler/beam.rian"), :rian_beam_module_fixpoint)
 
     {:ok, mod: mod}
   end

@@ -8,7 +8,7 @@ defmodule Rian.ComposeDriverWholeFixpointTest do
   # THE BUILD COMPILES THE BUILD (ADR-0063 Step 3 / §4 — the v1==v2 capstone). The
   # three stage loops (`compose_lexer`/`compose_decl_whole`/`compose_beam_whole`) each
   # close on one stage's source. This one closes on the DRIVER itself: the reference
-  # driver v1 (selfhost_compose_real_sum.rian, compiled by Rian.Beam) compiles its
+  # driver v1 (compose_real_sum.rian, compiled by Rian.Beam) compiles its
   # OWN whole source — lexer + decl-parser + beam-backend composition, cross-module
   # remote calls, tuple/atom abstract-form construction, and the `@external` FFI
   # functions whose host expressions (`:erlang.binary_to_list(s)`, `:compile.forms`,
@@ -21,20 +21,20 @@ defmodule Rian.ComposeDriverWholeFixpointTest do
   # Honesty (mirrors Rian.SelfHost @composition): the loop is self-COMPILING, not
   # self-CHECKING — Rian.Check/Exhaustiveness/Capability are not in `build`.
 
-  @driver_file "examples/rian/selfhost_compose_real_sum.rian"
+  @driver_file "compiler/compose_real_sum.rian"
   @driver_src File.read!(@driver_file)
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, v1} = Beam.load(@driver_src, :rian_driver_v1)
 

@@ -7,7 +7,7 @@ defmodule Rian.ComposeDeclWholeFixpointTest do
 
   # THE LOOP CLOSES ON THE WHOLE DECLARATION PARSER (ADR-0063 Step 3 / §4). Like
   # `compose_lexer_fixpoint_test`, this feeds the composed `build` the ENTIRE
-  # `examples/rian/selfhost_decl.rian` — ~400 lines: the `mod` wrapper, sum/struct
+  # `compiler/decl.rian` — ~400 lines: the `mod` wrapper, sum/struct
   # types, generic signatures (`forall T`), multi-clause guarded functions, `if`,
   # `case` with guarded arms and next-line arm bodies, string/char literals and
   # patterns, `<>`, `Prim.*`, list construction, and the P1 newline-tolerant `:=`
@@ -20,29 +20,29 @@ defmodule Rian.ComposeDeclWholeFixpointTest do
   # This is the second whole stage (after the lexer, `compose_lexer_fixpoint_test`)
   # to compile its **own whole source** — the v1==v2 shape, now on the declaration
   # parser. (`compose_decl_fixpoint_test` is the older, narrower single-`def`
-  # composition over `selfhost_compose_decl.rian`; this one is the whole file.)
+  # composition over `compose_decl.rian`; this one is the whole file.)
   #
   # Honesty (mirrors Rian.SelfHost @composition): the loop is self-COMPILING, not
   # self-CHECKING — Rian.Check/Exhaustiveness/Capability are not in `build`.
 
-  @decl_file "examples/rian/selfhost_decl.rian"
+  @decl_file "compiler/decl.rian"
   @decl_src File.read!(@decl_file)
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
     {:ok, _} = Beam.load(@decl_src, :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_sum.rian"),
+        File.read!("compiler/compose_real_sum.rian"),
         :rian_compose_decl_whole
       )
 
@@ -85,7 +85,7 @@ defmodule Rian.ComposeDeclWholeFixpointTest do
     end
 
     test "it is the WHOLE real file (verbatim), not a slice", %{built: built} do
-      # the source compiled is examples/rian/selfhost_decl.rian unmodified, and the
+      # the source compiled is compiler/decl.rian unmodified, and the
       # built module exports the real entry point.
       assert @decl_src =~ "mod SelfhostDecl do"
       assert @decl_src =~ "pub def parse_program("

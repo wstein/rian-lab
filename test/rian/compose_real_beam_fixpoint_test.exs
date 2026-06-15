@@ -8,8 +8,8 @@ defmodule Rian.ComposeRealBeamFixpointTest do
   # COMPOSITION fixpoint rung 7 (ADR-0063 Step 3 / §4): the first cut that connects
   # the two previously-disconnected successes — per-stage equivalence and the
   # composition loop. Rungs 1-6 used a TOY backend (the driver's own `forms`).
-  # `selfhost_compose_real_beam.rian` instead calls the EQUIVALENCE-LOCKED
-  # `selfhost_beam.rian` backend across modules:
+  # `compose_real_beam.rian` instead calls the EQUIVALENCE-LOCKED
+  # `beam.rian` backend across modules:
   #
   #     parse(src) → selfhost_beam Func → SelfhostBeam.compile_forms(funcs)
   #                                       └ the REAL port (cross-module call)
@@ -25,11 +25,11 @@ defmodule Rian.ComposeRealBeamFixpointTest do
 
   setup_all do
     # the verified backend, under the atom a Pascal-qualified call lowers to.
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_beam.rian"),
+        File.read!("compiler/compose_real_beam.rian"),
         :rian_compose_real_beam
       )
 

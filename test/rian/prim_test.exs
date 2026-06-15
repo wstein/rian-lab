@@ -133,7 +133,7 @@ defmodule Rian.PrimTest do
 
     test "selfhost lexer using `Prim.char_code`/`Prim.str_chars` round-trips" do
       {:ok, m} =
-        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_prim_selfhost_lex)
+        Beam.load(File.read!("compiler/lexer.rian"), :rian_prim_selfhost_lex)
 
       assert m.tokenize("1 + 2") == [{:t_num, 1}, :t_plus, {:t_num, 2}]
     end

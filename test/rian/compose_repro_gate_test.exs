@@ -7,7 +7,7 @@ defmodule Rian.ComposeReproGateTest do
 
   # REPRODUCIBILITY GATE (ADR-0063 §4, the P3 prototype — "prove the loop before
   # debating the artifact"). The composed `build` (verified lexer + decl parser +
-  # beam backend, cross-module — selfhost_compose_real_sum.rian) is a DETERMINISTIC
+  # beam backend, cross-module — compose_real_sum.rian) is a DETERMINISTIC
   # function of its source: the same real-source slice must regenerate identical
   # output, whose hash is pinned here. We commit the **hash, never the `.beam`
   # bytes** — so reproducible builds are *gated in CI*, and the question of vendoring
@@ -25,7 +25,7 @@ defmodule Rian.ComposeReproGateTest do
 
   @modname :rian_repro_gate
 
-  # a VERBATIM real-source slice (the `Ty` sum + `copyt` from selfhost_cap.rian, the
+  # a VERBATIM real-source slice (the `Ty` sum + `copyt` from cap.rian, the
   # capability checker) — the same slice compose_selfcompile_fixpoint_test.exs pins
   # and asserts is verbatim in the real file, so the gate is anchored to real
   # compiler source, never a toy.
@@ -46,19 +46,19 @@ defmodule Rian.ComposeReproGateTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_sum.rian"),
+        File.read!("compiler/compose_real_sum.rian"),
         :rian_repro_gate_drv
       )
 

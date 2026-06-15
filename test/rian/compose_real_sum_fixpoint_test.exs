@@ -21,19 +21,19 @@ defmodule Rian.ComposeRealSumFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_sum.rian"),
+        File.read!("compiler/compose_real_sum.rian"),
         :rian_compose_real_sum
       )
 
@@ -74,7 +74,7 @@ defmodule Rian.ComposeRealSumFixpointTest do
       [{:mk, [7]}, {:mk, [0]}, {:unwrap, [{:ok, 9}]}]
     },
     # `Prim.int_to_string` — integer → string (erlang:integer_to_binary), used by
-    # selfhost_core.rian. Locks the prim lowering end to end.
+    # core.rian. Locks the prim lowering end to end.
     {
       "def show(n Int53) String := Prim.int_to_string(n)",
       "def show(n Int53) String := Prim.int_to_string(n)",
@@ -88,7 +88,7 @@ defmodule Rian.ComposeRealSumFixpointTest do
       [{:rt, ["x", 7]}, {:rtar, ["y", 42]}]
     },
     # struct FIELD ACCESS `c.name` as a value — a Core field-read (`maps:get`); the
-    # form selfhost_exhaust.rian uses (`cd.name`/`cd.ar`/`td.ctors`). A struct is a
+    # form exhaust.rian uses (`cd.name`/`cd.ar`/`td.ctors`). A struct is a
     # tagged map, so a plain map carrying the field keys exercises the read path.
     {
       "struct CD(name String, ar Int53)\ndef gname(c CD) String := c.name\ndef gar(c CD) Int53 := c.ar",

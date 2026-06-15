@@ -3,7 +3,7 @@
 # ===========================================================================
 # Rungs 1-6 used a TOY backend: the driver had its own hand-rolled `forms`
 # (Core → abstract-form tuples), separate from the equivalence-locked
-# `selfhost_beam.rian`. That made two disconnected successes — a per-stage 100%
+# `beam.rian`. That made two disconnected successes — a per-stage 100%
 # (selfhost_beam verified vs `Rian.Beam` in ISOLATION, with its `Form` sum
 # inflated to real forms by Elixir glue in the fixpoint test) and a composition
 # loop over a toy surface. This rung connects them: the driver's backend IS now

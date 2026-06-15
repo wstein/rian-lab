@@ -177,7 +177,7 @@ defmodule Rian.BeamTest do
 
     test "the full self-hosting lexer compiles to real bytecode (variants + recursion, FFI-free)" do
       {:ok, mod} =
-        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_lexer)
+        Beam.load(File.read!("compiler/lexer.rian"), :rian_beam_lexer)
 
       assert mod.tokenize("1 + 2") == [{:t_num, 1}, :t_plus, {:t_num, 2}]
       assert {:file, _} = :code.is_loaded(:rian_beam_lexer)
@@ -185,10 +185,10 @@ defmodule Rian.BeamTest do
 
     test "the self-hosting parser (a Pratt slice in Rian) compiles and parses on bytecode" do
       {:ok, parser} =
-        Beam.load(File.read!("examples/rian/selfhost_parser.rian"), :rian_beam_parser)
+        Beam.load(File.read!("compiler/parser.rian"), :rian_beam_parser)
 
       {:ok, lexer} =
-        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_parser_lexer)
+        Beam.load(File.read!("compiler/lexer.rian"), :rian_beam_parser_lexer)
 
       # the full pipeline lexer -> parser, entirely Rian-compiled-to-.beam:
       # precedence (`*` over `+`) and parenthesisation come out right
@@ -207,7 +207,7 @@ defmodule Rian.BeamTest do
 
     test "the total parser clears the exhaustiveness gate and lowers to both targets" do
       # (was rejected by `Lower.check!` as partial before `EErr` made it total)
-      out = Rian.Decl.compile(File.read!("examples/rian/selfhost_parser.rian"))
+      out = Rian.Decl.compile(File.read!("compiler/parser.rian"))
       rust = Enum.map_join(out, "\n", fn {_, %{rust: r}} -> r end)
       assert rust =~ "enum Expr"
       # the parse-error fallback is present in the emitted Rust
@@ -215,13 +215,13 @@ defmodule Rian.BeamTest do
     end
 
     test "the self-hosting evaluator folds the Expr sum with a map symbol table" do
-      {:ok, ev} = Beam.load(File.read!("examples/rian/selfhost_eval.rian"), :rian_beam_eval)
+      {:ok, ev} = Beam.load(File.read!("compiler/eval.rian"), :rian_beam_eval)
 
       {:ok, parser} =
-        Beam.load(File.read!("examples/rian/selfhost_parser.rian"), :rian_beam_eval_parser)
+        Beam.load(File.read!("compiler/parser.rian"), :rian_beam_eval_parser)
 
       {:ok, lexer} =
-        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_eval_lexer)
+        Beam.load(File.read!("compiler/lexer.rian"), :rian_beam_eval_lexer)
 
       # full pipeline, all Rian-compiled-to-.beam: lex -> parse -> evaluate
       assert ev.run(parser.parse(lexer.tokenize("2 + 3 * 4"))) == 14
@@ -238,7 +238,7 @@ defmodule Rian.BeamTest do
     end
 
     test "the self-hosting type-checker reports structured errors via a struct record" do
-      {:ok, chk} = Beam.load(File.read!("examples/rian/selfhost_check.rian"), :rian_beam_check)
+      {:ok, chk} = Beam.load(File.read!("compiler/check.rian"), :rian_beam_check)
 
       describe = fn e -> chk.describe(chk.check(e)) end
 
@@ -260,13 +260,13 @@ defmodule Rian.BeamTest do
     end
 
     test "the full self-hosting pipeline: lex -> parse -> codegen -> stack VM, on bytecode" do
-      {:ok, cg} = Beam.load(File.read!("examples/rian/selfhost_codegen.rian"), :rian_beam_cg)
+      {:ok, cg} = Beam.load(File.read!("compiler/codegen.rian"), :rian_beam_cg)
 
       {:ok, parser} =
-        Beam.load(File.read!("examples/rian/selfhost_parser.rian"), :rian_beam_cg_parser)
+        Beam.load(File.read!("compiler/parser.rian"), :rian_beam_cg_parser)
 
       {:ok, lexer} =
-        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_cg_lexer)
+        Beam.load(File.read!("compiler/lexer.rian"), :rian_beam_cg_lexer)
 
       compile_run = fn s -> cg.run(cg.gen(parser.parse(lexer.tokenize(s)))) end
 
@@ -281,7 +281,7 @@ defmodule Rian.BeamTest do
     end
 
     test "the codegen handles variables and `let` via load/store slots" do
-      {:ok, cg} = Beam.load(File.read!("examples/rian/selfhost_codegen.rian"), :rian_beam_cg_vars)
+      {:ok, cg} = Beam.load(File.read!("compiler/codegen.rian"), :rian_beam_cg_vars)
 
       run = fn e -> cg.run(cg.gen(e)) end
 
@@ -305,8 +305,8 @@ defmodule Rian.BeamTest do
     end
 
     test "the self-hosting optimizer constant-folds + simplifies, shrinking codegen output" do
-      {:ok, opt} = Beam.load(File.read!("examples/rian/selfhost_opt.rian"), :rian_beam_opt)
-      {:ok, cg} = Beam.load(File.read!("examples/rian/selfhost_codegen.rian"), :rian_beam_opt_cg)
+      {:ok, opt} = Beam.load(File.read!("compiler/opt.rian"), :rian_beam_opt)
+      {:ok, cg} = Beam.load(File.read!("compiler/codegen.rian"), :rian_beam_opt_cg)
 
       # constant folding collapses a constant tree to a single literal
       folded = opt.fold({:mul, {:add, {:num, 2}, {:num, 3}}, {:num, 4}})
@@ -322,7 +322,7 @@ defmodule Rian.BeamTest do
     end
 
     test "a multi-module program: each `mod` is its own .beam, cross-module calls resolve" do
-      mods = Beam.load_program(File.read!("examples/rian/selfhost_modules.rian"))
+      mods = Beam.load_program(File.read!("compiler/modules.rian"))
 
       # every `mod` became its own loaded module (named `Elixir.<Mod>`)
       assert CalcLex in mods
@@ -338,7 +338,7 @@ defmodule Rian.BeamTest do
     end
 
     test "the whole calc compiler in ONE Rian module: source string -> value on bytecode" do
-      {:ok, calc} = Beam.load(File.read!("examples/rian/selfhost_calc.rian"), :rian_beam_calc)
+      {:ok, calc} = Beam.load(File.read!("compiler/calc.rian"), :rian_beam_calc)
 
       # one module, one .beam: lex -> parse -> fold -> codegen -> VM
       assert calc.run("2 + 3 * 4") == 14
@@ -353,7 +353,7 @@ defmodule Rian.BeamTest do
     end
 
     test "the calc parses `let`/variables from source (identifiers + keywords)" do
-      {:ok, calc} = Beam.load(File.read!("examples/rian/selfhost_calc.rian"), :rian_beam_calc_let)
+      {:ok, calc} = Beam.load(File.read!("compiler/calc.rian"), :rian_beam_calc_let)
 
       # identifiers, the `let`/`in` keywords, and `=` are lexed; `let` parses
       assert calc.run("let x = 5 in x + 1") == 6
@@ -364,7 +364,7 @@ defmodule Rian.BeamTest do
     end
 
     test "the calc parses top-level `def` declarations (a program is decls + a result)" do
-      {:ok, calc} = Beam.load(File.read!("examples/rian/selfhost_calc.rian"), :rian_beam_calc_def)
+      {:ok, calc} = Beam.load(File.read!("compiler/calc.rian"), :rian_beam_calc_def)
 
       # `def name = expr;` declarations desugar to nested lets, reusing the pipeline
       assert calc.run("def a = 2; def b = 3; a * b + a") == 8
@@ -564,7 +564,7 @@ defmodule Rian.BeamTest do
 
     test "the self-hosting lexer is FFI-free: `__prim_str_chars`, runs on BEAM" do
       {:ok, m} =
-        Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_beam_lex_ffifree)
+        Beam.load(File.read!("compiler/lexer.rian"), :rian_beam_lex_ffifree)
 
       # behaviour unchanged from the `String.to_charlist` version
       assert m.tokenize("1 + 2") == [{:t_num, 1}, :t_plus, {:t_num, 2}]
@@ -609,7 +609,7 @@ defmodule Rian.BeamTest do
     end
 
     test "a portable `List` library written in Rian (cons recursion, no FFI; ADR-0047)" do
-      {:ok, m} = Beam.load(File.read!("examples/rian/selfhost_listlib.rian"), :rian_beam_listlib)
+      {:ok, m} = Beam.load(File.read!("compiler/listlib.rian"), :rian_beam_listlib)
 
       # collection ops written in Rian over cons — no `:lists`/host FFI
       assert m.reverse([1, 2, 3]) == [3, 2, 1]
@@ -619,7 +619,7 @@ defmodule Rian.BeamTest do
     end
 
     test "user-defined functions: a Rian interpreter with recursion + mutual recursion" do
-      {:ok, m} = Beam.load(File.read!("examples/rian/selfhost_funcs.rian"), :rian_beam_funcs)
+      {:ok, m} = Beam.load(File.read!("compiler/funcs.rian"), :rian_beam_funcs)
 
       fact =
         {:f, ["n"],

@@ -8,7 +8,7 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
   # THE LOOP CLOSES ON THE WHOLE BEAM BACKEND (ADR-0063 Step 3 / §4). Like the
   # lexer (`compose_lexer_fixpoint_test`) and decl parser
   # (`compose_decl_whole_fixpoint_test`), this feeds the composed `build` the ENTIRE
-  # `examples/rian/selfhost_beam.rian` — the Rian-written counterpart of
+  # `compiler/beam.rian` — the Rian-written counterpart of
   # `Rian.Beam`'s form generation: Core→Form lowering, native-dispatch clause
   # patterns, `Prim.*` (str_concat/str_chars/…), `<>`, `if`/`case`, list/tuple
   # construction — and the composed build (verified lexer + decl parser + beam
@@ -22,24 +22,24 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
   # Honesty (mirrors Rian.SelfHost @composition): the loop is self-COMPILING, not
   # self-CHECKING — Rian.Check/Exhaustiveness/Capability are not in `build`.
 
-  @beam_file "examples/rian/selfhost_beam.rian"
+  @beam_file "compiler/beam.rian"
   @beam_src File.read!(@beam_file)
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
     {:ok, ref} = Beam.load(@beam_src, :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_sum.rian"),
+        File.read!("compiler/compose_real_sum.rian"),
         :rian_compose_beam_whole
       )
 
@@ -126,7 +126,7 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
     end
 
     test "it is the WHOLE real file (verbatim), not a slice", %{built: built} do
-      # the source compiled is examples/rian/selfhost_beam.rian unmodified, and the
+      # the source compiled is compiler/beam.rian unmodified, and the
       # built module exports the real entry point.
       assert @beam_src =~ "mod SelfhostBeam do"
       assert @beam_src =~ "pub def compile_forms("

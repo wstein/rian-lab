@@ -27,10 +27,10 @@ defmodule Rian.SelfhostV1V2FixpointTest do
   # FORMS, the canonical artifact (`compose_repro_gate_test` shows `.beam` is
   # byte-reproducible from forms under `:deterministic`).
 
-  @lexer File.read!("examples/rian/selfhost_lexer_v2.rian")
-  @decl File.read!("examples/rian/selfhost_decl.rian")
-  @beam File.read!("examples/rian/selfhost_beam.rian")
-  @driver File.read!("examples/rian/selfhost_compose_real_sum.rian")
+  @lexer File.read!("compiler/lexer_v2.rian")
+  @decl File.read!("compiler/decl.rian")
+  @beam File.read!("compiler/beam.rian")
+  @driver File.read!("compiler/compose_real_sum.rian")
 
   # {label, source, the BEAM module atom it must load under}. The driver references
   # its sibling stages by their `Elixir.`-prefixed atoms, so those three MUST load
@@ -57,9 +57,9 @@ defmodule Rian.SelfhostV1V2FixpointTest do
     {:ok, _} = Beam.load(@beam, :"Elixir.SelfhostBeam")
 
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
     {:ok, gen0_driver} = Beam.load(@driver, :rian_gen0_driver)
 
     # gen1 — gen0 compiles each compiler source (canonical forms).

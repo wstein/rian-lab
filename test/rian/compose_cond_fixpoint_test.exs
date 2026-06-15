@@ -16,7 +16,7 @@ defmodule Rian.ComposeCondFixpointTest do
 
   setup_all do
     {:ok, drv} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_cond.rian"), :rian_compose_cond)
+      Beam.load(File.read!("compiler/compose_cond.rian"), :rian_compose_cond)
 
     {:ok, drv: drv}
   end

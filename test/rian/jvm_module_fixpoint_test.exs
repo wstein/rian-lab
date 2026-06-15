@@ -5,7 +5,7 @@ defmodule Rian.JvmModuleFixpointTest do
   alias Rian.{Beam, Core, Decl, JVM, Pratt}
 
   # Self-hosting fixpoint (ADR-0063) for the **Kotlin/JVM backend** (whole module):
-  # a Rian-written port of `Rian.JVM`'s emission (examples/rian/selfhost_jvm.rian),
+  # a Rian-written port of `Rian.JVM`'s emission (compiler/jvm.rian),
   # compiled to real `.beam`, diffed against `Rian.JVM.compile` over a corpus of
   # programs in its full supported surface — sum types, multi-clause functions with
   # pattern dispatch, `if`, operators, primitives.
@@ -18,7 +18,7 @@ defmodule Rian.JvmModuleFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_jvm.rian"), :rian_jvm_module_fixpoint)
+      Beam.load(File.read!("compiler/jvm.rian"), :rian_jvm_module_fixpoint)
 
     {:ok, mod: mod}
   end

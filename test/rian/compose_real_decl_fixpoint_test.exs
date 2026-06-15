@@ -7,7 +7,7 @@ defmodule Rian.ComposeRealDeclFixpointTest do
 
   # COMPOSITION fixpoint rung 9 (ADR-0063 Step 3): the front-end's LAST toy piece —
   # declaration splitting — is replaced by the equivalence-locked `selfhost_decl`
-  # port. `selfhost_compose_real_decl.rian` parses the whole program with
+  # port. `compose_real_decl.rian` parses the whole program with
   # `SelfhostDecl.parse_program` (cross-module), lowers its Decl IR to `selfhost_beam`
   # Core/Pat (the surface→Core lowering), and compiles via the verified `selfhost_beam`
   # backend (cross-module). BOTH front-end (lex→SelfhostDecl) and back-end
@@ -23,12 +23,12 @@ defmodule Rian.ComposeRealDeclFixpointTest do
   # identical to `Rian.Beam`.
 
   setup_all do
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_decl.rian"),
+        File.read!("compiler/compose_real_decl.rian"),
         :rian_compose_real_decl
       )
 

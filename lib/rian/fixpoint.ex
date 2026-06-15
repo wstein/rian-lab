@@ -4,7 +4,7 @@ defmodule Rian.Fixpoint do
   from a *demo* into a *regression test*.
 
   The spike proved a lexer written in Rian compiles to real `.beam` and runs
-  (`examples/rian/selfhost_lexer.rian`, SELFHOST.md). This harness adds the
+  (`compiler/lexer.rian`, SELFHOST.md). This harness adds the
   missing half: it runs that compiled lexer over a corpus and **diffs its token
   stream against the reference `Rian.Lexer`** — the Elixir tokenizer the rest of
   the toolchain trusts. Drift in *either* lexer (the Rian source or the

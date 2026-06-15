@@ -5,7 +5,7 @@ defmodule Rian.ParseFixpointTest do
   alias Rian.{Beam, Lexer, Pratt}
 
   # Self-hosting fixpoint for the **expression/pattern parser** (ADR-0063): a
-  # Rian-written port of `Rian.Pratt` (examples/rian/selfhost_parse.rian), compiled
+  # Rian-written port of `Rian.Pratt` (compiler/parse.rian), compiled
   # to real `.beam`, its output **diffed against the reference `Rian.Pratt.parse`**
   # over a corpus with NO projection — the port builds Pratt's exact surface tuples
   # (`{:num,s}`, `{:bin,op,l,r}`, `:wild`, `{:lit,v}`, `{:if,c,t,e}`, …) as raw
@@ -20,7 +20,7 @@ defmodule Rian.ParseFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_parse.rian"), :rian_parse_fixpoint)
+      Beam.load(File.read!("compiler/parse.rian"), :rian_parse_fixpoint)
 
     {:ok, mod: mod}
   end

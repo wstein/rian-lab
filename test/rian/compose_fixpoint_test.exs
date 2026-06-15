@@ -5,7 +5,7 @@ defmodule Rian.ComposeFixpointTest do
   alias Rian.Beam
 
   # COMPOSITION fixpoint (ADR-0063 Step 3): the FIRST genuine composition rung.
-  # `selfhost_compose.rian` wires lex → parse → lower → forms DIRECTLY in Rian over
+  # `compose.rian` wires lex → parse → lower → forms DIRECTLY in Rian over
   # shared types — `compile(s) = forms(lower(parse(lex(s))))` — with no Elixir glue
   # between the stages. Its output IS Erlang abstract forms, so this test feeds them
   # to `:compile.forms`, loads the module, RUNS it, and asserts it behaves
@@ -15,7 +15,7 @@ defmodule Rian.ComposeFixpointTest do
   # composition: here stage N consumes stage N-1's Rian output with no projection.
 
   setup_all do
-    {:ok, mod} = Beam.load(File.read!("examples/rian/selfhost_compose.rian"), :rian_compose)
+    {:ok, mod} = Beam.load(File.read!("compiler/compose.rian"), :rian_compose)
     {:ok, mod: mod}
   end
 

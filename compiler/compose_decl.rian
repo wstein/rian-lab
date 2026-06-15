@@ -1,7 +1,7 @@
 # ===========================================================================
 # SELF-HOSTING — COMPOSITION rung 2: a full `def` DECLARATION, in one Rian module
 # ===========================================================================
-# `selfhost_compose.rian` composed lex → parse → lower → forms over an
+# `compose.rian` composed lex → parse → lower → forms over an
 # *expression* — but the test still built the surrounding Erlang function form
 # (params, clause, name, arity) in Elixir glue. This rung widens the composed
 # subset to a whole DECLARATION:

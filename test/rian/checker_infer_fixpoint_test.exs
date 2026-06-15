@@ -5,7 +5,7 @@ defmodule Rian.CheckerInferFixpointTest do
   alias Rian.{Beam, Core, Check, Pratt}
 
   # Self-hosting fixpoint (ADR-0063) for the **type-checker** stage: a Rian-written
-  # type inference (examples/rian/selfhost_checker.rian) — a slice of the REAL
+  # type inference (compiler/checker.rian) — a slice of the REAL
   # `Rian.Check.infer/3`, not the toy-language `selfhost_check` checker —
   # compiled to real `.beam`, diffed against `Rian.Check.infer` over a corpus.
   #
@@ -26,7 +26,7 @@ defmodule Rian.CheckerInferFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_checker.rian"), :rian_checker_infer_fixpoint)
+      Beam.load(File.read!("compiler/checker.rian"), :rian_checker_infer_fixpoint)
 
     {:ok, mod: mod}
   end

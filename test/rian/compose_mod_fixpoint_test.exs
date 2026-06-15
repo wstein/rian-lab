@@ -5,7 +5,7 @@ defmodule Rian.ComposeModFixpointTest do
   alias Rian.Beam
 
   # COMPOSITION fixpoint rung 4 (ADR-0063 Step 3): the composed pipeline now emits
-  # an ENTIRE module. `selfhost_compose_mod.rian` groups the flat clause stream into
+  # an ENTIRE module. `compose_mod.rian` groups the flat clause stream into
   # per-function groups and assembles the complete `:compile.forms` input — the
   # `:module`/`:export` attributes AND every `{:function,…}` form — as native Rian
   # tuple literals. compile_module(src, modname) returns that form list directly.
@@ -17,7 +17,7 @@ defmodule Rian.ComposeModFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_compose_mod.rian"), :rian_compose_mod)
+      Beam.load(File.read!("compiler/compose_mod.rian"), :rian_compose_mod)
 
     {:ok, mod: mod}
   end

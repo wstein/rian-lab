@@ -203,7 +203,7 @@ defmodule Rian.FeaturesTest do
 
     test "a type named in a `pub` fn's signature is emitted `pub` (cross-module usable)" do
       rust =
-        File.read!("examples/rian/selfhost_lexer.rian")
+        File.read!("compiler/lexer.rian")
         |> Rian.Decl.compile()
         |> Enum.map_join("\n", fn {_, %{rust: r}} -> r end)
 
@@ -219,7 +219,7 @@ defmodule Rian.FeaturesTest do
 
         rustc ->
           rust =
-            File.read!("examples/rian/selfhost_lexer.rian")
+            File.read!("compiler/lexer.rian")
             |> Rian.Decl.compile()
             |> Enum.map_join("\n", fn {_, %{rust: r}} -> r end)
 

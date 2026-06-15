@@ -1,7 +1,7 @@
 # Self-hosting blocker ledger
 
 Evidence from the **self-hosting spike** (ADR-0027/0031): writing a Rian lexer in
-Rian (`examples/rian/selfhost_lexer.rian`), typing its own data, compiling through
+Rian (`compiler/lexer.rian`), typing its own data, compiling through
 `Rian.Decl`, running on the BEAM. The point is the *ranked blocker list* — what a
 real Rian-in-Rian program needs that the toolchain can't yet do — not a green
 checkmark.
@@ -114,7 +114,7 @@ construction, and cons-list building all compose and lower correctly.
    cons/FFI program (the lexer) lower to Rust, and needs the collection-
    representation work (ADR-0041 / ADR-0049 emitters).
 5. **Self-hosting parser spike (ADR-0027/0031)** — **a Pratt slice runs in Rian,
-   no wall.** [`examples/rian/selfhost_parser.rian`](examples/rian/selfhost_parser.rian)
+   no wall.** [`compiler/parser.rian`](compiler/parser.rian)
    ports precedence climbing over `+ - * /` with parentheses into Rian: it
    consumes the lexer's `Vec(Token)`, builds its own `Expr` sum, and threads
    `(Expr, Vec(Token))` through each step as a single-constructor `Parse` pair.
@@ -130,7 +130,7 @@ construction, and cons-list building all compose and lower correctly.
    likely next blocker** — but that is now a prediction to be tested by the next
    spike, not a present wall.
 6. **Self-hosting evaluator spike + maps on BEAM (ADR-0027/0031/0041)** — **the
-   prediction held, and the wall is down.** [`examples/rian/selfhost_eval.rian`](examples/rian/selfhost_eval.rian)
+   prediction held, and the wall is down.** [`compiler/eval.rian`](compiler/eval.rian)
    is the layer after the parser: it folds the `Expr` sum to an `Int64`,
    threading a **symbol table** (`Map(String, Int64)`) with `let`-binding and
    `Var` lookup. Written idiomatically, it hit exactly the predicted wall — the
@@ -143,7 +143,7 @@ construction, and cons-list building all compose and lower correctly.
    compiled to `.beam`) gives `2 + 3 * 4` → `14`.
 7. **Self-hosting type-checker spike + structs on BEAM (ADR-0027/0031/0043)** —
    **the prediction held again; structs are down.**
-   [`examples/rian/selfhost_check.rian`](examples/rian/selfhost_check.rian) is
+   [`compiler/check.rian`](compiler/check.rian) is
    the layer after the evaluator: it infers a `Ty` (`TInt`/`TBool`) for the
    `Expr` language under a typing environment and reports a **structured type
    error** via `struct Mismatch(op, expected, got)`. Written idiomatically it hit
@@ -159,7 +159,7 @@ construction, and cons-list building all compose and lower correctly.
    and run.** Still unlowered (next, if a spike demands them): *positional*
    struct construction, map/struct *patterns*, and map *update* (`%{m | k: v}`).
 8. **Self-hosting code generator + stack VM (ADR-0027/0031)** — **a fifth layer,
-   no wall.** [`examples/rian/selfhost_codegen.rian`](examples/rian/selfhost_codegen.rian)
+   no wall.** [`compiler/codegen.rian`](compiler/codegen.rian)
    compiles the `Expr` sum to a post-order list of stack-machine `Instr`
    (`Push`/`IAdd`/…) and executes them on a stack (`Vec(Int64)`). The **full
    `lex → parse → codegen → run` pipeline — five Rian modules, all compiled to
@@ -175,7 +175,7 @@ construction, and cons-list building all compose and lower correctly.
    five-stage compiler/runtime pipeline written in Rian, end to end.**
 9. **Self-hosting optimizer (constant folding) (ADR-0027/0031)** — **the
    prediction did *not* fire, and that is the finding.**
-   [`examples/rian/selfhost_opt.rian`](examples/rian/selfhost_opt.rian) is a real
+   [`compiler/opt.rian`](compiler/opt.rian) is a real
    optimization pass: it folds constant subtrees (`(2 + 3) * 4` → `Num(20)`) and
    applies algebraic identities (`x * 1` → `x`, `x * 0` → `0`, `x + 0` → `x`),
    matching IR nodes **by shape** — `Add(Num(a), Num(b))`, `Mul(_, Num(0))`,
@@ -227,7 +227,7 @@ A Rian lexer emits its own `Token` sum (lowered to `{:t_num, n}` / `:t_plus` /
 …), so the harness takes a `project` function mapping each Rian token onto the
 reference shape; over the shared input domain the projected streams must be
 identical. Today that domain is the toy lexer's arithmetic (`digits`, `+ - * /
-( )`, spaces), where `selfhost_lexer.rian` and `Rian.Lexer.expr_tokens/1` agree
+( )`, spaces), where `lexer.rian` and `Rian.Lexer.expr_tokens/1` agree
 token-for-token across the corpus (`test/rian/fixpoint_test.exs`), and a
 deliberately wrong projection is *caught* — the diff has teeth, it is not
 vacuously green.
@@ -239,7 +239,7 @@ into a regression test rather than a fresh demo.
 
 ### Real-lexer port — slice 1: identifiers + keywords
 
-[`examples/rian/selfhost_lexer_v2.rian`](examples/rian/selfhost_lexer_v2.rian)
+[`compiler/lexer_v2.rian`](compiler/lexer_v2.rian)
 begins the port of the *real* `Rian.Lexer` (not the arithmetic toy). Slice 1
 adds **identifiers and keywords** on top of numbers/operators/parens — newly
 writable because `Char` is now a real ordinal type (ADR-0036): the scanner
@@ -286,7 +286,7 @@ operators, and parens (the slice-1 fixpoint test). Direct evidence that the
 
 ### Parser port — fixpoint-locked against `Rian.Pratt` (rung 2)
 
-[`examples/rian/selfhost_parse.rian`](examples/rian/selfhost_parse.rian) turns the
+[`compiler/parse.rian`](compiler/parse.rian) turns the
 parser spike from a *demo* into a *checked equivalence* — the parser analog of the
 lexer fixpoint. A Rian-written precedence-climbing parser compiles to real `.beam`
 and its output is **diffed against the reference `Rian.Pratt.parse`** over a corpus
@@ -329,7 +329,7 @@ over time. The proof is a four-stage ladder:
   now self-host. (a) The Rian *expression* parser (full binary precedence table +
   prefix `-`/`not` + calls) term-equals `Rian.Pratt.parse`
   ([`parse_fixpoint_test.exs`](test/rian/parse_fixpoint_test.exs)). (b) The Rian
-  *declaration* front-end [`selfhost_decl.rian`](examples/rian/selfhost_decl.rian)
+  *declaration* front-end [`decl.rian`](compiler/decl.rian)
   parses `type` sums and `def` functions into a `Decl` representation that, projected
   to `Rian.IR`, **equals what `Rian.Decl.parse` builds** *and* is **compiled and run
   by the real backend** via the new `Rian.Beam.compile_ir/2` seam — e.g. a program of
@@ -371,7 +371,7 @@ real front-end leans on. Remaining lexer gaps (heredocs `"""`, string-body escap
 
 ## The whole compiler as one Rian artifact
 
-[`examples/rian/selfhost_calc.rian`](examples/rian/selfhost_calc.rian) unifies
+[`compiler/calc.rian`](compiler/calc.rian) unifies
 every layer — lexer, parser, optimizer, code generator, stack VM — into a
 **single self-contained Rian module** that compiles to **one real `.beam`** and
 turns source text straight into a value:
@@ -405,7 +405,7 @@ rest, so the existing fold/codegen/VM handle it unchanged:
 compose, and (being still arithmetic + binding) the whole thing lowers to JS and
 runs under node too.
 
-**User-defined functions land via interpretation.** [`examples/rian/selfhost_funcs.rian`](examples/rian/selfhost_funcs.rian)
+**User-defined functions land via interpretation.** [`compiler/funcs.rian`](compiler/funcs.rian)
 is a tree-walking interpreter whose program is a **function table**
 (`name → Fun` of params + body) plus an `Expr`. A call evaluates its arguments
 in the caller's environment, binds them to the callee's params in a *fresh*
@@ -419,7 +419,7 @@ function name in a JS module.)
 
 ## Module system — a compiler is many modules
 
-A real compiler is split across files; [`examples/rian/selfhost_modules.rian`](examples/rian/selfhost_modules.rian)
+A real compiler is split across files; [`compiler/modules.rian`](compiler/modules.rian)
 splits the calc into `mod CalcLex` / `CalcParse` / `CalcGen` / `Calc`.
 `Rian.Beam.load_program/1` compiles **each `mod` to its own BEAM module** named
 `Elixir.<Mod>` — the very atom a Pascal-qualified call lowers to — so a Rian
@@ -435,7 +435,7 @@ Only the functions cross module boundaries; the types are erased to shared tags.
 
 The BEAM path drove these spikes, but the typed core IR is shared, so a
 *sum-based* spike can lower to other targets without a new fork. The **optimizer**
-(`selfhost_opt.rian`, variants + nested patterns, no lists/FFI) now lowers to
+(`opt.rian`, variants + nested patterns, no lists/FFI) now lowers to
 **three targets**:
 
 - **BEAM** — abstract forms, verified running (`fold` of `(2 + 3) * 4` → `Num(20)`).
@@ -450,7 +450,7 @@ ends, zero forks.
 `length`/`slice`), `case` (→ an IIFE if-chain), strings (`<>` → `+`), maps
 (`%{k: v}` → a JS object), and the handful of stdlib calls the spikes lean on,
 mapped to portable JS (`Map.get`/`Map.put` immutable, `String.to_charlist`,
-`List.to_string`, `:lists.reverse`). With those, **`selfhost_calc.rian` lowers to
+`List.to_string`, `:lists.reverse`). With those, **`calc.rian` lowers to
 JS in full** — lexer (FFI), parser, optimizer, codegen (slot map), VM — and runs
 under node:
 
@@ -463,7 +463,7 @@ So the complete self-hosting compiler runs on **two targets** (BEAM + JavaScript
 from one IR. The FFI mappings are a stopgap; the portable prelude (ADR-0047 §2)
 should own `Map`/`String`/`List` so they are not per-emitter special cases.
 
-**`List` is portable as pure Rian.** [`examples/rian/selfhost_listlib.rian`](examples/rian/selfhost_listlib.rian)
+**`List` is portable as pure Rian.** [`compiler/listlib.rian`](compiler/listlib.rian)
 writes `reverse`/`append`/`length`/`sum` over cons recursion with **no host
 FFI**, so they lower to every backend through the existing machinery — verified
 identical on BEAM and node (`reverse([1,2,3]) = [3,2,1]`). This is the ADR-0047
@@ -487,7 +487,7 @@ defines a portable `Str` over `__prim_str_chars`/`__prim_str_from_chars`/
 append on the BEAM, codepoints/`+` in JS, and `chars()`/`collect()`/`format!`
 on Rust (all three compile and run: `chars("ab") = [97,98]`, `concat`, etc.).
 `length` is a composite written in Rian. Crucially, **the lexer is now FFI-free**:
-`selfhost_lexer.rian`'s `tokenize` uses `__prim_str_chars(src)` instead of
+`lexer.rian`'s `tokenize` uses `__prim_str_chars(src)` instead of
 `String.to_charlist`, so its source carries no host call — it runs on BEAM and
 under node from one portable definition.
 

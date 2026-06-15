@@ -18,7 +18,7 @@ defmodule Rian.RustTyFixpointTest do
   # post-processes — with no private function and no hand-rolled oracle.
 
   setup_all do
-    {:ok, mod} = Beam.load(File.read!("examples/rian/selfhost_rust.rian"), :rian_rust_ty_fixpoint)
+    {:ok, mod} = Beam.load(File.read!("compiler/rust.rian"), :rian_rust_ty_fixpoint)
     {:ok, mod: mod}
   end
 

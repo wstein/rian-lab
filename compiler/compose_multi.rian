@@ -1,7 +1,7 @@
 # ===========================================================================
 # SELF-HOSTING — COMPOSITION rung 3: a MULTI-CLAUSE recursive function, in Rian
 # ===========================================================================
-# Rung 2 (selfhost_compose_decl.rian) compiled a *single-clause* `def` over
+# Rung 2 (compose_decl.rian) compiled a *single-clause* `def` over
 # arithmetic. This rung widens the composed subset to a whole MULTI-CLAUSE,
 # self-recursive function — the shape a real compiler stage actually is:
 #

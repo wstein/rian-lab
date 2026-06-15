@@ -6,7 +6,7 @@ defmodule Rian.RustModuleFixpointTest do
 
   # Self-hosting fixpoint (ADR-0063) for the **Rust text backend** (whole module):
   # a Rian-written port of `Rian.Lower.rust_program`'s emission
-  # (examples/rian/selfhost_rust.rian), compiled to real `.beam`, diffed against
+  # (compiler/rust.rian), compiled to real `.beam`, diffed against
   # `Rian.Lower.rust_program` over a corpus — sum types → `enum`s, functions with
   # `match`-tuple multi-clause dispatch, operators, `if`, variant construct+match.
   #
@@ -29,7 +29,7 @@ defmodule Rian.RustModuleFixpointTest do
 
   setup_all do
     {:ok, mod} =
-      Beam.load(File.read!("examples/rian/selfhost_rust.rian"), :rian_rust_module_fixpoint)
+      Beam.load(File.read!("compiler/rust.rian"), :rian_rust_module_fixpoint)
 
     {:ok, mod: mod}
   end

@@ -7,7 +7,7 @@ defmodule Rian.ComposeRealLexFixpointTest do
 
   # COMPOSITION fixpoint rung 10 (ADR-0063 Step 3): the front-end's LAST driver-local
   # piece — tokenizing — is replaced by the equivalence-locked `selfhost_lexer_v2`
-  # port. `selfhost_compose_real_lex.rian` now owns NO lexing or parsing: the whole
+  # port. `compose_real_lex.rian` now owns NO lexing or parsing: the whole
   # front-end is verified ports, called cross-module.
   #
   #   SelfhostLexerV2.tokenize → SelfhostDecl.parse_program → lower → SelfhostBeam.compile_forms
@@ -21,14 +21,14 @@ defmodule Rian.ComposeRealLexFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("examples/rian/selfhost_lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_lex.rian"),
+        File.read!("compiler/compose_real_lex.rian"),
         :rian_compose_real_lex
       )
 

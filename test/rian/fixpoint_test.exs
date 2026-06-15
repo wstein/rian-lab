@@ -32,7 +32,7 @@ defmodule Rian.FixpointTest do
   describe "self-hosting fixpoint (ADR-0027/0031) — Rian lexer vs reference" do
     setup do
       mod =
-        Fixpoint.load_lexer(File.read!("examples/rian/selfhost_lexer.rian"), :rian_fixpoint_lexer)
+        Fixpoint.load_lexer(File.read!("compiler/lexer.rian"), :rian_fixpoint_lexer)
 
       {:ok, mod: mod}
     end
@@ -55,7 +55,7 @@ defmodule Rian.FixpointTest do
     end
   end
 
-  # ── lexer port, slices 1-4 (selfhost_lexer_v2.rian) ──────────────────────
+  # ── lexer port, slices 1-4 (lexer_v2.rian) ──────────────────────
   # v2 keeps its own `Tok` sum; its parens are `TLP`/`TRP` (`:tlp`/`:trp`), distinct
   # from the toy lexer's `:tl_paren`/`:tr_paren`, so project them here. Slice 2
   # adds `TOp(String)` (`:t_op`) for comparison + word-operators. Slice 4 makes
@@ -139,7 +139,7 @@ defmodule Rian.FixpointTest do
     setup do
       mod =
         Fixpoint.load_lexer(
-          File.read!("examples/rian/selfhost_lexer_v2.rian"),
+          File.read!("compiler/lexer_v2.rian"),
           :rian_fixpoint_lexer_v2
         )
 
@@ -210,7 +210,7 @@ defmodule Rian.FixpointTest do
     setup do
       mod =
         Fixpoint.load_lexer(
-          File.read!("examples/rian/selfhost_lexer_v2.rian"),
+          File.read!("compiler/lexer_v2.rian"),
           :rian_fixpoint_lexer_tok
         )
 
@@ -280,7 +280,7 @@ defmodule Rian.FixpointTest do
     setup do
       mod =
         Fixpoint.load_lexer(
-          File.read!("examples/rian/selfhost_lexer_v2.rian"),
+          File.read!("compiler/lexer_v2.rian"),
           :rian_lex_completeness
         )
 

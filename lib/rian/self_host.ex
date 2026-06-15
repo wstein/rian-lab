@@ -9,7 +9,7 @@ defmodule Rian.SelfHost do
     * **Stage status** (`stages/0`, `percent/0`, `status_markdown/0`) — each pipeline
       stage's self-host state, the `% self-hosted` headline, and the rendered table
       that `docs/self-host-status.md` is a snapshot of. A self-hosted stage cites a
-      Rian source (`examples/rian/selfhost_*.rian`) and an equivalence/fixpoint test;
+      Rian source (`compiler/*.rian`) and an equivalence/fixpoint test;
       `test/rian/self_host_status_test.exs` checks the snapshot is current and the
       cited evidence exists, so the number cannot drift away from reality.
 
@@ -25,7 +25,7 @@ defmodule Rian.SelfHost do
   far-further **portable** one (compiling the compiler to Rust/JS), per ADR-0063 §4.
   """
 
-  @examples_dir Path.join([File.cwd!(), "examples", "rian"])
+  @compiler_dir Path.join([File.cwd!(), "compiler"])
 
   @typedoc "A pipeline stage's self-host state."
   @type status :: :self_hosted | :partial | :not_started
@@ -41,7 +41,7 @@ defmodule Rian.SelfHost do
       name: "Lexer",
       role: :frontend,
       status: :self_hosted,
-      source: "selfhost_lexer_v2.rian",
+      source: "lexer_v2.rian",
       test: "test/rian/fixpoint_test.exs",
       note: "token stream equals Rian.Lexer over slices 1-5 (incl. tokenize/1, {:nl})"
     },
@@ -50,7 +50,7 @@ defmodule Rian.SelfHost do
       name: "Declaration parser",
       role: :frontend,
       status: :partial,
-      source: "selfhost_decl.rian",
+      source: "decl.rian",
       test: "test/rian/decl_fixpoint_test.exs",
       note:
         "IR equals Rian.Decl over type/struct/mod/def slice incl. `forall` generics (tvars/bounds, ADR-0042), `if … do … else … end` expressions (single-expr branches → `{:if, c, {:block,…}, {:block,…}}`, ADR-0063), String/Char literals + patterns (`def tag() String := \"ok\"`, `def m(\"x\") := 1`), multi-statement block bodies (`<nl> b := e <nl> e end` → `{:block, [{:bind,…}, {:expr,…}]}`), and `case … do … end` (single-expr arms + `when` guards → `{:case, scrut, [{pat, g, body}, …]}`); alias/protocol/doc-comments remain"
@@ -60,7 +60,7 @@ defmodule Rian.SelfHost do
       name: "Expression/pattern parser",
       role: :frontend,
       status: :self_hosted,
-      source: "selfhost_parse.rian",
+      source: "parse.rian",
       test: "test/rian/parse_fixpoint_test.exs",
       note:
         "the full Rian.Pratt grammar — prefix/primary (if/case/with/list/map/tuple/lambda/capture/atom/str/char/num/id), postfix dot/call, labelled args, precedence climbing, AND the full pattern grammar + blocks — equals Rian.Pratt.parse with no projection; string-interpolation/`<-`-propagation sugar is out of scope; FFI-free — the `:if`/`:case`/`:with`/`:struct` keyword-atom tags are quoted-atom literals (`:\"if\"`)"
@@ -70,7 +70,7 @@ defmodule Rian.SelfHost do
       name: "Typed Core IR (from_expr/from_pat)",
       role: :frontend,
       status: :self_hosted,
-      source: "selfhost_core.rian",
+      source: "core.rian",
       test: "test/rian/core_fixpoint_test.exs",
       note:
         "the full surface→Core lowering — every Pratt-produced expression (literals/unary/binary/call/label/dot/if/tuple/list/map/block/case/lambda/capture/with) and pattern (wild/var/lit/char/atom/tuple/ctor/list/struct/map) — equals Rian.Core.from_expr/from_pat; the Lower-internal resolved nodes + never-parsed as/pin patterns are not surface-reachable"
@@ -80,17 +80,17 @@ defmodule Rian.SelfHost do
       name: "Type checker (inference + error sets)",
       role: :checker,
       status: :partial,
-      source: "selfhost_checker.rian",
+      source: "checker.rian",
       test: "test/rian/checker_infer_fixpoint_test.exs",
       note:
-        "type inference agrees with the REAL Rian.Check.infer over ALL 12 Core nodes AND the FULL inference context `ic` — literals incl. float/char, ids in a typing env, unary/binary with operand-directed arithmetic + cross-width widening, prim calls, `if`/`case` (with flow narrowing), lists, lambdas (`Fn(...)`), higher-order calls, constructor sum types + non-generic function returns, GENERIC-return instantiation (`ic.fsigs` + type variables — unify params with arg types, substitute bound tvars in the return) and constructor-pattern field narrowing (`ic.tdefs`). Inference is complete; the remaining gap is the checker's ERROR SETS (mismatch detection/reporting), not inference (selfhost_check.rian is a separate TOY-language spike)"
+        "type inference agrees with the REAL Rian.Check.infer over ALL 12 Core nodes AND the FULL inference context `ic` — literals incl. float/char, ids in a typing env, unary/binary with operand-directed arithmetic + cross-width widening, prim calls, `if`/`case` (with flow narrowing), lists, lambdas (`Fn(...)`), higher-order calls, constructor sum types + non-generic function returns, GENERIC-return instantiation (`ic.fsigs` + type variables — unify params with arg types, substitute bound tvars in the return) and constructor-pattern field narrowing (`ic.tdefs`). Inference is complete; the remaining gap is the checker's ERROR SETS (mismatch detection/reporting), not inference (check.rian is a separate TOY-language spike)"
     },
     %{
       id: :exhaustiveness,
       name: "Exhaustiveness gate",
       role: :checker,
       status: :self_hosted,
-      source: "selfhost_exhaust.rian",
+      source: "exhaust.rian",
       test: "test/rian/exhaust_fixpoint_test.exs",
       note:
         "the complete Maranget useful?/3 (specialize/default/signature over single+multi-column matrices, ctors-with-args, finite/infinite types) reproduces Rian.Exhaustiveness.useful? — the gate decision; only the witness/counterexample diagnostic (algorithm I) is unported"
@@ -100,7 +100,7 @@ defmodule Rian.SelfHost do
       name: "Capability checker",
       role: :checker,
       status: :self_hosted,
-      source: "selfhost_cap.rian",
+      source: "cap.rian",
       test: "test/rian/cap_fixpoint_test.exs",
       note:
         "the full capability→Rust mapping (every Copy width, String, nominal, nested Vec, parametric generics incl. the val-generic quirk) + ref-rejecting BEAM legality equal Rian.Capability over the whole matrix; type-string tokenisation is the type-parser's stage, the BEAM linearity check is native typestate"
@@ -110,17 +110,17 @@ defmodule Rian.SelfHost do
       name: "BEAM abstract-forms backend",
       role: :backend,
       status: :self_hosted,
-      source: "selfhost_beam.rian",
+      source: "beam.rian",
       test: "test/rian/beam_module_fixpoint_test.exs",
       note:
-        "the whole-module abstract-forms emitter — functions with native multi-clause dispatch (patterns ARE the forms), operators, if, case, variants/tuples/lists, guards — compiles via :compile.forms and RUNS identically to Rian.Beam; strings/prims/maps/structs/shadowed-binds are out of scope (selfhost_codegen.rian is a separate toy stack VM)"
+        "the whole-module abstract-forms emitter — functions with native multi-clause dispatch (patterns ARE the forms), operators, if, case, variants/tuples/lists, guards — compiles via :compile.forms and RUNS identically to Rian.Beam; strings/prims/maps/structs/shadowed-binds are out of scope (codegen.rian is a separate toy stack VM)"
     },
     %{
       id: :text_backend,
       name: "Rust text backend",
       role: :backend,
       status: :self_hosted,
-      source: "selfhost_rust.rian",
+      source: "rust.rian",
       test: "test/rian/rust_module_fixpoint_test.exs",
       note:
         "the whole-module Rust emitter — sum types → derive'd enums, structs → derive'd records (construct + field access), functions with match-over-param-tuple multi-clause dispatch (capability-lowered signatures), operators, if, variant construct+match, guards, closed + cons lists, generic `<T: Clone>` signatures + bare-tvar-return clone, list PATTERNS (`[h | t]` → slice `[h, t @ ..]`) with the slice-element clone rebind, non-generic call-site owned→borrow coercion (an owned `vec![…]` arg to a `&`-typed param is `&`-wrapped), the generic borrowed-set element clone (a borrowed `&T` binder stored into a closed list / cons head / non-Result variant payload is `.clone()`d), parametric-enum monomorphization (a parametric sum → `enum Name<K: Clone, …>`; every parametric type name in a signature spliced to its instantiation at identifier boundaries — param AND nested, `&Pair`→`&Pair<K,V>`, `Vec<Box>`→`Vec<Box<T>>` — a generic fn using the type's params, a non-generic builder the `i64`-per-param default `Box`→`Box<i64>`) — equals Rian.Lower.rust_program; the emitter consumes RESOLVED + capability-LOWERED Core (resolution = parser/Core stage, capability lowering = the self-hosted capability stage). The rest (concrete instantiation inferred from a generic-CALL builder tail, owned-String/owned-returning-call arg producers, borrowed args at generic call sites, maps, String-return coercion, the Elixir text target, struct *patterns* — a reference gap, Rian.Lower raises) remain out of scope"
@@ -130,7 +130,7 @@ defmodule Rian.SelfHost do
       name: "ECMAScript backend",
       role: :backend,
       status: :self_hosted,
-      source: "selfhost_js.rian",
+      source: "js.rian",
       test: "test/rian/js_module_fixpoint_test.exs",
       note:
         "the whole-module JS emitter — functions with multi-clause pattern dispatch, sum variants (tagged arrays), structs/tuples/lists/maps, .field, if (ternary), case (IIFE), operators, atoms, prims — equals Rian.JS.compile; protocol dispatch + whole-program int-mode + Shadow are out of scope (program-level / separate-subsystem concerns)"
@@ -140,7 +140,7 @@ defmodule Rian.SelfHost do
       name: "Kotlin/JVM backend",
       role: :backend,
       status: :self_hosted,
-      source: "selfhost_jvm.rian",
+      source: "jvm.rian",
       test: "test/rian/jvm_module_fixpoint_test.exs",
       note:
         "the whole-module Kotlin emitter — sum types (sealed interface + object/data class), functions with multi-clause pattern dispatch (is/smart-cast tests + binds + trailing throw), if, operators, prims — equals Rian.JVM.compile over its full SUPPORTED surface; lists/maps/lambda/@external/Shadow are reference gaps, not port gaps (`case` is a reference feature the port's surface does not yet emit)"
@@ -162,7 +162,7 @@ defmodule Rian.SelfHost do
     stages: 4,
     subset:
       "whole real compiler-stage files whose ENTIRE front-end is verified ports — tokenized by selfhost_lexer_v2, parsed by selfhost_decl (def heads, multi-clause patterns incl. cons-LISTS and TUPLES, SUM-TYPE/STRUCT declarations + constructor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access, `@external` FFI, `forall` generics, arithmetic + calls) — and compiled by the selfhost_beam backend; all THREE ports called CROSS-MODULE (incl. remote calls), with only a surface→Core lowering + Form inflater as driver glue",
-    source: "selfhost_compose_real_sum.rian",
+    source: "compose_real_sum.rian",
     test: "test/rian/compose_real_sum_fixpoint_test.exs",
     # honesty distinction (ADR-0063): the composed loop is self-COMPILING (codegen —
     # lex→parse→lower→emit→load). It is now PARTIALLY self-CHECKING: the two STRUCTURAL
@@ -177,17 +177,17 @@ defmodule Rian.SelfHost do
     exhaustiveness_gated: true,
     capability_gated: true,
     # has `build` compiled a real selfhost_*.rian slice (not a toy corpus)? Yes —
-    # the WHOLE capability checker (selfhost_cap.rian) and the whole lexer/decl/beam/
+    # the WHOLE capability checker (cap.rian) and the whole lexer/decl/beam/
     # core/exhaust stages compile + run identically to Rian.Beam.
     closed_on_real_source:
-      "selfhost_cap.rian (whole file) — plus the whole lexer/decl/beam/core/exhaust stages and the driver itself",
+      "cap.rian (whole file) — plus the whole lexer/decl/beam/core/exhaust stages and the driver itself",
     real_source_test: "test/rian/compose_selfcompile_fixpoint_test.exs",
     # has the bootstrap fixed point closed? Yes, for the Rian compiler (self-compiling):
     # gen1 == gen2 over the four compiler sources, identical forms + bit-identical .beam.
     bootstrap_v1_v2: true,
     bootstrap_test: "test/rian/selfhost_v1_v2_fixpoint_test.exs",
     note:
-      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.Selfhost*\" atoms (Pascal calls, ADR-0041). `SelfhostLexerV2.tokenize` feeds `SelfhostDecl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING and PARTIALLY self-CHECKING: the two STRUCTURAL gates are wired into the build loop — `build` refuses a non-exhaustive sum dispatch (SelfhostExhaust, env from the program's `type` decls) and a BEAM-illegal `ref` parameter (SelfhostCap.beam_legal), via `:erlang.error` (`compose_exhaust_gate_fixpoint_test`). Full self-CHECKING (Rian.Check type inference also in the loop) remains the next terminus — the checker port (selfhost_checker.rian) now covers 12/12 Core nodes WITH a typing env (bound variables; literals incl. float/char, unary/binary, prim calls), its tail being cross-width join widening, `case`/lists, lambdas, and user-fn/ctor return types. Host FFI in the loop: :compile.forms/:code.load_binary/:erlang.error."
+      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.Selfhost*\" atoms (Pascal calls, ADR-0041). `SelfhostLexerV2.tokenize` feeds `SelfhostDecl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING and PARTIALLY self-CHECKING: the two STRUCTURAL gates are wired into the build loop — `build` refuses a non-exhaustive sum dispatch (SelfhostExhaust, env from the program's `type` decls) and a BEAM-illegal `ref` parameter (SelfhostCap.beam_legal), via `:erlang.error` (`compose_exhaust_gate_fixpoint_test`). Full self-CHECKING (Rian.Check type inference also in the loop) remains the next terminus — the checker port (checker.rian) now covers 12/12 Core nodes WITH a typing env (bound variables; literals incl. float/char, unary/binary, prim calls), its tail being cross-width join widening, `case`/lists, lambdas, and user-fn/ctor return types. Host FFI in the loop: :compile.forms/:code.load_binary/:erlang.error."
   }
 
   @doc """
@@ -288,12 +288,12 @@ defmodule Rian.SelfHost do
   defp evidence(%{source: nil}), do: "—"
 
   defp evidence(%{source: src, test: test}),
-    do: "`examples/rian/#{src}`" <> if(test, do: " · `#{test}`", else: "")
+    do: "`compiler/#{src}`" <> if(test, do: " · `#{test}`", else: "")
 
   @doc "The self-host Rian sources cited as evidence (absolute paths)."
   @spec evidence_files() :: [String.t()]
   def evidence_files do
-    for s <- @stages, s.source, do: Path.join(@examples_dir, s.source)
+    for s <- @stages, s.source, do: Path.join(@compiler_dir, s.source)
   end
 
   # ── @selfhost_ffi ledger (ADR-0063 §4 — permitted, but counted) ────────────
@@ -304,47 +304,47 @@ defmodule Rian.SelfHost do
   # MUST delete its line here (the test fails on a stale entry), and any NEW host FFI
   # MUST be added here (the test fails on an unlisted crutch). Sorted, deduped.
   @ffi_ledger %{
-    "selfhost_calc.rian" => [
+    "calc.rian" => [
       ":lists.reverse",
       "List.to_string",
       "Map.get",
       "Map.put",
       "String.to_charlist"
     ],
-    "selfhost_check.rian" => ["Map.get", "Map.put"],
-    "selfhost_codegen.rian" => ["Map.get", "Map.put"],
-    "selfhost_eval.rian" => ["Map.get", "Map.put"],
-    "selfhost_funcs.rian" => ["Map.get", "Map.put"],
-    "selfhost_modules.rian" => ["String.to_charlist"],
+    "check.rian" => ["Map.get", "Map.put"],
+    "codegen.rian" => ["Map.get", "Map.put"],
+    "eval.rian" => ["Map.get", "Map.put"],
+    "funcs.rian" => ["Map.get", "Map.put"],
+    "modules.rian" => ["String.to_charlist"],
     # the composition-driver capstone owns the whole source->loaded-module loop in
     # Rian; the two irreducible BEAM toolchain calls are @external(:ex) FFI (ADR-0068),
     # counted here. Everything between them is portable Rian (ADR-0063 §4).
-    "selfhost_compose_driver.rian" => [":code.load_binary", ":compile.forms"],
+    "compose_driver.rian" => [":code.load_binary", ":compile.forms"],
     # rung 6 widens the driver's surface (if/comparisons/boolean) but keeps the
     # same two BEAM toolchain calls as its only FFI (ADR-0063 §4 / ADR-0068).
-    "selfhost_compose_cond.rian" => [":code.load_binary", ":compile.forms"],
+    "compose_cond.rian" => [":code.load_binary", ":compile.forms"],
     # rung 7 wires the VERIFIED beam backend into the driver via a cross-module call
     # to SelfhostBeam.compile_forms (composition — excluded from this count, see
     # ffi_in_file/1). Its only host FFI is still the two BEAM toolchain calls.
-    "selfhost_compose_real_beam.rian" => [":code.load_binary", ":compile.forms"],
+    "compose_real_beam.rian" => [":code.load_binary", ":compile.forms"],
     # rung 8 adds the verified FRONT-END: bodies parsed by SelfhostParse.parse, then
     # the SelfhostBeam backend (both cross-module composition, excluded). Same two
     # BEAM toolchain calls as the only host FFI.
-    "selfhost_compose_real_front.rian" => [":code.load_binary", ":compile.forms"],
+    "compose_real_front.rian" => [":code.load_binary", ":compile.forms"],
     # rung 9 replaces the last toy front-end piece: the whole program is parsed by
     # SelfhostDecl.parse_program, then compiled by SelfhostBeam (both cross-module
     # composition, excluded). Same two BEAM toolchain calls as the only host FFI.
-    "selfhost_compose_real_decl.rian" => [":code.load_binary", ":compile.forms"],
+    "compose_real_decl.rian" => [":code.load_binary", ":compile.forms"],
     # rung 10 wires the verified LEXER too: SelfhostLexerV2.tokenize → SelfhostDecl →
     # SelfhostBeam (all cross-module composition, excluded). The whole front-end is
     # now verified ports. Same two BEAM toolchain calls as the only host FFI.
-    "selfhost_compose_real_lex.rian" => [":code.load_binary", ":compile.forms"],
+    "compose_real_lex.rian" => [":code.load_binary", ":compile.forms"],
     # rung 11 widens the SURFACE to sum types + ctor dispatch (selfhost_decl's
     # existing type/ctor capability); same three verified ports. The strings/chars
     # widening (Phase A/B/C) adds `:erlang.binary_to_list` — a String's BYTES for the
     # `{:string, L, Cs}` bin-segment of a string literal's form (matching
     # Rian.Beam.str_form; codepoints would truncate >255 in an 8-bit segment).
-    "selfhost_compose_real_sum.rian" => [
+    "compose_real_sum.rian" => [
       ":code.load_binary",
       ":compile.forms",
       ":erlang.binary_to_list",
@@ -356,9 +356,9 @@ defmodule Rian.SelfHost do
   @spec ffi_ledger() :: %{String.t() => [String.t()]}
   def ffi_ledger, do: @ffi_ledger
 
-  @doc "All `examples/rian/selfhost_*.rian` source paths."
+  @doc "All `compiler/*.rian` source paths."
   @spec selfhost_files() :: [String.t()]
-  def selfhost_files, do: Path.wildcard(Path.join(@examples_dir, "selfhost_*.rian"))
+  def selfhost_files, do: Path.wildcard(Path.join(@compiler_dir, "*.rian"))
 
   @doc """
   The `mod <Name>` module names declared across the self-host sources — the set of

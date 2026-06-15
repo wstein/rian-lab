@@ -6,7 +6,7 @@ defmodule Rian.ComposeRealFrontFixpointTest do
   alias Rian.Beam
 
   # COMPOSITION fixpoint rung 8 (ADR-0063 Step 3): extends rung 7 (verified BACKEND)
-  # to the FRONT-END. `selfhost_compose_real_front.rian` parses each clause body with
+  # to the FRONT-END. `compose_real_front.rian` parses each clause body with
   # the equivalence-locked `selfhost_parse` port (the full Rian.Pratt grammar), called
   # cross-module, then lowers its raw surface tuple to `selfhost_beam` Core and runs it
   # through the equivalence-locked `selfhost_beam` backend (also cross-module):
@@ -20,12 +20,12 @@ defmodule Rian.ComposeRealFrontFixpointTest do
   # (real precedence, real surface) AND the real backend.
 
   setup_all do
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_parse.rian"), :"Elixir.SelfhostParse")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/parse.rian"), :"Elixir.SelfhostParse")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
 
     {:ok, drv} =
       Beam.load(
-        File.read!("examples/rian/selfhost_compose_real_front.rian"),
+        File.read!("compiler/compose_real_front.rian"),
         :rian_compose_real_front
       )
 
