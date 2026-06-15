@@ -1,73 +1,60 @@
 # ===========================================================================
-# `Foldable` — EAGER polymorphic reduction over a protocol (ADR-0073 / ADR-0042)
+# `Foldable` — EAGER polymorphic reduction, ELEMENT-GENERIC (ADR-0074 / ADR-0073)
 # ===========================================================================
-# Tier 1 (`prelude_list.rian`) gave `sum`/`any`/`all`/`length` over a concrete
-# `Vec`. Tier 2 lifts them to ANY container that can produce its elements, via a
-# one-method protocol — the eager, typed analogue of Python's "any iterable":
+# Tier 1 (`prelude_list.rian`) gave `sum`/`any`/`all`/`length` over a concrete `Vec`.
+# Tier 2 lifts them to ANY container via a one-method protocol — the eager, typed
+# analogue of Python's "any iterable". With ADR-0074's **associated type**, the
+# element is no longer pinned to `Int53`: the protocol's `type Elem` is fixed by each
+# impl, so ONE reducer serves containers of DIFFERENT element types.
 #
-#   protocol Foldable { to_list(self) -> Vec(Int53) }
+#   protocol Foldable { type Elem; to_list(self) -> Vec(Elem) }
 #
-# A reducer is then written ONCE against the protocol (`fsum`/`fany`/`fall`) and
-# dispatches to each impl by the receiver's runtime type (ADR-0042 first-arg
-# dispatch). `fsum(Bag([1,2,3]))` and `fsum(Sp(4,5))` call the SAME `fsum`.
+# `fcount` below is element-AGNOSTIC (it counts, not sums), so the SAME `fcount`
+# reduces a `Bag` of `Int53` AND a `Words` of `String` — selected by runtime type
+# (ADR-0042 first-arg dispatch). That is the element-generic win the `Int53`-pinned
+# ADR-0073 draft could not express.
 #
-# DELIBERATELY EAGER. `to_list` materialises — there is no lazy `Iterator`, which
-# would need a portable lazy-sequence abstraction Rian does not provide (laziness
-# is native-per-target, like concurrency in ADR-0057).
-#
-# TWO honest limits of today's protocol mechanism (ADR-0042/0061), both in the ADR:
-#   * No associated/element type — `Self` is one concrete type — so `to_list`
-#     fixes a CONCRETE element (`Int53`) here. An element-generic `Foldable(T)`
-#     needs associated types (deferred).
-#   * Dispatching over SUM types uses a constructor-tag atom in the BEAM/JS
-#     desugaring, so `Rian.Reach` pins these dispatchers to `[:ex, :js]` (exactly
-#     as it does the shipped `Show`-over-`Expr`); primitive-dispatch protocols
-#     (`Eq`/`Ord`) reach all four. Verified on the BEAM.
+# DELIBERATELY EAGER (`to_list` materialises — no lazy `Iterator`, ADR-0057). Honest
+# limits (ADR-0074):
+#   * `type Elem` is resolved per impl; on the BEAM it ERASES (runtime dispatch is
+#     unchanged), and only the Rust emitter materialises it (`trait { type Elem; }` +
+#     `impl { type Elem = i64; }`, ADR-0074 Stage 3).
+#   * dispatching over SUM types uses a constructor-tag atom, so `Rian.Reach` pins
+#     these dispatchers to `[:ex, :js]` (exactly as the shipped `Show`-over-`Expr`);
+#     associated types are erased and do NOT change that. Verified on the BEAM.
 # ---------------------------------------------------------------------------
 
-# the bridge: a container yields its elements as a concrete list.
+# the bridge: a container yields its elements. `Elem` is the associated element type.
 protocol Foldable do
-  def to_list(self Self) Vec(Int53)
+  type Elem
+  def to_list(self Self) Vec(Elem)
 end
 
+# two containers with DIFFERENT element types — the point of the associated type.
 type Bag := Bag(items Vec(Int53))
-type Span := Sp(lo Int53, hi Int53)
+type Words := Words(items Vec(String))
 
-# impl methods take a plain receiver and destructure with `case` (ADR-0042 — the
-# dispatcher binds the receiver; the head is not a constructor pattern).
 impl Foldable for Bag do
+  type Elem := Int53
   def to_list(b) := case b do Bag(xs) -> xs end
 end
 
-impl Foldable for Span do
-  def to_list(s) := case s do Sp(a, b) -> [a, b] end
+impl Foldable for Words do
+  type Elem := String
+  def to_list(w) := case w do Words(ss) -> ss end
 end
 
-# ── reducers written ONCE over the protocol; `forall T: Foldable` enforces the
-#    bound at every call site (a non-Foldable type is a compile error) ─────────
-def fsum(x T) Int53 forall T: Foldable := sum_l(to_list(x))
-def fany_pos(x T) Bool forall T: Foldable := anypos_l(to_list(x))
-def fall_pos(x T) Bool forall T: Foldable := allpos_l(to_list(x))
-def fcount(x T) Int53 forall T: Foldable := len_l(to_list(x))
+# ── an ELEMENT-AGNOSTIC reducer: one `fcount` over any Foldable, any element type.
+#    `forall C: Foldable` enforces the bound at every call site. ───────────────
+def fcount(x C) Int53 forall C: Foldable := len_l(to_list(x))
 
-# the concrete `Vec(Int53)` folds these bottom out in (cf. `List.*` in
-# prelude_list.rian — inlined here so the example is one self-contained module).
-def sum_l(Vec(Int53)) Int53
-def sum_l([]) := 0
-def sum_l([h | t]) := h + sum_l(t)
-
-def anypos_l(Vec(Int53)) Bool
-def anypos_l([]) := false
-def anypos_l([h | t]) := if h > 0 do true else anypos_l(t) end
-
-def allpos_l(Vec(Int53)) Bool
-def allpos_l([]) := true
-def allpos_l([h | t]) := if h > 0 do allpos_l(t) else false end
-
-def len_l(Vec(Int53)) Int53
+# the concrete fold it bottoms out in — generic over the element (cf. `List.length`
+# in prelude_list.rian; inlined here so the example is one self-contained module).
+def len_l(Vec(T)) Int53 forall T
 def len_l([]) := 0
 def len_l([_ | t]) := 1 + len_l(t)
 
-# fsum(Bag([1,2,3])) = 6 · fsum(Sp(4,5)) = 9 · fall_pos(Sp(-1,2)) = false ·
-# fany_pos(Bag([0,0,3])) = true · fcount(Bag([1,2,3])) = 3 — one reducer set,
-# two container types, selected by runtime shape.
+# fcount(Bag([1,2,3])) = 3 (Int53 elements) · fcount(Words(["a","b"])) = 2 (String
+# elements) — ONE reducer, two element types, dispatched by runtime shape. Numeric
+# reductions (`sum`/`any`/`all`) live in prelude_list.rian over a concrete `Vec`,
+# since they require a specific element type (`Int53`/`Bool`), not any `Elem`.

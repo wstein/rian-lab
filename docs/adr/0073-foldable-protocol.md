@@ -1,7 +1,7 @@
 # ADR-0073 — `Foldable`: eager polymorphic reduction over a protocol
 
-**Status:** Accepted (direction) · the **concrete-element** form is implemented and verified on the BEAM; the **element-generic** form is deferred behind **ADR-0074** (associated types). Debated 2026-06-15.
-**Implemented:** partial — `Foldable` + `fsum`/`fany_pos`/`fall_pos`/`fcount` over two container types (`examples/rian/foldable.rian`, `test/rian/prim_test.exs`), running on the BEAM and reach-gated honestly. Element-generic `Foldable(T)` and the lazy-iterator surface are **not** implemented (by design / pending ADR-0074).
+**Status:** Accepted · **ELEMENT-GENERIC** via ADR-0074's associated types — the `Int53` pin is retired. Debated 2026-06-15.
+**Implemented:** yes (eager) — `Foldable` with an associated `type Elem` (ADR-0074): one `fcount` reduces a `Bag` of `Int53` **and** a `Words` of `String` (`examples/rian/foldable.rian`, `test/rian/prim_test.exs`), running on the BEAM, reach-gated honestly (`[:ex, :js]` for the sum-dispatch consumer), and the Rust lowering rustc-verified (ADR-0074 Stage 3). The **lazy-iterator** surface remains deliberately unimplemented (per Decision §2 — laziness is native-per-target, ADR-0057).
 **Refines:** ADR-0047 (portable prelude — Tier 2 over the Tier-1 `List` reducers), ADR-0042 (protocols/impls/bounded generics — the mechanism this rides), ADR-0061 (multi-target protocol lowering — the reach reality below).
 **Refs:** ADR-0057 (concurrency/laziness native-per-target — the *principle* for rejecting lazy iterators), ADR-0034 (no `nil`; totality), ADR-0064 (portable `Int53`), ADR-0035 (no hidden control flow), ADR-0000 (honesty: the matrix matches the emitters).
 **Owners:** Arthur Pendelton (bounds / dispatch) · Maya Lin (emitters) · Elena Rostova (Rust traits / coherence) · Kira Neri (Reach honesty) · Mira (totality) · Rachel Okafor (PM)

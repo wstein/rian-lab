@@ -113,24 +113,22 @@ defmodule Rian.PrimTest do
       end
     end
 
-    test "`Foldable` protocol — one reducer set dispatches over two container types (ADR-0073)" do
+    test "`Foldable` — one ELEMENT-GENERIC reducer over two element types (ADR-0074)" do
       src = File.read!("examples/rian/foldable.rian")
       {:ok, m} = Beam.load(src, :rian_prim_foldable)
 
-      # the SAME `fsum`/`fall_pos`/`fcount` run over Bag AND Span (first-arg dispatch)
-      assert m.fsum({:bag, [1, 2, 3]}) == 6
-      assert m.fsum({:sp, 4, 5}) == 9
-      assert m.fall_pos({:sp, -1, 2}) == false
-      assert m.fany_pos({:bag, [0, 0, 3]}) == true
+      # the SAME `fcount` reduces a Bag of Int53 AND a Words of String — the
+      # associated type (`type Elem := Int53` / `:= String`) makes it element-generic.
       assert m.fcount({:bag, [1, 2, 3]}) == 3
+      assert m.fcount({:words, ["a", "b"]}) == 2
 
       # reach is honest: a SUM-dispatching protocol consumer is `[:ex, :js]` (the
       # constructor-tag atom in the dispatcher pins off `:rs`/`:jvm`) — exactly the
-      # reach of the shipped `Show`-over-`Expr` dispatcher, no better, no worse.
+      # reach of the shipped `Show`-over-`Expr`; associated types erase, no change.
       rep = Rian.Reach.analyze(Rian.Decl.parse(src))
-      assert Enum.sort(MapSet.to_list(rep["fsum"].reach)) == [:ex, :js]
+      assert Enum.sort(MapSet.to_list(rep["fcount"].reach)) == [:ex, :js]
       # the underlying concrete fold IS all-target — only the dispatcher gates it.
-      assert Enum.sort(MapSet.to_list(rep["sum_l"].reach)) == [:ex, :js, :jvm, :rs]
+      assert Enum.sort(MapSet.to_list(rep["len_l"].reach)) == [:ex, :js, :jvm, :rs]
     end
 
     test "selfhost lexer using `Prim.char_code`/`Prim.str_chars` round-trips" do

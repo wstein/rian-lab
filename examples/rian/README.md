@@ -390,14 +390,15 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   `mix rian.targets`). A *lazy* generator/`Iterator` protocol is deliberately NOT
   provided — laziness is a per-target evaluation concern, native like concurrency
   (ADR-0057), not portable sequential logic.
-- [foldable.rian](foldable.rian) — **Tier 2: `Foldable`, eager polymorphic reduction
-  over a protocol (ADR-0073).** A one-method protocol (`to_list(self) Vec(Int53)`)
-  bridges any container to a list, so `fsum`/`fany_pos`/`fall_pos`/`fcount` are written
-  ONCE and dispatch over `Bag` AND `Span` by runtime type (ADR-0042). Eager — no lazy
-  `Iterator` (rejected, ADR-0057). Honest limits: the protocol is single-`Self` (no
-  associated type), so the element is concrete `Int53` today (element-generic deferred);
-  and a sum-dispatch consumer reaches `[:ex, :js]` (the constructor-tag atom pins off
-  `:rs`/`:jvm`) — exactly the reach of the shipped `Show`-over-`Expr`. Verified on BEAM.
+- [foldable.rian](foldable.rian) — **Tier 2: `Foldable`, eager ELEMENT-GENERIC reduction
+  over a protocol (ADR-0073 + ADR-0074).** A one-method protocol with an **associated
+  type** (`type Elem; to_list(self) Vec(Elem)`) bridges any container to a list, so the
+  element is fixed per impl (`type Elem := Int53` / `:= String`) and ONE `fcount` reduces
+  a `Bag` of `Int53` **and** a `Words` of `String` — dispatched by runtime type (ADR-0042).
+  Eager — no lazy `Iterator` (rejected, ADR-0057). Honest reach: a sum-dispatch consumer
+  is `[:ex, :js]` (the constructor-tag atom pins off `:rs`/`:jvm`, exactly the shipped
+  `Show`-over-`Expr`); associated types erase on the BEAM and only the Rust emitter
+  materialises them (`trait { type Elem; }`). Verified on BEAM (+ rustc for the lowering).
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
