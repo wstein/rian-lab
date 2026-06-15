@@ -7,6 +7,7 @@
     { "include": "#annotations" },
     { "include": "#strings" },
     { "include": "#characters" },
+    { "include": "#prim" },
     { "include": "#declarations" },
     { "include": "#keywords" },
     { "include": "#capabilities" },
@@ -58,9 +59,36 @@
           },
           "patterns": [
             {
+              "comment": "Escapes, incl. `\\$` for a literal `$` (so `\\${` is not a hole).",
               "name": "constant.character.escape.rian",
               "match": "\\\\(x[0-9A-Fa-f]{2}|u\\{[0-9A-Fa-f]+\\}|.)"
-            }
+            },
+            { "include": "#interpolation" }
+          ]
+        }
+      ]
+    },
+    "interpolation": {
+      "patterns": [
+        {
+          "comment": "String interpolation hole `${expr}` (ADR-0069). The body is full source.",
+          "name": "meta.interpolation.rian",
+          "begin": "\\$\\{",
+          "beginCaptures": {
+            "0": { "name": "punctuation.section.interpolation.begin.rian" }
+          },
+          "end": "\\}",
+          "endCaptures": {
+            "0": { "name": "punctuation.section.interpolation.end.rian" }
+          },
+          "patterns": [
+            {
+              "comment": "Consume a nested `{ … }` so it does not end the hole early.",
+              "begin": "\\{",
+              "end": "\\}",
+              "patterns": [{ "include": "$self" }]
+            },
+            { "include": "$self" }
           ]
         }
       ]
@@ -76,11 +104,24 @@
         }
       ]
     },
+    "prim": {
+      "patterns": [
+        {
+          "comment": "Reserved `Prim.*` intrinsic namespace (ADR-0047) — `Prim.<name>`.",
+          "match": "\\b(Prim)(\\.)([a-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "support.class.prim.rian" },
+            "2": { "name": "punctuation.accessor.rian" },
+            "3": { "name": "support.function.prim.rian" }
+          }
+        }
+      ]
+    },
     "declarations": {
       "patterns": [
         {
-          "comment": "Function / macro definition heads bind the following lower-case name.",
-          "match": "\\b(def|defp|macro)\\b\\s+([a-z_][A-Za-z0-9_]*)",
+          "comment": "Function / macro / cast-method heads bind the following lower-case name.",
+          "match": "\\b(def|defp|macro|to)\\b\\s+([a-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "keyword.declaration.function.rian" },
             "2": { "name": "entity.name.function.rian" }
@@ -88,7 +129,7 @@
         },
         {
           "comment": "Type / value declaration heads bind the following Pascal-case name.",
-          "match": "\\b(type|struct|alias|range|const|mod)\\b\\s+([A-Z][A-Za-z0-9_]*)",
+          "match": "\\b(type|struct|alias|range|const|mod|abstract|opaque)\\b\\s+([A-Z][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "keyword.declaration.type.rian" },
             "2": { "name": "entity.name.type.rian" }
@@ -104,7 +145,7 @@
         },
         {
           "name": "keyword.declaration.rian",
-          "match": "\\b(def|defp|macro|type|struct|alias|range|const|mod|pub|use|import|extern|comptime)\\b"
+          "match": "\\b(def|defp|macro|type|struct|alias|range|const|mod|abstract|opaque|pub|use|import|extern|comptime|forall|to)\\b"
         },
         {
           "name": "keyword.operator.word.rian",

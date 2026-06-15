@@ -3,9 +3,12 @@
 Syntax highlighting for the [Rian](../../../README.md) programming language,
 driven by a TextMate grammar. It colours the surface syntax exercised by the
 [`examples/rian/`](../../../examples/rian/) tour: declarations (`def` / `type` /
-`struct` / `alias` / `range` / `mod`), reference capabilities
-(`val` / `iso` / `ref` / `tag`), `case`/`when` matching, word and symbolic
-operators, atoms, annotations (`@wire`), and numeric/string/char literals.
+`struct` / `alias` / `range` / `mod` / `abstract` / `opaque`), reference
+capabilities (`val` / `iso` / `ref` / `tag`), `forall` generics and `to`
+cast-methods, `case`/`when` matching, word and symbolic operators, atoms,
+annotations (`@wire` / `@targets`), the reserved `Prim.*` intrinsic namespace,
+and numeric/char/string literals — including `${expr}` interpolation holes
+(ADR-0069), whose bodies are highlighted as real source.
 
 This extension is **highlighting only** — there is no language server, so no
 completion, diagnostics, or go-to-definition.

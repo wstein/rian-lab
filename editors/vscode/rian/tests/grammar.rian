@@ -50,3 +50,30 @@ def words(n Int64) Int64 := if n > 0 do 1 else 0 end
 #                                ^ keyword.operator.comparison.rian
 #                                    ^^ keyword.control.rian
 #                                         ^^^^ keyword.control.rian
+
+# --- new surface: interpolation, abstract/opaque, forall, Prim.* ---
+
+def render(t Type) String := "Vec<${owned(t)}>"
+#                             ^^^ string.quoted.double.rian
+#                                 ^^ punctuation.section.interpolation.begin.rian
+#                                   ^^^^^ entity.name.function.call.rian
+#                                           ^ punctuation.section.interpolation.end.rian
+
+abstract Meters := Float64 do
+# <- keyword.declaration.type.rian
+#        ^^^^^^ entity.name.type.rian
+
+  to base() Float64
+# ^^ keyword.declaration.function.rian
+#    ^^^^ entity.name.function.rian
+
+opaque Id := Int64
+# <- keyword.declaration.type.rian
+#      ^^ entity.name.type.rian
+
+def id(x T) T forall T := x
+#             ^^^^^^ keyword.declaration.rian
+
+def cp(c Char) Int64 := Prim.char_code(c)
+#                       ^^^^ support.class.prim.rian
+#                            ^^^^^^^^^ support.function.prim.rian
