@@ -152,6 +152,7 @@ mod SelfhostBeam do
   # Rian.Beam uses, so the composed build is byte-equivalent: str_chars →
   # String.to_charlist, str_from_chars → List.to_string, char_code → identity
   # (a Char IS its codepoint on the BEAM). MUST precede the generic CCall clause.
+  def expr_form(CCall("__prim_str_concat", [a, b])) := FConcat(expr_form(a), expr_form(b))
   def expr_form(CCall("__prim_str_chars", [s])) := FRemote("Elixir.String", "to_charlist", [expr_form(s)])
   def expr_form(CCall("__prim_str_from_chars", [cs])) := FRemote("Elixir.List", "to_string", [expr_form(cs)])
   def expr_form(CCall("__prim_char_code", [c])) := expr_form(c)

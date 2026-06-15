@@ -205,8 +205,9 @@ defmodule Rian.BeamModuleFixpointTest do
     {"def echo(s String) String := Prim.str_from_chars(Prim.str_chars(s))",
      [{:echo, ["hi"]}, {:echo, ["ok"]}]},
     {"def d(c Char) Int64 := Prim.char_code(c) - Prim.char_code('0')", [{:d, [?7]}, {:d, [?0]}]},
-    # `<>` — binary concatenation (string building, as the lexer does)
+    # `<>` and the explicit `Prim.str_concat` (selfhost_decl uses the latter)
     {"def cat(a String, b String) String := a <> b", [{:cat, ["foo", "bar"]}, {:cat, ["", "x"]}]},
+    {"def pc(a String, b String) String := Prim.str_concat(a, b)", [{:pc, ["x", "y"]}]},
     {"def wrap(s String) String := \"[\" <> s <> \"]\"", [{:wrap, ["hi"]}]}
   ]
 

@@ -221,14 +221,14 @@ mod SelfhostDecl do
   def classify_def(pb, name, inside, [TKw("when") | rest])
     case parse_bp(0, rest) do
       P(g, [TOp(":=") | body]) ->
-        case parse_bp(0, body) do
+        case parse_bp(0, skip_nl(body)) do
           P(b, rest2) -> DR(DClauseG(name, parse_pats(inside), g, b), rest2)
         end
       P(_, other) -> DR(DErr, other)
     end
   end
   def classify_def(pb, name, inside, [TOp(":=") | body])
-    case parse_bp(0, body) do
+    case parse_bp(0, skip_nl(body)) do
       P(b, rest) -> DR(DClause(name, parse_pats(inside), b), rest)
     end
   end
@@ -253,7 +253,7 @@ mod SelfhostDecl do
   def finish_sig(pb, name, inside, ret, after)
     case parse_forall(after) do
       GR(tvs, [TOp(":=") | body]) ->
-        case parse_bp(0, body) do
+        case parse_bp(0, skip_nl(body)) do
           P(b, rest) -> DR(DFunc(pb, name, parse_params(inside), ret, tvs, b), rest)
         end
       GR(tvs, rest) -> finish_body(pb, name, parse_params(inside), ret, tvs, rest)
@@ -468,7 +468,9 @@ mod SelfhostDecl do
   def climb(min_bp Int53, lhs Expr, ts Vec(Tok)) Parse
   def climb(min_bp, lhs, [TOp(op) | rest])
     if lbp(op) >= min_bp do
-      case parse_bp(rbp(op), rest) do
+      # the RHS may begin on the next line (a trailing binary operator continues the
+      # expression, P1): `a or <nl> b`. Skip the newline so the RHS parses.
+      case parse_bp(rbp(op), skip_nl(rest)) do
         P(rhs, rest2) -> climb(min_bp, Bin(op, lhs, rhs), rest2)
       end
     else
