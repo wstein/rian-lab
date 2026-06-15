@@ -28,6 +28,8 @@ defmodule Rian.DeclFixpointTest do
 
   # inject the reference `Rian.Lexer.tokenize/1` tokens into the front-end's `Tok` sum
   defp inject({:num, s}), do: {:t_num, s}
+  defp inject({:str, s}), do: {:t_str, s}
+  defp inject({:char, cp}), do: {:t_char, cp}
   defp inject({:id, s}), do: {:t_id, s}
   defp inject({:kw, s}), do: {:t_kw, s}
   defp inject({:op, o}), do: {:t_op, o}
@@ -61,6 +63,8 @@ defmodule Rian.DeclFixpointTest do
   # convert the front-end's nil/cons list PATTERNS to Rian.Decl's `{:list, …}` shape
   # (var/lit/ctor/wild lower directly); flatten the cons chain.
   defp cp({:ctor, c, args}), do: {:ctor, c, Enum.map(args, &cp/1)}
+  defp cp({:str_p, s}), do: {:lit, s}
+  defp cp({:char_p, code}), do: {:char_lit, code}
   defp cp(:nil_p), do: {:list, [], :close}
 
   defp cp({:cons_p, _, _} = c) do
@@ -260,7 +264,13 @@ defmodule Rian.DeclFixpointTest do
     "def cmp(a val T, b val T) Bool forall T: Eq := a == b",
     "def srt(xs val Vec(T)) Vec(T) forall T: Ord + Eq\ndef srt(xs) := xs",
     "def pair(a val A, b val B) A forall A, B := a",
-    "def head(xs val Vec(T)) T forall T\ndef head([h | _]) := h"
+    "def head(xs val Vec(T)) T forall T\ndef head([h | _]) := h",
+    # String / Char literals — in expression and pattern position (toward the lexer)
+    "def tag() String := \"ok\"",
+    "def greet(name String) String := name",
+    "def isz(c Char) Bool := c == '0'",
+    "def cls(c Char) Int64\ndef cls('+') := 1\ndef cls(_) := 0",
+    "def m(s String) Int64\ndef m(\"x\") := 1\ndef m(_) := 0"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}

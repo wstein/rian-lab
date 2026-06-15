@@ -15,27 +15,29 @@
 #   def name(pat, …) [when g] := expr                  pattern clause (multi-clause)
 #   generics: `Ret forall T` / `Ret forall T, U: Eq + Ord` binders (ADR-0042),
 #             carried as `tvars`/`bounds` on the function head
-#   patterns: _ · var · Int literal · Ctor(pat, …) · cons/list [] / [h | t] (nested)
+#   patterns: _ · var · Int literal · String/Char literal · Ctor(pat, …)
+#             · cons/list [] / [h | t] (nested)
 #   capabilities: val / iso / ref / tag (default val); parametric types `Vec(T)`
 #   exprs: binops (precedence climbing) · prefix - / not · calls · `.field` access
-#          · labeled construction `Name(f: v)` · list construction `[x | acc]`
+#          · String/Char literals · labeled construction `Name(f: v)`
+#          · list construction `[x | acc]`
 #          · `if COND do THEN else ELSE end` (single-expr branches; ADR-0063)
 #
-# Out of slice (the remaining long tail of Rian.Decl): `case`, string/char clause
-# patterns, negative-literal patterns, `alias`/`const`/`protocol`/`impl`,
+# Out of slice (the remaining long tail of Rian.Decl): `case`,
+# negative-literal patterns, `alias`/`const`/`protocol`/`impl`,
 # doc-comments, and multi-statement block (`do … end`) function bodies.
 # ---------------------------------------------------------------------------
 
 mod SelfhostDecl do
   type Tok :=
-      TNum(String) | TId(String) | TKw(String) | TOp(String)
+      TNum(String) | TStr(String) | TChar(Int53) | TId(String) | TKw(String) | TOp(String)
     | TLP | TRP | TLBracket | TRBracket | TComma | TNL
 
   # expression AST — Num/Id/Bin/Unary/Call lower to Rian.Pratt's surface tuples;
   # list construction is nil/cons (NilE / ConsE), flattened to `{:list_lit, …}` by
   # the projection (the cons `{:tail, …}` tag would otherwise collide with patterns).
   type Expr :=
-      Num(String) | Id(String) | Bin(String, Expr, Expr)
+      Num(String) | Str(String) | Char(Int53) | Id(String) | Bin(String, Expr, Expr)
     | Unary(String, Expr) | Call(Expr, Vec(Expr))
     | Dot(Expr, String) | Label(String, Expr)
     | If(Expr, Expr, Expr)
@@ -44,8 +46,10 @@ mod SelfhostDecl do
   # clause PATTERNS — Wild/Var/Lit/Ctor lower straight to Rian.Decl's tuples
   # (:wild / {:var,n} / {:lit,k} / {:ctor,c,ps}); list patterns are nil/cons
   # (NilP / ConsP), flattened to `{:list, elems, :close | {:tail,p}}` by the test.
+  # StrP/CharP are literal patterns: a string pattern projects to `{:lit, s}` (like
+  # an int `Lit`), a char pattern to `{:char_lit, cp}`.
   type Pat :=
-      Wild | Var(String) | Lit(Int53) | Ctor(String, Vec(Pat))
+      Wild | Var(String) | Lit(Int53) | StrP(String) | CharP(Int53) | Ctor(String, Vec(Pat))
     | NilP | ConsP(Pat, Pat)
 
   type Variant := V(String, Vec(String))
@@ -329,6 +333,8 @@ mod SelfhostDecl do
   def parse_pat(ts Vec(Tok)) PatRes
   def parse_pat([TId("_") | rest]) := PP(Wild, rest)
   def parse_pat([TNum(s) | rest]) := PP(Lit(str_to_int(s)), rest)
+  def parse_pat([TStr(s) | rest]) := PP(StrP(s), rest)
+  def parse_pat([TChar(cp) | rest]) := PP(CharP(cp), rest)
   def parse_pat([TLBracket | rest]) := parse_list_pat(rest)
   def parse_pat([TId(ctor), TLP | rest])
     case parse_patlist(rest) do
@@ -412,6 +418,8 @@ mod SelfhostDecl do
 
   def parse_primary(ts Vec(Tok)) Parse
   def parse_primary([TNum(n) | rest]) := parse_postfix(Num(n), rest)
+  def parse_primary([TStr(s) | rest]) := parse_postfix(Str(s), rest)
+  def parse_primary([TChar(cp) | rest]) := parse_postfix(Char(cp), rest)
   def parse_primary([TId(x) | rest]) := parse_postfix(Id(x), rest)
   def parse_primary([TLBracket | rest]) := parse_list_expr(rest)
   def parse_primary([TKw("if") | rest]) := parse_if(rest)
