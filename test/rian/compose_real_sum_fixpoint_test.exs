@@ -83,6 +83,18 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "def isz(c) := c == '0'\ndef kind('+') := 1\ndef kind('-') := 2\ndef kind(_) := 0",
       "def isz(c Char) Bool := c == '0'\ndef kind(c Char) Int53\ndef kind('+') := 1\ndef kind('-') := 2\ndef kind(_) := 0",
       [{:isz, [?0]}, {:isz, [?1]}, {:kind, [?+]}, {:kind, [?-]}, {:kind, [?x]}]
+    },
+    # Prim.* — the string/char intrinsics the lexer leans on, normalized to
+    # __prim_* by the driver and lowered to native Erlang forms by selfhost_beam
+    {
+      "def echo(s) := Prim.str_from_chars(Prim.str_chars(s))",
+      "def echo(s String) String := Prim.str_from_chars(Prim.str_chars(s))",
+      [{:echo, ["hi"]}, {:echo, ["ok"]}]
+    },
+    {
+      "def d(c) := Prim.char_code(c) - Prim.char_code('0')",
+      "def d(c Char) Int64 := Prim.char_code(c) - Prim.char_code('0')",
+      [{:d, [?7]}, {:d, [?0]}, {:d, [?9]}]
     }
   ]
 

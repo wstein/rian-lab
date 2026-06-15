@@ -75,6 +75,7 @@ mod SelfhostComposeRealSum do
              | FOp1(String, Form)
              | FOp2(String, Form, Form)
              | FCall(String, Vec(Form))
+             | FRemote(String, String, Vec(Form))
              | FTuple(Vec(Form))
              | FNil
              | FCons(Form, Form)
@@ -170,6 +171,10 @@ mod SelfhostComposeRealSum do
   def lower_surface({:"if", c, t, e}) := CIf(lower_surface(c), Block([SExpr(lower_surface(t))]), Block([SExpr(lower_surface(e))]))
 
   def callee_name(c) String
+  # a `Prim.X(args)` dot-call normalizes to the canonical `__prim_X` intrinsic name
+  # (mirrors Rian.Prim.normalize, which the verified backend keys on); selfhost_decl
+  # does NOT run that pass, so the driver does it here.
+  def callee_name({:dot, {:id, "Prim"}, name}) := Prim.str_concat("__prim_", name)
   def callee_name({:id, f}) := f
 
   def lower_all(es) Vec(Core)
@@ -242,6 +247,8 @@ mod SelfhostComposeRealSum do
   def inflate(FOp1(op, x)) := {:op, 0, op_atom(op), inflate(x)}
   def inflate(FOp2(op, l, r)) := {:op, 0, op_atom(op), inflate(l), inflate(r)}
   def inflate(FCall(f, args)) := {:call, 0, {:atom, 0, Prim.str_to_atom(f)}, inflate_all(args)}
+  # a Prim lowered to a host remote call (str_chars → String.to_charlist, …).
+  def inflate(FRemote(m, fun, args)) := {:call, 0, {:remote, 0, {:atom, 0, Prim.str_to_atom(m)}, {:atom, 0, Prim.str_to_atom(fun)}}, inflate_all(args)}
   # a nullary constructor (pattern or value) is its snake_case atom; an applied
   # constructor is a tagged tuple {tag, arg, …} — the BEAM rep of a sum value.
   def inflate(FCtorN(c)) := {:atom, 0, to_snake(c)}
