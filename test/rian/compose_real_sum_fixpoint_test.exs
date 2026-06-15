@@ -113,6 +113,31 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "type Sign := Pos | Neg | Zero\ndef code(s) := case s do\n  Pos -> 1\n  Neg -> -1\n  Zero -> 0\nend",
       "type Sign := Pos | Neg | Zero\ndef code(s Sign) Int53 := case s do\n  Pos -> 1\n  Neg -> -1\n  Zero -> 0\nend",
       [{:code, [:pos]}, {:code, [:neg]}, {:code, [:zero]}]
+    },
+    # the driver `normalize`-completeness fixes (toward building the lexer):
+    # a `when`-guarded clause (was silently dropped — the guard discarded)
+    {
+      "def clamp(n) when n < 0 := 0\ndef clamp(n) := n",
+      "def clamp(n Int53) Int53\ndef clamp(n) when n < 0 := 0\ndef clamp(n) := n",
+      [{:clamp, [-5]}, {:clamp, [9]}, {:clamp, [0]}]
+    },
+    # a single TYPED clause (`DFunc`) — was skipped, leaving the function undefined
+    {
+      "def tag() Int53 := 7\ndef inc(n Int53) Int53 := n + 1",
+      "def tag() Int53 := 7\ndef inc(n Int53) Int53 := n + 1",
+      [{:tag, []}, {:inc, [41]}]
+    },
+    # list CONSTRUCTION in a body (`[x | acc]`, `[a, b]`) — lower_surface cons_e
+    {
+      "def one(x) := [x]\ndef pre(x, xs) := [x | xs]",
+      "def one(x Int53) Vec(Int53) := [x]\ndef pre(x Int53, xs Vec(Int53)) Vec(Int53) := [x | xs]",
+      [{:one, [9]}, {:pre, [1, [2, 3]]}]
+    },
+    # a `mod` wrapper — its inner defs flatten into the build's module
+    {
+      "mod M do\n  def double(n) := n * 2\n  pub def quad(n) := double(double(n))\nend",
+      "mod M do\n  pub def double(n Int53) Int53 := n * 2\n  pub def quad(n Int53) Int53 := double(double(n))\nend",
+      [{:double, [21]}, {:quad, [5]}]
     }
   ]
 

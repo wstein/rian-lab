@@ -89,7 +89,7 @@ mod SelfhostComposeRealSum do
   type FFunc := FFunc(String, Int53, Vec(FClause))
 
   # ── driver-local types ──
-  type NClause := NC(String, Vec(Pat), Core)
+  type NClause := NC(String, Vec(Pat), Guard, Core)
   type Grp := Grp(String, Int53, Vec(NClause))
 
   # ── the BEAM toolchain boundary: two @external(:ex) host calls (counted FFI) ──
@@ -129,10 +129,30 @@ mod SelfhostComposeRealSum do
   def exports([Func(name, arity, _) | rest]) := [{Prim.str_to_atom(name), arity} | exports(rest)]
 
   # ── normalize: selfhost_decl's Decl IR -> a flat list of (name, pats, body) ──
+  # selfhost_decl yields four function-clause forms: a bodiless `DSig` (skipped —
+  # it only declares the arity), guarded/unguarded pattern clauses (`DClauseG`/
+  # `DClause`), and a single TYPED clause with a body (`DFunc`, e.g.
+  # `def tokenize(s String) Vec(Tok) := …`). All but DSig become an NClause; DFunc's
+  # params become `PVar` patterns. A `when` guard is carried as `GSome`.
   def normalize(ds) Vec(NClause)
   def normalize([]) := []
-  def normalize([{:d_clause, name, pats, expr} | rest]) := [NC(name, lower_pats(pats), lower_surface(expr)) | normalize(rest)]
+  def normalize([{:d_clause, name, pats, expr} | rest]) := [NC(name, lower_pats(pats), GNone, lower_surface(expr)) | normalize(rest)]
+  def normalize([{:d_clause_g, name, pats, guard, expr} | rest]) := [NC(name, lower_pats(pats), GSome(lower_surface(guard)), lower_surface(expr)) | normalize(rest)]
+  def normalize([{:d_func, _, name, params, _, _, body} | rest]) := [NC(name, param_pats(params), GNone, lower_surface(body)) | normalize(rest)]
+  # a real selfhost_*.rian file wraps its defs in `mod Name do … end`; flatten the
+  # module's inner declarations into the same clause stream (its name is the build's
+  # `modname`, supplied by the caller).
+  def normalize([{:d_mod, _, inner} | rest]) := cat(normalize(inner), normalize(rest))
   def normalize([_ | rest]) := normalize(rest)
+
+  def cat(Vec(NClause), Vec(NClause)) Vec(NClause)
+  def cat([], ys) := ys
+  def cat([x | xs], ys) := [x | cat(xs, ys)]
+
+  # a `DFunc`'s parameters become plain variable patterns (`def f(a, b) := …`).
+  def param_pats(ps) Vec(Pat)
+  def param_pats([]) := []
+  def param_pats([{:par, n, _, _} | rest]) := [PVar(n) | param_pats(rest)]
 
   # ── the surface→Core lowering: selfhost_decl Pat/Expr -> selfhost_beam Pat/Core ──
   def lower_pats(ps) Vec(Pat)
@@ -174,6 +194,19 @@ mod SelfhostComposeRealSum do
   # reuses lower_pat, its single-expr body becomes a one-statement Block, and a
   # `when` guard becomes GSome (CArm -> GNone).
   def lower_surface({:"case", scrut, arms}) := CCase(lower_surface(scrut), lower_arms(arms))
+  # list construction in a body (`[x | acc]`, `[a, b]`) — a nil/cons chain -> CList,
+  # mirroring lower_pat's cons_pat. A non-nil tail becomes TTail (an open list).
+  def lower_surface(:nil_e) := CList([], TClose)
+  def lower_surface({:cons_e, h, t}) := cons_expr([lower_surface(h)], t)
+
+  def cons_expr(acc Vec(Core), t) Core
+  def cons_expr(acc, :nil_e) := CList(rev_core(acc, []), TClose)
+  def cons_expr(acc, {:cons_e, h, t}) := cons_expr([lower_surface(h) | acc], t)
+  def cons_expr(acc, other) := CList(rev_core(acc, []), TTail(lower_surface(other)))
+
+  def rev_core(Vec(Core), Vec(Core)) Vec(Core)
+  def rev_core([], out) := out
+  def rev_core([c | rest], out) := rev_core(rest, [c | out])
 
   def lower_arms(arms) Vec(Arm)
   def lower_arms([]) := []
@@ -197,15 +230,15 @@ mod SelfhostComposeRealSum do
   # ── group consecutive same-name clauses, wrap each as a beam Func ──
   def group(Vec(NClause)) Vec(Grp)
   def group([]) := []
-  def group([NC(name, pats, body) | rest]) := group_run(name, plen(pats), [NC(name, pats, body)], rest)
+  def group([NC(name, pats, g, b) | rest]) := group_run(name, plen(pats), [NC(name, pats, g, b)], rest)
 
   def group_run(name String, arity Int53, acc Vec(NClause), Vec(NClause)) Vec(Grp)
   def group_run(name, arity, acc, []) := [Grp(name, arity, rev_ncs(acc, []))]
-  def group_run(name, arity, acc, [NC(n2, p2, b2) | rest])
+  def group_run(name, arity, acc, [NC(n2, p2, g2, b2) | rest])
     if name == n2 do
-      group_run(name, arity, [NC(n2, p2, b2) | acc], rest)
+      group_run(name, arity, [NC(n2, p2, g2, b2) | acc], rest)
     else
-      [Grp(name, arity, rev_ncs(acc, [])) | group([NC(n2, p2, b2) | rest])]
+      [Grp(name, arity, rev_ncs(acc, [])) | group([NC(n2, p2, g2, b2) | rest])]
     end
   end
 
@@ -219,7 +252,7 @@ mod SelfhostComposeRealSum do
 
   def clauses_of(Vec(NClause)) Vec(Clause)
   def clauses_of([]) := []
-  def clauses_of([NC(_, pats, body) | rest]) := [Clause(pats, GNone, Block([SExpr(body)])) | clauses_of(rest)]
+  def clauses_of([NC(_, pats, guard, body) | rest]) := [Clause(pats, guard, Block([SExpr(body)])) | clauses_of(rest)]
 
   def plen(Vec(Pat)) Int53
   def plen([]) := 0
