@@ -298,7 +298,13 @@ defmodule Rian.DeclFixpointTest do
     # `case` expressions — literal/var/wildcard arms, with and without a `when` guard
     "def classify(n Int64) Int64 := case n do\n  0 -> 100\n  _ -> n * 2\nend",
     "def sgn(n Int64) Int64 := case n do\n  0 -> 0\n  m when m > 0 -> 1\n  _ -> -1\nend",
-    "def ctor(s Sign) Int64 := case s do\n  Pos -> 1\n  Neg -> -1\nend"
+    "def ctor(s Sign) Int64 := case s do\n  Pos -> 1\n  Neg -> -1\nend",
+    # UNTYPED clause + block body (`def f(p) <nl> stmts end`) — the dominant
+    # selfhost_decl idiom (a bodiless DSig followed by block-bodied clauses), which
+    # the parser previously rejected (DErr). Bind+expr blocks and a case block.
+    "def inc(n Int64) Int64\ndef inc(n)\n  d := n + 1\n  d\nend",
+    "def cls(n Int64) Int64\ndef cls(n)\n  case n do\n    0 -> 100\n    _ -> n\n  end\nend",
+    "def hd(xs Vec(Int64), d Int64) Int64\ndef hd([], d)\n  d\nend\ndef hd([h | _], d)\n  h\nend"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}

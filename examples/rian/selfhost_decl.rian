@@ -237,6 +237,14 @@ mod SelfhostDecl do
       PT(ret, after) -> finish_sig(pb, name, inside, ret, after)
     end
   end
+  # an UNTYPED clause with a multi-statement block body: `def f(pats) <nl> stmts end`
+  # (no `:=`, no return type — the dominant form for a multi-clause function's
+  # clauses). Collect the block to its matching `end` and parse its statements.
+  def classify_def(pb, name, inside, [TNL | rest])
+    case take_block(rest, 1, []) do
+      BRes(block, after) -> DR(DClause(name, parse_pats(inside), BlockE(parse_stmts(block))), after)
+    end
+  end
   def classify_def(pb, name, inside, after) := DR(DErr, after)
 
   # after the return type comes an optional `forall T, U: Bound` binder list, then
