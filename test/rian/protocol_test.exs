@@ -715,4 +715,42 @@ defmodule Rian.ProtocolTest do
       assert m.to_list({:bag, [1, 2, 3]}) == [1, 2, 3]
     end
   end
+
+  describe "associated-type coherence (ADR-0074 Stage 2)" do
+    defp proto_with_assoc(impl_body) do
+      "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Int53)\nend\n" <>
+        "type Bag := Bag(items Vec(Int53))\n" <>
+        "impl Foldable for Bag do\n#{impl_body}\n  def to_list(b) := case b do Bag(xs) -> xs end\nend"
+    end
+
+    test "a complete impl (binds every declared associated type) parses" do
+      assert %{} = Decl.parse(proto_with_assoc("  type Elem := Int53"))
+    end
+
+    test "an impl that omits a declared associated type is rejected" do
+      assert_raise CoherenceError, ~r/missing associated type binding\(s\) \["Elem"\]/, fn ->
+        Decl.parse(proto_with_assoc(""))
+      end
+    end
+
+    test "a bare `type Elem` in an impl (no binding) is rejected" do
+      assert_raise CoherenceError, ~r/need a binding/, fn ->
+        Decl.parse(proto_with_assoc("  type Elem"))
+      end
+    end
+
+    test "an impl binding an undeclared associated type is rejected" do
+      assert_raise CoherenceError, ~r/undeclared associated type\(s\) \["Other"\]/, fn ->
+        Decl.parse(proto_with_assoc("  type Elem := Int53\n  type Other := Bool"))
+      end
+    end
+
+    test "a protocol with NO associated types is unaffected (existing impls still parse)" do
+      assert %{} =
+               Decl.parse(
+                 "protocol Show do\n  def show(self Self) String\nend\n" <>
+                   "impl Show for Int53 do\n  def show(n) := \"n\"\nend\n"
+               )
+    end
+  end
 end

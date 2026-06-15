@@ -134,12 +134,19 @@ defmodule Rian.Decl do
         }
       end
 
+    protocols = all_protocols(decls)
+    impl_decls = all_impl_decls(decls)
+    # associated-type coherence (ADR-0074 Stage 2): each impl binds exactly its
+    # protocol's declared associated types. Raises `Rian.Protocol.Error` at parse time,
+    # alongside the method-set coherence the desugar already ran.
+    Rian.Protocol.check_assoc!(protocols, impl_decls)
+
     prog
     |> Map.drop([:consts, :uses])
     |> Map.put(:mods, mods)
     |> Map.put(:impls, all_impls(decls))
-    |> Map.put(:protocols, all_protocols(decls))
-    |> Map.put(:impl_decls, all_impl_decls(decls))
+    |> Map.put(:protocols, protocols)
+    |> Map.put(:impl_decls, impl_decls)
   end
 
   # Structured `protocol`/`impl` IR preserved for the Rust/JS emitters (ADR-0061):

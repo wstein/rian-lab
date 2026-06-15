@@ -59,6 +59,56 @@ defmodule Rian.Protocol do
     List.flatten(dispatchers) ++ methods
   end
 
+  @doc """
+  Associated-type coherence (ADR-0074 Stage 2). Every `impl` must bind **exactly** the
+  associated types its protocol declares — a `type Elem := …` for each declared
+  `type Elem`, none undeclared, and none left bare. Operates on the structured IR
+  (`prog.protocols`/`prog.impl_decls`, each carrying `:assoc`), so it sees the names the
+  BEAM desugar erases. Raises `Error`; the analogue of the method-set coherence in
+  `check_impl/3`, for the type side. A protocol with no associated types is unaffected.
+  """
+  def check_assoc!(protocols, impl_decls) do
+    declared = Map.new(protocols, fn p -> {p.name, MapSet.new(Map.get(p, :assoc, []))} end)
+
+    Enum.each(impl_decls, fn impl ->
+      want = Map.get(declared, impl.proto, MapSet.new())
+      assoc = Map.get(impl, :assoc, %{})
+      bound = assoc |> Map.keys() |> MapSet.new()
+
+      missing = MapSet.difference(want, bound) |> Enum.to_list()
+      extra = MapSet.difference(bound, want) |> Enum.to_list()
+      unbound = for {k, nil} <- assoc, do: k
+
+      cond do
+        missing != [] ->
+          raise(
+            Error,
+            "`impl #{impl.proto} for #{impl.type}` is missing associated type " <>
+              "binding(s) #{inspect(missing)} — add `type Elem := …`"
+          )
+
+        extra != [] ->
+          raise(
+            Error,
+            "`impl #{impl.proto} for #{impl.type}` binds undeclared associated " <>
+              "type(s) #{inspect(extra)}"
+          )
+
+        unbound != [] ->
+          raise(
+            Error,
+            "`impl #{impl.proto} for #{impl.type}`: associated type(s) #{inspect(unbound)} " <>
+              "need a binding (`type Elem := …`, not bare `type Elem`)"
+          )
+
+        true ->
+          :ok
+      end
+    end)
+
+    :ok
+  end
+
   # the dispatchable types in scope: sum types (name -> variants) and struct
   # names — the basis for runtime tag-membership guards.
   defp registry(types, structs) do
