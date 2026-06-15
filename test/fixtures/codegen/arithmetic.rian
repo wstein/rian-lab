@@ -1,0 +1,1 @@
+def double(n Int53) Int53 := n * 2

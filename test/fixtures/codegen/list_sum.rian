@@ -1,0 +1,3 @@
+def sum(xs Vec(Int53)) Int53
+def sum([]) := 0
+def sum([h | t]) := h + sum(t)

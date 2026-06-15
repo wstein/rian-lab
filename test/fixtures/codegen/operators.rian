@@ -1,0 +1,1 @@
+def calc(a Int53, b Int53) Bool := a * b + a - b > a and a != b

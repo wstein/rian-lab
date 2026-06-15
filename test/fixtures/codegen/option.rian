@@ -1,0 +1,4 @@
+type Opt := None | Some(Int53)
+def get(o Opt, d Int53) Int53
+def get(None, d) := d
+def get(Some(v), _) := v
