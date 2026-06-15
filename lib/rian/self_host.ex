@@ -53,7 +53,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_decl.rian",
       test: "test/rian/decl_fixpoint_test.exs",
       note:
-        "IR equals Rian.Decl over type/struct/mod/def slice incl. `forall` generics (tvars/bounds, ADR-0042) and `if … do … else … end` expressions (single-expr branches → `{:if, c, {:block,…}, {:block,…}}`, ADR-0063); `case`/block-bodies/strings, alias/protocol/doc-comments remain"
+        "IR equals Rian.Decl over type/struct/mod/def slice incl. `forall` generics (tvars/bounds, ADR-0042), `if … do … else … end` expressions (single-expr branches → `{:if, c, {:block,…}, {:block,…}}`, ADR-0063), and String/Char literals + patterns (`def tag() String := \"ok\"`, `def m(\"x\") := 1`); `case`/block-bodies, alias/protocol/doc-comments remain"
     },
     %{
       id: :expr_parser,
