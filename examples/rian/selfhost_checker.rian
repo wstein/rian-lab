@@ -22,9 +22,13 @@
 # convenience). Arithmetic is OPERAND-DIRECTED (Rian.Check's `arith_type`): an int
 # literal adopts a concrete-integer neighbour's width, `Char` ordinals widen to
 # `Int53`, float arithmetic is `Float64`, and a mismatch (`Int53 + Float64`) is
-# `unknown`. Covered Core nodes (7): CNum/CStr/CChar/CId/CUnary/CBin/CCall. The
-# `:partial` tail — user-function/ctor return types in the env, lambdas, `if`/`case`
-# LUB-join, and lists — see ADR-0063 / docs/self-host-status.md.
+# `unknown`. `if` infers the LUB-join of its branches (each a single-expression
+# block): equal branches join to that type, an integer literal adopts a non-literal
+# integer branch, and an incompatible pair is `unknown`. Covered Core nodes (9):
+# CNum/CStr/CChar/CId/CUnary/CBin/CCall/CIf/CBlock. The `:partial` tail —
+# cross-width numeric widening in the join (`Int32`⊔`Int64`=`Int64`), `case` (with
+# pattern narrowing), lists, lambdas, and user-function/ctor return types in the env
+# — see ADR-0063 / docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
 mod SelfhostChecker do
@@ -35,6 +39,14 @@ mod SelfhostChecker do
              | CUnary(String, Core)
              | CBin(String, Core, Core)
              | CCall(String, Vec(Core))
+             | CIf(Core, Core, Core)
+             | CBlock(Vec(Stmt))
+
+  # a block statement: a `name := e` bind (extends the env) or a bare expression;
+  # the block's type is its last expression's (Rian.Check.infer_block).
+  type Stmt := SBind(String, Core) | SExpr(Core)
+  # a branch/arm with its inferred type, for the LUB join (branch_join).
+  type BPair := BP(Core, String)
 
   # A binary op's result type, keyed by the operator (the integer slice):
   # comparisons/`and`/`or`/`in` -> Bool, `<>` -> String, `/` -> Float64, the
@@ -110,6 +122,8 @@ mod SelfhostChecker do
   def int_lit_expr(CNum(t)) := int_literal(t)
   def int_lit_expr(CUnary("-", a)) := int_lit_expr(a)
   def int_lit_expr(CBin(op, l, r)) := arith_op(op) and int_lit_expr(l) and int_lit_expr(r)
+  # an `if`/`case` branch is a single-expression block (`do 0 end`)
+  def int_lit_expr(CBlock([SExpr(e)])) := int_lit_expr(e)
   def int_lit_expr(_) := false
 
   def int_literal(t String) Bool := not float_mark(Prim.str_chars(t))
@@ -200,11 +214,82 @@ mod SelfhostChecker do
   pub def infer_env(CCall("__prim_char_to_string", [_]), _) := "String"
   pub def infer_env(CCall("__prim_str_concat_all", _), _) := "String"
   pub def infer_env(CCall(_, _), _) := "unknown"
+  # `if` — the LUB-join of the two branches (each a single-expression block); a
+  # block's type is its last expression's, binds extending the env (ADR-0059).
+  pub def infer_env(CIf(_, t, e), env) := branch_join([BP(t, infer_env(t, env)), BP(e, infer_env(e, env))])
+  pub def infer_env(CBlock(stmts), env) := infer_block(stmts, env)
 
   # a bound name's type from the env, else `unknown` (the checker does not guess).
   def lookup(env Dict(String, String), x String) String
     if Prim.map_has(env, x) do
       Prim.map_get(env, x)
+    else
+      "unknown"
+    end
+  end
+
+  # a block's type is its LAST expression's; a `name := e` bind extends the env for
+  # the rest (Rian.Check.infer_block). An empty block is `unknown`.
+  def infer_block(Vec(Stmt), Dict(String, String)) String
+  def infer_block([], _) := "unknown"
+  def infer_block([SExpr(e)], env) := infer_env(e, env)
+  def infer_block([SExpr(_) | rest], env) := infer_block(rest, env)
+  def infer_block([SBind(n, e) | rest], env) := infer_block(rest, Prim.map_put(env, n, infer_env(e, env)))
+
+  # LUB-join of branch/arm types (ADR-0059). An integer-LITERAL branch is
+  # width-flexible: when at least one branch is a non-literal, the literals adopt the
+  # non-literals' join (if that is an integer); otherwise join ALL branches. (The
+  # cross-width numeric widening of Rian.Check's `join` — `Int32`⊔`Int64` = `Int64` —
+  # is the remaining tail; here a non-equal join is conservatively `unknown`.)
+  def branch_join(Vec(BPair)) String
+  def branch_join(typed)
+    case non_lit_types(typed) do
+      [] -> join_all(all_types(typed))
+      non_lit -> adopt_or_join(join_all(non_lit), all_types(typed))
+    end
+  end
+
+  def adopt_or_join(nlj String, all Vec(String)) String
+  def adopt_or_join(nlj, all)
+    if int_type(nlj) do
+      nlj
+    else
+      join_all(all)
+    end
+  end
+
+  def all_types(Vec(BPair)) Vec(String)
+  def all_types([]) := []
+  def all_types([BP(_, t) | rest]) := [t | all_types(rest)]
+
+  def non_lit_types(Vec(BPair)) Vec(String)
+  def non_lit_types([]) := []
+  def non_lit_types([BP(e, t) | rest])
+    if int_lit_expr(e) do
+      non_lit_types(rest)
+    else
+      [t | non_lit_types(rest)]
+    end
+  end
+
+  def join_all(Vec(String)) String
+  def join_all(ts) := debottom(join_fold(ts, "bottom"))
+
+  def join_fold(Vec(String), String) String
+  def join_fold([], acc) := acc
+  def join_fold([t | rest], acc) := join_fold(rest, join(acc, t))
+
+  def debottom(t String) String := if t == "bottom" do "unknown" else t end
+
+  # the join kernel: bottom is the identity, equal types join to themselves, anything
+  # with `unknown` is `unknown`, and a non-equal pair is conservatively `unknown`
+  # (cross-width numeric widening not yet ported).
+  def join(a String, b String) String
+  def join("bottom", b) := b
+  def join(a, "bottom") := a
+  def join(a, b)
+    if a == b do
+      a
     else
       "unknown"
     end

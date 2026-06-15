@@ -31,6 +31,11 @@ defmodule Rian.CheckerInferFixpointTest do
   defp inj(%Core.EUnary{op: op, arg: a}), do: {:c_unary, op, inj(a)}
   defp inj(%Core.EBin{op: op, left: l, right: r}), do: {:c_bin, op, inj(l), inj(r)}
   defp inj(%Core.ECall{fun: %Core.EId{name: f}, args: as}), do: {:c_call, f, Enum.map(as, &inj/1)}
+  defp inj(%Core.EIf{cond: c, then: t, else: e}), do: {:c_if, inj(c), inj(t), inj(e)}
+  defp inj(%Core.EBlock{stmts: stmts}), do: {:c_block, Enum.map(stmts, &inj_stmt/1)}
+
+  defp inj_stmt({:expr, e}), do: {:s_expr, inj(e)}
+  defp inj_stmt({:bind, n, e}), do: {:s_bind, n, inj(e)}
 
   defp ported(mod, src), do: mod.infer(inj(Core.from_expr(Pratt.parse(src))))
 
@@ -89,7 +94,13 @@ defmodule Rian.CheckerInferFixpointTest do
     ~S|Prim.str_to_atom("x")|,
     "Prim.char_to_string('a')",
     # a general call with no env is conservatively unknown
-    "foo(1)"
+    "foo(1)",
+    # `if` — LUB-join of branches (each a single-expr block). Same-type branches join
+    # to that type; an int literal opposite a non-int branch can't adopt it → unknown.
+    "if c do 1 else 2 end",
+    "if c do true else false end",
+    ~S|if c do "a" else "b" end|,
+    "if c do 1 else true end"
   ]
 
   describe "self-hosting checker fixpoint — Rian infer vs Rian.Check.infer" do
@@ -134,7 +145,12 @@ defmodule Rian.CheckerInferFixpointTest do
     "w + w",
     "f + f",
     "x + f",
-    "f * 2.0"
+    "f * 2.0",
+    # `if` under the env: a literal branch adopts the typed branch's integer type;
+    # same-typed branches join to that type.
+    "if c do x else 1 end",
+    "if c do x else y end",
+    ~S|if c do s else "z" end|
   ]
 
   describe "self-hosting checker fixpoint — inference under a typing env" do
