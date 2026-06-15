@@ -86,13 +86,27 @@ self-hosted compiler that can compile *itself* but not arbitrary Rian (`protocol
 compiler" is only a true replacement for the Elixir reference at **feature parity**. This was a real
 blind spot: a fixpoint diff over a *corpus* proves equivalence only on the forms the corpus exercises,
 and a port's catch-all can *silently skip* an unhandled declaration, so a missing feature reads as
-"covered" rather than "absent." So each port carries a **reference-completeness ledger** — every
-oracle construct listed with a `ported?` flag, enforced against reality (`port_parity?`), with a
-coverage count that can't regress (the `@selfhost_ffi`-ledger pattern). The decl parser's ledger
-(`decl_fixpoint_test.exs`) is the first: **6/18 `Rian.Decl` declaration forms ported today**, the
-12-form tail now tracked, not silently absent. The other ports (lexer/Core/checker/cap/exhaust/each
-backend) need the same ledger; until every port's ledger reaches parity, the self-hosted compiler is
-honestly labelled *bootstrap-complete*, not *feature-complete*.
+"covered" rather than "absent." So **each port carries a reference-completeness ledger** — every
+oracle construct listed with a `ported?` flag, enforced against reality, with a coverage count that
+can't regress (the `@selfhost_ffi`-ledger pattern). **All ten ports now have one** (in their
+respective `*_fixpoint_test.exs`) — the ledgers are the live source of truth; this table is a snapshot:
+
+| Port | Oracle | Coverage |
+|---|---|---|
+| decl parser | `Rian.Decl` | 12/18 declaration forms |
+| lexer | `Rian.Lexer` | 15/20 lexical constructs |
+| Core lowering | `Rian.Core` | 30/30 surface node kinds |
+| type checker | `Rian.Check.infer` | 14/14 Core nodes (ic gap tracked separately) |
+| capability | `Rian.Capability` | 7/7 type categories (full 4×25 matrix locked) |
+| exhaustiveness | `Rian.Exhaustiveness` | 8/8 `useful?` features |
+| BEAM backend | `Rian.Beam` | 14/18 constructs |
+| Rust backend | `Rian.Lower.rust_program` | 13/13 constructs |
+| JS backend | `Rian.JS` | 12/13 constructs |
+| JVM backend | `Rian.JVM` | 11/14 constructs |
+
+The front-end ports (decl, lexer) have the real tails; the Core/checker/cap/exhaust ports are at or
+near parity; the backends each have a small construct tail. Until every port's ledger reaches parity,
+the self-hosted compiler is honestly labelled *bootstrap-complete*, not *feature-complete*.
 
 ### 4. Two termini: BEAM self-hosting vs portable self-hosting (do not conflate)
 
