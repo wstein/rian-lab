@@ -141,8 +141,29 @@ mod SelfhostLexerV2 do
   def scan_str([c | rest], acc) := scan_str(rest, [c | acc])
   def scan_str([], acc) := [TStr(Prim.str_from_chars(rev(acc, [])))]
 
+  # a char literal: `'a'` (one char + close quote) or `'\n'` (a backslash escape,
+  # one char + close quote). The escape clause MUST precede the plain one.
   def scan_char(cs Vec(Char)) Vec(Tok)
+  def scan_char(['\\', e, q | rest]) when q == '\'' := [TChar(char_esc(e)) | lex(rest)]
   def scan_char([c, q | rest]) when q == '\'' := [TChar(Prim.char_code(c)) | lex(rest)]
+
+  # decode a single-character escape to its codepoint — the named set of
+  # Rian.Lexer.char_escape (the `\xHH`/`\uHHHH` numeric escapes are out of slice).
+  def char_esc(e Char) Int53
+  def char_esc('a') := 7
+  def char_esc('b') := 8
+  def char_esc('d') := 127
+  def char_esc('e') := 27
+  def char_esc('f') := 12
+  def char_esc('n') := 10
+  def char_esc('r') := 13
+  def char_esc('s') := 32
+  def char_esc('t') := 9
+  def char_esc('v') := 11
+  def char_esc('0') := 0
+  def char_esc('\\') := 92
+  def char_esc('\'') := 39
+  def char_esc('\"') := 34
 
   # ── identifiers / keyword classification (slices 1-2) ─────────────────────
   def lex_id(cs Vec(Char), chars Vec(Char)) Vec(Tok)

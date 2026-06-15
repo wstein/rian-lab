@@ -110,6 +110,15 @@ defmodule Rian.FixpointTest do
     "'A'",
     "foo \"bar\" + 'z'",
     "if c == 'x' do \"yes\" else \"no\" end",
+    # escaped char literals (\n \t \r \\ \') — toward tokenizing the lexer's OWN
+    # source (`lex(['\n' | rest])`, `c == '\t'`, …), which `scan_char` choked on
+    ~S|'\n'|,
+    ~S|'\t'|,
+    ~S|'\r'|,
+    ~S|'\\'|,
+    ~S|'\''|,
+    ~S|c == '\n' or c == '\t'|,
+    ~S/lex(['\n' | rest])/,
     # slice 4 — number lexemes: `_` separators, decimals, exponents (norm_num)
     "1_000",
     "3.14",
