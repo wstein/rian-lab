@@ -237,4 +237,72 @@ defmodule Rian.FixpointTest do
       assert {:semi} in got
     end
   end
+
+  # === reference-completeness ledger (selfhost_lexer_v2 vs Rian.Lexer) ==========
+  # Does the port tokenize each lexical construct exactly like `Rian.Lexer`? A
+  # `ported?` flag per construct, checked against reality, with teeth — so a
+  # frontier gap (heredocs, string-body escapes, `\u{…}` char escapes, `${}`
+  # interpolation, the 4 unported keywords) can't masquerade as covered.
+  defp lex_covers?(mod, input) do
+    Fixpoint.check(mod, [input], &project_v2/1, &Rian.Lexer.tokenize/1) == :ok
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @lex_constructs [
+    {"integer", "42", true},
+    {"underscore separator", "1_000", true},
+    {"float / decimal", "3.14", true},
+    {"exponent (normalized)", "1e9", true},
+    {"string literal", ~S|"hi"|, true},
+    {"char literal", ~S|'A'|, true},
+    {"char named escape", ~S|'\n'|, true},
+    {"multi-char operators", "a -> b := c <> d", true},
+    {"word operators", "a and b or not c", true},
+    {"keywords (core)", "if do else end def type case when with", true},
+    {"brackets / braces / map-open", "[1, 2] %{k: v}", true},
+    {"comma / semicolon", "f(a, b) ; g(c)", true},
+    {"line comment", "a # note\nb", true},
+    {"significant newline", "a\nb", true},
+    {"annotation @x", "@doc", true},
+    # --- the documented frontier: not yet lexed like the reference ---
+    {"string interpolation ${}", ~S|"x=${n}"|, false},
+    {"string-body escape", ~S|"a\nb"|, false},
+    {"char unicode escape", ~S|'\u{1F600}'|, false},
+    {"heredoc", "\"\"\"\ndoc\n\"\"\"", false},
+    {"keywords protocol/impl/opaque/abstract", "protocol", false}
+  ]
+
+  describe "lexer completeness ledger (selfhost_lexer_v2 vs Rian.Lexer)" do
+    setup do
+      mod =
+        Fixpoint.load_lexer(
+          File.read!("examples/rian/selfhost_lexer_v2.rian"),
+          :rian_lex_completeness
+        )
+
+      {:ok, mod: mod}
+    end
+
+    test "every construct's ported? flag matches reality", %{mod: mod} do
+      drift =
+        for {name, input, ported?} <- @lex_constructs,
+            actual = lex_covers?(mod, input),
+            actual != ported? do
+          "#{name}: ledger says ported?=#{ported?} but selfhost_lexer_v2 " <>
+            "#{if actual, do: "MATCHES", else: "does NOT match"} Rian.Lexer"
+        end
+
+      assert drift == [], "lexer completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "lexical-construct coverage is measured and must not regress" do
+      ported = Enum.count(@lex_constructs, fn {_, _, p} -> p end)
+      total = length(@lex_constructs)
+      IO.puts("\n  selfhost_lexer_v2 completeness: #{ported}/#{total} Rian.Lexer constructs")
+      assert ported >= 13
+    end
+  end
 end
