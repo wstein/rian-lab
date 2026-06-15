@@ -16,10 +16,13 @@ defmodule Rian.CheckerInferFixpointTest do
   # Coverage: ALL 12 Core expression nodes (literals incl. float/char, ids, unary/
   # binary with operand-directed + cross-width arithmetic, prim + higher-order calls,
   # `if`/`case` with flow narrowing, lists, lambdas) under both a typing env (`infer_env/2`,
-  # `Check.infer/2`) and an inference context `ic` (`infer_ic/3`, `Check.infer/3`) for
-  # constructor sum types + non-generic function returns. The remaining tail is
-  # generic-return instantiation (`ic.fsigs` + type variables) and ctor-pattern field
-  # narrowing (`ic.tdefs`) — ADR-0063.
+  # `Check.infer/2`) and the FULL inference context `ic` (`infer_ic/3`, `Check.infer/3`):
+  # constructor sum types (`:ctors`), non-generic function returns (`:funs`), GENERIC
+  # function-return instantiation (`:fsigs` + type variables — `id(5)` -> `Int53`,
+  # `head([1,2,3])` -> `Int53`, `mkpair(1,"a")` -> `Pair(Int53, String)`), and
+  # constructor-pattern field narrowing (`:tdefs` — a `case` arm's `Pair(k, v)` binds
+  # `k`/`v` to their field types). The port now matches Rian.Check.infer over the whole
+  # node + context axis — ADR-0063.
 
   setup_all do
     {:ok, mod} =
@@ -57,6 +60,7 @@ defmodule Rian.CheckerInferFixpointTest do
 
   defp inj_arm({pat, _guard, body}), do: {:c_arm, inj_pat(pat), inj(body)}
   defp inj_pat(%Core.PVar{name: n}), do: {:p_var, n}
+  defp inj_pat(%Core.PCtor{ctor: c, args: args}), do: {:p_ctor, c, Enum.map(args, &inj_pat/1)}
   defp inj_pat(_), do: :p_other
 
   defp ported(mod, src), do: mod.infer(inj(Core.from_expr(Pratt.parse(src))))
@@ -78,7 +82,27 @@ defmodule Rian.CheckerInferFixpointTest do
   end
 
   defp ported_ic(mod, src, env, ic),
-    do: mod.infer_ic(inj(Core.from_expr(Pratt.parse(src))), env, ic)
+    do: mod.infer_ic(inj(Core.from_expr(Pratt.parse(src))), env, encode_ic(ic))
+
+  # the port keeps `ic` a `Dict(String,String)`-valued map, so list/struct sub-values
+  # are string-encoded (the same projection idea as `inj` for Core): `tdefs` field
+  # lists -> ";"-joined, `fsigs` %{params,ret,tvars} -> "params|ret|tvars" (params and
+  # tvars comma-joined). `ctors`/`funs` (already String->String) pass through. The
+  # reference reads the native shapes; both are built from the same logical @ic.
+  defp encode_ic(ic) do
+    ic
+    |> encode_key(:tdefs, fn fields -> Enum.join(fields, ";") end)
+    |> encode_key(:fsigs, fn sig ->
+      Enum.join(sig.params, ",") <> "|" <> sig.ret <> "|" <> Enum.join(sig.tvars, ",")
+    end)
+  end
+
+  defp encode_key(ic, key, f) do
+    case Map.get(ic, key) do
+      nil -> ic
+      sub -> Map.put(ic, key, Map.new(sub, fn {k, v} -> {k, f.(v)} end))
+    end
+  end
 
   defp reference_ic(src, env, ic) do
     case Check.infer(Pratt.parse(src), env, ic) do
@@ -274,7 +298,22 @@ end|,
       "None" => "Opt",
       "Some" => "Opt"
     },
-    funs: %{"area" => "Int64", "name_of" => "String", "mkvec" => "Vec(Int8)"}
+    funs: %{"area" => "Int64", "name_of" => "String", "mkvec" => "Vec(Int8)"},
+    # ctor -> field types (for `case` flow narrowing): RGB carries three ints, Pair a
+    # String + an Int64, Some a single generic field `T` (narrows to unknown).
+    tdefs: %{
+      "RGB" => ["Int64", "Int64", "Int64"],
+      "Pair" => ["String", "Int64"],
+      "Some" => ["T"],
+      "None" => []
+    },
+    # generic function signatures (forall): instantiate the return from the args.
+    fsigs: %{
+      "id" => %{params: ["T"], ret: "T", tvars: ["T"]},
+      "head" => %{params: ["Vec(T)"], ret: "T", tvars: ["T"]},
+      "length" => %{params: ["Vec(T)"], ret: "Int53", tvars: ["T"]},
+      "mkpair" => %{params: ["A", "B"], ret: "Pair(A, B)", tvars: ["A", "B"]}
+    }
   }
   @ic_corpus [
     # a nullary constructor resolves to its sum type
@@ -303,6 +342,57 @@ end|,
 
         assert ported_ic(mod, src, @env, @ic) == expected,
                "ic inference wrong on #{inspect(src)} — got #{inspect(ported_ic(mod, src, @env, @ic))}, want #{inspect(expected)}"
+      end
+    end
+  end
+
+  # a `case` arm whose pattern is a CONSTRUCTOR binds each field variable to the
+  # field's declared type (`ic.tdefs`), so the arm body infers concretely. A generic
+  # field (`T`) narrows to `unknown` (conservative — generics not instantiated here).
+  @narrow_corpus [
+    {"case p do\n  Pair(k, v) -> k\nend", "String"},
+    {"case p do\n  Pair(k, v) -> v\nend", "Int64"},
+    {"case c do\n  RGB(r, g, b) -> g\nend", "Int64"},
+    {"case o do\n  Some(x) -> x\nend", "unknown"},
+    {"case o do\n  None -> 1\nend", "Int53"}
+  ]
+
+  # a call to a GENERIC function instantiates its return from the argument types: a
+  # bare-tvar return is pinned to the arg, a `Vec(T)` param unifies structurally, a
+  # return that ignores its tvar is concrete regardless, and an un-pinnable tvar in
+  # the return falls back to `unknown` (sound).
+  @fsig_corpus [
+    {"id(5)", "Int53"},
+    {~S|id("x")|, "String"},
+    {"head([1, 2, 3])", "Int53"},
+    # the return ignores T, so it is concrete even with an un-inferable argument
+    {"length([1, 2, 3])", "Int53"},
+    {"length(nope)", "Int53"},
+    {~S|mkpair(1, "a")|, "Pair(Int53, String)"},
+    # an un-pinnable tvar in the return -> unknown (conservative)
+    {"id(nope)", "unknown"}
+  ]
+
+  describe "self-hosting checker fixpoint — generic-return instantiation (ic.fsigs)" do
+    test "generic-function call returns agree with Rian.Check.infer/3", %{mod: mod} do
+      for {src, expected} <- @fsig_corpus do
+        assert ported_ic(mod, src, @env, @ic) == reference_ic(src, @env, @ic),
+               "generic-return instantiation diverged on #{inspect(src)}"
+
+        assert ported_ic(mod, src, @env, @ic) == expected,
+               "generic-return wrong on #{inspect(src)} — got #{inspect(ported_ic(mod, src, @env, @ic))}, want #{inspect(expected)}"
+      end
+    end
+  end
+
+  describe "self-hosting checker fixpoint — constructor-pattern field narrowing (ic.tdefs)" do
+    test "ctor-pattern field bindings agree with Rian.Check.infer/3", %{mod: mod} do
+      for {src, expected} <- @narrow_corpus do
+        assert ported_ic(mod, src, @env, @ic) == reference_ic(src, @env, @ic),
+               "ctor-narrowing diverged on #{inspect(src)}"
+
+        assert ported_ic(mod, src, @env, @ic) == expected,
+               "ctor-narrowing wrong on #{inspect(src)} — got #{inspect(ported_ic(mod, src, @env, @ic))}, want #{inspect(expected)}"
       end
     end
   end
