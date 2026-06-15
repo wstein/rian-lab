@@ -58,7 +58,16 @@ defmodule Rian.DeclFixpointTest do
   defp param({:par, n, cap, t}), do: %Param{name: n, type: t, cap: String.to_atom(cap)}
 
   defp clause(pats, body),
-    do: %Clause{pats: Enum.map(pats, &cp/1), body: {:block, [{:expr, ce(body)}]}, guard: nil}
+    do: %Clause{pats: Enum.map(pats, &cp/1), body: to_body(body), guard: nil}
+
+  # a `:=` one-liner body is a single `{:expr, …}` block; a multi-statement block
+  # body (`BlockE`) projects each statement onto Rian.Pratt's `{:bind,…}`/`{:expr,…}`,
+  # matching what `Pratt.parse_body` builds from Rian.Decl's `;`-joined body string.
+  defp to_body({:block_e, stmts}), do: {:block, Enum.map(stmts, &stmt/1)}
+  defp to_body(body), do: {:block, [{:expr, ce(body)}]}
+
+  defp stmt({:s_bind, n, e}), do: {:bind, n, ce(e)}
+  defp stmt({:s_expr, e}), do: {:expr, ce(e)}
 
   # convert the front-end's nil/cons list PATTERNS to Rian.Decl's `{:list, …}` shape
   # (var/lit/ctor/wild lower directly); flatten the cons chain.
@@ -270,7 +279,16 @@ defmodule Rian.DeclFixpointTest do
     "def greet(name String) String := name",
     "def isz(c Char) Bool := c == '0'",
     "def cls(c Char) Int64\ndef cls('+') := 1\ndef cls(_) := 0",
-    "def m(s String) Int64\ndef m(\"x\") := 1\ndef m(_) := 0"
+    "def m(s String) Int64\ndef m(\"x\") := 1\ndef m(_) := 0",
+    # multi-statement block bodies (`<nl> binds <nl> expr <nl> end`) — ADR-0063 widening
+    "def double_inc(n Int64) Int64\n  d := n * 2\n  d + 1\nend",
+    "def two_binds(a Int64, b Int64) Int64\n  x := a + b\n  y := x * 2\n  y - 1\nend",
+    # a block body next to a bodiless multi-clause head (the disambiguation case)
+    "def f(n Int64) Int64\n  k := n + 1\n  k\nend\ndef g(n Int64) Int64 := n",
+    # a block body holding an `if` statement (nested do/end is balanced by take_block)
+    "def grade(n Int64) Int64\n  base := n * 10\n  if base > 50 do base else 0 end\nend",
+    # a block body inside a `mod`
+    "mod Calc do\n  pub def inc2(n Int64) Int64\n    t := n + 1\n    t + 1\n  end\nend"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}

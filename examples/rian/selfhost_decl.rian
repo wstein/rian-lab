@@ -41,7 +41,14 @@ mod SelfhostDecl do
     | Unary(String, Expr) | Call(Expr, Vec(Expr))
     | Dot(Expr, String) | Label(String, Expr)
     | If(Expr, Expr, Expr)
+    | BlockE(Vec(Stmt))
     | NilE | ConsE(Expr, Expr) | EErr
+
+  # a multi-statement block body (`def f() T <nl> b := e <nl> e <nl> end`): a
+  # sequence of `name := expr` binds (SBind) and bare expressions (SExpr) ending in
+  # a value. The projection (decl_fixpoint) lowers `BlockE` to Rian.Pratt's
+  # `{:block, [{:bind, n, e} | {:expr, e}, …]}` (what `Pratt.parse_body` builds).
+  type Stmt := SBind(String, Expr) | SExpr(Expr)
 
   # clause PATTERNS — Wild/Var/Lit/Ctor lower straight to Rian.Decl's tuples
   # (:wild / {:var,n} / {:lit,k} / {:ctor,c,ps}); list patterns are nil/cons
@@ -83,6 +90,7 @@ mod SelfhostDecl do
   type PatRes := PP(Pat, Vec(Tok))
   type PatList := PL(Vec(Pat), Vec(Tok))
   type ModBody := MB(Vec(Tok), Vec(Tok))
+  type BlockRes := BRes(Vec(Tok), Vec(Tok))
   type Gen := GR(Vec(TVar), Vec(Tok))
   type TVarRes := TVR(TVar, Vec(Tok))
   type BoundRes := BR(Vec(String), Vec(Tok))
@@ -232,7 +240,57 @@ mod SelfhostDecl do
         case parse_bp(0, body) do
           P(b, rest) -> DR(DFunc(pb, name, parse_params(inside), ret, tvs, b), rest)
         end
-      GR(tvs, rest) -> DR(DSig(pb, name, parse_params(inside), ret, tvs), rest)
+      GR(tvs, rest) -> finish_body(pb, name, parse_params(inside), ret, tvs, rest)
+    end
+  end
+
+  # No `:=` after the head: either a multi-statement block body (`<nl> stmts end`)
+  # or a bodiless signature (a multi-clause head). Mirrors Rian.Decl.take_head: a
+  # newline followed by a declaration boundary is a bodiless sig; otherwise collect
+  # the block to its matching `end` and parse the statements.
+  def finish_body(pb Bool, name String, ps Vec(Param), ret String, tvs Vec(TVar), ts Vec(Tok)) DeclRes
+  def finish_body(pb, name, ps, ret, tvs, [TNL | rest])
+    if starts_decl(rest) do
+      DR(DSig(pb, name, ps, ret, tvs), [TNL | rest])
+    else
+      case take_block(rest, 1, []) do
+        BRes(block, after) -> DR(DFunc(pb, name, ps, ret, tvs, BlockE(parse_stmts(block))), after)
+      end
+    end
+  end
+  def finish_body(pb, name, ps, ret, tvs, ts) := DR(DSig(pb, name, ps, ret, tvs), ts)
+
+  # collect a block body up to its matching `end` (depth 1 = the implicit body
+  # block); a nested `do … end` (`if`/`case`) is balanced. Returns (body, rest).
+  def take_block(ts Vec(Tok), depth Int53, acc Vec(Tok)) BlockRes
+  def take_block([TKw("do") | rest], depth, acc) := take_block(rest, depth + 1, [TKw("do") | acc])
+  def take_block([TKw("end") | rest], 1, acc) := BRes(rev_tok(acc, []), rest)
+  def take_block([TKw("end") | rest], depth, acc) := take_block(rest, depth - 1, [TKw("end") | acc])
+  def take_block([t | rest], depth, acc) := take_block(rest, depth, [t | acc])
+  def take_block([], depth, acc) := BRes(rev_tok(acc, []), [])
+
+  # a declaration boundary (Rian.Decl.decl_boundary?): a decl keyword or `end`.
+  def starts_decl(ts Vec(Tok)) Bool
+  def starts_decl([TKw(k) | _]) :=
+    k == "def" or k == "type" or k == "struct" or k == "pub" or k == "mod" or
+      k == "end" or k == "alias" or k == "const" or k == "macro" or k == "use" or
+      k == "import" or k == "protocol" or k == "impl" or k == "opaque" or k == "abstract"
+  def starts_decl(ts) := false
+
+  # parse the collected block tokens into statements: `name := expr` is a bind, any
+  # other leading token starts a bare expression. `parse_bp` stops at the block-level
+  # newline that separates statements (it climbs only over operators).
+  def parse_stmts(ts Vec(Tok)) Vec(Stmt)
+  def parse_stmts([]) := []
+  def parse_stmts([TNL | rest]) := parse_stmts(rest)
+  def parse_stmts([TId(n), TOp(":=") | rest])
+    case parse_bp(0, rest) do
+      P(e, rest2) -> [SBind(n, e) | parse_stmts(rest2)]
+    end
+  end
+  def parse_stmts(ts)
+    case parse_bp(0, ts) do
+      P(e, rest2) -> [SExpr(e) | parse_stmts(rest2)]
     end
   end
 
