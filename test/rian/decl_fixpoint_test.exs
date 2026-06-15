@@ -174,7 +174,7 @@ defmodule Rian.DeclFixpointTest do
       funcs: Enum.filter(ir, &match?(%Func{}, &1)),
       uses: Enum.filter(ir, &match?(%Rian.IR.Use{}, &1)),
       ranges: [],
-      consts: [],
+      consts: Enum.filter(ir, &match?(%Rian.IR.Const{}, &1)),
       doc: nil,
       targets: nil
     }
@@ -187,6 +187,9 @@ defmodule Rian.DeclFixpointTest do
   defp group([{:d_pub_type, _, _} = t | rest]), do: [to_type(t) | group(rest)]
   # a `use Path` becomes a Rian.IR.Use the enclosing module collects (Rian.Decl).
   defp group([{:d_use, path} | rest]), do: [%Rian.IR.Use{path: path, names: []} | group(rest)]
+  # a `const NAME Type := lit` becomes a Rian.IR.Const (value is the literal's text).
+  defp group([{:d_const, name, ty, val} | rest]),
+    do: [%Rian.IR.Const{name: name, type: ty, value: val, pub?: false, doc: nil} | group(rest)]
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
@@ -603,7 +606,7 @@ defmodule Rian.DeclFixpointTest do
     # uses it (the oracle substitutes `Id`→`Int64`; the port, skipping the alias,
     # leaves `Id`), so the parity probe is non-vacuous.
     {"alias", "alias Id := Int64\ndef f(x Id) Id := x", false},
-    {"const", "mod M do\n  const MAX Int64 := 100\nend", false},
+    {"const", "mod M do\n  const MAX Int64 := 100\nend", true},
     {"use", "mod M do\n  use Foo\nend", true},
     {"macro", "macro double(x) := x + x\ndef f() Int64 := double(2)", false},
     {"protocol", "protocol Show do\n  def show(x Int64) String\nend", false},
