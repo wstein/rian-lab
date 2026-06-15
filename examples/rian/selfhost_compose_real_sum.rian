@@ -225,6 +225,9 @@ mod SelfhostComposeRealSum do
   # a raw-atom module dot-call `:erlang.f(args)` (NO `Elixir.` prefix) — what an
   # `@external(:ex, ":erlang.binary_to_list(s)")` host expression parses to.
   def lower_surface({:call, {:dot, {:atom, m}, fun}, args}) := CRemote(m, fun, lower_all(args))
+  # named struct construction `Name(field: v, …)` — labeled args -> a tagged map.
+  # (A call's args are all-labeled or none; matching the first label suffices.)
+  def lower_surface({:call, {:id, ctor}, [{:label, k, v} | more]}) := CStruct(ctor, lower_flds([{:label, k, v} | more]))
   def lower_surface({:call, callee, args}) := CCall(callee_name(callee), lower_all(args))
   # selfhost_decl's `If(cond, then, else)` (single-expr branches) -> selfhost_beam's
   # CIf with single-statement blocks; the backend lowers it to a `case` on the bool.
@@ -265,6 +268,10 @@ mod SelfhostComposeRealSum do
   def lower_all(es) Vec(Core)
   def lower_all([]) := []
   def lower_all([e | rest]) := [lower_surface(e) | lower_all(rest)]
+
+  def lower_flds(es Vec(Tuple)) Vec(SFld)
+  def lower_flds([]) := []
+  def lower_flds([{:label, k, v} | rest]) := [SFld(k, lower_surface(v)) | lower_flds(rest)]
 
   # ── group consecutive same-name clauses, wrap each as a beam Func ──
   def group(Vec(NClause)) Vec(Grp)
@@ -320,6 +327,10 @@ mod SelfhostComposeRealSum do
   def inflate_all([]) := []
   def inflate_all([f | rest]) := [inflate(f) | inflate_all(rest)]
 
+  def inflate_flds(Vec(FFld)) Vec(Tuple)
+  def inflate_flds([]) := []
+  def inflate_flds([FFld(k, v) | rest]) := [{:map_field_assoc, 0, {:atom, 0, Prim.str_to_atom(k)}, inflate(v)} | inflate_flds(rest)]
+
   def inflate(Form) Tuple
   def inflate(FInt(v)) := {:integer, 0, v}
   # a string literal -> a binary form `<<"…"/string-segment>>` (Rian.Beam.str_form):
@@ -341,6 +352,9 @@ mod SelfhostComposeRealSum do
   def inflate(FCtorN(c)) := {:atom, 0, to_snake(c)}
   def inflate(FCtor(c, args)) := {:tuple, 0, [{:atom, 0, to_snake(c)} | inflate_all(args)]}
   def inflate(FTuple(es)) := {:tuple, 0, inflate_all(es)}
+  # named struct construction -> a tagged map `%{__struct__: <snake>, field: v, …}`
+  # (Rian.Beam.expr_form): the `__struct__` field carries the snake-cased type name.
+  def inflate(FStruct(name, fields)) := {:map, 0, [{:map_field_assoc, 0, {:atom, 0, Prim.str_to_atom("__struct__")}, {:atom, 0, to_snake(name)}} | inflate_flds(fields)]}
   # `if` lowers (via selfhost_beam's FIf) to a `case` on the boolean condition.
   def inflate(FIf(c, t, e)) := {:"case", 0, inflate(c), [{:clause, 0, [{:atom, 0, :true}], [], inflate_all(t)}, {:clause, 0, [{:atom, 0, :false}], [], inflate_all(e)}]}
   # `case` -> a real Erlang `case`; each arm is an FClause (single pattern, guard, body).

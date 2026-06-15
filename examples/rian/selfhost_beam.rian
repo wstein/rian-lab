@@ -28,12 +28,14 @@ mod SelfhostBeam do
              | CCall(String, Vec(Core))
              | CRemote(String, String, Vec(Core))
              | CDot(Core, String)
+             | CStruct(String, Vec(SFld))
              | CTuple(Vec(Core))
              | CList(Vec(Core), Tail)
              | CIf(Core, Block, Block)
              | CCase(Core, Vec(Arm))
 
   type Tail := TClose | TTail(Core)
+  type SFld := SFld(String, Core)
   type Block := Block(Vec(Stmt))
   type Stmt := SBind(String, Core) | STypedBind(String, String, Core) | SExpr(Core)
   type Arm := Arm(Pat, Guard, Block)
@@ -66,12 +68,14 @@ mod SelfhostBeam do
              | FCall(String, Vec(Form))
              | FRemote(String, String, Vec(Form))
              | FTuple(Vec(Form))
+             | FStruct(String, Vec(FFld))
              | FNil
              | FCons(Form, Form)
              | FIf(Form, Vec(Form), Vec(Form))
              | FCase(Form, Vec(FClause))
              | FMatch(String, Form)
 
+  type FFld := FFld(String, Form)
   type GForm := GfNone | GfSome(Form)
   type FClause := FClause(Vec(Form), GForm, Vec(Form))
   type FFunc := FFunc(String, Int53, Vec(FClause))
@@ -175,6 +179,9 @@ mod SelfhostBeam do
   # atoms (Rian.Beam), so reading a field is `maps:get(:field, value)`.
   def expr_form(CDot(h, f)) := FRemote("maps", "get", [FAtom(f), expr_form(h)])
   def expr_form(CTuple(es)) := FTuple(expr_forms(es))
+  # named struct construction `Name(f: v, …)` — a tagged map (the driver's inflater
+  # adds the `__struct__` field + snake tag, matching Rian.Beam.expr_form).
+  def expr_form(CStruct(name, fields)) := FStruct(name, fld_forms(fields))
   def expr_form(CList(es, TClose)) := list_form(expr_forms(es), FNil)
   def expr_form(CList(es, TTail(t))) := list_form(expr_forms(es), expr_form(t))
   def expr_form(CIf(c, t, e)) := FIf(expr_form(c), block_forms(t), block_forms(e))
@@ -190,6 +197,10 @@ mod SelfhostBeam do
   def expr_forms(Vec(Core)) Vec(Form)
   def expr_forms([]) := []
   def expr_forms([x | rest]) := [expr_form(x) | expr_forms(rest)]
+
+  def fld_forms(Vec(SFld)) Vec(FFld)
+  def fld_forms([]) := []
+  def fld_forms([SFld(k, v) | rest]) := [FFld(k, expr_form(v)) | fld_forms(rest)]
 
   # ── helpers (portable, FFI-free) ──
   def parse_int(s String) Int53 := digits(Prim.str_chars(s), 0)

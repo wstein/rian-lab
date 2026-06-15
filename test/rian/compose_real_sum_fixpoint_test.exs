@@ -75,6 +75,13 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "def show(n Int53) String := Prim.int_to_string(n)",
       [{:show, [0]}, {:show, [42]}, {:show, [-7]}]
     },
+    # named struct CONSTRUCTION `CD(name: n, ar: a)` -> a tagged map, then field
+    # read-back — the form the exhaustiveness gate uses to build its `Env`/`CDef`.
+    {
+      "struct CD(name String, ar Int53)\ndef rt(n String, a Int53) String\n  c := CD(name: n, ar: a)\n  c.name\nend\ndef rtar(n String, a Int53) Int53\n  c := CD(name: n, ar: a)\n  c.ar\nend",
+      "struct CD(name String, ar Int53)\ndef rt(n String, a Int53) String\n  c := CD(name: n, ar: a)\n  c.name\nend\ndef rtar(n String, a Int53) Int53\n  c := CD(name: n, ar: a)\n  c.ar\nend",
+      [{:rt, ["x", 7]}, {:rtar, ["y", 42]}]
+    },
     # struct FIELD ACCESS `c.name` as a value — a Core field-read (`maps:get`); the
     # form selfhost_exhaust.rian uses (`cd.name`/`cd.ar`/`td.ctors`). A struct is a
     # tagged map, so a plain map carrying the field keys exercises the read path.
