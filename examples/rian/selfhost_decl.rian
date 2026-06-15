@@ -89,6 +89,7 @@ mod SelfhostDecl do
     | DTest
     | DTargets(Vec(String))
     | DPubType(String, Vec(Variant))
+    | DUse(String)
     | DErr
 
   # result pairs (a value + the unconsumed tokens)
@@ -136,6 +137,9 @@ mod SelfhostDecl do
       DR(d, rest2) -> [d | parse_program(rest2)]
     end
   end
+  # `use Foo` — a module import (Rian.IR.Use); the projection collects it into the
+  # enclosing module's `uses`. (Only the plain `use Path` form; `only:`/`as:` is tail.)
+  pub def parse_program([TKw("use"), TId(path) | rest]) := [DUse(path) | parse_program(rest)]
   pub def parse_program([TKw("struct") | rest])
     case parse_struct(rest) do
       DR(d, rest2) -> [d | parse_program(rest2)]

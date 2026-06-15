@@ -172,7 +172,7 @@ defmodule Rian.DeclFixpointTest do
       types: Enum.filter(ir, &match?(%Type{}, &1)),
       structs: Enum.filter(ir, &match?(%Struct{}, &1)),
       funcs: Enum.filter(ir, &match?(%Func{}, &1)),
-      uses: [],
+      uses: Enum.filter(ir, &match?(%Rian.IR.Use{}, &1)),
       ranges: [],
       consts: [],
       doc: nil,
@@ -185,6 +185,8 @@ defmodule Rian.DeclFixpointTest do
   defp group([]), do: []
   defp group([{:d_type, _, _} = t | rest]), do: [to_type(t) | group(rest)]
   defp group([{:d_pub_type, _, _} = t | rest]), do: [to_type(t) | group(rest)]
+  # a `use Path` becomes a Rian.IR.Use the enclosing module collects (Rian.Decl).
+  defp group([{:d_use, path} | rest]), do: [%Rian.IR.Use{path: path, names: []} | group(rest)]
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
@@ -602,7 +604,7 @@ defmodule Rian.DeclFixpointTest do
     # leaves `Id`), so the parity probe is non-vacuous.
     {"alias", "alias Id := Int64\ndef f(x Id) Id := x", false},
     {"const", "mod M do\n  const MAX Int64 := 100\nend", false},
-    {"use", "mod M do\n  use Foo\nend", false},
+    {"use", "mod M do\n  use Foo\nend", true},
     {"macro", "macro double(x) := x + x\ndef f() Int64 := double(2)", false},
     {"protocol", "protocol Show do\n  def show(x Int64) String\nend", false},
     {"impl",
