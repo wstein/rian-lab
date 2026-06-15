@@ -71,6 +71,18 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "type Color := Red | Green\ndef code(c) := if c == Red do 0 else 1 end",
       "type Color := Red | Green\ndef code(c Color) Int53 := if c == Red do 0 else 1 end",
       [{:code, [:red]}, {:code, [:green]}]
+    },
+    # String literals — return body + string-literal clause head (toward the lexer)
+    {
+      "def tag() := \"ok\"\ndef sel(\"a\") := 1\ndef sel(_) := 0",
+      "def tag() String := \"ok\"\ndef sel(s String) Int53\ndef sel(\"a\") := 1\ndef sel(_) := 0",
+      [{:tag, []}, {:sel, ["a"]}, {:sel, ["z"]}]
+    },
+    # Char literals — in an expression (`c == '0'`) and as clause heads
+    {
+      "def isz(c) := c == '0'\ndef kind('+') := 1\ndef kind('-') := 2\ndef kind(_) := 0",
+      "def isz(c Char) Bool := c == '0'\ndef kind(c Char) Int53\ndef kind('+') := 1\ndef kind('-') := 2\ndef kind(_) := 0",
+      [{:isz, [?0]}, {:isz, [?1]}, {:kind, [?+]}, {:kind, [?-]}, {:kind, [?x]}]
     }
   ]
 

@@ -33,6 +33,8 @@
 mod SelfhostComposeRealSum do
   # ── selfhost_beam's INPUT IR (the shared contract — structurally identical) ──
   type Core := CNum(String)
+             | CStr(String)
+             | CChar(Int53)
              | CId(String)
              | CAtom(String)
              | CUnary(String, Core)
@@ -51,6 +53,8 @@ mod SelfhostComposeRealSum do
   type Pat := PWild
             | PVar(String)
             | PInt(Int53)
+            | PStr(String)
+            | PChar(Int53)
             | PAtom(String)
             | PCtor(String, Vec(Pat))
             | PTuple(Vec(Pat))
@@ -63,6 +67,7 @@ mod SelfhostComposeRealSum do
 
   # ── selfhost_beam's OUTPUT (the string-carrying Form sum we inflate) ──
   type Form := FInt(Int53)
+             | FStr(String)
              | FVar(String)
              | FAtom(String)
              | FCtorN(String)
@@ -91,6 +96,12 @@ mod SelfhostComposeRealSum do
 
   @external(:ex, ":code.load_binary(name, chars, bin)")
   def load_binary(name Symbol, chars Vec(Int53), bin String) Tuple
+
+  # a String's BYTES (not codepoints) — what a `{:string, L, Cs}` bin-segment needs,
+  # matching Rian.Beam.str_form exactly (codepoints would truncate >255 in an 8-bit
+  # segment). Host FFI, counted in the @selfhost_ffi ledger.
+  @external(:ex, ":erlang.binary_to_list(s)")
+  def str_bytes(s String) Vec(Int53)
 
   # ── the driver: source -> a loaded, runnable module ──
   pub def build(src String, modname Symbol) Symbol
@@ -131,6 +142,8 @@ mod SelfhostComposeRealSum do
   def lower_pat(:nil_p) := PList([], PtlClose)
   def lower_pat({:var, n}) := PVar(n)
   def lower_pat({:lit, k}) := PInt(k)
+  def lower_pat({:str_p, s}) := PStr(s)
+  def lower_pat({:char_p, cp}) := PChar(cp)
   def lower_pat({:ctor, c, ps}) := PCtor(c, lower_pats(ps))
   def lower_pat({:cons_p, h, t}) := cons_pat([lower_pat(h)], t)
 
@@ -146,6 +159,8 @@ mod SelfhostComposeRealSum do
 
   def lower_surface(e) Core
   def lower_surface({:num, s}) := CNum(s)
+  def lower_surface({:str, s}) := CStr(s)
+  def lower_surface({:char, cp}) := CChar(cp)
   def lower_surface({:id, x}) := CId(x)
   def lower_surface({:bin, op, l, r}) := CBin(op, lower_surface(l), lower_surface(r))
   def lower_surface({:unary, op, x}) := CUnary(op, lower_surface(x))
@@ -217,6 +232,9 @@ mod SelfhostComposeRealSum do
 
   def inflate(Form) Tuple
   def inflate(FInt(v)) := {:integer, 0, v}
+  # a string literal -> a binary form `<<"…"/string-segment>>` (Rian.Beam.str_form):
+  # one bin-element wrapping the byte list as a `{:string, …}` charlist.
+  def inflate(FStr(s)) := {:bin, 0, [{:bin_element, 0, {:string, 0, str_bytes(s)}, :default, :default}]}
   def inflate(FVar(n)) := {:var, 0, var_atom(n)}
   def inflate(FAtom(a)) := {:atom, 0, Prim.str_to_atom(a)}
   def inflate(FNil) := {:nil, 0}

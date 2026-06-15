@@ -330,9 +330,15 @@ defmodule Rian.SelfHost do
     # now verified ports. Same two BEAM toolchain calls as the only host FFI.
     "selfhost_compose_real_lex.rian" => [":code.load_binary", ":compile.forms"],
     # rung 11 widens the SURFACE to sum types + ctor dispatch (selfhost_decl's
-    # existing type/ctor capability); same three verified ports, same two BEAM
-    # toolchain calls as the only host FFI.
-    "selfhost_compose_real_sum.rian" => [":code.load_binary", ":compile.forms"]
+    # existing type/ctor capability); same three verified ports. The strings/chars
+    # widening (Phase A/B/C) adds `:erlang.binary_to_list` — a String's BYTES for the
+    # `{:string, L, Cs}` bin-segment of a string literal's form (matching
+    # Rian.Beam.str_form; codepoints would truncate >255 in an 8-bit segment).
+    "selfhost_compose_real_sum.rian" => [
+      ":code.load_binary",
+      ":compile.forms",
+      ":erlang.binary_to_list"
+    ]
   }
 
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."
