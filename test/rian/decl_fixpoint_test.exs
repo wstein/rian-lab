@@ -39,6 +39,8 @@ defmodule Rian.DeclFixpointTest do
   defp inject({:nl}), do: :tnl
   defp inject({:lbracket}), do: :tl_bracket
   defp inject({:rbracket}), do: :tr_bracket
+  defp inject({:lbrace}), do: :tl_brace
+  defp inject({:rbrace}), do: :tr_brace
   defp inject({:annot, name}), do: {:t_annot, name}
 
   defp front_decls(fe, src), do: fe.parse_program(src |> Lexer.tokenize() |> Enum.map(&inject/1))
@@ -75,6 +77,8 @@ defmodule Rian.DeclFixpointTest do
   defp cp({:ctor, c, args}), do: {:ctor, c, Enum.map(args, &cp/1)}
   defp cp({:str_p, s}), do: {:lit, s}
   defp cp({:char_p, code}), do: {:char_lit, code}
+  defp cp({:atom_p, n}), do: {:atom, n}
+  defp cp({:tuple_p, ps}), do: {:tuple, Enum.map(ps, &cp/1)}
   defp cp(:nil_p), do: {:list, [], :close}
 
   defp cp({:cons_p, _, _} = c) do
@@ -116,6 +120,7 @@ defmodule Rian.DeclFixpointTest do
   # the front-end's `Case(scrut, arms)` projects onto Rian.Pratt's
   # `{:case, scrut, [{pat, guard | nil, body}, …]}` — single-expr arm bodies.
   defp ce({:case, scrut, arms}), do: {:case, ce(scrut), Enum.map(arms, &carm/1)}
+  defp ce({:tuple, es}), do: {:tuple, Enum.map(es, &ce/1)}
   defp ce(leaf), do: leaf
 
   defp carm({:c_arm, pat, body}), do: {cp(pat), nil, ce(body)}
@@ -334,7 +339,14 @@ defmodule Rian.DeclFixpointTest do
     "@external(:ex, \":erlang.binary_to_list(s)\")\ndef str_bytes(s String) Vec(Int53)",
     # two `@external` + bodiless sigs in sequence — the exact driver pattern that hung
     # (the first bodiless sig must terminate at the second `@external`).
-    "@external(:ex, \":compile.forms(forms, [:return_errors])\")\ndef host_a(forms Vec(Tuple)) Tuple\n\n@external(:ex, \":code.load_binary(name, chars, bin)\")\ndef load_binary(name Symbol, chars Vec(Int53), bin String) Tuple"
+    "@external(:ex, \":compile.forms(forms, [:return_errors])\")\ndef host_a(forms Vec(Tuple)) Tuple\n\n@external(:ex, \":code.load_binary(name, chars, bin)\")\ndef load_binary(name Symbol, chars Vec(Int53), bin String) Tuple",
+    # tuple PATTERNS + atom literals (`{:ok, m, bin}`, `:err`) in a `case` — the
+    # driver's `build` dispatches on `compile.forms`' `{:ok, m, bin}` result.
+    "def step(r Tuple) Int64 := case r do\n  {:ok, m, bin} -> m\n  :err -> 0\nend",
+    # tuple + atom EXPRESSIONS (`{:var, 0, n}`) — the driver's `inflate` builds these
+    # abstract-form tuples.
+    "def vform(n Int64) Tuple := {:var, 0, n}",
+    "def mk(a Int64, b Int64) Tuple := {:op, 0, :plus, a, b}"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}

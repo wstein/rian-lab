@@ -32,18 +32,19 @@
 mod SelfhostDecl do
   type Tok :=
       TNum(String) | TStr(String) | TChar(Int53) | TId(String) | TKw(String) | TOp(String)
-    | TAnnot(String) | TLP | TRP | TLBracket | TRBracket | TComma | TNL
+    | TAnnot(String) | TLP | TRP | TLBracket | TRBracket | TLBrace | TRBrace | TComma | TNL
 
   # expression AST — Num/Id/Bin/Unary/Call lower to Rian.Pratt's surface tuples;
   # list construction is nil/cons (NilE / ConsE), flattened to `{:list_lit, …}` by
   # the projection (the cons `{:tail, …}` tag would otherwise collide with patterns).
   type Expr :=
-      Num(String) | Str(String) | Char(Int53) | Id(String) | Bin(String, Expr, Expr)
+      Num(String) | Str(String) | Char(Int53) | Id(String) | Atom(String) | Bin(String, Expr, Expr)
     | Unary(String, Expr) | Call(Expr, Vec(Expr))
     | Dot(Expr, String) | Label(String, Expr)
     | If(Expr, Expr, Expr)
     | Case(Expr, Vec(CaseArm))
     | BlockE(Vec(Stmt))
+    | Tuple(Vec(Expr))
     | NilE | ConsE(Expr, Expr) | EErr
 
   # a multi-statement block body (`def f() T <nl> b := e <nl> e <nl> end`): a
@@ -58,7 +59,8 @@ mod SelfhostDecl do
   # StrP/CharP are literal patterns: a string pattern projects to `{:lit, s}` (like
   # an int `Lit`), a char pattern to `{:char_lit, cp}`.
   type Pat :=
-      Wild | Var(String) | Lit(Int53) | StrP(String) | CharP(Int53) | Ctor(String, Vec(Pat))
+      Wild | Var(String) | Lit(Int53) | StrP(String) | CharP(Int53) | AtomP(String) | Ctor(String, Vec(Pat))
+    | TupleP(Vec(Pat))
     | NilP | ConsP(Pat, Pat)
 
   # a `case` arm — `pat [when guard] -> body`. Projects to Rian.Pratt's
@@ -418,6 +420,13 @@ mod SelfhostDecl do
   def parse_pat([TNum(s) | rest]) := PP(Lit(str_to_int(s)), rest)
   def parse_pat([TStr(s) | rest]) := PP(StrP(s), rest)
   def parse_pat([TChar(cp) | rest]) := PP(CharP(cp), rest)
+  def parse_pat([TOp(":"), TId(name) | rest]) := PP(AtomP(name), rest)
+  def parse_pat([TOp(":"), TStr(name) | rest]) := PP(AtomP(name), rest)
+  def parse_pat([TLBrace | rest])
+    case parse_tuple_pat(rest) do
+      PL(ps, rest2) -> PP(TupleP(ps), rest2)
+    end
+  end
   def parse_pat([TLBracket | rest]) := parse_list_pat(rest)
   def parse_pat([TId(ctor), TLP | rest])
     case parse_patlist(rest) do
@@ -466,6 +475,21 @@ mod SelfhostDecl do
     end
   end
 
+  # tuple pattern elements: comma-separated patterns terminated by `}` (mirrors
+  # parse_patlist, brace-closed). `{:ok, m, bin}` -> TupleP([AtomP, Var, Var]).
+  def parse_tuple_pat(ts Vec(Tok)) PatList
+  def parse_tuple_pat([TRBrace | rest]) := PL([], rest)
+  def parse_tuple_pat(ts)
+    case parse_pat(ts) do
+      PP(p, [TComma | rest]) ->
+        case parse_tuple_pat(rest) do
+          PL(more, r) -> PL([p | more], r)
+        end
+      PP(p, [TRBrace | rest]) -> PL([p], rest)
+      PP(p, rest) -> PL([p], rest)
+    end
+  end
+
   # ── expression parser (precedence climbing — mirrors Rian.Pratt) ──────────
   def parse_bp(min_bp Int53, ts Vec(Tok)) Parse
   def parse_bp(min_bp, ts)
@@ -505,7 +529,14 @@ mod SelfhostDecl do
   def parse_primary([TNum(n) | rest]) := parse_postfix(Num(n), rest)
   def parse_primary([TStr(s) | rest]) := parse_postfix(Str(s), rest)
   def parse_primary([TChar(cp) | rest]) := parse_postfix(Char(cp), rest)
+  def parse_primary([TOp(":"), TId(name) | rest]) := parse_postfix(Atom(name), rest)
+  def parse_primary([TOp(":"), TStr(name) | rest]) := parse_postfix(Atom(name), rest)
   def parse_primary([TId(x) | rest]) := parse_postfix(Id(x), rest)
+  def parse_primary([TLBrace | rest])
+    case parse_tuple_expr(rest) do
+      AP(es, rest2) -> parse_postfix(Tuple(es), rest2)
+    end
+  end
   def parse_primary([TLBracket | rest]) := parse_list_expr(rest)
   def parse_primary([TKw("if") | rest]) := parse_if(rest)
   def parse_primary([TKw("case") | rest]) := parse_case(rest)
@@ -617,6 +648,21 @@ mod SelfhostDecl do
         end
       P(h, [TRBracket | rest]) -> P(ConsE(h, NilE), rest)
       P(h, rest) -> P(ConsE(h, NilE), rest)
+    end
+  end
+
+  # tuple construction: comma-separated expressions terminated by `}` (reuses the
+  # `Args`/`AP` result type). `{:ok, m, bin}` -> Tuple([Atom("ok"), Id("m"), Id("bin")]).
+  def parse_tuple_expr(ts Vec(Tok)) Args
+  def parse_tuple_expr([TRBrace | rest]) := AP([], rest)
+  def parse_tuple_expr(ts)
+    case parse_bp(0, ts) do
+      P(e, [TComma | rest]) ->
+        case parse_tuple_expr(rest) do
+          AP(more, r) -> AP([e | more], r)
+        end
+      P(e, [TRBrace | rest]) -> AP([e], rest)
+      P(e, rest) -> AP([e], rest)
     end
   end
 
