@@ -197,10 +197,15 @@ defmodule Rian.DeclFixpointTest do
   # a `range Name := lo .. hi` becomes a Rian.IR.Range (top-level), `opaque Name :=
   # Base` a Rian.IR.Opaque — matching Rian.Decl.
   defp group([{:d_range, name, base, lo, hi} | rest]),
-    do: [%Rian.IR.Range{name: name, base: base, lo: lo, hi: hi, pub?: false, doc: nil} | group(rest)]
+    do: [
+      %Rian.IR.Range{name: name, base: base, lo: lo, hi: hi, pub?: false, doc: nil} | group(rest)
+    ]
 
   defp group([{:d_opaque, name, base} | rest]),
-    do: [%Rian.IR.Opaque{name: name, base: base, pub?: false, doc: nil, ops: [], casts: []} | group(rest)]
+    do: [
+      %Rian.IR.Opaque{name: name, base: base, pub?: false, doc: nil, ops: [], casts: []}
+      | group(rest)
+    ]
 
   # a `protocol` becomes the bare-map protocol record Rian.Decl builds (tagged
   # `:proto` so to_prog can collect it). Method params/ret arrive already detokenized
@@ -703,6 +708,23 @@ defmodule Rian.DeclFixpointTest do
      "protocol Show do\n  def show(x Int64) String\nend\n" <>
        "impl Show for Int64 do\n  def show(n) := \"an int\"\nend", true}
   ]
+
+  describe "expression nodes — `with` is parsed into an AST node (not desugared)" do
+    test "selfhost_decl keeps `with` as a `With` node (intent preserved)", %{frontend: fe} do
+      src = "def f(p Tuple) Int53 := with {:ok, v} <- p do v else _ -> 0 end"
+
+      body =
+        case front_decls(fe, src) do
+          [{:d_func, _, "f", _, _, _, b}] -> b
+          other -> other
+        end
+
+      # `{:with, clauses, body, els}` — the surface keeps the construct; the desugar
+      # to nested `case` happens later, at lowering (ADR-0039), not in the parser.
+      assert match?({:with, _, _, _}, body),
+             "parser should keep `with` as a node, got: #{inspect(body)}"
+    end
+  end
 
   describe "self-host declaration completeness ledger (vs Rian.Decl, the oracle)" do
     test "the oracle (Rian.Decl) parses every listed form — the corpus is valid" do

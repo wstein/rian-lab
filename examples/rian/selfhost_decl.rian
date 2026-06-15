@@ -23,6 +23,9 @@
 #          · list construction `[x | acc]`
 #          · `if COND do THEN else ELSE end` (single-expr branches; ADR-0063)
 #          · `case SCRUT do PAT [when G] -> BODY … end` (single-expr arms; ADR-0063)
+#          · `with C <- E [, …] do BODY [else ARMS] end` — kept as a `With` node
+#            (preserving intent); the desugar to nested `case` is done when LOWERING
+#            the AST to Core, not here (ADR-0039)
 #
 # Out of slice (the remaining long tail of Rian.Decl):
 # negative-literal patterns, `alias`/`const`/`protocol`/`impl`,
@@ -43,6 +46,7 @@ mod SelfhostDecl do
     | Dot(Expr, String) | Label(String, Expr)
     | If(Expr, Expr, Expr)
     | Case(Expr, Vec(CaseArm))
+    | With(Vec(WithClause), Expr, Vec(CaseArm))
     | BlockE(Vec(Stmt))
     | Tuple(Vec(Expr))
     | NilE | ConsE(Expr, Expr) | EErr
@@ -66,6 +70,11 @@ mod SelfhostDecl do
   # a `case` arm — `pat [when guard] -> body`. Projects to Rian.Pratt's
   # `{pat, guard | nil, body}` (CArm → nil guard; CArmG → the guard expr).
   type CaseArm := CArm(Pat, Expr) | CArmG(Pat, Expr, Expr)
+
+  # a `with` clause — `PAT <- EXPR`. A `with` carries an ordered list of these,
+  # a body, and `else` arms (case-style). The desugar to nested `case` is a
+  # lowering concern (ADR-0039), so the AST keeps the clauses intact.
+  type WithClause := WC(Pat, Expr)
 
   type Variant := V(String, Vec(String))
   type Param := Par(String, String, String)
@@ -131,6 +140,7 @@ mod SelfhostDecl do
   type BlockRes := BRes(Vec(Tok), Vec(Tok))
   type ArmRes := AR(CaseArm, Vec(Tok))
   type ArmsRes := ARs(Vec(CaseArm), Vec(Tok))
+  type WClausesRes := WCs(Vec(WithClause), Vec(Tok))
   type Gen := GR(Vec(TVar), Vec(Tok))
   type LineRes := LR(Vec(Tok), Vec(Tok))
   type TVarRes := TVR(TVar, Vec(Tok))
@@ -294,6 +304,7 @@ mod SelfhostDecl do
   def expand_e(m, Label(l, v)) := Label(l, expand_e(m, v))
   def expand_e(m, If(c, t, el)) := If(expand_e(m, c), expand_e(m, t), expand_e(m, el))
   def expand_e(m, Case(s, arms)) := Case(expand_e(m, s), expand_arms(m, arms))
+  def expand_e(m, With(cs, b, els)) := With(expand_wclauses(m, cs), expand_e(m, b), expand_arms(m, els))
   def expand_e(m, BlockE(stmts)) := BlockE(expand_stmts(m, stmts))
   def expand_e(m, Tuple(es)) := Tuple(expand_es(m, es))
   def expand_e(m, ConsE(h, t)) := ConsE(expand_e(m, h), expand_e(m, t))
@@ -307,6 +318,10 @@ mod SelfhostDecl do
   def expand_arms(_, []) := []
   def expand_arms(m, [CArm(p, b) | rest]) := [CArm(p, expand_e(m, b)) | expand_arms(m, rest)]
   def expand_arms(m, [CArmG(p, g, b) | rest]) := [CArmG(p, expand_e(m, g), expand_e(m, b)) | expand_arms(m, rest)]
+
+  def expand_wclauses(m Macro, cs Vec(WithClause)) Vec(WithClause)
+  def expand_wclauses(_, []) := []
+  def expand_wclauses(m, [WC(p, e) | rest]) := [WC(p, expand_e(m, e)) | expand_wclauses(m, rest)]
 
   def expand_stmts(m Macro, ss Vec(Stmt)) Vec(Stmt)
   def expand_stmts(_, []) := []
@@ -332,6 +347,7 @@ mod SelfhostDecl do
   def subst_e(env, Label(l, v)) := Label(l, subst_e(env, v))
   def subst_e(env, If(c, t, el)) := If(subst_e(env, c), subst_e(env, t), subst_e(env, el))
   def subst_e(env, Case(s, arms)) := Case(subst_e(env, s), subst_arms(env, arms))
+  def subst_e(env, With(cs, b, els)) := With(subst_wclauses(env, cs), subst_e(env, b), subst_arms(env, els))
   def subst_e(env, BlockE(stmts)) := BlockE(subst_stmts(env, stmts))
   def subst_e(env, Tuple(es)) := Tuple(subst_es(env, es))
   def subst_e(env, ConsE(h, t)) := ConsE(subst_e(env, h), subst_e(env, t))
@@ -345,6 +361,10 @@ mod SelfhostDecl do
   def subst_arms(_, []) := []
   def subst_arms(env, [CArm(p, b) | rest]) := [CArm(p, subst_e(env, b)) | subst_arms(env, rest)]
   def subst_arms(env, [CArmG(p, g, b) | rest]) := [CArmG(p, subst_e(env, g), subst_e(env, b)) | subst_arms(env, rest)]
+
+  def subst_wclauses(env Vec(Subst), cs Vec(WithClause)) Vec(WithClause)
+  def subst_wclauses(_, []) := []
+  def subst_wclauses(env, [WC(p, e) | rest]) := [WC(p, subst_e(env, e)) | subst_wclauses(env, rest)]
 
   def subst_stmts(env Vec(Subst), ss Vec(Stmt)) Vec(Stmt)
   def subst_stmts(_, []) := []
@@ -1094,6 +1114,7 @@ mod SelfhostDecl do
   def parse_primary([TLBracket | rest]) := parse_list_expr(rest)
   def parse_primary([TKw("if") | rest]) := parse_if(rest)
   def parse_primary([TKw("case") | rest]) := parse_case(rest)
+  def parse_primary([TKw("with") | rest]) := parse_with(rest)
   def parse_primary([TLP | rest])
     case parse_bp(0, rest) do
       P(e, [TRP | rest2]) -> parse_postfix(e, rest2)
@@ -1174,6 +1195,44 @@ mod SelfhostDecl do
         end
     end
   end
+
+  # `with C1 <- E1 [, C2 <- E2 …] do BODY [else ARMS] end` — parsed into a `With`
+  # node carrying the clause list, body, and `else` arms (empty when absent). The
+  # intent is kept here; the desugar to nested `case` happens at lowering (ADR-0039).
+  def parse_with(ts Vec(Tok)) Parse
+  def parse_with(ts)
+    case parse_wclauses(ts, []) do
+      WCs(clauses, [TKw("do") | r2]) ->
+        case parse_bp(0, skip_nl(r2)) do
+          P(body, r3) -> parse_with_else(clauses, body, skip_nl(r3))
+        end
+    end
+  end
+
+  # the `<-` clause list, comma-separated, up to `do`.
+  def parse_wclauses(ts Vec(Tok), acc Vec(WithClause)) WClausesRes
+  def parse_wclauses(ts, acc)
+    case parse_pat(ts) do
+      PP(pat, [TOp("<-") | r1]) ->
+        case parse_bp(0, r1) do
+          P(src, [TComma | r2]) -> parse_wclauses(skip_nl(r2), [WC(pat, src) | acc])
+          P(src, rest) -> WCs(rev_wclauses([WC(pat, src) | acc], []), rest)
+        end
+    end
+  end
+
+  # `else ARMS end` -> the arms; a bare `end` -> no `else` (empty arms).
+  def parse_with_else(cs Vec(WithClause), body Expr, ts Vec(Tok)) Parse
+  def parse_with_else(cs, body, [TKw("else") | r4])
+    case parse_arms(r4, []) do
+      ARs(arms, r5) -> parse_postfix(With(cs, body, arms), r5)
+    end
+  end
+  def parse_with_else(cs, body, [TKw("end") | r4]) := parse_postfix(With(cs, body, []), r4)
+
+  def rev_wclauses(Vec(WithClause), Vec(WithClause)) Vec(WithClause)
+  def rev_wclauses([], out) := out
+  def rev_wclauses([c | rest], out) := rev_wclauses(rest, [c | out])
 
   # an arm body may begin on the next line (`PAT -> <nl> body`); skip the newline(s)
   # so `parse_bp` sees the body, not an empty expression.
