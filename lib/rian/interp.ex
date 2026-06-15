@@ -20,9 +20,11 @@ defmodule Rian.Interp do
                             character; byte-identical per target — the static type
                             means no runtime Char/Int dispatch, ADR-0069 §6)
 
-  `Float64` (ADR-0069 open item: cross-target round-trip divergence, §6) and a hole
-  whose type cannot be inferred are a **compile error at the hole** — never a silent
-  `inspect`-style fallback (ADR-0035).
+  `Float64` and a hole whose type cannot be inferred are a **compile error at the
+  hole** — never a silent `inspect`-style fallback (ADR-0035). The portable
+  ECMAScript float formatter exists and is byte-identical (`Show.float`,
+  examples/rian/stdlib_show.rian); auto-wiring it into `${…}` awaits
+  prelude-function injection so it is available without an explicit import.
   """
   alias Rian.Check
 
@@ -67,8 +69,10 @@ defmodule Rian.Interp do
 
       type == "Float64" or type == "Float32" ->
         raise ArgumentError,
-              "interpolation of a `Float` is not supported yet (ADR-0069 open item: " <>
-                "cross-target round-trip divergence is unspecified)"
+              "interpolation of a `Float` is not auto-wired into `${…}` yet — call " <>
+                "`Show.float(x)` explicitly (examples/rian/stdlib_show.rian): the canonical " <>
+                "ECMAScript formatter is portable and byte-identical, but wiring it into " <>
+                "interpolation awaits prelude-function injection (ADR-0069 §6 / ADR-0047)"
 
       true ->
         raise ArgumentError,

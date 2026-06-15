@@ -182,10 +182,14 @@ defmodule Rian.InterpTest do
   end
 
   describe "un-stringifiable holes are a compile error, never a silent fallback (ADR-0035)" do
-    test "a `Float` hole is rejected (ADR-0069 open item: round-trip divergence)" do
-      assert_raise ArgumentError, ~r/`Float` is not supported yet/, fn ->
-        Beam.load(~S|def f(x Float64) String := "x=${x}"|, :interp_float_err)
-      end
+    test "a `Float` hole is rejected, pointing at the explicit `Show.float` (ADR-0069 §6)" do
+      err =
+        assert_raise ArgumentError, fn ->
+          Beam.load(~S|def f(x Float64) String := "x=${x}"|, :interp_float_err)
+        end
+
+      assert Exception.message(err) =~ "Show.float"
+      assert Exception.message(err) =~ "not auto-wired"
     end
 
     test "a hole whose type cannot be statically inferred is rejected" do
