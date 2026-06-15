@@ -23,6 +23,7 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
       Beam.load(File.read!("examples/rian/selfhost_compose_real_sum.rian"), :rian_exhaust_gate)
@@ -93,6 +94,27 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
       m = drv.build(@exhaustive, :"GoodMod_#{System.unique_integer([:positive])}")
       assert m.f(:a) == 1
       assert m.f(:b) == 2
+    end
+  end
+
+  describe "the capability gate is wired (ADR-0055/P5) — a BEAM-illegal `ref` is REJECTED" do
+    test "build refuses a function with a `ref` parameter (raise {:not_beam_legal, name})",
+         %{drv: drv} do
+      bad = "def f(x ref Int64) Int64 := x"
+      assert catch_error(drv.compile_module(bad, :CapBad)) == {:not_beam_legal, "f"}
+      assert catch_error(drv.build(bad, :CapBad2)) == {:not_beam_legal, "f"}
+    end
+
+    test "val/iso/tag parameters are BEAM-legal and compile + run", %{drv: drv} do
+      m =
+        drv.build(
+          "def f(x iso Int64) Int64 := x\ndef g(y tag Int64) Int64 := y\ndef h(z Int64) Int64 := z",
+          :"Caps_#{System.unique_integer([:positive])}"
+        )
+
+      assert m.f(5) == 5
+      assert m.g(7) == 7
+      assert m.h(9) == 9
     end
   end
 end

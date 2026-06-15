@@ -99,6 +99,10 @@ mod SelfhostComposeRealSum do
   struct TDef(ty String, ctors Vec(String))
   struct Env(cdefs Vec(CDef), tdefs Vec(TDef))
 
+  # the capability lattice (ADR-0055), same shape as SelfhostCap's Cap, so the
+  # verified `SelfhostCap.beam_legal` decides BEAM-legality of a parameter cap.
+  type Cap := Iso | Val | Ref | Tag
+
   # ── the BEAM toolchain boundary: two @external(:ex) host calls (counted FFI) ──
   @external(:ex, ":compile.forms(forms, [:return_errors])")
   def compile_forms_host(forms Vec(Tuple)) Tuple
@@ -134,15 +138,28 @@ mod SelfhostComposeRealSum do
     decls := SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src))
     grps := group(normalize(decls))
     case first_bad(gate_env(decls), grps) do
-      "" -> assemble(modname, funcs(grps))
+      "" -> emit_checked(decls, grps, modname)
       bad -> refuse(bad)
     end
   end
 
-  # refusal channel: a non-exhaustive program is rejected (the BEAM raises). Host FFI
-  # (ADR-0068) — `name` is the offending function, surfaced in the error.
+  # capability gate (ADR-0055/P5): after exhaustiveness, refuse any function with a
+  # BEAM-illegal parameter capability (`ref` → `&mut`, not in the portable core).
+  def emit_checked(decls Vec(Tuple), grps Vec(Grp), modname Symbol) Vec(Tuple)
+  def emit_checked(decls, grps, modname)
+    case first_illegal_cap(decls) do
+      "" -> assemble(modname, funcs(grps))
+      bad -> refuse_cap(bad)
+    end
+  end
+
+  # refusal channels: a non-exhaustive or capability-illegal program is rejected (the
+  # BEAM raises). Host FFI (ADR-0068) — `name` is the offending function.
   @external(:ex, ":erlang.error({:non_exhaustive, name})")
   def refuse(name String) Vec(Tuple)
+
+  @external(:ex, ":erlang.error({:not_beam_legal, name})")
+  def refuse_cap(name String) Vec(Tuple)
 
   def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
 
@@ -564,4 +581,46 @@ mod SelfhostComposeRealSum do
   def dup_wild(Int53) Vec(Pat)
   def dup_wild(0) := []
   def dup_wild(n) := [PWild | dup_wild(n - 1)]
+
+  # ── capability gate (ADR-0055/P5) — the verified SelfhostCap.beam_legal, in-loop ──
+  # The first function with a parameter whose capability is not BEAM-legal (`ref`),
+  # else "". Caps live on the typed head (DSig/DFunc); pattern clauses carry none.
+  def first_illegal_cap(decls Vec(Tuple)) String
+  def first_illegal_cap([]) := ""
+  def first_illegal_cap([{:d_sig, _, name, params, _, _} | rest]) := cap_or(name, params, rest)
+  def first_illegal_cap([{:d_func, _, name, params, _, _, _} | rest]) := cap_or(name, params, rest)
+  def first_illegal_cap([{:d_mod, _, inner} | rest]) := mod_cap(first_illegal_cap(inner), rest)
+  def first_illegal_cap([_ | rest]) := first_illegal_cap(rest)
+
+  def cap_or(name String, params Vec(Tuple), rest Vec(Tuple)) String
+    if params_legal(params) do
+      first_illegal_cap(rest)
+    else
+      name
+    end
+  end
+
+  def mod_cap(inner String, rest Vec(Tuple)) String
+    if inner == "" do
+      first_illegal_cap(rest)
+    else
+      inner
+    end
+  end
+
+  def params_legal(Vec(Tuple)) Bool
+  def params_legal([]) := true
+  def params_legal([{:par, _, cap, _} | rest])
+    if SelfhostCap.beam_legal(to_cap(cap)) do
+      params_legal(rest)
+    else
+      false
+    end
+  end
+
+  def to_cap(s String) Cap
+  def to_cap("iso") := Iso
+  def to_cap("ref") := Ref
+  def to_cap("tag") := Tag
+  def to_cap(_) := Val
 end

@@ -56,6 +56,7 @@ defmodule Rian.SelfhostV1V2FixpointTest do
     {:ok, _} = Beam.load(@decl, :"Elixir.SelfhostDecl")
     {:ok, _} = Beam.load(@beam, :"Elixir.SelfhostBeam")
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
     {:ok, gen0_driver} = Beam.load(@driver, :rian_gen0_driver)
 
     # gen1 — gen0 compiles each compiler source (canonical forms).
