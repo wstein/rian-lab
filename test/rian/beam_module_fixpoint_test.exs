@@ -249,4 +249,77 @@ defmodule Rian.BeamModuleFixpointTest do
       assert {:f_op2, "+", _, _} = body
     end
   end
+
+  # === reference-completeness ledger (selfhost_beam vs Rian.Beam) ===============
+  # Does the port emit + compile each construct the oracle supports? Coverage
+  # signal = `port_module` builds a loadable module without raising (the existing
+  # fixpoint already verifies the RUNTIME behaviour matches over its corpus).
+  # Teeth: a `ported?` flag per construct, checked against reality.
+  defp beam_covers?(mod, src) do
+    is_atom(port_module(mod, src, :"beam_led_#{System.unique_integer([:positive])}"))
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @beam_constructs [
+    {"function", "def add(a Int53, b Int53) Int53 := a + b", true},
+    {"multi-clause dispatch",
+     "def fib(n Int53) Int53\ndef fib(0) := 0\ndef fib(1) := 1\ndef fib(n) := fib(n - 1) + fib(n - 2)",
+     true},
+    {"when guard",
+     "def sign(n Int53) Int53\ndef sign(0) := 0\ndef sign(n) when n > 0 := 1\ndef sign(_) := -1",
+     true},
+    {"if-expression", "def maxi(a Int53, b Int53) Int53 := if a > b do a else b end", true},
+    {"case", "def chk(x Int53) Int53 := case {:ok, x} do\n  {:ok, v} -> v\n  _ -> 0\nend", true},
+    {"tuples (Result)", "type E := Bad\ndef ok(x Int53) Int53 | E := {:ok, x}", true},
+    {"atoms", "def y() Symbol := :yes", true},
+    {"cons lists",
+     "def hd(xs Vec(Int53), d Int53) Int53\ndef hd([], d) := d\ndef hd([h | t], _) := h", true},
+    {"sum variant + ctor pattern",
+     "type Opt := None | Some(Int53)\npub def get(o Opt, d Int53) Int53\n" <>
+       "def get(None, d) := d\ndef get(Some(v), _) := v", true},
+    {"char literal", "def kind(c Char) Int53\ndef kind('a') := 1\ndef kind(_) := 0", true},
+    {"string literal", "def tag() String := \"ok\"", true},
+    {"string `<>`", "def cat(a String, b String) String := a <> b", true},
+    {"Str/Char prims", "def d(c Char) Int53 := Prim.char_code(c)", true},
+    {"block body w/ binds", "def f(n Int53) Int53\n  d := n * 2\n  d + 1\nend", true},
+    # --- oracle supports, port does NOT yet ---
+    {"maps", "def m() Dict(Symbol, Int53) := %{a: 1}", false},
+    {"structs", "struct P(x Int53, y Int53)\ndef getx(p P) Int53 := p.x", false},
+    {"lambdas", "def ap(x Int53) Int53 := ((y) -> y + 1)(x)", false},
+    {"with",
+     "type E := Bad\ndef g(x Int53) Int53 | E := {:ok, x}\n" <>
+       "def f(x Int53) Int53 := with {:ok, v} <- g(x) do v else _ -> 0 end", false}
+  ]
+
+  describe "BEAM backend completeness ledger (selfhost_beam vs Rian.Beam)" do
+    test "the oracle compiles every listed construct — corpus is valid" do
+      for {name, src, _} <- @beam_constructs do
+        assert match?(
+                 {:ok, _, _},
+                 Beam.compile(src, :"beam_ora_#{System.unique_integer([:positive])}")
+               ),
+               "Rian.Beam rejected the `#{name}` example — fix it"
+      end
+    end
+
+    test "every construct's ported? flag matches reality", %{mod: mod} do
+      drift =
+        for {name, src, ported?} <- @beam_constructs, beam_covers?(mod, src) != ported? do
+          "#{name}: ported?=#{ported?} but selfhost_beam " <>
+            "#{if beam_covers?(mod, src), do: "EMITS", else: "does NOT emit"} it"
+        end
+
+      assert drift == [], "BEAM backend completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "construct coverage is measured and must not regress" do
+      total = length(@beam_constructs)
+      ported = Enum.count(@beam_constructs, fn {_, _, p} -> p end)
+      IO.puts("\n  selfhost_beam backend completeness: #{ported}/#{total} Rian.Beam constructs")
+      assert ported >= 12
+    end
+  end
 end
