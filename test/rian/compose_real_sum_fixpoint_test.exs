@@ -68,6 +68,13 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "def mk(n Int53) Tuple := {:ok, n}\ndef unwrap(t Tuple) Int53\ndef unwrap({:ok, v}) := v",
       [{:mk, [7]}, {:mk, [0]}, {:unwrap, [{:ok, 9}]}]
     },
+    # `Prim.int_to_string` — integer → string (erlang:integer_to_binary), used by
+    # selfhost_core.rian. Locks the prim lowering end to end.
+    {
+      "def show(n Int53) String := Prim.int_to_string(n)",
+      "def show(n Int53) String := Prim.int_to_string(n)",
+      [{:show, [0]}, {:show, [42]}, {:show, [-7]}]
+    },
     # struct FIELD ACCESS `c.name` as a value — a Core field-read (`maps:get`); the
     # form selfhost_exhaust.rian uses (`cd.name`/`cd.ar`/`td.ctors`). A struct is a
     # tagged map, so a plain map carrying the field keys exercises the read path.
