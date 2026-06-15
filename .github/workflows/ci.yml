@@ -13,6 +13,14 @@ jobs:
     runs-on: ubuntu-latest
     env:
       MIX_ENV: test
+      # The JVM execution lane compiles emitted Kotlin with this kotlinc. The
+      # emitted subset (functions, sealed interfaces, data classes, smart casts,
+      # `when`, string templates) is long-stable, so any 2.x compiles it
+      # identically; pinned to the widely-deployed 2.1.x for reproducible CI.
+      # NB: an older kotlinc cannot parse a *very* new JDK's version string, so
+      # this pairs with the JDK 21 set up in the lane below (verified: 2.1.0 +
+      # JDK 21 compiles the emitted output). Local dev uses its own kotlinc.
+      KOTLIN_VERSION: "2.1.0"
     steps:
       - uses: actions/checkout@v4
 
@@ -57,8 +65,43 @@ jobs:
       # `mix test.all` (not `mix test`) — the default loop excludes the
       # external-toolchain tests (`@tag :rust|:js|:jvm`) for inner-loop speed;
       # CI must run the full set or that coverage silently vanishes. The runner
-      # ships rustc + node (those tests execute); kotlinc is absent, so the
-      # `:jvm` runs self-skip to their shape assertions (ADR-0049 Tier 2,
-      # non-blocking). See test/test_helper.exs.
+      # ships rustc + node (those tests execute); kotlinc is NOT on PATH yet, so
+      # the `:jvm` runs self-skip to their shape assertions here — JVM execution
+      # is verified separately, non-blocking, in the Tier-2 lane below. This
+      # blocking gate is therefore Tier 1 only (ADR-0049). See test/test_helper.exs.
       - name: Run the full suite (incl. toolchain tests + the self-hosting fixpoint diff)
         run: mix test.all
+
+      # ── Tier-2 JVM execution lane (ADR-0049: non-blocking until promoted) ──
+      # kotlinc is installed only after the blocking gate above, so it never makes
+      # `mix test.all` block on a Tier-2 backend. `continue-on-error` keeps a JVM
+      # regression visible on CI without failing the build — exactly the Tier-2
+      # contract. The JVM emitter is ADR-0049 Tier 2; this becomes blocking only
+      # if/when JVM is promoted to Tier 1 (which would also move it into test.all).
+      - name: Set up JDK (kotlinc runtime)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Cache the Kotlin compiler
+        uses: actions/cache@v4
+        with:
+          path: ~/kotlin-compiler
+          key: kotlinc-${{ env.KOTLIN_VERSION }}
+
+      - name: Install the Kotlin compiler
+        run: |
+          if [ ! -x "$HOME/kotlin-compiler/kotlinc/bin/kotlinc" ]; then
+            curl -fsSL -o /tmp/kotlin.zip \
+              "https://github.com/JetBrains/kotlin/releases/download/v${KOTLIN_VERSION}/kotlin-compiler-${KOTLIN_VERSION}.zip"
+            mkdir -p "$HOME/kotlin-compiler"
+            unzip -q /tmp/kotlin.zip -d "$HOME/kotlin-compiler"
+          fi
+          echo "$HOME/kotlin-compiler/kotlinc/bin" >> "$GITHUB_PATH"
+
+      - name: JVM execution lane (Tier 2, non-blocking)
+        continue-on-error: true
+        run: |
+          kotlinc -version
+          mix test --only jvm

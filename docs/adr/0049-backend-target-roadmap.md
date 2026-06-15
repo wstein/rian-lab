@@ -52,8 +52,11 @@ fourth backend with no new fork (ADR-0050) and the second proof of that thesis a
 lowers to Kotlin, compiles with `kotlinc`, and folds correctly under `java`). Lists/`Vec`, maps,
 structs, protocols, and FFI raise `Rian.JVM.Unsupported` (the next increments). `case` is supported
 (a labelled `run` whose arms reuse the clause dispatcher). Per ADR-0026
-parity, JVM CI stays **non-blocking** until promoted (and `kotlinc`/`java` are absent from the
-Erlang-only CI image, so the run-tests no-op there, like the `node`/`rustc` pattern).
+parity, JVM CI stays **non-blocking** until promoted: CI installs `kotlinc` and runs the JVM
+execution tests in a dedicated `continue-on-error` lane (the blocking `mix test.all` gate keeps
+`kotlinc` off its PATH, so it stays Tier-1 only). A JVM regression surfaces on CI without failing the
+build — promotion to Tier 1 would fold the lane into `test.all`. The `:jvm` tests still self-skip
+their executed-output checks when `kotlinc` is absent (local dev without the toolchain).
 
 **Artifacts & citizenship** are a separate ladder (**ADR-0062**): rung B — a runnable `.jar` via
 `kotlinc` (`Rian.JVM.to_jar/3`, `mix rian.jar`) — is shipped; rung C — *direct* JVM bytecode (the
