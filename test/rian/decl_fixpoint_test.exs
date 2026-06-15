@@ -115,11 +115,10 @@ defmodule Rian.DeclFixpointTest do
   # the front-end's `Case(scrut, arms)` projects onto Rian.Pratt's
   # `{:case, scrut, [{pat, guard | nil, body}, …]}` — single-expr arm bodies.
   defp ce({:case, scrut, arms}), do: {:case, ce(scrut), Enum.map(arms, &carm/1)}
+  defp ce(leaf), do: leaf
 
   defp carm({:c_arm, pat, body}), do: {cp(pat), nil, ce(body)}
   defp carm({:c_arm_g, pat, g, body}), do: {cp(pat), ce(g), ce(body)}
-
-  defp ce(leaf), do: leaf
 
   defp flat_e(:nil_e), do: {[], nil}
   defp flat_e({:cons_e, h, :nil_e}), do: {[h], nil}

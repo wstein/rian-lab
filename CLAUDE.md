@@ -79,8 +79,10 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
    - **`Rian.JS`** — ECMAScript (ADR-0049 Tier 1); partial (`struct`/`with`/lambdas/FFI raise
      `Unsupported`).
    - **`Rian.JVM`** — Kotlin/JVM (ADR-0049 **Tier 2**); a direct source emitter on Core, like JS.
-     MVP: functions, primitives, operators, `if`, sum variants (→ `sealed interface` + `data class` +
-     smart-cast patterns); lists/maps/structs/FFI raise `Unsupported` (`case` is supported). Verified via
+     MVP: functions, primitives, operators, `if`, `case`, sum variants (→ `sealed interface` +
+     `data class` + smart-cast patterns), lists (`listOf` literals + cons/closed clause patterns →
+     `isEmpty`/`size`/`[0]`/`drop` guards), `Vec(Char)` Str/Char prims, and `${float}` interpolation
+     (Show.float, all four targets); maps/structs/tuples/FFI raise `Unsupported`. Verified via
      `kotlinc`+`java`. `:jvm` is now in the `Rian.Reach` target vocabulary.
 
 **Consequence for any new language feature:** a new AST node must be threaded through `Pratt` → `Core`
