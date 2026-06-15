@@ -192,6 +192,14 @@ defmodule Rian.DeclFixpointTest do
     end
   end
 
+  # a `@test` marks the following function as a test (`test?: true`, Rian.Decl).
+  defp group([:d_test | rest]) do
+    case group(rest) do
+      [%Func{} = f | more] -> [%{f | test?: true} | more]
+      other -> other
+    end
+  end
+
   # a run of `@external` annotations attaches to the following bodiless `def` as the
   # func's `externals` map (clauses stay empty — the body is host-provided), matching
   # Rian.Decl.attach_external.
@@ -572,7 +580,7 @@ defmodule Rian.DeclFixpointTest do
     {"@external", ~S|@external(:ex, ":os.system_time()") def now() Int64|, true},
     # --- not yet ported: the oracle handles these; the port skips / errors / drops a modifier ---
     {"@doc", ~s|@doc "d"\ndef f() Int64 := 1|, true},
-    {"@test", "@test def t() Bool := true", false},
+    {"@test", "@test def t() Bool := true", true},
     {"@targets", "@targets(ex, js)\nmod M do\n  def f() Int64 := 1\nend", false},
     {"pub type", "pub type C := A | B", false},
     {"range", "range Digit := 0 .. 9", false},
