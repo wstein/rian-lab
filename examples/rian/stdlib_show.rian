@@ -9,11 +9,12 @@
 # canonical, so the output is byte-identical across targets by construction.
 #
 # Auto-wired into `${…}` interpolation: a `Float64` hole calls `Show.float`, and
-# `Rian.Decl` injects this module on demand (ADR-0069 §6). Emits byte-identically on
-# `:ex`, `:js`, and `:rs` (conformance-tested against ECMAScript `String(x)`). On
-# `:jvm` (Tier-2 list/cons emitter) it matches too, EXCEPT the tiniest denormal
-# extremes (< ~1e-322), where the JLS pins `Double.toString` to a non-shortest form
-# (`4.9E-324` vs ECMA `5e-324`) — a documented platform `toString` quirk.
+# `Rian.Decl` injects this module on demand (ADR-0069 §6). Emits **byte-identically
+# on all four targets** — `:ex`, `:js`, `:rs`, and `:jvm` — conformance-tested against
+# ECMAScript `String(x)` over the exponent thresholds, subnormals, ±0, and the
+# denormal extremes. (`__prim_float_repr` is contracted to return the *shortest*
+# round-tripping decimal; each target's native formatter honors that, the JVM by a
+# shortest-search since `Double.toString` is not always shortest at the denormals.)
 #
 # `__prim_float_repr` is an INTERNAL building block (each target's native shortest
 # string, which diverges in presentation) — never user-facing, only consumed here.

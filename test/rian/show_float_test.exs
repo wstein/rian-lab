@@ -8,21 +8,16 @@ defmodule Rian.ShowFloatTest do
   # corpus, and assert each output equals JS `String(x)` — the ECMAScript reference.
   # The BEAM match is the real proof (a different engine reproducing ECMA exactly).
   #
-  # Byte-identical on all three Tier-1 targets: BEAM, JS, and Rust (the Rust-emitter
-  # coverage for this collection-heavy shape landed alongside this). On `:jvm` (the
-  # Tier-2 list/cons emitter) it matches ECMAScript too — EXCEPT the tiniest denormal
-  # extremes (< ~1e-322), where the JLS pins `Double.toString` to a non-shortest form
-  # (`4.9E-324` vs ECMA's `5e-324`). Those values are excluded from the JVM lane
-  # (`@jvm_skip`) and documented as a platform `toString` quirk (ADR-0069 §6 caveat).
+  # Byte-identical on **all four** targets: BEAM, JS, Rust, and the JVM. The JVM's
+  # `__prim_float_repr` searches for the true shortest round-tripping decimal rather
+  # than trusting `Double.toString` (JLS-pinned to a non-shortest form for the tiniest
+  # denormals), so the denormal extremes (`5e-324`, `1e-323`) now match too — no caveat.
 
   @src File.read!("examples/rian/stdlib_show.rian")
 
-  # denormal extremes whose Java `Double.toString` is not the ECMA-shortest digit
-  # string — excluded from the JVM conformance lane only (BEAM/JS/Rust still cover them).
-  @jvm_skip [5.0e-324]
-
   # curated corpus: integer-valued, decimals, signs, ±0, the exponent thresholds
-  # (1e21 / 1e-7 where ECMA switches to scientific), subnormals, and extremes.
+  # (1e21 / 1e-7 where ECMA switches to scientific), subnormals, and the denormal
+  # extremes that exercise the shortest-round-trip search on every target.
   @corpus [
     1.0,
     42.0,
@@ -48,6 +43,8 @@ defmodule Rian.ShowFloatTest do
     1.0e-300,
     1.7976931348623157e308,
     5.0e-324,
+    1.0e-323,
+    9.9e-324,
     100_000_000_000_000_000_000.0
   ]
 
@@ -97,9 +94,6 @@ defmodule Rian.ShowFloatTest do
     end
   end
 
-  # the JVM corpus drops the denormal extremes (see `@jvm_skip`).
-  defp jvm_corpus, do: @corpus -- @jvm_skip
-
   defp jvm_out do
     case {System.find_executable("kotlinc"), System.find_executable("java")} do
       {nil, _} ->
@@ -110,7 +104,7 @@ defmodule Rian.ShowFloatTest do
 
       {kotlinc, java} ->
         kt = Rian.JVM.compile(@src)
-        body = Enum.map_join(jvm_corpus(), "\n", &"  println(float(#{lit(&1)}))")
+        body = Enum.map_join(@corpus, "\n", &"  println(float(#{lit(&1)}))")
         dir = System.tmp_dir!()
         f = Path.join(dir, "rian_show_#{System.unique_integer([:positive])}.kt")
         jar = String.replace_suffix(f, ".kt", ".jar")
@@ -153,7 +147,7 @@ defmodule Rian.ShowFloatTest do
   end
 
   @tag :jvm
-  test "Show.float equals ECMAScript String(x) on the JVM (denormal extremes aside)" do
+  test "Show.float equals ECMAScript String(x) on the JVM — the whole corpus, denormals included" do
     case System.find_executable("node") do
       nil ->
         :ok
@@ -162,7 +156,7 @@ defmodule Rian.ShowFloatTest do
         {ref, 0} =
           System.cmd(node, [
             "-e",
-            Enum.map_join(jvm_corpus(), "\n", &"console.log(String(#{lit(&1)}))")
+            Enum.map_join(@corpus, "\n", &"console.log(String(#{lit(&1)}))")
           ])
 
         ref = ref |> String.trim() |> String.split("\n")
@@ -172,8 +166,7 @@ defmodule Rian.ShowFloatTest do
             :ok
 
           got ->
-            assert got == ref,
-                   "JVM Show.float diverges:\n" <> diff(jvm_corpus(), ref, got)
+            assert got == ref, "JVM Show.float diverges:\n" <> diff(ref, got)
         end
     end
   end

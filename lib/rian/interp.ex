@@ -23,9 +23,8 @@ defmodule Rian.Interp do
                             `Number::toString` formatter (examples/rian/stdlib_show.rian),
                             **auto-injected** into the program when first interpolated
                             (`Rian.Decl.inject_stdlib/1`), so it needs no explicit
-                            import. Reaches all four targets, byte-identical on
-                            `:ex`/`:rs`/`:js` and on `:jvm` except the tiniest denormal
-                            extremes (a `Double.toString` spec quirk, ADR-0069 §6).
+                            import. Reaches all four targets, **byte-identical on
+                            every one** — `:ex`/`:rs`/`:js`/`:jvm` (ADR-0069 §6).
     * a **user type `T`**  with an `impl Show for T` → `show(value)`: the program's
                             `Show` dispatcher routes it to the impl (ADR-0069 §6, user
                             `Show`). The hole's static type fixes `T`, so this is still

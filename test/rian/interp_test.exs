@@ -193,10 +193,9 @@ defmodule Rian.InterpTest do
     end
 
     test "it reaches all four targets (the portability win)" do
-      # `:jvm` included since the Tier-2 list/cons emitter landed; JVM `Show.float`
-      # matches ECMAScript except the tiniest denormal extremes (a `Double.toString`
-      # spec quirk, ADR-0069 §6 caveat) — outside any value a `${float}` realistically
-      # carries, so the reach is honest at the surface.
+      # `:jvm` included since the Tier-2 list/cons emitter landed; JVM `Show.float` is
+      # byte-identical to ECMAScript on every double (its `__prim_float_repr` searches
+      # for the shortest round-trip, ADR-0069 §6) — no caveat.
       assert reach(@fsrc, "label").reach |> MapSet.to_list() |> Enum.sort() ==
                [:ex, :js, :jvm, :rs]
     end

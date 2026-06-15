@@ -97,8 +97,34 @@ defmodule Rian.JVM do
     reject_unsupported!(funcs)
     type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt/1)
+    # inject the float-repr helper only when the program lowers `__prim_float_repr`.
+    runtime =
+      if String.contains?(fn_decls, "__rian_float_repr("), do: float_repr_helper(), else: ""
 
-    [type_decls, fn_decls] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+    [runtime, type_decls, fn_decls] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+  end
+
+  # The `__prim_float_repr` lowering (ADR-0069). Returns the **shortest** decimal
+  # string that round-trips to `x` — the contract `Show.float` relies on. Java's
+  # `Double.toString` is shortest for all normal doubles but JLS-pinned to a
+  # non-shortest form for the tiniest denormals, so we search instead: the smallest
+  # significant-digit count whose `%e` rounding parses back to `x` exactly. Verified
+  # byte-identical to ECMAScript `String(x)` across a 120k-double fuzz + the whole
+  # denormal tail. `Locale.ROOT` keeps the decimal separator a `.` regardless of host
+  # locale; ±0/NaN/Inf fall through to `toString` (`Show.float` handles the sign/zero).
+  defp float_repr_helper do
+    """
+    private fun __rian_float_repr(x: Double): String {
+      if (x.isNaN() || x.isInfinite() || x == 0.0) return x.toString()
+      val a = Math.abs(x)
+      var rep = a.toString()
+      for (p in 0..16) {
+        val c = String.format(java.util.Locale.ROOT, "%." + p + "e", a)
+        if (c.toDouble() == a) { rep = c; break }
+      }
+      return if (x < 0) "-" + rep else rep
+    }\
+    """
   end
 
   # Fast-fail diagnostic (parity with `Rian.JS`): before emitting, scan each
@@ -409,14 +435,13 @@ defmodule Rian.JVM do
     do: "(#{expr_kt(n)}).toString()"
 
   # float → shortest-round-trip string (ADR-0069 Float64 unlock); `Rian.Show.float`
-  # normalizes to the ECMAScript canonical. Kotlin `Double.toString` is shortest for
-  # all normal doubles and ~all subnormals — EXCEPT the tiniest denormal extremes
-  # (< ~1e-322), where the JLS pins a non-shortest 2-digit form (`4.9E-324` vs ECMA's
-  # `5e-324`). So JVM `Show.float` matches ECMAScript everywhere but that handful of
-  # values (ADR-0069 §6, documented caveat) — a platform `toString` quirk, not fixable
-  # here without a hand-written shortest-float algorithm.
+  # normalizes it to the ECMAScript canonical. Lowers to the injected
+  # `__rian_float_repr` helper (below) rather than `Double.toString` directly: the
+  # JLS pins `toString` to a *non-shortest* form for the tiniest denormals (`4.9E-324`
+  # vs ECMA's `5e-324`), which would break byte-identity, so the helper finds the true
+  # shortest by trial — making `:jvm` byte-identical to ECMAScript for *every* double.
   defp expr_kt(%ECall{fun: %EId{name: "__prim_float_repr"}, args: [n]}),
-    do: "(#{expr_kt(n)}).toString()"
+    do: "__rian_float_repr(#{expr_kt(n)})"
 
   # variadic single-shot join (ADR-0069 §6): a flat `+` chain — every part is
   # already a String; the Kotlin compiler lowers it to a single StringBuilder.

@@ -404,10 +404,10 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   `__prim_float_repr` (each target's native shortest-round-trip string): it parses
   the repr to the unique shortest digits and applies the ECMA presentation rules,
   so the output is byte-identical across targets by construction. Conformance-tested
-  equal to JS `String(x)` on **BEAM, node, rustc, and the JVM**
-  ([show_float_test.exs](../../test/rian/show_float_test.exs)) — the JVM lane excludes
-  only the tiniest denormal extremes (< ~1e-322), where the JLS pins `Double.toString`
-  to a non-shortest form (`4.9E-324` vs ECMA `5e-324`).
+  equal to JS `String(x)` on **all four targets — BEAM, node, rustc, and the JVM**
+  ([show_float_test.exs](../../test/rian/show_float_test.exs)), the denormal extremes
+  included (`__prim_float_repr` returns the *shortest* round-tripping decimal on each
+  target — the JVM by a shortest-search, since `Double.toString` is not always shortest).
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
