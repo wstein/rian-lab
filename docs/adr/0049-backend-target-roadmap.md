@@ -34,6 +34,46 @@ direct; PureScript reference-only).
 | **WASM** | **2** | **Rides the Rust pipeline** — emit Rust, compile to `wasm32` — so it is cheap given Rust is Tier 1. A *direct* WASM emitter is deferred. |
 | **Go** | **3** | Deferred/best-effort; no near-term resourcing. |
 
+### 2a. Once portable: the tier is a (host × target) matrix, not a number per target
+
+The table above assigns **one tier per target** because today there is **one host**: the compiler runs
+on the BEAM, so "which target" fully determines the support contract. **Portable self-hosting (ADR-0063
+§4) breaks that** — the Rian compiler, lowered to JS/Rust/Kotlin, runs on several hosts, and the *same*
+target can have very different maturity depending on *which host emits it*. From that point the support
+contract is a **(host platform × target) matrix**, governed by one principle — **output type decides
+host-coupling**:
+
+- **Source backends are host-agnostic.** Emitting Rust/JS/Kotlin *source* is pure string generation, so
+  any host emits it; those cells inherit the target's tier unchanged. (Running the source still needs the
+  target toolchain — that is downstream of emission, not part of it.)
+- **Bytecode backends are host-coupled** — emitting a platform's *bytecode* needs that platform's
+  assembler in-process:
+  - **The native-bytecode diagonal is first-class.** A host emitting its *own* platform's bytecode —
+    BEAM→`.beam` via `:compile.forms`, JVM→`.class` via `java.lang.classfile` (ADR-0062 rung **C3**) — is
+    the high-support cell, the genuine `:compile.forms`-shaped path.
+  - **Off-diagonal cross-host bytecode is best-effort (Tier-3-flavoured *per cell*).** Emitting a
+    *foreign* platform's bytecode — e.g. a JS/Rust-hosted compiler hand-writing JVM `.class` (ADR-0062
+    rung **C2**) — is a real but niche capability that carries no support promise even when the *target*
+    is Tier 1/2.
+  - **`.beam` has no portable writer.** `:compile.forms` does heavy lowering and the `.beam` format is
+    not a stable hand-writable spec, so off-BEAM hosts cannot hand-write `.beam` (there is no "C2 for
+    BEAM") — BEAM bytecode is produced only on a BEAM. The JVM classfile format, being fully specified,
+    is the one bytecode target a foreign host can write at all.
+
+Illustrative matrix (post-portable-self-host; `src` = host-agnostic source emit):
+
+| Compiler host \ target | `.beam` | `.class` | Rust / JS / Kotlin src |
+|---|---|---|---|
+| **BEAM** | diagonal ✅ (`:compile.forms`) | `src → kotlinc`, or C1 helper | src ✅ |
+| **JVM** | needs a BEAM | diagonal ✅ (C3, `java.lang.classfile`) | src ✅ |
+| **JS / native** | needs a BEAM | C2 hand-written (best-effort) | src ✅ |
+
+**Orthogonality — do not conflate rung with tier.** The ADR-0062 *rung* (C1/C2/C3) is the *mechanism*
+that makes the bytes; the *tier* (this ADR) is the *support contract*. A rung is never a tier: finishing
+rung C **+** the citizenship contract is part of what would **promote JVM from Tier 2 → Tier 1** — it is
+not itself "Tier 2." Until portable self-hosting lands, the single-host table in §2 is the whole story;
+the matrix is the honest shape the moment there is more than one host.
+
 ### 3a. The JVM emitter targets Kotlin (landed 2026-06-13)
 
 The Tier-2 JVM emitter (`Rian.JVM`) lowers to **Kotlin source**, not Java. Rian is sum-and-match
@@ -156,6 +196,7 @@ ADR-0031 already identifies.
 | Decision | Rating |
 |---|---|
 | Tiers as a support contract (1 blocking-CI / 2 non-blocking / 3 best-effort) | 5/5 |
+| Post-portable-self-host, the contract is a **(host × target) matrix** (§2a): native-bytecode diagonal first-class, cross-host bytecode best-effort, source backends host-agnostic | 5/5 |
 | Tier 1 = BEAM, Rust, ECMAScript | 5/5 |
 | ECMAScript **direct**; PureScript **reference-only**, no `purs` dependency | 5/5 |
 | WASM Tier 2 **via the Rust pipeline**; direct WASM emitter deferred | 4/5 |
@@ -173,6 +214,10 @@ ADR-0031 already identifies.
   targets must satisfy all of target-model + effects + stdlib.
 - Concurrency stays **BEAM-only**; every other tier gets the **sequential core** (ADR-0031), with the
   named non-BEAM concurrency gap applying to Rust/ECMAScript/JVM/WASM/Go alike.
+- **The tier becomes a matrix once portable self-hosting lands** (§2a): the per-target numbers in §2 are
+  the single-host (BEAM) projection of a future **(host × target)** contract, whose cells are formalized
+  when the compiler first runs off the BEAM. The native-bytecode diagonal is first-class; cross-host
+  bytecode is best-effort; source backends are host-agnostic.
 
 ## Open items
 

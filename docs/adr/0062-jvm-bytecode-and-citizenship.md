@@ -61,6 +61,14 @@ three candidate mechanisms; the choice is the substance of this rung:
 duplicated format work); treat **C3** as the long-term terminus that falls out of self-hosting; keep
 **C2** only as a fallback if out-of-process proves unacceptable.
 
+**Rung ≠ tier — placement in the (host × target) matrix (ADR-0049 §2a).** These rungs are *mechanisms*
+for making the bytes, not support tiers. In the post-portable-self-host matrix: **C3 is the first-class
+native-bytecode diagonal cell** — a JVM-hosted Rian compiler emitting `.class` in-process, the JVM
+analog of BEAM→`.beam` via `:compile.forms`; **C2 (cross-host hand-written classfile) is the best-effort
+off-diagonal** — any host emitting JVM bytecode without a JVM, carrying no support promise; **C1** is the
+pragmatic bridge while the compiler is still BEAM-hosted. Completing rung C **+** the citizenship
+contract below is part of what **promotes JVM from Tier 2 → Tier 1** — a rung is never itself a tier.
+
 ### Citizenship is more than bytecode
 
 Bytecode is necessary, not sufficient. A JVM *citizen* (the rung-C contract, beyond emitting bytes):
