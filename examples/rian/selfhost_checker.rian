@@ -29,9 +29,11 @@
 # `unknown`. `case` infers the LUB-join of its arm bodies, each under the env
 # flow-NARROWED by the arm pattern (a variable binds the scrutinee's type). A list
 # literal infers `Vec(T)` when its elements (and any cons tail) LUB-join to a concrete
-# `T`. Covered Core nodes (11): CNum/CStr/CChar/CId/CUnary/CBin/CCall/CIf/CBlock/CCase/
-# CList. The `:partial` tail — lambdas (`Fn(...)` arrow types), user-function/ctor
-# return types in the env, constructor-pattern field narrowing, and the parametric
+# `T`. A lambda infers its arrow type `Fn(arg.., body)` (an unannotated param is `_`),
+# the body inferred under the param bindings. Covered Core nodes (12, FULL): CNum/CStr/
+# CChar/CId/CUnary/CBin/CCall/CIf/CBlock/CCase/CList/CLambda. The `:partial` tail is now
+# DEPTH within nodes, not missing nodes — user-function/ctor return types (needs the
+# inference context `ic`), constructor-pattern field narrowing, and the parametric
 # covariant join (`Vec(A)`⊔`Vec(B)`) — see ADR-0063 / docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
@@ -47,9 +49,13 @@ mod SelfhostChecker do
              | CBlock(Vec(Stmt))
              | CCase(Core, Vec(Arm))
              | CList(Vec(Core), Tail)
+             | CLambda(Vec(Param), Core)
 
   # a list literal's tail: closed (`[a, b]`) or a cons tail expression (`[h | t]`).
   type Tail := TClose | TCons(Core)
+  # a lambda parameter: a name + an optional type annotation (absent -> `_`).
+  type Param := LP(String, PType)
+  type PType := PtNone | PtSome(String)
 
   # a block statement: a `name := e` bind (extends the env) or a bare expression;
   # the block's type is its last expression's (Rian.Check.infer_block).
@@ -240,6 +246,10 @@ mod SelfhostChecker do
   # a list literal infers `Vec(T)` when its elements — and any cons tail — LUB-join to
   # a concrete element type `T`; else `unknown` (Rian.Check; ADR-0059).
   pub def infer_env(CList(elems, tail), env) := list_ty(join_all(infer_all(elems, env)), list_elem(infer_tail(tail, env)))
+  # a lambda infers the arrow type `Fn(a_t.., body_t)` — each annotated param
+  # contributes its type (an unannotated one is `_`), and the body is inferred under
+  # those bindings (Rian.Check; ADR-0042).
+  pub def infer_env(CLambda(params, body), env) := build_fn(param_types(params), infer_env(body, extend_lenv(params, env)))
 
   # a bound name's type from the env, else `unknown` (the checker does not guess).
   def lookup(env Dict(String, String), x String) String
@@ -486,4 +496,34 @@ mod SelfhostChecker do
   def skip_rparen(Vec(Int53)) Vec(Int53)
   def skip_rparen([41 | rest]) := skip_rparen(rest)
   def skip_rparen(cs) := cs
+
+  # ── lambda inference helpers (Rian.Check.build_fn) ──
+  # extend the env with each param's type (an unannotated param binds `unknown`).
+  def extend_lenv(Vec(Param), Dict(String, String)) Dict(String, String)
+  def extend_lenv([], env) := env
+  def extend_lenv([LP(n, PtSome(t)) | rest], env) := extend_lenv(rest, Prim.map_put(env, n, t))
+  def extend_lenv([LP(n, PtNone) | rest], env) := extend_lenv(rest, Prim.map_put(env, n, "unknown"))
+
+  def param_types(Vec(Param)) Vec(String)
+  def param_types([]) := []
+  def param_types([LP(_, PtSome(t)) | rest]) := [t | param_types(rest)]
+  def param_types([LP(_, PtNone) | rest]) := ["unknown" | param_types(rest)]
+
+  # `Fn(arg1,..,argN,ret)` — each component is its type or `_` for `unknown`.
+  def build_fn(args Vec(String), ret String) String := "Fn(" <> join_comma(comps(cat_str(args, [ret]))) <> ")"
+
+  def comps(Vec(String)) Vec(String)
+  def comps([]) := []
+  def comps([t | rest]) := [comp_str(t) | comps(rest)]
+
+  def comp_str(t String) String := if t == "unknown" do "_" else t end
+
+  def join_comma(Vec(String)) String
+  def join_comma([]) := ""
+  def join_comma([s]) := s
+  def join_comma([s | rest]) := s <> "," <> join_comma(rest)
+
+  def cat_str(Vec(String), Vec(String)) Vec(String)
+  def cat_str([], ys) := ys
+  def cat_str([x | xs], ys) := [x | cat_str(xs, ys)]
 end

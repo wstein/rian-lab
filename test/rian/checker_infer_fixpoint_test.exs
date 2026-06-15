@@ -35,10 +35,14 @@ defmodule Rian.CheckerInferFixpointTest do
   defp inj(%Core.EBlock{stmts: stmts}), do: {:c_block, Enum.map(stmts, &inj_stmt/1)}
   defp inj(%Core.ECase{scrut: s, arms: arms}), do: {:c_case, inj(s), Enum.map(arms, &inj_arm/1)}
   defp inj(%Core.EList{elems: elems, tail: tail}), do: {:c_list, Enum.map(elems, &inj/1), inj_tail(tail)}
+  defp inj(%Core.ELambda{params: ps, body: body}), do: {:c_lambda, Enum.map(ps, &inj_param/1), inj(body)}
 
   defp inj_tail(nil), do: :t_close
   defp inj_tail(:close), do: :t_close
   defp inj_tail(tail), do: {:t_cons, inj(tail)}
+
+  defp inj_param({n, nil}), do: {:lp, n, :pt_none}
+  defp inj_param({n, t}), do: {:lp, n, {:pt_some, t}}
 
   defp inj_stmt({:expr, e}), do: {:s_expr, inj(e)}
   defp inj_stmt({:bind, n, e}), do: {:s_bind, n, inj(e)}
@@ -124,7 +128,14 @@ end|,
     "[1, 2, 3]",
     "[]",
     "[1, 2.0]",
-    "[1, true]"
+    "[1, true]",
+    # lambdas — the arrow type `Fn(arg.., body)`; an unannotated param is `_`.
+    "(x Int64, y Int64) -> x + y",
+    "(x) -> x",
+    "(x Int64) -> x",
+    ~S|(s String) -> s|,
+    "(b Bool) -> not b",
+    "(x Int8) -> x + 1"
   ]
 
   describe "self-hosting checker fixpoint — Rian infer vs Rian.Check.infer" do
