@@ -19,6 +19,8 @@
 mod SelfhostBeam do
   # ── Core (supported subset) ──
   type Core := CNum(String)
+             | CStr(String)
+             | CChar(Int53)
              | CId(String)
              | CAtom(String)
              | CUnary(String, Core)
@@ -37,6 +39,8 @@ mod SelfhostBeam do
   type Pat := PWild
             | PVar(String)
             | PInt(Int53)
+            | PStr(String)
+            | PChar(Int53)
             | PAtom(String)
             | PCtor(String, Vec(Pat))
             | PTuple(Vec(Pat))
@@ -49,6 +53,7 @@ mod SelfhostBeam do
 
   # ── Form (output; strings inflated by the fixpoint) ──
   type Form := FInt(Int53)
+             | FStr(String)
              | FVar(String)
              | FAtom(String)
              | FCtorN(String)
@@ -91,6 +96,8 @@ mod SelfhostBeam do
   def pat_form(PWild) := FVar("_")
   def pat_form(PVar(n)) := FVar(n)
   def pat_form(PInt(v)) := FInt(v)
+  def pat_form(PStr(s)) := FStr(s)
+  def pat_form(PChar(cp)) := FInt(cp)
   def pat_form(PAtom(a)) := FAtom(a)
   def pat_form(PCtor(c, [])) := FCtorN(c)
   def pat_form(PCtor(c, args)) := FCtor(c, pat_forms(args))
@@ -122,6 +129,8 @@ mod SelfhostBeam do
   # ── expressions -> forms ──
   def expr_form(Core) Form
   def expr_form(CNum(t)) := FInt(parse_int(t))
+  def expr_form(CStr(s)) := FStr(s)
+  def expr_form(CChar(cp)) := FInt(cp)
   def expr_form(CId("true")) := FAtom("true")
   def expr_form(CId("false")) := FAtom("false")
   def expr_form(CId(x))

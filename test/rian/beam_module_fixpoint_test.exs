@@ -21,6 +21,8 @@ defmodule Rian.BeamModuleFixpointTest do
 
   # ── Core struct -> port Core ──
   defp ic(%Core.ENum{text: t}), do: {:c_num, t}
+  defp ic(%Core.EStr{value: s}), do: {:c_str, s}
+  defp ic(%Core.EChar{value: cp}), do: {:c_char, cp}
   defp ic(%Core.EId{name: n}), do: {:c_id, n}
   defp ic(%Core.EAtom{name: a}), do: {:c_atom, a}
   defp ic(%Core.EUnary{op: op, arg: a}), do: {:c_unary, op, ic(a)}
@@ -48,6 +50,8 @@ defmodule Rian.BeamModuleFixpointTest do
   defp ip(%Core.PWild{}), do: :p_wild
   defp ip(%Core.PVar{name: n}), do: {:p_var, n}
   defp ip(%Core.PLit{value: v}) when is_integer(v), do: {:p_int, v}
+  defp ip(%Core.PLit{value: v}) when is_binary(v), do: {:p_str, v}
+  defp ip(%Core.PChar{value: cp}), do: {:p_char, cp}
   defp ip(%Core.PAtom{name: a}), do: {:p_atom, a}
   defp ip(%Core.PCtor{ctor: c, args: args}), do: {:p_ctor, c, Enum.map(args, &ip/1)}
   defp ip(%Core.PTuple{elems: es}), do: {:p_tuple, Enum.map(es, &ip/1)}
@@ -71,6 +75,11 @@ defmodule Rian.BeamModuleFixpointTest do
 
   # ── inflate the port's Form sum -> real Erlang abstract forms (anno 0) ──
   defp inf({:f_int, v}), do: {:integer, 0, v}
+
+  defp inf({:f_str, s}),
+    do:
+      {:bin, 0, [{:bin_element, 0, {:string, 0, :erlang.binary_to_list(s)}, :default, :default}]}
+
   defp inf({:f_var, "_"}), do: {:var, 0, :_}
   defp inf({:f_var, n}), do: {:var, 0, var_atom(n)}
   defp inf({:f_atom, a}), do: {:atom, 0, String.to_atom(a)}
@@ -170,7 +179,13 @@ defmodule Rian.BeamModuleFixpointTest do
     # list construct + cons dispatch
     {"def hd(xs Vec(Int53), d Int53) Int53\ndef hd([], d) := d\ndef hd([h | t], _) := h",
      [{:hd, [[], 0]}, {:hd, [[3, 4, 5], 0]}]},
-    {"def cons(x Int53, xs Vec(Int53)) Vec(Int53) := [x | xs]", [{:cons, [1, [2, 3]]}]}
+    {"def cons(x Int53, xs Vec(Int53)) Vec(Int53) := [x | xs]", [{:cons, [1, [2, 3]]}]},
+    # String / Char literals — return bodies, char guard, char- and string-clause heads
+    {"def tag() String := \"ok\"", [{:tag, []}]},
+    {"def kind(c Char) Int64\ndef kind('+') := 1\ndef kind('-') := 2\ndef kind(_) := 0",
+     [{:kind, [?+]}, {:kind, [?-]}, {:kind, [?x]}]},
+    {"def sel(s String) Int64\ndef sel(\"a\") := 1\ndef sel(_) := 0",
+     [{:sel, ["a"]}, {:sel, ["z"]}]}
   ]
 
   describe "self-hosting BEAM-module fixpoint — Rian forms run identically to Rian.Beam" do
