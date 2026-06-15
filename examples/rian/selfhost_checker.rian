@@ -30,16 +30,17 @@
 # flow-NARROWED by the arm pattern (a variable binds the scrutinee's type). A list
 # literal infers `Vec(T)` when its elements (and any cons tail) LUB-join to a concrete
 # `T`. A lambda infers its arrow type `Fn(arg.., body)` (an unannotated param is `_`),
-# the body inferred under the param bindings. Covered Core nodes (12, FULL): CNum/CStr/
-# CChar/CId/CUnary/CBin/CCall/CIf/CBlock/CCase/CList/CLambda. The `:partial` tail is now
-# a general call resolves a function-typed callee to its return type (higher-order:
-# `g(5)` with `g : Fn(Int64,Int64)` -> `Int64`). The port now AGREES WITH
-# `Rian.Check.infer` over the whole fixpoint domain — every expression node + a typing
-# env, with an empty inference context. The remaining gap needs a NON-empty `ic`
-# (named-function/constructor return types, constructor-pattern field narrowing); the
-# fixpoint supplies no `ic`, so exercising it means threading an `ic` through both the
-# port and the test. The join LUB is complete (numeric widening + the parametric
-# covariant join). See ADR-0063 / docs/self-host-status.md.
+# the body inferred under the param bindings. A general call resolves a function-typed
+# env var (higher-order: `g(5)` with `g : Fn(Int64,Int64)` -> `Int64`), an applied
+# constructor (`ic.ctors`), or a non-generic named function's return (`ic.funs`); a
+# bare identifier resolves a nullary constructor's sum type (`ic.ctors`) when not a
+# bound variable. Covered Core nodes (12, FULL): CNum/CStr/CChar/CId/CUnary/CBin/CCall/
+# CIf/CBlock/CCase/CList/CLambda. Both a typing env AND an inference context `ic`
+# (`:ctors`/`:funs`) are threaded through (`infer_ic/3`; `infer_env/2` and `infer/1`
+# are empty-context conveniences). The join LUB is complete (numeric widening + the
+# parametric covariant join). The remaining tail: GENERIC function-return
+# instantiation (`ic.fsigs` with type variables, ADR-0042) and constructor-pattern
+# field narrowing (`ic.tdefs`). See ADR-0063 / docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
 mod SelfhostChecker do
@@ -207,65 +208,102 @@ mod SelfhostChecker do
 
   def conservative(t String) String := if t == "mismatch" do "unknown" else t end
 
-  # Infer the type of a Core node in the empty env (closed expression).
+  # Infer the type of a Core node in the empty env + empty inference context.
   pub def infer(Core) String
-  pub def infer(c) := infer_env(c, Prim.map_new())
+  pub def infer(c) := infer_ic(c, Prim.map_new(), Prim.map_new())
 
-  # Infer under a typing env (name -> type), threading it through sub-expressions —
-  # a bound identifier resolves to its env type (ADR-0042; mirrors Rian.Check's
-  # `Map.get(env, x)`), else `true`/`false` are `Bool`, else `unknown`.
+  # Infer under a typing env only (empty inference context).
   pub def infer_env(Core, Dict(String, String)) String
-  pub def infer_env(CNum(t), _) := num_ty(t)
-  pub def infer_env(CStr(_), _) := "String"
-  pub def infer_env(CChar(_), _) := "Char"
-  pub def infer_env(CId("true"), _) := "Bool"
-  pub def infer_env(CId("false"), _) := "Bool"
-  pub def infer_env(CId(x), env) := lookup(env, x)
-  pub def infer_env(CUnary("not", _), _) := "Bool"
-  pub def infer_env(CUnary("-", x), env) := infer_env(x, env)
-  # arithmetic (`+ - * div rem`) is operand-directed (arith_type); every other op's
-  # result is fixed by the op (comparisons/`and`/`or`/`in` → Bool, `<>` → String,
-  # `/` → Float64) via bin_ty.
-  pub def infer_env(CBin(op, l, r), env)
+  pub def infer_env(c, env) := infer_ic(c, env, Prim.map_new())
+
+  # Infer under a typing env AND an inference context `ic` (a map with `:ctors`
+  # name->type and `:funs` name->return-type). A bound id resolves to its env type,
+  # else a nullary constructor's sum type (`ic.ctors`), else `unknown`. A call
+  # resolves a function-typed env var (higher-order), else an applied constructor
+  # (`ic.ctors`), else a non-generic named function's return (`ic.funs`). (Generic-
+  # return instantiation and constructor-pattern field narrowing — needing `ic.fsigs`
+  # / `ic.tdefs` — are the remaining tail.)
+  pub def infer_ic(Core, Dict(String, String), Dict(Symbol, Dict(String, String))) String
+  pub def infer_ic(CNum(t), _, _) := num_ty(t)
+  pub def infer_ic(CStr(_), _, _) := "String"
+  pub def infer_ic(CChar(_), _, _) := "Char"
+  pub def infer_ic(CId("true"), _, _) := "Bool"
+  pub def infer_ic(CId("false"), _, _) := "Bool"
+  pub def infer_ic(CId(x), env, ic) := id_ty(x, env, ic)
+  pub def infer_ic(CUnary("not", _), _, _) := "Bool"
+  pub def infer_ic(CUnary("-", x), env, ic) := infer_ic(x, env, ic)
+  pub def infer_ic(CBin(op, l, r), env, ic)
     if arith_op(op) do
-      arith_type(l, r, infer_env(l, env), infer_env(r, env))
+      arith_type(l, r, infer_ic(l, env, ic), infer_ic(r, env, ic))
     else
       bin_ty(op)
     end
   end
-  # primitive intrinsics with a determinate result type (ADR-0036/0047/0069 — mirrors
-  # Rian.Check's `__prim_*` clauses). A general call has no determinate type without
-  # function/ctor return types in the env, so it is conservatively `unknown`.
-  pub def infer_env(CCall("__prim_char_code", [_]), _) := "Int53"
-  pub def infer_env(CCall("__prim_int_to_float", [_]), _) := "Float64"
-  pub def infer_env(CCall("__prim_str_to_atom", [_]), _) := "Symbol"
-  pub def infer_env(CCall("__prim_char_to_string", [_]), _) := "String"
-  pub def infer_env(CCall("__prim_str_concat_all", _), _) := "String"
-  # a general call: if the callee NAME is bound to a function type in the env (a
-  # higher-order value), the call's type is that function's return type; else
-  # `unknown` (a named function / constructor return needs the inference context `ic`,
-  # which this fixpoint does not supply — Rian.Check with an empty `ic` agrees).
-  pub def infer_env(CCall(f, _), env) := call_ret(lookup(env, f))
-  # `if` — the LUB-join of the two branches (each a single-expression block); a
-  # block's type is its last expression's, binds extending the env (ADR-0059).
-  pub def infer_env(CIf(_, t, e), env) := branch_join([BP(t, infer_env(t, env)), BP(e, infer_env(e, env))])
-  pub def infer_env(CBlock(stmts), env) := infer_block(stmts, env)
-  # `case` — each arm body is inferred under the env NARROWED by the arm pattern
-  # against the scrutinee's type (a variable pattern binds it); the case's type is the
-  # LUB-join of the arm bodies (Rian.Check; ADR-0059).
-  pub def infer_env(CCase(scrut, arms), env) := branch_join(arm_pairs(arms, infer_env(scrut, env), env))
-  # a list literal infers `Vec(T)` when its elements — and any cons tail — LUB-join to
-  # a concrete element type `T`; else `unknown` (Rian.Check; ADR-0059).
-  pub def infer_env(CList(elems, tail), env) := list_ty(join_all(infer_all(elems, env)), list_elem(infer_tail(tail, env)))
-  # a lambda infers the arrow type `Fn(a_t.., body_t)` — each annotated param
-  # contributes its type (an unannotated one is `_`), and the body is inferred under
-  # those bindings (Rian.Check; ADR-0042).
-  pub def infer_env(CLambda(params, body), env) := build_fn(param_types(params), infer_env(body, extend_lenv(params, env)))
+  pub def infer_ic(CCall("__prim_char_code", [_]), _, _) := "Int53"
+  pub def infer_ic(CCall("__prim_int_to_float", [_]), _, _) := "Float64"
+  pub def infer_ic(CCall("__prim_str_to_atom", [_]), _, _) := "Symbol"
+  pub def infer_ic(CCall("__prim_char_to_string", [_]), _, _) := "String"
+  pub def infer_ic(CCall("__prim_str_concat_all", _), _, _) := "String"
+  pub def infer_ic(CCall(f, _), env, ic) := call_ty(f, env, ic)
+  pub def infer_ic(CIf(_, t, e), env, ic) := branch_join([BP(t, infer_ic(t, env, ic)), BP(e, infer_ic(e, env, ic))])
+  pub def infer_ic(CBlock(stmts), env, ic) := infer_block(stmts, env, ic)
+  pub def infer_ic(CCase(scrut, arms), env, ic) := branch_join(arm_pairs(arms, infer_ic(scrut, env, ic), env, ic))
+  pub def infer_ic(CList(elems, tail), env, ic) := list_ty(join_all(infer_all(elems, env, ic)), list_elem(infer_tail(tail, env, ic)))
+  pub def infer_ic(CLambda(params, body), env, ic) := build_fn(param_types(params), infer_ic(body, extend_lenv(params, env), ic))
 
-  # a bound name's type from the env, else `unknown` (the checker does not guess).
-  def lookup(env Dict(String, String), x String) String
+  # a bare identifier: its env type if bound, else a nullary constructor's sum type
+  # (`ic.ctors`), else `unknown` (Rian.Check's `Map.get(env,x) || ctor_type(ic,x)`).
+  def id_ty(x String, env Dict(String, String), ic Dict(Symbol, Dict(String, String))) String
+  def id_ty(x, env, ic)
     if Prim.map_has(env, x) do
       Prim.map_get(env, x)
+    else
+      ctor_type(ic, x)
+    end
+  end
+
+  # a call's result: a function-typed env var yields its return type; else an applied
+  # constructor's sum type (`ic.ctors`); else a non-generic named function's return
+  # (`ic.funs`); else `unknown`.
+  def call_ty(f String, env Dict(String, String), ic Dict(Symbol, Dict(String, String))) String
+  def call_ty(f, env, ic)
+    if Prim.map_has(env, f) do
+      call_ret(Prim.map_get(env, f))
+    else
+      ctor_or_fn(f, ic)
+    end
+  end
+
+  def ctor_or_fn(f String, ic Dict(Symbol, Dict(String, String))) String
+  def ctor_or_fn(f, ic)
+    case ctor_type(ic, f) do
+      "unknown" -> called_ret(ic, f)
+      ty -> ty
+    end
+  end
+
+  # `ic.ctors[name]` (a nullary or applied constructor's sum type), else `unknown`.
+  def ctor_type(ic Dict(Symbol, Dict(String, String)), name String) String := ic_lookup(ic, :ctors, name)
+
+  # a non-generic named function's declared return type (`ic.funs[f]`), else
+  # `unknown`. (A return that is itself a type variable, or a generic `ic.fsigs`
+  # signature needing instantiation, is the deferred tail.)
+  def called_ret(ic Dict(Symbol, Dict(String, String)), f String) String := ic_lookup(ic, :funs, f)
+
+  # look `name` up in the `key` sub-map of `ic`; `unknown` if either is absent.
+  def ic_lookup(ic Dict(Symbol, Dict(String, String)), key Symbol, name String) String
+  def ic_lookup(ic, key, name)
+    if Prim.map_has(ic, key) do
+      sub_lookup(Prim.map_get(ic, key), name)
+    else
+      "unknown"
+    end
+  end
+
+  def sub_lookup(m Dict(String, String), name String) String
+  def sub_lookup(m, name)
+    if Prim.map_has(m, name) do
+      Prim.map_get(m, name)
     else
       "unknown"
     end
@@ -273,11 +311,11 @@ mod SelfhostChecker do
 
   # a block's type is its LAST expression's; a `name := e` bind extends the env for
   # the rest (Rian.Check.infer_block). An empty block is `unknown`.
-  def infer_block(Vec(Stmt), Dict(String, String)) String
-  def infer_block([], _) := "unknown"
-  def infer_block([SExpr(e)], env) := infer_env(e, env)
-  def infer_block([SExpr(_) | rest], env) := infer_block(rest, env)
-  def infer_block([SBind(n, e) | rest], env) := infer_block(rest, Prim.map_put(env, n, infer_env(e, env)))
+  def infer_block(Vec(Stmt), Dict(String, String), Dict(Symbol, Dict(String, String))) String
+  def infer_block([], _, _) := "unknown"
+  def infer_block([SExpr(e)], env, ic) := infer_ic(e, env, ic)
+  def infer_block([SExpr(_) | rest], env, ic) := infer_block(rest, env, ic)
+  def infer_block([SBind(n, e) | rest], env, ic) := infer_block(rest, Prim.map_put(env, n, infer_ic(e, env, ic)), ic)
 
   # LUB-join of branch/arm types (ADR-0059). An integer-LITERAL branch is
   # width-flexible: when at least one branch is a non-literal, the literals adopt the
@@ -569,9 +607,9 @@ mod SelfhostChecker do
   def parse_digits([c | rest], acc) := parse_digits(rest, acc * 10 + c - 48)
 
   # each arm -> a (body, type) pair, the body inferred under the narrowed env.
-  def arm_pairs(Vec(Arm), String, Dict(String, String)) Vec(BPair)
-  def arm_pairs([], _, _) := []
-  def arm_pairs([CArm(pat, body) | rest], st, env) := [BP(body, infer_env(body, narrow(pat, st, env))) | arm_pairs(rest, st, env)]
+  def arm_pairs(Vec(Arm), String, Dict(String, String), Dict(Symbol, Dict(String, String))) Vec(BPair)
+  def arm_pairs([], _, _, _) := []
+  def arm_pairs([CArm(pat, body) | rest], st, env, ic) := [BP(body, infer_ic(body, narrow(pat, st, env), ic)) | arm_pairs(rest, st, env, ic)]
 
   # flow narrowing (Rian.Check.narrow): a VARIABLE pattern binds the scrutinee's
   # (concretized) type into the env; every other pattern leaves it unchanged.
@@ -597,13 +635,13 @@ mod SelfhostChecker do
   def tvar(_) := false
 
   # ── list inference helpers (Rian.Check) ──
-  def infer_all(Vec(Core), Dict(String, String)) Vec(String)
-  def infer_all([], _) := []
-  def infer_all([e | rest], env) := [infer_env(e, env) | infer_all(rest, env)]
+  def infer_all(Vec(Core), Dict(String, String), Dict(Symbol, Dict(String, String))) Vec(String)
+  def infer_all([], _, _) := []
+  def infer_all([e | rest], env, ic) := [infer_ic(e, env, ic) | infer_all(rest, env, ic)]
 
-  def infer_tail(Tail, Dict(String, String)) String
-  def infer_tail(TClose, _) := "unknown"
-  def infer_tail(TCons(e), env) := infer_env(e, env)
+  def infer_tail(Tail, Dict(String, String), Dict(Symbol, Dict(String, String))) String
+  def infer_tail(TClose, _, _) := "unknown"
+  def infer_tail(TCons(e), env, ic) := infer_ic(e, env, ic)
 
   # the element type the list type carries: `Vec(T)` -> `T`; anything else -> unknown.
   def list_elem(t String) String := le(Prim.str_chars(t))

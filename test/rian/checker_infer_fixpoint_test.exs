@@ -69,6 +69,15 @@ defmodule Rian.CheckerInferFixpointTest do
     end
   end
 
+  defp ported_ic(mod, src, env, ic), do: mod.infer_ic(inj(Core.from_expr(Pratt.parse(src))), env, ic)
+
+  defp reference_ic(src, env, ic) do
+    case Check.infer(Pratt.parse(src), env, ic) do
+      :unknown -> "unknown"
+      ty -> ty
+    end
+  end
+
   @corpus [
     "1",
     "3.14",
@@ -242,6 +251,50 @@ end|,
       assert ported_env(mod, "z", @env) == "unknown"
       assert reference_env("x", @env) == "Int53"
       assert reference_env("z", @env) == "unknown"
+    end
+  end
+
+  # an inference context `ic`: constructor names -> their sum type (`:ctors`), and
+  # non-generic function names -> their return type (`:funs`). The env still takes
+  # precedence over a constructor of the same name.
+  @ic %{
+    ctors: %{
+      "Red" => "Color",
+      "Green" => "Color",
+      "RGB" => "Color",
+      "None" => "Opt",
+      "Some" => "Opt"
+    },
+    funs: %{"area" => "Int64", "name_of" => "String", "mkvec" => "Vec(Int8)"}
+  }
+  @ic_corpus [
+    # a nullary constructor resolves to its sum type
+    {"Red", "Color"},
+    {"Green", "Color"},
+    # an applied constructor too
+    {"RGB(1, 2)", "Color"},
+    {"Some(1)", "Opt"},
+    # a non-generic named function resolves to its declared return type
+    {"area(5)", "Int64"},
+    {~S|name_of(1)|, "String"},
+    {"mkvec()", "Vec(Int8)"},
+    # an unknown name / call is still unknown
+    {"Nope", "unknown"},
+    {"nope(1)", "unknown"},
+    # the env shadows a constructor of the same name
+    {"x", "Int53"}
+  ]
+
+  describe "self-hosting checker fixpoint — inference under an inference context (ic)" do
+    test "constructor + non-generic-function returns agree with Rian.Check.infer/3",
+         %{mod: mod} do
+      for {src, expected} <- @ic_corpus do
+        assert ported_ic(mod, src, @env, @ic) == reference_ic(src, @env, @ic),
+               "ic inference diverged on #{inspect(src)}"
+
+        assert ported_ic(mod, src, @env, @ic) == expected,
+               "ic inference wrong on #{inspect(src)} — got #{inspect(ported_ic(mod, src, @env, @ic))}, want #{inspect(expected)}"
+      end
     end
   end
 
