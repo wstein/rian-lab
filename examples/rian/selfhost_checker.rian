@@ -26,10 +26,12 @@
 # block): the branches climb to their LUB via the full numeric-widening `join`
 # (`Int8`⊔`Int53`=`Int53`, `Int53`⊔`Float64`=`Float64`, `UInt8`⊔`Int64`=`Int64`), an
 # integer literal adopts a non-literal integer branch, and an incompatible pair is
-# `unknown`. Covered Core nodes (9): CNum/CStr/CChar/CId/CUnary/CBin/CCall/CIf/CBlock.
-# The `:partial` tail — `case` (with pattern narrowing), lists, lambdas, the
-# parametric covariant join (`Vec(A)`⊔`Vec(B)`), and user-function/ctor return types
-# in the env — see ADR-0063 / docs/self-host-status.md.
+# `unknown`. `case` infers the LUB-join of its arm bodies, each under the env
+# flow-NARROWED by the arm pattern (a variable binds the scrutinee's type). Covered
+# Core nodes (10): CNum/CStr/CChar/CId/CUnary/CBin/CCall/CIf/CBlock/CCase. The
+# `:partial` tail — constructor-pattern field narrowing (needs the ctor-def context),
+# lists, lambdas, the parametric covariant join (`Vec(A)`⊔`Vec(B)`), and
+# user-function/ctor return types in the env — see ADR-0063 / docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
 mod SelfhostChecker do
@@ -42,10 +44,15 @@ mod SelfhostChecker do
              | CCall(String, Vec(Core))
              | CIf(Core, Core, Core)
              | CBlock(Vec(Stmt))
+             | CCase(Core, Vec(Arm))
 
   # a block statement: a `name := e` bind (extends the env) or a bare expression;
   # the block's type is its last expression's (Rian.Check.infer_block).
   type Stmt := SBind(String, Core) | SExpr(Core)
+  # a `case` arm: a pattern + a single-expression body (the guard is type-irrelevant).
+  # The pattern flow-NARROWS the env: a variable binds the scrutinee's type.
+  type Arm := CArm(Pat, Core)
+  type Pat := PVar(String) | POther
   # a branch/arm with its inferred type, for the LUB join (branch_join).
   type BPair := BP(Core, String)
   # a numeric type decomposed into kind ("int"/"uint"/"float") + bit width, or none.
@@ -221,6 +228,10 @@ mod SelfhostChecker do
   # block's type is its last expression's, binds extending the env (ADR-0059).
   pub def infer_env(CIf(_, t, e), env) := branch_join([BP(t, infer_env(t, env)), BP(e, infer_env(e, env))])
   pub def infer_env(CBlock(stmts), env) := infer_block(stmts, env)
+  # `case` — each arm body is inferred under the env NARROWED by the arm pattern
+  # against the scrutinee's type (a variable pattern binds it); the case's type is the
+  # LUB-join of the arm bodies (Rian.Check; ADR-0059).
+  pub def infer_env(CCase(scrut, arms), env) := branch_join(arm_pairs(arms, infer_env(scrut, env), env))
 
   # a bound name's type from the env, else `unknown` (the checker does not guess).
   def lookup(env Dict(String, String), x String) String
@@ -399,4 +410,32 @@ mod SelfhostChecker do
   def parse_digits(Vec(Int53), Int53) Int53
   def parse_digits([], acc) := acc
   def parse_digits([c | rest], acc) := parse_digits(rest, acc * 10 + c - 48)
+
+  # each arm -> a (body, type) pair, the body inferred under the narrowed env.
+  def arm_pairs(Vec(Arm), String, Dict(String, String)) Vec(BPair)
+  def arm_pairs([], _, _) := []
+  def arm_pairs([CArm(pat, body) | rest], st, env) := [BP(body, infer_env(body, narrow(pat, st, env))) | arm_pairs(rest, st, env)]
+
+  # flow narrowing (Rian.Check.narrow): a VARIABLE pattern binds the scrutinee's
+  # (concretized) type into the env; every other pattern leaves it unchanged.
+  # (Constructor patterns binding typed fields need the ctor-def context — the tail.)
+  def narrow(Pat, String, Dict(String, String)) Dict(String, String)
+  def narrow(PVar(x), st, env) := Prim.map_put(env, x, concretize(st))
+  def narrow(POther, _, env) := env
+
+  # a type *variable* (a single upper-case letter + optional digit, e.g. `T`/`T1`)
+  # narrows to `unknown` — generics are not instantiated yet (conservative).
+  def concretize(t String) String
+  def concretize(t)
+    if tvar(Prim.str_chars(t)) do
+      "unknown"
+    else
+      t
+    end
+  end
+
+  def tvar(Vec(Int53)) Bool
+  def tvar([c]) := c >= 65 and c <= 90
+  def tvar([c, d]) := c >= 65 and c <= 90 and d >= 48 and d <= 57
+  def tvar(_) := false
 end

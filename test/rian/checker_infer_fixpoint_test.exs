@@ -33,9 +33,14 @@ defmodule Rian.CheckerInferFixpointTest do
   defp inj(%Core.ECall{fun: %Core.EId{name: f}, args: as}), do: {:c_call, f, Enum.map(as, &inj/1)}
   defp inj(%Core.EIf{cond: c, then: t, else: e}), do: {:c_if, inj(c), inj(t), inj(e)}
   defp inj(%Core.EBlock{stmts: stmts}), do: {:c_block, Enum.map(stmts, &inj_stmt/1)}
+  defp inj(%Core.ECase{scrut: s, arms: arms}), do: {:c_case, inj(s), Enum.map(arms, &inj_arm/1)}
 
   defp inj_stmt({:expr, e}), do: {:s_expr, inj(e)}
   defp inj_stmt({:bind, n, e}), do: {:s_bind, n, inj(e)}
+
+  defp inj_arm({pat, _guard, body}), do: {:c_arm, inj_pat(pat), inj(body)}
+  defp inj_pat(%Core.PVar{name: n}), do: {:p_var, n}
+  defp inj_pat(_), do: :p_other
 
   defp ported(mod, src), do: mod.infer(inj(Core.from_expr(Pratt.parse(src))))
 
@@ -100,7 +105,16 @@ defmodule Rian.CheckerInferFixpointTest do
     "if c do 1 else 2 end",
     "if c do true else false end",
     ~S|if c do "a" else "b" end|,
-    "if c do 1 else true end"
+    "if c do 1 else true end",
+    # `case` — arm bodies LUB-join; an unbound scrutinee + a var-pattern body is
+    # unknown; same-typed arm bodies join to that type; a mismatch is unknown.
+    "case n do\n  0 -> 1\n  m -> 2\nend",
+    ~S|case n do
+  0 -> "a"
+  _ -> "b"
+end|,
+    "case n do\n  0 -> 1\n  _ -> true\nend",
+    "case n do\n  0 -> 1\n  m -> m\nend"
   ]
 
   describe "self-hosting checker fixpoint — Rian infer vs Rian.Check.infer" do
@@ -159,7 +173,15 @@ defmodule Rian.CheckerInferFixpointTest do
     "if c do x else f end",
     "if c do u8 else i64 end",
     "if c do u8 else x end",
-    "if c do w else i64 end"
+    "if c do w else i64 end",
+    # `case` with narrowing: a var pattern binds the scrutinee's type, so the
+    # variable's arm body takes that type; arm bodies LUB-join (incl. widening).
+    "case x do\n  0 -> 1\n  m -> m\nend",
+    "case x do\n  0 -> f\n  m -> m\nend",
+    ~S|case s do
+  "a" -> s
+  v -> v
+end|
   ]
 
   describe "self-hosting checker fixpoint — inference under a typing env" do
