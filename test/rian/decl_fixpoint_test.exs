@@ -304,7 +304,11 @@ defmodule Rian.DeclFixpointTest do
     # the parser previously rejected (DErr). Bind+expr blocks and a case block.
     "def inc(n Int64) Int64\ndef inc(n)\n  d := n + 1\n  d\nend",
     "def cls(n Int64) Int64\ndef cls(n)\n  case n do\n    0 -> 100\n    _ -> n\n  end\nend",
-    "def hd(xs Vec(Int64), d Int64) Int64\ndef hd([], d)\n  d\nend\ndef hd([h | _], d)\n  h\nend"
+    "def hd(xs Vec(Int64), d Int64) Int64\ndef hd([], d)\n  d\nend\ndef hd([h | _], d)\n  h\nend",
+    # `case` arm body on the NEXT line (`PAT -> <nl> body`) — the selfhost_decl idiom
+    "def nl_arm(n Int64) Int64\ndef nl_arm(n)\n  case n do\n    0 ->\n      n + 1\n    m -> m\n  end\nend",
+    # a NESTED `case` in an arm body (case-inside-case, as selfhost_decl's parsers do)
+    "def nz(n Int64) Int64\ndef nz(n)\n  case n do\n    0 ->\n      case n do\n        0 -> 10\n        k -> k\n      end\n    m -> m\n  end\nend"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}

@@ -559,16 +559,22 @@ mod SelfhostDecl do
       PP(pat, [TKw("when") | r1]) ->
         case parse_bp(0, r1) do
           P(g, [TOp("->") | r2]) ->
-            case parse_bp(0, r2) do
+            case parse_bp(0, skip_nl(r2)) do
               P(body, r3) -> AR(CArmG(pat, g, body), r3)
             end
         end
       PP(pat, [TOp("->") | r1]) ->
-        case parse_bp(0, r1) do
+        case parse_bp(0, skip_nl(r1)) do
           P(body, r2) -> AR(CArm(pat, body), r2)
         end
     end
   end
+
+  # an arm body may begin on the next line (`PAT -> <nl> body`); skip the newline(s)
+  # so `parse_bp` sees the body, not an empty expression.
+  def skip_nl(ts Vec(Tok)) Vec(Tok)
+  def skip_nl([TNL | rest]) := skip_nl(rest)
+  def skip_nl(ts) := ts
 
   def rev_arms(Vec(CaseArm), Vec(CaseArm)) Vec(CaseArm)
   def rev_arms([], out) := out
