@@ -399,6 +399,14 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   is `[:ex, :js]` (the constructor-tag atom pins off `:rs`/`:jvm`, exactly the shipped
   `Show`-over-`Expr`); associated types erase on the BEAM and only the Rust emitter
   materialises them (`trait { type Elem; }`). Verified on BEAM (+ rustc for the lowering).
+- [stdlib_show.rian](stdlib_show.rian) — **portable `Show.float` — ECMAScript
+  `Number::toString` (ECMA-262 §7.1.12.1, ADR-0069 §6).** Written ONCE in Rian over
+  `__prim_float_repr` (each target's native shortest-round-trip string): it parses
+  the repr to the unique shortest digits and applies the ECMA presentation rules,
+  so the output is byte-identical across targets by construction. Conformance-tested
+  equal to JS `String(x)` on **all three Tier-1 targets — BEAM, node, and rustc**
+  ([show_float_test.exs](../../test/rian/show_float_test.exs)); `:jvm` awaits Tier-2
+  list/cons patterns.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
