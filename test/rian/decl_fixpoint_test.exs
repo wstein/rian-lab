@@ -58,6 +58,9 @@ defmodule Rian.DeclFixpointTest do
     }
   end
 
+  # a `pub type` is a `type` with `pub?: true` (Rian.IR.Type.pub?).
+  defp to_type({:d_pub_type, name, vs}), do: %{to_type({:d_type, name, vs}) | pub?: true}
+
   defp param({:par, n, cap, t}), do: %Param{name: n, type: t, cap: String.to_atom(cap)}
 
   defp clause(pats, body),
@@ -181,6 +184,7 @@ defmodule Rian.DeclFixpointTest do
   # the same name (multi-clause); a `d_func` is a single typed clause.
   defp group([]), do: []
   defp group([{:d_type, _, _} = t | rest]), do: [to_type(t) | group(rest)]
+  defp group([{:d_pub_type, _, _} = t | rest]), do: [to_type(t) | group(rest)]
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
@@ -590,7 +594,7 @@ defmodule Rian.DeclFixpointTest do
     {"@doc", ~s|@doc "d"\ndef f() Int64 := 1|, true},
     {"@test", "@test def t() Bool := true", true},
     {"@targets", "@targets(ex, js)\nmod M do\n  def f() Int64 := 1\nend", true},
-    {"pub type", "pub type C := A | B", false},
+    {"pub type", "pub type C := A | B", true},
     {"range", "range Digit := 0 .. 9", false},
     {"opaque", "opaque Id := Int64", false},
     # tested IN USE: an alias only has an observable effect when a later signature

@@ -490,6 +490,7 @@ mod SelfhostComposeRealSum do
   def gate_cdefs(decls Vec(Tuple)) Vec(CDef)
   def gate_cdefs([]) := []
   def gate_cdefs([{:d_type, name, vs} | rest]) := cat_cd(vs_cdefs(name, vs), gate_cdefs(rest))
+  def gate_cdefs([{:d_pub_type, name, vs} | rest]) := cat_cd(vs_cdefs(name, vs), gate_cdefs(rest))
   def gate_cdefs([{:d_mod, _, inner} | rest]) := cat_cd(gate_cdefs(inner), gate_cdefs(rest))
   def gate_cdefs([_ | rest]) := gate_cdefs(rest)
 
@@ -500,6 +501,7 @@ mod SelfhostComposeRealSum do
   def gate_tdefs(decls Vec(Tuple)) Vec(TDef)
   def gate_tdefs([]) := []
   def gate_tdefs([{:d_type, name, vs} | rest]) := [TDef(ty: name, ctors: v_names(vs)) | gate_tdefs(rest)]
+  def gate_tdefs([{:d_pub_type, name, vs} | rest]) := [TDef(ty: name, ctors: v_names(vs)) | gate_tdefs(rest)]
   def gate_tdefs([{:d_mod, _, inner} | rest]) := cat_td(gate_tdefs(inner), gate_tdefs(rest))
   def gate_tdefs([_ | rest]) := gate_tdefs(rest)
 
