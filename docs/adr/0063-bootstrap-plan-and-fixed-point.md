@@ -78,6 +78,22 @@ Do not call Stage 1 a "bootstrap fixed point." It is **self-application**: a por
 Rian source (including its own) and matching the reference. The genuine vN==vN+1 fixed point is Stage 3
 and requires the compiler in Rian. Each stage's claim is bounded to what its proof actually shows.
 
+**Bootstrap-sufficiency is not feature-completeness — measure both with teeth.** A port that parses
+the *compiler's own sources* is enough to reach `v1==v2` (the compiler's sources use a subset of the
+language), but that is **not** the same as a port that parses *everything the oracle does*. A
+self-hosted compiler that can compile *itself* but not arbitrary Rian (`protocol`/`impl`/`alias`/
+`macro`/doc-comments/…) is bootstrap-complete, **not** feature-complete — and "the self-hosted
+compiler" is only a true replacement for the Elixir reference at **feature parity**. This was a real
+blind spot: a fixpoint diff over a *corpus* proves equivalence only on the forms the corpus exercises,
+and a port's catch-all can *silently skip* an unhandled declaration, so a missing feature reads as
+"covered" rather than "absent." So each port carries a **reference-completeness ledger** — every
+oracle construct listed with a `ported?` flag, enforced against reality (`port_parity?`), with a
+coverage count that can't regress (the `@selfhost_ffi`-ledger pattern). The decl parser's ledger
+(`decl_fixpoint_test.exs`) is the first: **6/18 `Rian.Decl` declaration forms ported today**, the
+12-form tail now tracked, not silently absent. The other ports (lexer/Core/checker/cap/exhaust/each
+backend) need the same ledger; until every port's ledger reaches parity, the self-hosted compiler is
+honestly labelled *bootstrap-complete*, not *feature-complete*.
+
 ### 4. Two termini: BEAM self-hosting vs portable self-hosting (do not conflate)
 
 The debate kept tripping over a contradiction: the docs imply "self-hosting" is one finish line, but
