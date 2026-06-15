@@ -1,0 +1,73 @@
+# ===========================================================================
+# `Foldable` — EAGER polymorphic reduction over a protocol (ADR-0073 / ADR-0042)
+# ===========================================================================
+# Tier 1 (`prelude_list.rian`) gave `sum`/`any`/`all`/`length` over a concrete
+# `Vec`. Tier 2 lifts them to ANY container that can produce its elements, via a
+# one-method protocol — the eager, typed analogue of Python's "any iterable":
+#
+#   protocol Foldable { to_list(self) -> Vec(Int53) }
+#
+# A reducer is then written ONCE against the protocol (`fsum`/`fany`/`fall`) and
+# dispatches to each impl by the receiver's runtime type (ADR-0042 first-arg
+# dispatch). `fsum(Bag([1,2,3]))` and `fsum(Sp(4,5))` call the SAME `fsum`.
+#
+# DELIBERATELY EAGER. `to_list` materialises — there is no lazy `Iterator`, which
+# would need a portable lazy-sequence abstraction Rian does not provide (laziness
+# is native-per-target, like concurrency in ADR-0057).
+#
+# TWO honest limits of today's protocol mechanism (ADR-0042/0061), both in the ADR:
+#   * No associated/element type — `Self` is one concrete type — so `to_list`
+#     fixes a CONCRETE element (`Int53`) here. An element-generic `Foldable(T)`
+#     needs associated types (deferred).
+#   * Dispatching over SUM types uses a constructor-tag atom in the BEAM/JS
+#     desugaring, so `Rian.Reach` pins these dispatchers to `[:ex, :js]` (exactly
+#     as it does the shipped `Show`-over-`Expr`); primitive-dispatch protocols
+#     (`Eq`/`Ord`) reach all four. Verified on the BEAM.
+# ---------------------------------------------------------------------------
+
+# the bridge: a container yields its elements as a concrete list.
+protocol Foldable do
+  def to_list(self Self) Vec(Int53)
+end
+
+type Bag := Bag(items Vec(Int53))
+type Span := Sp(lo Int53, hi Int53)
+
+# impl methods take a plain receiver and destructure with `case` (ADR-0042 — the
+# dispatcher binds the receiver; the head is not a constructor pattern).
+impl Foldable for Bag do
+  def to_list(b) := case b do Bag(xs) -> xs end
+end
+
+impl Foldable for Span do
+  def to_list(s) := case s do Sp(a, b) -> [a, b] end
+end
+
+# ── reducers written ONCE over the protocol; `forall T: Foldable` enforces the
+#    bound at every call site (a non-Foldable type is a compile error) ─────────
+def fsum(x T) Int53 forall T: Foldable := sum_l(to_list(x))
+def fany_pos(x T) Bool forall T: Foldable := anypos_l(to_list(x))
+def fall_pos(x T) Bool forall T: Foldable := allpos_l(to_list(x))
+def fcount(x T) Int53 forall T: Foldable := len_l(to_list(x))
+
+# the concrete `Vec(Int53)` folds these bottom out in (cf. `List.*` in
+# prelude_list.rian — inlined here so the example is one self-contained module).
+def sum_l(Vec(Int53)) Int53
+def sum_l([]) := 0
+def sum_l([h | t]) := h + sum_l(t)
+
+def anypos_l(Vec(Int53)) Bool
+def anypos_l([]) := false
+def anypos_l([h | t]) := if h > 0 do true else anypos_l(t) end
+
+def allpos_l(Vec(Int53)) Bool
+def allpos_l([]) := true
+def allpos_l([h | t]) := if h > 0 do allpos_l(t) else false end
+
+def len_l(Vec(Int53)) Int53
+def len_l([]) := 0
+def len_l([_ | t]) := 1 + len_l(t)
+
+# fsum(Bag([1,2,3])) = 6 · fsum(Sp(4,5)) = 9 · fall_pos(Sp(-1,2)) = false ·
+# fany_pos(Bag([0,0,3])) = true · fcount(Bag([1,2,3])) = 3 — one reducer set,
+# two container types, selected by runtime shape.

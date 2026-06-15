@@ -113,6 +113,26 @@ defmodule Rian.PrimTest do
       end
     end
 
+    test "`Foldable` protocol — one reducer set dispatches over two container types (ADR-0073)" do
+      src = File.read!("examples/rian/foldable.rian")
+      {:ok, m} = Beam.load(src, :rian_prim_foldable)
+
+      # the SAME `fsum`/`fall_pos`/`fcount` run over Bag AND Span (first-arg dispatch)
+      assert m.fsum({:bag, [1, 2, 3]}) == 6
+      assert m.fsum({:sp, 4, 5}) == 9
+      assert m.fall_pos({:sp, -1, 2}) == false
+      assert m.fany_pos({:bag, [0, 0, 3]}) == true
+      assert m.fcount({:bag, [1, 2, 3]}) == 3
+
+      # reach is honest: a SUM-dispatching protocol consumer is `[:ex, :js]` (the
+      # constructor-tag atom in the dispatcher pins off `:rs`/`:jvm`) — exactly the
+      # reach of the shipped `Show`-over-`Expr` dispatcher, no better, no worse.
+      rep = Rian.Reach.analyze(Rian.Decl.parse(src))
+      assert Enum.sort(MapSet.to_list(rep["fsum"].reach)) == [:ex, :js]
+      # the underlying concrete fold IS all-target — only the dispatcher gates it.
+      assert Enum.sort(MapSet.to_list(rep["sum_l"].reach)) == [:ex, :js, :jvm, :rs]
+    end
+
     test "selfhost lexer using `Prim.char_code`/`Prim.str_chars` round-trips" do
       {:ok, m} =
         Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_prim_selfhost_lex)
