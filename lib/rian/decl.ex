@@ -334,26 +334,29 @@ defmodule Rian.Decl do
   defp lower_meta(funcs, decls, targets) do
     env = collect_macros(decls)
     portable? = targets != nil
+    # types with an `impl Show for T` (ADR-0069 §6, user `Show`) — a hole of such a
+    # type lowers to `show(value)` instead of erroring.
+    show_types = MapSet.new(for {"Show", t} <- all_impls(decls), do: t)
 
     Enum.map(funcs, fn
       %Func{synthetic: true} = f ->
         f
 
       %Func{clauses: cs, params: ps} = f ->
-        %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?, ps))}
+        %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?, ps, show_types))}
     end)
   end
 
-  defp meta_clause(%Clause{body: nil} = c, _env, _p, _params), do: c
+  defp meta_clause(%Clause{body: nil} = c, _env, _p, _params, _show), do: c
 
-  defp meta_clause(%Clause{body: body} = c, env, portable?, params) when is_binary(body) do
+  defp meta_clause(%Clause{body: body} = c, env, portable?, params, show) when is_binary(body) do
     ast = Pratt.parse_body(body)
     expanded = if env == %{}, do: ast, else: Rian.Macro.expand(env, ast, portable: portable?)
     folded = Rian.Comptime.fold(expanded)
     # ADR-0069: resolve `\(expr)` interpolation here, where the clause's parameter
     # types are in scope, so each hole stringifies by its static type before the
     # checker and emitters see a plain `<>`/stringify chain.
-    out = Rian.Interp.resolve(folded, clause_env(c, params), %{})
+    out = Rian.Interp.resolve(folded, clause_env(c, params), %{}, show)
 
     # Only swap the source-string body for an AST when a transform actually fired;
     # bodies with no macro/`comptime`/interpolation keep their string form (and the

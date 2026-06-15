@@ -26,42 +26,59 @@ defmodule Rian.Interp do
                             import. Reaches all four targets, byte-identical on
                             `:ex`/`:rs`/`:js` and on `:jvm` except the tiniest denormal
                             extremes (a `Double.toString` spec quirk, ADR-0069 §6).
+    * a **user type `T`**  with an `impl Show for T` → `show(value)`: the program's
+                            `Show` dispatcher routes it to the impl (ADR-0069 §6, user
+                            `Show`). The hole's static type fixes `T`, so this is still
+                            monomorphic. Reaches as far as the impl does — a sum-dispatch
+                            consumer is `[:ex, :js]` (the constructor-tag atom pins off
+                            `:rs`/`:jvm`), honestly via `Rian.Reach`.
 
-  `Float32` and a hole whose type cannot be inferred are a **compile error at the
-  hole** — never a silent `inspect`-style fallback (ADR-0035). (`Float32` has no
-  portable formatter; widen to `Float64` and interpolate that.)
+  `Float32`, a user type with **no** `impl Show`, and a hole whose type cannot be
+  inferred are a **compile error at the hole** — never a silent `inspect`-style
+  fallback (ADR-0035). (`Float32` has no portable formatter; widen to `Float64` and
+  interpolate that.) NB: a field-access hole (`${p.x}`) over a pattern/field-bound
+  value still infers `:unknown` — interpolate the **whole** value (`${p}`, routed
+  through its `Show`) or build the string with explicit calls.
   """
   alias Rian.Check
 
-  @doc "Rewrite every `{:str_interp, …}` in `ast` to a `<>`/stringify chain."
-  def resolve(ast, env, ic)
+  @doc """
+  Rewrite every `{:str_interp, …}` in `ast` to a `<>`/stringify chain.
 
-  def resolve({:str_interp, parts}, env, ic) do
+  `show` is the set of type names with an `impl Show for T` in the program — a hole
+  of such a type lowers to `show(value)` (the protocol dispatcher routes it to the
+  impl; ADR-0069 §6, user `Show`). It is statically resolved, so still monomorphic.
+  """
+  def resolve(ast, env, ic, show \\ MapSet.new())
+
+  def resolve({:str_interp, parts}, env, ic, show) do
     parts
-    |> Enum.map(&resolve_part(&1, env, ic))
+    |> Enum.map(&resolve_part(&1, env, ic, show))
     |> concat_chain()
   end
 
-  def resolve(ast, env, ic) when is_tuple(ast),
-    do: ast |> Tuple.to_list() |> Enum.map(&resolve(&1, env, ic)) |> List.to_tuple()
+  def resolve(ast, env, ic, show) when is_tuple(ast),
+    do: ast |> Tuple.to_list() |> Enum.map(&resolve(&1, env, ic, show)) |> List.to_tuple()
 
-  def resolve(list, env, ic) when is_list(list), do: Enum.map(list, &resolve(&1, env, ic))
-  def resolve(other, _env, _ic), do: other
+  def resolve(list, env, ic, show) when is_list(list),
+    do: Enum.map(list, &resolve(&1, env, ic, show))
 
-  defp resolve_part({:lit, s}, _env, _ic), do: {:str, s}
+  def resolve(other, _env, _ic, _show), do: other
 
-  defp resolve_part({:hole, expr}, env, ic) do
+  defp resolve_part({:lit, s}, _env, _ic, _show), do: {:str, s}
+
+  defp resolve_part({:hole, expr}, env, ic, show) do
     # resolve nested interpolation first, then stringify by the hole's type
-    expr = resolve(expr, env, ic)
-    stringify(expr, Check.infer(expr, env, ic))
+    expr = resolve(expr, env, ic, show)
+    stringify(expr, Check.infer(expr, env, ic), show)
   end
 
-  defp stringify(expr, "String"), do: expr
+  defp stringify(expr, "String", _show), do: expr
 
-  defp stringify(expr, "Bool"),
+  defp stringify(expr, "Bool", _show),
     do: {:if, expr, {:block, [expr: {:str, "true"}]}, {:block, [expr: {:str, "false"}]}}
 
-  defp stringify(expr, type) do
+  defp stringify(expr, type, show) do
     cond do
       int_type?(type) ->
         {:call, {:id, "__prim_int_to_string"}, [expr]}
@@ -84,10 +101,17 @@ defmodule Rian.Interp do
               "interpolation of a `Float32` is not supported — widen to `Float64` and " <>
                 "interpolate that (`Show.float` is the portable Float64 formatter, ADR-0069)"
 
+      MapSet.member?(show, type) ->
+        # a user type with an `impl Show for T` (ADR-0069 §6, user `Show`): call the
+        # protocol method `show/1`. The hole's static type fixes T, so this stays
+        # monomorphic — the program's `Show` dispatcher routes it to T's impl.
+        {:call, {:id, "show"}, [expr]}
+
       true ->
         raise ArgumentError,
-              "no `Show` for `#{type}` — interpolation requires a statically-known, " <>
-                "stringifiable type (String / Int* / Bool); got `#{type}`"
+              "no `Show` for `#{type}` — interpolation requires a statically-known " <>
+                "stringifiable type (String / Int* / Bool / Float64, or a type with an " <>
+                "`impl Show`); got `#{type}`"
     end
   end
 

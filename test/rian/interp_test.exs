@@ -220,6 +220,74 @@ defmodule Rian.InterpTest do
     end
   end
 
+  describe "a user type with `impl Show for T` interpolates via `show/1` (ADR-0069 §6)" do
+    @sum_src """
+    type Color := Red | Green | Blue
+    protocol Show do
+      def show(self Self) String
+    end
+    impl Show for Color do
+      def show(c) := case c do
+        Red -> "red"
+        Green -> "green"
+        Blue -> "blue"
+      end
+    end
+    def describe(c Color) String := "color = ${c}!"
+    def demo_red() String := describe(Red)
+    def demo_blue() String := describe(Blue)
+    """
+
+    test "a sum-typed hole dispatches to the user impl and runs on the BEAM" do
+      {:ok, m} = Beam.load(@sum_src, :interp_usershow_sum)
+      assert m.demo_red() == "color = red!"
+      assert m.demo_blue() == "color = blue!"
+    end
+
+    test "the hole lowers to a `show(…)` call (resolved statically by the hole's type)" do
+      out = Decl.parse(@sum_src)
+      describe = Enum.find(out.funcs, &(&1.name == "describe"))
+
+      assert {:block, [expr: {:call, {:id, "__prim_str_concat_all"}, parts}]} =
+               hd(describe.clauses).body
+
+      assert Enum.any?(parts, &match?({:call, {:id, "show"}, [id: "c"]}, &1))
+    end
+
+    test "user-`Show` over a sum is honestly `[:ex, :js]` (the constructor-tag atom pins off :rs/:jvm)" do
+      assert reach(@sum_src, "describe").reach |> MapSet.to_list() |> Enum.sort() == [:ex, :js]
+    end
+
+    test "a struct with an `impl Show` interpolates the whole value via `show/1`" do
+      src = """
+      struct Point(x Int64, y Int64)
+      protocol Show do
+        def show(self Self) String
+      end
+      impl Show for Point do
+        def show(p) := "the-origin"
+      end
+      def label(p Point) String := "pt = ${p}"
+      def demo() String := label(Point(x: 3, y: 4))
+      """
+
+      {:ok, m} = Beam.load(src, :interp_usershow_struct)
+      assert m.demo() == "pt = the-origin"
+    end
+
+    test "a user type with NO `impl Show` is still the `no Show` compile error" do
+      assert_raise ArgumentError, ~r/no `Show` for `Color`/, fn ->
+        Beam.load(
+          ~S"""
+          type Color := Red | Green
+          def f(c Color) String := "c=${c}"
+          """,
+          :interp_usershow_none
+        )
+      end
+    end
+  end
+
   describe "un-stringifiable holes are a compile error, never a silent fallback (ADR-0035)" do
     test "a hole whose type cannot be statically inferred is rejected" do
       assert_raise ArgumentError, ~r/no `Show` for|statically-known/, fn ->
