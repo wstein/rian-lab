@@ -94,11 +94,27 @@ mod SelfhostDecl do
     | DRange(String, String, Int53, Int53)
     | DOpaque(String, String)
     | DProtocol(String, Vec(PMethod))
+    | DImpl(String, String, Vec(IMethod))
     | DErr
 
   # a protocol method signature: name + detokenized parameter string + return type
   # string (the raw forms Rian.Decl stores, which are `Lexer.detokenize` output).
   type PMethod := PM(String, String, String)
+
+  # an impl method clause: name + detokenized parameter string + detokenized body
+  # string + guard string ("" = no guard — Rian has no nil, so "" is the sentinel
+  # the projection maps back to a `nil` guard).
+  type IMethod := IM(String, String, String, String)
+
+  # a generated `protocol`/`impl` def (the desugar output of `Rian.Protocol.expand`):
+  # the raw-def-map fields `Rian.Decl.build_func/1` consumes. Empty strings are the
+  # `nil` sentinels for ret/guard/body (a bodiless dispatcher signature has body "").
+  # `dispatch` is "dispatcher" | "impl"; the projection atomizes it.
+  type GenFunc := GF(String, String, String, String, String, Bool, Vec(String), String, Bool)
+
+  # collected protocol/impl declarations (the engine works over these, not raw Decls).
+  type DProtoRec := DP(String, Vec(PMethod))
+  type DImplRec := DI(String, String, Vec(IMethod))
 
   # result pairs (a value + the unconsumed tokens)
   type Parse := P(Expr, Vec(Tok))
@@ -183,6 +199,15 @@ mod SelfhostDecl do
   pub def parse_program([TKw("protocol"), TId(name), TKw("do") | rest])
     case take_block(rest, 1, []) do
       BRes(body, after) -> [DProtocol(name, parse_pmethods(body)) | parse_program(after)]
+    end
+  end
+  # `impl Proto for Type do <method defs> end` — `for` lexes as a plain id. The
+  # method clauses carry RAW detokenized parameter/body strings (Rian.Decl defers
+  # parsing them). The dispatcher + mangled impl functions are NOT generated here;
+  # `expand_protocols` is the post-pass that desugars them (ADR-0042 §3).
+  pub def parse_program([TKw("impl"), TId(proto), TId("for"), TId(ty), TKw("do") | rest])
+    case take_block(rest, 1, []) do
+      BRes(body, after) -> [DImpl(proto, ty, parse_imethods(body)) | parse_program(after)]
     end
   end
   pub def parse_program([TKw("struct") | rest])
@@ -364,6 +389,7 @@ mod SelfhostDecl do
   def tok_text(TKw(s)) := s
   def tok_text(TNum(s)) := s
   def tok_text(TOp(s)) := s
+  def tok_text(TStr(s)) := Prim.str_concat(Prim.str_from_chars(['"']), Prim.str_concat(s, Prim.str_from_chars(['"'])))
   def tok_text(TAnnot(s)) := Prim.str_concat("@", s)
   def tok_text(TLP) := "("
   def tok_text(TRP) := ")"
@@ -373,10 +399,276 @@ mod SelfhostDecl do
   def tok_text(TRBrace) := "}"
   def tok_text(TComma) := ","
   def tok_text(TNL) := " "
-  # the wildcard covers `TChar` and `TStr` — char `'c'` source rendering and string
-  # re-quoting are the documented tail (neither appears in the type signatures the
-  # protocol port reconstructs; impl bodies, which DO carry strings, are a later rung).
+  # the wildcard covers `TChar` — its `'c'` source rendering is the documented tail
+  # (chars don't appear in the type signatures / impl bodies the port reconstructs).
   def tok_text(_) := "?"
+
+  # ── impl method parsing ───────────────────────────────────────────────────
+  # `def name(params) := body` clauses inside an `impl` block. The parameter and
+  # body strings are kept RAW via `detok`. `when` guards / block bodies are a
+  # documented tail (the guard sentinel "" means none).
+  def parse_imethods(ts Vec(Tok)) Vec(IMethod)
+  def parse_imethods([]) := []
+  def parse_imethods([TNL | rest]) := parse_imethods(rest)
+  def parse_imethods([TKw("def"), TId(name), TLP | rest])
+    case take_parens(rest, 0, []) do
+      Paren(inside, [TOp(":=") | body_rest]) ->
+        case take_line(body_rest, []) do
+          LR(body_toks, rest2) -> [IM(name, detok(inside), detok(body_toks), "") | parse_imethods(rest2)]
+        end
+      Paren(_, after) -> parse_imethods(after)
+    end
+  end
+  def parse_imethods([_ | rest]) := parse_imethods(rest)
+
+  # ── protocol/impl desugar (port of Rian.Protocol.expand) ──────────────────
+  # Generate the guarded dispatcher + mangled impl functions for every protocol
+  # method that has a matching impl. The result is raw-def-map data (GenFunc) the
+  # projection feeds to Rian.Decl.build_func — the engine (mangling, guard synthesis,
+  # parameter assembly) is ported here; turning raw maps into Func is reused, exactly
+  # as the backend Beam.compile_ir is reused.
+  pub def expand_protocols(decls Vec(Decl)) Vec(GenFunc)
+  pub def expand_protocols(decls) := join_gfs(dispatchers(collect_protocols(decls), collect_impls(decls)), impl_funcs(collect_impls(decls), collect_protocols(decls)))
+
+  def join_gfs(a Vec(GenFunc), b Vec(GenFunc)) Vec(GenFunc)
+  def join_gfs([], b) := b
+  def join_gfs([x | xs], b) := [x | join_gfs(xs, b)]
+
+  # ── collect the protocol/impl declarations ────────────────────────────────
+  def collect_protocols(decls Vec(Decl)) Vec(DProtoRec)
+  def collect_protocols([]) := []
+  def collect_protocols([DProtocol(name, ms) | rest]) := [DP(name, ms) | collect_protocols(rest)]
+  def collect_protocols([_ | rest]) := collect_protocols(rest)
+
+  def collect_impls(decls Vec(Decl)) Vec(DImplRec)
+  def collect_impls([]) := []
+  def collect_impls([DImpl(proto, ty, ms) | rest]) := [DI(proto, ty, ms) | collect_impls(rest)]
+  def collect_impls([_ | rest]) := collect_impls(rest)
+
+  # ── dispatchers: one guarded clause per matching impl, headed by a bodiless sig ─
+  def dispatchers(protos Vec(DProtoRec), impls Vec(DImplRec)) Vec(GenFunc)
+  def dispatchers([], _) := []
+  def dispatchers([DP(pname, ms) | rest], impls) := join_gfs(disp_methods(pname, ms, impls), dispatchers(rest, impls))
+
+  def disp_methods(pname String, ms Vec(PMethod), impls Vec(DImplRec)) Vec(GenFunc)
+  def disp_methods(_, [], _) := []
+  def disp_methods(pname, [PM(mname, mparams, mret) | rest], impls) := join_gfs(one_dispatcher(pname, mname, mparams, mret, impls), disp_methods(pname, rest, impls))
+
+  # a method's dispatcher: bodiless sig (params renamed to v0.., ret kept, Self
+  # listed as a tvar, synthetic) followed by one guarded clause per matching impl.
+  # No matching impl -> no dispatcher (a bodiless sig with no clauses is not a func).
+  def one_dispatcher(pname String, mname String, mparams String, mret String, impls Vec(DImplRec)) Vec(GenFunc)
+  def one_dispatcher(pname, mname, mparams, mret, impls)
+    arity := len(split_commas(mparams))
+    vars := gen_vars(0, arity)
+    matching := disp_clauses(pname, mname, vars, impls)
+    if is_empty(matching) do
+      []
+    else
+      [GF(mname, dispatcher_params(split_commas(mparams), vars), mret, "", "", true, ["Self"], "dispatcher", true) | matching]
+    end
+  end
+
+  def disp_clauses(pname String, mname String, vars Vec(String), impls Vec(DImplRec)) Vec(GenFunc)
+  def disp_clauses(_, _, _, []) := []
+  def disp_clauses(pname, mname, vars, [DI(iproto, ity, _) | rest])
+    if iproto == pname do
+      [GF(mname, join_commas(vars), "", guard_for(ity), Prim.str_concat(mangle(pname, ity, mname), Prim.str_concat("(", Prim.str_concat(join_commas(vars), ")"))), false, [], "dispatcher", false) | disp_clauses(pname, mname, vars, rest)]
+    else
+      disp_clauses(pname, mname, vars, rest)
+    end
+  end
+
+  # ── impl methods: one mangled single-clause function per impl method ──────
+  def impl_funcs(impls Vec(DImplRec), protos Vec(DProtoRec)) Vec(GenFunc)
+  def impl_funcs([], _) := []
+  def impl_funcs([DI(proto, ty, ms) | rest], protos) := join_gfs(impl_methods(proto, ty, ms, protos), impl_funcs(rest, protos))
+
+  def impl_methods(proto String, ty String, ms Vec(IMethod), protos Vec(DProtoRec)) Vec(GenFunc)
+  def impl_methods(_, _, [], _) := []
+  def impl_methods(proto, ty, [IM(mname, mparams, mbody, mguard) | rest], protos) := [one_impl(proto, ty, mname, mparams, mbody, mguard, find_sig(proto, mname, protos)) | impl_methods(proto, ty, rest, protos)]
+
+  # build a mangled single-clause impl function: the impl's parameter NAMES carry the
+  # protocol's parameter TYPES (Self substituted to the impl type).
+  def one_impl(proto String, ty String, mname String, mparams String, mbody String, mguard String, sig PMethod) GenFunc
+  def one_impl(proto, ty, mname, mparams, mbody, mguard, PM(_, sparams, sret)) := GF(mangle(proto, ty, mname), zip_params(split_commas(mparams), subst_self_all(map_param_type(split_commas(sparams)), ty)), subst_self(sret, ty), mguard, mbody, false, [], "impl", false)
+
+  # the protocol method signature with the given name, or PM("","","") if absent.
+  def find_sig(proto String, mname String, protos Vec(DProtoRec)) PMethod
+  def find_sig(_, _, []) := PM("", "", "")
+  def find_sig(proto, mname, [DP(pname, ms) | rest])
+    if pname == proto do
+      find_in(mname, ms, find_sig(proto, mname, rest))
+    else
+      find_sig(proto, mname, rest)
+    end
+  end
+
+  def find_in(mname String, ms Vec(PMethod), fallback PMethod) PMethod
+  def find_in(_, [], fallback) := fallback
+  def find_in(mname, [PM(n, p, r) | rest], fallback) := if n == mname do PM(n, p, r) else find_in(mname, rest, fallback) end
+
+  # ── small list/string utilities for the desugar ───────────────────────────
+  def rev(xs Vec(T), acc Vec(T)) Vec(T) forall T
+  def rev([], acc) := acc
+  def rev([x | xs], acc) := rev(xs, [x | acc])
+
+  def len(xs Vec(T)) Int53 forall T
+  def len([]) := 0
+  def len([_ | rest]) := 1 + len(rest)
+
+  def is_empty(xs Vec(T)) Bool forall T
+  def is_empty([]) := true
+  def is_empty(_) := false
+
+  # `v0, v1, …, v(n-1)` — the dispatch variable names for an arity-`n` method.
+  def gen_vars(i Int53, n Int53) Vec(String)
+  def gen_vars(i, n) := if i >= n do [] else [Prim.str_concat("v", Prim.int_to_string(i)) | gen_vars(i + 1, n)] end
+
+  def join_commas(xs Vec(String)) String
+  def join_commas([]) := ""
+  def join_commas([x]) := x
+  def join_commas([x | rest]) := Prim.str_concat(x, Prim.str_concat(", ", join_commas(rest)))
+
+  # the receiver type-test guard over `v0` (port of guard_for!). Primitives only;
+  # sum/struct dispatch (tag/struct guards needing the type registry) is the tail.
+  def guard_for(ty String) String
+  def guard_for("Bool") := "is_boolean(v0)"
+  def guard_for("String") := "is_binary(v0)"
+  def guard_for("Char") := "is_integer(v0)"
+  def guard_for("Int") := "is_integer(v0)"
+  def guard_for("Int8") := "is_integer(v0)"
+  def guard_for("Int16") := "is_integer(v0)"
+  def guard_for("Int32") := "is_integer(v0)"
+  def guard_for("Int53") := "is_integer(v0)"
+  def guard_for("Int64") := "is_integer(v0)"
+  def guard_for("Int128") := "is_integer(v0)"
+  def guard_for("UInt8") := "is_integer(v0)"
+  def guard_for("UInt16") := "is_integer(v0)"
+  def guard_for("UInt32") := "is_integer(v0)"
+  def guard_for("UInt64") := "is_integer(v0)"
+  def guard_for("UInt128") := "is_integer(v0)"
+  def guard_for("Float") := "is_float(v0)"
+  def guard_for("Float32") := "is_float(v0)"
+  def guard_for("Float64") := "is_float(v0)"
+  def guard_for(_) := "is_integer(v0)"
+
+  # `impl_<proto>_<type>_<method>` (lowercased proto/type), port of `mangle`.
+  def mangle(proto String, ty String, method String) String := Prim.str_concat("impl_", Prim.str_concat(downcase(proto), Prim.str_concat("_", Prim.str_concat(downcase(ty), Prim.str_concat("_", method)))))
+
+  def downcase(s String) String := concat_strs(map_lower(Prim.str_chars(s)))
+
+  def concat_strs(xs Vec(String)) String
+  def concat_strs([]) := ""
+  def concat_strs([x | rest]) := Prim.str_concat(x, concat_strs(rest))
+
+  def map_lower(cs Vec(Char)) Vec(String)
+  def map_lower([]) := []
+  def map_lower([c | rest]) := [lower_char_str(c) | map_lower(rest)]
+
+  # there is no int->char prim, so map each upper-case letter to its lower-case
+  # STRING by literal; any other char renders as itself.
+  def lower_char_str(c Char) String
+  def lower_char_str('A') := "a"
+  def lower_char_str('B') := "b"
+  def lower_char_str('C') := "c"
+  def lower_char_str('D') := "d"
+  def lower_char_str('E') := "e"
+  def lower_char_str('F') := "f"
+  def lower_char_str('G') := "g"
+  def lower_char_str('H') := "h"
+  def lower_char_str('I') := "i"
+  def lower_char_str('J') := "j"
+  def lower_char_str('K') := "k"
+  def lower_char_str('L') := "l"
+  def lower_char_str('M') := "m"
+  def lower_char_str('N') := "n"
+  def lower_char_str('O') := "o"
+  def lower_char_str('P') := "p"
+  def lower_char_str('Q') := "q"
+  def lower_char_str('R') := "r"
+  def lower_char_str('S') := "s"
+  def lower_char_str('T') := "t"
+  def lower_char_str('U') := "u"
+  def lower_char_str('V') := "v"
+  def lower_char_str('W') := "w"
+  def lower_char_str('X') := "x"
+  def lower_char_str('Y') := "y"
+  def lower_char_str('Z') := "z"
+  def lower_char_str(c) := Prim.str_from_chars([c])
+
+  # the dispatcher signature: keep each protocol param's TYPE, rename to `v0, v1, …`.
+  def dispatcher_params(params Vec(String), vars Vec(String)) String := join_commas(zip_disp(params, vars))
+
+  def zip_disp(params Vec(String), vars Vec(String)) Vec(String)
+  def zip_disp([], _) := []
+  def zip_disp(_, []) := []
+  def zip_disp([p | ps], [v | vs]) := [Prim.str_concat(v, Prim.str_concat(" ", param_type(p))) | zip_disp(ps, vs)]
+
+  # the impl-method parameters: zip the impl's parameter NAMES with the protocol's
+  # parameter TYPES (Self already substituted), as `name type`.
+  def zip_params(names Vec(String), types Vec(String)) String := join_commas(zip_nt(names, types))
+
+  def zip_nt(names Vec(String), types Vec(String)) Vec(String)
+  def zip_nt([], _) := []
+  def zip_nt(_, []) := []
+  def zip_nt([n | ns], [t | ts]) := [Prim.str_concat(n, Prim.str_concat(" ", t)) | zip_nt(ns, ts)]
+
+  def map_param_type(ps Vec(String)) Vec(String)
+  def map_param_type([]) := []
+  def map_param_type([p | rest]) := [param_type(p) | map_param_type(rest)]
+
+  # the TYPE of a `name Type` (or bare `Type`) parameter — the last space token.
+  def param_type(p String) String := last_token(split_spaces(p))
+
+  def last_token(xs Vec(String)) String
+  def last_token([]) := ""
+  def last_token([x]) := x
+  def last_token([_ | rest]) := last_token(rest)
+
+  # whole-word `Self` -> the impl type. Embedded `Self` (e.g. `Vec(Self)`) is the tail.
+  def subst_self(t String, ty String) String := if t == "Self" do ty else t end
+
+  def subst_self_all(ts Vec(String), ty String) Vec(String)
+  def subst_self_all([], _) := []
+  def subst_self_all([t | rest], ty) := [subst_self(t, ty) | subst_self_all(rest, ty)]
+
+  # split a parameter string on TOP-LEVEL commas (a comma inside `(…)` is part of one
+  # parameter's parametric type); each piece trimmed, empties dropped — port of
+  # Rian.TypeStr.split_top_commas.
+  def split_commas(s String) Vec(String) := reject_empty(parts_to_str(sc(Prim.str_chars(s), 0, [], [])))
+
+  def sc(cs Vec(Char), depth Int53, cur Vec(Char), parts Vec(Vec(Char))) Vec(Vec(Char))
+  def sc([], _, cur, parts) := rev([rev(cur, []) | parts], [])
+  def sc([c | rest], depth, cur, parts)
+    if (c == ',') and (depth == 0) do
+      sc(rest, 0, [], [rev(cur, []) | parts])
+    else
+      sc(rest, next_depth(c, depth), [c | cur], parts)
+    end
+  end
+
+  def next_depth(c Char, d Int53) Int53
+  def next_depth('(', d) := d + 1
+  def next_depth(')', d) := d - 1
+  def next_depth(_, d) := d
+
+  # split on (runs of) spaces — empties dropped, so leading/trailing/multiple spaces
+  # collapse (matching `String.split(~r/\s+/)` for the space case).
+  def split_spaces(s String) Vec(String) := reject_empty(parts_to_str(sp(Prim.str_chars(s), [], [])))
+
+  def sp(cs Vec(Char), cur Vec(Char), parts Vec(Vec(Char))) Vec(Vec(Char))
+  def sp([], cur, parts) := rev([rev(cur, []) | parts], [])
+  def sp([' ' | rest], cur, parts) := sp(rest, [], [rev(cur, []) | parts])
+  def sp([c | rest], cur, parts) := sp(rest, [c | cur], parts)
+
+  def parts_to_str(ps Vec(Vec(Char))) Vec(String)
+  def parts_to_str([]) := []
+  def parts_to_str([p | rest]) := [Prim.str_from_chars(p) | parts_to_str(rest)]
+
+  def reject_empty(xs Vec(String)) Vec(String)
+  def reject_empty([]) := []
+  def reject_empty([x | rest]) := if x == "" do reject_empty(rest) else [x | reject_empty(rest)] end
 
   # parse a standalone EXPRESSION from a token list (the driver uses this to inline
   # an `@external(:ex, "host expr")` body, ADR-0068). Trailing tokens are ignored.

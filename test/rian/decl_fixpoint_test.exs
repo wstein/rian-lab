@@ -207,6 +207,23 @@ defmodule Rian.DeclFixpointTest do
     [{:proto, %{name: name, methods: ms, assoc: []}} | group(rest)]
   end
 
+  # an `impl` yields the `impls` membership pair {proto, type} and the structured
+  # `impl_decls` record (the guard sentinel "" maps back to a nil guard). The
+  # generated dispatcher/impl FUNCTIONS are produced separately by the front-end's
+  # ported `expand_protocols` (see gen_funcs/2), mirroring Rian.Protocol.expand.
+  defp group([{:d_impl, proto, type, methods} | rest]) do
+    ms =
+      Enum.map(methods, fn {:im, n, p, b, g} ->
+        %{name: n, params: p, body: b, guard: nil_if_empty(g)}
+      end)
+
+    [
+      {:impl_pair, {proto, type}},
+      {:impl_decl, %{proto: proto, type: type, methods: ms, assoc: %{}}}
+      | group(rest)
+    ]
+  end
+
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
@@ -280,9 +297,41 @@ defmodule Rian.DeclFixpointTest do
       mods: Enum.filter(ir, &match?(%Mod{}, &1)),
       ranges: Enum.filter(ir, &match?(%Rian.IR.Range{}, &1)),
       opaques: Enum.filter(ir, &match?(%Rian.IR.Opaque{}, &1)),
-      protocols: for({:proto, m} <- ir, do: m)
+      protocols: for({:proto, m} <- ir, do: m),
+      impls: for({:impl_pair, p} <- ir, do: p),
+      impl_decls: for({:impl_decl, m} <- ir, do: m)
     }
   end
+
+  # the generated protocol/impl functions: run the front-end's ported expander
+  # (`expand_protocols`), convert each GenFunc tuple to the raw def map, then reuse
+  # `Rian.Decl.build_func` (name-grouped) to turn them into %Func{} — the same reuse
+  # boundary as Rian.Beam.compile_ir. The engine (mangle/guard/param assembly) is the
+  # PORT; build_func is the shared raw-map→Func step.
+  defp gen_funcs(fe, decls) do
+    fe.expand_protocols(decls)
+    |> Enum.map(&gf_to_raw/1)
+    |> Enum.chunk_by(& &1.name)
+    |> Enum.map(&Rian.Decl.build_func/1)
+  end
+
+  defp gf_to_raw({:gf, name, params, ret, guard, body, pub, tvars, dispatch, synthetic}) do
+    %{
+      name: name,
+      params: params,
+      ret: nil_if_empty(ret),
+      guard: nil_if_empty(guard),
+      body: nil_if_empty(body),
+      pub: pub,
+      tvars: tvars,
+      synthetic: synthetic,
+      dispatch: String.to_atom(dispatch),
+      externals: %{}
+    }
+  end
+
+  defp nil_if_empty(""), do: nil
+  defp nil_if_empty(s), do: s
 
   # clause bodies/guards differ in form (Decl.parse keeps source strings; the
   # front-end parsed ASTs) — normalize both through `Pratt.parse_body`/`parse` to
@@ -586,11 +635,25 @@ defmodule Rian.DeclFixpointTest do
   # opaques/consts/uses/…) means it cannot be matching.
   defp port_parity?(fe, src) do
     ref = Decl.parse(src)
-    prog = front_decls(fe, src) |> to_prog()
+    decls = front_decls(fe, src)
+    prog = to_prog(decls)
+    # the generated dispatcher/impl functions (the ported protocol/impl desugar)
+    # join the user funcs, exactly as Rian.Decl appends protocol_defs to user_defs.
+    funcs = prog.funcs ++ gen_funcs(fe, decls)
 
     ref_unportable? =
       ref
-      |> Map.drop([:types, :structs, :funcs, :mods, :ranges, :opaques, :protocols])
+      |> Map.drop([
+        :types,
+        :structs,
+        :funcs,
+        :mods,
+        :ranges,
+        :opaques,
+        :protocols,
+        :impls,
+        :impl_decls
+      ])
       |> Map.values()
       |> Enum.any?(fn v -> v not in [[], nil, %{}] end)
 
@@ -600,7 +663,9 @@ defmodule Rian.DeclFixpointTest do
       prog.ranges == ref.ranges and
       prog.opaques == ref.opaques and
       prog.protocols == ref.protocols and
-      Enum.map(prog.funcs, &norm_func/1) == Enum.map(ref.funcs, &norm_func/1) and
+      prog.impls == ref.impls and
+      prog.impl_decls == ref.impl_decls and
+      Enum.map(funcs, &norm_func/1) == Enum.map(ref.funcs, &norm_func/1) and
       Enum.map(prog.mods, &norm_mod/1) == Enum.map(ref.mods, &norm_mod/1)
   rescue
     _ -> false
@@ -634,7 +699,7 @@ defmodule Rian.DeclFixpointTest do
     {"protocol", "protocol Show do\n  def show(x Int64) String\nend", true},
     {"impl",
      "protocol Show do\n  def show(x Int64) String\nend\n" <>
-       "impl Show for Int64 do\n  def show(n) := \"an int\"\nend", false}
+       "impl Show for Int64 do\n  def show(n) := \"an int\"\nend", true}
   ]
 
   describe "self-host declaration completeness ledger (vs Rian.Decl, the oracle)" do

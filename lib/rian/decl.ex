@@ -1229,7 +1229,7 @@ defmodule Rian.Decl do
 
   # multi-clause: bodiless signature followed by >=1 pattern clauses. `pub` (if
   # any) sits on the signature; the clause defs that follow are not re-marked.
-  defp build_func([%{body: nil} = sig | [_ | _] = clauses]) do
+  def build_func([%{body: nil} = sig | [_ | _] = clauses]) do
     params = parse_params(sig.params)
 
     %Func{
@@ -1248,7 +1248,7 @@ defmodule Rian.Decl do
   end
 
   # single typed clause — each parameter binds itself as the clause pattern
-  defp build_func([%{body: body} = d]) when not is_nil(body) do
+  def build_func([%{body: body} = d]) when not is_nil(body) do
     params = parse_params(d.params)
 
     %Func{
@@ -1269,7 +1269,7 @@ defmodule Rian.Decl do
   # an `@external` function (ADR-0068): a bodiless signature with one or more
   # per-target host bodies and NO portable clauses. The signature is checked once;
   # `Rian.Reach` reads `externals` for the target set; each emitter lowers its spec.
-  defp build_func([%{body: nil, externals: ext} = sig]) when map_size(ext) > 0 do
+  def build_func([%{body: nil, externals: ext} = sig]) when map_size(ext) > 0 do
     %Func{
       name: sig.name,
       params: parse_params(sig.params),
@@ -1283,10 +1283,10 @@ defmodule Rian.Decl do
     }
   end
 
-  defp build_func([%{body: nil, name: n}]),
+  def build_func([%{body: nil, name: n}]),
     do: raise(Error, "function `#{n}` has a signature but no clauses")
 
-  defp build_func(group),
+  def build_func(group),
     do: raise(Error, "cannot group clauses of `#{hd(group).name}`")
 
   defp clause(%{body: nil, name: n}, _arity), do: raise(Error, "clause of `#{n}` has no body")
