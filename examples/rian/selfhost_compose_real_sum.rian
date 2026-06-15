@@ -275,6 +275,12 @@ mod SelfhostComposeRealSum do
   # reuses lower_pat, its single-expr body becomes a one-statement Block, and a
   # `when` guard becomes GSome (CArm -> GNone).
   def lower_surface({:"case", scrut, arms}) := CCase(lower_surface(scrut), lower_arms(arms))
+  # selfhost_decl's `With(clauses, body, els)` desugars to nested `case` HERE, at the
+  # AST -> Core boundary (ADR-0039) — the parser kept the construct, this lowering
+  # turns it into the Core the backend already understands. Each clause `C <- E`
+  # becomes `case E do C -> <rest> ; _with -> <else over _with> end`; a non-matching
+  # value falls to the `else` arms, or (with no `else`) is the `with`'s result.
+  def lower_surface({:"with", clauses, body, els}) := with_case(clauses, body, els)
   # list construction in a body (`[x | acc]`, `[a, b]`) — a nil/cons chain -> CList,
   # mirroring lower_pat's cons_pat. A non-nil tail becomes TTail (an open list).
   def lower_surface(:nil_e) := CList([], TClose)
@@ -296,6 +302,18 @@ mod SelfhostComposeRealSum do
   def lower_arm(a) Arm
   def lower_arm({:c_arm, pat, body}) := Arm(lower_pat(pat), GNone, Block([SExpr(lower_surface(body))]))
   def lower_arm({:c_arm_g, pat, g, body}) := Arm(lower_pat(pat), GSome(lower_surface(g)), Block([SExpr(lower_surface(body))]))
+
+  # the `with` desugar (ADR-0039). When the clauses are exhausted, the result is the
+  # `with` body. Each clause nests a `case` over its expression: the pattern arm
+  # continues with the remaining clauses; a catch-all `_with` arm runs the `else`
+  # arms (case-style) — or, with no `else`, returns the non-matching value.
+  def with_case(cs, body, els) Core
+  def with_case([], body, _els) := lower_surface(body)
+  def with_case([{:wc, pat, src} | rest], body, els) := CCase(lower_surface(src), [Arm(lower_pat(pat), GNone, Block([SExpr(with_case(rest, body, els))])), Arm(PVar("_with"), GNone, Block([SExpr(else_lower(els))]))])
+
+  def else_lower(els) Core
+  def else_lower([]) := CId("_with")
+  def else_lower(els) := CCase(CId("_with"), lower_arms(els))
 
   def callee_name(c) String
   # a `Prim.X(args)` dot-call normalizes to the canonical `__prim_X` intrinsic name

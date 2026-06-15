@@ -12,8 +12,6 @@ defmodule Rian.SelfhostBuildTest do
   #
   # Known gaps (the backlog — programs `build` cannot yet compile, so they are not
   # asserted here; add them as they land):
-  #   * `with` — the driver's `lower_surface` has no `with` clause (desugars to
-  #     nested `case`, ADR-0039).  [next]
   #   * lambdas / function captures — selfhost_beam emits no fun forms yet.
   #   * maps — no map-literal lowering in the driver / backend.
 
@@ -63,7 +61,22 @@ defmodule Rian.SelfhostBuildTest do
     {"alias", "alias N := Int53\ndef f(x N) N := x", :f, [5], 5},
     {"struct construct + field",
      "struct P(x Int53)\ndef mk(n Int53) Int53\n  p := P(x: n)\n  p.x\nend", :mk, [5], 5},
-    {"tuple", "def pr(a Int53, b Int53) Tuple := {a, b}", :pr, [1, 2], {1, 2}}
+    {"tuple", "def pr(a Int53, b Int53) Tuple := {a, b}", :pr, [1, 2], {1, 2}},
+    # `with` (ADR-0039): the parser keeps it as a node, the driver's lowering
+    # desugars it to nested `case`. A clause that matches continues; a non-match
+    # falls to the `else` arms, or (no `else`) returns the value.
+    {"with (clause matches -> body)",
+     "def f(p Tuple) Int53 := with {:ok, v} <- p do v else _ -> 0 end", :f, [{:ok, 5}], 5},
+    {"with (clause fails -> else)",
+     "def f(p Tuple) Int53 := with {:ok, v} <- p do v else _ -> 0 end", :f, [{:error, :bad}], 0},
+    {"with (no else -> passthrough)", "def f(p Tuple) Int53 := with {:ok, v} <- p do v end", :f,
+     [{:error, :bad}], {:error, :bad}},
+    {"with (multi-clause, all match)",
+     "def f(p Tuple, q Tuple) Int53 := with {:ok, a} <- p, {:ok, b} <- q do a + b else _ -> 0 end",
+     :f, [{:ok, 3}, {:ok, 4}], 7},
+    {"with (multi-clause, 2nd fails -> else)",
+     "def f(p Tuple, q Tuple) Int53 := with {:ok, a} <- p, {:ok, b} <- q do a + b else _ -> 0 end",
+     :f, [{:ok, 3}, {:error, :x}], 0}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do
