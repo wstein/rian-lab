@@ -85,6 +85,7 @@ mod SelfhostDecl do
     | DClauseG(String, Vec(Pat), Expr, Expr)
     | DMod(String, Vec(Decl))
     | DExtern(String, String)
+    | DDoc(String)
     | DErr
 
   # result pairs (a value + the unconsumed tokens)
@@ -140,6 +141,9 @@ mod SelfhostDecl do
   # projection folds into the next func's `externals` map (multiple stack). Modelled
   # as its own boundary token (`TAnnot`) so a preceding bodiless sig terminates here.
   pub def parse_program([TAnnot("external"), TLP, TOp(":"), TId(tgt), TComma, TStr(code), TRP | rest]) := [DExtern(tgt, code) | parse_program(rest)]
+  # `@doc "text"` — a documentation annotation on the FOLLOWING declaration; emits a
+  # DDoc that the projection folds into the next function's `doc` (Rian.Decl).
+  pub def parse_program([TAnnot("doc"), TStr(text) | rest]) := [DDoc(text) | parse_program(rest)]
   pub def parse_program([_ | rest]) := parse_program(rest)
 
   # parse a standalone EXPRESSION from a token list (the driver uses this to inline

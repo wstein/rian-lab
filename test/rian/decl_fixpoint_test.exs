@@ -184,6 +184,14 @@ defmodule Rian.DeclFixpointTest do
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
+  # a `@doc "text"` attaches to the following function as its `doc` (Rian.Decl).
+  defp group([{:d_doc, text} | rest]) do
+    case group(rest) do
+      [%Func{} = f | more] -> [%{f | doc: text} | more]
+      other -> other
+    end
+  end
+
   # a run of `@external` annotations attaches to the following bodiless `def` as the
   # func's `externals` map (clauses stay empty — the body is host-provided), matching
   # Rian.Decl.attach_external.
@@ -563,7 +571,7 @@ defmodule Rian.DeclFixpointTest do
     {"mod", "mod M do\n  def f() Int64 := 1\nend", true},
     {"@external", ~S|@external(:ex, ":os.system_time()") def now() Int64|, true},
     # --- not yet ported: the oracle handles these; the port skips / errors / drops a modifier ---
-    {"@doc", ~s|@doc "d"\ndef f() Int64 := 1|, false},
+    {"@doc", ~s|@doc "d"\ndef f() Int64 := 1|, true},
     {"@test", "@test def t() Bool := true", false},
     {"@targets", "@targets(ex, js)\nmod M do\n  def f() Int64 := 1\nend", false},
     {"pub type", "pub type C := A | B", false},
