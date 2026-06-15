@@ -341,7 +341,7 @@ mod SelfhostDecl do
   def lookup_subst([], name) := Id(name)
   def lookup_subst([SB(p, a) | rest], name) := if p == name do a else lookup_subst(rest, name) end
 
-  def subst_e(env Vec(Subst), e Expr) Expr
+  pub def subst_e(env Vec(Subst), e Expr) Expr
   def subst_e(env, Id(name)) := lookup_subst(env, name)
   def subst_e(env, Bin(op, l, r)) := Bin(op, subst_e(env, l), subst_e(env, r))
   def subst_e(env, Unary(op, x)) := Unary(op, subst_e(env, x))

@@ -135,7 +135,7 @@ mod SelfhostComposeRealSum do
   # silently emitting it. Requires SelfhostExhaust to be loaded.
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
   pub def compile_module(src, modname)
-    decls := SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src))
+    decls := inline_consts(SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src)))
     grps := group(normalize(decls))
     case first_bad(gate_env(decls), grps) do
       "" -> emit_checked(decls, grps, modname)
@@ -208,6 +208,36 @@ mod SelfhostComposeRealSum do
   # parse an `@external` host-code string into a surface expression, via the same
   # verified lexer + the decl parser's exported expression entry point.
   def parse_host(code String) Tuple := SelfhostDecl.parse_expr(SelfhostLexerV2.tokenize(code))
+
+  # module constants — `const K Type := <literal>` (DConst). A const is a literal-
+  # valued compile-time constant, so the build INLINES references rather than
+  # emitting an accessor: `K` is capitalized and would otherwise lower to a nullary-
+  # ctor atom, so we collect the consts into a substitution env and rewrite every
+  # body's references via the decl parser's exhaustive `subst_e`. An empty env
+  # short-circuits, leaving const-free programs byte-identical (v1==v2 safe).
+  def inline_consts(ds Vec(Tuple)) Vec(Tuple) := apply_consts(const_env(ds), ds)
+
+  def apply_consts(Vec(Subst), Vec(Tuple)) Vec(Tuple)
+  def apply_consts([], ds) := ds
+  def apply_consts(env, ds) := subst_decls(env, ds)
+
+  def const_env(ds Vec(Tuple)) Vec(Subst)
+  def const_env([]) := []
+  def const_env([{:d_const, name, _ty, v} | rest]) := [SB(name, Num(v)) | const_env(rest)]
+  def const_env([{:d_mod, _, inner} | rest]) := cat_subst(const_env(inner), const_env(rest))
+  def const_env([_ | rest]) := const_env(rest)
+
+  def cat_subst(Vec(Subst), Vec(Subst)) Vec(Subst)
+  def cat_subst([], ys) := ys
+  def cat_subst([x | xs], ys) := [x | cat_subst(xs, ys)]
+
+  def subst_decls(env Vec(Subst), ds Vec(Tuple)) Vec(Tuple)
+  def subst_decls(_, []) := []
+  def subst_decls(env, [{:d_clause, name, pats, body} | rest]) := [{:d_clause, name, pats, SelfhostDecl.subst_e(env, body)} | subst_decls(env, rest)]
+  def subst_decls(env, [{:d_clause_g, name, pats, g, body} | rest]) := [{:d_clause_g, name, pats, SelfhostDecl.subst_e(env, g), SelfhostDecl.subst_e(env, body)} | subst_decls(env, rest)]
+  def subst_decls(env, [{:d_func, a, name, params, b, c, body} | rest]) := [{:d_func, a, name, params, b, c, SelfhostDecl.subst_e(env, body)} | subst_decls(env, rest)]
+  def subst_decls(env, [{:d_mod, n, inner} | rest]) := [{:d_mod, n, subst_decls(env, inner)} | subst_decls(env, rest)]
+  def subst_decls(env, [d | rest]) := [d | subst_decls(env, rest)]
 
   def cat(Vec(NClause), Vec(NClause)) Vec(NClause)
   def cat([], ys) := ys

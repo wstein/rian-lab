@@ -89,7 +89,14 @@ defmodule Rian.SelfhostBuildTest do
     # by inspecting it and parses the float with correct rounding (Prim.str_to_float),
     # so the emitted `float()` equals the source literal (no silent int-mangling).
     {"float literal", "def pi() Float64 := 3.14", :pi, [], 3.14},
-    {"float through arithmetic", "def bump(x Float64) Float64 := x + 1.5", :bump, [3.0], 4.5}
+    {"float through arithmetic", "def bump(x Float64) Float64 := x + 1.5", :bump, [3.0], 4.5},
+    # module constant (DConst): a literal-valued `const` is inlined at its references
+    # (a capitalized `K` would otherwise lower to a nullary-ctor atom `:k`).
+    {"const reference", "const K Int53 := 42\ndef f() Int53 := K", :f, [], 42},
+    {"const in arithmetic", "const BASE Int53 := 10\ndef g(n Int53) Int53 := n * BASE + 1", :g,
+     [4], 41},
+    {"float const", "const PI Float64 := 3.14\ndef area(r Float64) Float64 := PI * r * r", :area,
+     [2.0], 12.56}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do
