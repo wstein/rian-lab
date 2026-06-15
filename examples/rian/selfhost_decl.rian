@@ -91,6 +91,8 @@ mod SelfhostDecl do
     | DPubType(String, Vec(Variant))
     | DUse(String)
     | DConst(String, String, String)
+    | DRange(String, String, Int53, Int53)
+    | DOpaque(String, String)
     | DErr
 
   # result pairs (a value + the unconsumed tokens)
@@ -144,6 +146,12 @@ mod SelfhostDecl do
   # `const NAME Type := <literal>` — a module constant (Rian.IR.Const; value is the
   # literal's source text). The plain single-literal form; a complex value expr is tail.
   pub def parse_program([TKw("const"), TId(name), TId(ty), TOp(":="), TNum(v) | rest]) := [DConst(name, ty, v) | parse_program(rest)]
+  # `range Name := lo .. hi` — a bounded integer subrange (Rian.IR.Range; the int form
+  # has base `Int64`). The projection collects it into the top-level `ranges`.
+  pub def parse_program([TKw("range"), TId(name), TOp(":="), TNum(lo), TOp(".."), TNum(hi) | rest]) := [DRange(name, "Int64", str_to_int(lo), str_to_int(hi)) | parse_program(rest)]
+  # `opaque Name := Base` — a nominal opaque wrapper (Rian.IR.Opaque); collected into
+  # the top-level `opaques`.
+  pub def parse_program([TKw("opaque"), TId(name), TOp(":="), TId(base) | rest]) := [DOpaque(name, base) | parse_program(rest)]
   pub def parse_program([TKw("struct") | rest])
     case parse_struct(rest) do
       DR(d, rest2) -> [d | parse_program(rest2)]

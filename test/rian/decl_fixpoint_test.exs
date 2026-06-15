@@ -190,6 +190,14 @@ defmodule Rian.DeclFixpointTest do
   # a `const NAME Type := lit` becomes a Rian.IR.Const (value is the literal's text).
   defp group([{:d_const, name, ty, val} | rest]),
     do: [%Rian.IR.Const{name: name, type: ty, value: val, pub?: false, doc: nil} | group(rest)]
+
+  # a `range Name := lo .. hi` becomes a Rian.IR.Range (top-level), `opaque Name :=
+  # Base` a Rian.IR.Opaque — matching Rian.Decl.
+  defp group([{:d_range, name, base, lo, hi} | rest]),
+    do: [%Rian.IR.Range{name: name, base: base, lo: lo, hi: hi, pub?: false, doc: nil} | group(rest)]
+
+  defp group([{:d_opaque, name, base} | rest]),
+    do: [%Rian.IR.Opaque{name: name, base: base, pub?: false, doc: nil, ops: [], casts: []} | group(rest)]
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
@@ -261,7 +269,8 @@ defmodule Rian.DeclFixpointTest do
       funcs: Enum.filter(ir, &match?(%Func{}, &1)),
       structs: Enum.filter(ir, &match?(%Struct{}, &1)),
       mods: Enum.filter(ir, &match?(%Mod{}, &1)),
-      ranges: []
+      ranges: Enum.filter(ir, &match?(%Rian.IR.Range{}, &1)),
+      opaques: Enum.filter(ir, &match?(%Rian.IR.Opaque{}, &1))
     }
   end
 
@@ -571,13 +580,15 @@ defmodule Rian.DeclFixpointTest do
 
     ref_unportable? =
       ref
-      |> Map.drop([:types, :structs, :funcs, :mods])
+      |> Map.drop([:types, :structs, :funcs, :mods, :ranges, :opaques])
       |> Map.values()
       |> Enum.any?(fn v -> v not in [[], nil, %{}] end)
 
     not ref_unportable? and
       prog.types == ref.types and
       prog.structs == ref.structs and
+      prog.ranges == ref.ranges and
+      prog.opaques == ref.opaques and
       Enum.map(prog.funcs, &norm_func/1) == Enum.map(ref.funcs, &norm_func/1) and
       Enum.map(prog.mods, &norm_mod/1) == Enum.map(ref.mods, &norm_mod/1)
   rescue
@@ -600,8 +611,8 @@ defmodule Rian.DeclFixpointTest do
     {"@test", "@test def t() Bool := true", true},
     {"@targets", "@targets(ex, js)\nmod M do\n  def f() Int64 := 1\nend", true},
     {"pub type", "pub type C := A | B", true},
-    {"range", "range Digit := 0 .. 9", false},
-    {"opaque", "opaque Id := Int64", false},
+    {"range", "range Digit := 0 .. 9", true},
+    {"opaque", "opaque Id := Int64", true},
     # tested IN USE: an alias only has an observable effect when a later signature
     # uses it (the oracle substitutes `Id`→`Int64`; the port, skipping the alias,
     # leaves `Id`), so the parity probe is non-vacuous.
