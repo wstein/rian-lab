@@ -794,21 +794,48 @@ defmodule Rian.Lower do
   defp proto_method_traits(protocols),
     do: for(p <- protocols, m <- p.methods, into: %{}, do: {m.name, p.name})
 
-  defp rust_trait(%{name: name, methods: methods}) do
+  defp rust_trait(%{name: name, methods: methods} = p) do
+    # associated types (ADR-0074 Stage 3): `type Elem` declares `type Elem;` in the
+    # trait, and each projection in a method signature becomes `Self::Elem`.
+    assoc = Map.get(p, :assoc, [])
+    type_members = Enum.map_join(assoc, "", &"    type #{&1};\n")
+
     sigs =
       Enum.map_join(methods, "\n", fn m ->
-        "    fn #{m.name}(#{trait_params(m.params, "Self")}) -> #{rust_ret(self_subst(m.ret, "Self"))};"
+        sig =
+          "    fn #{m.name}(#{trait_params(m.params, "Self")}) -> #{rust_ret(self_subst(m.ret, "Self"))};"
+
+        assoc_proj(sig, assoc)
       end)
 
-    "trait Rian#{name} {\n#{sigs}\n}"
+    "trait Rian#{name} {\n#{type_members}#{sigs}\n}"
   end
 
-  defp rust_impl(%{proto: proto, type: type, methods: methods}, protocols, c) do
+  # project each associated-type name to its `Self::Name` use inside a trait sig.
+  defp assoc_proj(s, assoc),
+    do: Enum.reduce(assoc, s, &Regex.replace(~r/\b#{&1}\b/, &2, "Self::#{&1}"))
+
+  # substitute each associated-type name with its concrete Rust type (the impl side):
+  # `%{"Elem" => "i64"}` turns `Vec<Elem>` into `Vec<i64>`.
+  defp subst_assoc(t, assoc_rust),
+    do: Enum.reduce(assoc_rust, t, fn {a, r}, acc -> Regex.replace(~r/\b#{a}\b/, acc, r) end)
+
+  defp rust_impl(%{proto: proto, type: type, methods: methods} = impl, protocols, c) do
+    # associated-type bindings (ADR-0074 Stage 3): `type Elem := Int53` emits
+    # `type Elem = i64;` in the impl, and every `Elem` in the protocol's method sigs is
+    # substituted to the concrete Rust type for this impl (so a `-> Vec<Elem>` becomes
+    # `-> Vec<i64>` and the body's coerce_ret sees a real type).
+    assoc_rust = Map.new(Map.get(impl, :assoc, %{}), fn {a, ty} -> {a, prim_rust(ty)} end)
+    type_members = Enum.map_join(assoc_rust, "", fn {a, r} -> "    type #{a} = #{r};\n" end)
+
     sig_for =
       protocols
       |> Enum.find(%{methods: []}, &(&1.name == proto))
       |> Map.fetch!(:methods)
-      |> Map.new(&{&1.name, &1})
+      |> Map.new(fn m ->
+        {m.name,
+         %{m | ret: subst_assoc(m.ret, assoc_rust), params: subst_assoc(m.params, assoc_rust)}}
+      end)
 
     rust_type = rust_proto_type!(type)
     copy_recv? = Rian.Capability.copy?(type)
@@ -820,7 +847,7 @@ defmodule Rian.Lower do
         &rust_impl_method(&1, sig_for[&1.name], rust_type, c, copy_recv?)
       )
 
-    "impl Rian#{proto} for #{rust_type} {\n#{bodies}\n}"
+    "impl Rian#{proto} for #{rust_type} {\n#{type_members}#{bodies}\n}"
   end
 
   # the Rust spelling of an impl target type: a primitive maps via `Capability`,

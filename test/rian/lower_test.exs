@@ -370,6 +370,70 @@ defmodule Rian.LowerTest do
       assert rust =~ "fn eq(&self, b: &Box) -> bool"
       assert rust =~ "fn tag(&self, n: i64) -> i64"
     end
+
+    test "an associated type lowers to `type Elem;` (trait, `Self::Elem`) + `type Elem = i64;` (impl) — ADR-0074" do
+      p =
+        Decl.parse("""
+        protocol Foldable do
+          type Elem
+          def first(self Self) Elem
+        end
+        type Bag := Bag(items Vec(Int53))
+        impl Foldable for Bag do
+          type Elem := Int53
+          def first(b) := case b do Bag(xs) -> 0 end
+        end
+        """)
+
+      rust = Lower.rust_protocols(p.protocols, p.impl_decls, p.types, p.structs)
+      # trait: declares the associated type and projects it as `Self::Elem`
+      assert rust =~ "trait RianFoldable {\n    type Elem;"
+      assert rust =~ "fn first(&self) -> Self::Elem;"
+      # impl: binds the associated type to the concrete Rust type, ret resolved
+      assert rust =~ "impl RianFoldable for Bag {\n    type Elem = i64;"
+      assert rust =~ "fn first(&self) -> i64 {"
+    end
+
+    @tag :rust
+    test "the emitted associated-type trait + impl compiles and runs under rustc (ADR-0074)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          p =
+            Decl.parse("""
+            protocol Foldable do
+              type Elem
+              def first(self Self) Elem
+            end
+            type Bag := Bag(items Vec(Int53))
+            impl Foldable for Bag do
+              type Elem := Int53
+              def first(b) := case b do Bag(xs) -> 7 end
+            end
+            """)
+
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_assoc_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            Lower.rust_program(p) <>
+              "\nfn main() { let b = Bag::Bag { items: vec![1,2,3] }; " <>
+              "assert_eq!(b.first(), 7); println!(\"ok\"); }\n"
+          )
+
+          {_, 0} =
+            System.cmd(rustc, ["--edition", "2021", src, "-o", bin], stderr_to_stdout: true)
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "ok"
+      end
+    end
   end
 
   describe "rust_program (whole-program assembly)" do
