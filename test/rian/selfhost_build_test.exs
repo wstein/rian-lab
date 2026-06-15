@@ -81,7 +81,12 @@ defmodule Rian.SelfhostBuildTest do
     # (atom keys, no `__struct__` tag). Values may be literals or expressions.
     {"map literal", "def m() Map := %{a: 1, b: 2}", :m, [], %{a: 1, b: 2}},
     {"map with expression values", "def wrap(n Int53) Map := %{ok: n, double: n * 2}", :wrap, [7],
-     %{ok: 7, double: 14}}
+     %{ok: 7, double: 14}},
+    # float literal: the lexeme carries the `.`; selfhost_beam splits Int53/Float64
+    # by inspecting it and parses the float with correct rounding (Prim.str_to_float),
+    # so the emitted `float()` equals the source literal (no silent int-mangling).
+    {"float literal", "def pi() Float64 := 3.14", :pi, [], 3.14},
+    {"float through arithmetic", "def bump(x Float64) Float64 := x + 1.5", :bump, [3.0], 4.5}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do

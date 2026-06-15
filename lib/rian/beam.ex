@@ -604,6 +604,12 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_str_to_atom"}, args: [s_]}, s),
     do: remote_call(:"Elixir.String", "to_atom", [s_], s)
 
+  # string → float — correctly-rounded native parse (the self-host backend needs it
+  # to turn a `Float64` literal lexeme into a `float()` form; pure-Rian decimal
+  # arithmetic could not guarantee the same last-ULP rounding as the literal).
+  defp expr_form(%ECall{fun: %EId{name: "__prim_str_to_float"}, args: [s_]}, s),
+    do: remote_call(:erlang, "binary_to_float", [s_], s)
+
   # a `Char`'s codepoint — identity on the BEAM, where a `Char` *is* its integer
   defp expr_form(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}, s),
     do: expr_form(c, s)

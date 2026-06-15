@@ -12,8 +12,9 @@
 # fixpoint (`test/rian/beam_module_fixpoint_test.exs`) inflates them to real forms
 # (the `erl_op`/`var_atom`/`to_snake` conventions), compiles the module via
 # `:compile.forms`, and RUNS it — asserting it behaves identically to
-# `Rian.Beam`. Strings, prims, maps/structs, blocks-with-shadowed-binds, and
-# variable-application are out of scope (the corpus avoids them).
+# `Rian.Beam`. A numeric literal splits on its lexeme: a `.`/`e` marks a `Float64`
+# (parsed via `Prim.str_to_float` for correctly-rounded native parity), else `Int53`.
+# Variable-application (lambdas) is the remaining out-of-scope node.
 # ---------------------------------------------------------------------------
 
 mod SelfhostBeam do
@@ -58,6 +59,7 @@ mod SelfhostBeam do
 
   # ── Form (output; strings inflated by the fixpoint) ──
   type Form := FInt(Int53)
+             | FFloat(Float64)
              | FStr(String)
              | FVar(String)
              | FAtom(String)
@@ -138,7 +140,16 @@ mod SelfhostBeam do
 
   # ── expressions -> forms ──
   def expr_form(Core) Form
-  def expr_form(CNum(t)) := FInt(parse_int(t))
+  # a numeric literal carries its lexeme as text (like Rian.Beam's `%ENum{text}`);
+  # a `.` or `e`/`E` marks a Float64 — parsed with correctly-rounded native parse
+  # (`Prim.str_to_float`), an `Int53` otherwise. `_` separators are dropped either way.
+  def expr_form(CNum(t))
+    if float_lex(t) do
+      FFloat(Prim.str_to_float(drop_us(t)))
+    else
+      FInt(parse_int(t))
+    end
+  end
   def expr_form(CStr(s)) := FStr(s)
   def expr_form(CChar(cp)) := FInt(cp)
   def expr_form(CId("true")) := FAtom("true")
@@ -162,6 +173,7 @@ mod SelfhostBeam do
   # (a Char IS its codepoint on the BEAM). MUST precede the generic CCall clause.
   def expr_form(CCall("__prim_str_concat", [a, b])) := FConcat(expr_form(a), expr_form(b))
   def expr_form(CCall("__prim_str_to_atom", [s])) := FRemote("Elixir.String", "to_atom", [expr_form(s)])
+  def expr_form(CCall("__prim_str_to_float", [s])) := FRemote("erlang", "binary_to_float", [expr_form(s)])
   def expr_form(CCall("__prim_int_to_string", [n])) := FRemote("erlang", "integer_to_binary", [expr_form(n)])
   def expr_form(CCall("__prim_str_chars", [s])) := FRemote("Elixir.String", "to_charlist", [expr_form(s)])
   def expr_form(CCall("__prim_str_from_chars", [cs])) := FRemote("Elixir.List", "to_string", [expr_form(cs)])
@@ -208,6 +220,30 @@ mod SelfhostBeam do
 
   # ── helpers (portable, FFI-free) ──
   def parse_int(s String) Int53 := digits(Prim.str_chars(s), 0)
+
+  # a numeric lexeme is a float iff it carries a `.` or an exponent marker.
+  def float_lex(s String) Bool := has_float_marker(Prim.str_chars(s))
+  def has_float_marker(Vec(Int53)) Bool
+  def has_float_marker([]) := false
+  def has_float_marker([c | rest])
+    if c == 46 or c == 101 or c == 69 do
+      true
+    else
+      has_float_marker(rest)
+    end
+  end
+
+  # drop `_` digit separators (code 95) — `binary_to_float` rejects them.
+  def drop_us(s String) String := Prim.str_from_chars(no_us(Prim.str_chars(s)))
+  def no_us(Vec(Int53)) Vec(Int53)
+  def no_us([]) := []
+  def no_us([c | rest])
+    if c == 95 do
+      no_us(rest)
+    else
+      [c | no_us(rest)]
+    end
+  end
 
   def digits(Vec(Int53), Int53) Int53
   def digits([], acc) := acc

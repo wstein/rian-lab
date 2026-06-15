@@ -393,6 +393,7 @@ mod SelfhostComposeRealSum do
 
   def inflate(Form) Tuple
   def inflate(FInt(v)) := {:integer, 0, v}
+  def inflate(FFloat(v)) := {:float, 0, v}
   # a string literal -> a binary form `<<"…"/string-segment>>` (Rian.Beam.str_form):
   # one bin-element wrapping the byte list as a `{:string, …}` charlist.
   def inflate(FStr(s)) := {:bin, 0, [{:bin_element, 0, {:string, 0, str_bytes(s)}, :default, :default}]}
