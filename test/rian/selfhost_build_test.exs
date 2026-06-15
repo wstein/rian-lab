@@ -10,9 +10,11 @@ defmodule Rian.SelfhostBuildTest do
   # The spec is the expected value, not `Rian.Decl`/`Rian.Beam`. This is the
   # Rian-first loop: a failing case here is a feature to add to the *Rian* sources.
   #
-  # Known gaps (the backlog — programs `build` cannot yet compile, so they are not
-  # asserted here; add them as they land):
-  #   * lambdas / function captures — selfhost_beam emits no fun forms yet.
+  # Known gaps (the backlog — programs `build` cannot yet compile; both fail LOUDLY,
+  # not silently, so they are honest — add coverage as they land):
+  #   * lambdas `(x) -> e` + variable application — needs a fun node across the three
+  #     selfhost modules and scope tracking to tell a fun-valued var from a local
+  #     call (the largest remaining gap; selfhost_beam currently emits no fun forms).
   #   * string interpolation `"…${e}…"` — blocked on type inference in the build
   #     loop (a hole is stringified by its static type, ADR-0069 §4); REFUSED loudly
   #     for now rather than silently mis-lowered (see the reject test below).
