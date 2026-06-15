@@ -59,6 +59,18 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "type Box := B(Int53)\ndef wrap(n) := B(n)\ndef unwrap(B(n)) := n",
       "type Box := B(Int53)\ndef wrap(n Int53) Box := B(n)\ndef unwrap(b Box) Int53\ndef unwrap(B(n)) := n",
       [{:wrap, [7]}, {:wrap, [42]}, {:unwrap, [{:b, 9}]}]
+    },
+    # `if` — now in selfhost_decl's surface (ADR-0063 widening); compiles end to end
+    {
+      "def max(a, b) := if a > b do a else b end\ndef min(a, b) := if a < b do a else b end",
+      "def max(a Int53, b Int53) Int53 := if a > b do a else b end\ndef min(a Int53, b Int53) Int53 := if a < b do a else b end",
+      [{:max, [3, 7]}, {:max, [9, 2]}, {:min, [3, 7]}]
+    },
+    # `if`-guarded recursion + sum-type constructor comparison in one program
+    {
+      "type Color := Red | Green\ndef code(c) := if c == Red do 0 else 1 end",
+      "type Color := Red | Green\ndef code(c Color) Int53 := if c == Red do 0 else 1 end",
+      [{:code, [:red]}, {:code, [:green]}]
     }
   ]
 

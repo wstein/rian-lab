@@ -94,6 +94,11 @@ defmodule Rian.DeclFixpointTest do
   defp ce({:call, f, args}), do: {:call, ce(f), Enum.map(args, &ce/1)}
   defp ce({:dot, e, field}), do: {:dot, ce(e), field}
   defp ce({:label, name, v}), do: {:label, name, ce(v)}
+  # the front-end's `If(cond, then, else)` (single-expr branches) projects onto
+  # Rian.Pratt's `{:if, c, {:block, [{:expr, t}]}, {:block, [{:expr, e}]}}`.
+  defp ce({:if, c, t, e}),
+    do: {:if, ce(c), {:block, [{:expr, ce(t)}]}, {:block, [{:expr, ce(e)}]}}
+
   defp ce(leaf), do: leaf
 
   defp flat_e(:nil_e), do: {[], nil}
@@ -229,6 +234,15 @@ defmodule Rian.DeclFixpointTest do
     "def len(xs val Vec(Int64)) Int64\n" <>
       "def len([]) := 0\n" <>
       "def len([_ | t]) := 1 + len(t)",
+    # `if … do … else … end` expressions (single-expr branches) — ADR-0063 widening
+    "def max(a Int64, b Int64) Int64 := if a > b do a else b end",
+    "def clampv(x Int64) Int64 := if x > 10 do 10 else x end",
+    # `if` in a multi-clause body, with a nested arithmetic condition + recursion
+    "def sign(n Int64) Int64\n" <>
+      "def sign(0) := 0\n" <>
+      "def sign(n) := if n > 0 do 1 else 0 end",
+    # `if` whose branches are themselves compound expressions (calls / arithmetic)
+    "def pickf(a Int64, b Int64) Int64 := if a == b do a + b else a - b end",
     # `when` guards
     "def clamp(n Int64) Int64\n" <>
       "def clamp(n) when n < 0 := 0\n" <>

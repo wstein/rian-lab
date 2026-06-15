@@ -150,6 +150,9 @@ mod SelfhostComposeRealSum do
   def lower_surface({:bin, op, l, r}) := CBin(op, lower_surface(l), lower_surface(r))
   def lower_surface({:unary, op, x}) := CUnary(op, lower_surface(x))
   def lower_surface({:call, callee, args}) := CCall(callee_name(callee), lower_all(args))
+  # selfhost_decl's `If(cond, then, else)` (single-expr branches) -> selfhost_beam's
+  # CIf with single-statement blocks; the backend lowers it to a `case` on the bool.
+  def lower_surface({:"if", c, t, e}) := CIf(lower_surface(c), Block([SExpr(lower_surface(t))]), Block([SExpr(lower_surface(e))]))
 
   def callee_name(c) String
   def callee_name({:id, f}) := f
@@ -225,6 +228,8 @@ mod SelfhostComposeRealSum do
   # constructor is a tagged tuple {tag, arg, …} — the BEAM rep of a sum value.
   def inflate(FCtorN(c)) := {:atom, 0, to_snake(c)}
   def inflate(FCtor(c, args)) := {:tuple, 0, [{:atom, 0, to_snake(c)} | inflate_all(args)]}
+  # `if` lowers (via selfhost_beam's FIf) to a `case` on the boolean condition.
+  def inflate(FIf(c, t, e)) := {:"case", 0, inflate(c), [{:clause, 0, [{:atom, 0, :true}], [], inflate_all(t)}, {:clause, 0, [{:atom, 0, :false}], [], inflate_all(e)}]}
 
   def var_atom(n String) Symbol := Prim.str_to_atom(cap(n))
 
@@ -274,6 +279,13 @@ mod SelfhostComposeRealSum do
   def op_atom("+") := :"+"
   def op_atom("-") := :"-"
   def op_atom("*") := :"*"
+  def op_atom("==") := :"=="
+  def op_atom("<") := :"<"
+  def op_atom(">") := :">"
+  def op_atom(">=") := :">="
+  def op_atom("<=") := :"=<"
+  def op_atom("and") := :andalso
+  def op_atom("or") := :orelse
 
   def cap(s String) String
     case Prim.str_chars(s) do

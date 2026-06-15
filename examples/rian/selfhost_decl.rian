@@ -19,10 +19,11 @@
 #   capabilities: val / iso / ref / tag (default val); parametric types `Vec(T)`
 #   exprs: binops (precedence climbing) · prefix - / not · calls · `.field` access
 #          · labeled construction `Name(f: v)` · list construction `[x | acc]`
+#          · `if COND do THEN else ELSE end` (single-expr branches; ADR-0063)
 #
-# Out of slice (the remaining long tail of Rian.Decl): string/char clause patterns,
-# negative-literal patterns, `alias`/`const`/`protocol`/`impl`,
-# doc-comments, and block (`do … end`) function bodies.
+# Out of slice (the remaining long tail of Rian.Decl): `case`, string/char clause
+# patterns, negative-literal patterns, `alias`/`const`/`protocol`/`impl`,
+# doc-comments, and multi-statement block (`do … end`) function bodies.
 # ---------------------------------------------------------------------------
 
 mod SelfhostDecl do
@@ -37,6 +38,7 @@ mod SelfhostDecl do
       Num(String) | Id(String) | Bin(String, Expr, Expr)
     | Unary(String, Expr) | Call(Expr, Vec(Expr))
     | Dot(Expr, String) | Label(String, Expr)
+    | If(Expr, Expr, Expr)
     | NilE | ConsE(Expr, Expr) | EErr
 
   # clause PATTERNS — Wild/Var/Lit/Ctor lower straight to Rian.Decl's tuples
@@ -412,6 +414,7 @@ mod SelfhostDecl do
   def parse_primary([TNum(n) | rest]) := parse_postfix(Num(n), rest)
   def parse_primary([TId(x) | rest]) := parse_postfix(Id(x), rest)
   def parse_primary([TLBracket | rest]) := parse_list_expr(rest)
+  def parse_primary([TKw("if") | rest]) := parse_if(rest)
   def parse_primary([TLP | rest])
     case parse_bp(0, rest) do
       P(e, [TRP | rest2]) -> parse_postfix(e, rest2)
@@ -419,6 +422,30 @@ mod SelfhostDecl do
     end
   end
   def parse_primary(ts) := P(EErr, ts)
+
+  # `if COND do THEN else ELSE end` — each part is a full sub-expression. The
+  # projection (decl_fixpoint) wraps THEN/ELSE in `{:block, [{:expr, …}]}` to match
+  # Rian.Pratt's `{:if, c, {:block, …}, {:block, …}}`. Single-expression branches.
+  def parse_if(ts Vec(Tok)) Parse
+  def parse_if(ts)
+    case parse_bp(0, ts) do
+      P(cnd, [TKw("do") | r2]) -> parse_if_then(cnd, r2)
+    end
+  end
+
+  def parse_if_then(cnd Expr, ts Vec(Tok)) Parse
+  def parse_if_then(cnd, ts)
+    case parse_bp(0, ts) do
+      P(thn, [TKw("else") | r3]) -> parse_if_else(cnd, thn, r3)
+    end
+  end
+
+  def parse_if_else(cnd Expr, thn Expr, ts Vec(Tok)) Parse
+  def parse_if_else(cnd, thn, ts)
+    case parse_bp(0, ts) do
+      P(els, [TKw("end") | r4]) -> parse_postfix(If(cnd, thn, els), r4)
+    end
+  end
 
   # list construction as a nil/cons chain (mirrors parse_list_pat): `[x | acc]` ->
   # ConsE(x, acc); elements are full expressions.
