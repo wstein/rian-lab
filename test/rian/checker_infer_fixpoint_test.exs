@@ -75,6 +75,14 @@ defmodule Rian.CheckerInferFixpointTest do
     ~S|"a" <> "b"|,
     "-(1 + 2)",
     "not (1 < 2)",
+    # operand-directed arithmetic (arith_type): float arithmetic is Float64 (NOT the
+    # old hardcoded Int53), char ordinals widen to Int53, and Int53+Float64 is a
+    # mismatch (no implicit int→float) → unknown.
+    "1.0 + 2.0",
+    "3.14 * 2.0",
+    "'a' + 1",
+    "'z' - 'a'",
+    "1.0 + 2",
     # primitive intrinsics with determinate result types
     "Prim.char_code('a')",
     "Prim.int_to_float(5)",
@@ -96,7 +104,14 @@ defmodule Rian.CheckerInferFixpointTest do
   # a typing env binding variables to types — the headline gap the port now closes.
   # (operand-directed arithmetic widths are a later rung, so bound vars appear in
   # env-lookup / comparison / unary / same-type-Int arithmetic positions.)
-  @env %{"x" => "Int53", "y" => "Int53", "s" => "String", "b" => "Bool", "f" => "Float64"}
+  @env %{
+    "x" => "Int53",
+    "y" => "Int53",
+    "s" => "String",
+    "b" => "Bool",
+    "f" => "Float64",
+    "w" => "Int8"
+  }
   @env_corpus [
     "x",
     "y",
@@ -112,7 +127,14 @@ defmodule Rian.CheckerInferFixpointTest do
     "s <> s",
     "x + y",
     "x - y * x",
-    "x + 1"
+    "x + 1",
+    # operand-directed widths under the env: an int literal adopts the typed
+    # neighbour's width; Float64 arithmetic stays Float64; a mix is unknown.
+    "w + 1",
+    "w + w",
+    "f + f",
+    "x + f",
+    "f * 2.0"
   ]
 
   describe "self-hosting checker fixpoint — inference under a typing env" do

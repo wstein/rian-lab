@@ -19,10 +19,12 @@
 #
 # A typing ENVIRONMENT (name -> type) is threaded through inference: a bound
 # variable resolves to its declared type (`infer_env/2`; `infer/1` is the empty-env
-# convenience). Covered Core nodes (7): CNum/CStr/CChar/CId/CUnary/CBin/CCall. The
-# `:partial` tail — user-function/ctor return types in the env, operand-directed
-# arithmetic widths (Rian.Check's `arith_type`: `x + 1.0`, char ordinals), lambdas,
-# `if`/`case` LUB-join, and lists — see ADR-0063 / docs/self-host-status.md.
+# convenience). Arithmetic is OPERAND-DIRECTED (Rian.Check's `arith_type`): an int
+# literal adopts a concrete-integer neighbour's width, `Char` ordinals widen to
+# `Int53`, float arithmetic is `Float64`, and a mismatch (`Int53 + Float64`) is
+# `unknown`. Covered Core nodes (7): CNum/CStr/CChar/CId/CUnary/CBin/CCall. The
+# `:partial` tail — user-function/ctor return types in the env, lambdas, `if`/`case`
+# LUB-join, and lists — see ADR-0063 / docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
 mod SelfhostChecker do
@@ -76,6 +78,93 @@ mod SelfhostChecker do
     end
   end
 
+  # ── operand-directed arithmetic result (ADR-0034/0036; mirrors Rian.Check.arith_type) ──
+  # `+ - * div rem`. An integer-literal operand is width-flexible — it ADOPTS a
+  # concrete-integer neighbour's width (`Int8 + 1` is `Int8`, not the literal's
+  # default); two non-literal operands UNIFY their ordinal bases (`Char` → `Int53`,
+  # so `'9' - '0'` is `Int53`); a mismatch (e.g. `Int53 + Float64`, no implicit
+  # int→float) is conservatively `unknown`.
+  def arith_op(op String) Bool := op == "+" or op == "-" or op == "*" or op == "div" or op == "rem"
+
+  def arith_type(l Core, r Core, lt String, rt String) String
+  def arith_type(l, r, lt, rt)
+    if int_lit_expr(l) and int_type(rt) do
+      ordinal_base(rt)
+    else
+      arith_type2(r, lt, rt)
+    end
+  end
+
+  def arith_type2(r Core, lt String, rt String) String
+  def arith_type2(r, lt, rt)
+    if int_lit_expr(r) and int_type(lt) do
+      ordinal_base(lt)
+    else
+      conservative(unify(ordinal_base(lt), ordinal_base(rt)))
+    end
+  end
+
+  # a constant integer expression of literals (a bare int literal, negation, or
+  # arithmetic of such) — the operand that may adopt a typed neighbour's width.
+  def int_lit_expr(Core) Bool
+  def int_lit_expr(CNum(t)) := int_literal(t)
+  def int_lit_expr(CUnary("-", a)) := int_lit_expr(a)
+  def int_lit_expr(CBin(op, l, r)) := arith_op(op) and int_lit_expr(l) and int_lit_expr(r)
+  def int_lit_expr(_) := false
+
+  def int_literal(t String) Bool := not float_mark(Prim.str_chars(t))
+
+  # a concrete integer type: `^U?Int\d*$` (`Int`, `Int8`…`Int128`, `UInt8`…).
+  def int_type(t String) Bool := int_word(skip_u(Prim.str_chars(t)))
+
+  def skip_u(Vec(Int53)) Vec(Int53)
+  def skip_u(['U' | rest]) := rest
+  def skip_u(cs) := cs
+
+  def int_word(Vec(Int53)) Bool
+  def int_word(['I', 'n', 't' | rest]) := all_digits(rest)
+  def int_word(_) := false
+
+  def all_digits(Vec(Int53)) Bool
+  def all_digits([]) := true
+  def all_digits([c | rest]) := c >= 48 and c <= 57 and all_digits(rest)
+
+  # `Char`'s ordinal base is its codepoint width `Int53` (ADR-0036); else passthrough.
+  def ordinal_base(t String) String
+  def ordinal_base("Char") := "Int53"
+  def ordinal_base(t) := t
+
+  # the unification kernel (ADR-0033): equal types unify; `unknown` is the identity;
+  # else a mismatch (`"mismatch"` sentinel). Fn-structural unify is out of scope here.
+  def unify(a String, b String) String
+  def unify(a, b)
+    if a == b do
+      a
+    else
+      unify_unknown(a, b)
+    end
+  end
+
+  def unify_unknown(a String, b String) String
+  def unify_unknown(a, b)
+    if a == "unknown" do
+      b
+    else
+      pick_b_or_mismatch(a, b)
+    end
+  end
+
+  def pick_b_or_mismatch(a String, b String) String
+  def pick_b_or_mismatch(a, b)
+    if b == "unknown" do
+      a
+    else
+      "mismatch"
+    end
+  end
+
+  def conservative(t String) String := if t == "mismatch" do "unknown" else t end
+
   # Infer the type of a Core node in the empty env (closed expression).
   pub def infer(Core) String
   pub def infer(c) := infer_env(c, Prim.map_new())
@@ -92,7 +181,16 @@ mod SelfhostChecker do
   pub def infer_env(CId(x), env) := lookup(env, x)
   pub def infer_env(CUnary("not", _), _) := "Bool"
   pub def infer_env(CUnary("-", x), env) := infer_env(x, env)
-  pub def infer_env(CBin(op, _, _), _) := bin_ty(op)
+  # arithmetic (`+ - * div rem`) is operand-directed (arith_type); every other op's
+  # result is fixed by the op (comparisons/`and`/`or`/`in` → Bool, `<>` → String,
+  # `/` → Float64) via bin_ty.
+  pub def infer_env(CBin(op, l, r), env)
+    if arith_op(op) do
+      arith_type(l, r, infer_env(l, env), infer_env(r, env))
+    else
+      bin_ty(op)
+    end
+  end
   # primitive intrinsics with a determinate result type (ADR-0036/0047/0069 — mirrors
   # Rian.Check's `__prim_*` clauses). A general call has no determinate type without
   # function/ctor return types in the env, so it is conservatively `unknown`.
