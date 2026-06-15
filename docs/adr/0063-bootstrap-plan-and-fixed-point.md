@@ -48,7 +48,25 @@ gating library work and blocks Stage 2 below.
 | **3 — Bootstrap fixed point** | the **whole compiler**, written in Rian, compiles its own source; doing so twice is stable | compile the Rian compiler source with the Elixir-hosted compiler → v1; compile the *same source* with v1 → v2; assert **v1 == v2** (bit-identical `.beam`) | **CLOSED for the Rian compiler (self-compiling)** — gen1 == gen2 over the four compiler sources (lexer/decl/beam/driver), identical forms + bit-identical `.beam` (`selfhost_v1_v2_fixpoint_test.exs`); determinism prerequisite verified (`selfhost_fixedpoint_test.exs`). Remaining: a self-**checking** compiler (the gates in the loop; checker port still infer-only over 5/12 Core nodes) |
 
 **"Real self-hosting" = Stage 2** (the front-end genuinely self-hosts, reusing a trusted backend);
-**Stage 3** is the canonical bootstrap fixed point that retires the Elixir host entirely.
+**Stage 3** is the canonical bootstrap fixed point that retires the Elixir host from the **build loop**.
+
+**"Retire" means out of the build loop, not deleted — the Elixir compiler is deliberately kept
+(decided).** Past `v1==v2` the Rian compiler builds itself, so Elixir is no longer *needed* to produce
+releases. But a self-hosting compiler always needs a **bootstrap seed**, and the choice is "trust a
+checked-in binary blob" vs "keep an auditable source path" — Rian keeps the latter, for three concrete
+reasons specific to this project:
+1. **It is the verification oracle.** The entire self-hosting method is the fixpoint diff — every Rian
+   port is equivalence-locked against the Elixir reference (`Rian.Fixpoint`, the `*_fixpoint_test.exs`
+   suite). Deleting the Elixir compiler deletes the correctness cross-check.
+2. **It is a diverse second implementation.** Two independent compilers for one language is the defense
+   against self-miscompilation and the "Reflections on Trusting Trust" seed-backdoor problem (cf.
+   diverse double-compilation) — and a free differential-fuzzing target.
+3. **It is the auditable cold-start seed.** A fresh machine (or a lost/regressed binary) can rebuild
+   the whole compiler from source with no binary blob.
+
+So Stage 3 removes Elixir from the *build loop*, not from the repo. (The BEAM *runtime* stays regardless
+— the self-hosted compiler is itself a BEAM program; only **portable self-hosting** (§4) takes the
+compiler off the BEAM.)
 
 **This whole ladder is the BEAM terminus** — Stage 2 feeds `Rian.Beam.compile_ir/2` and Stage 3 asserts
 `v1 == v2` over `.beam` bytecode. It says nothing about lowering the compiler to Rust or JS; that is a
