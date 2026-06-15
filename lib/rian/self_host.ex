@@ -83,7 +83,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_checker.rian",
       test: "test/rian/checker_infer_fixpoint_test.exs",
       note:
-        "type inference agrees with the REAL Rian.Check.infer over ALL 12 Core nodes — literals incl. float/char, ids in a typing env, unary/binary with operand-directed arithmetic + cross-width widening, prim calls, `if`/`case` (with flow narrowing), lists, lambdas (`Fn(...)`), and higher-order calls — i.e. the WHOLE fixpoint domain under an empty inference context; the remaining gap (named-fn/ctor return types, ctor-pattern field narrowing) needs a non-empty `ic` the fixpoint does not supply (selfhost_check.rian is a separate TOY-language spike)"
+        "type inference agrees with the REAL Rian.Check.infer over ALL 12 Core nodes — literals incl. float/char, ids in a typing env, unary/binary with operand-directed arithmetic + cross-width widening, prim calls, `if`/`case` (with flow narrowing), lists, lambdas (`Fn(...)`), higher-order calls, and a non-empty inference context `ic` (constructor sum types + non-generic function returns); the remaining gap is GENERIC-return instantiation (`ic.fsigs` + type variables) and ctor-pattern field narrowing (`ic.tdefs`) (selfhost_check.rian is a separate TOY-language spike)"
     },
     %{
       id: :exhaustiveness,
