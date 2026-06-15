@@ -5,33 +5,19 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
 
   alias Rian.Beam
 
-  # THE LOOP CLOSES ON REAL SOURCE (ADR-0063 Step 3). Every other composition fixpoint
-  # feeds `build` a hand-written corpus. This one feeds it a VERBATIM slice of a real
-  # compiler stage — `examples/rian/selfhost_cap.rian` (the capability checker): its
-  # `Ty` sum type and `copyt` function. The composed build (verified lexer + decl
-  # parser + backend, cross-module) compiles that real source and runs it identically
-  # to `Rian.Beam`. This is the first time a stage compiles its OWN source, not a toy.
+  # THE LOOP CLOSES ON A WHOLE REAL STAGE (ADR-0063 Step 3/4). This was once a
+  # verbatim SLICE of selfhost_cap.rian (the `Ty` sum + `copyt`); it now feeds the
+  # composed `build` the ENTIRE capability checker — the `Cap`/`Ty` sums, the
+  # `rust_param` Rust-signature matrix, `beam_legal`, and `copyt` — and the composed
+  # build (verified lexer + decl parser + beam backend, cross-module) compiles it
+  # into a real loadable module that runs identically to `Rian.Beam`.
   #
   # Caveat (honesty): the loop is self-COMPILING, not self-CHECKING — Rian.Check /
   # Exhaustiveness / Capability are not in the `build` loop (see Rian.SelfHost
-  # @composition). And this is a SLICE: the whole file needs `if`/strings/Prim, which
-  # the build's surface does not yet cover. The slice is chosen to be within surface
-  # AND is asserted to be a verbatim substring of the real file, so it cannot drift
-  # into a toy.
+  # @composition).
 
   @cap_file "examples/rian/selfhost_cap.rian"
-
-  # the `Ty` declaration + `copyt` clauses, verbatim from selfhost_cap.rian. The
-  # "real source" assertion below checks each line actually appears in that file.
-  @slice """
-  type Ty := TScalar(String) | TString | TNom(String) | TVec(Ty) | TGen(String, Vec(Ty), String)
-  def copyt(Ty) Bool
-  def copyt(TScalar(_)) := true
-  def copyt(TString) := false
-  def copyt(TNom(_)) := false
-  def copyt(TVec(_)) := false
-  def copyt(TGen(_, _, _)) := false
-  """
+  @cap_src File.read!(@cap_file)
 
   setup_all do
     {:ok, _} =
@@ -46,12 +32,16 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
         :rian_compose_selfcompile
       )
 
-    {:ok, drv: drv}
+    built = drv.build(@cap_src, :"RianBuiltCap_#{System.unique_integer([:positive])}")
+    {:ok, ref} = Beam.load(@cap_src, :"selfcompile_ref_#{System.unique_integer([:positive])}")
+    {:ok, built: built, ref: ref}
   end
 
-  # representative Ty values (the BEAM rep of each variant: nullary → atom,
-  # applied → tagged tuple) — the shapes copyt dispatches on.
-  @values [
+  # the capability core (ADR-0055): `Cap` nullary variants → atoms, `Ty` → atom /
+  # tagged tuple. `copyt` (only a scalar is Copy), `beam_legal` (`ref` is the sole
+  # BEAM-illegal cap), and `rust_param` (the val/iso/ref/tag → Rust-signature matrix).
+  @caps [:iso, :val, :ref, :tag]
+  @tys [
     {:t_scalar, "Int53"},
     :t_string,
     {:t_nom, "Color"},
@@ -60,55 +50,42 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
     {:t_gen, "Vec", [], "raw"}
   ]
 
-  test "the slice is REAL source — copyt clauses verbatim, Ty variants real, in selfhost_cap.rian" do
-    real = File.read!(@cap_file)
+  describe "the loop closes on the whole capability checker — `build` self-compiles the file" do
+    test "copyt / beam_legal / rust_param run identically to Rian.Beam over the matrix",
+         %{built: built, ref: ref} do
+      for ty <- @tys do
+        assert built.copyt(ty) == ref.copyt(ty), "copyt diverged on #{inspect(ty)}"
+      end
 
-    # the stage logic — every `copyt` clause — is verbatim in the real file.
-    copyt_lines =
-      @slice
-      |> String.split("\n", trim: true)
-      |> Enum.map(&String.trim/1)
-      |> Enum.filter(&String.starts_with?(&1, "def copyt"))
+      for cap <- @caps do
+        assert built.beam_legal(cap) == ref.beam_legal(cap), "beam_legal diverged on #{cap}"
 
-    assert length(copyt_lines) == 6
+        for ty <- @tys do
+          assert built.rust_param(cap, ty) == ref.rust_param(cap, ty),
+                 "rust_param diverged on #{cap}/#{inspect(ty)}"
+        end
+      end
 
-    for line <- copyt_lines do
-      assert String.contains?(real, line),
-             "copyt clause is not verbatim in #{@cap_file} (would be a toy, not real source): #{line}"
+      # the capability semantics survive: only a scalar is Copy; only `ref` is
+      # BEAM-illegal (it lowers to `&mut`).
+      assert built.copyt({:t_scalar, "Int53"}) == true
+      assert built.copyt(:t_string) == false
+      assert built.beam_legal(:ref) == false
+      assert built.beam_legal(:iso) == true
     end
 
-    # the `Ty` type is the same declaration (reflowed to one line); its variants are real.
-    for variant <- [
-          "TScalar(String)",
-          "TString",
-          "TNom(String)",
-          "TVec(Ty)",
-          "TGen(String, Vec(Ty), String)"
-        ] do
-      assert String.contains?(real, variant), "Ty variant not found in #{@cap_file}: #{variant}"
-    end
-  end
-
-  test "build compiles the real selfhost_cap slice; copyt runs identically to Rian.Beam", %{
-    drv: drv
-  } do
-    composed = drv.build(@slice, :"selfcompile_#{System.unique_integer([:positive])}")
-    {:ok, ref} = Beam.load(@slice, :"selfcompile_ref_#{System.unique_integer([:positive])}")
-
-    for v <- @values do
-      assert apply(composed, :copyt, [v]) == apply(ref, :copyt, [v]),
-             "composed copyt diverged from Rian.Beam on #{inspect(v)}"
+    test "it is the WHOLE real file (verbatim), not a slice", %{built: built} do
+      assert @cap_src =~ "mod SelfhostCap do"
+      assert @cap_src =~ "pub def rust_param(Cap, Ty) String"
+      assert function_exported?(built, :rust_param, 2)
+      assert function_exported?(built, :copyt, 1)
     end
 
-    # and the actual capability semantics survive: only a scalar is Copy.
-    assert apply(composed, :copyt, [{:t_scalar, "Int53"}]) == true
-    assert apply(composed, :copyt, [:t_string]) == false
-  end
-
-  test "teeth — `build` self-COMPILES but does NOT self-CHECK (honest scope)" do
-    comp = Rian.SelfHost.composition()
-    assert comp.self_compiling == true
-    assert comp.self_checking == false
-    assert comp.closed_on_real_source =~ "selfhost_cap.rian"
+    test "teeth — `build` self-COMPILES but does NOT self-CHECK (honest scope)" do
+      comp = Rian.SelfHost.composition()
+      assert comp.self_compiling == true
+      assert comp.self_checking == false
+      assert comp.closed_on_real_source =~ "selfhost_cap.rian"
+    end
   end
 end
