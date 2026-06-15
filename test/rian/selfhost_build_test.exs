@@ -13,7 +13,6 @@ defmodule Rian.SelfhostBuildTest do
   # Known gaps (the backlog — programs `build` cannot yet compile, so they are not
   # asserted here; add them as they land):
   #   * lambdas / function captures — selfhost_beam emits no fun forms yet.
-  #   * maps — no map-literal lowering in the driver / backend.
 
   setup_all do
     for {mod, file} <- [
@@ -76,7 +75,13 @@ defmodule Rian.SelfhostBuildTest do
      :f, [{:ok, 3}, {:ok, 4}], 7},
     {"with (multi-clause, 2nd fails -> else)",
      "def f(p Tuple, q Tuple) Int53 := with {:ok, a} <- p, {:ok, b} <- q do a + b else _ -> 0 end",
-     :f, [{:ok, 3}, {:error, :x}], 0}
+     :f, [{:ok, 3}, {:error, :x}], 0},
+    # map literal (ADR-0063 #2): the parser keeps `%{…}` as a `MapE` node; the
+    # driver lowers it to a Core map and the backend emits a plain Erlang map
+    # (atom keys, no `__struct__` tag). Values may be literals or expressions.
+    {"map literal", "def m() Map := %{a: 1, b: 2}", :m, [], %{a: 1, b: 2}},
+    {"map with expression values", "def wrap(n Int53) Map := %{ok: n, double: n * 2}", :wrap, [7],
+     %{ok: 7, double: 14}}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do

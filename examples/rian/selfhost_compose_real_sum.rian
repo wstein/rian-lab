@@ -268,6 +268,9 @@ mod SelfhostComposeRealSum do
   # (A call's args are all-labeled or none; matching the first label suffices.)
   def lower_surface({:call, {:id, ctor}, [{:label, k, v} | more]}) := CStruct(ctor, lower_flds([{:label, k, v} | more]))
   def lower_surface({:call, callee, args}) := CCall(callee_name(callee), lower_all(args))
+  # map literal `%{k: v, …}` — `MapE` of `Label` fields -> a Core map; the fields
+  # reuse the labeled-construction lowering (`lower_flds`), but no `__struct__` tag.
+  def lower_surface({:map_e, flds}) := CMap(lower_flds(flds))
   # selfhost_decl's `If(cond, then, else)` (single-expr branches) -> selfhost_beam's
   # CIf with single-statement blocks; the backend lowers it to a `case` on the bool.
   def lower_surface({:"if", c, t, e}) := CIf(lower_surface(c), Block([SExpr(lower_surface(t))]), Block([SExpr(lower_surface(e))]))
@@ -412,6 +415,8 @@ mod SelfhostComposeRealSum do
   # named struct construction -> a tagged map `%{__struct__: <snake>, field: v, …}`
   # (Rian.Beam.expr_form): the `__struct__` field carries the snake-cased type name.
   def inflate(FStruct(name, fields)) := {:map, 0, [{:map_field_assoc, 0, {:atom, 0, Prim.str_to_atom("__struct__")}, {:atom, 0, to_snake(name)}} | inflate_flds(fields)]}
+  # a map literal -> a plain Erlang map (no `__struct__` tag); fields reuse inflate_flds.
+  def inflate(FMap(fields)) := {:map, 0, inflate_flds(fields)}
   # `if` lowers (via selfhost_beam's FIf) to a `case` on the boolean condition.
   def inflate(FIf(c, t, e)) := {:"case", 0, inflate(c), [{:clause, 0, [{:atom, 0, :true}], [], inflate_all(t)}, {:clause, 0, [{:atom, 0, :false}], [], inflate_all(e)}]}
   # `case` -> a real Erlang `case`; each arm is an FClause (single pattern, guard, body).

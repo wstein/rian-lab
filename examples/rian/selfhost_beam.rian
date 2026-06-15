@@ -29,6 +29,7 @@ mod SelfhostBeam do
              | CRemote(String, String, Vec(Core))
              | CDot(Core, String)
              | CStruct(String, Vec(SFld))
+             | CMap(Vec(SFld))
              | CTuple(Vec(Core))
              | CList(Vec(Core), Tail)
              | CIf(Core, Block, Block)
@@ -69,6 +70,7 @@ mod SelfhostBeam do
              | FRemote(String, String, Vec(Form))
              | FTuple(Vec(Form))
              | FStruct(String, Vec(FFld))
+             | FMap(Vec(FFld))
              | FNil
              | FCons(Form, Form)
              | FIf(Form, Vec(Form), Vec(Form))
@@ -182,6 +184,8 @@ mod SelfhostBeam do
   # named struct construction `Name(f: v, …)` — a tagged map (the driver's inflater
   # adds the `__struct__` field + snake tag, matching Rian.Beam.expr_form).
   def expr_form(CStruct(name, fields)) := FStruct(name, fld_forms(fields))
+  # map literal -> a plain Erlang map form (no `__struct__` tag); reuses fld_forms.
+  def expr_form(CMap(fields)) := FMap(fld_forms(fields))
   def expr_form(CList(es, TClose)) := list_form(expr_forms(es), FNil)
   def expr_form(CList(es, TTail(t))) := list_form(expr_forms(es), expr_form(t))
   def expr_form(CIf(c, t, e)) := FIf(expr_form(c), block_forms(t), block_forms(e))
