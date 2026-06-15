@@ -32,11 +32,14 @@
 # `T`. A lambda infers its arrow type `Fn(arg.., body)` (an unannotated param is `_`),
 # the body inferred under the param bindings. Covered Core nodes (12, FULL): CNum/CStr/
 # CChar/CId/CUnary/CBin/CCall/CIf/CBlock/CCase/CList/CLambda. The `:partial` tail is now
-# DEPTH within nodes, not missing nodes — user-function/ctor return types and
-# constructor-pattern field narrowing, both of which need the inference context `ic`
-# (function signatures + ctor field types) threaded through. The join LUB is complete
-# (numeric widening + the parametric covariant join `Vec(A)`⊔`Vec(B)`). See ADR-0063 /
-# docs/self-host-status.md.
+# a general call resolves a function-typed callee to its return type (higher-order:
+# `g(5)` with `g : Fn(Int64,Int64)` -> `Int64`). The port now AGREES WITH
+# `Rian.Check.infer` over the whole fixpoint domain — every expression node + a typing
+# env, with an empty inference context. The remaining gap needs a NON-empty `ic`
+# (named-function/constructor return types, constructor-pattern field narrowing); the
+# fixpoint supplies no `ic`, so exercising it means threading an `ic` through both the
+# port and the test. The join LUB is complete (numeric widening + the parametric
+# covariant join). See ADR-0063 / docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
 mod SelfhostChecker do
@@ -238,7 +241,11 @@ mod SelfhostChecker do
   pub def infer_env(CCall("__prim_str_to_atom", [_]), _) := "Symbol"
   pub def infer_env(CCall("__prim_char_to_string", [_]), _) := "String"
   pub def infer_env(CCall("__prim_str_concat_all", _), _) := "String"
-  pub def infer_env(CCall(_, _), _) := "unknown"
+  # a general call: if the callee NAME is bound to a function type in the env (a
+  # higher-order value), the call's type is that function's return type; else
+  # `unknown` (a named function / constructor return needs the inference context `ic`,
+  # which this fixpoint does not supply — Rian.Check with an empty `ic` agrees).
+  pub def infer_env(CCall(f, _), env) := call_ret(lookup(env, f))
   # `if` — the LUB-join of the two branches (each a single-expression block); a
   # block's type is its last expression's, binds extending the env (ADR-0059).
   pub def infer_env(CIf(_, t, e), env) := branch_join([BP(t, infer_env(t, env)), BP(e, infer_env(e, env))])
@@ -394,6 +401,35 @@ mod SelfhostChecker do
   def len(Vec(String)) Int53
   def len([]) := 0
   def len([_ | rest]) := 1 + len(rest)
+
+  # a call's result: a function-typed callee yields its return type, else unknown.
+  def call_ret(ft String) String
+  def call_ret(ft)
+    if is_fn(ft) do
+      fn_ret(ft)
+    else
+      "unknown"
+    end
+  end
+
+  # the return type of an `Fn(arg.., ret)` string: its last component, with `_`
+  # (and a type variable) reading back as `unknown` (Rian.Check.fn_ret).
+  def fn_ret(ft String) String
+  def fn_ret(ft)
+    case parse_parametric(ft) do
+      Pp(_, args) -> deplaceholder(last_str(args))
+      PpNone -> "unknown"
+    end
+  end
+
+  def last_str(Vec(String)) String
+  def last_str([]) := "unknown"
+  def last_str([s]) := s
+  def last_str([_ | rest]) := last_str(rest)
+
+  def deplaceholder(t String) String
+  def deplaceholder("_") := "unknown"
+  def deplaceholder(t) := concretize(t)
 
   def is_fn(s String) Bool := fn_pfx(Prim.str_chars(s))
 

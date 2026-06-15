@@ -162,7 +162,10 @@ end|,
     "h" => "Int53",
     "t" => "Vec(Int53)",
     "v8" => "Vec(Int8)",
-    "v16" => "Vec(Int16)"
+    "v16" => "Vec(Int16)",
+    "g" => "Fn(Int64,Int64)",
+    "k" => "Fn(Int8,String,Bool)",
+    "fu" => "Fn(Int64,_)"
   }
   @env_corpus [
     "x",
@@ -215,7 +218,13 @@ end|,
     # parametric covariant join: `Vec(A)`⊔`Vec(B)` = `Vec(A⊔B)` (componentwise widen).
     "if c do v8 else v16 end",
     "if c do v8 else t end",
-    "[v8, v16]"
+    "[v8, v16]",
+    # calling a function-typed variable (higher-order): the call's type is the
+    # function's return type; an `_` (unknown) return reads back as unknown.
+    "g(5)",
+    ~S|k(1, "x")|,
+    "fu(5)",
+    "z(5)"
   ]
 
   describe "self-hosting checker fixpoint — inference under a typing env" do
