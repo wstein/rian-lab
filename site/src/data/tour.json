@@ -109,6 +109,58 @@
       },
       "source": "type Shape := Circle(radius Float64) | Square(side Float64)\n\ndef area(s val Shape) Float64\ndef area(Circle(r)) := 3.14159 * r * r\ndef area(Square(s)) := s * s\n\n# `iso`: owned, consumed exactly once\ndef consume(s iso Shape) Float64 := area(s)",
       "title": "Capabilities"
+    },
+    {
+      "blurb": "`case` is an expression that yields a value, proven total by the same exhaustiveness gate as clauses. It becomes a tagged match on the BEAM, an `enum` match on Rust, a tag switch on JS, and a labelled `run` on Kotlin.",
+      "covers": [
+        "case",
+        "arms (`->`)",
+        "exhaustiveness"
+      ],
+      "file": "code.rian",
+      "id": "case",
+      "panes": {
+        "ex": "@type color :: :red | :green | :blue\ndef code(c) do case c do :red -> 1; :green -> 2; :blue -> 3 end end",
+        "js": "function code(a0) {\n  { const c = a0; return (() => { const _s = c; if (_s[0] === \"Red\") { return 1; } if (_s[0] === \"Green\") { return 2; } if (_s[0] === \"Blue\") { return 3; } throw new Error(\"case: no clause matched\"); })(); }\n  throw new Error(\"code: no clause matched\");\n}",
+        "jvm": "sealed interface Color\nobject Red : Color\nobject Green : Color\nobject Blue : Color\n\nprivate fun code(a0: Color): Long {\n  val c = a0; return run rcase@{\nif (c is Red) { return@rcase 1L }\nif (c is Green) { return@rcase 2L }\nif (c is Blue) { return@rcase 3L }\nthrow RuntimeException(\"case: no clause matched\")\n}\n}",
+        "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Color {\n    Red,\n    Green,\n    Blue,\n}\n\nfn code(c: &Color) -> i64 {\n    match c {\n        c => match c { Color::Red => 1, Color::Green => 2, Color::Blue => 3, },\n    }\n}"
+      },
+      "reach": {
+        "code": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "source": "type Color := Red | Green | Blue\n\ndef code(c val Color) Int53 := case c do\n  Red -> 1\n  Green -> 2\n  Blue -> 3\nend",
+      "title": "The `case` expression"
+    },
+    {
+      "blurb": "A `${expr}` hole stringifies by its statically-inferred type and lowers to a single-shot join (ADR-0069). `String` and `Int*` holes are byte-identical across every target — no hidden `Show` dispatch.",
+      "covers": [
+        "${…}",
+        "auto-stringify",
+        "single-shot join"
+      ],
+      "file": "greet.rian",
+      "id": "interpolation",
+      "panes": {
+        "ex": "def greet(name, age) do <<\"hi \"::binary, name::binary, \", you are \"::binary, Integer.to_string(age)::binary>> end",
+        "js": "function greet(a0, a1) {\n  { const name = a0; const age = a1; return (\"hi \" + name + \", you are \" + String(age)); }\n  throw new Error(\"greet: no clause matched\");\n}",
+        "jvm": "private fun greet(a0: String, a1: Long): String {\n  val name = a0; val age = a1; return (\"hi \" + name + \", you are \" + (age).toString())\n}",
+        "rs": "fn greet(name: &str, age: i64) -> String {\n    match (name, age) {\n        (name, age) => (format!(\"{}{}{}{}\", \"hi \", name, \", you are \", age.to_string())).to_string(),\n    }\n}"
+      },
+      "reach": {
+        "greet": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "source": "def greet(name String, age Int53) String := \"hi ${name}, you are ${age}\"",
+      "title": "String interpolation"
     }
   ],
   "reachExamples": [

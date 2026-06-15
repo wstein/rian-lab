@@ -91,6 +91,38 @@ defmodule Rian.Tour do
       # `iso`: owned, consumed exactly once
       def consume(s iso Shape) Float64 := area(s)
       """
+    },
+    %{
+      id: "case",
+      title: "The `case` expression",
+      file: "code.rian",
+      blurb:
+        "`case` is an expression that yields a value, proven total by the same " <>
+          "exhaustiveness gate as clauses. It becomes a tagged match on the BEAM, " <>
+          "an `enum` match on Rust, a tag switch on JS, and a labelled `run` on Kotlin.",
+      covers: ["case", "arms (`->`)", "exhaustiveness"],
+      source: """
+      type Color := Red | Green | Blue
+
+      def code(c val Color) Int53 := case c do
+        Red -> 1
+        Green -> 2
+        Blue -> 3
+      end
+      """
+    },
+    %{
+      id: "interpolation",
+      title: "String interpolation",
+      file: "greet.rian",
+      blurb:
+        "A `${expr}` hole stringifies by its statically-inferred type and lowers " <>
+          "to a single-shot join (ADR-0069). `String` and `Int*` holes are " <>
+          "byte-identical across every target — no hidden `Show` dispatch.",
+      covers: ["${…}", "auto-stringify", "single-shot join"],
+      source: """
+      def greet(name String, age Int53) String := "hi ${name}, you are ${age}"
+      """
     }
   ]
 
