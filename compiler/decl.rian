@@ -33,7 +33,7 @@
 # doc-comments, and multi-statement block (`do … end`) function bodies.
 # ---------------------------------------------------------------------------
 
-mod SelfhostDecl do
+mod Decl do
   type Tok :=
       TNum(String) | TStr(String) | TIStr(Vec(IPart)) | TChar(Int53) | TId(String) | TKw(String) | TOp(String)
     | TAnnot(String) | TLP | TRP | TLBracket | TRBracket | TLBrace | TRBrace | TMapOpen | TComma | TNL

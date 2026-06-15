@@ -1,4 +1,4 @@
-defmodule Rian.SelfhostFixedpointTest do
+defmodule Rian.FixedpointTest do
   # async: false — loads a real module into the VM via :code.load_binary.
   use ExUnit.Case, async: false
 
@@ -51,8 +51,8 @@ defmodule Rian.SelfhostFixedpointTest do
   # 27 of the 33 `.rian` sources; the divergent ones use heredoc doc-comments, and
   # the lexer cannot yet lex *its own* source — char escapes `'\n'` — the frontier.)
   @sources ~w(
-    compiler/parse.rian compiler/opt.rian compiler/modules.rian
-    compiler/calc.rian compiler/eval.rian compiler/codegen.rian compiler/listlib.rian
+    compiler/parse.rian test/fixtures/rian/opt.rian test/fixtures/rian/modules.rian
+    test/fixtures/rian/calc.rian test/fixtures/rian/eval.rian test/fixtures/rian/codegen.rian test/fixtures/rian/listlib.rian
     examples/rian/prelude_dict.rian examples/rian/prelude_int.rian examples/rian/prelude_str.rian
     examples/rian/01_basics.rian examples/rian/05_modules.rian
   )
@@ -81,8 +81,8 @@ defmodule Rian.SelfhostFixedpointTest do
   # same source compiles to byte-identical bytecode on every run.
   describe "Stage 3 prerequisite — deterministic emission (ADR-0063)" do
     test "Rian.Beam emits byte-identical bytecode on recompilation" do
-      for f <- ~w(opt.rian modules.rian parse.rian) do
-        src = File.read!(Path.join(["compiler", f]))
+      for f <- ~w(test/fixtures/rian/opt.rian test/fixtures/rian/modules.rian compiler/parse.rian) do
+        src = File.read!(f)
 
         assert Beam.compile_program(src) == Beam.compile_program(src),
                "Rian.Beam emission is nondeterministic for #{f} — blocks a bit-identical bootstrap"

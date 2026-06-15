@@ -61,7 +61,7 @@ native doc system. This is the ADR-0041 "same source, idiomatic per target" patt
 
 - `@moduledoc`/`@doc`/`@typedoc` **parse with the declaration parser** (ADR-0031 Stage 0.1), not later.
 - The **tour examples** gain module/function docs; the **self-host examples**
-  (`compiler/lexer.rian`) are documented — demonstrating documented self-hosting code from
+  (`test/fixtures/rian/lexer.rian`) are documented — demonstrating documented self-hosting code from
   day one.
 - The **formatter** (ADR-0045) treats doc attributes as structured CST nodes — preserved and canonically
   formatted (easier than free comments, because they're structured).

@@ -14,7 +14,7 @@
 #   factor := TNum | '(' expr ')'
 # ---------------------------------------------------------------------------
 
-mod SelfhostParser do
+mod Parser do
   # The token stream this parser consumes (same shape the lexer emits).
   type Token := TNum(Int53) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
 

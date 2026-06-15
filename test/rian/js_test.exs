@@ -156,7 +156,7 @@ defmodule Rian.JSTest do
     end
 
     test "the self-hosting optimizer spike lowers to JS and folds under node (multi-target)" do
-      js = JS.compile(File.read!("compiler/opt.rian"))
+      js = JS.compile(File.read!("test/fixtures/rian/opt.rian"))
 
       # (2 + 3) * 4  ->  Num(20);  a constant tree folds to one literal
       tree = ~s|["Mul",["Add",["Num",2n],["Num",3n]],["Num",4n]]|
@@ -178,7 +178,7 @@ defmodule Rian.JSTest do
     end
 
     test "the self-hosting parser lowers to JS and parses under node (cons-recursive)" do
-      js = JS.compile(File.read!("compiler/parser.rian"))
+      js = JS.compile(File.read!("test/fixtures/rian/parser.rian"))
 
       # token arrays use the variant convention: TNum(5) -> ["TNum", 5n], TPlus -> ["TPlus"]
       toks =
@@ -197,7 +197,7 @@ defmodule Rian.JSTest do
     end
 
     test "the WHOLE calc compiler lowers to JS and runs end-to-end under node" do
-      js = JS.compile(File.read!("compiler/calc.rian"))
+      js = JS.compile(File.read!("test/fixtures/rian/calc.rian"))
 
       # lexer (FFI) + parser + optimizer + codegen (maps) + VM, all in JS
       assert node_eval(js, "run(\"2 + 3 * 4\").toString()") in [:no_node, "14"]

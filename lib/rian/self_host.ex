@@ -157,8 +157,7 @@ defmodule Rian.SelfHost do
   # bootstrap terminus (Stage 3: v1==v2) is gated on this reaching the whole
   # pipeline — not on `percent`.
   @composition %{
-    rung:
-      "SelfhostLexerV2.tokenize → SelfhostDecl.parse_program → lower → SelfhostBeam.compile_forms → load",
+    rung: "LexerV2.tokenize → Decl.parse_program → lower → Beam.compile_forms → load",
     stages: 4,
     subset:
       "whole real compiler-stage files whose ENTIRE front-end is verified ports — tokenized by selfhost_lexer_v2, parsed by selfhost_decl (def heads, multi-clause patterns incl. cons-LISTS and TUPLES, SUM-TYPE/STRUCT declarations + constructor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access, `@external` FFI, `forall` generics, arithmetic + calls) — and compiled by the selfhost_beam backend; all THREE ports called CROSS-MODULE (incl. remote calls), with only a surface→Core lowering + Form inflater as driver glue",
@@ -167,8 +166,8 @@ defmodule Rian.SelfHost do
     # honesty distinction (ADR-0063): the composed loop is self-COMPILING (codegen —
     # lex→parse→lower→emit→load). It is now PARTIALLY self-CHECKING: the two STRUCTURAL
     # gates run in the build loop — EXHAUSTIVENESS (`build` REFUSES a non-exhaustive
-    # sum dispatch, via SelfhostExhaust) and CAPABILITY (refuses a BEAM-illegal `ref`
-    # param, via SelfhostCap.beam_legal). Full self-checking is NOT reached — Rian.Check
+    # sum dispatch, via Exhaust) and CAPABILITY (refuses a BEAM-illegal `ref`
+    # param, via Cap.beam_legal). Full self-checking is NOT reached — Rian.Check
     # (type inference / error sets) is still NOT in the loop, so `build` does not yet
     # reject ill-typed programs the way the whole compiler does. Tracked granularly so
     # partial gates cannot masquerade as the whole checker.
@@ -187,7 +186,7 @@ defmodule Rian.SelfHost do
     bootstrap_v1_v2: true,
     bootstrap_test: "test/rian/selfhost_v1_v2_fixpoint_test.exs",
     note:
-      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.Selfhost*\" atoms (Pascal calls, ADR-0041). `SelfhostLexerV2.tokenize` feeds `SelfhostDecl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING and PARTIALLY self-CHECKING: the two STRUCTURAL gates are wired into the build loop — `build` refuses a non-exhaustive sum dispatch (SelfhostExhaust, env from the program's `type` decls) and a BEAM-illegal `ref` parameter (SelfhostCap.beam_legal), via `:erlang.error` (`compose_exhaust_gate_fixpoint_test`). Full self-CHECKING (Rian.Check type inference also in the loop) remains the next terminus — the checker port (checker.rian) now covers 12/12 Core nodes WITH a typing env (bound variables; literals incl. float/char, unary/binary, prim calls), its tail being cross-width join widening, `case`/lists, lambdas, and user-fn/ctor return types. Host FFI in the loop: :compile.forms/:code.load_binary/:erlang.error."
+      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.*\" atoms (Pascal calls, ADR-0041). `LexerV2.tokenize` feeds `Decl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING and PARTIALLY self-CHECKING: the two STRUCTURAL gates are wired into the build loop — `build` refuses a non-exhaustive sum dispatch (Exhaust, env from the program's `type` decls) and a BEAM-illegal `ref` parameter (Cap.beam_legal), via `:erlang.error` (`compose_exhaust_gate_fixpoint_test`). Full self-CHECKING (Rian.Check type inference also in the loop) remains the next terminus — the checker port (checker.rian) now covers 12/12 Core nodes WITH a typing env (bound variables; literals incl. float/char, unary/binary, prim calls), its tail being cross-width join widening, `case`/lists, lambdas, and user-fn/ctor return types. Host FFI in the loop: :compile.forms/:code.load_binary/:erlang.error."
   }
 
   @doc """
@@ -304,32 +303,20 @@ defmodule Rian.SelfHost do
   # MUST delete its line here (the test fails on a stale entry), and any NEW host FFI
   # MUST be added here (the test fails on an unlisted crutch). Sorted, deduped.
   @ffi_ledger %{
-    "calc.rian" => [
-      ":lists.reverse",
-      "List.to_string",
-      "Map.get",
-      "Map.put",
-      "String.to_charlist"
-    ],
-    "check.rian" => ["Map.get", "Map.put"],
-    "codegen.rian" => ["Map.get", "Map.put"],
-    "eval.rian" => ["Map.get", "Map.put"],
-    "funcs.rian" => ["Map.get", "Map.put"],
-    "modules.rian" => ["String.to_charlist"],
     # rung 7 wires the VERIFIED beam backend into the driver via a cross-module call
-    # to SelfhostBeam.compile_forms (composition — excluded from this count, see
+    # to Beam.compile_forms (composition — excluded from this count, see
     # ffi_in_file/1). Its only host FFI is still the two BEAM toolchain calls.
     "compose_real_beam.rian" => [":code.load_binary", ":compile.forms"],
-    # rung 8 adds the verified FRONT-END: bodies parsed by SelfhostParse.parse, then
-    # the SelfhostBeam backend (both cross-module composition, excluded). Same two
+    # rung 8 adds the verified FRONT-END: bodies parsed by Parse.parse, then
+    # the Beam backend (both cross-module composition, excluded). Same two
     # BEAM toolchain calls as the only host FFI.
     "compose_real_front.rian" => [":code.load_binary", ":compile.forms"],
     # rung 9 replaces the last toy front-end piece: the whole program is parsed by
-    # SelfhostDecl.parse_program, then compiled by SelfhostBeam (both cross-module
+    # Decl.parse_program, then compiled by Beam (both cross-module
     # composition, excluded). Same two BEAM toolchain calls as the only host FFI.
     "compose_real_decl.rian" => [":code.load_binary", ":compile.forms"],
-    # rung 10 wires the verified LEXER too: SelfhostLexerV2.tokenize → SelfhostDecl →
-    # SelfhostBeam (all cross-module composition, excluded). The whole front-end is
+    # rung 10 wires the verified LEXER too: LexerV2.tokenize → Decl →
+    # Beam (all cross-module composition, excluded). The whole front-end is
     # now verified ports. Same two BEAM toolchain calls as the only host FFI.
     "compose_real_lex.rian" => [":code.load_binary", ":compile.forms"],
     # rung 11 widens the SURFACE to sum types + ctor dispatch (selfhost_decl's
@@ -356,7 +343,7 @@ defmodule Rian.SelfHost do
   @doc """
   The `mod <Name>` module names declared across the self-host sources — the set of
   *sibling self-host ports*. A Pascal-qualified call to one of these (e.g.
-  `SelfhostBeam.compile_forms`) is intra-self-host **composition**, not a host
+  `Beam.compile_forms`) is intra-self-host **composition**, not a host
   crutch, so `ffi_in_file/1` excludes it from the FFI count (it is the loop closing,
   tracked by the composition axis — counting it would perversely make composing more
   verified stages look like more host dependency).
@@ -384,7 +371,7 @@ defmodule Rian.SelfHost do
   We scan each external spec for `:mod.fun` host MFAs so the toolchain FFI a BEAM
   bootstrap driver leans on (`:compile.forms`, `:code.load_binary`) is counted.
 
-  Cross-module calls to a *sibling self-host port* (`SelfhostBeam.compile_forms`) are
+  Cross-module calls to a *sibling self-host port* (`Beam.compile_forms`) are
   excluded: they are composition (one verified stage feeding the next), not a host
   crutch (see `selfhost_module_names/0`). Genuine host `Mod.fun` calls (`String.to_atom`)
   stay counted — their module head is not a self-host port.

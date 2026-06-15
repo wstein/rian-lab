@@ -32,7 +32,7 @@ defmodule Rian.FixpointTest do
   describe "self-hosting fixpoint (ADR-0027/0031) — Rian lexer vs reference" do
     setup do
       mod =
-        Fixpoint.load_lexer(File.read!("compiler/lexer.rian"), :rian_fixpoint_lexer)
+        Fixpoint.load_lexer(File.read!("test/fixtures/rian/lexer.rian"), :rian_fixpoint_lexer)
 
       {:ok, mod: mod}
     end

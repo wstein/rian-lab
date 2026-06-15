@@ -17,7 +17,7 @@
 # every backend through the same machinery.
 # ---------------------------------------------------------------------------
 
-mod SelfhostLexer do
+mod Lexer do
   # The lexer's own typed token stream — a sealed sum (ADR-0034).
   type Token := TNum(Int53) | TPlus | TMinus | TStar | TSlash | TLParen | TRParen
 

@@ -15,7 +15,7 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
   # backend, cross-module) compiles it into a real loadable module.
   #
   # That Rian-built backend then lowers Core IR to abstract forms IDENTICALLY to the
-  # reference backend (`SelfhostBeam`, which `beam_module_fixpoint_test` already
+  # reference backend (`Beam`, which `beam_module_fixpoint_test` already
   # locks against `Rian.Beam`). This is the third whole stage to compile its **own
   # whole source** — the v1==v2 shape, now on the backend itself.
   #
@@ -27,15 +27,15 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, ref} = Beam.load(@beam_src, :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, ref} = Beam.load(@beam_src, :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
     {:ok, drv} =
       Beam.load(
@@ -101,7 +101,7 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
     {:func, "rem", 1,
      [
        {:clause, [{:p_var, "x"}], :g_none,
-        {:block, [{:s_expr, {:c_remote, "Elixir.SelfhostDecl", "parse_program", [{:c_id, "x"}]}}]}}
+        {:block, [{:s_expr, {:c_remote, "Elixir.Decl", "parse_program", [{:c_id, "x"}]}}]}}
      ]},
     # the str_to_atom prim (CCall → String.to_atom) — the driver interns names.
     {:func, "atm", 1,
@@ -128,7 +128,7 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
     test "it is the WHOLE real file (verbatim), not a slice", %{built: built} do
       # the source compiled is compiler/beam.rian unmodified, and the
       # built module exports the real entry point.
-      assert @beam_src =~ "mod SelfhostBeam do"
+      assert @beam_src =~ "mod Beam do"
       assert @beam_src =~ "pub def compile_forms("
       assert function_exported?(built, :compile_forms, 1)
     end

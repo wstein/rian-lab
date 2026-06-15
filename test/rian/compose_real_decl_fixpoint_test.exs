@@ -8,23 +8,23 @@ defmodule Rian.ComposeRealDeclFixpointTest do
   # COMPOSITION fixpoint rung 9 (ADR-0063 Step 3): the front-end's LAST toy piece —
   # declaration splitting — is replaced by the equivalence-locked `selfhost_decl`
   # port. `compose_real_decl.rian` parses the whole program with
-  # `SelfhostDecl.parse_program` (cross-module), lowers its Decl IR to `selfhost_beam`
+  # `Decl.parse_program` (cross-module), lowers its Decl IR to `selfhost_beam`
   # Core/Pat (the surface→Core lowering), and compiles via the verified `selfhost_beam`
-  # backend (cross-module). BOTH front-end (lex→SelfhostDecl) and back-end
-  # (SelfhostBeam) are now verified ports.
+  # backend (cross-module). BOTH front-end (lex→Decl) and back-end
+  # (Beam) are now verified ports.
   #
-  #   lex → SelfhostDecl.parse_program → normalize/group → lower → SelfhostBeam.compile_forms
+  #   lex → Decl.parse_program → normalize/group → lower → Beam.compile_forms
   #        → inflate (in Rian) → :compile.forms / :code.load_binary
   #
   # selfhost_decl's surface has no `if` (that was rung 8's selfhost_parse) but DOES
   # have cons-list patterns — so this rung compiles list-pattern recursion
   # (`sum`/`len`), beyond rung 8. The test loads both ports under their
-  # :"Elixir.Selfhost*" atoms, then calls only `build/2` and runs the result,
+  # :"Elixir.*" atoms, then calls only `build/2` and runs the result,
   # identical to `Rian.Beam`.
 
   setup_all do
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, drv} =
       Beam.load(
@@ -71,7 +71,7 @@ defmodule Rian.ComposeRealDeclFixpointTest do
   ]
 
   describe "verified front-end + back-end fixpoint — runs identically to Elixir" do
-    test "build/2 (SelfhostDecl + SelfhostBeam) loads modules equal to Rian.Beam's", %{drv: drv} do
+    test "build/2 (Decl + Beam) loads modules equal to Rian.Beam's", %{drv: drv} do
       for {rian_src, ref_src, calls} <- @corpus do
         modname = :"cmp_rd_#{System.unique_integer([:positive])}"
         loaded = drv.build(rian_src, modname)

@@ -18,7 +18,7 @@
 # renders the reference `Rian.Core` struct to the same string and diffs.
 # ---------------------------------------------------------------------------
 
-mod SelfhostCore do
+mod Core do
   # ── surface expression AST (mirrors Rian.Pratt tuples) ──
   type Surface := SNum(String)
                 | SStr(String)

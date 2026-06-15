@@ -9,7 +9,7 @@
 # wanted. Evidence for SELFHOST.md.
 # ---------------------------------------------------------------------------
 
-mod SelfhostOpt do
+mod Opt do
   type Expr := Num(Int53)
              | Var(String)
              | Add(Expr, Expr)

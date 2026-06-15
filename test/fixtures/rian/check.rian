@@ -11,7 +11,7 @@
 # `<` (Int×Int→Bool), `if` (Bool cond, branches of one type), and `let`.
 # ---------------------------------------------------------------------------
 
-mod SelfhostCheck do
+mod Check do
   type Expr := Num(Int53)
              | Bln(Bool)
              | Var(String)

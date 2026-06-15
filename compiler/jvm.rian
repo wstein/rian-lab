@@ -16,7 +16,7 @@
 # `:=` binds are out of scope (the corpus is shadow-free).
 # ---------------------------------------------------------------------------
 
-mod SelfhostJvm do
+mod Jvm do
   # ── Core (the supported expression subset) ──
   type Core := CNum(String)
              | CChar(Int53)

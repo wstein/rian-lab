@@ -11,12 +11,12 @@ defmodule Rian.ComposeRealBeamFixpointTest do
   # `compose_real_beam.rian` instead calls the EQUIVALENCE-LOCKED
   # `beam.rian` backend across modules:
   #
-  #     parse(src) → selfhost_beam Func → SelfhostBeam.compile_forms(funcs)
+  #     parse(src) → selfhost_beam Func → Beam.compile_forms(funcs)
   #                                       └ the REAL port (cross-module call)
   #                  → inflate its Form sum → real abstract-form tuples (in Rian)
   #                  → :compile.forms / :code.load_binary (the driver loop)
   #
-  # `SelfhostBeam` must be loaded under its natural `:"Elixir.SelfhostBeam"` atom so
+  # `Beam` must be loaded under its natural `:"Elixir.Beam"` atom so
   # the Pascal-qualified call resolves (ADR-0041). The `Form → abstract-form`
   # inflation the beam fixpoint test did in Elixir is now ported into the driver.
   #
@@ -25,7 +25,7 @@ defmodule Rian.ComposeRealBeamFixpointTest do
 
   setup_all do
     # the verified backend, under the atom a Pascal-qualified call lowers to.
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, drv} =
       Beam.load(
@@ -65,7 +65,7 @@ defmodule Rian.ComposeRealBeamFixpointTest do
     }
   ]
 
-  describe "real-backend fixpoint — driver via SelfhostBeam runs identically to Elixir" do
+  describe "real-backend fixpoint — driver via Beam runs identically to Elixir" do
     test "build/2 (verified backend) loads modules equal to Rian.Beam's", %{drv: drv} do
       for {rian_src, ref_src, calls} <- @corpus do
         modname = :"cmp_rb_#{System.unique_integer([:positive])}"
@@ -83,7 +83,7 @@ defmodule Rian.ComposeRealBeamFixpointTest do
   end
 
   describe "teeth — the backend really is the cross-module verified port" do
-    test "compile_module routes through SelfhostBeam.compile_forms (inflated in Rian)", %{
+    test "compile_module routes through Beam.compile_forms (inflated in Rian)", %{
       drv: drv
     } do
       # the abstract form is exactly what the verified backend + Rian inflater produce.
@@ -103,12 +103,12 @@ defmodule Rian.ComposeRealBeamFixpointTest do
               ]} = func
     end
 
-    test "without SelfhostBeam loaded the call would fail — proving it's a real dependency", %{
+    test "without Beam loaded the call would fail — proving it's a real dependency", %{
       drv: drv
     } do
-      # SelfhostBeam IS loaded (setup_all), so this succeeds; the point of the rung is
+      # Beam IS loaded (setup_all), so this succeeds; the point of the rung is
       # that the backend is an external verified module, not inlined toy code.
-      assert Code.ensure_loaded?(:"Elixir.SelfhostBeam")
+      assert Code.ensure_loaded?(:"Elixir.Beam")
       m = drv.build("def double(n) := n + n", :rb_double)
       assert apply(m, :double, [21]) == 42
     end

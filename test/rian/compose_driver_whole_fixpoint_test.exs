@@ -26,15 +26,15 @@ defmodule Rian.ComposeDriverWholeFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
     {:ok, v1} = Beam.load(@driver_src, :rian_driver_v1)
 

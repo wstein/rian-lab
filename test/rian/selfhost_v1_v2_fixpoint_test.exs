@@ -1,4 +1,4 @@
-defmodule Rian.SelfhostV1V2FixpointTest do
+defmodule Rian.V1V2FixpointTest do
   # async: false — compiles + loads the whole Rian-written compiler into the VM in
   # two generations and compares their output.
   use ExUnit.Case, async: false
@@ -37,10 +37,10 @@ defmodule Rian.SelfhostV1V2FixpointTest do
   # under exactly these names for the self-built compiler to find them.
   defp modules do
     [
-      {"lexer", @lexer, :"Elixir.SelfhostLexerV2"},
-      {"decl", @decl, :"Elixir.SelfhostDecl"},
-      {"beam", @beam, :"Elixir.SelfhostBeam"},
-      {"driver", @driver, :SelfhostDriverFixedPoint}
+      {"lexer", @lexer, :"Elixir.LexerV2"},
+      {"decl", @decl, :"Elixir.Decl"},
+      {"beam", @beam, :"Elixir.Beam"},
+      {"driver", @driver, :DriverFixedPoint}
     ]
   end
 
@@ -52,14 +52,14 @@ defmodule Rian.SelfhostV1V2FixpointTest do
 
   setup_all do
     # gen0 — the compiler compiled by the Elixir host.
-    {:ok, _} = Beam.load(@lexer, :"Elixir.SelfhostLexerV2")
-    {:ok, _} = Beam.load(@decl, :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(@beam, :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(@lexer, :"Elixir.LexerV2")
+    {:ok, _} = Beam.load(@decl, :"Elixir.Decl")
+    {:ok, _} = Beam.load(@beam, :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
     {:ok, gen0_driver} = Beam.load(@driver, :rian_gen0_driver)
 
     # gen1 — gen0 compiles each compiler source (canonical forms).
@@ -68,10 +68,10 @@ defmodule Rian.SelfhostV1V2FixpointTest do
 
     # load gen1 as the live compiler: the three stages under their Elixir atoms
     # (replacing gen0), and the gen1 driver under its own.
-    load_forms(:"Elixir.SelfhostLexerV2", gen1["lexer"])
-    load_forms(:"Elixir.SelfhostDecl", gen1["decl"])
-    load_forms(:"Elixir.SelfhostBeam", gen1["beam"])
-    {gen1_driver, _} = load_forms(:SelfhostDriverFixedPoint, gen1["driver"])
+    load_forms(:"Elixir.LexerV2", gen1["lexer"])
+    load_forms(:"Elixir.Decl", gen1["decl"])
+    load_forms(:"Elixir.Beam", gen1["beam"])
+    {gen1_driver, _} = load_forms(:DriverFixedPoint, gen1["driver"])
 
     # gen2 — the self-built compiler recompiles the SAME sources.
     gen2 =

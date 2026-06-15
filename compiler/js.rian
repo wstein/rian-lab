@@ -17,7 +17,7 @@
 # program-level / separate-subsystem concern, like `@external` for the JVM port).
 # ---------------------------------------------------------------------------
 
-mod SelfhostJs do
+mod Js do
   type Core := CNum(String)
              | CChar(Int53)
              | CStr(String)

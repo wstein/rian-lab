@@ -12,7 +12,7 @@
 #   String -> Vec(Token) -> Expr -> Expr(folded) -> Vec(Instr) -> Int53
 # ---------------------------------------------------------------------------
 
-mod SelfhostCalc do
+mod Calc do
   # ── tokens ────────────────────────────────────────────────────────────
   type Token := TNum(Int53)
               | TPlus | TMinus | TStar | TSlash | TLParen | TRParen

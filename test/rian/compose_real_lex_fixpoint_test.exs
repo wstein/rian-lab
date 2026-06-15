@@ -10,21 +10,21 @@ defmodule Rian.ComposeRealLexFixpointTest do
   # port. `compose_real_lex.rian` now owns NO lexing or parsing: the whole
   # front-end is verified ports, called cross-module.
   #
-  #   SelfhostLexerV2.tokenize → SelfhostDecl.parse_program → lower → SelfhostBeam.compile_forms
+  #   LexerV2.tokenize → Decl.parse_program → lower → Beam.compile_forms
   #        → inflate (in Rian) → :compile.forms / :code.load_binary
   #
   # THREE verified ports (lexer, declaration parser, backend) composed end to end,
   # with identical token tags across the lexer→parser boundary (no projection). The
   # only driver-local code is the surface→Core lowering and the Form inflater. The
-  # test loads all three ports under their :"Elixir.Selfhost*" atoms, then calls only
+  # test loads all three ports under their :"Elixir.*" atoms, then calls only
   # `build/2` and runs the result, identical to `Rian.Beam`.
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, drv} =
       Beam.load(

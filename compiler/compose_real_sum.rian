@@ -12,8 +12,8 @@
 #   def code(Green) := 1
 #   def code(Blue) := 2
 #
-# No verified port changes — the front-end (SelfhostLexerV2 + SelfhostDecl) and
-# back-end (SelfhostBeam) are the same locked ports as rung 10. Only the driver
+# No verified port changes — the front-end (LexerV2 + Decl) and
+# back-end (Beam) are the same locked ports as rung 10. Only the driver
 # glue grows: the `type` declaration is ERASED (variants are atoms / tagged tuples
 # on the BEAM — no codegen), and the Form inflater learns FCtorN / FCtor:
 #   nullary ctor pattern/value -> {:atom, 0, snake_atom}     (Red -> :red)
@@ -21,16 +21,16 @@
 # via a `to_snake` matching Rian.PatternLower.to_snake (SNum -> :s_num, SP -> :sp).
 #
 # Pipeline (unchanged from rung 10 except the wider inflater):
-#   SelfhostLexerV2.tokenize → SelfhostDecl.parse_program → normalize (drops DType)
-#     → surface→Core lowering → SelfhostBeam.compile_forms → inflate → load
+#   LexerV2.tokenize → Decl.parse_program → normalize (drops DType)
+#     → surface→Core lowering → Beam.compile_forms → inflate → load
 #
-# All three ports load under :"Elixir.Selfhost*" atoms (Pascal calls, ADR-0041);
+# All three ports load under :"Elixir.*" atoms (Pascal calls, ADR-0041);
 # sibling-port calls are composition, not host crutches. Only host FFI:
 # :compile.forms / :code.load_binary. selfhost_decl still lacks `if`/strings, so
 # widening it off :partial remains the path to a real selfhost_*.rian slice.
 # ---------------------------------------------------------------------------
 
-mod SelfhostComposeRealSum do
+mod ComposeRealSum do
   # ── selfhost_beam's INPUT IR (the shared contract — structurally identical) ──
   type Core := CNum(String)
              | CStr(String)
@@ -96,15 +96,15 @@ mod SelfhostComposeRealSum do
   type NClause := NC(String, Vec(Pat), Guard, Block)
   type Grp := Grp(String, Int53, Vec(NClause))
 
-  # the exhaustiveness gate's env (ADR-0036) — same field shape as SelfhostExhaust's
+  # the exhaustiveness gate's env (ADR-0036) — same field shape as Exhaust's
   # CDef/TDef/Env (which only field-READS them, ignoring the struct tag), so these
-  # locally-declared structs feed the verified `SelfhostExhaust.useful` directly.
+  # locally-declared structs feed the verified `Exhaust.useful` directly.
   struct CDef(name String, ar Int53, ty String)
   struct TDef(ty String, ctors Vec(String))
   struct Env(cdefs Vec(CDef), tdefs Vec(TDef))
 
-  # the capability lattice (ADR-0055), same shape as SelfhostCap's Cap, so the
-  # verified `SelfhostCap.beam_legal` decides BEAM-legality of a parameter cap.
+  # the capability lattice (ADR-0055), same shape as Cap's Cap, so the
+  # verified `Cap.beam_legal` decides BEAM-legality of a parameter cap.
   type Cap := Iso | Val | Ref | Tag
 
   # ── the BEAM toolchain boundary: two @external(:ex) host calls (counted FFI) ──
@@ -132,14 +132,14 @@ mod SelfhostComposeRealSum do
   def loaded({:module, m}) := m
 
   # ── source -> a full :compile.forms input, via the REAL lexer + parser + backend ──
-  # the front-end is entirely verified ports: SelfhostLexerV2.tokenize feeds
-  # SelfhostDecl.parse_program directly (same token tags, no projection). SELF-CHECKING
+  # the front-end is entirely verified ports: LexerV2.tokenize feeds
+  # Decl.parse_program directly (same token tags, no projection). SELF-CHECKING
   # (ADR-0036): the exhaustiveness gate runs first and REFUSES (raises) on a
   # non-exhaustive sum-dispatch function — the compiler rejects bad input rather than
-  # silently emitting it. Requires SelfhostExhaust to be loaded.
+  # silently emitting it. Requires Exhaust to be loaded.
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
   pub def compile_module(src, modname)
-    decls := inline_consts(SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src)))
+    decls := inline_consts(Decl.parse_program(LexerV2.tokenize(src)))
     ncs := normalize(decls)
     grps := group(resolve_ncs(nc_names(ncs), ncs))
     case first_bad(gate_env(decls), grps) do
@@ -251,7 +251,7 @@ mod SelfhostComposeRealSum do
   @external(:ex, ":erlang.error({:unresolved_interp_hole, src})")
   def refuse_interp(src String) Tuple
 
-  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
+  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(Beam.compile_forms(fs))]
 
   def exports(Vec(Func)) Vec(Tuple)
   def exports([]) := []
@@ -281,7 +281,7 @@ mod SelfhostComposeRealSum do
 
   # parse an `@external` host-code string into a surface expression, via the same
   # verified lexer + the decl parser's exported expression entry point.
-  def parse_host(code String) Tuple := SelfhostDecl.parse_expr(SelfhostLexerV2.tokenize(code))
+  def parse_host(code String) Tuple := Decl.parse_expr(LexerV2.tokenize(code))
 
   # module constants — `const K Type := <literal>` (DConst). A const is a literal-
   # valued compile-time constant, so the build INLINES references rather than
@@ -307,9 +307,9 @@ mod SelfhostComposeRealSum do
 
   def subst_decls(env Vec(Subst), ds Vec(Tuple)) Vec(Tuple)
   def subst_decls(_, []) := []
-  def subst_decls(env, [{:d_clause, name, pats, body} | rest]) := [{:d_clause, name, pats, SelfhostDecl.subst_e(env, body)} | subst_decls(env, rest)]
-  def subst_decls(env, [{:d_clause_g, name, pats, g, body} | rest]) := [{:d_clause_g, name, pats, SelfhostDecl.subst_e(env, g), SelfhostDecl.subst_e(env, body)} | subst_decls(env, rest)]
-  def subst_decls(env, [{:d_func, a, name, params, b, c, body} | rest]) := [{:d_func, a, name, params, b, c, SelfhostDecl.subst_e(env, body)} | subst_decls(env, rest)]
+  def subst_decls(env, [{:d_clause, name, pats, body} | rest]) := [{:d_clause, name, pats, Decl.subst_e(env, body)} | subst_decls(env, rest)]
+  def subst_decls(env, [{:d_clause_g, name, pats, g, body} | rest]) := [{:d_clause_g, name, pats, Decl.subst_e(env, g), Decl.subst_e(env, body)} | subst_decls(env, rest)]
+  def subst_decls(env, [{:d_func, a, name, params, b, c, body} | rest]) := [{:d_func, a, name, params, b, c, Decl.subst_e(env, body)} | subst_decls(env, rest)]
   def subst_decls(env, [{:d_mod, n, inner} | rest]) := [{:d_mod, n, subst_decls(env, inner)} | subst_decls(env, rest)]
   def subst_decls(env, [d | rest]) := [d | subst_decls(env, rest)]
 
@@ -756,16 +756,16 @@ mod SelfhostComposeRealSum do
     end
   end
 
-  # ── exhaustiveness gate (ADR-0036) — the verified SelfhostExhaust port, in-loop ──
+  # ── exhaustiveness gate (ADR-0036) — the verified Exhaust port, in-loop ──
   # Build the usefulness env from the program's `type` declarations, then ask
-  # SelfhostExhaust.useful whether a wildcard row is useful against each function's
+  # Exhaust.useful whether a wildcard row is useful against each function's
   # clause matrix (useful ⇒ an uncovered case ⇒ NON-exhaustive). Read-only: returns
   # "" if every CHECKABLE function is exhaustive, else the first that is not.
   # Functions with guards or non-ctor/wild/var patterns (literals/lists/tuples) are
   # conservatively SKIPPED — the gate decides the sum-type-dispatch subset.
   pub def non_exhaustive(src String) String
   pub def non_exhaustive(src)
-    decls := SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src))
+    decls := Decl.parse_program(LexerV2.tokenize(src))
     first_bad(gate_env(decls), group(normalize(decls)))
   end
 
@@ -817,7 +817,7 @@ mod SelfhostComposeRealSum do
 
   def grp_bad(env Env, ar Int53, cls Vec(NClause)) Bool
     if checkable(cls) do
-      SelfhostExhaust.useful(env, matrix(cls), dup_wild(ar))
+      Exhaust.useful(env, matrix(cls), dup_wild(ar))
     else
       false
     end
@@ -871,7 +871,7 @@ mod SelfhostComposeRealSum do
   def dup_wild(0) := []
   def dup_wild(n) := [PWild | dup_wild(n - 1)]
 
-  # ── capability gate (ADR-0055/P5) — the verified SelfhostCap.beam_legal, in-loop ──
+  # ── capability gate (ADR-0055/P5) — the verified Cap.beam_legal, in-loop ──
   # The first function with a parameter whose capability is not BEAM-legal (`ref`),
   # else "". Caps live on the typed head (DSig/DFunc); pattern clauses carry none.
   def first_illegal_cap(decls Vec(Tuple)) String
@@ -900,7 +900,7 @@ mod SelfhostComposeRealSum do
   def params_legal(Vec(Tuple)) Bool
   def params_legal([]) := true
   def params_legal([{:par, _, cap, _} | rest])
-    if SelfhostCap.beam_legal(to_cap(cap)) do
+    if Cap.beam_legal(to_cap(cap)) do
       params_legal(rest)
     else
       false

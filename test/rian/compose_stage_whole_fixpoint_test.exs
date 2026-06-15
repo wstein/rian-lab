@@ -22,15 +22,15 @@ defmodule Rian.ComposeStageWholeFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
     {:ok, drv} =
       Beam.load(File.read!("compiler/compose_real_sum.rian"), :rian_compose_stage)
@@ -82,7 +82,7 @@ defmodule Rian.ComposeStageWholeFixpointTest do
     end
 
     test "it is the WHOLE real file", %{core_src: src, core_b: b} do
-      assert src =~ "mod SelfhostCore do"
+      assert src =~ "mod Core do"
       assert src =~ "pub def emit(Surface) String"
       assert function_exported?(b, :emit, 1)
     end
@@ -117,7 +117,7 @@ defmodule Rian.ComposeStageWholeFixpointTest do
     end
 
     test "it is the WHOLE real file", %{exh_src: src, exh_b: b} do
-      assert src =~ "mod SelfhostExhaust do"
+      assert src =~ "mod Exhaust do"
       assert src =~ "pub def useful("
       assert function_exported?(b, :useful, 3)
     end

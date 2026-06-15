@@ -8,15 +8,15 @@
 # cons-lists, expressions) into a `Decl` IR. The driver then lowers that IR to
 # `selfhost_beam` Core and runs it through the verified backend (rung 7):
 #
-#   lex(src) → SelfhostDecl.parse_program(toks)   ← the REAL declaration parser
+#   lex(src) → Decl.parse_program(toks)   ← the REAL declaration parser
 #            → normalize/group clauses by name
 #            → lower Decl IR → selfhost_beam Core/Pat   (the surface→Core lowering)
-#            → SelfhostBeam.compile_forms(funcs)        ← the REAL backend
+#            → Beam.compile_forms(funcs)        ← the REAL backend
 #            → inflate Form → abstract-form tuples (in Rian)
 #            → :compile.forms / :code.load_binary
 #
-# Now BOTH the front-end (parsing: lex→SelfhostDecl) and the back-end (codegen:
-# SelfhostBeam) are equivalence-locked ports. The only driver-local glue is the
+# Now BOTH the front-end (parsing: lex→Decl) and the back-end (codegen:
+# Beam) are equivalence-locked ports. The only driver-local glue is the
 # lexer, the surface→Core lowering, and the Form inflater — none of which
 # reimplements a verified stage. Two verified ports, composed.
 #
@@ -24,14 +24,14 @@
 # LISTS (no `if` — that was rung 8's selfhost_parse). So this rung compiles e.g.
 #   def sum([]) := 0
 #   def sum([h | t]) := h + sum(t)
-# — list-pattern recursion, beyond rung 8's surface. Both `SelfhostDecl` and
-# `SelfhostBeam` load under their :"Elixir.Selfhost*" atoms (Pascal calls,
+# — list-pattern recursion, beyond rung 8's surface. Both `Decl` and
+# `Beam` load under their :"Elixir.*" atoms (Pascal calls,
 # ADR-0041); both are sibling ports, so the calls are composition, not host
 # crutches (excluded from the FFI ledger). Only host FFI: :compile.forms /
 # :code.load_binary.
 # ---------------------------------------------------------------------------
 
-mod SelfhostComposeRealDecl do
+mod ComposeRealDecl do
   # ── selfhost_decl's Tok (the subset the driver emits; tags must match) ──
   type Tok := TNum(String) | TId(String) | TKw(String) | TOp(String)
             | TLP | TRP | TLBracket | TRBracket | TComma | TNL
@@ -111,9 +111,9 @@ mod SelfhostComposeRealDecl do
 
   # ── source -> a full :compile.forms input, via the REAL decl parser + backend ──
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
-  pub def compile_module(src, modname) := assemble(modname, funcs(group(normalize(SelfhostDecl.parse_program(lex(src))))))
+  pub def compile_module(src, modname) := assemble(modname, funcs(group(normalize(Decl.parse_program(lex(src))))))
 
-  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
+  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(Beam.compile_forms(fs))]
 
   def exports(Vec(Func)) Vec(Tuple)
   def exports([]) := []

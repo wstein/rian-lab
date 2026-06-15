@@ -26,11 +26,11 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
-    {:ok, _} = Beam.load(File.read!("compiler/core.rian"), :"Elixir.SelfhostCore")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
+    {:ok, _} = Beam.load(File.read!("compiler/core.rian"), :"Elixir.Core")
 
     {:ok, drv} =
       Beam.load(File.read!("compiler/compose_real_sum.rian"), :rian_core_bridge)
@@ -80,7 +80,7 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
   defp canon_tail(:close), do: "close"
   defp canon_tail(core), do: "(tail #{canon(core)})"
 
-  # the selfhost_core oracle's surface injector (Rian.Pratt surface → SelfhostCore
+  # the selfhost_core oracle's surface injector (Rian.Pratt surface → Core
   # Surface), value subset; mirrors core_fixpoint_test's `inj`.
   defp inj({:num, t}), do: {:s_num, t}
   defp inj({:str, s}), do: {:s_str, s}
@@ -124,11 +124,11 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
     test "the driver's Core renders identically to the selfhost_core oracle AND Rian.Core",
          %{drv: drv} do
       for src <- @corpus do
-        driver_core = drv.lower_surface(SelfhostDecl.parse_expr(SelfhostLexerV2.tokenize(src)))
+        driver_core = drv.lower_surface(Decl.parse_expr(LexerV2.tokenize(src)))
         driver_text = r(driver_core)
 
         rian_surface = Pratt.parse(src)
-        oracle_text = SelfhostCore.emit(inj(rian_surface))
+        oracle_text = :"Elixir.Core".emit(inj(rian_surface))
         rian_core_text = canon(Core.from_expr(rian_surface))
 
         assert driver_text == oracle_text,
@@ -145,7 +145,7 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
       for src <- @corpus do
         rian_surface = Pratt.parse(src)
 
-        assert SelfhostCore.emit(inj(rian_surface)) == canon(Core.from_expr(rian_surface)),
+        assert :"Elixir.Core".emit(inj(rian_surface)) == canon(Core.from_expr(rian_surface)),
                "selfhost_core diverged from Rian.Core on #{inspect(src)}"
       end
     end

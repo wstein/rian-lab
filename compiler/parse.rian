@@ -18,7 +18,7 @@
 # the bare `<-` propagation bind (ADR-0066, desugars a block to a Result `case`).
 # ---------------------------------------------------------------------------
 
-mod SelfhostParse do
+mod Parse do
   type Tok := TNum(String)
             | TStr(String)
             | TChar(Int53)

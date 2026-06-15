@@ -12,24 +12,24 @@ defmodule Rian.ComposeRealSumFixpointTest do
   # (nullary ctor -> snake atom; applied ctor -> tagged tuple), via a `to_snake`
   # matching Rian.PatternLower.to_snake.
   #
-  #   SelfhostLexerV2.tokenize → SelfhostDecl.parse_program → normalize (drops DType)
-  #     → surface→Core lowering → SelfhostBeam.compile_forms → inflate → load
+  #   LexerV2.tokenize → Decl.parse_program → normalize (drops DType)
+  #     → surface→Core lowering → Beam.compile_forms → inflate → load
   #
-  # The test loads all three verified ports under their :"Elixir.Selfhost*" atoms,
+  # The test loads all three verified ports under their :"Elixir.*" atoms,
   # then calls only `build/2` and runs the result, identical to `Rian.Beam` — now
   # over sum-type programs (Color/Shape/Box) with constructor dispatch.
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
     {:ok, drv} =
       Beam.load(

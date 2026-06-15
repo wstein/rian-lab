@@ -18,7 +18,7 @@
 # reference. The witness/counterexample pass (algorithm I) is the `:partial` tail.
 # ---------------------------------------------------------------------------
 
-mod SelfhostExhaust do
+mod Exhaust do
   # A pattern: a wildcard, or a constructor applied to sub-patterns.
   type Pat := PWild | PCtor(String, Vec(Pat))
 

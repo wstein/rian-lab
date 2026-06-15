@@ -14,7 +14,7 @@ defmodule Rian.ComposeLexerFixpointTest do
   # compiles it into a real loadable module.
   #
   # That Rian-built lexer then tokenizes IDENTICALLY to the reference lexer
-  # (`SelfhostLexerV2`, which the per-stage fixpoint already locks against
+  # (`LexerV2`, which the per-stage fixpoint already locks against
   # `Rian.Lexer`). This is the first time a stage compiles its **own whole source**,
   # not a toy or a slice — the v1==v2 shape, on the lexer.
   #
@@ -25,20 +25,20 @@ defmodule Rian.ComposeLexerFixpointTest do
   @lexer_src File.read!(@lexer_file)
 
   setup_all do
-    {:ok, _} = Beam.load(@lexer_src, :"Elixir.SelfhostLexerV2")
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(@lexer_src, :"Elixir.LexerV2")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
     {:ok, drv} =
       Beam.load(File.read!("compiler/compose_real_sum.rian"), :rian_compose_lexer)
 
     built = drv.build(@lexer_src, :"RianBuiltLexer_#{System.unique_integer([:positive])}")
-    {:ok, built: built, ref: :"Elixir.SelfhostLexerV2"}
+    {:ok, built: built, ref: :"Elixir.LexerV2"}
   end
 
   # inputs that exercise the lexer's full token vocabulary — ids/keywords, two-char
@@ -80,7 +80,7 @@ defmodule Rian.ComposeLexerFixpointTest do
     test "it is the WHOLE real file (verbatim), not a slice", %{built: built} do
       # the source compiled is compiler/lexer_v2.rian unmodified, and
       # the built module exports the real entry point.
-      assert @lexer_src =~ "mod SelfhostLexerV2 do"
+      assert @lexer_src =~ "mod LexerV2 do"
       assert @lexer_src =~ "pub def tokenize(src String) Vec(Tok)"
       assert function_exported?(built, :tokenize, 1)
     end

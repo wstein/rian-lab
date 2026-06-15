@@ -7,10 +7,10 @@
 # NO part of lexing or parsing — the full front-end is verified ports, called
 # cross-module, and so is the backend:
 #
-#   SelfhostLexerV2.tokenize(src)        ← the REAL lexer        (cross-module)
-#     → SelfhostDecl.parse_program(toks) ← the REAL decl parser  (cross-module)
+#   LexerV2.tokenize(src)        ← the REAL lexer        (cross-module)
+#     → Decl.parse_program(toks) ← the REAL decl parser  (cross-module)
 #     → normalize/group + surface→Core lowering   (driver glue — lowers, doesn't parse)
-#     → SelfhostBeam.compile_forms(funcs)← the REAL backend      (cross-module)
+#     → Beam.compile_forms(funcs)← the REAL backend      (cross-module)
 #     → inflate Form → abstract-form tuples (driver glue)
 #     → :compile.forms / :code.load_binary
 #
@@ -23,12 +23,12 @@
 # Surface: selfhost_decl's slice (arithmetic + calls + multi-clause patterns incl.
 # cons-LISTS; no `if`/strings/sum-types yet — widening selfhost_decl off :partial
 # is the path to compiling a real selfhost_*.rian slice / the v1==v2 fixed point).
-# All three ports load under their :"Elixir.Selfhost*" atoms (Pascal calls,
+# All three ports load under their :"Elixir.*" atoms (Pascal calls,
 # ADR-0041); sibling-port calls are composition, not host crutches (excluded from
 # the FFI ledger). Only host FFI: :compile.forms / :code.load_binary.
 # ---------------------------------------------------------------------------
 
-mod SelfhostComposeRealLex do
+mod ComposeRealLex do
   # ── selfhost_beam's INPUT IR (the shared contract — structurally identical) ──
   type Core := CNum(String)
              | CId(String)
@@ -102,12 +102,12 @@ mod SelfhostComposeRealLex do
   def loaded({:module, m}) := m
 
   # ── source -> a full :compile.forms input, via the REAL lexer + parser + backend ──
-  # the front-end is entirely verified ports: SelfhostLexerV2.tokenize feeds
-  # SelfhostDecl.parse_program directly (same token tags, no projection).
+  # the front-end is entirely verified ports: LexerV2.tokenize feeds
+  # Decl.parse_program directly (same token tags, no projection).
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
-  pub def compile_module(src, modname) := assemble(modname, funcs(group(normalize(SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src))))))
+  pub def compile_module(src, modname) := assemble(modname, funcs(group(normalize(Decl.parse_program(LexerV2.tokenize(src))))))
 
-  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
+  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(Beam.compile_forms(fs))]
 
   def exports(Vec(Func)) Vec(Tuple)
   def exports([]) := []

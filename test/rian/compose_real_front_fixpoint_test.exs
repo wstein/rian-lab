@@ -11,17 +11,17 @@ defmodule Rian.ComposeRealFrontFixpointTest do
   # cross-module, then lowers its raw surface tuple to `selfhost_beam` Core and runs it
   # through the equivalence-locked `selfhost_beam` backend (also cross-module):
   #
-  #   lex → decl-parse → SelfhostParse.parse(body) → lower → SelfhostBeam.compile_forms
+  #   lex → decl-parse → Parse.parse(body) → lower → Beam.compile_forms
   #        → inflate (in Rian) → :compile.forms / :code.load_binary
   #
   # TWO verified stages composed end to end. This test loads both ports under their
-  # :"Elixir.Selfhost*" atoms (so the Pascal-qualified calls resolve), then calls only
+  # :"Elixir.*" atoms (so the Pascal-qualified calls resolve), then calls only
   # `build/2` and runs the result — identical to `Rian.Beam`, now with the REAL parser
   # (real precedence, real surface) AND the real backend.
 
   setup_all do
-    {:ok, _} = Beam.load(File.read!("compiler/parse.rian"), :"Elixir.SelfhostParse")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/parse.rian"), :"Elixir.Parse")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, drv} =
       Beam.load(
@@ -91,7 +91,7 @@ defmodule Rian.ComposeRealFrontFixpointTest do
       assert apply(m, :f, [2, 3, 4]) == 13
     end
 
-    test "compile_module routes bodies through SelfhostParse then SelfhostBeam", %{drv: drv} do
+    test "compile_module routes bodies through Parse then Beam", %{drv: drv} do
       [_m, _exp, func] =
         drv.compile_module("def pick(a, b) := if a > b do a else b end", :pick_rf)
 

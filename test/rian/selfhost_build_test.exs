@@ -1,11 +1,11 @@
-defmodule Rian.SelfhostBuildTest do
+defmodule Rian.BuildTest do
   # async: false — loads real modules into the VM via :code.load_binary.
   use ExUnit.Case, async: false
 
   alias Rian.Beam
 
   # Rian-FIRST behavioural tests: drive the **self-hosted Rian compiler** (the
-  # composed `build`: SelfhostLexerV2 → SelfhostDecl → lower → SelfhostBeam) with
+  # composed `build`: LexerV2 → Decl → lower → Beam) with
   # real Rian programs and assert what they COMPUTE — no Elixir oracle in the loop.
   # The spec is the expected value, not `Rian.Decl`/`Rian.Beam`. This is the
   # Rian-first loop: a failing case here is a feature to add to the *Rian* sources.
@@ -20,11 +20,11 @@ defmodule Rian.SelfhostBuildTest do
 
   setup_all do
     for {mod, file} <- [
-          {"SelfhostLexerV2", "lexer_v2"},
-          {"SelfhostDecl", "decl"},
-          {"SelfhostBeam", "beam"},
-          {"SelfhostExhaust", "exhaust"},
-          {"SelfhostCap", "cap"}
+          {"LexerV2", "lexer_v2"},
+          {"Decl", "decl"},
+          {"Beam", "beam"},
+          {"Exhaust", "exhaust"},
+          {"Cap", "cap"}
         ] do
       {:ok, _} = Beam.load(File.read!("compiler/#{file}.rian"), :"Elixir.#{mod}")
     end

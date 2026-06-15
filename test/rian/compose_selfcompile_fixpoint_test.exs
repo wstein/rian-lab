@@ -23,15 +23,15 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
     {:ok, drv} =
       Beam.load(
@@ -82,7 +82,7 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
     end
 
     test "it is the WHOLE real file (verbatim), not a slice", %{built: built} do
-      assert @cap_src =~ "mod SelfhostCap do"
+      assert @cap_src =~ "mod Cap do"
       assert @cap_src =~ "pub def rust_param(Cap, Ty) String"
       assert function_exported?(built, :rust_param, 2)
       assert function_exported?(built, :copyt, 1)

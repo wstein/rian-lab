@@ -16,7 +16,7 @@ defmodule Rian.ComposeDeclWholeFixpointTest do
   # compiles it into a real loadable module.
   #
   # That Rian-built decl parser then parses IDENTICALLY to the reference parser
-  # (`SelfhostDecl`, which `decl_fixpoint_test` already locks against `Rian.Decl`).
+  # (`Decl`, which `decl_fixpoint_test` already locks against `Rian.Decl`).
   # This is the second whole stage (after the lexer, `compose_lexer_fixpoint_test`)
   # to compile its **own whole source** — the v1==v2 shape, now on the declaration
   # parser. (`compose_decl_fixpoint_test` is the older, narrower single-`def`
@@ -30,15 +30,15 @@ defmodule Rian.ComposeDeclWholeFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(@decl_src, :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(@decl_src, :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
     {:ok, drv} =
       Beam.load(
@@ -47,7 +47,7 @@ defmodule Rian.ComposeDeclWholeFixpointTest do
       )
 
     built = drv.build(@decl_src, :"RianBuiltDecl_#{System.unique_integer([:positive])}")
-    {:ok, built: built, ref: :"Elixir.SelfhostDecl", lexer: :"Elixir.SelfhostLexerV2"}
+    {:ok, built: built, ref: :"Elixir.Decl", lexer: :"Elixir.LexerV2"}
   end
 
   # inputs that exercise the decl parser's full vocabulary — sum/struct types,
@@ -87,7 +87,7 @@ defmodule Rian.ComposeDeclWholeFixpointTest do
     test "it is the WHOLE real file (verbatim), not a slice", %{built: built} do
       # the source compiled is compiler/decl.rian unmodified, and the
       # built module exports the real entry point.
-      assert @decl_src =~ "mod SelfhostDecl do"
+      assert @decl_src =~ "mod Decl do"
       assert @decl_src =~ "pub def parse_program("
       assert function_exported?(built, :parse_program, 1)
     end

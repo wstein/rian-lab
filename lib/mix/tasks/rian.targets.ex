@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Rian.Targets do
 
       mix rian.targets examples/rian/prelude_int.rian
       mix rian.targets examples/rian/prelude_int.rian --require ex,rs,js
-      mix rian.targets compiler/lexer.rian --require rs,js
+      mix rian.targets test/fixtures/rian/lexer.rian --require rs,js
   """
   use Mix.Task
 

@@ -14,7 +14,7 @@
 # this proves first-class user functions over the existing IR machinery.)
 # ---------------------------------------------------------------------------
 
-mod SelfhostFuncs do
+mod Funcs do
   # The expression language: arithmetic, variables, `<` (as 1/0), an `if` that
   # tests "non-zero", and a call `App(name, args)` to a user function.
   type Expr := Num(Int53)

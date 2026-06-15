@@ -39,20 +39,20 @@ defmodule Rian.ComposeBenchTest do
 
   setup_all do
     # gen0 — the compiler compiled by the Elixir host.
-    {:ok, _} = Beam.load(@lexer, :"Elixir.SelfhostLexerV2")
-    {:ok, _} = Beam.load(@decl, :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(@beam, :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(@lexer, :"Elixir.LexerV2")
+    {:ok, _} = Beam.load(@decl, :"Elixir.Decl")
+    {:ok, _} = Beam.load(@beam, :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
     {:ok, gen0} = Beam.load(@driver, :rian_bench_gen0)
 
     # gen1 — gen0 compiles the compiler's own sources; load them as the live compiler.
-    load_forms(:"Elixir.SelfhostLexerV2", gen0.compile_module(@lexer, :"Elixir.SelfhostLexerV2"))
-    load_forms(:"Elixir.SelfhostDecl", gen0.compile_module(@decl, :"Elixir.SelfhostDecl"))
-    load_forms(:"Elixir.SelfhostBeam", gen0.compile_module(@beam, :"Elixir.SelfhostBeam"))
+    load_forms(:"Elixir.LexerV2", gen0.compile_module(@lexer, :"Elixir.LexerV2"))
+    load_forms(:"Elixir.Decl", gen0.compile_module(@decl, :"Elixir.Decl"))
+    load_forms(:"Elixir.Beam", gen0.compile_module(@beam, :"Elixir.Beam"))
     g1 = load_forms(:RianBenchV1, gen0.compile_module(@driver, :RianBenchV1))
 
     # gen2 — the self-built compiler.

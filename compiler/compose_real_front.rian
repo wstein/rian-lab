@@ -7,9 +7,9 @@
 # grammar), called cross-module — not by a toy expression parser.
 #
 #   lex(src) → driver decl-parse (def head + clause split)
-#            → SelfhostParse.parse(body tokens)   ← the REAL parser (cross-module)
+#            → Parse.parse(body tokens)   ← the REAL parser (cross-module)
 #            → lower its raw surface tuple → selfhost_beam Core
-#            → SelfhostBeam.compile_forms(funcs)  ← the REAL backend (cross-module)
+#            → Beam.compile_forms(funcs)  ← the REAL backend (cross-module)
 #            → inflate Form → abstract-form tuples (in Rian)
 #            → :compile.forms / :code.load_binary (the driver loop)
 #
@@ -18,8 +18,8 @@
 # `selfhost_parse`'s exact `Tok`, a declaration splitter, and a raw-surface→Core
 # lowering (`{:bin,op,l,r}` → `CBin`, `{:if,c,{:block,_},{:block,_}}` → `CIf`, …).
 #
-# Both `SelfhostParse` and `SelfhostBeam` must be loaded under their
-# `:"Elixir.Selfhost*"` atoms so the Pascal-qualified calls resolve (ADR-0041);
+# Both `Parse` and `Beam` must be loaded under their
+# `:"Elixir.*"` atoms so the Pascal-qualified calls resolve (ADR-0041);
 # both are sibling self-host ports, so the calls are composition, not host crutches
 # (excluded from the FFI ledger). The only host FFI is still :compile.forms /
 # :code.load_binary.
@@ -29,7 +29,7 @@
 # remaining toy piece is the declaration layer (selfhost_decl is :partial).
 # ---------------------------------------------------------------------------
 
-mod SelfhostComposeRealFront do
+mod ComposeRealFront do
   # ── selfhost_parse's Tok (the subset the driver emits; tags must match) ──
   type Tok := TNum(String) | TId(String) | TKw(String) | TOp(String)
             | TLP | TRP | TComma
@@ -112,7 +112,7 @@ mod SelfhostComposeRealFront do
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
   pub def compile_module(src, modname) := assemble(modname, funcs(group(parse_clauses(lex(src)))))
 
-  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
+  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(Beam.compile_forms(fs))]
 
   def exports(Vec(Func)) Vec(Tuple)
   def exports([]) := []
@@ -232,7 +232,7 @@ mod SelfhostComposeRealFront do
   def finish_clause(name String, pats Vec(Pat), Vec(Tok)) CR
   def finish_clause(name, pats, [_ | rest])
     case take_body(rest, []) do
-      BR(body, leftover) -> CR(Def(name, pats, lower_surface(SelfhostParse.parse(body))), leftover)
+      BR(body, leftover) -> CR(Def(name, pats, lower_surface(Parse.parse(body))), leftover)
     end
   end
 

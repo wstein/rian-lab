@@ -9,14 +9,14 @@
 # loop over a toy surface. This rung connects them: the driver's backend IS now
 # the verified port, called across modules.
 #
-#   parse(src) → selfhost_beam Core/Func  →  SelfhostBeam.compile_forms(funcs)
+#   parse(src) → selfhost_beam Core/Func  →  Beam.compile_forms(funcs)
 #                                            └─ the REAL, equivalence-locked backend
 #                          → inflate Form → real abstract-form tuples (IN RIAN)
 #                          → :compile.forms / :code.load_binary (the driver loop)
 #
 # Two things move out of "glue" and into Rian:
-#   * the backend call is a genuine cross-module call to `SelfhostBeam` (loaded
-#     under its `:"Elixir.SelfhostBeam"` atom — a Pascal-qualified call, ADR-0041),
+#   * the backend call is a genuine cross-module call to `Beam` (loaded
+#     under its `:"Elixir.Beam"` atom — a Pascal-qualified call, ADR-0041),
 #     so stage N's Rian output (a `Func`) is stage N+1's Rian input with no
 #     projection — the shared-type reconciliation the composition axis is about.
 #   * the `Form` → abstract-form inflation that the beam fixpoint test did in
@@ -26,11 +26,11 @@
 # front-end is unchanged) — but the BACKEND is no longer a toy. Widening the
 # front-end to the real parser/core stages is the next cut.
 #
-# `test/rian/compose_real_beam_fixpoint_test.exs` loads `SelfhostBeam`, then calls
+# `test/rian/compose_real_beam_fixpoint_test.exs` loads `Beam`, then calls
 # only `build/2` and runs the result, identical to `Rian.Beam`.
 # ---------------------------------------------------------------------------
 
-mod SelfhostComposeRealBeam do
+mod ComposeRealBeam do
   # ── selfhost_beam's INPUT IR (structurally identical — the shared contract) ──
   type Core := CNum(String)
              | CId(String)
@@ -109,12 +109,12 @@ mod SelfhostComposeRealBeam do
   def loaded({:module, m}) := m
 
   # ── source -> a full :compile.forms input, via the REAL beam backend ──
-  # `SelfhostBeam.compile_forms` is the equivalence-locked port (cross-module call);
+  # `Beam.compile_forms` is the equivalence-locked port (cross-module call);
   # its `Form` output is inflated to real abstract-form tuples here in Rian.
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
   pub def compile_module(src, modname) := assemble(modname, funcs(group(parse_clauses(lex(src)))))
 
-  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
+  def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(Beam.compile_forms(fs))]
 
   def exports(Vec(Func)) Vec(Tuple)
   def exports([]) := []

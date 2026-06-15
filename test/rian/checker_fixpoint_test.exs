@@ -16,7 +16,7 @@ defmodule Rian.CheckerFixpointTest do
   # Var→{:var,s}, Add/Lt→{:tag,a,b}, If→{:if,c,t,e}, Let→{:let,name,rhs,body}.
   setup do
     {:ok, chk} =
-      Beam.load(File.read!("compiler/check.rian"), :rian_checker_fixpoint)
+      Beam.load(File.read!("test/fixtures/rian/check.rian"), :rian_checker_fixpoint)
 
     {:ok, chk: chk}
   end

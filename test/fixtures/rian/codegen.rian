@@ -14,7 +14,7 @@
 #   run(that)  =  6
 # ---------------------------------------------------------------------------
 
-mod SelfhostCodegen do
+mod Codegen do
   type Expr := Num(Int53)
              | Var(String)
              | Add(Expr, Expr)

@@ -22,7 +22,7 @@
 # `Prim.str_from_chars`-ed (ADR-0047 portable prelude).
 # ---------------------------------------------------------------------------
 
-mod SelfhostLexerV2 do
+mod LexerV2 do
   # The lexer's own token sum — projected onto `Rian.Lexer.tokenize/1` by the
   # fixpoint harness. Operators (single/multi/word) are all `TOp`; structural
   # punctuation and the significant newline get their own nullary variants.

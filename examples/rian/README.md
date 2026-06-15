@@ -46,13 +46,13 @@ distinguishes Rian from "Elixir with different keywords."
 Outside the numbered tour, two **self-hosting spikes** are written in Rian and
 compile + run on real BEAM bytecode:
 
-- [lexer.rian](../compiler/lexer.rian) — a real arithmetic lexer (its own
+- [lexer.rian](../test/fixtures/rian/lexer.rian) — a real arithmetic lexer (its own
   `Token` sum, list-pattern recursion).
 - [lexer_v2.rian](../compiler/lexer_v2.rian) — porting the *real*
   `Rian.Lexer` to Rian (slice 1): adds **identifiers and keywords** on top of
   numbers/operators/parens, using `Char` comparisons and ordinal arithmetic
   (ADR-0036). Checked against the reference lexer by `Rian.Fixpoint`.
-- [parser.rian](../compiler/parser.rian) — a precedence-climbing
+- [parser.rian](../test/fixtures/rian/parser.rian) — a precedence-climbing
   expression parser (a slice of `Rian.Pratt`) that consumes the lexer's
   `Vec(Token)`, builds its own `Expr` sum, and threads `(Expr, Vec(Token))` as a
   `Parse` pair. It exercises higher-order-free recursion, sum construction,
@@ -88,12 +88,12 @@ compile + run on real BEAM bytecode:
   consumes (`test/rian/decl_fixpoint_test.exs`). Core forms; the long tail of
   `Rian.Decl` (multi-clause, capabilities, parametric types, mod/struct/protocol)
   remains.
-- [eval.rian](../compiler/eval.rian) — an evaluator that folds the `Expr`
+- [eval.rian](../test/fixtures/rian/eval.rian) — an evaluator that folds the `Expr`
   sum to an `Int64`, threading a **symbol table** (`Map(String, Int64)`) with
   `let`-binding and `Var` lookup. The symbol table is the first place that
   reaches for a map; its empty initial environment `%{}` was the construct that
   drove the BEAM **map-literal** increment.
-- [check.rian](../compiler/check.rian) — a type-checker pass that infers a
+- [check.rian](../test/fixtures/rian/check.rian) — a type-checker pass that infers a
   `Ty` (`TInt`/`TBool`) for the `Expr` language, reporting a **structured type
   error** via a `struct Mismatch(op, expected, got)`. The diagnostic record is
   the first place a checker wants a `struct`; it drove the BEAM **struct**
@@ -242,7 +242,7 @@ compile + run on real BEAM bytecode:
   backend (the driver's own `forms`); this rung's backend **is** the
   equivalence-locked [beam.rian](../compiler/beam.rian), called **across
   modules**: the driver builds beam's `Func` IR and invokes
-  `SelfhostBeam.compile_forms` (loaded under its `:"Elixir.SelfhostBeam"` atom — a
+  `Beam.compile_forms` (loaded under its `:"Elixir.Beam"` atom — a
   Pascal-qualified call, ADR-0041), so stage N's Rian output is stage N+1's Rian
   input with no projection glue. The `Form`→abstract-form inflation the beam fixpoint
   test did in Elixir (`erl_op`/`var_atom`) is ported into the driver. The cross-module
@@ -254,12 +254,12 @@ compile + run on real BEAM bytecode:
 - [compose_real_front.rian](../compiler/compose_real_front.rian) — **COMPOSITION
   rung 8** (ADR-0063 Step 3): extends rung 7 to the **front-end**. Each clause body is
   now parsed by the equivalence-locked [parse.rian](../compiler/parse.rian) (the
-  full Rian.Pratt grammar) via a cross-module `SelfhostParse.parse`, its raw surface
+  full Rian.Pratt grammar) via a cross-module `Parse.parse`, its raw surface
   tuple (`{:bin,op,l,r}`, `{:if,c,{:block,_},{:block,_}}`, …) lowered to `beam`
-  Core, then compiled by the cross-module `SelfhostBeam.compile_forms` (rung 7). **Two
+  Core, then compiled by the cross-module `Beam.compile_forms` (rung 7). **Two
   verified stages composed end to end** — connected only by driver-local lexing,
   declaration-splitting, and a raw-surface→Core lowering (none reimplementing either
-  port). Both load under `:"Elixir.Selfhost*"` atoms (ADR-0041); both are sibling
+  port). Both load under `:"Elixir.*"` atoms (ADR-0041); both are sibling
   ports, so the calls are composition, not host crutches (excluded from the FFI
   ledger). `test/rian/compose_real_front_fixpoint_test.exs` runs `fib`/`max`/`gcd`/
   `poly` — with the **real** Pratt precedence and surface — identical to `Rian.Beam`.
@@ -267,25 +267,25 @@ compile + run on real BEAM bytecode:
 - [compose_real_decl.rian](../compiler/compose_real_decl.rian) — **COMPOSITION
   rung 9** (ADR-0063 Step 3): replaces the front-end's last toy piece — declaration
   splitting — with the equivalence-locked [decl.rian](../compiler/decl.rian).
-  The whole program is parsed by a cross-module `SelfhostDecl.parse_program`, its
+  The whole program is parsed by a cross-module `Decl.parse_program`, its
   `Decl`/`Expr`/`Pat` IR lowered to `beam` Core/Pat (the **surface→Core
   lowering** — incl. cons-list patterns → `PList`), then compiled by the cross-module
-  `SelfhostBeam.compile_forms`. **Both front-end (lex→SelfhostDecl) and back-end
-  (SelfhostBeam) are now verified ports**; the only driver-local glue is the lexer,
+  `Beam.compile_forms`. **Both front-end (lex→Decl) and back-end
+  (Beam) are now verified ports**; the only driver-local glue is the lexer,
   the lowering, and the Form inflater — none reimplementing a verified stage.
   `decl`'s surface has no `if` (that was rung 8) but **does** have cons-list
   patterns, so this rung compiles list-pattern recursion —
   `test/rian/compose_real_decl_fixpoint_test.exs` runs `fib`/`fact`/`even`/`odd`/
   **`sum`**/**`len`** (over lists), identical to `Rian.Beam`. Both ports load under
-  `:"Elixir.Selfhost*"` atoms (ADR-0041); sibling-port calls are composition, not
+  `:"Elixir.*"` atoms (ADR-0041); sibling-port calls are composition, not
   host crutches. Path to `v1==v2`: widen `decl` past its `:partial` slice.
 - [compose_real_lex.rian](../compiler/compose_real_lex.rian) — **COMPOSITION
   rung 10** (ADR-0063 Step 3): wires the verified lexer too, so the driver owns **no
   lexing or parsing** — the whole front-end is verified ports. The
-  [lexer_v2.rian](../compiler/lexer_v2.rian) port (`SelfhostLexerV2.tokenize`)
+  [lexer_v2.rian](../compiler/lexer_v2.rian) port (`LexerV2.tokenize`)
   feeds [decl.rian](../compiler/decl.rian) directly (its token tags are a
   superset of the parser's — **no projection**), whose IR is lowered to
-  `beam` Core and compiled by `SelfhostBeam.compile_forms`. **Three verified
+  `beam` Core and compiled by `Beam.compile_forms`. **Three verified
   ports** (lexer, declaration parser, backend) composed cross-module; the only
   driver-local code is the surface→Core lowering and the Form inflater.
   `test/rian/compose_real_lex_fixpoint_test.exs` runs `fib`/`fact`/`even`/`odd`/`sum`/
@@ -315,14 +315,14 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
 `Capability` are not in the `build` loop — and it's a *slice*: the whole file needs
 `if`/strings/`Prim`, which the surface doesn't cover yet. Widening that surface until
 `build` compiles a whole real `*.rian` file is the work before `v1==v2`.
-- [codegen.rian](../compiler/codegen.rian) — a **code generator + stack
+- [codegen.rian](../test/fixtures/rian/codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
   load/store **slots** — the generator threads a compile-time `name → slot`
   environment and the VM threads a slot store (`Map(Int64, Int64)`) — so
   `let x = 5 in x + 1` lowers to `[Push 5, Store 0, Load 0, Push 1, IAdd]`. The
   full `lex → parse → codegen → run` pipeline runs on `.beam`; no backend wall.
-- [opt.rian](../compiler/opt.rian) — an **optimizer** (constant folding +
+- [opt.rian](../test/fixtures/rian/opt.rian) — an **optimizer** (constant folding +
   algebraic identities: `2 + 3 → 5`, `x * 1 → x`, `x * 0 → 0`). It matches IR
   nodes by shape with nested variant and literal-in-variant patterns
   (`Add(Num(a), Num(b))`, `Mul(_, Num(0))`) — and hits **no** wall. Slotting it
@@ -330,7 +330,7 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   Being variant-only, it is **tri-target**: it lowers to BEAM (runs), Rust (an
   idiomatic `enum` + `match`), and JavaScript (runs under node) — one IR, three
   back ends (ADR-0050).
-- [calc.rian](../compiler/calc.rian) — **the whole calc compiler in one
+- [calc.rian](../test/fixtures/rian/calc.rian) — **the whole calc compiler in one
   Rian module.** It ties every layer above (lexer, parser, optimizer, code
   generator, stack VM) into a single self-contained program compiled to one
   `.beam`: `run("1 + 2 * (3 - 4)") → -1`. `String → Vec(Token) → Expr → Expr′ →
@@ -343,19 +343,19 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   `run("def a = 2; def b = 3; a * b + a") → 8`. The whole pipeline also **lowers
   to JavaScript and runs under node** (`Rian.JS.compile`), so the calc runs on
   two targets.
-- [modules.rian](../compiler/modules.rian) — **the same calc split across
+- [modules.rian](../test/fixtures/rian/modules.rian) — **the same calc split across
   many modules.** `mod CalcLex` / `CalcParse` / `CalcGen` / `Calc` each compile
   to their own BEAM module (`Elixir.CalcLex`, …); the driver `Calc.run` calls
   across them by name (`CalcLex.lex(…)`), and variant tags are global so a module
   pattern-matches another's data without re-declaring the type. Load with
   `Rian.Beam.load_program/1`.
 
-- [funcs.rian](../compiler/funcs.rian) — **user-defined functions +
+- [funcs.rian](../test/fixtures/rian/funcs.rian) — **user-defined functions +
   recursion.** A tree-walking interpreter whose program is a function table
   (`name → Fun` of params + body) plus an `Expr`; a call binds its arguments in a
   fresh environment and recurses, so self- and mutual recursion work
   (`fact(5) = 120`, `even`/`odd`). Runs on BEAM and under node.
-- [listlib.rian](../compiler/listlib.rian) — **a portable `List` library
+- [listlib.rian](../test/fixtures/rian/listlib.rian) — **a portable `List` library
   (ADR-0047 §2)** — `reverse`/`append`/`length`/`sum` written in Rian over cons
   recursion, **no host FFI** — so it lowers to every backend through the same
   machinery (verified on BEAM and node). The right way to retire per-emitter FFI
@@ -370,7 +370,7 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   (ADR-0047 §2).** `chars`/`from_chars`/`concat` forward to per-target primitives
   (BEAM `String.to_charlist`/`List.to_string`/binary-append; JS codepoints/`+`;
   Rust `chars()`/`collect()`/`format!`) — all three lower and run. With it,
-  [lexer.rian](../compiler/lexer.rian) uses `__prim_str_chars` instead of
+  [lexer.rian](../test/fixtures/rian/lexer.rian) uses `__prim_str_chars` instead of
   host FFI, so its source is portable (it now runs on BEAM **and** under node).
 - [prelude_int.rian](prelude_int.rian) — **explicit overflow ops over `__prim_*`
   (ADR-0035 §3).** Bare `+` on `Int64` is native-per-target (bignum on BEAM/JS, a

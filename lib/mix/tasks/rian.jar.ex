@@ -17,7 +17,7 @@ defmodule Mix.Tasks.Rian.Jar do
   Requires `kotlinc` (and `java` to run the result) on `PATH`. Exits non-zero on a
   parse/type/reachability error, an unsupported construct, or a `kotlinc` failure.
 
-      mix rian.jar compiler/opt.rian -o opt.jar
+      mix rian.jar test/fixtures/rian/opt.rian -o opt.jar
       mix rian.jar calc.rian --main answer && java -jar calc.jar
   """
   use Mix.Task

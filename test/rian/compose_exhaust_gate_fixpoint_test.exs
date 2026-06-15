@@ -7,7 +7,7 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
   # SELF-CHECKING (ADR-0063 / ADR-0036) — the exhaustiveness gate, running INSIDE the
   # Rian compiler. The driver (compose_real_sum.rian) builds the usefulness
   # env from a program's `type` declarations, converts each function's clause matrix,
-  # and asks the verified `SelfhostExhaust.useful` (locked to `Rian.Exhaustiveness`
+  # and asks the verified `Exhaust.useful` (locked to `Rian.Exhaustiveness`
   # in exhaust_fixpoint_test) whether a wildcard row is useful — useful ⇒ an uncovered
   # case ⇒ NON-exhaustive. `non_exhaustive/1` returns "" if every checkable function
   # is exhaustive, else the first that is not.
@@ -18,15 +18,15 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
 
   setup_all do
     {:ok, _} =
-      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.SelfhostLexerV2")
+      Beam.load(File.read!("compiler/lexer_v2.rian"), :"Elixir.LexerV2")
 
-    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.SelfhostDecl")
-    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("compiler/decl.rian"), :"Elixir.Decl")
+    {:ok, _} = Beam.load(File.read!("compiler/beam.rian"), :"Elixir.Beam")
 
     {:ok, _} =
-      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.SelfhostExhaust")
+      Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
-    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.SelfhostCap")
+    {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
     {:ok, drv} =
       Beam.load(File.read!("compiler/compose_real_sum.rian"), :rian_exhaust_gate)

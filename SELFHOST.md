@@ -1,7 +1,7 @@
 # Self-hosting blocker ledger
 
 Evidence from the **self-hosting spike** (ADR-0027/0031): writing a Rian lexer in
-Rian (`compiler/lexer.rian`), typing its own data, compiling through
+Rian (`test/fixtures/rian/lexer.rian`), typing its own data, compiling through
 `Rian.Decl`, running on the BEAM. The point is the *ranked blocker list* — what a
 real Rian-in-Rian program needs that the toolchain can't yet do — not a green
 checkmark.
@@ -26,7 +26,7 @@ essential ones, work around the rest (and record the cost).
 
 ## Outcome
 
-**The spike works.** `SelfhostLexer.tokenize("12 + 34 * (5 - 6)")` runs on the
+**The spike works.** `Lexer.tokenize("12 + 34 * (5 - 6)")` runs on the
 BEAM and returns the full typed token list
 (`[{:t_num, 12}, :t_plus, {:t_num, 34}, :t_star, :tl_paren, …]`). After B1, the
 front end is **self-hosting-capable for the BEAM**: multi-clause functions, list
@@ -74,7 +74,7 @@ construction, and cons-list building all compose and lower correctly.
    → loadable `.beam` (no `eval`, no Elixir-compiler dep, line-tracked). Now
    covers sum-variant construction+patterns (tag = `snake(Ctor)`: `Num(n)` →
    `{:num, n}`, `Zero` → `:zero`) and remote/FFI calls (`String.to_charlist` →
-   `'Elixir.String'`), plus a single `mod`. **`SelfhostLexer.tokenize/1` is now a
+   `'Elixir.String'`), plus a single `mod`. **`Lexer.tokenize/1` is now a
    genuinely-compiled `.beam` module**, not eval'd source. Since extended with
    **higher-order functions** (lambdas/captures + fun-valued *variable
    application*, ADR-0042), **strings** (literal/`<>`/string-pattern, ADR-0041),
@@ -114,7 +114,7 @@ construction, and cons-list building all compose and lower correctly.
    cons/FFI program (the lexer) lower to Rust, and needs the collection-
    representation work (ADR-0041 / ADR-0049 emitters).
 5. **Self-hosting parser spike (ADR-0027/0031)** — **a Pratt slice runs in Rian,
-   no wall.** [`compiler/parser.rian`](compiler/parser.rian)
+   no wall.** [`test/fixtures/rian/parser.rian`](test/fixtures/rian/parser.rian)
    ports precedence climbing over `+ - * /` with parentheses into Rian: it
    consumes the lexer's `Vec(Token)`, builds its own `Expr` sum, and threads
    `(Expr, Vec(Token))` through each step as a single-constructor `Parse` pair.
@@ -130,7 +130,7 @@ construction, and cons-list building all compose and lower correctly.
    likely next blocker** — but that is now a prediction to be tested by the next
    spike, not a present wall.
 6. **Self-hosting evaluator spike + maps on BEAM (ADR-0027/0031/0041)** — **the
-   prediction held, and the wall is down.** [`compiler/eval.rian`](compiler/eval.rian)
+   prediction held, and the wall is down.** [`test/fixtures/rian/eval.rian`](test/fixtures/rian/eval.rian)
    is the layer after the parser: it folds the `Expr` sum to an `Int64`,
    threading a **symbol table** (`Map(String, Int64)`) with `let`-binding and
    `Var` lookup. Written idiomatically, it hit exactly the predicted wall — the
@@ -143,7 +143,7 @@ construction, and cons-list building all compose and lower correctly.
    compiled to `.beam`) gives `2 + 3 * 4` → `14`.
 7. **Self-hosting type-checker spike + structs on BEAM (ADR-0027/0031/0043)** —
    **the prediction held again; structs are down.**
-   [`compiler/check.rian`](compiler/check.rian) is
+   [`test/fixtures/rian/check.rian`](test/fixtures/rian/check.rian) is
    the layer after the evaluator: it infers a `Ty` (`TInt`/`TBool`) for the
    `Expr` language under a typing environment and reports a **structured type
    error** via `struct Mismatch(op, expected, got)`. Written idiomatically it hit
@@ -159,7 +159,7 @@ construction, and cons-list building all compose and lower correctly.
    and run.** Still unlowered (next, if a spike demands them): *positional*
    struct construction, map/struct *patterns*, and map *update* (`%{m | k: v}`).
 8. **Self-hosting code generator + stack VM (ADR-0027/0031)** — **a fifth layer,
-   no wall.** [`compiler/codegen.rian`](compiler/codegen.rian)
+   no wall.** [`test/fixtures/rian/codegen.rian`](test/fixtures/rian/codegen.rian)
    compiles the `Expr` sum to a post-order list of stack-machine `Instr`
    (`Push`/`IAdd`/…) and executes them on a stack (`Vec(Int64)`). The **full
    `lex → parse → codegen → run` pipeline — five Rian modules, all compiled to
@@ -175,7 +175,7 @@ construction, and cons-list building all compose and lower correctly.
    five-stage compiler/runtime pipeline written in Rian, end to end.**
 9. **Self-hosting optimizer (constant folding) (ADR-0027/0031)** — **the
    prediction did *not* fire, and that is the finding.**
-   [`compiler/opt.rian`](compiler/opt.rian) is a real
+   [`test/fixtures/rian/opt.rian`](test/fixtures/rian/opt.rian) is a real
    optimization pass: it folds constant subtrees (`(2 + 3) * 4` → `Num(20)`) and
    applies algebraic identities (`x * 1` → `x`, `x * 0` → `0`, `x + 0` → `x`),
    matching IR nodes **by shape** — `Add(Num(a), Num(b))`, `Mul(_, Num(0))`,
@@ -371,7 +371,7 @@ real front-end leans on. Remaining lexer gaps (heredocs `"""`, string-body escap
 
 ## The whole compiler as one Rian artifact
 
-[`compiler/calc.rian`](compiler/calc.rian) unifies
+[`test/fixtures/rian/calc.rian`](test/fixtures/rian/calc.rian) unifies
 every layer — lexer, parser, optimizer, code generator, stack VM — into a
 **single self-contained Rian module** that compiles to **one real `.beam`** and
 turns source text straight into a value:
@@ -405,7 +405,7 @@ rest, so the existing fold/codegen/VM handle it unchanged:
 compose, and (being still arithmetic + binding) the whole thing lowers to JS and
 runs under node too.
 
-**User-defined functions land via interpretation.** [`compiler/funcs.rian`](compiler/funcs.rian)
+**User-defined functions land via interpretation.** [`test/fixtures/rian/funcs.rian`](test/fixtures/rian/funcs.rian)
 is a tree-walking interpreter whose program is a **function table**
 (`name → Fun` of params + body) plus an `Expr`. A call evaluates its arguments
 in the caller's environment, binds them to the callee's params in a *fresh*
@@ -419,7 +419,7 @@ function name in a JS module.)
 
 ## Module system — a compiler is many modules
 
-A real compiler is split across files; [`compiler/modules.rian`](compiler/modules.rian)
+A real compiler is split across files; [`test/fixtures/rian/modules.rian`](test/fixtures/rian/modules.rian)
 splits the calc into `mod CalcLex` / `CalcParse` / `CalcGen` / `Calc`.
 `Rian.Beam.load_program/1` compiles **each `mod` to its own BEAM module** named
 `Elixir.<Mod>` — the very atom a Pascal-qualified call lowers to — so a Rian
@@ -463,7 +463,7 @@ So the complete self-hosting compiler runs on **two targets** (BEAM + JavaScript
 from one IR. The FFI mappings are a stopgap; the portable prelude (ADR-0047 §2)
 should own `Map`/`String`/`List` so they are not per-emitter special cases.
 
-**`List` is portable as pure Rian.** [`compiler/listlib.rian`](compiler/listlib.rian)
+**`List` is portable as pure Rian.** [`test/fixtures/rian/listlib.rian`](test/fixtures/rian/listlib.rian)
 writes `reverse`/`append`/`length`/`sum` over cons recursion with **no host
 FFI**, so they lower to every backend through the existing machinery — verified
 identical on BEAM and node (`reverse([1,2,3]) = [3,2,1]`). This is the ADR-0047

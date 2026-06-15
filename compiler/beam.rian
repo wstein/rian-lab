@@ -19,7 +19,7 @@
 # local call. The remaining out-of-scope prims are the i64 overflow ops + `float_repr`.
 # ---------------------------------------------------------------------------
 
-mod SelfhostBeam do
+mod Beam do
   # ── Core (supported subset) ──
   type Core := CNum(String)
              | CStr(String)

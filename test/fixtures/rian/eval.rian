@@ -12,7 +12,7 @@
 # map literal `%{}` — the construct that drove the next backend increment.
 # ---------------------------------------------------------------------------
 
-mod SelfhostEval do
+mod Eval do
   # An expression tree, extended from the parser's with variables and `let`.
   type Expr := Num(Int53)
              | Var(String)

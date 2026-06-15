@@ -46,7 +46,7 @@
 # Rian.Check.infer/3 over the whole inference-context axis. See ADR-0063.
 # ---------------------------------------------------------------------------
 
-mod SelfhostChecker do
+mod Checker do
   type Core := CNum(String)
              | CStr(String)
              | CChar(Int53)
