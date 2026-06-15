@@ -89,7 +89,7 @@ mod SelfhostComposeRealSum do
   type FFunc := FFunc(String, Int53, Vec(FClause))
 
   # ── driver-local types ──
-  type NClause := NC(String, Vec(Pat), Guard, Core)
+  type NClause := NC(String, Vec(Pat), Guard, Block)
   type Grp := Grp(String, Int53, Vec(NClause))
 
   # ── the BEAM toolchain boundary: two @external(:ex) host calls (counted FFI) ──
@@ -136,9 +136,9 @@ mod SelfhostComposeRealSum do
   # params become `PVar` patterns. A `when` guard is carried as `GSome`.
   def normalize(ds) Vec(NClause)
   def normalize([]) := []
-  def normalize([{:d_clause, name, pats, expr} | rest]) := [NC(name, lower_pats(pats), GNone, lower_surface(expr)) | normalize(rest)]
-  def normalize([{:d_clause_g, name, pats, guard, expr} | rest]) := [NC(name, lower_pats(pats), GSome(lower_surface(guard)), lower_surface(expr)) | normalize(rest)]
-  def normalize([{:d_func, _, name, params, _, _, body} | rest]) := [NC(name, param_pats(params), GNone, lower_surface(body)) | normalize(rest)]
+  def normalize([{:d_clause, name, pats, expr} | rest]) := [NC(name, lower_pats(pats), GNone, lower_body(expr)) | normalize(rest)]
+  def normalize([{:d_clause_g, name, pats, guard, expr} | rest]) := [NC(name, lower_pats(pats), GSome(lower_surface(guard)), lower_body(expr)) | normalize(rest)]
+  def normalize([{:d_func, _, name, params, _, _, body} | rest]) := [NC(name, param_pats(params), GNone, lower_body(body)) | normalize(rest)]
   # a real selfhost_*.rian file wraps its defs in `mod Name do … end`; flatten the
   # module's inner declarations into the same clause stream (its name is the build's
   # `modname`, supplied by the caller).
@@ -153,6 +153,17 @@ mod SelfhostComposeRealSum do
   def param_pats(ps) Vec(Pat)
   def param_pats([]) := []
   def param_pats([{:par, n, _, _} | rest]) := [PVar(n) | param_pats(rest)]
+
+  # a clause body -> a selfhost_beam Block. A `BlockE` (multi-statement block body)
+  # lowers each statement; any other expression is a one-statement block.
+  def lower_body(body) Block
+  def lower_body({:block_e, stmts}) := Block(lower_stmts(stmts))
+  def lower_body(e) := Block([SExpr(lower_surface(e))])
+
+  def lower_stmts(ss) Vec(Stmt)
+  def lower_stmts([]) := []
+  def lower_stmts([{:s_bind, n, e} | rest]) := [SBind(n, lower_surface(e)) | lower_stmts(rest)]
+  def lower_stmts([{:s_expr, e} | rest]) := [SExpr(lower_surface(e)) | lower_stmts(rest)]
 
   # ── the surface→Core lowering: selfhost_decl Pat/Expr -> selfhost_beam Pat/Core ──
   def lower_pats(ps) Vec(Pat)
@@ -252,7 +263,7 @@ mod SelfhostComposeRealSum do
 
   def clauses_of(Vec(NClause)) Vec(Clause)
   def clauses_of([]) := []
-  def clauses_of([NC(_, pats, guard, body) | rest]) := [Clause(pats, guard, Block([SExpr(body)])) | clauses_of(rest)]
+  def clauses_of([NC(_, pats, guard, block) | rest]) := [Clause(pats, guard, block) | clauses_of(rest)]
 
   def plen(Vec(Pat)) Int53
   def plen([]) := 0
@@ -305,6 +316,8 @@ mod SelfhostComposeRealSum do
   def inflate(FIf(c, t, e)) := {:"case", 0, inflate(c), [{:clause, 0, [{:atom, 0, :true}], [], inflate_all(t)}, {:clause, 0, [{:atom, 0, :false}], [], inflate_all(e)}]}
   # `case` -> a real Erlang `case`; each arm is an FClause (single pattern, guard, body).
   def inflate(FCase(scrut, clauses)) := {:"case", 0, inflate(scrut), inflate_clauses(clauses)}
+  # a block-body bind (`d := e`) is an Erlang match `D = e`.
+  def inflate(FMatch(n, e)) := {:match, 0, {:var, 0, var_atom(n)}, inflate(e)}
 
   def var_atom(n String) Symbol := Prim.str_to_atom(cap(n))
 

@@ -138,6 +138,13 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "mod M do\n  def double(n) := n * 2\n  pub def quad(n) := double(double(n))\nend",
       "mod M do\n  pub def double(n Int53) Int53 := n * 2\n  pub def quad(n Int53) Int53 := double(double(n))\nend",
       [{:double, [21]}, {:quad, [5]}]
+    },
+    # an untyped clause with a multi-statement BLOCK body (bind + expr), and a
+    # `case` arm body on the next line — selfhost_decl's own idioms, end to end
+    {
+      "def step(n)\n  d := n * 2\n  d + 1\nend\ndef sgn(n)\n  case n do\n    0 ->\n      0\n    m -> m\n  end\nend",
+      "def step(n Int53) Int53\n  d := n * 2\n  d + 1\nend\ndef sgn(n Int53) Int53\n  case n do\n    0 ->\n      0\n    m -> m\n  end\nend",
+      [{:step, [10]}, {:sgn, [0]}, {:sgn, [7]}]
     }
   ]
 

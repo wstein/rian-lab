@@ -308,7 +308,9 @@ defmodule Rian.DeclFixpointTest do
     # `case` arm body on the NEXT line (`PAT -> <nl> body`) — the selfhost_decl idiom
     "def nl_arm(n Int64) Int64\ndef nl_arm(n)\n  case n do\n    0 ->\n      n + 1\n    m -> m\n  end\nend",
     # a NESTED `case` in an arm body (case-inside-case, as selfhost_decl's parsers do)
-    "def nz(n Int64) Int64\ndef nz(n)\n  case n do\n    0 ->\n      case n do\n        0 -> 10\n        k -> k\n      end\n    m -> m\n  end\nend"
+    "def nz(n Int64) Int64\ndef nz(n)\n  case n do\n    0 ->\n      case n do\n        0 -> 10\n        k -> k\n      end\n    m -> m\n  end\nend",
+    # `if` with each branch body on the NEXT line (`do <nl> … else <nl> … end`)
+    "def mli(n Int64) Int64\ndef mli(n)\n  if n > 0 do\n    n + 1\n  else\n    0\n  end\nend"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}

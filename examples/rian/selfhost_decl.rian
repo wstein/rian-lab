@@ -509,24 +509,33 @@ mod SelfhostDecl do
   # `if COND do THEN else ELSE end` — each part is a full sub-expression. The
   # projection (decl_fixpoint) wraps THEN/ELSE in `{:block, [{:expr, …}]}` to match
   # Rian.Pratt's `{:if, c, {:block, …}, {:block, …}}`. Single-expression branches.
+  # `if` branches may each begin on the next line (`do <nl> body <nl> else <nl> body
+  # <nl> end`), the selfhost_decl idiom — skip newlines at every boundary so the
+  # branch bodies (single expressions) parse and `else`/`end` are seen.
   def parse_if(ts Vec(Tok)) Parse
   def parse_if(ts)
     case parse_bp(0, ts) do
-      P(cnd, [TKw("do") | r2]) -> parse_if_then(cnd, r2)
+      P(cnd, [TKw("do") | r2]) -> parse_if_then(cnd, skip_nl(r2))
     end
   end
 
   def parse_if_then(cnd Expr, ts Vec(Tok)) Parse
   def parse_if_then(cnd, ts)
     case parse_bp(0, ts) do
-      P(thn, [TKw("else") | r3]) -> parse_if_else(cnd, thn, r3)
+      P(thn, rest) ->
+        case skip_nl(rest) do
+          [TKw("else") | r3] -> parse_if_else(cnd, thn, skip_nl(r3))
+        end
     end
   end
 
   def parse_if_else(cnd Expr, thn Expr, ts Vec(Tok)) Parse
   def parse_if_else(cnd, thn, ts)
     case parse_bp(0, ts) do
-      P(els, [TKw("end") | r4]) -> parse_postfix(If(cnd, thn, els), r4)
+      P(els, rest) ->
+        case skip_nl(rest) do
+          [TKw("end") | r4] -> parse_postfix(If(cnd, thn, els), r4)
+        end
     end
   end
 
