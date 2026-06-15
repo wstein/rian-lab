@@ -95,6 +95,9 @@ defmodule Rian.Decl do
   # ── Public API ─────────────────────────────────────────────────────────
   @doc "Parse source into `%{types: [...], structs: [...], funcs: [...], mods: [...]}` (pipeline IR)."
   def parse(src) do
+    # cleared per parse; `Rian.Interp` sets it when a `${float}` hole desugars to a
+    # `Show.float` call, so `inject_stdlib/1` knows to supply the `Show` module.
+    Process.delete(:rian_needs_show_float)
     decls = src |> Lexer.tokenize() |> split_decls()
     aliases = collect_aliases(decls)
     prog = assemble(decls, aliases)
@@ -147,6 +150,39 @@ defmodule Rian.Decl do
     |> Map.put(:impls, all_impls(decls))
     |> Map.put(:protocols, protocols)
     |> Map.put(:impl_decls, impl_decls)
+    |> inject_stdlib()
+  end
+
+  # Prelude-function injection (ADR-0047 / ADR-0069 §6): a program that interpolates
+  # a `Float64` calls `Show.float`, so supply the `Show` module unless the program
+  # already defines one. Conditional — injected ONLY when used, so a non-float
+  # program is untouched (and never inherits `Show`'s list helpers, which the JVM
+  # emitter cannot yet lower).
+  defp inject_stdlib(prog) do
+    if Process.get(:rian_needs_show_float, false) and
+         not Enum.any?(prog.mods, &(&1.name == "Show")) do
+      %{prog | mods: [show_module() | prog.mods]}
+    else
+      prog
+    end
+  end
+
+  # the canonical `Show` source, embedded at compile time (single source of truth
+  # with the documented/tested `examples/rian/stdlib_show.rian`); parsed once.
+  @show_src File.read!(Path.join([__DIR__, "..", "..", "examples", "rian", "stdlib_show.rian"]))
+
+  defp show_module do
+    case :persistent_term.get({__MODULE__, :show_module}, nil) do
+      nil ->
+        # `parse/1` on `Show` is safe (it defines `Show`, so `inject_stdlib` is a
+        # no-op there — no recursion).
+        m = @show_src |> parse() |> Map.fetch!(:mods) |> Enum.find(&(&1.name == "Show"))
+        :persistent_term.put({__MODULE__, :show_module}, m)
+        m
+
+      m ->
+        m
+    end
   end
 
   # Structured `protocol`/`impl` IR preserved for the Rust/JS emitters (ADR-0061):

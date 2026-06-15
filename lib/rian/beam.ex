@@ -105,9 +105,42 @@ defmodule Rian.Beam do
   `Rian.Beam.Unsupported` for a construct outside this increment's core.
   """
   def load(src, module) when is_atom(module) do
-    {:ok, ^module, bin} = compile(src, module)
+    prog = Decl.parse(src)
+    :ok = Rian.Reach.gate!(prog)
+    prog = Rian.Opaque.erase(prog)
+    load_aux_mods(prog)
+
+    {:ok, ^module, bin} =
+      beam_for(module, funcs_of(prog), ranges_of(prog), types_of(prog), structs_of(prog))
+
     {:module, ^module} = :code.load_binary(module, ~c"#{module}.beam", bin)
     {:ok, module}
+  end
+
+  # load any sibling `mod`s (e.g. the `Show` module injected for `${float}`
+  # interpolation, ADR-0069) into their own `Elixir.<Name>` modules, so a
+  # cross-module call from the main module resolves. Skipped when there are no
+  # top-level funcs — then `funcs_of/1` already pulls the single `mod` up as the
+  # main module, and loading it again would clash.
+  defp load_aux_mods(%{funcs: []}), do: :ok
+
+  defp load_aux_mods(prog) do
+    top = Map.get(prog, :ranges, [])
+
+    for m <- Map.get(prog, :mods, []) do
+      {:ok, atom, bin} =
+        beam_for(
+          :"Elixir.#{m.name}",
+          m.funcs,
+          top ++ Map.get(m, :ranges, []),
+          Map.get(m, :types, []),
+          Map.get(m, :structs, [])
+        )
+
+      {:module, ^atom} = :code.load_binary(atom, ~c"#{atom}.beam", bin)
+    end
+
+    :ok
   end
 
   @doc "Compile `src`'s functions to `{:ok, module, beam_binary}` via `:compile.forms`."

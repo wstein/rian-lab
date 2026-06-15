@@ -920,7 +920,11 @@ defmodule Rian.Lower do
       Enum.map_join(structs, "\n\n", &rust_struct/1),
       Enum.map_join(types, "\n\n", &rust_enum/1),
       trait_impl_block(protocols, impl_decls, c),
-      Enum.map_join(funcs, "\n\n", &rust_fn(&1, c, ""))
+      Enum.map_join(funcs, "\n\n", &rust_fn(&1, c, "")),
+      # sibling `mod`s become Rust `mod snake { … }` (each self-contained — see
+      # `module_rust/1`), so a cross-module call `Mod.fun(…)` -> `snake::fun(…)`
+      # resolves. This is how the injected `Show` (ADR-0069 `${float}`) is emitted.
+      Enum.map_join(Map.get(prog, :mods, []), "\n\n", &module_rust/1)
     ]
     |> Enum.reject(&(&1 in ["", nil]))
     |> Enum.join("\n\n")

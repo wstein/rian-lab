@@ -181,17 +181,41 @@ defmodule Rian.InterpTest do
     end
   end
 
-  describe "un-stringifiable holes are a compile error, never a silent fallback (ADR-0035)" do
-    test "a `Float` hole is rejected, pointing at the explicit `Show.float` (ADR-0069 §6)" do
-      err =
-        assert_raise ArgumentError, fn ->
-          Beam.load(~S|def f(x Float64) String := "x=${x}"|, :interp_float_err)
-        end
+  describe "a `Float64` hole auto-wires the portable `Show.float` (ADR-0069 §6)" do
+    @fsrc ~S|def label(x Float64) String := "v = ${x}, half ${x / 2.0}"|
 
-      assert Exception.message(err) =~ "Show.float"
-      assert Exception.message(err) =~ "not auto-wired"
+    test "the `Show` formatter is injected and runs on the BEAM (ECMAScript output)" do
+      {:ok, m} = Beam.load(@fsrc, :interp_float_beam)
+      # ECMA `Number::toString`: integer-valued -> no `.0`, shortest round-trip digits
+      assert m.label(3.14) == "v = 3.14, half 1.57"
+      assert m.label(1.0) == "v = 1, half 0.5"
+      assert m.label(100.0) == "v = 100, half 50"
     end
 
+    test "it reaches `:ex`/`:rs`/`:js` but is honestly off `:jvm` (formatter Tier-2-pending)" do
+      assert reach(@fsrc, "label").reach |> MapSet.to_list() |> Enum.sort() == [:ex, :js, :rs]
+    end
+
+    test "JS lowers the cross-module `Show.float` call to a flat `float(…)` and runs" do
+      js = JS.compile(@fsrc)
+      assert js =~ "float(x)"
+      # the injected formatter is flattened into the same module
+      assert js =~ "function float("
+      assert node_eval(js, "label(1.0)") in [:no_node, "v = 1, half 0.5"]
+    end
+
+    test "a `Float32` hole is rejected — widen to `Float64` (ADR-0069)" do
+      err =
+        assert_raise ArgumentError, fn ->
+          Beam.load(~S|def f(x Float32) String := "x=${x}"|, :interp_f32_err)
+        end
+
+      assert Exception.message(err) =~ "Float32"
+      assert Exception.message(err) =~ "Float64"
+    end
+  end
+
+  describe "un-stringifiable holes are a compile error, never a silent fallback (ADR-0035)" do
     test "a hole whose type cannot be statically inferred is rejected" do
       assert_raise ArgumentError, ~r/no `Show` for|statically-known/, fn ->
         Beam.load(~S|def f(x Int64) String := "v=${g(x)}"|, :interp_unknown_err)

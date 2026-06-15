@@ -118,7 +118,7 @@ defmodule Rian.JS do
     # the BEAM `:dispatcher` is a guarded runtime type-test — not the JS shape.
     # JS keeps the `:impl` methods (they lower as plain functions) and regenerates
     # the dispatcher with JS-native guards (ADR-0061 §3).
-    funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
+    funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
     reject_unsupported!(funcs)
     fn_js = Enum.map_join(funcs, "\n\n", &function_js/1)
     disp_js = protocol_dispatchers_js(prog)
@@ -175,8 +175,12 @@ defmodule Rian.JS do
 
   defp first_unsupported(_node, _unsup), do: nil
 
-  defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
-  defp funcs_of(%{funcs: funcs}), do: funcs
+  # every function the JS file emits: the top-level ones plus every `mod`'s,
+  # flattened into one namespace — JS erases module boundaries, so a cross-module
+  # call `Mod.fun(…)` lowers to a bare `fun(…)` (see the `EDot`-call clause). This
+  # is how the injected `Show` module (ADR-0069 `${float}`) reaches the output.
+  defp all_funcs(prog),
+    do: Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
 
   # ── protocol dispatch (ADR-0061 §3): a JS dispatcher per protocol method ──
   # mirrors the BEAM strategy — select the impl by the first argument's runtime
@@ -655,6 +659,15 @@ defmodule Rian.JS do
 
   defp expr_js(%ECall{fun: %EDot{head: %EAtom{name: "lists"}, name: "reverse"}, args: [xs]}),
     do: "#{paren(xs)}.slice().reverse()"
+
+  # a user cross-module call `Mod.fun(args)` (Pascal-qualified): JS erases module
+  # boundaries — every `mod`'s funcs flatten into this one file (see `all_funcs/1`)
+  # — so the qualifier drops and it lowers to a bare call. (ADR-0069: the `Show`
+  # module injected for `${float}` interpolation resolves through here.) The three
+  # built-in interop namespaces above keep their special lowering and are excluded.
+  defp expr_js(%ECall{fun: %EDot{head: %EId{name: mod}, name: fun}, args: args})
+       when mod not in ~w(Map String List),
+       do: "#{fun}(#{Enum.map_join(args, ", ", &expr_js/1)})"
 
   # `case scrut do pat -> body … end` -> an IIFE: bind the scrutinee, then an
   # if-chain of `pat_match` tests; the first matching arm `return`s its body

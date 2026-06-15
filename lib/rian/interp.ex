@@ -19,12 +19,17 @@ defmodule Rian.Interp do
     * `Char`              → `__prim_char_to_string(value)` (the codepoint's single
                             character; byte-identical per target — the static type
                             means no runtime Char/Int dispatch, ADR-0069 §6)
+    * `Float64`           → `Show.float(value)` — the portable ECMAScript
+                            `Number::toString` formatter (examples/rian/stdlib_show.rian),
+                            **auto-injected** into the program when first interpolated
+                            (`Rian.Decl.inject_stdlib/1`), so it needs no explicit
+                            import. Byte-identical on `:ex`/`:rs`/`:js`; honestly off
+                            `:jvm` until the Tier-2 emitter lowers its list patterns
+                            (`Rian.Reach` pins it, ADR-0069 §6).
 
-  `Float64` and a hole whose type cannot be inferred are a **compile error at the
-  hole** — never a silent `inspect`-style fallback (ADR-0035). The portable
-  ECMAScript float formatter exists and is byte-identical (`Show.float`,
-  examples/rian/stdlib_show.rian); auto-wiring it into `${…}` awaits
-  prelude-function injection so it is available without an explicit import.
+  `Float32` and a hole whose type cannot be inferred are a **compile error at the
+  hole** — never a silent `inspect`-style fallback (ADR-0035). (`Float32` has no
+  portable formatter; widen to `Float64` and interpolate that.)
   """
   alias Rian.Check
 
@@ -67,12 +72,17 @@ defmodule Rian.Interp do
         # single-character string is byte-identical on every target.
         {:call, {:id, "__prim_char_to_string"}, [expr]}
 
-      type == "Float64" or type == "Float32" ->
+      type == "Float64" ->
+        # the canonical portable ECMAScript formatter (`Show.float`, ADR-0069 §6).
+        # The flag asks `Rian.Decl.parse` to inject the `Show` stdlib module so the
+        # call resolves without the program importing it (prelude-function injection).
+        Process.put(:rian_needs_show_float, true)
+        {:call, {:dot, {:id, "Show"}, "float"}, [expr]}
+
+      type == "Float32" ->
         raise ArgumentError,
-              "interpolation of a `Float` is not auto-wired into `${…}` yet — call " <>
-                "`Show.float(x)` explicitly (examples/rian/stdlib_show.rian): the canonical " <>
-                "ECMAScript formatter is portable and byte-identical, but wiring it into " <>
-                "interpolation awaits prelude-function injection (ADR-0069 §6 / ADR-0047)"
+              "interpolation of a `Float32` is not supported — widen to `Float64` and " <>
+                "interpolate that (`Show.float` is the portable Float64 formatter, ADR-0069)"
 
       true ->
         raise ArgumentError,
