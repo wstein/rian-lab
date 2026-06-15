@@ -115,6 +115,24 @@ defmodule Rian.JVMTest do
       src: ~S|def s() String := "a\\b\nc\rd"|,
       probe: ~S|println(s().map { it.code }.joinToString(","))|
     },
+    %{
+      id: :list_sum,
+      src: """
+      def sum(xs Vec(Int64)) Int64
+      def sum([]) := 0
+      def sum([h | t]) := h + sum(t)
+      """,
+      probe: ~s|println(sum(listOf(1L, 2L, 3L)))|
+    },
+    %{
+      id: :list_head_lit,
+      src: """
+      def one(xs Vec(Int64)) String
+      def one([1]) := "yes"
+      def one(xs) := "no"
+      """,
+      probe: ~s|println(one(listOf(1L))); println(one(listOf(2L)))|
+    },
     %{id: :interp_int, src: ~S|def f(n Int64) String := "v${n}"|, probe: ~S|println(f(42L))|},
     %{
       id: :interp_bool,
@@ -303,14 +321,14 @@ defmodule Rian.JVMTest do
     end
 
     test "a not-yet-implemented construct fails early with a clear message (naming the fn)" do
-      # the emitter-capability pre-check: lists/`Vec` aren't on the Tier-2 JVM subset
-      # yet, so a list literal raises ONE clear error up front (naming `f`).
+      # the emitter-capability pre-check: tuples aren't on the Tier-2 JVM subset
+      # yet, so a tuple raises ONE clear error up front (naming `f`).
       err =
         assert_raise JVM.Unsupported, fn ->
-          JVM.compile("def f() Vec(Int64) := [1, 2]")
+          JVM.compile("def f() Int64 := {1, 2}")
         end
 
-      assert Exception.message(err) =~ "`f`: a list / `Vec` is not yet supported on :jvm"
+      assert Exception.message(err) =~ "`f`: a tuple is not yet supported on :jvm"
     end
 
     @tag :jvm
@@ -452,12 +470,33 @@ defmodule Rian.JVMTest do
       expect_jvm(jvm, :char_pat, "1\n0")
     end
 
-    test "an unsupported clause pattern (a list pattern) raises" do
+    @tag :jvm
+    test "list/cons clause patterns lower to size guards + index/drop binds and run", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :list_sum)
+      # `[]` -> isEmpty; `[h | t]` -> size guard, head index, tail drop
+      assert kt =~ "(a0).isEmpty()"
+      assert kt =~ "(a0).size >= 1"
+      assert kt =~ "val h = (a0)[0]"
+      assert kt =~ "val t = (a0).drop(1)"
+      expect_jvm(jvm, :list_sum, "6")
+    end
+
+    @tag :jvm
+    test "a closed list pattern tests exact size and a leading-element literal matches", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :list_head_lit)
+      assert kt =~ "(a0).size == 1"
+      expect_jvm(jvm, :list_head_lit, "yes\nno")
+    end
+
+    test "a tuple clause pattern (outside the Tier-2 subset) raises" do
       assert_raise JVM.Unsupported, fn ->
         JVM.compile("""
-        def head(xs Vec(Int64)) Int64
-        def head([x]) := x
-        def head(xs) := 0
+        def fst(p Int64) Int64
+        def fst({x, y}) := x
         """)
       end
     end

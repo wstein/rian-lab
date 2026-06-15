@@ -36,9 +36,14 @@ defmodule Rian.JVM do
   with clause patterns that smart-cast (`a0 is Ctor`) and recurse into positional
   fields (`a0.f0`, nested + literal patterns supported). A `case` expression lowers
   to a labelled `run rcase@{ … }` whose arms reuse the clause dispatcher's
-  smart-cast/literal tests, binds, and guard handling. **Not yet** (raise
-  `Rian.JVM.Unsupported`): tuples, lists/`Vec`, maps, structs, atoms/`Symbol`,
-  `with`, lambdas, protocols, general FFI.
+  smart-cast/literal tests, binds, and guard handling. **Lists / `Vec(T)`** lower to
+  Kotlin `List<T>`: a literal `[a, b]` → `listOf(a, b)`, a cons `[h, … | t]` →
+  `listOf(h, …) + t`; clause/`case` patterns test `size` (exact for a closed list,
+  `>=` for a cons), match fixed elements by index (`acc[i]`), and bind the rest with
+  `acc.drop(n)`. The `Str`/`Char` prims over codepoint lists are lowered
+  (`str_chars`/`str_from_chars`/`str_concat`/`char_code`). **Not yet** (raise
+  `Rian.JVM.Unsupported`): tuples, maps, structs, atoms/`Symbol`, `with`, lambdas,
+  protocols, general FFI.
 
   ## Capabilities
 
@@ -60,11 +65,13 @@ defmodule Rian.JVM do
     EChar,
     EId,
     EIf,
+    EList,
     ENum,
     EStr,
     EUnary,
     PChar,
     PCtor,
+    PList,
     PLit,
     PVar,
     PWild
@@ -105,7 +112,6 @@ defmodule Rian.JVM do
     Core.ECapture => "a function capture (`&(…)`)",
     Core.ECaptureNamed => "a function capture (`&name/arity`)",
     Core.ETuple => "a tuple",
-    Core.EList => "a list / `Vec`",
     Core.EMap => "a map",
     Core.EStruct => "a struct construction"
   }
@@ -318,6 +324,38 @@ defmodule Rian.JVM do
     {["#{acc} is #{ctor}" | ts], bs}
   end
 
+  # a list pattern over a `List<_>` access path. A closed `[a, b]` tests the exact
+  # `size`; a cons `[a, … | t]` tests `size >=` the fixed-element count and binds the
+  # rest pattern to `acc.drop(n)`. Each fixed element `i` matches `acc[i]` (a literal
+  # tests, a var binds, recursively). The `&&` chain is short-circuit, so an element
+  # test never indexes past a failed size guard.
+  defp pat_match(%PList{elems: elems, tail: tail}, acc) do
+    n = length(elems)
+
+    size_test =
+      case {n, tail} do
+        {0, :close} -> ["(#{acc}).isEmpty()"]
+        {_, :close} -> ["(#{acc}).size == #{n}"]
+        _ -> ["(#{acc}).size >= #{n}"]
+      end
+
+    {elem_tests, elem_binds} =
+      elems
+      |> Enum.with_index()
+      |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
+        {t, b} = pat_match(p, "(#{acc})[#{i}]")
+        {ts ++ t, bs ++ b}
+      end)
+
+    {tail_tests, tail_binds} =
+      case tail do
+        :close -> {[], []}
+        t -> pat_match(t, "(#{acc}).drop(#{n})")
+      end
+
+    {size_test ++ elem_tests ++ tail_tests, elem_binds ++ tail_binds}
+  end
+
   defp pat_match(other, _acc), do: raise(Unsupported, "jvm: clause pattern #{inspect(other)}")
 
   defp bind_str([]), do: ""
@@ -380,6 +418,22 @@ defmodule Rian.JVM do
   defp expr_kt(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}),
     do: "String(Character.toChars((#{expr_kt(c)}).toInt()))"
 
+  # ── `Str`/`Char` primitives over `Vec(Char)` = `List<Long>` codepoints ────
+  # a String → its codepoints as `List<Long>` (the portable-prelude `Vec(Char)`).
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_str_chars"}, args: [s]}),
+    do: "(#{expr_kt(s)}).codePoints().toArray().map { it.toLong() }"
+
+  # a `Vec(Char)` → the String of those codepoints (supplementary-safe).
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_str_from_chars"}, args: [cs]}),
+    do: ~s|(#{expr_kt(cs)}).joinToString("") { String(Character.toChars(it.toInt())) }|
+
+  # a `Char`'s codepoint — identity, since a `Char` *is* a codepoint `Long`.
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}), do: expr_kt(c)
+
+  # binary String concat (`Prim.str_concat`): Kotlin `+`.
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
+    do: "(#{expr_kt(a)} + #{expr_kt(b)})"
+
   # integer → float (ADR-0035 explicit conversion): Kotlin `Long.toDouble()`
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}),
     do: "(#{expr_kt(n)}).toDouble()"
@@ -389,6 +443,16 @@ defmodule Rian.JVM do
   defp expr_kt(%ECall{fun: %EId{name: f}, args: args}) do
     "#{f}(#{Enum.map_join(args, ", ", &expr_kt/1)})"
   end
+
+  # a list literal `[a, b]` → `listOf(a, b)` (the empty `[]` → `listOf()`, whose
+  # `List<Nothing>` unifies with any `List<T>` by covariance); a cons `[h, … | t]`
+  # → `listOf(h, …) + t` (Kotlin `List + List` concatenation). `Vec(Char)` elements
+  # are codepoint `Long`s, so this is a `List<Long>`.
+  defp expr_kt(%EList{elems: elems, tail: :close}),
+    do: "listOf(#{Enum.map_join(elems, ", ", &expr_kt/1)})"
+
+  defp expr_kt(%EList{elems: elems, tail: tail}),
+    do: "(listOf(#{Enum.map_join(elems, ", ", &expr_kt/1)}) + #{expr_kt(tail)})"
 
   # Kotlin `if` is an expression
   defp expr_kt(%EIf{cond: c, then: t, else: e}),
