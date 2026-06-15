@@ -26,6 +26,7 @@ mod SelfhostBeam do
              | CUnary(String, Core)
              | CBin(String, Core, Core)
              | CCall(String, Vec(Core))
+             | CRemote(String, String, Vec(Core))
              | CTuple(Vec(Core))
              | CList(Vec(Core), Tail)
              | CIf(Core, Block, Block)
@@ -153,6 +154,7 @@ mod SelfhostBeam do
   # String.to_charlist, str_from_chars → List.to_string, char_code → identity
   # (a Char IS its codepoint on the BEAM). MUST precede the generic CCall clause.
   def expr_form(CCall("__prim_str_concat", [a, b])) := FConcat(expr_form(a), expr_form(b))
+  def expr_form(CCall("__prim_str_to_atom", [s])) := FRemote("Elixir.String", "to_atom", [expr_form(s)])
   def expr_form(CCall("__prim_str_chars", [s])) := FRemote("Elixir.String", "to_charlist", [expr_form(s)])
   def expr_form(CCall("__prim_str_from_chars", [cs])) := FRemote("Elixir.List", "to_string", [expr_form(cs)])
   def expr_form(CCall("__prim_char_code", [c])) := expr_form(c)
@@ -163,6 +165,10 @@ mod SelfhostBeam do
       FCall(f, expr_forms(args))
     end
   end
+  # a cross-module (remote) call `Mod.fun(args)` — what the composition driver uses
+  # to reach the verified lexer/decl/beam modules. Lowers to the same `{:call, …,
+  # {:remote, …}, …}` form Rian.Beam emits for qualified calls.
+  def expr_form(CRemote(m, f, args)) := FRemote(m, f, expr_forms(args))
   def expr_form(CTuple(es)) := FTuple(expr_forms(es))
   def expr_form(CList(es, TClose)) := list_form(expr_forms(es), FNil)
   def expr_form(CList(es, TTail(t))) := list_form(expr_forms(es), expr_form(t))

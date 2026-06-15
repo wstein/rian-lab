@@ -60,6 +60,14 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "type Box := B(Int53)\ndef wrap(n Int53) Box := B(n)\ndef unwrap(b Box) Int53\ndef unwrap(B(n)) := n",
       [{:wrap, [7]}, {:wrap, [42]}, {:unwrap, [{:b, 9}]}]
     },
+    # tuple EXPRESSIONS + atom literals (`{:ok, n}`) and tuple PATTERNS (`{:ok, v}`)
+    # — the driver dispatches on `compile.forms`' `{:ok, m, bin}` and builds `{:var,
+    # 0, n}` abstract-form tuples this way (CTuple/CAtom + PTuple/PAtom lowering).
+    {
+      "def mk(n Int53) Tuple := {:ok, n}\ndef unwrap(t Tuple) Int53\ndef unwrap({:ok, v}) := v",
+      "def mk(n Int53) Tuple := {:ok, n}\ndef unwrap(t Tuple) Int53\ndef unwrap({:ok, v}) := v",
+      [{:mk, [7]}, {:mk, [0]}, {:unwrap, [{:ok, 9}]}]
+    },
     # `if` — now in selfhost_decl's surface (ADR-0063 widening); compiles end to end
     {
       "def max(a, b) := if a > b do a else b end\ndef min(a, b) := if a < b do a else b end",

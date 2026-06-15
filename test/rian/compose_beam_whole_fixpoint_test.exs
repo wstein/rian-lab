@@ -91,6 +91,20 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
        {:clause, [{:p_var, "x"}, {:p_var, "y"}], :g_none,
         {:block, [{:s_expr, {:c_tuple, [{:c_id, "x"}, {:c_id, "y"}]}}]}}
      ]},
+    # a cross-module remote call (CRemote) — the composition driver reaches sibling
+    # self-host modules this way.
+    {:func, "rem", 1,
+     [
+       {:clause, [{:p_var, "x"}], :g_none,
+        {:block,
+         [{:s_expr, {:c_remote, "Elixir.SelfhostDecl", "parse_program", [{:c_id, "x"}]}}]}}
+     ]},
+    # the str_to_atom prim (CCall → String.to_atom) — the driver interns names.
+    {:func, "atm", 1,
+     [
+       {:clause, [{:p_var, "s"}], :g_none,
+        {:block, [{:s_expr, {:c_call, "__prim_str_to_atom", [{:c_id, "s"}]}}]}}
+     ]},
     {:func, "lst", 1,
      [
        {:clause, [{:p_var, "t"}], :g_none,

@@ -178,6 +178,8 @@ mod SelfhostComposeRealSum do
   def lower_pat({:str_p, s}) := PStr(s)
   def lower_pat({:char_p, cp}) := PChar(cp)
   def lower_pat({:ctor, c, ps}) := PCtor(c, lower_pats(ps))
+  def lower_pat({:atom_p, n}) := PAtom(n)
+  def lower_pat({:tuple_p, ps}) := PTuple(lower_pats(ps))
   def lower_pat({:cons_p, h, t}) := cons_pat([lower_pat(h)], t)
 
   # flatten a cons-pattern chain `[a, b | tl]` into PList([a, b], tail).
@@ -195,8 +197,16 @@ mod SelfhostComposeRealSum do
   def lower_surface({:str, s}) := CStr(s)
   def lower_surface({:char, cp}) := CChar(cp)
   def lower_surface({:id, x}) := CId(x)
+  def lower_surface({:atom, n}) := CAtom(n)
+  def lower_surface({:tuple, es}) := CTuple(lower_all(es))
   def lower_surface({:bin, op, l, r}) := CBin(op, lower_surface(l), lower_surface(r))
   def lower_surface({:unary, op, x}) := CUnary(op, lower_surface(x))
+  # a `Prim.X(args)` dot-call is a local intrinsic (`__prim_X`); any other
+  # `Mod.fun(args)` dot-call is a cross-module REMOTE call into a sibling self-host
+  # module, loaded on the BEAM under its `Elixir.`-prefixed atom (the lexer/decl/beam
+  # modules the driver composes). Plain `f(args)` stays a local call.
+  def lower_surface({:call, {:dot, {:id, "Prim"}, name}, args}) := CCall(Prim.str_concat("__prim_", name), lower_all(args))
+  def lower_surface({:call, {:dot, {:id, mname}, fun}, args}) := CRemote(Prim.str_concat("Elixir.", mname), fun, lower_all(args))
   def lower_surface({:call, callee, args}) := CCall(callee_name(callee), lower_all(args))
   # selfhost_decl's `If(cond, then, else)` (single-expr branches) -> selfhost_beam's
   # CIf with single-statement blocks; the backend lowers it to a `case` on the bool.
@@ -312,6 +322,7 @@ mod SelfhostComposeRealSum do
   # constructor is a tagged tuple {tag, arg, …} — the BEAM rep of a sum value.
   def inflate(FCtorN(c)) := {:atom, 0, to_snake(c)}
   def inflate(FCtor(c, args)) := {:tuple, 0, [{:atom, 0, to_snake(c)} | inflate_all(args)]}
+  def inflate(FTuple(es)) := {:tuple, 0, inflate_all(es)}
   # `if` lowers (via selfhost_beam's FIf) to a `case` on the boolean condition.
   def inflate(FIf(c, t, e)) := {:"case", 0, inflate(c), [{:clause, 0, [{:atom, 0, :true}], [], inflate_all(t)}, {:clause, 0, [{:atom, 0, :false}], [], inflate_all(e)}]}
   # `case` -> a real Erlang `case`; each arm is an FClause (single pattern, guard, body).
