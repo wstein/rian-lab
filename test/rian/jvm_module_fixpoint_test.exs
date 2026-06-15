@@ -130,4 +130,76 @@ defmodule Rian.JvmModuleFixpointTest do
                ported(mod, "def f(a Int53, b Int53) Int53 := a - b")
     end
   end
+
+  # === reference-completeness ledger (selfhost_jvm vs Rian.JVM) =================
+  # Does the port reproduce `Rian.JVM.compile` for each construct the oracle
+  # supports? Teeth like decl_fixpoint_test: a `ported?` flag per construct,
+  # checked against reality, so a port gap can't masquerade as covered. (Oracle-
+  # *unsupported* constructs — tuples/maps/structs/atoms/with/lambda/protocols/FFI
+  # — are excluded; neither side handles them.)
+  defp jvm_covers?(mod, src) do
+    ported(mod, src) == JVM.compile(src)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @jvm_constructs [
+    {"function", "def add(a Int53, b Int53) Int53 := a + b", true},
+    {"operators", "def cmp(a Int53, b Int53) Bool := a < b and a != b or not a > b", true},
+    {"if-expression", "def maxi(a Int53, b Int53) Int53 := if a > b do a else b end", true},
+    {"div/rem + float `/`", "def half(a Int53, b Int53) Float64 := a / b", true},
+    {"when guard",
+     "def sign(n Int53) Int53\ndef sign(0) := 0\ndef sign(n) when n > 0 := 1\ndef sign(_) := -1",
+     true},
+    {"string `<>`", "def shout(s String) String := s <> \"!\"", true},
+    {"sum type (sealed)",
+     "type Color := Red | Green | Blue\npub def code(c Color) Int53\n" <>
+       "def code(Red) := 1\ndef code(Green) := 2\ndef code(Blue) := 3", true},
+    {"ctor pattern (payload)",
+     "type Box := B(Int53)\ndef unbox(b Box) Int53\ndef unbox(B(n)) := n", true},
+    {"nested ctor pattern",
+     "type Box := B(Int53)\ntype Wrap := W(Box)\ndef deep(w Wrap) Int53\ndef deep(W(B(n))) := n",
+     true},
+    {"literal dispatch + recursion",
+     "def fib(n Int53) Int53\ndef fib(0) := 0\ndef fib(1) := 1\ndef fib(n) := fib(n - 1) + fib(n - 2)",
+     true},
+    # --- oracle supports, port does NOT yet (no ic/ip clause in selfhost_jvm) ---
+    {"case",
+     "type Shape := Circle(Int53) | Square(Int53)\ndef area(s Shape) Int53 := case s do\n" <>
+       "  Circle(r) -> r\n  Square(x) -> x\nend", false},
+    {"lists / Vec",
+     "def hd(xs Vec(Int53), d Int53) Int53\ndef hd([], d) := d\ndef hd([h | t], _) := h", false},
+    {"char literal", "def kind(c Char) Int64\ndef kind('a') := 1\ndef kind(_) := 0", true},
+    # --- oracle supports, port does NOT yet ---
+    {"Str/Char prims", "def d(c Char) Int64 := Prim.char_code(c) - Prim.char_code('0')", false}
+  ]
+
+  describe "JVM backend completeness ledger (selfhost_jvm vs Rian.JVM)" do
+    test "the oracle compiles every listed construct — corpus is valid" do
+      for {name, src, _} <- @jvm_constructs do
+        assert is_binary(JVM.compile(src)), "Rian.JVM rejected the `#{name}` example — fix it"
+      end
+    end
+
+    test "every construct's ported? flag matches reality", %{mod: mod} do
+      drift =
+        for {name, src, ported?} <- @jvm_constructs,
+            actual = jvm_covers?(mod, src),
+            actual != ported? do
+          "#{name}: ledger says ported?=#{ported?} but selfhost_jvm " <>
+            "#{if actual, do: "REPRODUCES", else: "does NOT reproduce"} Rian.JVM"
+        end
+
+      assert drift == [], "JVM backend completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "construct coverage is measured and must not regress" do
+      ported = Enum.count(@jvm_constructs, fn {_, _, p} -> p end)
+      total = length(@jvm_constructs)
+      IO.puts("\n  selfhost_jvm backend completeness: #{ported}/#{total} Rian.JVM constructs")
+      assert ported >= 10
+    end
+  end
 end

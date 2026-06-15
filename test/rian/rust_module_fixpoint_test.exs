@@ -281,6 +281,70 @@ defmodule Rian.RustModuleFixpointTest do
       refute ported(mod, "def f(a Int64, b Int64) Int64 := a + b") ==
                ported(mod, "def f(a Int64, b Int64) Int64 := a - b")
     end
+  end
+
+  # === reference-completeness ledger (selfhost_rust vs Rian.Lower.rust_program) =
+  defp rust_covers?(mod, src) do
+    ported(mod, src) == Lower.rust_program(Decl.parse(src))
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @rust_constructs [
+    {"function", "def add(a Int64, b Int64) Int64 := a + b", true},
+    {"operators", "def cmp(a Int64, b Int64) Bool := a < b and a != b", true},
+    {"if-expression", "def maxi(a Int64, b Int64) Int64 := if a > b do a else b end", true},
+    {"multi-clause match",
+     "def add0(a Int64, b Int64) Int64\ndef add0(0, b) := b\ndef add0(a, b) := a + b", true},
+    {"when guard",
+     "def sign(n Int64) Int64\ndef sign(0) := 0\ndef sign(n) when n > 0 := 1\ndef sign(_) := -1",
+     true},
+    {"sum type -> enum + ctor pattern",
+     "type Opt := None | Some(Int64)\ndef get(o Opt, d Int64) Int64\n" <>
+       "def get(None, d) := d\ndef get(Some(v), _) := v", true},
+    {"struct (construct + field)",
+     "struct Point(x Int64, y Int64)\ndef mk(a Int64, b Int64) Point := Point(x: a, y: b)\n" <>
+       "def getx(p val Point) Int64 := p.x", true},
+    {"closed list + cons", "def two() Vec(Int64) := [1, 2]", true},
+    {"list patterns (slice)",
+     "def hd(xs val Vec(Int64), d Int64) Int64\ndef hd([], d) := d\ndef hd([h | t], _) := h",
+     true},
+    {"generics + tvar-return clone", "def id(x val T) T forall T := x", true},
+    {"iso capability (owned)", "def keep(xs iso Vec(Int64)) Vec(Int64) := xs", true},
+    {"owned->borrow call coercion",
+     "def takes(xs val Vec(Int64)) Int64 := 0\ndef build() Int64 := takes([1, 2])", true},
+    {"parametric enum monomorphization",
+     "type Pair := P(k K, v V)\ndef getk(p val Pair) K forall K, V := p.k", true}
+  ]
+
+  describe "Rust backend completeness ledger (selfhost_rust vs Rian.Lower.rust_program)" do
+    test "the oracle compiles every listed construct — corpus is valid" do
+      for {name, src, _} <- @rust_constructs do
+        assert is_binary(Lower.rust_program(Decl.parse(src))),
+               "Rian.Lower.rust_program rejected the `#{name}` example — fix it"
+      end
+    end
+
+    test "every construct's ported? flag matches reality", %{mod: mod} do
+      drift =
+        for {name, src, ported?} <- @rust_constructs,
+            actual = rust_covers?(mod, src),
+            actual != ported? do
+          "#{name}: ledger says ported?=#{ported?} but selfhost_rust " <>
+            "#{if actual, do: "REPRODUCES", else: "does NOT reproduce"} Rian.Lower.rust_program"
+        end
+
+      assert drift == [], "Rust backend completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "construct coverage is measured and must not regress" do
+      ported = Enum.count(@rust_constructs, fn {_, _, p} -> p end)
+      total = length(@rust_constructs)
+      IO.puts("\n  selfhost_rust backend completeness: #{ported}/#{total} Rust constructs")
+      assert ported >= 10
+    end
 
     test "a struct emits a derive'd record, named construction, and field access", %{mod: mod} do
       out =

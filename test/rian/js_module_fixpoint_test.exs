@@ -148,4 +148,67 @@ defmodule Rian.JsModuleFixpointTest do
                ported(mod, "def f(a Int53, b Int53) Int53 := a - b")
     end
   end
+
+  # === reference-completeness ledger (selfhost_js vs Rian.JS) ===================
+  defp js_covers?(mod, src) do
+    ported(mod, src) == JS.compile(src)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @js_constructs [
+    {"function", "def add(a Int53, b Int53) Int53 := a + b", true},
+    {"operators", "def cmp(a Int53, b Int53) Bool := a < b and a != b or not a > b", true},
+    {"if (ternary)", "def maxi(a Int53, b Int53) Int53 := if a > b do a else b end", true},
+    {"when guard",
+     "def sign(n Int53) Int53\ndef sign(0) := 0\ndef sign(n) when n > 0 := 1\ndef sign(_) := -1",
+     true},
+    {"sum variants",
+     "type Opt := None | Some(Int53)\ndef get(o Opt, d Int53) Int53\n" <>
+       "def get(None, d) := d\ndef get(Some(v), _) := v", true},
+    {"Result + tuple",
+     "type E := Bad\ndef half(n Int53) Int53 | E\ndef half(0) := {:error, Bad}\ndef half(n) := {:ok, n}",
+     true},
+    {"case (IIFE)", "def classify(n Int53) Int53 := case n do\n  0 -> 10\n  m -> m + 1\nend",
+     true},
+    {"lists / cons",
+     "def hd(xs Vec(Int53), d Int53) Int53\ndef hd([], d) := d\ndef hd([h | t], _) := h", true},
+    {"atoms / Symbol", "def tag(b Bool) Symbol := if b do :yes else :no end", true},
+    {"string `<>`", "def shout(s String) String := s <> \"!\"", true},
+    {"char literal", "def kind(c Char) Int53\ndef kind('a') := 1\ndef kind(_) := 0", true},
+    {"struct", "struct P(x Int53, y Int53)\ndef getx(p P) Int53 := p.x", true},
+    # --- oracle supports, port does NOT (program-level / separate subsystem) ---
+    {"protocol dispatch",
+     "protocol Show do\n  def show(x Int53) String\nend\nimpl Show for Int53 do\n" <>
+       "  def show(n) := \"x\"\nend\ndef render(x Int53) String := show(x)", false}
+  ]
+
+  describe "JS backend completeness ledger (selfhost_js vs Rian.JS)" do
+    test "the oracle compiles every listed construct — corpus is valid" do
+      for {name, src, _} <- @js_constructs do
+        assert is_binary(JS.compile(src)), "Rian.JS rejected the `#{name}` example — fix it"
+      end
+    end
+
+    test "every construct's ported? flag matches reality", %{mod: mod} do
+      drift =
+        for {name, src, ported?} <- @js_constructs,
+            actual = js_covers?(mod, src),
+            actual != ported? do
+          "#{name}: ledger says ported?=#{ported?} but selfhost_js " <>
+            "#{if actual, do: "REPRODUCES", else: "does NOT reproduce"} Rian.JS"
+        end
+
+      assert drift == [], "JS backend completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "construct coverage is measured and must not regress" do
+      ported = Enum.count(@js_constructs, fn {_, _, p} -> p end)
+      total = length(@js_constructs)
+      IO.puts("\n  selfhost_js backend completeness: #{ported}/#{total} Rian.JS constructs")
+      assert ported >= 10
+    end
+  end
 end
