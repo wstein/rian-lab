@@ -13,6 +13,9 @@ defmodule Rian.SelfhostBuildTest do
   # Known gaps (the backlog — programs `build` cannot yet compile, so they are not
   # asserted here; add them as they land):
   #   * lambdas / function captures — selfhost_beam emits no fun forms yet.
+  #   * string interpolation `"…${e}…"` — blocked on type inference in the build
+  #     loop (a hole is stringified by its static type, ADR-0069 §4); REFUSED loudly
+  #     for now rather than silently mis-lowered (see the reject test below).
 
   setup_all do
     for {mod, file} <- [
@@ -98,6 +101,15 @@ defmodule Rian.SelfhostBuildTest do
       test "#{name}", %{drv: drv} do
         assert run(drv, @src, @fun, @args) == @want
       end
+    end
+  end
+
+  describe "honest rejects (gaps that must fail LOUDLY, not silently mis-compile)" do
+    test "string interpolation is refused, not returned as a literal", %{drv: drv} do
+      # Blocked on type inference in the build loop (ADR-0069 §4 / ADR-0063); until
+      # then the build refuses rather than silently emitting the raw `${…}` text.
+      assert catch_error(run(drv, ~S|def g() String := "n=${n}"|, :g, [])) ==
+               {:unsupported_interpolation, "n=${n}"}
     end
   end
 end

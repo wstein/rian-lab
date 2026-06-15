@@ -161,6 +161,22 @@ mod SelfhostComposeRealSum do
   @external(:ex, ":erlang.error({:not_beam_legal, name})")
   def refuse_cap(name String) Vec(Tuple)
 
+  # string interpolation `"…${e}…"` is REFUSED, not silently mis-lowered: a hole is
+  # stringified by its statically-inferred type (ADR-0069 §4 — int_to_string vs
+  # char_to_string vs Show.float vs user `show`), and the self-hosted build has no
+  # type inference in the loop yet (ADR-0063's open terminus). Honest loud failure
+  # beats returning the literal `${…}` text. Lift the reject once inference lands.
+  @external(:ex, ":erlang.error({:unsupported_interpolation, src})")
+  def refuse_interp(src String) Core
+
+  # a string literal carries an interpolation hole iff its text holds an unescaped
+  # `${` ($ = 36, { = 123) — the selfhost lexer keeps the raw `${…}` in the lexeme.
+  def has_interp(s String) Bool := scan_interp(Prim.str_chars(s))
+  def scan_interp(Vec(Int53)) Bool
+  def scan_interp([]) := false
+  def scan_interp([36, 123 | _]) := true
+  def scan_interp([_ | rest]) := scan_interp(rest)
+
   def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
 
   def exports(Vec(Func)) Vec(Tuple)
@@ -245,7 +261,13 @@ mod SelfhostComposeRealSum do
   # (≡ `Rian.Core`). Exported on the sig; the clauses below stay local.
   pub def lower_surface(e) Core
   def lower_surface({:num, s}) := CNum(s)
-  def lower_surface({:str, s}) := CStr(s)
+  def lower_surface({:str, s})
+    if has_interp(s) do
+      refuse_interp(s)
+    else
+      CStr(s)
+    end
+  end
   def lower_surface({:char, cp}) := CChar(cp)
   def lower_surface({:id, x}) := CId(x)
   def lower_surface({:atom, n}) := CAtom(n)
