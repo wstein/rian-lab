@@ -22,8 +22,9 @@
 #          · String/Char literals · labeled construction `Name(f: v)`
 #          · list construction `[x | acc]`
 #          · `if COND do THEN else ELSE end` (single-expr branches; ADR-0063)
+#          · `case SCRUT do PAT [when G] -> BODY … end` (single-expr arms; ADR-0063)
 #
-# Out of slice (the remaining long tail of Rian.Decl): `case`,
+# Out of slice (the remaining long tail of Rian.Decl):
 # negative-literal patterns, `alias`/`const`/`protocol`/`impl`,
 # doc-comments, and multi-statement block (`do … end`) function bodies.
 # ---------------------------------------------------------------------------
@@ -41,6 +42,7 @@ mod SelfhostDecl do
     | Unary(String, Expr) | Call(Expr, Vec(Expr))
     | Dot(Expr, String) | Label(String, Expr)
     | If(Expr, Expr, Expr)
+    | Case(Expr, Vec(CaseArm))
     | BlockE(Vec(Stmt))
     | NilE | ConsE(Expr, Expr) | EErr
 
@@ -58,6 +60,10 @@ mod SelfhostDecl do
   type Pat :=
       Wild | Var(String) | Lit(Int53) | StrP(String) | CharP(Int53) | Ctor(String, Vec(Pat))
     | NilP | ConsP(Pat, Pat)
+
+  # a `case` arm — `pat [when guard] -> body`. Projects to Rian.Pratt's
+  # `{pat, guard | nil, body}` (CArm → nil guard; CArmG → the guard expr).
+  type CaseArm := CArm(Pat, Expr) | CArmG(Pat, Expr, Expr)
 
   type Variant := V(String, Vec(String))
   type Param := Par(String, String, String)
@@ -91,6 +97,8 @@ mod SelfhostDecl do
   type PatList := PL(Vec(Pat), Vec(Tok))
   type ModBody := MB(Vec(Tok), Vec(Tok))
   type BlockRes := BRes(Vec(Tok), Vec(Tok))
+  type ArmRes := AR(CaseArm, Vec(Tok))
+  type ArmsRes := ARs(Vec(CaseArm), Vec(Tok))
   type Gen := GR(Vec(TVar), Vec(Tok))
   type TVarRes := TVR(TVar, Vec(Tok))
   type BoundRes := BR(Vec(String), Vec(Tok))
@@ -481,6 +489,7 @@ mod SelfhostDecl do
   def parse_primary([TId(x) | rest]) := parse_postfix(Id(x), rest)
   def parse_primary([TLBracket | rest]) := parse_list_expr(rest)
   def parse_primary([TKw("if") | rest]) := parse_if(rest)
+  def parse_primary([TKw("case") | rest]) := parse_case(rest)
   def parse_primary([TLP | rest])
     case parse_bp(0, rest) do
       P(e, [TRP | rest2]) -> parse_postfix(e, rest2)
@@ -512,6 +521,50 @@ mod SelfhostDecl do
       P(els, [TKw("end") | r4]) -> parse_postfix(If(cnd, thn, els), r4)
     end
   end
+
+  # `case SCRUT do <nl> PAT [when G] -> BODY <nl> … end` — the scrutinee, then
+  # newline-separated arms up to `end`. Each arm is a pattern, an optional `when`
+  # guard, `->`, and a single-expression body (parse_bp stops at the next `<nl>`/
+  # `end`/`->`). Projects to Rian.Pratt's `{:case, scrut, [{pat, guard|nil, body}]}`.
+  def parse_case(ts Vec(Tok)) Parse
+  def parse_case(ts)
+    case parse_bp(0, ts) do
+      P(scrut, [TKw("do") | r2]) ->
+        case parse_arms(r2, []) do
+          ARs(arms, r3) -> parse_postfix(Case(scrut, arms), r3)
+        end
+    end
+  end
+
+  def parse_arms(ts Vec(Tok), acc Vec(CaseArm)) ArmsRes
+  def parse_arms([TNL | rest], acc) := parse_arms(rest, acc)
+  def parse_arms([TKw("end") | rest], acc) := ARs(rev_arms(acc, []), rest)
+  def parse_arms(ts, acc)
+    case parse_arm(ts) do
+      AR(arm, rest) -> parse_arms(rest, [arm | acc])
+    end
+  end
+
+  def parse_arm(ts Vec(Tok)) ArmRes
+  def parse_arm(ts)
+    case parse_pat(ts) do
+      PP(pat, [TKw("when") | r1]) ->
+        case parse_bp(0, r1) do
+          P(g, [TOp("->") | r2]) ->
+            case parse_bp(0, r2) do
+              P(body, r3) -> AR(CArmG(pat, g, body), r3)
+            end
+        end
+      PP(pat, [TOp("->") | r1]) ->
+        case parse_bp(0, r1) do
+          P(body, r2) -> AR(CArm(pat, body), r2)
+        end
+    end
+  end
+
+  def rev_arms(Vec(CaseArm), Vec(CaseArm)) Vec(CaseArm)
+  def rev_arms([], out) := out
+  def rev_arms([a | rest], out) := rev_arms(rest, [a | out])
 
   # list construction as a nil/cons chain (mirrors parse_list_pat): `[x | acc]` ->
   # ConsE(x, acc); elements are full expressions.

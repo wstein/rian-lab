@@ -112,6 +112,13 @@ defmodule Rian.DeclFixpointTest do
   defp ce({:if, c, t, e}),
     do: {:if, ce(c), {:block, [{:expr, ce(t)}]}, {:block, [{:expr, ce(e)}]}}
 
+  # the front-end's `Case(scrut, arms)` projects onto Rian.Pratt's
+  # `{:case, scrut, [{pat, guard | nil, body}, …]}` — single-expr arm bodies.
+  defp ce({:case, scrut, arms}), do: {:case, ce(scrut), Enum.map(arms, &carm/1)}
+
+  defp carm({:c_arm, pat, body}), do: {cp(pat), nil, ce(body)}
+  defp carm({:c_arm_g, pat, g, body}), do: {cp(pat), ce(g), ce(body)}
+
   defp ce(leaf), do: leaf
 
   defp flat_e(:nil_e), do: {[], nil}
@@ -288,7 +295,11 @@ defmodule Rian.DeclFixpointTest do
     # a block body holding an `if` statement (nested do/end is balanced by take_block)
     "def grade(n Int64) Int64\n  base := n * 10\n  if base > 50 do base else 0 end\nend",
     # a block body inside a `mod`
-    "mod Calc do\n  pub def inc2(n Int64) Int64\n    t := n + 1\n    t + 1\n  end\nend"
+    "mod Calc do\n  pub def inc2(n Int64) Int64\n    t := n + 1\n    t + 1\n  end\nend",
+    # `case` expressions — literal/var/wildcard arms, with and without a `when` guard
+    "def classify(n Int64) Int64 := case n do\n  0 -> 100\n  _ -> n * 2\nend",
+    "def sgn(n Int64) Int64 := case n do\n  0 -> 0\n  m when m > 0 -> 1\n  _ -> -1\nend",
+    "def ctor(s Sign) Int64 := case s do\n  Pos -> 1\n  Neg -> -1\nend"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}
