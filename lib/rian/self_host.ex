@@ -161,7 +161,7 @@ defmodule Rian.SelfHost do
       "SelfhostLexerV2.tokenize → SelfhostDecl.parse_program → lower → SelfhostBeam.compile_forms → load",
     stages: 4,
     subset:
-      "a whole multi-function module whose ENTIRE front-end is verified ports — tokenized by selfhost_lexer_v2, parsed by selfhost_decl (def heads, multi-clause patterns incl. cons-LISTS, SUM-TYPE declarations + constructor dispatch, `if`/comparison/boolean, arithmetic + calls; strings/`case` not yet) — and compiled by the selfhost_beam backend; all THREE ports called CROSS-MODULE, with only a surface→Core lowering + Form inflater as driver glue",
+      "whole real compiler-stage files whose ENTIRE front-end is verified ports — tokenized by selfhost_lexer_v2, parsed by selfhost_decl (def heads, multi-clause patterns incl. cons-LISTS and TUPLES, SUM-TYPE/STRUCT declarations + constructor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access, `@external` FFI, `forall` generics, arithmetic + calls) — and compiled by the selfhost_beam backend; all THREE ports called CROSS-MODULE (incl. remote calls), with only a surface→Core lowering + Form inflater as driver glue",
     source: "selfhost_compose_real_sum.rian",
     test: "test/rian/compose_real_sum_fixpoint_test.exs",
     # honesty distinction (ADR-0063): the composed loop is self-COMPILING (codegen —
@@ -173,11 +173,17 @@ defmodule Rian.SelfHost do
     self_compiling: true,
     self_checking: false,
     # has `build` compiled a real selfhost_*.rian slice (not a toy corpus)? Yes —
-    # the capability checker's `Ty`+`copyt` compile + run identically to Rian.Beam.
-    closed_on_real_source: "selfhost_cap.rian (Ty + copyt)",
+    # the WHOLE capability checker (selfhost_cap.rian) and the whole lexer/decl/beam/
+    # core/exhaust stages compile + run identically to Rian.Beam.
+    closed_on_real_source:
+      "selfhost_cap.rian (whole file) — plus the whole lexer/decl/beam/core/exhaust stages and the driver itself",
     real_source_test: "test/rian/compose_selfcompile_fixpoint_test.exs",
+    # has the bootstrap fixed point closed? Yes, for the Rian compiler (self-compiling):
+    # gen1 == gen2 over the four compiler sources, identical forms + bit-identical .beam.
+    bootstrap_v1_v2: true,
+    bootstrap_test: "test/rian/selfhost_v1_v2_fixpoint_test.exs",
     note:
-      "Rungs 1-6 built a driver owning the source→loaded-module loop over a TOY pipeline. Rung 7 made the BACKEND verified (`selfhost_beam`); rung 8 made body-parsing verified (`selfhost_parse`); rung 9 made declaration-parsing verified (`selfhost_decl`); rung 10 makes LEXING verified too (`selfhost_lexer_v2`), so the driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports, composed cross-module. The lexer's token tags are a superset of the parser's (same tags), so `SelfhostLexerV2.tokenize` feeds `SelfhostDecl.parse_program` with NO projection. The only driver-local code left reimplements no stage: the surface→Core lowering (selfhost_decl's Decl/Expr/Pat IR → selfhost_beam Core/Pat, incl. cons-list patterns → PList) and the Form inflater. Rung 11 widens the SURFACE to sum types + constructor dispatch using selfhost_decl's already-locked type/ctor capability (no port change — only the driver glue grows: `type` decls are erased, and the Form inflater learns FCtorN/FCtor via a to_snake matching Rian.PatternLower). Surface is now selfhost_decl's slice (arithmetic + calls + multi-clause + cons-lists + sum-type declarations/dispatch; list recursion like sum/len AND ctor dispatch like Color/Shape work). All ports load under :\"Elixir.Selfhost*\" atoms (Pascal calls, ADR-0041); sibling-port calls are composition, not host crutches (excluded from the FFI ledger). Only host FFI: :compile.forms/:code.load_binary. The fixpoint calls only build/2 and runs the result identically to the full Elixir toolchain. Rung 12 widens selfhost_decl ITSELF off its old :partial slice — `if … do … else … end` expressions now parse (equivalence-locked: decl_fixpoint diffs the projected IR against Rian.Decl.parse), and the build's lowering/inflater learn `if`→`case`, so the composed build compiles `if` end to end. The path to v1==v2: keep widening selfhost_decl (it still lacks `case`/strings/block bodies) and the surface→Core lowering to match, until build compiles a whole real selfhost_*.rian file"
+      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.Selfhost*\" atoms (Pascal calls, ADR-0041). `SelfhostLexerV2.tokenize` feeds `SelfhostDecl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING; a self-CHECKING compiler (Check/Exhaustiveness/Capability in the loop; the checker port is still infer-only over 5/12 Core nodes) remains the next terminus. Only host FFI in the loop: :compile.forms/:code.load_binary."
   }
 
   @doc """
