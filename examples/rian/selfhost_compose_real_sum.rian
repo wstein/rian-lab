@@ -143,7 +143,16 @@ mod SelfhostComposeRealSum do
   # module's inner declarations into the same clause stream (its name is the build's
   # `modname`, supplied by the caller).
   def normalize([{:d_mod, _, inner} | rest]) := cat(normalize(inner), normalize(rest))
+  # an `@external(:ex, "host expr")` on the following bodiless `DSig` (ADR-0068): the
+  # host expression is itself Rian surface (e.g. `:erlang.binary_to_list(s)`), so
+  # parse it and splice it as the function body, a single clause whose head binds the
+  # signature's params (mirrors Rian.Beam.beam_func for externals).
+  def normalize([{:d_extern, "ex", code}, {:d_sig, _, name, params, _, _} | rest]) := [NC(name, param_pats(params), GNone, Block([SExpr(lower_surface(parse_host(code)))])) | normalize(rest)]
   def normalize([_ | rest]) := normalize(rest)
+
+  # parse an `@external` host-code string into a surface expression, via the same
+  # verified lexer + the decl parser's exported expression entry point.
+  def parse_host(code String) Tuple := SelfhostDecl.parse_expr(SelfhostLexerV2.tokenize(code))
 
   def cat(Vec(NClause), Vec(NClause)) Vec(NClause)
   def cat([], ys) := ys
@@ -207,6 +216,9 @@ mod SelfhostComposeRealSum do
   # modules the driver composes). Plain `f(args)` stays a local call.
   def lower_surface({:call, {:dot, {:id, "Prim"}, name}, args}) := CCall(Prim.str_concat("__prim_", name), lower_all(args))
   def lower_surface({:call, {:dot, {:id, mname}, fun}, args}) := CRemote(Prim.str_concat("Elixir.", mname), fun, lower_all(args))
+  # a raw-atom module dot-call `:erlang.f(args)` (NO `Elixir.` prefix) — what an
+  # `@external(:ex, ":erlang.binary_to_list(s)")` host expression parses to.
+  def lower_surface({:call, {:dot, {:atom, m}, fun}, args}) := CRemote(m, fun, lower_all(args))
   def lower_surface({:call, callee, args}) := CCall(callee_name(callee), lower_all(args))
   # selfhost_decl's `If(cond, then, else)` (single-expr branches) -> selfhost_beam's
   # CIf with single-statement blocks; the backend lowers it to a `case` on the bool.

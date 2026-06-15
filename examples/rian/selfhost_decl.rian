@@ -142,6 +142,15 @@ mod SelfhostDecl do
   pub def parse_program([TAnnot("external"), TLP, TOp(":"), TId(tgt), TComma, TStr(code), TRP | rest]) := [DExtern(tgt, code) | parse_program(rest)]
   pub def parse_program([_ | rest]) := parse_program(rest)
 
+  # parse a standalone EXPRESSION from a token list (the driver uses this to inline
+  # an `@external(:ex, "host expr")` body, ADR-0068). Trailing tokens are ignored.
+  pub def parse_expr(ts Vec(Tok)) Expr
+  pub def parse_expr(ts)
+    case parse_bp(0, ts) do
+      P(e, _) -> e
+    end
+  end
+
   # struct Name(field Type, …) — a product type; fields reuse the param grammar.
   def parse_struct(ts Vec(Tok)) DeclRes
   def parse_struct([TId(name), TLP | rest])
