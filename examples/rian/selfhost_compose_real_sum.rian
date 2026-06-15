@@ -58,9 +58,11 @@ mod SelfhostComposeRealSum do
             | PAtom(String)
             | PCtor(String, Vec(Pat))
             | PTuple(Vec(Pat))
+            | PStructP(String, Vec(FldP))
             | PList(Vec(Pat), PTail)
 
   type PTail := PtlClose | PtlTail(Pat)
+  type FldP := FP(String, Pat)
   type Guard := GNone | GSome(Core)
   type Clause := Clause(Vec(Pat), Guard, Block)
   type Func := Func(String, Int53, Vec(Clause))
@@ -272,9 +274,14 @@ mod SelfhostComposeRealSum do
   def lower_pat({:str_p, s}) := PStr(s)
   def lower_pat({:char_p, cp}) := PChar(cp)
   def lower_pat({:ctor, c, ps}) := PCtor(c, lower_pats(ps))
+  def lower_pat({:struct_p, c, flds}) := PStructP(c, lower_fldpats(flds))
   def lower_pat({:atom_p, n}) := PAtom(n)
   def lower_pat({:tuple_p, ps}) := PTuple(lower_pats(ps))
   def lower_pat({:cons_p, h, t}) := cons_pat([lower_pat(h)], t)
+
+  def lower_fldpats(flds Vec(Tuple)) Vec(FldP)
+  def lower_fldpats([]) := []
+  def lower_fldpats([{:fp, f, p} | rest]) := [FP(f, lower_pat(p)) | lower_fldpats(rest)]
 
   # flatten a cons-pattern chain `[a, b | tl]` into PList([a, b], tail).
   def cons_pat(acc Vec(Pat), t) Pat
@@ -444,6 +451,11 @@ mod SelfhostComposeRealSum do
   def inflate_bin_segs([]) := []
   def inflate_bin_segs([f | rest]) := [{:bin_element, 0, inflate(f), :default, [:binary]} | inflate_bin_segs(rest)]
 
+  # a struct pattern's field-exacts `field := pat` (FMapPat).
+  def inflate_fld_pats(Vec(FFldP)) Vec(Tuple)
+  def inflate_fld_pats([]) := []
+  def inflate_fld_pats([FFP(f, p) | rest]) := [{:map_field_exact, 0, {:atom, 0, Prim.str_to_atom(f)}, inflate(p)} | inflate_fld_pats(rest)]
+
   def inflate_flds(Vec(FFld)) Vec(Tuple)
   def inflate_flds([]) := []
   def inflate_flds([FFld(k, v) | rest]) := [{:map_field_assoc, 0, {:atom, 0, Prim.str_to_atom(k)}, inflate(v)} | inflate_flds(rest)]
@@ -479,6 +491,9 @@ mod SelfhostComposeRealSum do
   def inflate(FStruct(name, fields)) := {:map, 0, [{:map_field_assoc, 0, {:atom, 0, Prim.str_to_atom("__struct__")}, {:atom, 0, to_snake(name)}} | inflate_flds(fields)]}
   # a map literal -> a plain Erlang map (no `__struct__` tag); fields reuse inflate_flds.
   def inflate(FMap(fields)) := {:map, 0, inflate_flds(fields)}
+  # a struct PATTERN `P(field: pat, …)` -> a map pattern requiring `__struct__ := <snake>`
+  # plus each named field exactly (`field := pat`); other fields are ignored.
+  def inflate(FMapPat(name, fields)) := {:map, 0, [{:map_field_exact, 0, {:atom, 0, Prim.str_to_atom("__struct__")}, {:atom, 0, to_snake(name)}} | inflate_fld_pats(fields)]}
   # `if` lowers (via selfhost_beam's FIf) to a `case` on the boolean condition.
   def inflate(FIf(c, t, e)) := {:"case", 0, inflate(c), [{:clause, 0, [{:atom, 0, :true}], [], inflate_all(t)}, {:clause, 0, [{:atom, 0, :false}], [], inflate_all(e)}]}
   # `case` -> a real Erlang `case`; each arm is an FClause (single pattern, guard, body).
@@ -668,6 +683,9 @@ mod SelfhostComposeRealSum do
   def to_exh(PWild) := PWild
   def to_exh(PVar(_)) := PWild
   def to_exh(PCtor(c, args)) := PCtor(c, exh_row(args))
+  # a struct has a single shape, so a struct pattern always covers its type — treat
+  # it as a wildcard for the gate (same approximation the catch-all gives literals).
+  def to_exh(PStructP(_, _)) := PWild
   def to_exh(_) := PWild
 
   def dup_wild(Int53) Vec(Pat)

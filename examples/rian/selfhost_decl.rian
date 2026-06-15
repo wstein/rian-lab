@@ -67,7 +67,11 @@ mod SelfhostDecl do
   type Pat :=
       Wild | Var(String) | Lit(Int53) | StrP(String) | CharP(Int53) | AtomP(String) | Ctor(String, Vec(Pat))
     | TupleP(Vec(Pat))
+    | StructP(String, Vec(FldP))
     | NilP | ConsP(Pat, Pat)
+
+  # a struct pattern field `field: pat` (symmetric with labeled construction).
+  type FldP := FP(String, Pat)
 
   # a `case` arm — `pat [when guard] -> body`. Projects to Rian.Pratt's
   # `{pat, guard | nil, body}` (CArm → nil guard; CArmG → the guard expr).
@@ -138,6 +142,7 @@ mod SelfhostDecl do
   type Paren := Paren(Vec(Tok), Vec(Tok))
   type PatRes := PP(Pat, Vec(Tok))
   type PatList := PL(Vec(Pat), Vec(Tok))
+  type FldPatList := FPL(Vec(FldP), Vec(Tok))
   type ModBody := MB(Vec(Tok), Vec(Tok))
   type BlockRes := BRes(Vec(Tok), Vec(Tok))
   type ArmRes := AR(CaseArm, Vec(Tok))
@@ -1006,6 +1011,13 @@ mod SelfhostDecl do
     end
   end
   def parse_pat([TLBracket | rest]) := parse_list_pat(rest)
+  # a struct pattern `P(field: pat, …)` — labeled fields (the `TId :` lookahead
+  # distinguishes it from a positional sum-variant pattern). MUST precede that clause.
+  def parse_pat([TId(ctor), TLP, TId(f), TOp(":") | rest])
+    case parse_fldpats([TId(f), TOp(":") | rest]) do
+      FPL(fields, rest2) -> PP(StructP(ctor, fields), rest2)
+    end
+  end
   def parse_pat([TId(ctor), TLP | rest])
     case parse_patlist(rest) do
       PL(args, rest2) -> PP(Ctor(ctor, args), rest2)
@@ -1037,6 +1049,19 @@ mod SelfhostDecl do
         end
       PP(h, [TRBracket | rest]) -> PP(ConsP(h, NilP), rest)
       PP(h, rest) -> PP(ConsP(h, NilP), rest)
+    end
+  end
+
+  # struct-pattern fields: `field: pat` pairs until the closing `)`.
+  def parse_fldpats(ts Vec(Tok)) FldPatList
+  def parse_fldpats([TId(f), TOp(":") | rest])
+    case parse_pat(rest) do
+      PP(p, [TComma | r2]) ->
+        case parse_fldpats(r2) do
+          FPL(more, r3) -> FPL([FP(f, p) | more], r3)
+        end
+      PP(p, [TRP | r2]) -> FPL([FP(f, p)], r2)
+      PP(p, r2) -> FPL([FP(f, p)], r2)
     end
   end
 

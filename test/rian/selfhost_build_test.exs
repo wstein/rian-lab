@@ -10,14 +10,16 @@ defmodule Rian.SelfhostBuildTest do
   # The spec is the expected value, not `Rian.Decl`/`Rian.Beam`. This is the
   # Rian-first loop: a failing case here is a feature to add to the *Rian* sources.
   #
-  # Known gaps (the backlog — programs `build` cannot yet compile; both fail LOUDLY,
-  # not silently, so they are honest — add coverage as they land):
+  # Known gaps (the backlog — programs `build` cannot yet compile; all fail LOUDLY,
+  # not silently, so they are honest — add coverage as they land). None is needed by
+  # the self-hosting bootstrap (the compiler sources avoid them); they are user sugar:
   #   * lambdas `(x) -> e` + variable application — needs a fun node across the three
   #     selfhost modules and scope tracking to tell a fun-valued var from a local
   #     call (the largest remaining gap; selfhost_beam currently emits no fun forms).
   #   * string interpolation `"…${e}…"` — blocked on type inference in the build
   #     loop (a hole is stringified by its static type, ADR-0069 §4); REFUSED loudly
   #     for now rather than silently mis-lowered (see the reject test below).
+  #   * niche prims: i64 overflow ops (wrapping/saturating/checked_add) + float_repr.
 
   setup_all do
     for {mod, file} <- [
@@ -121,7 +123,17 @@ defmodule Rian.SelfhostBuildTest do
     {"prim char_to_string", "def f() String := Prim.char_to_string('Z')", :f, [], "Z"},
     {"prim int_to_float", "def f() Float64 := Prim.int_to_float(3)", :f, [], 3.0},
     {"prim str_concat_all", "def f() String := Prim.str_concat_all(\"a\", \"b\", \"c\")", :f, [],
-     "abc"}
+     "abc"},
+    # struct PATTERN `P(field: pat, …)`: parses to a distinct StructP node (the `TId :`
+    # lookahead distinguishes it from a positional sum-variant pattern) and lowers to a
+    # `%{__struct__ := …, field := pat}` map pattern; the exhaustiveness gate treats it
+    # as a wildcard (a struct is single-shape).
+    {"struct pattern field",
+     "struct P(x Int53, y Int53)\ndef gx(p P) Int53\ndef gx(P(x: a, y: _)) := a", :gx,
+     [%{__struct__: :p, x: 5, y: 6}], 5},
+    {"struct pattern roundtrip",
+     "struct P(x Int53)\ndef gx(p P) Int53\ndef gx(P(x: v)) := v\ndef f() Int53 := gx(P(x: 9))",
+     :f, [], 9}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do
