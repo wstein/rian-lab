@@ -13,9 +13,13 @@ defmodule Rian.CheckerInferFixpointTest do
   # the string `"unknown"` (Rian has no bare atom result here), so the test maps
   # `:unknown -> "unknown"` before comparing.
   #
-  # Slice: closed integer expressions (no env, no float literals). Variables,
-  # float widths, calls, lambdas, `case`, and abstract operators are the
-  # `:partial` tail (ADR-0063).
+  # Coverage: ALL 12 Core expression nodes (literals incl. float/char, ids, unary/
+  # binary with operand-directed + cross-width arithmetic, prim + higher-order calls,
+  # `if`/`case` with flow narrowing, lists, lambdas) under both a typing env (`infer_env/2`,
+  # `Check.infer/2`) and an inference context `ic` (`infer_ic/3`, `Check.infer/3`) for
+  # constructor sum types + non-generic function returns. The remaining tail is
+  # generic-return instantiation (`ic.fsigs` + type variables) and ctor-pattern field
+  # narrowing (`ic.tdefs`) — ADR-0063.
 
   setup_all do
     {:ok, mod} =
