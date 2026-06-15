@@ -26,9 +26,11 @@ defmodule Rian.CheckerInferFixpointTest do
 
   defp inj(%Core.ENum{text: t}), do: {:c_num, t}
   defp inj(%Core.EStr{value: v}), do: {:c_str, v}
+  defp inj(%Core.EChar{value: c}), do: {:c_char, c}
   defp inj(%Core.EId{name: n}), do: {:c_id, n}
   defp inj(%Core.EUnary{op: op, arg: a}), do: {:c_unary, op, inj(a)}
   defp inj(%Core.EBin{op: op, left: l, right: r}), do: {:c_bin, op, inj(l), inj(r)}
+  defp inj(%Core.ECall{fun: %Core.EId{name: f}, args: as}), do: {:c_call, f, Enum.map(as, &inj/1)}
 
   defp ported(mod, src), do: mod.infer(inj(Core.from_expr(Pratt.parse(src))))
 
@@ -41,6 +43,10 @@ defmodule Rian.CheckerInferFixpointTest do
 
   @corpus [
     "1",
+    "3.14",
+    "2.5e3",
+    "1.0",
+    "'a'",
     "true",
     "false",
     "x",
@@ -59,7 +65,14 @@ defmodule Rian.CheckerInferFixpointTest do
     "1 < 2 or 3 > 4",
     ~S|"a" <> "b"|,
     "-(1 + 2)",
-    "not (1 < 2)"
+    "not (1 < 2)",
+    # primitive intrinsics with determinate result types
+    "Prim.char_code('a')",
+    "Prim.int_to_float(5)",
+    ~S|Prim.str_to_atom("x")|,
+    "Prim.char_to_string('a')",
+    # a general call with no env is conservatively unknown
+    "foo(1)"
   ]
 
   describe "self-hosting checker fixpoint — Rian infer vs Rian.Check.infer" do
