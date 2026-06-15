@@ -89,9 +89,10 @@ fourth backend with no new fork (ADR-0050) and the second proof of that thesis a
 
 **Scope (MVP):** functions (single/multi-clause), `Int64`/`Float64`/`Bool`/`String`, operators,
 `if`, local calls, `when` guards, and sum variants — verified end-to-end (the `selfhost_opt` optimizer
-lowers to Kotlin, compiles with `kotlinc`, and folds correctly under `java`). Lists/`Vec`, maps,
-structs, protocols, and FFI raise `Rian.JVM.Unsupported` (the next increments). `case` is supported
-(a labelled `run` whose arms reuse the clause dispatcher). Per ADR-0026
+lowers to Kotlin, compiles with `kotlinc`, and folds correctly under `java`). **`case`** (a labelled
+`run rcase@{ … }`), **lists/`Vec`** (`listOf`/cons, with `size`/index/`drop` clause+`case` patterns),
+and the **`Str`/`Char` codepoint prims** now lower too. Still raising `Rian.JVM.Unsupported` (the next
+increments): tuples, maps, structs, atoms/`Symbol`, `with`, lambdas, protocols, and general FFI. Per ADR-0026
 parity, JVM CI stays **non-blocking** until promoted: CI installs `kotlinc` and runs the JVM
 execution tests in a dedicated `continue-on-error` lane (the blocking `mix test.all` gate keeps
 `kotlinc` off its PATH, so it stays Tier-1 only). A JVM regression surfaces on CI without failing the

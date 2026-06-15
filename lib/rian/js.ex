@@ -48,8 +48,10 @@ defmodule Rian.JS do
   (the bound was checked statically and is erased). **Structs**: named
   construction `Name(f: v, …)` → a `__struct__`-tagged object `{__struct__:
   "Name", f: v}`, with field access `p.f` and struct clause patterns; struct
-  protocol dispatch tests `a0.__struct__ === "Name"`. **Not yet** (raise
-  `Rian.JS.Unsupported`): atoms/`Symbol`, `with`, lambdas/captures, general FFI.
+  protocol dispatch tests `a0.__struct__ === "Name"`. Atoms/`Symbol` (→ JS
+  strings) and `Result` (`{:ok,v}`/`{:error,e}` → tagged arrays, matched in a
+  `case`) lower too. **Not yet** (raise `Rian.JS.Unsupported`): `with`,
+  lambdas/captures, general FFI.
 
   ## Capabilities
 
