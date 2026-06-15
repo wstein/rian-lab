@@ -41,6 +41,15 @@ defmodule Rian.CheckerInferFixpointTest do
     end
   end
 
+  defp ported_env(mod, src, env), do: mod.infer_env(inj(Core.from_expr(Pratt.parse(src))), env)
+
+  defp reference_env(src, env) do
+    case Check.infer(Pratt.parse(src), env) do
+      :unknown -> "unknown"
+      ty -> ty
+    end
+  end
+
   @corpus [
     "1",
     "3.14",
@@ -81,6 +90,46 @@ defmodule Rian.CheckerInferFixpointTest do
         assert ported(mod, src) == reference(src),
                "inference diverged on #{inspect(src)}"
       end
+    end
+  end
+
+  # a typing env binding variables to types — the headline gap the port now closes.
+  # (operand-directed arithmetic widths are a later rung, so bound vars appear in
+  # env-lookup / comparison / unary / same-type-Int arithmetic positions.)
+  @env %{"x" => "Int53", "y" => "Int53", "s" => "String", "b" => "Bool", "f" => "Float64"}
+  @env_corpus [
+    "x",
+    "y",
+    "s",
+    "b",
+    "f",
+    "z",
+    "-x",
+    "-f",
+    "not b",
+    "x < y",
+    "x == y",
+    "s <> s",
+    "x + y",
+    "x - y * x",
+    "x + 1"
+  ]
+
+  describe "self-hosting checker fixpoint — inference under a typing env" do
+    test "the Rian inference agrees with Rian.Check.infer over bound variables", %{mod: mod} do
+      for src <- @env_corpus do
+        assert ported_env(mod, src, @env) == reference_env(src, @env),
+               "env inference diverged on #{inspect(src)}"
+      end
+    end
+
+    test "a bound variable resolves to its env type; an unbound one stays unknown",
+         %{mod: mod} do
+      assert ported_env(mod, "x", @env) == "Int53"
+      assert ported_env(mod, "s", @env) == "String"
+      assert ported_env(mod, "z", @env) == "unknown"
+      assert reference_env("x", @env) == "Int53"
+      assert reference_env("z", @env) == "unknown"
     end
   end
 

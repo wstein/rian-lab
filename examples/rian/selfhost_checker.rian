@@ -17,11 +17,12 @@
 # or a general (non-prim) call is `unknown` — the checker is deliberately
 # conservative and does NOT guess.
 #
-# Covered Core nodes (7): CNum/CStr/CChar/CId/CUnary/CBin/CCall (closed expressions,
-# no typing environment). The `:partial` tail — a typing env (bound variables,
-# user-function/ctor return types), operand-directed arithmetic widths, lambdas,
-# `if`/`case` LUB-join, lists, and the abstract operators — see ADR-0063 /
-# docs/self-host-status.md.
+# A typing ENVIRONMENT (name -> type) is threaded through inference: a bound
+# variable resolves to its declared type (`infer_env/2`; `infer/1` is the empty-env
+# convenience). Covered Core nodes (7): CNum/CStr/CChar/CId/CUnary/CBin/CCall. The
+# `:partial` tail — user-function/ctor return types in the env, operand-directed
+# arithmetic widths (Rian.Check's `arith_type`: `x + 1.0`, char ordinals), lambdas,
+# `if`/`case` LUB-join, and lists — see ADR-0063 / docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
 mod SelfhostChecker do
@@ -75,24 +76,39 @@ mod SelfhostChecker do
     end
   end
 
-  # Infer the type of a Core node, returning the type name (or "unknown").
+  # Infer the type of a Core node in the empty env (closed expression).
   pub def infer(Core) String
-  pub def infer(CNum(t)) := num_ty(t)
-  pub def infer(CStr(_)) := "String"
-  pub def infer(CChar(_)) := "Char"
-  pub def infer(CId("true")) := "Bool"
-  pub def infer(CId("false")) := "Bool"
-  pub def infer(CId(_)) := "unknown"
-  pub def infer(CUnary("not", _)) := "Bool"
-  pub def infer(CUnary("-", x)) := infer(x)
-  pub def infer(CBin(op, _, _)) := bin_ty(op)
+  pub def infer(c) := infer_env(c, Prim.map_new())
+
+  # Infer under a typing env (name -> type), threading it through sub-expressions —
+  # a bound identifier resolves to its env type (ADR-0042; mirrors Rian.Check's
+  # `Map.get(env, x)`), else `true`/`false` are `Bool`, else `unknown`.
+  pub def infer_env(Core, Dict(String, String)) String
+  pub def infer_env(CNum(t), _) := num_ty(t)
+  pub def infer_env(CStr(_), _) := "String"
+  pub def infer_env(CChar(_), _) := "Char"
+  pub def infer_env(CId("true"), _) := "Bool"
+  pub def infer_env(CId("false"), _) := "Bool"
+  pub def infer_env(CId(x), env) := lookup(env, x)
+  pub def infer_env(CUnary("not", _), _) := "Bool"
+  pub def infer_env(CUnary("-", x), env) := infer_env(x, env)
+  pub def infer_env(CBin(op, _, _), _) := bin_ty(op)
   # primitive intrinsics with a determinate result type (ADR-0036/0047/0069 — mirrors
-  # Rian.Check's `__prim_*` clauses). A general call has no determinate type without a
-  # typing env (function/ctor return types), so it is conservatively `unknown`.
-  pub def infer(CCall("__prim_char_code", [_])) := "Int53"
-  pub def infer(CCall("__prim_int_to_float", [_])) := "Float64"
-  pub def infer(CCall("__prim_str_to_atom", [_])) := "Symbol"
-  pub def infer(CCall("__prim_char_to_string", [_])) := "String"
-  pub def infer(CCall("__prim_str_concat_all", _)) := "String"
-  pub def infer(CCall(_, _)) := "unknown"
+  # Rian.Check's `__prim_*` clauses). A general call has no determinate type without
+  # function/ctor return types in the env, so it is conservatively `unknown`.
+  pub def infer_env(CCall("__prim_char_code", [_]), _) := "Int53"
+  pub def infer_env(CCall("__prim_int_to_float", [_]), _) := "Float64"
+  pub def infer_env(CCall("__prim_str_to_atom", [_]), _) := "Symbol"
+  pub def infer_env(CCall("__prim_char_to_string", [_]), _) := "String"
+  pub def infer_env(CCall("__prim_str_concat_all", _), _) := "String"
+  pub def infer_env(CCall(_, _), _) := "unknown"
+
+  # a bound name's type from the env, else `unknown` (the checker does not guess).
+  def lookup(env Dict(String, String), x String) String
+    if Prim.map_has(env, x) do
+      Prim.map_get(env, x)
+    else
+      "unknown"
+    end
+  end
 end
