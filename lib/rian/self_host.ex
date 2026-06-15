@@ -316,13 +316,6 @@ defmodule Rian.SelfHost do
     "eval.rian" => ["Map.get", "Map.put"],
     "funcs.rian" => ["Map.get", "Map.put"],
     "modules.rian" => ["String.to_charlist"],
-    # the composition-driver capstone owns the whole source->loaded-module loop in
-    # Rian; the two irreducible BEAM toolchain calls are @external(:ex) FFI (ADR-0068),
-    # counted here. Everything between them is portable Rian (ADR-0063 §4).
-    "compose_driver.rian" => [":code.load_binary", ":compile.forms"],
-    # rung 6 widens the driver's surface (if/comparisons/boolean) but keeps the
-    # same two BEAM toolchain calls as its only FFI (ADR-0063 §4 / ADR-0068).
-    "compose_cond.rian" => [":code.load_binary", ":compile.forms"],
     # rung 7 wires the VERIFIED beam backend into the driver via a cross-module call
     # to SelfhostBeam.compile_forms (composition — excluded from this count, see
     # ffi_in_file/1). Its only host FFI is still the two BEAM toolchain calls.
