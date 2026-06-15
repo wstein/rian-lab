@@ -39,6 +39,7 @@ defmodule Rian.DeclFixpointTest do
   defp inject({:nl}), do: :tnl
   defp inject({:lbracket}), do: :tl_bracket
   defp inject({:rbracket}), do: :tr_bracket
+  defp inject({:annot, name}), do: {:t_annot, name}
 
   defp front_decls(fe, src), do: fe.parse_program(src |> Lexer.tokenize() |> Enum.map(&inject/1))
 
@@ -178,6 +179,19 @@ defmodule Rian.DeclFixpointTest do
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
+  # a run of `@external` annotations attaches to the following bodiless `def` as the
+  # func's `externals` map (clauses stay empty — the body is host-provided), matching
+  # Rian.Decl.attach_external.
+  defp group([{:d_extern, _, _} | _] = ds) do
+    {externs, rest} = Enum.split_while(ds, &match?({:d_extern, _, _}, &1))
+    ext = for {:d_extern, tgt, code} <- externs, into: %{}, do: {String.to_atom(tgt), code}
+
+    case rest do
+      [{:d_sig, pub, name, params, ret, tvs} | rest2] ->
+        [%{func(name, params, ret, [], pub, tvs) | externals: ext} | group(rest2)]
+    end
+  end
+
   defp group([{:d_func, pub, name, params, ret, tvs, body} | rest]) do
     pats = Enum.map(params, fn {:par, n, _, _} -> {:var, n} end)
     [func(name, params, ret, [clause(pats, body)], pub, tvs) | group(rest)]
@@ -313,7 +327,14 @@ defmodule Rian.DeclFixpointTest do
     "def mli(n Int64) Int64\ndef mli(n)\n  if n > 0 do\n    n + 1\n  else\n    0\n  end\nend",
     # a `:=` body that begins on the NEXT line and continues after trailing `or`s
     # across newlines (P1) — the exact `starts_decl` idiom
-    "def sd(k String) Bool :=\n  k == \"a\" or k == \"b\" or\n  k == \"c\" or k == \"d\""
+    "def sd(k String) Bool :=\n  k == \"a\" or k == \"b\" or\n  k == \"c\" or k == \"d\"",
+    # `@external` FFI annotations on a bodiless `def` → Func with empty clauses + an
+    # `externals` map (the driver, selfhost_compose_real_sum.rian, uses these). A
+    # bodiless sig followed by `@external` previously HUNG the parser.
+    "@external(:ex, \":erlang.binary_to_list(s)\")\ndef str_bytes(s String) Vec(Int53)",
+    # two `@external` + bodiless sigs in sequence — the exact driver pattern that hung
+    # (the first bodiless sig must terminate at the second `@external`).
+    "@external(:ex, \":compile.forms(forms, [:return_errors])\")\ndef host_a(forms Vec(Tuple)) Tuple\n\n@external(:ex, \":code.load_binary(name, chars, bin)\")\ndef load_binary(name Symbol, chars Vec(Int53), bin String) Tuple"
   ]
 
   defp norm_mod(m), do: %{m | funcs: Enum.map(m.funcs, &norm_func/1)}

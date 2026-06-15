@@ -32,7 +32,7 @@
 mod SelfhostDecl do
   type Tok :=
       TNum(String) | TStr(String) | TChar(Int53) | TId(String) | TKw(String) | TOp(String)
-    | TLP | TRP | TLBracket | TRBracket | TComma | TNL
+    | TAnnot(String) | TLP | TRP | TLBracket | TRBracket | TComma | TNL
 
   # expression AST — Num/Id/Bin/Unary/Call lower to Rian.Pratt's surface tuples;
   # list construction is nil/cons (NilE / ConsE), flattened to `{:list_lit, …}` by
@@ -82,6 +82,7 @@ mod SelfhostDecl do
     | DClause(String, Vec(Pat), Expr)
     | DClauseG(String, Vec(Pat), Expr, Expr)
     | DMod(String, Vec(Decl))
+    | DExtern(String, String)
     | DErr
 
   # result pairs (a value + the unconsumed tokens)
@@ -132,6 +133,11 @@ mod SelfhostDecl do
       MB(inner, rest2) -> [DMod(name, parse_program(inner)) | parse_program(rest2)]
     end
   end
+  # `@external(:target, "host code")` — an FFI annotation on the *following* bodiless
+  # `def` (Rian.Decl.attach_external). It emits a `DExtern(target, code)` that the
+  # projection folds into the next func's `externals` map (multiple stack). Modelled
+  # as its own boundary token (`TAnnot`) so a preceding bodiless sig terminates here.
+  pub def parse_program([TAnnot("external"), TLP, TOp(":"), TId(tgt), TComma, TStr(code), TRP | rest]) := [DExtern(tgt, code) | parse_program(rest)]
   pub def parse_program([_ | rest]) := parse_program(rest)
 
   # struct Name(field Type, …) — a product type; fields reuse the param grammar.
@@ -291,6 +297,9 @@ mod SelfhostDecl do
     k == "def" or k == "type" or k == "struct" or k == "pub" or k == "mod" or
       k == "end" or k == "alias" or k == "const" or k == "macro" or k == "use" or
       k == "import" or k == "protocol" or k == "impl" or k == "opaque" or k == "abstract"
+  # an `@`-annotation (`@external`) begins the next declaration: a bodiless sig must
+  # terminate at it rather than swallow it as a block body.
+  def starts_decl([TAnnot(_) | _]) := true
   def starts_decl(ts) := false
 
   # parse the collected block tokens into statements: `name := expr` is a bind, any
