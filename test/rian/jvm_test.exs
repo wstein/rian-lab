@@ -212,8 +212,11 @@ defmodule Rian.JVMTest do
 
       runner =
         Enum.map_join(indexed, "\n", fn {_c, i} ->
-          ~s|  try { println("@@S #{i}"); rian_case_#{i}.__probe(); println("@@E #{i}") } | <>
-            ~s|catch (e: Throwable) { println("@@S #{i}"); println("@@ERR " + e); println("@@E #{i}") }|
+          # Each marker is printed exactly once, on its own line; a per-case
+          # runtime throw is caught and reported inline so it can't abort the
+          # shared `main` or duplicate a marker.
+          ~s|  println("@@S #{i}"); try { rian_case_#{i}.__probe() } | <>
+            ~s|catch (e: Throwable) { println("@@ERR " + e) }; println("@@E #{i}")|
         end)
 
       File.write!(Path.join(dir, "runner.kt"), "fun main() {\n#{runner}\n}\n")
@@ -235,8 +238,11 @@ defmodule Rian.JVMTest do
 
   defp parse_markers(indexed, out) do
     Map.new(indexed, fn {c, i} ->
+      # Markers are matched line-anchored (`^…$`, `/m`) so a probe that happens
+      # to print a marker-like substring can't truncate or shift the capture;
+      # `/s` lets `.` span the multi-line probe body.
       captured =
-        case Regex.run(~r/@@S #{i}\n(.*?)\n?@@E #{i}/s, out) do
+        case Regex.run(~r/^@@S #{i}$\n(.*?)\n?^@@E #{i}$/ms, out) do
           [_, body] -> String.trim(body)
           _ -> "<<no output captured for case #{i}>>"
         end
