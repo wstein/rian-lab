@@ -179,7 +179,7 @@ mod SelfhostComposeRealSum do
   def lower_pats([]) := []
   def lower_pats([p | rest]) := [lower_pat(p) | lower_pats(rest)]
 
-  def lower_pat(p) Pat
+  pub def lower_pat(p) Pat
   def lower_pat(:wild) := PWild
   def lower_pat(:nil_p) := PList([], PtlClose)
   def lower_pat({:var, n}) := PVar(n)
@@ -201,7 +201,10 @@ mod SelfhostComposeRealSum do
   def rev_pats([], out) := out
   def rev_pats([p | rest], out) := rev_pats(rest, [p | out])
 
-  def lower_surface(e) Core
+  # `pub` so the equivalence bridge (`compose_core_bridge_fixpoint_test`) can render
+  # the driver's Core and assert it matches the verified `selfhost_core` oracle
+  # (≡ `Rian.Core`). Exported on the sig; the clauses below stay local.
+  pub def lower_surface(e) Core
   def lower_surface({:num, s}) := CNum(s)
   def lower_surface({:str, s}) := CStr(s)
   def lower_surface({:char, cp}) := CChar(cp)
