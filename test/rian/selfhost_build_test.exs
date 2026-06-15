@@ -96,7 +96,15 @@ defmodule Rian.SelfhostBuildTest do
     {"const in arithmetic", "const BASE Int53 := 10\ndef g(n Int53) Int53 := n * BASE + 1", :g,
      [4], 41},
     {"float const", "const PI Float64 := 3.14\ndef area(r Float64) Float64 := PI * r * r", :area,
-     [2.0], 12.56}
+     [2.0], 12.56},
+    # operator coverage: `/` (float div), `div`/`rem` (integer), `!=`, and unary
+    # `not` all reach the driver's `op_atom`, mapped to the same Erlang op atoms the
+    # oracle (`Rian.Beam.erl_op`) uses.
+    {"float division", "def half(x Float64) Float64 := x / 2.0", :half, [3.0], 1.5},
+    {"integer div/rem", "def dr(a Int53, b Int53) Tuple := {a div b, a rem b}", :dr, [17, 5],
+     {3, 2}},
+    {"not-equal", "def ne(a Int53, b Int53) Bool := a != b", :ne, [1, 2], true},
+    {"unary not", "def neg(b Bool) Bool := not b", :neg, [true], false}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do

@@ -525,13 +525,18 @@ mod SelfhostComposeRealSum do
   def op_atom("+") := :"+"
   def op_atom("-") := :"-"
   def op_atom("*") := :"*"
+  def op_atom("/") := :"/"
+  def op_atom("div") := :"div"
+  def op_atom("rem") := :"rem"
   def op_atom("==") := :"=="
+  def op_atom("!=") := :"/="
   def op_atom("<") := :"<"
   def op_atom(">") := :">"
   def op_atom(">=") := :">="
   def op_atom("<=") := :"=<"
   def op_atom("and") := :andalso
   def op_atom("or") := :orelse
+  def op_atom("not") := :"not"
 
   def cap(s String) String
     case Prim.str_chars(s) do
