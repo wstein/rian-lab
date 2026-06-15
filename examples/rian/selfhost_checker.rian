@@ -23,12 +23,13 @@
 # literal adopts a concrete-integer neighbour's width, `Char` ordinals widen to
 # `Int53`, float arithmetic is `Float64`, and a mismatch (`Int53 + Float64`) is
 # `unknown`. `if` infers the LUB-join of its branches (each a single-expression
-# block): equal branches join to that type, an integer literal adopts a non-literal
-# integer branch, and an incompatible pair is `unknown`. Covered Core nodes (9):
-# CNum/CStr/CChar/CId/CUnary/CBin/CCall/CIf/CBlock. The `:partial` tail —
-# cross-width numeric widening in the join (`Int32`⊔`Int64`=`Int64`), `case` (with
-# pattern narrowing), lists, lambdas, and user-function/ctor return types in the env
-# — see ADR-0063 / docs/self-host-status.md.
+# block): the branches climb to their LUB via the full numeric-widening `join`
+# (`Int8`⊔`Int53`=`Int53`, `Int53`⊔`Float64`=`Float64`, `UInt8`⊔`Int64`=`Int64`), an
+# integer literal adopts a non-literal integer branch, and an incompatible pair is
+# `unknown`. Covered Core nodes (9): CNum/CStr/CChar/CId/CUnary/CBin/CCall/CIf/CBlock.
+# The `:partial` tail — `case` (with pattern narrowing), lists, lambdas, the
+# parametric covariant join (`Vec(A)`⊔`Vec(B)`), and user-function/ctor return types
+# in the env — see ADR-0063 / docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
 mod SelfhostChecker do
@@ -47,6 +48,8 @@ mod SelfhostChecker do
   type Stmt := SBind(String, Core) | SExpr(Core)
   # a branch/arm with its inferred type, for the LUB join (branch_join).
   type BPair := BP(Core, String)
+  # a numeric type decomposed into kind ("int"/"uint"/"float") + bit width, or none.
+  type NumKind := NkNone | Nk(String, Int53)
 
   # A binary op's result type, keyed by the operator (the integer slice):
   # comparisons/`and`/`or`/`in` -> Bool, `<>` -> String, `/` -> Float64, the
@@ -281,9 +284,11 @@ mod SelfhostChecker do
 
   def debottom(t String) String := if t == "bottom" do "unknown" else t end
 
-  # the join kernel: bottom is the identity, equal types join to themselves, anything
-  # with `unknown` is `unknown`, and a non-equal pair is conservatively `unknown`
-  # (cross-width numeric widening not yet ported).
+  # the join kernel (ADR-0059): bottom is the identity, equal types join to
+  # themselves, anything with `unknown` is `unknown`, and two distinct NUMERIC types
+  # climb to their least-upper-bound width/kind (Rian.Check.join). A non-numeric
+  # non-equal pair is `unknown` (parametric covariant join — `Vec(A)`⊔`Vec(B)` — is
+  # the remaining tail).
   def join(a String, b String) String
   def join("bottom", b) := b
   def join(a, "bottom") := a
@@ -291,7 +296,107 @@ mod SelfhostChecker do
     if a == b do
       a
     else
-      "unknown"
+      join_num(a, b)
     end
   end
+
+  def join_num(a String, b String) String
+  def join_num(a, b)
+    case num_kind(a) do
+      NkNone -> "unknown"
+      Nk(ka, wa) -> join_num2(ka, wa, b)
+    end
+  end
+
+  def join_num2(ka String, wa Int53, b String) String
+  def join_num2(ka, wa, b)
+    case num_kind(b) do
+      NkNone -> "unknown"
+      Nk(kb, wb) -> num_join(ka, wa, kb, wb)
+    end
+  end
+
+  # same kind -> widest width; else the cross-kind rules (uint⊔int, int⊔float, …).
+  def num_join(ka String, wa Int53, kb String, wb Int53) String
+  def num_join(ka, wa, kb, wb)
+    if ka == kb do
+      kind_prefix(ka) <> Prim.int_to_string(max2(wa, wb))
+    else
+      num_join_mixed(ka, wa, kb, wb)
+    end
+  end
+
+  def num_join_mixed(ka String, wa Int53, kb String, wb Int53) String
+  def num_join_mixed("uint", wa, "int", wb) := uint_signed_join(wa, wb)
+  def num_join_mixed("int", wa, "uint", wb) := uint_signed_join(wb, wa)
+  def num_join_mixed("int", wa, "float", wb) := int_float_join(wa - 1, wb)
+  def num_join_mixed("float", wa, "int", wb) := int_float_join(wb - 1, wa)
+  def num_join_mixed("uint", wa, "float", wb) := int_float_join(wa, wb)
+  def num_join_mixed("float", wa, "uint", wb) := int_float_join(wb, wa)
+  def num_join_mixed(_, _, _, _) := "unknown"
+
+  # `UIntᵤ ⊔ Intᵢ` = least Int width strictly wider than `u` (to hold the unsigned
+  # range) and at least `i`; none ⇒ `unknown`.
+  def uint_signed_join(u Int53, i Int53) String := find_int_width([8, 16, 32, 64, 128], u, i)
+
+  def find_int_width(Vec(Int53), Int53, Int53) String
+  def find_int_width([], _, _) := "unknown"
+  def find_int_width([c | rest], u, i)
+    if c > u and c >= i do
+      "Int" <> Prim.int_to_string(c)
+    else
+      find_int_width(rest, u, i)
+    end
+  end
+
+  # Int/UInt ⊔ Float = least Float width ≥ the float operand whose mantissa holds the
+  # integer's `exact` bits; none ⇒ `unknown`.
+  def int_float_join(exact Int53, fb Int53) String := find_float_width([32, 64], exact, fb)
+
+  def find_float_width(Vec(Int53), Int53, Int53) String
+  def find_float_width([], _, _) := "unknown"
+  def find_float_width([c | rest], exact, fb)
+    if c >= fb and float_mantissa(c) >= exact do
+      "Float" <> Prim.int_to_string(c)
+    else
+      find_float_width(rest, exact, fb)
+    end
+  end
+
+  def float_mantissa(Int53) Int53
+  def float_mantissa(64) := 53
+  def float_mantissa(32) := 24
+  def float_mantissa(_) := 0
+
+  def kind_prefix(k String) String
+  def kind_prefix("int") := "Int"
+  def kind_prefix("uint") := "UInt"
+  def kind_prefix("float") := "Float"
+  def kind_prefix(_) := ""
+
+  def max2(a Int53, b Int53) Int53 := if a >= b do a else b end
+
+  # decompose `UInt`/`Int`/`Float` + a non-empty all-digit width; else NkNone (so a
+  # bare `Int` (arbitrary precision) / `Bool` / `Char` is not numeric here).
+  def num_kind(t String) NumKind := nk(Prim.str_chars(t))
+
+  def nk(Vec(Int53)) NumKind
+  def nk(['U', 'I', 'n', 't' | rest]) := nk_width("uint", rest)
+  def nk(['I', 'n', 't' | rest]) := nk_width("int", rest)
+  def nk(['F', 'l', 'o', 'a', 't' | rest]) := nk_width("float", rest)
+  def nk(_) := NkNone
+
+  def nk_width(kind String, w Vec(Int53)) NumKind
+  def nk_width(_, []) := NkNone
+  def nk_width(kind, w)
+    if all_digits(w) do
+      Nk(kind, parse_digits(w, 0))
+    else
+      NkNone
+    end
+  end
+
+  def parse_digits(Vec(Int53), Int53) Int53
+  def parse_digits([], acc) := acc
+  def parse_digits([c | rest], acc) := parse_digits(rest, acc * 10 + c - 48)
 end

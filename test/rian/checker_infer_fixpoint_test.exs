@@ -121,7 +121,9 @@ defmodule Rian.CheckerInferFixpointTest do
     "s" => "String",
     "b" => "Bool",
     "f" => "Float64",
-    "w" => "Int8"
+    "w" => "Int8",
+    "u8" => "UInt8",
+    "i64" => "Int64"
   }
   @env_corpus [
     "x",
@@ -150,7 +152,14 @@ defmodule Rian.CheckerInferFixpointTest do
     # same-typed branches join to that type.
     "if c do x else 1 end",
     "if c do x else y end",
-    ~S|if c do s else "z" end|
+    ~S|if c do s else "z" end|,
+    # cross-width numeric widening in the branch join (Rian.Check.join): same-kind
+    # branches widen to the wider width; UInt⊔Int and Int⊔Float climb the lattice.
+    "if c do w else x end",
+    "if c do x else f end",
+    "if c do u8 else i64 end",
+    "if c do u8 else x end",
+    "if c do w else i64 end"
   ]
 
   describe "self-hosting checker fixpoint — inference under a typing env" do
