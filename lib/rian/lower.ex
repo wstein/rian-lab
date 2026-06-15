@@ -243,7 +243,10 @@ defmodule Rian.Lower do
     for t <- Rian.Prelude.with_prelude(types), v <- t.variants, into: %{} do
       labels = Enum.map(v.fields, &Map.get(&1, :label))
       named = v.fields != [] and Enum.all?(v.fields, &Map.get(&1, :label))
-      {PL.to_snake(v.ctor), %{enum: t.name, ctor: v.ctor, labels: labels, named: named}}
+      field_types = Enum.map(v.fields, &Map.get(&1, :type))
+
+      {PL.to_snake(v.ctor),
+       %{enum: t.name, ctor: v.ctor, labels: labels, named: named, field_types: field_types}}
     end
   end
 
@@ -469,6 +472,47 @@ defmodule Rian.Lower do
   defp case_guard(nil, _), do: ""
   defp case_guard(g, target), do: guard_kw(target) <> (emit(g, target) |> elem(0))
 
+  # a resolved Rust arm pattern that is a list/slice pattern (`[…]`) — its `case`
+  # scrutinee must be matched as a slice (`&(scrut)[..]`).
+  defp list_rpat?({:rpat, s}), do: String.starts_with?(String.trim_leading(s), "[")
+  defp list_rpat?(_), do: false
+
+  # Emit a Rust `match`, with `body_fn` rendering each arm's body (the default emits
+  # it plainly; the `String`-return path coerces it). A `case` whose arms are list
+  # patterns must match a slice: `&(scrut)[..]` coerces both an owned `Vec<T>` and an
+  # already-borrowed `&[T]` to `&[T]` uniformly (binders stay `&T`/`&[T]`).
+  defp rust_case(scrut, arms, body_fn) do
+    body =
+      Enum.map_join(arms, " ", fn {pt, g, b} ->
+        "#{rpat(pt)}#{case_guard(g, :rust)} => #{body_fn.(b)},"
+      end)
+
+    scrut_rs =
+      if Enum.any?(arms, fn {pt, _, _} -> list_rpat?(pt) end),
+        do: "&(#{p(scrut, 0, :rust)})[..]",
+        else: p(scrut, 0, :rust)
+
+    "match #{scrut_rs} { #{body} }"
+  end
+
+  # Gap B (ADR-0061): a `String`-returning body that is an `if`/`case` cannot mix a
+  # `&str`-literal arm with a `String` arm — Rust requires both to agree. Push the
+  # `&str -> String` coercion into the TAIL positions (each branch/arm leaf) so they
+  # unify, rather than wrapping the whole `if`/`match` (which can't type-check).
+  defp coerce_string_ast(%EIf{cond: c, then: t, else: e}),
+    do: "if #{p(c, 0, :rust)} { #{coerce_string_branch(t)} } else { #{coerce_string_branch(e)} }"
+
+  defp coerce_string_ast(%ECase{scrut: scrut, arms: arms}),
+    do: rust_case(scrut, arms, &coerce_string_branch/1)
+
+  defp coerce_string_ast(%EBlock{stmts: [{:expr, e}]}), do: coerce_string_ast(e)
+  defp coerce_string_ast(%EBlock{} = b), do: "({ #{emit_block(b, :rust)} }).to_string()"
+  defp coerce_string_ast(ast), do: "(#{p(ast, 0, :rust)}).to_string()"
+
+  defp coerce_string_branch(%EBlock{stmts: [{:expr, e}]}), do: coerce_string_ast(e)
+  defp coerce_string_branch(%EBlock{} = b), do: "({ #{emit_block(b, :rust)} }).to_string()"
+  defp coerce_string_branch(e), do: coerce_string_ast(e)
+
   # Resolve every `case` arm pattern in a body to its Rust spelling using the
   # type meta, storing it back into the IR as `{:rpat, str}`. After this pass the
   # Rust emitter needs no ambient meta — the IR carries the resolution.
@@ -540,6 +584,7 @@ defmodule Rian.Lower do
       # a string literal fed to a *generic* `&K` param (`K` resolves to owned `String`,
       # which has the `Clone`/`impl`s a tvar needs — `str` does not): `&"a".to_string()`.
       generic_tvar_borrow?(pt) and match?({:str, _}, a) -> owned_str_arg(elem(a, 1))
+      owned_field_var?(a) -> {:unary, "&", a}
       borrowed != nil -> borrow_value(a, borrowed)
       owned_arg?(a, funs) -> {:unary, "&", a}
       scalar_literal?(a) -> {:unary, "&", a}
@@ -579,6 +624,70 @@ defmodule Rian.Lower do
 
   defp scalar_literal?(_), do: false
 
+  # Gap C (ADR-0061): variables bound to an owned `Vec`/`String` field of a sum
+  # destructured in the BODY — a nested `case` over an OWNED-returning scrutinee
+  # (a constructor, or a local call returning `Vec`/`String`/a user type). Such a
+  # binder is an owned value, so passing it to a `&[T]`/`&str` param needs `&`.
+  # Collected from the surface body BEFORE pattern resolution (`{:ctor, …}` arms);
+  # clause-head ctor patterns are not `{:case}` nodes here, so they are untouched.
+  defp owned_field_binders(ast, ctx), do: ofb(ast, ctx, MapSet.new())
+
+  defp ofb({:case, scrut, arms}, ctx, acc) do
+    acc = ofb(scrut, ctx, acc)
+    owned? = owned_scrut?(scrut, ctx)
+
+    Enum.reduce(arms, acc, fn {pat, _g, body}, a ->
+      a = if owned?, do: collect_owned_field_vars(pat, ctx, a), else: a
+      ofb(body, ctx, a)
+    end)
+  end
+
+  defp ofb(t, ctx, acc) when is_tuple(t),
+    do: Enum.reduce(Tuple.to_list(t), acc, &ofb(&1, ctx, &2))
+
+  defp ofb(l, ctx, acc) when is_list(l), do: Enum.reduce(l, acc, &ofb(&1, ctx, &2))
+  defp ofb(_, _ctx, acc), do: acc
+
+  defp collect_owned_field_vars({:ctor, ctor, argpats}, ctx, acc) do
+    case Map.get(ctx.meta, PL.to_snake(ctor)) do
+      %{field_types: fts} ->
+        argpats
+        |> Enum.zip(fts)
+        |> Enum.reduce(acc, fn
+          {{:var, n}, ft}, a -> if owned_value_type?(ft), do: MapSet.put(a, n), else: a
+          {_, _}, a -> a
+        end)
+
+      _ ->
+        acc
+    end
+  end
+
+  defp collect_owned_field_vars(_pat, _ctx, acc), do: acc
+
+  defp owned_scrut?({:ctor, _, _}, _ctx), do: true
+
+  defp owned_scrut?({:call, {:id, f}, _}, ctx) do
+    case Map.get(ctx.funs, f) do
+      %{ret: ret} -> owned_value_type?(ret) or user_type?(ret, ctx)
+      _ -> false
+    end
+  end
+
+  defp owned_scrut?(_, _ctx), do: false
+
+  defp owned_value_type?("Vec(" <> _), do: true
+  defp owned_value_type?("String"), do: true
+  defp owned_value_type?(_), do: false
+
+  defp user_type?(t, ctx),
+    do: Map.has_key?(ctx.smeta, t) or Enum.any?(ctx.meta, fn {_, m} -> m.enum == t end)
+
+  defp owned_field_var?({:id, v}),
+    do: MapSet.member?(Process.get(:rian_rust_owned_fields, MapSet.new()), v)
+
+  defp owned_field_var?(_), do: false
+
   # the clause vars that are a runtime `&`-reference (see `rust_fn`): a pattern var
   # binding a `&`-typed param, plus any cons-tail (`@..`) binder. Cloned element/field
   # binders and literals are owned and excluded.
@@ -598,6 +707,32 @@ defmodule Rian.Lower do
   defp borrowed_in_pat(%PVar{name: n}, true), do: [n]
   defp borrowed_in_pat(%PList{tail: %PVar{name: n}}, _ref?), do: [n]
   defp borrowed_in_pat(_pat, _ref?), do: []
+
+  # the clause vars that are a `&[T]` SLICE (a `Vec`-typed `val` param, or a cons-tail
+  # `@..` binder) — distinct from a single `&T` borrow. A slice stored into an owned
+  # `Vec<T>` (a field, a `Vec` return) needs `.to_vec()`, not `.clone()` (which would
+  # clone the reference, staying `&[T]`). Gaps D/E (ADR-0061).
+  defp slice_binders(params, pats) do
+    param_slices =
+      params
+      |> Enum.filter(&String.starts_with?(Rian.Capability.rust_param(&1.cap, &1.type), "&["))
+      |> Enum.map(& &1.name)
+
+    tails = Enum.flat_map(pats, fn pat -> cons_tail_names(Core.from_pat(pat)) end)
+    MapSet.new(param_slices ++ tails)
+  end
+
+  defp cons_tail_names(%PList{tail: %PVar{name: n}}), do: [n]
+  defp cons_tail_names(_), do: []
+
+  defp slice_var?(%EId{name: n}),
+    do: MapSet.member?(Process.get(:rian_rust_slices, MapSet.new()), n)
+
+  defp slice_var?(_), do: false
+
+  # a clause body (a single-expression block) whose value is a `&[T]` slice binder
+  defp tail_slice_id?(%EBlock{stmts: [{:expr, e}]}), do: slice_var?(e)
+  defp tail_slice_id?(e), do: slice_var?(e)
 
   # the callee's parameter Rust types, or nil when the callee is unknown (an
   # external/primitive call — leave its args untouched)
@@ -1072,15 +1207,23 @@ defmodule Rian.Lower do
         # value (literal, cloned element/field binder, owned call) is owned.
         borrowed = if generic?, do: borrowed_vars(func.params, c.pats), else: nil
         Process.put(:rian_rust_borrowed, borrowed || MapSet.new())
+        Process.put(:rian_rust_slices, slice_binders(func.params, c.pats))
 
         # Resolve construction (struct + variant), constant references, and `case`
         # patterns on the surface (where the meta is available), then translate to
         # the typed core IR the emitter consumes (ADR-0050).
-        surface =
+        pre =
           c.body
           |> body_ast(ctx)
           |> widen_char_arith(char_vars(func.params, c.pats))
           |> rewrite_proto_calls(proto_methods())
+
+        # owned `Vec`/`String` sum-field binders (Gap C) must be collected from the
+        # structured `{:ctor, …}` arms, before `resolve_rust_pats` stringifies them.
+        Process.put(:rian_rust_owned_fields, owned_field_binders(pre, ctx))
+
+        surface =
+          pre
           |> resolve_rust_pats(ctx.meta)
           |> insert_borrows(Map.get(ctx, :funs, %{}), borrowed)
 
@@ -1095,9 +1238,21 @@ defmodule Rian.Lower do
 
         # a `String`-returning function lowers its clause bodies to `&str`; coerce
         # the arm so the owned `String` the signature promises is produced (a
-        # no-op clone if the arm already yields a `String`). Mirrors the protocol
-        # method path (`rust_impl_method`).
-        arm = coerce_ret(arm, func.ret)
+        # no-op clone if the arm already yields a `String`). For a no-rebind body
+        # the coercion is pushed into `if`/`case` TAIL leaves (Gap B) so a `&str`
+        # literal arm unifies with a `String` arm; otherwise it wraps the arm.
+        arm =
+          if func.ret == "String" and rebinds == [],
+            do: coerce_string_ast(ast),
+            else: coerce_ret(arm, func.ret)
+
+        # Gap E: a clause that returns a bare `&[T]` slice binder where a `Vec<T>` is
+        # promised needs `.to_vec()` (e.g. `def drop(cs, 0) := cs`). The body is a
+        # single-expression block, so unwrap it to reach the bare binder.
+        arm =
+          if match?("Vec(" <> _, func.ret) and tail_slice_id?(ast),
+            do: "(#{arm}).to_vec()",
+            else: arm
 
         # a generic function returning a bare owned type variable (`T`) yields a
         # borrowed `&T` in its base arms (a returned param); `.clone()` to the owned
@@ -1749,14 +1904,8 @@ defmodule Rian.Lower do
     {"case #{scrut_str} do #{body} end", 0}
   end
 
-  defp emit(%ECase{scrut: scrut, arms: arms}, :rust) do
-    body =
-      Enum.map_join(arms, " ", fn {pt, g, b} ->
-        "#{rpat(pt)}#{case_guard(g, :rust)} => #{p(b, 0, :rust)},"
-      end)
-
-    {"match #{p(scrut, 0, :rust)} { #{body} }", 0}
-  end
+  defp emit(%ECase{scrut: scrut, arms: arms}, :rust),
+    do: {rust_case(scrut, arms, &p(&1, 0, :rust)), 0}
 
   # with expression — Elixir native `with`/`else`; Rust nested `match` chain that
   # short-circuits to the `else` arms (or yields the non-matching value).
@@ -1913,9 +2062,12 @@ defmodule Rian.Lower do
   defp rust_owned_elem(%EId{name: n} = e) do
     s = p(e, 0, :rust)
 
-    if MapSet.member?(Process.get(:rian_rust_borrowed, MapSet.new()), n),
-      do: "#{s}.clone()",
-      else: s
+    cond do
+      # a `&[T]` slice → `Vec<T>` (a `.clone()` would clone the reference, Gap D)
+      slice_var?(e) -> "#{s}.to_vec()"
+      MapSet.member?(Process.get(:rian_rust_borrowed, MapSet.new()), n) -> "#{s}.clone()"
+      true -> s
+    end
   end
 
   defp rust_owned_elem(e), do: p(e, 0, :rust)

@@ -8,11 +8,9 @@ defmodule Rian.ShowFloatTest do
   # corpus, and assert each output equals JS `String(x)` — the ECMAScript reference.
   # The BEAM match is the real proof (a different engine reproducing ECMA exactly).
   #
-  # Reaches BEAM + JS cleanly today. `:rs` is blocked by Rust-emitter gaps for this
-  # code shape (a `case` over a `Vec` slice pattern, owned→borrow coercion of a
-  # case-bound arg, and unifying a `&str`-literal `if`-branch with a `String` one);
-  # `:jvm` awaits Tier-2 list-pattern support. Both are general collection-code
-  # emitter gaps (the drift tax, CLAUDE.md), not formatter bugs.
+  # Byte-identical on all three Tier-1 targets: BEAM, JS, and Rust (the Rust-emitter
+  # coverage for this collection-heavy shape landed alongside this). `:jvm` still
+  # awaits Tier-2 list-pattern support.
 
   @src File.read!("examples/rian/stdlib_show.rian")
 
@@ -72,6 +70,26 @@ defmodule Rian.ShowFloatTest do
     end
   end
 
+  defp rust_out do
+    case System.find_executable("rustc") do
+      nil ->
+        :skip
+
+      rustc ->
+        rust = Enum.map_join(Rian.Decl.compile(@src), "\n", fn {_, o} -> o[:rust] || "" end)
+        body = Enum.map_join(@corpus, "\n", &"    println!(\"{}\", show::float(#{lit(&1)}f64));")
+        dir = System.tmp_dir!()
+        f = Path.join(dir, "rian_show_#{System.unique_integer([:positive])}.rs")
+        bin = String.trim_trailing(f, ".rs")
+        File.write!(f, rust <> "\nfn main() {\n" <> body <> "\n}\n")
+        {_, 0} = System.cmd(rustc, ["-O", "--edition", "2021", "-A", "warnings", f, "-o", bin])
+        out = run(bin, [])
+        File.rm(f)
+        File.rm(bin)
+        out
+    end
+  end
+
   # an exact-round-trip literal for the double (valid in Rian/Elixir, JS and Rust)
   defp lit(x), do: :erlang.float_to_binary(x, [:short])
 
@@ -92,9 +110,11 @@ defmodule Rian.ShowFloatTest do
         assert beam == ref,
                "BEAM Show.float diverges from ECMAScript String(x):\n" <> diff(ref, beam)
 
-        case js_out() do
-          :skip -> :ok
-          got -> assert got == ref, "JS Show.float diverges:\n" <> diff(ref, got)
+        for {target, outs} <- [js: js_out(), rust: rust_out()] do
+          case outs do
+            :skip -> :ok
+            got -> assert got == ref, "#{target} Show.float diverges:\n" <> diff(ref, got)
+          end
         end
     end
   end

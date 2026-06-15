@@ -9,11 +9,9 @@
 # canonical, so the output is byte-identical across targets by construction.
 #
 # Opt-in: call `Show.float(x)` explicitly (it is NOT yet wired into `${…}`
-# interpolation). Emits byte-identically on `:ex` + `:js` today (conformance-tested
-# against ECMAScript `String(x)`). `:rs` and `:jvm` await emitter coverage for this
-# collection-heavy shape — Rust: a `case` over a `Vec` slice pattern + owned→borrow
-# coercion of a case-bound arg; JVM: list/cons patterns (ADR-0049 Tier-2). Both are
-# the general drift tax (CLAUDE.md), not formatter bugs.
+# interpolation). Emits byte-identically on all three Tier-1 targets — `:ex`, `:js`,
+# and `:rs` (conformance-tested against ECMAScript `String(x)`). `:jvm` awaits
+# Tier-2 list/cons-pattern support (ADR-0049), the only remaining emitter gap.
 #
 # `__prim_float_repr` is an INTERNAL building block (each target's native shortest
 # string, which diverges in presentation) — never user-facing, only consumed here.
@@ -112,7 +110,8 @@ mod Show do
   # exponential: d[.ddd]e±E
   def sci(s Vec(Char), k Int53, ex Int53) String
   def sci(s, k, ex)
-    mant := if k == 1 do s else point_after_first(s) end
+    # `take(s, 1)` (not the bare slice `s`) keeps both `if` branches an owned Vec
+    mant := if k == 1 do take(s, 1) else point_after_first(s) end
     esign := if ex >= 0 do "e+" else "e-" end
     Prim.str_concat(
       Prim.str_from_chars(mant),
