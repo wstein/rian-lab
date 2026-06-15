@@ -255,4 +255,89 @@ defmodule Rian.CoreFixpointTest do
       refute ported_pat(mod, "42") == ported_pat(mod, ~S|"42"|)
     end
   end
+
+  # === reference-completeness ledger (selfhost_core vs Rian.Core) ===============
+  # Every surface-reachable Core node kind, with a representative snippet and a
+  # `ported?` flag. The Core port is complete over the surface front-door, so this
+  # is a confirmation lock with teeth — if a future node stops lowering like
+  # `Rian.Core.from_expr`/`from_pat`, the matching row flips and the build fails.
+  # (Non-surface nodes — EVariant/EStruct/EConstRef, str_interp, PAs/PPin, rpat —
+  # are produced only by Lower's resolution passes, so they're out of scope.)
+  defp core_covers?(mod, src) do
+    ported(mod, src) == reference(src)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  defp core_pat_covers?(mod, src) do
+    ported_pat(mod, src) == reference_pat(src)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @core_exprs [
+    {"ENum", "1", true},
+    {"EId", "x", true},
+    {"EChar", "'A'", true},
+    {"EAtom", ":ok", true},
+    {"EStr", ~S|"hi"|, true},
+    {"EUnary", "-x", true},
+    {"EBin", "1 + 2 * 3", true},
+    {"ECall", "f(x, 1)", true},
+    {"ELabel", "Point(x: 1, y: 2)", true},
+    {"EDot", "obj.field", true},
+    {"EIf (+ EBlock branches)", "if c do 1 else 2 end", true},
+    {"ETuple", "{1, 2}", true},
+    {"EList", "[1, 2, 3]", true},
+    {"EMap", "%{a: 1}", true},
+    {"ECase", "case n do\n  0 -> 1\n  m -> m\nend", true},
+    {"ELambda", "(x) -> x + 1", true},
+    {"ECapture", "&(_1 + _2)", true},
+    {"ECaptureNamed", "&foo/2", true},
+    {"EWith", "with y <- f(x) do y else z -> 0 end", true}
+  ]
+
+  @core_pats [
+    {"PWild", "_", true},
+    {"PVar", "x", true},
+    {"PLit (int)", "42", true},
+    {"PLit (str)", ~S|"hi"|, true},
+    {"PChar", "'A'", true},
+    {"PAtom", ":ok", true},
+    {"PCtor", "Some(v)", true},
+    {"PList", "[a, b]", true},
+    {"PTuple", "{a, b}", true},
+    {"PStruct", "Point(x: a, y: b)", true},
+    {"PMap", "%{k: w}", true}
+  ]
+
+  describe "Core lowering completeness ledger (selfhost_core vs Rian.Core)" do
+    test "every node's ported? flag matches reality", %{mod: mod} do
+      expr_drift =
+        for {name, src, ported?} <- @core_exprs, core_covers?(mod, src) != ported? do
+          "expr #{name}: ported?=#{ported?} but port " <>
+            "#{if core_covers?(mod, src), do: "REPRODUCES", else: "does NOT reproduce"} Rian.Core"
+        end
+
+      pat_drift =
+        for {name, src, ported?} <- @core_pats, core_pat_covers?(mod, src) != ported? do
+          "pat #{name}: ported?=#{ported?} but port " <>
+            "#{if core_pat_covers?(mod, src), do: "REPRODUCES", else: "does NOT reproduce"} Rian.Core"
+        end
+
+      drift = expr_drift ++ pat_drift
+      assert drift == [], "Core completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "Core node coverage is measured and must not regress" do
+      total = length(@core_exprs) + length(@core_pats)
+      ported = Enum.count(@core_exprs ++ @core_pats, fn {_, _, p} -> p end)
+      IO.puts("\n  selfhost_core completeness: #{ported}/#{total} surface Core node kinds")
+      assert ported == total
+    end
+  end
 end

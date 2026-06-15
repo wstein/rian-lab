@@ -114,4 +114,48 @@ defmodule Rian.CapFixpointTest do
       assert mod.beam_legal(:iso) and mod.beam_legal(:val) and mod.beam_legal(:tag)
     end
   end
+
+  # === reference-completeness ledger (selfhost_cap vs Rian.Capability) ==========
+  # The matrix test above already proves parity over @caps × @types; this is the
+  # explicit type-category checklist with teeth + a coverage count. The port
+  # reproduces the WHOLE mapping matrix (the linearity/use-once check and the
+  # type-string tokenizer are intentionally a different stage, not the mapping).
+  defp cap_covers?(mod, t) do
+    Enum.all?([:iso, :val, :ref, :tag], fn c ->
+      mod.rust_param(c, to_ty(t)) == Capability.rust_param(c, t)
+    end)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @cap_categories [
+    {"Copy scalar", "Int53", true},
+    {"String", "String", true},
+    {"nominal", "Foo", true},
+    {"Vec(scalar)", "Vec(Int32)", true},
+    {"nested Vec", "Vec(Vec(Int8))", true},
+    {"generic + val-quirk", "Option(Int64)", true},
+    {"Map(K, V)", "Map(String, Int64)", true}
+  ]
+
+  describe "capability completeness ledger (selfhost_cap vs Rian.Capability)" do
+    test "every type category's ported? flag matches reality (all 4 caps)", %{mod: mod} do
+      drift =
+        for {name, t, ported?} <- @cap_categories, cap_covers?(mod, t) != ported? do
+          "#{name}: ported?=#{ported?} but selfhost_cap " <>
+            "#{if cap_covers?(mod, t), do: "REPRODUCES", else: "does NOT reproduce"} Rian.Capability"
+        end
+
+      assert drift == [], "capability completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "type-category coverage is measured (the full matrix is locked above)" do
+      total = length(@cap_categories)
+      ported = Enum.count(@cap_categories, fn {_, _, p} -> p end)
+      IO.puts("\n  selfhost_cap completeness: #{ported}/#{total} type categories (×4 caps)")
+      assert ported == total
+    end
+  end
 end

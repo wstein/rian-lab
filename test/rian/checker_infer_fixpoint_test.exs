@@ -34,8 +34,12 @@ defmodule Rian.CheckerInferFixpointTest do
   defp inj(%Core.EIf{cond: c, then: t, else: e}), do: {:c_if, inj(c), inj(t), inj(e)}
   defp inj(%Core.EBlock{stmts: stmts}), do: {:c_block, Enum.map(stmts, &inj_stmt/1)}
   defp inj(%Core.ECase{scrut: s, arms: arms}), do: {:c_case, inj(s), Enum.map(arms, &inj_arm/1)}
-  defp inj(%Core.EList{elems: elems, tail: tail}), do: {:c_list, Enum.map(elems, &inj/1), inj_tail(tail)}
-  defp inj(%Core.ELambda{params: ps, body: body}), do: {:c_lambda, Enum.map(ps, &inj_param/1), inj(body)}
+
+  defp inj(%Core.EList{elems: elems, tail: tail}),
+    do: {:c_list, Enum.map(elems, &inj/1), inj_tail(tail)}
+
+  defp inj(%Core.ELambda{params: ps, body: body}),
+    do: {:c_lambda, Enum.map(ps, &inj_param/1), inj(body)}
 
   defp inj_tail(nil), do: :t_close
   defp inj_tail(:close), do: :t_close
@@ -69,7 +73,8 @@ defmodule Rian.CheckerInferFixpointTest do
     end
   end
 
-  defp ported_ic(mod, src, env, ic), do: mod.infer_ic(inj(Core.from_expr(Pratt.parse(src))), env, ic)
+  defp ported_ic(mod, src, env, ic),
+    do: mod.infer_ic(inj(Core.from_expr(Pratt.parse(src))), env, ic)
 
   defp reference_ic(src, env, ic) do
     case Check.infer(Pratt.parse(src), env, ic) do
@@ -317,6 +322,60 @@ end|,
     test "`<>` is String and arithmetic is Int53", %{mod: mod} do
       assert ported(mod, ~S|"a" <> "b"|) == "String"
       assert ported(mod, "1 + 2") == "Int53"
+    end
+  end
+
+  # === reference-completeness ledger (selfhost_checker vs Rian.Check.infer) ======
+  # Each Core node kind the checker infers, with a representative expression and a
+  # `ported?` flag, checked with teeth. Coverage is over the node-inference axis;
+  # the remaining gap is the non-empty inference context `ic` — generic-return
+  # instantiation (`ic.fsigs`) and ctor-pattern field narrowing (`ic.tdefs`) — which
+  # is exercised by the `infer_ic` tests above and tracked in ADR-0063, not here.
+  defp checker_covers?(mod, src) do
+    ported(mod, src) == reference(src)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @checker_nodes [
+    {"CNum (int)", "1", true},
+    {"CNum (float)", "3.14", true},
+    {"CStr", ~S|"a"|, true},
+    {"CChar", "'a'", true},
+    {"CId (bool)", "true", true},
+    {"CUnary", "not true", true},
+    {"CBin (arith)", "1 + 2", true},
+    {"CBin (compare)", "1 < 2", true},
+    {"CBin (concat)", ~S|"a" <> "b"|, true},
+    {"CCall (prim)", "Prim.char_code('a')", true},
+    {"CIf (LUB)", "if true do 1 else 2 end", true},
+    {"CCase", "case 1 do\n  0 -> 1\n  m -> m\nend", true},
+    {"CList (Vec LUB)", "[1, 2, 3]", true},
+    {"CLambda (Fn)", "(x Int64, y Int64) -> x + y", true}
+  ]
+
+  describe "type-checker completeness ledger (selfhost_checker vs Rian.Check.infer)" do
+    test "every Core node's ported? flag matches reality", %{mod: mod} do
+      drift =
+        for {name, src, ported?} <- @checker_nodes, checker_covers?(mod, src) != ported? do
+          "#{name}: ported?=#{ported?} but selfhost_checker " <>
+            "#{if checker_covers?(mod, src), do: "REPRODUCES", else: "does NOT reproduce"} Rian.Check.infer"
+        end
+
+      assert drift == [], "checker completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "Core-node inference coverage is measured and must not regress" do
+      total = length(@checker_nodes)
+      ported = Enum.count(@checker_nodes, fn {_, _, p} -> p end)
+
+      IO.puts(
+        "\n  selfhost_checker completeness: #{ported}/#{total} Core nodes (ic gap tracked separately)"
+      )
+
+      assert ported == total
     end
   end
 end

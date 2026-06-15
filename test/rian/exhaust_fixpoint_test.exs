@@ -126,4 +126,51 @@ defmodule Rian.ExhaustFixpointTest do
       assert port_useful(mod, rows, [:w, :w]) == ref_useful(rows, [:w, :w])
     end
   end
+
+  # === reference-completeness ledger (selfhost_exhaust vs Rian.Exhaustiveness) ===
+  # Each Maranget `useful?` algorithm feature with a representative {matrix, query}
+  # and a `ported?` flag, checked with teeth. The port reproduces the full gate
+  # VERDICT; the witness/counterexample diagnostic (algorithm I, `analyze`) is a
+  # separate function, not a `useful?` feature, so it's out of this ledger's scope.
+  defp exhaust_covers?(mod, rows, q) do
+    port_useful(mod, rows, q) == ref_useful(rows, q)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  @exhaust_features [
+    {"base recursion U(P,[])", [[:w]], [], true},
+    {"nullary signature (incomplete gap)", [[{"red", []}], [{"green", []}]], [:w], true},
+    {"nullary signature (complete)", [[{"red", []}], [{"green", []}], [{"blue", []}]], [:w],
+     true},
+    {"specialize — ctors with args (by arity)", [[{"circle", [:w]}], [{"square", [:w]}]], [:w],
+     true},
+    {"nested ctor args", [[{"rect", [{"red", []}, :w]}]], [:w], true},
+    {"finite single-ctor type", [[{"box", [:w]}]], [:w], true},
+    {"default — list nil/cons", [[{"nil", []}], [{"cons", [:w, :w]}]], [:w], true},
+    {"multi-column matrix", [[{"red", []}, {"circle", [:w]}]], [:w, :w], true}
+  ]
+
+  describe "exhaustiveness completeness ledger (selfhost_exhaust vs Rian.Exhaustiveness)" do
+    test "every algorithm feature's ported? flag matches reality", %{mod: mod} do
+      drift =
+        for {name, rows, q, ported?} <- @exhaust_features,
+            exhaust_covers?(mod, rows, q) != ported? do
+          "#{name}: ported?=#{ported?} but selfhost_exhaust " <>
+            "#{if exhaust_covers?(mod, rows, q), do: "REPRODUCES", else: "does NOT reproduce"} the verdict"
+        end
+
+      assert drift == [],
+             "exhaustiveness completeness ledger drifted:\n" <> Enum.join(drift, "\n")
+    end
+
+    test "algorithm-feature coverage is measured and must not regress" do
+      total = length(@exhaust_features)
+      ported = Enum.count(@exhaust_features, fn {_, _, _, p} -> p end)
+      IO.puts("\n  selfhost_exhaust completeness: #{ported}/#{total} useful? features")
+      assert ported == total
+    end
+  end
 end
