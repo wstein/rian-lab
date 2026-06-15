@@ -160,7 +160,9 @@ end|,
     "u8" => "UInt8",
     "i64" => "Int64",
     "h" => "Int53",
-    "t" => "Vec(Int53)"
+    "t" => "Vec(Int53)",
+    "v8" => "Vec(Int8)",
+    "v16" => "Vec(Int16)"
   }
   @env_corpus [
     "x",
@@ -209,7 +211,11 @@ end|,
     # type; element widening applies.
     "[h | t]",
     "[x, y]",
-    "[x, f]"
+    "[x, f]",
+    # parametric covariant join: `Vec(A)`⊔`Vec(B)` = `Vec(A⊔B)` (componentwise widen).
+    "if c do v8 else v16 end",
+    "if c do v8 else t end",
+    "[v8, v16]"
   ]
 
   describe "self-hosting checker fixpoint — inference under a typing env" do

@@ -32,9 +32,11 @@
 # `T`. A lambda infers its arrow type `Fn(arg.., body)` (an unannotated param is `_`),
 # the body inferred under the param bindings. Covered Core nodes (12, FULL): CNum/CStr/
 # CChar/CId/CUnary/CBin/CCall/CIf/CBlock/CCase/CList/CLambda. The `:partial` tail is now
-# DEPTH within nodes, not missing nodes — user-function/ctor return types (needs the
-# inference context `ic`), constructor-pattern field narrowing, and the parametric
-# covariant join (`Vec(A)`⊔`Vec(B)`) — see ADR-0063 / docs/self-host-status.md.
+# DEPTH within nodes, not missing nodes — user-function/ctor return types and
+# constructor-pattern field narrowing, both of which need the inference context `ic`
+# (function signatures + ctor field types) threaded through. The join LUB is complete
+# (numeric widening + the parametric covariant join `Vec(A)`⊔`Vec(B)`). See ADR-0063 /
+# docs/self-host-status.md.
 # ---------------------------------------------------------------------------
 
 mod SelfhostChecker do
@@ -68,6 +70,8 @@ mod SelfhostChecker do
   type BPair := BP(Core, String)
   # a numeric type decomposed into kind ("int"/"uint"/"float") + bit width, or none.
   type NumKind := NkNone | Nk(String, Int53)
+  # a parametric type `Name(arg, …)` decomposed into its name + argument types, or none.
+  type PpRes := PpNone | Pp(String, Vec(String))
 
   # A binary op's result type, keyed by the operator (the integer slice):
   # comparisons/`and`/`or`/`in` -> Bool, `<>` -> String, `/` -> Float64, the
@@ -329,13 +333,112 @@ mod SelfhostChecker do
     end
   end
 
+  # a non-equal pair: a numeric pair widens; else fall to the parametric covariant
+  # join (`Vec(A)`⊔`Vec(B)` = `Vec(A⊔B)`); a non-numeric non-parametric pair is unknown.
   def join_num(a String, b String) String
   def join_num(a, b)
     case num_kind(a) do
-      NkNone -> "unknown"
+      NkNone -> parametric_join(a, b)
       Nk(ka, wa) -> join_num2(ka, wa, b)
     end
   end
+
+  # same-constructor covariant join (Rian.Check.parametric_join): `Name(A..)` ⊔
+  # `Name(B..)` = `Name((A⊔B)..)`; an `Fn(...)`, a different constructor, or a
+  # non-parametric type ⇒ unknown.
+  def parametric_join(a String, b String) String
+  def parametric_join(a, b)
+    if is_fn(a) or is_fn(b) do
+      "unknown"
+    else
+      pj_parse(parse_parametric(a), b)
+    end
+  end
+
+  def pj_parse(PpRes, String) String
+  def pj_parse(PpNone, _) := "unknown"
+  def pj_parse(Pp(na, fa), b)
+    case parse_parametric(b) do
+      PpNone -> "unknown"
+      Pp(nb, fb) -> pj(na, fa, nb, fb)
+    end
+  end
+
+  def pj(na String, fa Vec(String), nb String, fb Vec(String)) String
+  def pj(na, fa, nb, fb)
+    if na == nb and len(fa) == len(fb) do
+      rebuild(na, join_args(fa, fb))
+    else
+      "unknown"
+    end
+  end
+
+  def join_args(Vec(String), Vec(String)) Vec(String)
+  def join_args([], []) := []
+  def join_args([x | xs], [y | ys]) := [join(x, y) | join_args(xs, ys)]
+  def join_args(_, _) := []
+
+  def rebuild(name String, parts Vec(String)) String
+  def rebuild(name, parts)
+    if any_unknown(parts) do
+      "unknown"
+    else
+      name <> "(" <> join_comma(parts) <> ")"
+    end
+  end
+
+  def any_unknown(Vec(String)) Bool
+  def any_unknown([]) := false
+  def any_unknown([t | rest]) := if t == "unknown" do true else any_unknown(rest) end
+
+  def len(Vec(String)) Int53
+  def len([]) := 0
+  def len([_ | rest]) := 1 + len(rest)
+
+  def is_fn(s String) Bool := fn_pfx(Prim.str_chars(s))
+
+  def fn_pfx(Vec(Int53)) Bool
+  def fn_pfx(['F', 'n', '(' | _]) := true
+  def fn_pfx(_) := false
+
+  # `Name(inner)` -> Pp(name, top-level-comma-split args); else PpNone.
+  def parse_parametric(s String) PpRes := pp_name(Prim.str_chars(s), [])
+
+  def pp_name(Vec(Int53), Vec(Int53)) PpRes
+  def pp_name([40 | rest], acc) := pp_close(rev(acc, []), rev(rest, []))
+  def pp_name([c | rest], acc)
+    if name_char(c) do
+      pp_name(rest, [c | acc])
+    else
+      PpNone
+    end
+  end
+  def pp_name([], _) := PpNone
+
+  # `rest_rev` is the post-`(` chars reversed; require a trailing `)` and a non-empty
+  # name, then split the inner on top-level commas.
+  def pp_close(Vec(Int53), Vec(Int53)) PpRes
+  def pp_close([], _) := PpNone
+  def pp_close(name, [41 | inner_rev]) := Pp(Prim.str_from_chars(name), split_top(rev(inner_rev, [])))
+  def pp_close(_, _) := PpNone
+
+  def name_char(c Int53) Bool := (c >= 65 and c <= 90) or (c >= 97 and c <= 122) or (c >= 48 and c <= 57) or c == 95
+
+  # split on commas at paren-depth 0 (so `Vec(A),B` -> ["Vec(A)", "B"]).
+  def split_top(cs Vec(Int53)) Vec(String) := st(cs, [], [], 0)
+
+  def st(Vec(Int53), Vec(Int53), Vec(String), Int53) Vec(String)
+  def st([], seg, segs, _) := rev_str(add_seg(seg, segs), [])
+  def st([44 | rest], seg, segs, 0) := st(rest, [], add_seg(seg, segs), 0)
+  def st([40 | rest], seg, segs, d) := st(rest, [40 | seg], segs, d + 1)
+  def st([41 | rest], seg, segs, d) := st(rest, [41 | seg], segs, d - 1)
+  def st([c | rest], seg, segs, d) := st(rest, [c | seg], segs, d)
+
+  def add_seg(seg Vec(Int53), segs Vec(String)) Vec(String) := [Prim.str_from_chars(rev(seg, [])) | segs]
+
+  def rev_str(Vec(String), Vec(String)) Vec(String)
+  def rev_str([], out) := out
+  def rev_str([s | rest], out) := rev_str(rest, [s | out])
 
   def join_num2(ka String, wa Int53, b String) String
   def join_num2(ka, wa, b)
