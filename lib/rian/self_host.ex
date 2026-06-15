@@ -343,7 +343,8 @@ defmodule Rian.SelfHost do
     "selfhost_compose_real_sum.rian" => [
       ":code.load_binary",
       ":compile.forms",
-      ":erlang.binary_to_list"
+      ":erlang.binary_to_list",
+      ":erlang.error"
     ]
   }
 

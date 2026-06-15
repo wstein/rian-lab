@@ -29,6 +29,8 @@ defmodule Rian.ComposeLexerFixpointTest do
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
 
+    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
     {:ok, drv} =
       Beam.load(File.read!("examples/rian/selfhost_compose_real_sum.rian"), :rian_compose_lexer)
 

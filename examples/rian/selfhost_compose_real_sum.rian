@@ -125,9 +125,24 @@ mod SelfhostComposeRealSum do
 
   # ── source -> a full :compile.forms input, via the REAL lexer + parser + backend ──
   # the front-end is entirely verified ports: SelfhostLexerV2.tokenize feeds
-  # SelfhostDecl.parse_program directly (same token tags, no projection).
+  # SelfhostDecl.parse_program directly (same token tags, no projection). SELF-CHECKING
+  # (ADR-0036): the exhaustiveness gate runs first and REFUSES (raises) on a
+  # non-exhaustive sum-dispatch function — the compiler rejects bad input rather than
+  # silently emitting it. Requires SelfhostExhaust to be loaded.
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
-  pub def compile_module(src, modname) := assemble(modname, funcs(group(normalize(SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src))))))
+  pub def compile_module(src, modname)
+    decls := SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src))
+    grps := group(normalize(decls))
+    case first_bad(gate_env(decls), grps) do
+      "" -> assemble(modname, funcs(grps))
+      bad -> refuse(bad)
+    end
+  end
+
+  # refusal channel: a non-exhaustive program is rejected (the BEAM raises). Host FFI
+  # (ADR-0068) — `name` is the offending function, surfaced in the error.
+  @external(:ex, ":erlang.error({:non_exhaustive, name})")
+  def refuse(name String) Vec(Tuple)
 
   def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
 

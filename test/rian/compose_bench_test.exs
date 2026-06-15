@@ -42,6 +42,7 @@ defmodule Rian.ComposeBenchTest do
     {:ok, _} = Beam.load(@lexer, :"Elixir.SelfhostLexerV2")
     {:ok, _} = Beam.load(@decl, :"Elixir.SelfhostDecl")
     {:ok, _} = Beam.load(@beam, :"Elixir.SelfhostBeam")
+    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
     {:ok, gen0} = Beam.load(@driver, :rian_bench_gen0)
 
     # gen1 — gen0 compiles the compiler's own sources; load them as the live compiler.

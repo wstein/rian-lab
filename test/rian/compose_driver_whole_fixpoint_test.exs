@@ -31,6 +31,8 @@ defmodule Rian.ComposeDriverWholeFixpointTest do
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
 
+    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
     {:ok, v1} = Beam.load(@driver_src, :rian_driver_v1)
 
     # v1 compiles its OWN whole source into v2 — the build compiling the build.

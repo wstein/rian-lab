@@ -78,4 +78,21 @@ defmodule Rian.ComposeExhaustGateFixpointTest do
       end
     end
   end
+
+  describe "the gate is WIRED into build — bad input is REJECTED, not silently emitted" do
+    @non_exhaustive "type C := A | B | D\ndef f(c C) Int53\ndef f(A) := 1\ndef f(B) := 2"
+    @exhaustive "type C := A | B\ndef f(c C) Int53\ndef f(A) := 1\ndef f(B) := 2"
+
+    test "compile_module and build REFUSE a non-exhaustive program (raise {:non_exhaustive, name})",
+         %{drv: drv} do
+      assert catch_error(drv.compile_module(@non_exhaustive, :BadMod)) == {:non_exhaustive, "f"}
+      assert catch_error(drv.build(@non_exhaustive, :BadMod2)) == {:non_exhaustive, "f"}
+    end
+
+    test "an exhaustive program still compiles + runs", %{drv: drv} do
+      m = drv.build(@exhaustive, :"GoodMod_#{System.unique_integer([:positive])}")
+      assert m.f(:a) == 1
+      assert m.f(:b) == 2
+    end
+  end
 end
