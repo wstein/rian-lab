@@ -17,9 +17,12 @@ defmodule Rian.DeclFixpointTest do
   # functions (single + multi-clause); clause patterns (var/lit/ctor/wildcard/
   # cons-list); capabilities (val/iso/ref/tag); parametric types (`Vec(T)`); list
   # construction; `.field` access + labeled construction; `when` guards; and
-  # `forall` generics (`Ret forall T, U: Eq + Ord` -> Func.tvars/Func.bounds).
-  # Remaining long tail of `Rian.Decl`: string/char clause patterns, `alias`/
-  # `protocol`/doc-comments, and the portable stdlib breadth — see ADR-0063.
+  # `forall` generics (`Ret forall T, U: Eq + Ord` -> Func.tvars/Func.bounds); and the
+  # full declaration-form ledger (18/18 below) incl. `alias` substitution, `macro`
+  # expansion, and `protocol`/`impl` (the dispatcher/mangle desugar of
+  # Rian.Protocol.expand, reusing the public Rian.Decl.build_func). Remaining is the
+  # documented per-form tail (sum/struct dispatch guards, embedded-Self, string/char
+  # clause patterns) + the portable stdlib breadth — see ADR-0063.
 
   setup_all do
     {:ok, fe} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :rian_decl_frontend)
@@ -682,7 +685,6 @@ defmodule Rian.DeclFixpointTest do
     {"pub def", "pub def f(n Int64) Int64 := n", true},
     {"mod", "mod M do\n  def f() Int64 := 1\nend", true},
     {"@external", ~S|@external(:ex, ":os.system_time()") def now() Int64|, true},
-    # --- not yet ported: the oracle handles these; the port skips / errors / drops a modifier ---
     {"@doc", ~s|@doc "d"\ndef f() Int64 := 1|, true},
     {"@test", "@test def t() Bool := true", true},
     {"@targets", "@targets(ex, js)\nmod M do\n  def f() Int64 := 1\nend", true},

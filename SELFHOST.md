@@ -350,8 +350,13 @@ over time. The proof is a four-stage ladder:
   labeled construction `Point(x: 0, y: 0)`) and **`mod` nesting** (incl. `pub def`):
   a struct program and a `mod` compiled to its **own BEAM module** (`Calc.double`/
   `Calc.quad`, local cross-call) both run via `Rian.Beam.load_ir`/`load_program_ir`.
-  **Remaining (the last of the `Rian.Decl` tail):** string/char clause patterns,
-  `alias`/`const`/`protocol`/`impl`/generics/doc-comments, block (`do … end`) bodies,
+  The completeness ledger now reads **18/18 declaration forms** — `alias` (whole-type
+  substitution), `macro` (call-site expansion), `const`/`use`/`range`/`opaque`,
+  `@doc`/`@test`/`@targets`, `pub type`, and `protocol`/`impl` all ported; the last
+  ports the dispatcher/mangle desugar (`Rian.Protocol.expand`), the first Rian port of
+  a pass that lived only in Elixir, reusing the now-public `Rian.Decl.build_func`.
+  **Remaining (documented tails, not whole forms):** string/char clause patterns,
+  sum/struct dispatch guards + multi-method coherence, embedded-`Self` substitution,
   and the portable `Enum`/`Map`/`String` stdlib breadth (ADR-0047).
 - **Stage 3 — bootstrap fixed point** (future; **determinism prerequisite verified**):
   the whole compiler in Rian; compile its source with the Elixir host → v1, compile
