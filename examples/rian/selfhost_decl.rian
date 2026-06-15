@@ -152,6 +152,11 @@ mod SelfhostDecl do
   # `opaque Name := Base` — a nominal opaque wrapper (Rian.IR.Opaque); collected into
   # the top-level `opaques`.
   pub def parse_program([TKw("opaque"), TId(name), TOp(":="), TId(base) | rest]) := [DOpaque(name, base) | parse_program(rest)]
+  # `alias Name := Base` — a transparent type alias. Rian.Decl CONSUMES it: it does
+  # not appear in the output; instead `Name` is substituted by `Base` in every LATER
+  # declaration's parameter/return types. So we parse the rest, then rewrite it (the
+  # plain whole-type-name form; parametric `Vec(Name)` substitution is the tail).
+  pub def parse_program([TKw("alias"), TId(name), TOp(":="), TId(base) | rest]) := subst_in(name, base, parse_program(rest))
   pub def parse_program([TKw("struct") | rest])
     case parse_struct(rest) do
       DR(d, rest2) -> [d | parse_program(rest2)]
@@ -182,6 +187,26 @@ mod SelfhostDecl do
     end
   end
   pub def parse_program([_ | rest]) := parse_program(rest)
+
+  # ── alias substitution ────────────────────────────────────────────────────
+  # An `alias Name := Base` is CONSUMED (no output node); `Name` is rewritten to
+  # `Base` in every later declaration's parameter and return types — the plain
+  # whole-type-name form. Mirrors Rian.Decl's transparent aliases.
+  def subst_in(name String, base String, decls Vec(Decl)) Vec(Decl)
+  def subst_in(_, _, []) := []
+  def subst_in(name, base, [d | rest]) := [subst_decl(name, base, d) | subst_in(name, base, rest)]
+
+  def subst_decl(name String, base String, d Decl) Decl
+  def subst_decl(name, base, DFunc(pb, fn, ps, ret, tvs, body)) := DFunc(pb, fn, subst_params(name, base, ps), subst_ty(name, base, ret), tvs, body)
+  def subst_decl(name, base, DSig(pb, fn, ps, ret, tvs)) := DSig(pb, fn, subst_params(name, base, ps), subst_ty(name, base, ret), tvs)
+  def subst_decl(name, base, DStruct(sn, ps)) := DStruct(sn, subst_params(name, base, ps))
+  def subst_decl(_, _, d) := d
+
+  def subst_params(name String, base String, ps Vec(Param)) Vec(Param)
+  def subst_params(_, _, []) := []
+  def subst_params(name, base, [Par(pn, cap, ty) | rest]) := [Par(pn, cap, subst_ty(name, base, ty)) | subst_params(name, base, rest)]
+
+  def subst_ty(name String, base String, ty String) String := if ty == name do base else ty end
 
   # parse a standalone EXPRESSION from a token list (the driver uses this to inline
   # an `@external(:ex, "host expr")` body, ADR-0068). Trailing tokens are ignored.

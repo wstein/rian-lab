@@ -616,7 +616,7 @@ defmodule Rian.DeclFixpointTest do
     # tested IN USE: an alias only has an observable effect when a later signature
     # uses it (the oracle substitutes `Id`→`Int64`; the port, skipping the alias,
     # leaves `Id`), so the parity probe is non-vacuous.
-    {"alias", "alias Id := Int64\ndef f(x Id) Id := x", false},
+    {"alias", "alias Id := Int64\ndef f(x Id) Id := x", true},
     {"const", "mod M do\n  const MAX Int64 := 100\nend", true},
     {"use", "mod M do\n  use Foo\nend", true},
     {"macro", "macro double(x) := x + x\ndef f() Int64 := double(2)", false},
