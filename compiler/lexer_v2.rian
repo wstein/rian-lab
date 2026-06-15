@@ -28,9 +28,15 @@ mod SelfhostLexerV2 do
   # punctuation and the significant newline get their own nullary variants.
   type Tok :=
       TNum(String) | TId(String) | TKw(String) | TOp(String) | TStr(String)
+    | TIStr(Vec(IPart))
     | TChar(Int53) | TAnnot(String)
     | TLP | TRP | TLBracket | TRBracket | TLBrace | TRBrace | TMapOpen
     | TComma | TSemi | TNL
+
+  # an interpolated string `"… ${e} …"` (ADR-0069) is a sequence of literal segments
+  # and holes; a hole carries its already-lexed tokens (the parser parses them
+  # directly, no re-lex). A string with NO holes stays a plain `TStr` (fixpoint-safe).
+  type IPart := ILit(String) | IHole(Vec(Tok))
 
   # Full token stream with significant newlines collapsed — matches `tokenize/1`.
   pub def tokenize(src String) Vec(Tok) := collapse(lex(Prim.str_chars(src)))
@@ -136,14 +142,34 @@ mod SelfhostLexerV2 do
   def lex_exp(cs, acc) := [TNum(Prim.str_from_chars(rev(acc, []))) | lex(cs)]
 
   # ── string / char literals (slice 3) ─────────────────────────────────────
-  def scan_str(cs Vec(Char), acc Vec(Char)) Vec(Tok)
-  def scan_str(['"' | rest], acc) := [TStr(Prim.str_from_chars(rev(acc, []))) | lex(rest)]
-  # a backslash escape decodes to its codepoint (reusing `char_esc`, shared with the
-  # char-literal scanner): `\n` → 10, `\"` → 34 (an escaped quote is NOT the close),
-  # `\\` → 92. MUST precede the plain-char clause.
-  def scan_str(['\\', e | rest], acc) := scan_str(rest, [char_esc(e) | acc])
-  def scan_str([c | rest], acc) := scan_str(rest, [c | acc])
-  def scan_str([], acc) := [TStr(Prim.str_from_chars(rev(acc, [])))]
+  def scan_str(cs Vec(Char), acc Vec(Char)) Vec(Tok) := scan_istr(cs, acc, [])
+
+  # accumulate the current literal `acc` and completed `parts`; an unescaped `${`
+  # closes the literal and opens a hole. `\$` is a literal `$` (the only `$` escape).
+  def scan_istr(cs Vec(Char), acc Vec(Char), parts Vec(IPart)) Vec(Tok)
+  def scan_istr(['"' | rest], acc, parts) := [finish_istr(Prim.str_from_chars(rev(acc, [])), parts) | lex(rest)]
+  def scan_istr(['\\', '$' | rest], acc, parts) := scan_istr(rest, [36 | acc], parts)
+  def scan_istr(['\\', e | rest], acc, parts) := scan_istr(rest, [char_esc(e) | acc], parts)
+  def scan_istr(['$', '{' | rest], acc, parts) := scan_hole(rest, [ILit(Prim.str_from_chars(rev(acc, []))) | parts], [], 0)
+  def scan_istr([c | rest], acc, parts) := scan_istr(rest, [c | acc], parts)
+  def scan_istr([], acc, parts) := [finish_istr(Prim.str_from_chars(rev(acc, [])), parts)]
+
+  # no holes -> a plain `TStr` (keeps the lexer fixpoint); else a `TIStr` of parts.
+  def finish_istr(String, Vec(IPart)) Tok
+  def finish_istr(lit, []) := TStr(lit)
+  def finish_istr(lit, parts) := TIStr(rev_iparts([ILit(lit) | parts], []))
+
+  # scan the hole's raw chars until the matching `}` (tracking `{}` depth), then lex
+  # them into tokens and resume the string after the `}`.
+  def scan_hole(cs Vec(Char), parts Vec(IPart), hacc Vec(Char), depth Int53) Vec(Tok)
+  def scan_hole(['}' | rest], parts, hacc, 0) := scan_istr(rest, [], [IHole(lex(rev(hacc, []))) | parts])
+  def scan_hole(['{' | rest], parts, hacc, depth) := scan_hole(rest, parts, ['{' | hacc], depth + 1)
+  def scan_hole(['}' | rest], parts, hacc, depth) := scan_hole(rest, parts, ['}' | hacc], depth - 1)
+  def scan_hole([c | rest], parts, hacc, depth) := scan_hole(rest, parts, [c | hacc], depth)
+
+  def rev_iparts(Vec(IPart), Vec(IPart)) Vec(IPart)
+  def rev_iparts([], acc) := acc
+  def rev_iparts([p | rest], acc) := rev_iparts(rest, [p | acc])
 
   # a char literal: `'a'` (one char + close quote) or `'\n'` (a backslash escape,
   # one char + close quote). The escape clause MUST precede the plain one.

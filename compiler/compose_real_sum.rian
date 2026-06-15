@@ -245,21 +245,11 @@ mod SelfhostComposeRealSum do
   @external(:ex, ":erlang.error({:not_beam_legal, name})")
   def refuse_cap(name String) Vec(Tuple)
 
-  # string interpolation `"…${e}…"` is REFUSED, not silently mis-lowered: a hole is
-  # stringified by its statically-inferred type (ADR-0069 §4 — int_to_string vs
-  # char_to_string vs Show.float vs user `show`), and the self-hosted build has no
-  # type inference in the loop yet (ADR-0063's open terminus). Honest loud failure
-  # beats returning the literal `${…}` text. Lift the reject once inference lands.
-  @external(:ex, ":erlang.error({:unsupported_interpolation, src})")
-  def refuse_interp(src String) Core
-
-  # a string literal carries an interpolation hole iff its text holds an unescaped
-  # `${` ($ = 36, { = 123) — the selfhost lexer keeps the raw `${…}` in the lexeme.
-  def has_interp(s String) Bool := scan_interp(Prim.str_chars(s))
-  def scan_interp(Vec(Int53)) Bool
-  def scan_interp([]) := false
-  def scan_interp([36, 123 | _]) := true
-  def scan_interp([_ | rest]) := scan_interp(rest)
+  # an interpolation hole whose static type the AOT resolver cannot determine is
+  # REFUSED, not guessed (ADR-0069 §4 — the stringify is chosen by the hole's static
+  # type; a `:unknown` hole is a documented limitation: name the value or annotate).
+  @external(:ex, ":erlang.error({:unresolved_interp_hole, src})")
+  def refuse_interp(src String) Tuple
 
   def assemble(modname Symbol, fs Vec(Func)) Vec(Tuple) := [{:attribute, 0, :module, modname}, {:attribute, 0, :export, exports(fs)} | inflate_funcs(SelfhostBeam.compile_forms(fs))]
 
@@ -275,9 +265,9 @@ mod SelfhostComposeRealSum do
   # params become `PVar` patterns. A `when` guard is carried as `GSome`.
   def normalize(ds) Vec(NClause)
   def normalize([]) := []
-  def normalize([{:d_clause, name, pats, expr} | rest]) := [NC(name, lower_pats(pats), GNone, lower_body(expr)) | normalize(rest)]
-  def normalize([{:d_clause_g, name, pats, guard, expr} | rest]) := [NC(name, lower_pats(pats), GSome(lower_surface(guard)), lower_body(expr)) | normalize(rest)]
-  def normalize([{:d_func, _, name, params, _, _, body} | rest]) := [NC(name, param_pats(params), GNone, lower_body(body)) | normalize(rest)]
+  def normalize([{:d_clause, name, pats, expr} | rest]) := [NC(name, lower_pats(pats), GNone, lower_body(desugar_interp([], expr))) | normalize(rest)]
+  def normalize([{:d_clause_g, name, pats, guard, expr} | rest]) := [NC(name, lower_pats(pats), GSome(lower_surface(guard)), lower_body(desugar_interp([], expr))) | normalize(rest)]
+  def normalize([{:d_func, _, name, params, _, _, body} | rest]) := [NC(name, param_pats(params), GNone, lower_body(desugar_interp(param_tenv(params), body))) | normalize(rest)]
   # a real selfhost_*.rian file wraps its defs in `mod Name do … end`; flatten the
   # module's inner declarations into the same clause stream (its name is the build's
   # `modname`, supplied by the caller).
@@ -338,6 +328,109 @@ mod SelfhostComposeRealSum do
   def lower_body({:block_e, stmts}) := Block(lower_stmts(stmts))
   def lower_body(e) := Block([SExpr(lower_surface(e))])
 
+  # ── AOT string interpolation (ADR-0069) ──────────────────────────────────────
+  # An `Interp` node desugars, ahead of time, to a single `Prim.str_concat_all(…)`
+  # over its segments — each hole stringified by its STATIC type (no runtime `Show`
+  # dispatch, which could not tell a `Char` from an `Int` on the BEAM): `Int*` →
+  # `int_to_string`, `Char` → `char_to_string`, `Float*` → `float_repr`, `String` →
+  # identity, `Bool` → `if`. The type comes from the hole's literal form or a declared
+  # param type (`env`); a hole whose type cannot be resolved is REFUSED (refuse_interp),
+  # the documented `:unknown` limitation — name the value or use explicit calls.
+  def param_tenv(params Vec(Tuple)) Vec(Tuple)
+  def param_tenv([]) := []
+  def param_tenv([{:par, n, _, t} | rest]) := [{n, t} | param_tenv(rest)]
+
+  def desugar_interp(env Vec(Tuple), e Tuple) Tuple
+  def desugar_interp(env, {:interp, segs}) := {:call, {:dot, {:id, "Prim"}, "str_concat_all"}, stringify_segs(env, segs)}
+  def desugar_interp(env, {:bin, op, l, r}) := {:bin, op, desugar_interp(env, l), desugar_interp(env, r)}
+  def desugar_interp(env, {:unary, op, x}) := {:unary, op, desugar_interp(env, x)}
+  def desugar_interp(env, {:call, c, args}) := {:call, desugar_interp(env, c), di_all(env, args)}
+  def desugar_interp(env, {:dot, o, f}) := {:dot, desugar_interp(env, o), f}
+  def desugar_interp(env, {:label, n, v}) := {:label, n, desugar_interp(env, v)}
+  def desugar_interp(env, {:"if", c, t, e}) := {:"if", desugar_interp(env, c), desugar_interp(env, t), desugar_interp(env, e)}
+  def desugar_interp(env, {:"case", s, arms}) := {:"case", desugar_interp(env, s), di_arms(env, arms)}
+  def desugar_interp(env, {:"with", cs, b, els}) := {:"with", di_wcs(env, cs), desugar_interp(env, b), di_arms(env, els)}
+  def desugar_interp(env, {:block_e, stmts}) := {:block_e, di_stmts(env, stmts)}
+  def desugar_interp(env, {:tuple, es}) := {:tuple, di_all(env, es)}
+  def desugar_interp(env, {:map_e, flds}) := {:map_e, di_all(env, flds)}
+  def desugar_interp(env, {:lam, ps, b}) := {:lam, ps, desugar_interp(env, b)}
+  def desugar_interp(env, {:cons_e, h, t}) := {:cons_e, desugar_interp(env, h), desugar_interp(env, t)}
+  def desugar_interp(_, x) := x
+
+  def di_all(env Vec(Tuple), es Vec(Tuple)) Vec(Tuple)
+  def di_all(_, []) := []
+  def di_all(env, [e | rest]) := [desugar_interp(env, e) | di_all(env, rest)]
+
+  def di_arms(env Vec(Tuple), arms Vec(Tuple)) Vec(Tuple)
+  def di_arms(_, []) := []
+  def di_arms(env, [{:c_arm, pat, body} | rest]) := [{:c_arm, pat, desugar_interp(env, body)} | di_arms(env, rest)]
+  def di_arms(env, [{:c_arm_g, pat, g, body} | rest]) := [{:c_arm_g, pat, desugar_interp(env, g), desugar_interp(env, body)} | di_arms(env, rest)]
+
+  def di_wcs(env Vec(Tuple), cs Vec(Tuple)) Vec(Tuple)
+  def di_wcs(_, []) := []
+  def di_wcs(env, [{:wc, pat, src} | rest]) := [{:wc, pat, desugar_interp(env, src)} | di_wcs(env, rest)]
+
+  def di_stmts(env Vec(Tuple), ss Vec(Tuple)) Vec(Tuple)
+  def di_stmts(_, []) := []
+  def di_stmts(env, [{:s_bind, n, e} | rest]) := [{:s_bind, n, desugar_interp(env, e)} | di_stmts(env, rest)]
+  def di_stmts(env, [{:s_expr, e} | rest]) := [{:s_expr, desugar_interp(env, e)} | di_stmts(env, rest)]
+
+  def stringify_segs(env Vec(Tuple), segs Vec(Tuple)) Vec(Tuple)
+  def stringify_segs(_, []) := []
+  def stringify_segs(env, [{:s_lit, s} | rest]) := [{:str, s} | stringify_segs(env, rest)]
+  def stringify_segs(env, [{:s_hole, e} | rest]) := [stringify_hole(hole_type(env, e), desugar_interp(env, e)) | stringify_segs(env, rest)]
+
+  # the hole's STATIC type — from its literal form, or a declared param type in `env`.
+  def hole_type(env Vec(Tuple), e Tuple) String
+  def hole_type(_, {:num, s}) := if num_is_float(s) do "Float64" else "Int53" end
+  def hole_type(_, {:str, _}) := "String"
+  def hole_type(_, {:char, _}) := "Char"
+  def hole_type(_, {:id, "true"}) := "Bool"
+  def hole_type(_, {:id, "false"}) := "Bool"
+  def hole_type(env, {:id, x}) := lookup_ty(env, x)
+  def hole_type(_, {:bin, "<>", _, _}) := "String"
+  def hole_type(env, {:bin, op, l, _}) := if is_cmp_op(op) do "Bool" else hole_type(env, l) end
+  def hole_type(_, _) := ""
+
+  def lookup_ty(Vec(Tuple), String) String
+  def lookup_ty([], _) := ""
+  def lookup_ty([{n, t} | rest], x) := if n == x do t else lookup_ty(rest, x) end
+
+  # choose the stringify prim by static type; an unresolved type is refused.
+  def stringify_hole(String, Tuple) Tuple
+  def stringify_hole("String", e) := e
+  def stringify_hole("Char", e) := {:call, {:dot, {:id, "Prim"}, "char_to_string"}, [e]}
+  def stringify_hole("Bool", e) := {:"if", e, {:str, "true"}, {:str, "false"}}
+  def stringify_hole(t, e)
+    if starts_with(t, "Int") or starts_with(t, "UInt") do
+      {:call, {:dot, {:id, "Prim"}, "int_to_string"}, [e]}
+    else
+      stringify_float_or_refuse(t, e)
+    end
+  end
+
+  def stringify_float_or_refuse(t String, e Tuple) Tuple
+  def stringify_float_or_refuse(t, e)
+    if starts_with(t, "Float") do
+      {:call, {:dot, {:id, "Prim"}, "float_repr"}, [e]}
+    else
+      refuse_interp(t)
+    end
+  end
+
+  def num_is_float(s String) Bool := scan_fmark(Prim.str_chars(s))
+  def scan_fmark(Vec(Int53)) Bool
+  def scan_fmark([]) := false
+  def scan_fmark([c | rest]) := if c == 46 or c == 101 or c == 69 do true else scan_fmark(rest) end
+
+  def is_cmp_op(op String) Bool := op == "<" or op == ">" or op == "<=" or op == ">=" or op == "==" or op == "!="
+
+  def starts_with(s String, p String) Bool := pfx(Prim.str_chars(s), Prim.str_chars(p))
+  def pfx(Vec(Int53), Vec(Int53)) Bool
+  def pfx(_, []) := true
+  def pfx([], [_ | _]) := false
+  def pfx([c | cs], [p | ps]) := if c == p do pfx(cs, ps) else false end
+
   def lower_stmts(ss) Vec(Stmt)
   def lower_stmts([]) := []
   def lower_stmts([{:s_bind, n, e} | rest]) := [SBind(n, lower_surface(e)) | lower_stmts(rest)]
@@ -380,13 +473,7 @@ mod SelfhostComposeRealSum do
   # (≡ `Rian.Core`). Exported on the sig; the clauses below stay local.
   pub def lower_surface(e) Core
   def lower_surface({:num, s}) := CNum(s)
-  def lower_surface({:str, s})
-    if has_interp(s) do
-      refuse_interp(s)
-    else
-      CStr(s)
-    end
-  end
+  def lower_surface({:str, s}) := CStr(s)
   def lower_surface({:char, cp}) := CChar(cp)
   def lower_surface({:id, x}) := CId(x)
   def lower_surface({:atom, n}) := CAtom(n)

@@ -159,7 +159,24 @@ defmodule Rian.SelfhostBuildTest do
      [9_223_372_036_854_775_807, 1], :none},
     {"prim checked_add (some)", "def f(a Int64, b Int64) Tuple := Prim.checked_add(a, b)", :f,
      [40, 2], {:some, 42}},
-    {"prim float_repr", "def f(x Float64) String := Prim.float_repr(x)", :f, [3.5], "3.5"}
+    {"prim float_repr", "def f(x Float64) String := Prim.float_repr(x)", :f, [3.5], "3.5"},
+    # string interpolation (ADR-0069), resolved AOT: each hole is stringified by its
+    # STATIC type (declared param / literal) — Int → int_to_string, Char →
+    # char_to_string, Float → float_repr, String → identity, Bool → if. NOT runtime
+    # dispatch (which can't tell a Char from an Int on the BEAM).
+    {"interp int param", ~S|def f(n Int53) String := "n=${n}"|, :f, [42], "n=42"},
+    {"interp string param", ~S|def greet(name String) String := "hi ${name}!"|, :greet, ["Ada"],
+     "hi Ada!"},
+    {"interp float param", ~S|def f(x Float64) String := "x=${x}"|, :f, [3.5], "x=3.5"},
+    {"interp char param", ~S|def f(c Char) String := "[${c}]"|, :f, [?A], "[A]"},
+    {"interp bool param", ~S|def f(b Bool) String := "ok=${b}"|, :f, [true], "ok=true"},
+    {"interp literal hole", ~S|def f() String := "v=${42}"|, :f, [], "v=42"},
+    {"interp arithmetic hole", ~S|def f(n Int53) String := "double=${n * 2}"|, :f, [21],
+     "double=42"},
+    {"interp multi-hole", ~S|def pt(x Int53, y Int53) String := "(${x}, ${y})"|, :pt, [3, 4],
+     "(3, 4)"},
+    {"interp escaped dollar (literal, not a hole)", ~S|def f() String := "cost \$5"|, :f, [],
+     "cost $5"}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do
@@ -175,11 +192,12 @@ defmodule Rian.SelfhostBuildTest do
   end
 
   describe "honest rejects (gaps that must fail LOUDLY, not silently mis-compile)" do
-    test "string interpolation is refused, not returned as a literal", %{drv: drv} do
-      # Blocked on type inference in the build loop (ADR-0069 §4 / ADR-0063); until
-      # then the build refuses rather than silently emitting the raw `${…}` text.
-      assert catch_error(run(drv, ~S|def g() String := "n=${n}"|, :g, [])) ==
-               {:unsupported_interpolation, "n=${n}"}
+    test "an interpolation hole whose type can't be resolved AOT is refused", %{drv: drv} do
+      # ADR-0069 §4: the stringify is chosen by the hole's STATIC type. A bare hole
+      # over an untyped lambda param can't be resolved, so the build refuses (the
+      # documented `:unknown` limitation) rather than guessing — never a runtime guess.
+      assert catch_error(run(drv, ~S|def f(g) Int53 := g("v=${q}")|, :f, [fn x -> x end])) ==
+               {:unresolved_interp_hole, ""}
     end
   end
 end

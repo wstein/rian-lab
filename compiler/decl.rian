@@ -35,8 +35,11 @@
 
 mod SelfhostDecl do
   type Tok :=
-      TNum(String) | TStr(String) | TChar(Int53) | TId(String) | TKw(String) | TOp(String)
+      TNum(String) | TStr(String) | TIStr(Vec(IPart)) | TChar(Int53) | TId(String) | TKw(String) | TOp(String)
     | TAnnot(String) | TLP | TRP | TLBracket | TRBracket | TLBrace | TRBrace | TMapOpen | TComma | TNL
+
+  # mirrors the lexer's interpolated-string token: literal segments + token-carrying holes.
+  type IPart := ILit(String) | IHole(Vec(Tok))
 
   # expression AST — Num/Id/Bin/Unary/Call lower to Rian.Pratt's surface tuples;
   # list construction is nil/cons (NilE / ConsE), flattened to `{:list_lit, …}` by
@@ -52,7 +55,11 @@ mod SelfhostDecl do
     | Tuple(Vec(Expr))
     | MapE(Vec(Expr))
     | Lam(Vec(String), Expr)
+    | Interp(Vec(ISeg))
     | NilE | ConsE(Expr, Expr) | EErr
+
+  # an interpolation segment: a literal chunk or a hole expression to stringify.
+  type ISeg := SLit(String) | SHole(Expr)
 
   # a multi-statement block body (`def f() T <nl> b := e <nl> e <nl> end`): a
   # sequence of `name := expr` binds (SBind) and bare expressions (SExpr) ending in
@@ -318,12 +325,18 @@ mod SelfhostDecl do
   def expand_e(m, Tuple(es)) := Tuple(expand_es(m, es))
   def expand_e(m, MapE(es)) := MapE(expand_es(m, es))
   def expand_e(m, Lam(ps, b)) := Lam(ps, expand_e(m, b))
+  def expand_e(m, Interp(segs)) := Interp(expand_segs(m, segs))
   def expand_e(m, ConsE(h, t)) := ConsE(expand_e(m, h), expand_e(m, t))
   def expand_e(_, e) := e
 
   def expand_es(m Macro, es Vec(Expr)) Vec(Expr)
   def expand_es(_, []) := []
   def expand_es(m, [e | rest]) := [expand_e(m, e) | expand_es(m, rest)]
+
+  def expand_segs(m Macro, segs Vec(ISeg)) Vec(ISeg)
+  def expand_segs(_, []) := []
+  def expand_segs(m, [SLit(s) | rest]) := [SLit(s) | expand_segs(m, rest)]
+  def expand_segs(m, [SHole(e) | rest]) := [SHole(expand_e(m, e)) | expand_segs(m, rest)]
 
   def expand_arms(m Macro, arms Vec(CaseArm)) Vec(CaseArm)
   def expand_arms(_, []) := []
@@ -363,12 +376,18 @@ mod SelfhostDecl do
   def subst_e(env, Tuple(es)) := Tuple(subst_es(env, es))
   def subst_e(env, MapE(es)) := MapE(subst_es(env, es))
   def subst_e(env, Lam(ps, b)) := Lam(ps, subst_e(env, b))
+  def subst_e(env, Interp(segs)) := Interp(subst_segs(env, segs))
   def subst_e(env, ConsE(h, t)) := ConsE(subst_e(env, h), subst_e(env, t))
   def subst_e(_, e) := e
 
   def subst_es(env Vec(Subst), es Vec(Expr)) Vec(Expr)
   def subst_es(_, []) := []
   def subst_es(env, [e | rest]) := [subst_e(env, e) | subst_es(env, rest)]
+
+  def subst_segs(env Vec(Subst), segs Vec(ISeg)) Vec(ISeg)
+  def subst_segs(_, []) := []
+  def subst_segs(env, [SLit(s) | rest]) := [SLit(s) | subst_segs(env, rest)]
+  def subst_segs(env, [SHole(e) | rest]) := [SHole(subst_e(env, e)) | subst_segs(env, rest)]
 
   def subst_arms(env Vec(Subst), arms Vec(CaseArm)) Vec(CaseArm)
   def subst_arms(_, []) := []
@@ -1149,6 +1168,8 @@ mod SelfhostDecl do
       AP(es, rest2) -> parse_postfix(MapE(es), rest2)
     end
   end
+  # an interpolated string (ADR-0069): each hole's tokens are parsed as an expression.
+  def parse_primary([TIStr(parts) | rest]) := parse_postfix(Interp(parse_iparts(parts)), rest)
   def parse_primary([TLBracket | rest]) := parse_list_expr(rest)
   def parse_primary([TKw("if") | rest]) := parse_if(rest)
   def parse_primary([TKw("case") | rest]) := parse_case(rest)
@@ -1190,6 +1211,20 @@ mod SelfhostDecl do
   def param_names(Vec(Expr)) Vec(String)
   def param_names([]) := []
   def param_names([Id(x) | rest]) := [x | param_names(rest)]
+
+  # interpolation parts -> segments: a literal chunk stays a string; a hole's tokens
+  # are parsed (the lexer already tokenized them) into the expression to stringify.
+  def parse_iparts(Vec(IPart)) Vec(ISeg)
+  def parse_iparts([]) := []
+  def parse_iparts([ILit(s) | rest]) := [SLit(s) | parse_iparts(rest)]
+  def parse_iparts([IHole(toks) | rest]) := [SHole(parse_hole_expr(toks)) | parse_iparts(rest)]
+
+  def parse_hole_expr(toks Vec(Tok)) Expr
+  def parse_hole_expr(toks)
+    case parse_bp(0, toks) do
+      P(e, _) -> e
+    end
+  end
 
   # `if COND do THEN else ELSE end` — each part is a full sub-expression. The
   # projection (decl_fixpoint) wraps THEN/ELSE in `{:block, [{:expr, …}]}` to match
