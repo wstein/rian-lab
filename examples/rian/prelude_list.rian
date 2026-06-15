@@ -1,0 +1,53 @@
+# ===========================================================================
+# PORTABLE PRELUDE (ADR-0047 §2) — `List`, written in Rian (pure cons)
+# ===========================================================================
+# Unlike `Dict`/`Str` (which bottom out in a per-target `Prim.*`), a list is pure
+# cons (`[]` / `[h | t]`), so these reducers need NO primitive — they are plain
+# structural recursion and lower to every backend unchanged.
+#
+# These are the EAGER, iterable-accepting reducers (the Python `sum`/`any`/`all`/
+# `len` family) over a CONCRETE list — no lazy generator/`Iterator` protocol, which
+# would need a portable lazy-sequence abstraction Rian deliberately does not provide
+# (laziness is a per-target evaluation concern, like concurrency in ADR-0057). Each
+# reducer has a natural identity for the empty list (0/1/false/true/0), so it is
+# total — no `Option`, no empty-list crash.
+#
+# Capability: a reducer READS the list, so `val Vec(T)` (a borrowed `&[T]` slice on
+# Rust); the cons recursion lowers to a slice rest-pattern there (ADR-0055/0064).
+# Numeric reducers fix `Int53` (the portable all-target integer, ADR-0064 §2) — a
+# bare `0`/`1` would infer `Int64`, which is off `:js`; the declared `Int53` return
+# pins the literal across the base clause.
+#
+#   List.sum([1, 2, 3])         = 6
+#   List.all([true, true])      = true
+#   List.any([false, true])     = true
+#   List.length(["a", "b"])     = 2
+# ---------------------------------------------------------------------------
+
+mod List do
+  # Σ — the additive fold; identity 0.
+  pub def sum(val Vec(Int53)) Int53
+  pub def sum([]) := 0
+  pub def sum([h | t]) := h + sum(t)
+
+  # Π — the multiplicative fold; identity 1.
+  pub def product(val Vec(Int53)) Int53
+  pub def product([]) := 1
+  pub def product([h | t]) := h * product(t)
+
+  # ∃ — does any element hold? short-circuits on the first `true`. (`true`/`false`
+  # are variable patterns in a clause head, so branch with `if`, not literal clauses.)
+  pub def any(val Vec(Bool)) Bool
+  pub def any([]) := false
+  pub def any([h | t]) := if h do true else any(t) end
+
+  # ∀ — do all elements hold? short-circuits on the first `false`.
+  pub def all(val Vec(Bool)) Bool
+  pub def all([]) := true
+  pub def all([h | t]) := if h do all(t) else false end
+
+  # |xs| — element count (Python `len`); generic over the element type.
+  pub def length(val Vec(T)) Int53 forall T
+  pub def length([]) := 0
+  pub def length([_ | t]) := 1 + length(t)
+end

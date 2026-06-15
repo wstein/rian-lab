@@ -86,6 +86,33 @@ defmodule Rian.PrimTest do
       assert m.has(d, "y") == false
     end
 
+    test "`List` prelude reducers run (with empty-list identities) and reach all four targets" do
+      src = File.read!("examples/rian/prelude_list.rian")
+      {:ok, m} = Beam.load(src, :rian_prim_list)
+
+      # behaviour — including the empty-list identity, so each reducer is TOTAL
+      # (no `Option`, no crash): 0/1/false/true/0.
+      assert m.sum([1, 2, 3]) == 6
+      assert m.sum([]) == 0
+      assert m.product([2, 3, 4]) == 24
+      assert m.product([]) == 1
+      assert m.any([false, true]) == true
+      assert m.any([]) == false
+      assert m.all([true, true]) == true
+      assert m.all([true, false]) == false
+      assert m.all([]) == true
+      assert m.length(["a", "b", "c"]) == 3
+      assert m.length([]) == 0
+
+      # the POINT of a portable prelude: pure-cons reducers reach every target.
+      rep = Rian.Reach.analyze(Rian.Decl.parse(src))
+
+      for fname <- ~w(sum product any all length) do
+        assert Enum.sort(MapSet.to_list(rep[fname].reach)) == [:ex, :js, :jvm, :rs],
+               "#{fname} must reach all four targets (it is pure cons)"
+      end
+    end
+
     test "selfhost lexer using `Prim.char_code`/`Prim.str_chars` round-trips" do
       {:ok, m} =
         Beam.load(File.read!("examples/rian/selfhost_lexer.rian"), :rian_prim_selfhost_lex)

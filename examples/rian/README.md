@@ -381,6 +381,15 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   overflow in the type (no hidden control flow). Prefer a **subrange** (ADR-0036)
   when the bound is known at the type level; these are the unbounded-`Int64`
   fallback. Verified on BEAM, rustc, and node.
+- [prelude_list.rian](prelude_list.rian) — **the eager iterable-accepting reducers
+  over a concrete list (ADR-0047 §2).** `List.sum`/`product`/`any`/`all`/`length` —
+  the Python `sum`/`any`/`all`/`len` family — written **once in Rian** as pure cons
+  recursion (no `__prim_*`, since a list is already portable). Each has a natural
+  empty-list identity (0/1/false/true/0), so it is **total** (no `Option`, no crash),
+  and all five **reach every target** (`ex`/`rs`/`js`/`jvm`, verified by
+  `mix rian.targets`). A *lazy* generator/`Iterator` protocol is deliberately NOT
+  provided — laziness is a per-target evaluation concern, native like concurrency
+  (ADR-0057), not portable sequential logic.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
