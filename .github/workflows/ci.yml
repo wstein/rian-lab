@@ -54,5 +54,11 @@ jobs:
             mix rian.targets "$f" --require "$req"
           done
 
-      - name: Run the component suite (incl. the self-hosting fixpoint diff)
-        run: mix test
+      # `mix test.all` (not `mix test`) — the default loop excludes the
+      # external-toolchain tests (`@tag :rust|:js|:jvm`) for inner-loop speed;
+      # CI must run the full set or that coverage silently vanishes. The runner
+      # ships rustc + node (those tests execute); kotlinc is absent, so the
+      # `:jvm` runs self-skip to their shape assertions (ADR-0049 Tier 2,
+      # non-blocking). See test/test_helper.exs.
+      - name: Run the full suite (incl. toolchain tests + the self-hosting fixpoint diff)
+        run: mix test.all

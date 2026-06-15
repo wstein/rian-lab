@@ -18,10 +18,12 @@ prose specs; `examples/rian/` is the annotated by-example tour and the self-host
 ## Commands
 
 ```bash
-mix test                                  # full suite (loads real modules into the VM)
+mix test                                  # fast inner loop — EXCLUDES external-toolchain tests (~10s)
+mix test.all                              # full suite incl. rustc/node/kotlinc — the enforced CI gate (~70s)
 mix test test/rian/check_test.exs         # one file
 mix test test/rian/check_test.exs:51      # one test (by line number)
 mix test --only rust                      # only the rustc-backed tests
+mix test --include jvm                    # default loop plus one toolchain back (rust|js|jvm)
 
 mix format                                # THE linter — no credo/dialyzer in this repo
 mix compile --warnings-as-errors          # warnings are errors; run before every commit
@@ -34,9 +36,17 @@ mix rian.tour [--check]                           # regenerate site/src/data/tou
 mix examples                                      # end-to-end lowering demo
 ```
 
-- `@tag :rust` tests shell out to `rustc` and **run by default**, no-op'ing if `rustc` is absent;
-  some JS tests require `node`. Both are present in CI-like environments.
-- `mix test` is the real coverage signal, but much of it runs on hand-built source strings / a toy
+- External-toolchain tests are **excluded from the default `mix test`** for inner-loop speed:
+  `@tag :jvm` (kotlinc + java — the dominant cost, `kotlinc -include-runtime` rebundles the Kotlin
+  stdlib per test), `@tag :rust` (rustc), `@tag :js` (node). They are **not dropped** — `mix test.all`
+  runs everything and is the **enforced CI gate** (it sets `RIAN_TEST_ALL=1`); `mix test --include jvm`
+  adds one back. The exclude lives in `test/test_helper.exs`. `Rian.TestPolicyTest` guards the `:jvm`
+  tagging so a new toolchain test can't silently rejoin (and slow) the default loop. When adding a
+  test that spawns one of these, **tag it**.
+- Coverage (`mix test --cover`, `threshold: 95`) must be measured on the **full set** — the toolchain
+  tests exercise the Rust/JVM emitters — so the honest number is `mix test.all --cover`. A plain
+  `mix test --cover` runs the reduced default set and under-reports.
+- `mix test.all` is the real coverage signal, but much of it runs on hand-built source strings / a toy
   corpus — see `Rian.Fixpoint` and `SELFHOST.md` for where self-hosting verification actually bites.
 
 ## Architecture — the compile pipeline

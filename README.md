@@ -90,7 +90,8 @@ still drives the Rust + debug-Elixir text.
 
 ```sh
 mix deps.get          # fetches ex_doc (dev only)
-mix test              # full component suite
+mix test              # fast inner loop — excludes external-toolchain tests
+mix test.all          # full component suite incl. rustc/node/kotlinc (the CI gate)
 mix run examples/lower_run.exs   # end-to-end area/1 lowering demo
 mix docs              # render ADRs + specs + module docs (ExDoc)
 ```

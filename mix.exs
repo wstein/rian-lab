@@ -33,6 +33,11 @@ defmodule RianLab.MixProject do
     ]
   end
 
+  # `test.all` is an alias, so it would default to the `:dev` env; force `:test`.
+  def cli do
+    [preferred_envs: ["test.all": :test]]
+  end
+
   # `dev/` holds the ExDoc-dependent doc tooling (`Rian.DocFormatter`); it compiles
   # only in `:dev`/`:test`, where ExDoc is a dependency. `:prod` builds `lib/` alone.
   defp elixirc_paths(:prod), do: ["lib"]
@@ -104,7 +109,20 @@ defmodule RianLab.MixProject do
       # `mix examples` runs the end-to-end area/1 lowering demo through the
       # compiled app. Each driver in examples/*.exs is independently runnable
       # via `mix run`; the annotated source tour lives in examples/rian/.
-      examples: ["run --no-start examples/lower_run.exs"]
+      examples: ["run --no-start examples/lower_run.exs"],
+      # `mix test.all` runs EVERYTHING incl. the external-toolchain tests
+      # (kotlinc/rustc/node) that the default `mix test` excludes for speed.
+      # CI runs this — it is the enforced gate (see test/test_helper.exs).
+      "test.all": &test_all/1
     ]
+  end
+
+  # Run the full suite with the external-toolchain tags included. The exclude
+  # policy lives in `test/test_helper.exs`, keyed off RIAN_TEST_ALL — this just
+  # flips that switch, so the env var is the single source of truth. Forwards any
+  # extra args (e.g. `mix test.all --cover`).
+  defp test_all(args) do
+    System.put_env("RIAN_TEST_ALL", "1")
+    Mix.Task.run("test", args)
   end
 end
