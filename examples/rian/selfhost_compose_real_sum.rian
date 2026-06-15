@@ -208,6 +208,9 @@ mod SelfhostComposeRealSum do
   def lower_surface({:id, x}) := CId(x)
   def lower_surface({:atom, n}) := CAtom(n)
   def lower_surface({:tuple, es}) := CTuple(lower_all(es))
+  # bare field access `obj.field` as a VALUE (not a call callee) -> a Core field-read
+  # (`maps:get`); struct field reads like `cd.name` in selfhost_exhaust.rian.
+  def lower_surface({:dot, obj, field}) := CDot(lower_surface(obj), field)
   def lower_surface({:bin, op, l, r}) := CBin(op, lower_surface(l), lower_surface(r))
   def lower_surface({:unary, op, x}) := CUnary(op, lower_surface(x))
   # a `Prim.X(args)` dot-call is a local intrinsic (`__prim_X`); any other

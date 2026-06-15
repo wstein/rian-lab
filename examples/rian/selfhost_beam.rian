@@ -27,6 +27,7 @@ mod SelfhostBeam do
              | CBin(String, Core, Core)
              | CCall(String, Vec(Core))
              | CRemote(String, String, Vec(Core))
+             | CDot(Core, String)
              | CTuple(Vec(Core))
              | CList(Vec(Core), Tail)
              | CIf(Core, Block, Block)
@@ -169,6 +170,9 @@ mod SelfhostBeam do
   # to reach the verified lexer/decl/beam modules. Lowers to the same `{:call, …,
   # {:remote, …}, …}` form Rian.Beam emits for qualified calls.
   def expr_form(CRemote(m, f, args)) := FRemote(m, f, expr_forms(args))
+  # struct field access `value.field` — a struct is a tagged map keyed by field-name
+  # atoms (Rian.Beam), so reading a field is `maps:get(:field, value)`.
+  def expr_form(CDot(h, f)) := FRemote("maps", "get", [FAtom(f), expr_form(h)])
   def expr_form(CTuple(es)) := FTuple(expr_forms(es))
   def expr_form(CList(es, TClose)) := list_form(expr_forms(es), FNil)
   def expr_form(CList(es, TTail(t))) := list_form(expr_forms(es), expr_form(t))

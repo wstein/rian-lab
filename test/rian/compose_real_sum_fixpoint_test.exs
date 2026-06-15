@@ -68,6 +68,14 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "def mk(n Int53) Tuple := {:ok, n}\ndef unwrap(t Tuple) Int53\ndef unwrap({:ok, v}) := v",
       [{:mk, [7]}, {:mk, [0]}, {:unwrap, [{:ok, 9}]}]
     },
+    # struct FIELD ACCESS `c.name` as a value — a Core field-read (`maps:get`); the
+    # form selfhost_exhaust.rian uses (`cd.name`/`cd.ar`/`td.ctors`). A struct is a
+    # tagged map, so a plain map carrying the field keys exercises the read path.
+    {
+      "struct CD(name String, ar Int53)\ndef gname(c CD) String := c.name\ndef gar(c CD) Int53 := c.ar",
+      "struct CD(name String, ar Int53)\ndef gname(c CD) String := c.name\ndef gar(c CD) Int53 := c.ar",
+      [{:gname, [%{name: "x", ar: 7}]}, {:gar, [%{name: "y", ar: 42}]}]
+    },
     # `if` — now in selfhost_decl's surface (ADR-0063 widening); compiles end to end
     {
       "def max(a, b) := if a > b do a else b end\ndef min(a, b) := if a < b do a else b end",
