@@ -198,6 +198,15 @@ defmodule Rian.DeclFixpointTest do
 
   defp group([{:d_opaque, name, base} | rest]),
     do: [%Rian.IR.Opaque{name: name, base: base, pub?: false, doc: nil, ops: [], casts: []} | group(rest)]
+
+  # a `protocol` becomes the bare-map protocol record Rian.Decl builds (tagged
+  # `:proto` so to_prog can collect it). Method params/ret arrive already detokenized
+  # from the front-end; assoc parsing is a documented tail (empty here).
+  defp group([{:d_protocol, name, methods} | rest]) do
+    ms = Enum.map(methods, fn {:pm, n, p, r} -> %{name: n, params: p, ret: r} end)
+    [{:proto, %{name: name, methods: ms, assoc: []}} | group(rest)]
+  end
+
   defp group([{:d_struct, _, _} = s | rest]), do: [to_struct(s) | group(rest)]
   defp group([{:d_mod, _, _} = m | rest]), do: [to_mod(m) | group(rest)]
 
@@ -270,7 +279,8 @@ defmodule Rian.DeclFixpointTest do
       structs: Enum.filter(ir, &match?(%Struct{}, &1)),
       mods: Enum.filter(ir, &match?(%Mod{}, &1)),
       ranges: Enum.filter(ir, &match?(%Rian.IR.Range{}, &1)),
-      opaques: Enum.filter(ir, &match?(%Rian.IR.Opaque{}, &1))
+      opaques: Enum.filter(ir, &match?(%Rian.IR.Opaque{}, &1)),
+      protocols: for({:proto, m} <- ir, do: m)
     }
   end
 
@@ -580,7 +590,7 @@ defmodule Rian.DeclFixpointTest do
 
     ref_unportable? =
       ref
-      |> Map.drop([:types, :structs, :funcs, :mods, :ranges, :opaques])
+      |> Map.drop([:types, :structs, :funcs, :mods, :ranges, :opaques, :protocols])
       |> Map.values()
       |> Enum.any?(fn v -> v not in [[], nil, %{}] end)
 
@@ -589,6 +599,7 @@ defmodule Rian.DeclFixpointTest do
       prog.structs == ref.structs and
       prog.ranges == ref.ranges and
       prog.opaques == ref.opaques and
+      prog.protocols == ref.protocols and
       Enum.map(prog.funcs, &norm_func/1) == Enum.map(ref.funcs, &norm_func/1) and
       Enum.map(prog.mods, &norm_mod/1) == Enum.map(ref.mods, &norm_mod/1)
   rescue
@@ -620,7 +631,7 @@ defmodule Rian.DeclFixpointTest do
     {"const", "mod M do\n  const MAX Int64 := 100\nend", true},
     {"use", "mod M do\n  use Foo\nend", true},
     {"macro", "macro double(x) := x + x\ndef f() Int64 := double(2)", true},
-    {"protocol", "protocol Show do\n  def show(x Int64) String\nend", false},
+    {"protocol", "protocol Show do\n  def show(x Int64) String\nend", true},
     {"impl",
      "protocol Show do\n  def show(x Int64) String\nend\n" <>
        "impl Show for Int64 do\n  def show(n) := \"an int\"\nend", false}

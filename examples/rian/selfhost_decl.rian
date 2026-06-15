@@ -93,7 +93,12 @@ mod SelfhostDecl do
     | DConst(String, String, String)
     | DRange(String, String, Int53, Int53)
     | DOpaque(String, String)
+    | DProtocol(String, Vec(PMethod))
     | DErr
+
+  # a protocol method signature: name + detokenized parameter string + return type
+  # string (the raw forms Rian.Decl stores, which are `Lexer.detokenize` output).
+  type PMethod := PM(String, String, String)
 
   # result pairs (a value + the unconsumed tokens)
   type Parse := P(Expr, Vec(Tok))
@@ -111,6 +116,7 @@ mod SelfhostDecl do
   type ArmRes := AR(CaseArm, Vec(Tok))
   type ArmsRes := ARs(Vec(CaseArm), Vec(Tok))
   type Gen := GR(Vec(TVar), Vec(Tok))
+  type LineRes := LR(Vec(Tok), Vec(Tok))
   type TVarRes := TVR(TVar, Vec(Tok))
   type BoundRes := BR(Vec(String), Vec(Tok))
 
@@ -168,6 +174,15 @@ mod SelfhostDecl do
           P(b, rest2) -> expand_in(Mac(name, params, b), parse_program(rest2))
         end
       TL(_, other) -> parse_program(other)
+    end
+  end
+  # `protocol Name do <method sigs> end` — a protocol declaration. Unlike a `def`,
+  # its method signatures keep their parameter/return strings RAW (the detokenized
+  # form Rian.Decl stores). No dispatcher is generated until an `impl` exists, so a
+  # protocol on its own is just a `protocols` record (collected at the top level).
+  pub def parse_program([TKw("protocol"), TId(name), TKw("do") | rest])
+    case take_block(rest, 1, []) do
+      BRes(body, after) -> [DProtocol(name, parse_pmethods(body)) | parse_program(after)]
     end
   end
   pub def parse_program([TKw("struct") | rest])
@@ -310,6 +325,58 @@ mod SelfhostDecl do
   def subst_stmts(_, []) := []
   def subst_stmts(env, [SBind(n, e) | rest]) := [SBind(n, subst_e(env, e)) | subst_stmts(env, rest)]
   def subst_stmts(env, [SExpr(e) | rest]) := [SExpr(subst_e(env, e)) | subst_stmts(env, rest)]
+
+  # ── protocol method parsing ───────────────────────────────────────────────
+  # parse the `def name(params) Ret` method signatures inside a `protocol` block.
+  # Each method's parameter and return strings are kept RAW via `detok` (matching
+  # Rian.Decl, which stores `Lexer.detokenize` output). Non-`def` lines (blank /
+  # associated-type `type Elem`) are skipped — assoc parsing is a documented tail.
+  def parse_pmethods(ts Vec(Tok)) Vec(PMethod)
+  def parse_pmethods([]) := []
+  def parse_pmethods([TNL | rest]) := parse_pmethods(rest)
+  def parse_pmethods([TKw("def"), TId(name), TLP | rest])
+    case take_parens(rest, 0, []) do
+      Paren(inside, after) ->
+        case take_line(after, []) do
+          LR(ret_toks, rest2) -> [PM(name, detok(inside), detok(ret_toks)) | parse_pmethods(rest2)]
+        end
+    end
+  end
+  def parse_pmethods([_ | rest]) := parse_pmethods(rest)
+
+  # collect tokens up to (and consuming) the next newline.
+  def take_line(ts Vec(Tok), acc Vec(Tok)) LineRes
+  def take_line([], acc) := LR(rev_tok(acc, []), [])
+  def take_line([TNL | rest], acc) := LR(rev_tok(acc, []), rest)
+  def take_line([t | rest], acc) := take_line(rest, [t | acc])
+
+  # render a token list back to source text, space-joined — a port of
+  # `Rian.Lexer.detokenize` (which is `Enum.map_join(" ", …)`). String escaping and
+  # `Char` source rendering are the documented tail (they don't appear in the type
+  # signatures / impl bodies the protocol port reconstructs).
+  def detok(ts Vec(Tok)) String
+  def detok([]) := ""
+  def detok([t]) := tok_text(t)
+  def detok([t | rest]) := Prim.str_concat(tok_text(t), Prim.str_concat(" ", detok(rest)))
+
+  def tok_text(t Tok) String
+  def tok_text(TId(s)) := s
+  def tok_text(TKw(s)) := s
+  def tok_text(TNum(s)) := s
+  def tok_text(TOp(s)) := s
+  def tok_text(TAnnot(s)) := Prim.str_concat("@", s)
+  def tok_text(TLP) := "("
+  def tok_text(TRP) := ")"
+  def tok_text(TLBracket) := "["
+  def tok_text(TRBracket) := "]"
+  def tok_text(TLBrace) := "{"
+  def tok_text(TRBrace) := "}"
+  def tok_text(TComma) := ","
+  def tok_text(TNL) := " "
+  # the wildcard covers `TChar` and `TStr` — char `'c'` source rendering and string
+  # re-quoting are the documented tail (neither appears in the type signatures the
+  # protocol port reconstructs; impl bodies, which DO carry strings, are a later rung).
+  def tok_text(_) := "?"
 
   # parse a standalone EXPRESSION from a token list (the driver uses this to inline
   # an `@external(:ex, "host expr")` body, ADR-0068). Trailing tokens are ignored.
