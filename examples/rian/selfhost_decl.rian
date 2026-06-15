@@ -87,6 +87,7 @@ mod SelfhostDecl do
     | DExtern(String, String)
     | DDoc(String)
     | DTest
+    | DTargets(Vec(String))
     | DErr
 
   # result pairs (a value + the unconsumed tokens)
@@ -148,6 +149,14 @@ mod SelfhostDecl do
   # `@test` — marks the FOLLOWING `def` as a test; emits a DTest the projection folds
   # into the next function's `test?` flag (Rian.Decl).
   pub def parse_program([TAnnot("test") | rest]) := [DTest | parse_program(rest)]
+  # `@targets(ex, js)` — restricts the FOLLOWING `mod` to a target set; emits a
+  # DTargets the projection folds into the next module's `targets` (Rian.Decl). The
+  # comma-separated id list reuses parse_typelist.
+  pub def parse_program([TAnnot("targets"), TLP | rest])
+    case parse_typelist(rest) do
+      TL(tgts, rest2) -> [DTargets(tgts) | parse_program(rest2)]
+    end
+  end
   pub def parse_program([_ | rest]) := parse_program(rest)
 
   # parse a standalone EXPRESSION from a token list (the driver uses this to inline

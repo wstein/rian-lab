@@ -200,6 +200,14 @@ defmodule Rian.DeclFixpointTest do
     end
   end
 
+  # a `@targets(...)` restricts the following module to a target set (Rian.Decl).
+  defp group([{:d_targets, tgts} | rest]) do
+    case group(rest) do
+      [%Mod{} = m | more] -> [%{m | targets: Enum.map(tgts, &String.to_atom/1)} | more]
+      other -> other
+    end
+  end
+
   # a run of `@external` annotations attaches to the following bodiless `def` as the
   # func's `externals` map (clauses stay empty — the body is host-provided), matching
   # Rian.Decl.attach_external.
@@ -581,7 +589,7 @@ defmodule Rian.DeclFixpointTest do
     # --- not yet ported: the oracle handles these; the port skips / errors / drops a modifier ---
     {"@doc", ~s|@doc "d"\ndef f() Int64 := 1|, true},
     {"@test", "@test def t() Bool := true", true},
-    {"@targets", "@targets(ex, js)\nmod M do\n  def f() Int64 := 1\nend", false},
+    {"@targets", "@targets(ex, js)\nmod M do\n  def f() Int64 := 1\nend", true},
     {"pub type", "pub type C := A | B", false},
     {"range", "range Digit := 0 .. 9", false},
     {"opaque", "opaque Id := Int64", false},
