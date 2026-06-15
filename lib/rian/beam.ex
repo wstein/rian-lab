@@ -579,6 +579,15 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, s),
     do: remote_call(:erlang, "integer_to_binary", [n], s)
 
+  # float → shortest-round-trip string (ADR-0069 Float64 unlock): native
+  # `erlang:float_to_binary(F, [short])`; `Rian.Show.float` normalizes to ECMAScript.
+  defp expr_form(%ECall{fun: %EId{name: "__prim_float_repr"}, args: [n]}, s) do
+    short = {:cons, @ln, {:atom, @ln, :short}, {nil, @ln}}
+
+    {:call, @ln, {:remote, @ln, {:atom, @ln, :erlang}, {:atom, @ln, :float_to_binary}},
+     [expr_form(n, s), short]}
+  end
+
   # integer → float (ADR-0035 explicit conversion): native `erlang:float/1`
   defp expr_form(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}, s),
     do: remote_call(:erlang, "float", [n], s)

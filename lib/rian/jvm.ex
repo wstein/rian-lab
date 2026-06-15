@@ -365,6 +365,11 @@ defmodule Rian.JVM do
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
     do: "(#{expr_kt(n)}).toString()"
 
+  # float → shortest-round-trip string (ADR-0069 Float64 unlock); `Rian.Show.float`
+  # normalizes to the ECMAScript canonical. Kotlin `Double.toString` is shortest.
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_float_repr"}, args: [n]}),
+    do: "(#{expr_kt(n)}).toString()"
+
   # variadic single-shot join (ADR-0069 §6): a flat `+` chain — every part is
   # already a String; the Kotlin compiler lowers it to a single StringBuilder.
   defp expr_kt(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}),

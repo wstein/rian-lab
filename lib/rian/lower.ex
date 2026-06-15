@@ -1625,6 +1625,15 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, :elixir),
     do: {"Integer.to_string(#{p(n, 0, :elixir)})", 12}
 
+  # float → shortest-round-trip scientific (ADR-0069 Float64 unlock); `Rian.Show.float`
+  # normalizes it to the ECMAScript canonical. Rust `{:e}` and Erlang `[:short]` both
+  # carry the unique shortest digits (different presentation, same digits).
+  defp emit(%ECall{fun: %EId{name: "__prim_float_repr"}, args: [n]}, :rust),
+    do: {"format!(\"{:e}\", #{p(n, 0, :rust)})", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_float_repr"}, args: [n]}, :elixir),
+    do: {":erlang.float_to_binary(#{p(n, 0, :elixir)}, [:short])", 12}
+
   # integer → float (ADR-0035 explicit conversion): Rust `n as f64`, Elixir `n * 1.0`
   defp emit(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}, :rust),
     do: {"(#{p(n, 12, :rust)} as f64)", 12}

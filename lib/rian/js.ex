@@ -598,6 +598,13 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
     do: "String(#{expr_js(n)})"
 
+  # float → its shortest-round-trip scientific form (ADR-0069 Float64 unlock): the
+  # *digits* are unique across targets; `Rian.Show.float` (portable Rian) normalizes
+  # this to the ECMAScript canonical. `toExponential()` (no arg) gives the shortest
+  # mantissa with an explicit signed exponent, e.g. `0.1 -> "1e-1"`.
+  defp expr_js(%ECall{fun: %EId{name: "__prim_float_repr"}, args: [n]}),
+    do: "(#{expr_js(n)}).toExponential()"
+
   # integer → float (ADR-0035 explicit conversion): `Number(n)` widens a `number`
   # or a `BigInt` (`Number(5n)` === 5) to a JS number (Float64)
   defp expr_js(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}),
