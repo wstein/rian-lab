@@ -619,7 +619,7 @@ defmodule Rian.DeclFixpointTest do
     {"alias", "alias Id := Int64\ndef f(x Id) Id := x", true},
     {"const", "mod M do\n  const MAX Int64 := 100\nend", true},
     {"use", "mod M do\n  use Foo\nend", true},
-    {"macro", "macro double(x) := x + x\ndef f() Int64 := double(2)", false},
+    {"macro", "macro double(x) := x + x\ndef f() Int64 := double(2)", true},
     {"protocol", "protocol Show do\n  def show(x Int64) String\nend", false},
     {"impl",
      "protocol Show do\n  def show(x Int64) String\nend\n" <>
