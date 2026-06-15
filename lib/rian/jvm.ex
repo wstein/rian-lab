@@ -34,9 +34,11 @@ defmodule Rian.JVM do
   guards; and **sum variants** — a `type` lowers to a sealed hierarchy, a
   construction `Ctor(a, …)` to a data-class constructor (nullary → an `object`),
   with clause patterns that smart-cast (`a0 is Ctor`) and recurse into positional
-  fields (`a0.f0`, nested + literal patterns supported). **Not yet** (raise
-  `Rian.JVM.Unsupported`): tuples, lists/`Vec`, maps, structs, `case`,
-  atoms/`Symbol`, `with`, lambdas, protocols, general FFI.
+  fields (`a0.f0`, nested + literal patterns supported). A `case` expression lowers
+  to a labelled `run rcase@{ … }` whose arms reuse the clause dispatcher's
+  smart-cast/literal tests, binds, and guard handling. **Not yet** (raise
+  `Rian.JVM.Unsupported`): tuples, lists/`Vec`, maps, structs, atoms/`Symbol`,
+  `with`, lambdas, protocols, general FFI.
 
   ## Capabilities
 
@@ -54,6 +56,7 @@ defmodule Rian.JVM do
     EBin,
     EBlock,
     ECall,
+    ECase,
     EChar,
     EId,
     EIf,
@@ -104,7 +107,6 @@ defmodule Rian.JVM do
     Core.ETuple => "a tuple",
     Core.EList => "a list / `Vec`",
     Core.EMap => "a map",
-    Core.ECase => "a `case` expression",
     Core.EStruct => "a struct construction"
   }
   defp reject_unsupported!(funcs) do
@@ -387,11 +389,50 @@ defmodule Rian.JVM do
   defp expr_kt(%EIf{cond: c, then: t, else: e}),
     do: "if (#{expr_kt(c)}) #{branch_kt(t)} else #{branch_kt(e)}"
 
+  # `case` is an expression: a labelled `run` whose arms test the scrutinee like
+  # the clause dispatcher and `return@rcase` the matching body. Reuses `pat_match`
+  # for the smart-cast/literal tests + binds; a `when` guard rides an inner `if`.
+  # The scrutinee is bound once (skipped when it is already a bare variable).
+  defp expr_kt(%ECase{scrut: scrut, arms: arms}) do
+    {decl, acc} =
+      case scrut do
+        %EId{name: n} -> {[], n}
+        other -> {["val __s = #{expr_kt(other)}"], "__s"}
+      end
+
+    {arm_lines, closed?} = case_arms(arms, acc)
+    tail = if closed?, do: [], else: ["throw RuntimeException(\"case: no clause matched\")"]
+    # statements are newline-separated (Kotlin does not accept space-separated ones)
+    "run rcase@{\n" <> Enum.join(decl ++ arm_lines ++ tail, "\n") <> "\n}"
+  end
+
   defp expr_kt(other), do: raise(Unsupported, "jvm: expression #{inspect(other)}")
 
   defp branch_kt(%EBlock{stmts: [{:expr, e}]}), do: expr_kt(e)
   defp branch_kt(%EBlock{stmts: stmts}), do: block_value(stmts)
   defp branch_kt(expr), do: expr_kt(expr)
+
+  # Emit `case` arms top-to-bottom, mirroring `clause_lines`: a structural test is
+  # an `if`, a guard-only arm a scoped `run { … }`, and an unconditional arm closes
+  # the `run` (drop the rest + the trailing throw). `branch_kt` yields the arm body.
+  defp case_arms(arms, acc) do
+    {lines, closed?} =
+      Enum.reduce_while(arms, {[], false}, fn {pat, guard, body}, {ls, _} ->
+        {tests, binds} = pat_match(pat, acc)
+        stmt = bind_str(binds) <> guarded_arm(branch_kt(body), guard)
+
+        case {tests, guard} do
+          {[], nil} -> {:halt, {["#{stmt}" | ls], true}}
+          {[], _g} -> {:cont, {["run { #{stmt} }" | ls], false}}
+          _ -> {:cont, {["if (#{Enum.join(tests, " && ")}) { #{stmt} }" | ls], false}}
+        end
+      end)
+
+    {Enum.reverse(lines), closed?}
+  end
+
+  defp guarded_arm(body_kt, nil), do: "return@rcase #{body_kt}"
+  defp guarded_arm(body_kt, g), do: "if (#{expr_kt(g)}) { return@rcase #{body_kt} }"
 
   # ── helpers ─────────────────────────────────────────────────────────────
   # Int64 -> a Kotlin `Long` literal (`42L`); a Float64 literal is a Kotlin Double

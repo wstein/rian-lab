@@ -481,6 +481,77 @@ defmodule Rian.JVMTest do
     end
   end
 
+  describe "case expressions" do
+    test "a `case` over a sum lowers to a labelled `run` with smart-cast arms" do
+      kt =
+        JVM.compile("""
+        type Shape := Circle(Float64) | Square(Float64)
+        def area(s Shape) Float64 := case s do
+          Circle(r) -> 3.14159 * r * r
+          Square(x) -> x * x
+        end
+        """)
+
+      assert kt =~ "run rcase@{"
+      assert kt =~ "if (s is Circle) { val r = s.f0; return@rcase ((3.14159 * r) * r) }"
+
+      case kotlin_run(kt, ~s|println(area(Circle(2.0))); println(area(Square(3.0)))|) do
+        :no_jvm -> :ok
+        out -> assert out == "12.56636\n9.0"
+      end
+    end
+
+    test "a `case` with literal, guard, and catch-all arms runs" do
+      kt =
+        JVM.compile("""
+        def sign(n Int64) String := case n do
+          0 -> "zero"
+          m when m < 0 -> "neg"
+          m -> "pos"
+        end
+        """)
+
+      assert kt =~ ~s|if (n == 0L) { return@rcase "zero" }|
+      # guard-only arm is a scoped run; catch-all closes the case (no trailing throw)
+      assert kt =~ ~s|run { val m = n; if ((m < 0L)) { return@rcase "neg" } }|
+      refute kt =~ "no clause matched"
+
+      case kotlin_run(kt, ~s|println(sign(0L)); println(sign(-5L)); println(sign(7L))|) do
+        :no_jvm -> :ok
+        out -> assert out == "zero\nneg\npos"
+      end
+    end
+
+    test "nested `case` and a non-variable scrutinee compile and run" do
+      kt =
+        JVM.compile("""
+        type Tri := A | B | C
+        def nested(x Tri, y Tri) Int64 := case x do
+          A -> case y do
+            A -> 1
+            other -> 2
+          end
+          rest -> 9
+        end
+        def bumped(n Int64) Int64 := case n + 1 do
+          0 -> 100
+          m -> m
+        end
+        """)
+
+      # the scrutinee `n + 1` is bound once; nested `return@rcase` targets the inner run
+      assert kt =~ "val __s = (n + 1L)"
+
+      case kotlin_run(
+             kt,
+             ~s|println(nested(A, A)); println(nested(A, B)); println(nested(B, A)); println(bumped(-1L)); println(bumped(4L))|
+           ) do
+        :no_jvm -> :ok
+        out -> assert out == "1\n2\n9\n100\n5"
+      end
+    end
+  end
+
   describe "@external lowering edge (ADR-0068)" do
     test "an @external fn with no `:jvm` body raises (off :jvm, never a stub)" do
       # an `:ex`-only external is not reachable on :jvm; asking the JVM emitter for

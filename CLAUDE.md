@@ -66,7 +66,7 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
      `Unsupported`).
    - **`Rian.JVM`** — Kotlin/JVM (ADR-0049 **Tier 2**); a direct source emitter on Core, like JS.
      MVP: functions, primitives, operators, `if`, sum variants (→ `sealed interface` + `data class` +
-     smart-cast patterns); lists/maps/structs/`case`/FFI raise `Unsupported`. Verified via
+     smart-cast patterns); lists/maps/structs/FFI raise `Unsupported` (`case` is supported). Verified via
      `kotlinc`+`java`. `:jvm` is now in the `Rian.Reach` target vocabulary.
 
 **Consequence for any new language feature:** a new AST node must be threaded through `Pratt` → `Core`

@@ -143,7 +143,7 @@ defmodule Rian.SelfHost do
       source: "selfhost_jvm.rian",
       test: "test/rian/jvm_module_fixpoint_test.exs",
       note:
-        "the whole-module Kotlin emitter — sum types (sealed interface + object/data class), functions with multi-clause pattern dispatch (is/smart-cast tests + binds + trailing throw), if, operators, prims — equals Rian.JVM.compile over its full SUPPORTED surface; lists/maps/case/lambda/@external/Shadow are reference gaps, not port gaps"
+        "the whole-module Kotlin emitter — sum types (sealed interface + object/data class), functions with multi-clause pattern dispatch (is/smart-cast tests + binds + trailing throw), if, operators, prims — equals Rian.JVM.compile over its full SUPPORTED surface; lists/maps/lambda/@external/Shadow are reference gaps, not port gaps (`case` is a reference feature the port's surface does not yet emit)"
     }
   ]
 

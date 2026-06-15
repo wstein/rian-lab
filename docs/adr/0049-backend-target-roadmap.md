@@ -50,7 +50,8 @@ fourth backend with no new fork (ADR-0050) and the second proof of that thesis a
 **Scope (MVP):** functions (single/multi-clause), `Int64`/`Float64`/`Bool`/`String`, operators,
 `if`, local calls, `when` guards, and sum variants — verified end-to-end (the `selfhost_opt` optimizer
 lowers to Kotlin, compiles with `kotlinc`, and folds correctly under `java`). Lists/`Vec`, maps,
-structs, `case`, protocols, and FFI raise `Rian.JVM.Unsupported` (the next increments). Per ADR-0026
+structs, protocols, and FFI raise `Rian.JVM.Unsupported` (the next increments). `case` is supported
+(a labelled `run` whose arms reuse the clause dispatcher). Per ADR-0026
 parity, JVM CI stays **non-blocking** until promoted (and `kotlinc`/`java` are absent from the
 Erlang-only CI image, so the run-tests no-op there, like the `node`/`rustc` pattern).
 
@@ -122,7 +123,7 @@ explicit rule, not by momentum:
 4. **Target budget.** Adding target N+1 is a decision with a cost (it can only *narrow* the LCD), made
    explicitly — not a default. The current order of business is **self-hosting the Gleam-proven
    BEAM+JS core** (ADR-0063) before widening; **JVM stays Tier 2** under rule 1 (its MVP does not claim
-   portable-core parity — lists/maps/`case`/FFI raise `Unsupported`), which is the rule working as
+   portable-core parity — lists/maps/FFI raise `Unsupported`), which is the rule working as
    intended, not a gap to paper over.
 
 **The gate is mechanized** — `Rian.ConformanceTest` (`test/rian/conformance_test.exs`) compiles and
@@ -133,7 +134,7 @@ arithmetic / `div`-`rem` / comparison / multi-clause recursion + guards): lists/
 sum-type `match` are portable on `:ex`/`:js` but have open gaps in the **Rust** `@test`-harness lowering
 (duplicate-type / type-mismatch emission), so they are not yet all-Tier-1 green and join the corpus when
 that lands. **JVM audit (2026-06-14):** `Rian.JVM` compiles the scalar corpus but raises `Unsupported`
-on portable-core lists/maps/`case`/structs/strings/FFI (`jvm_test.exs`), so it cannot pass the *full*
+on portable-core lists/maps/structs/strings/FFI (`jvm_test.exs`), so it cannot pass the *full*
 portable-core matrix → **Tier 2 by rule 1**, confirmed.
 
 ### 6. Roadmap sequence
