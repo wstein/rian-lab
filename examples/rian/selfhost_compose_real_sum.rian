@@ -439,6 +439,11 @@ mod SelfhostComposeRealSum do
   def inflate_all([]) := []
   def inflate_all([f | rest]) := [inflate(f) | inflate_all(rest)]
 
+  # each join part is a `/binary` bit-string segment (str_concat_all).
+  def inflate_bin_segs(Vec(Form)) Vec(Tuple)
+  def inflate_bin_segs([]) := []
+  def inflate_bin_segs([f | rest]) := [{:bin_element, 0, inflate(f), :default, [:binary]} | inflate_bin_segs(rest)]
+
   def inflate_flds(Vec(FFld)) Vec(Tuple)
   def inflate_flds([]) := []
   def inflate_flds([FFld(k, v) | rest]) := [{:map_field_assoc, 0, {:atom, 0, Prim.str_to_atom(k)}, inflate(v)} | inflate_flds(rest)]
@@ -460,6 +465,10 @@ mod SelfhostComposeRealSum do
   def inflate(FRemote(m, fun, args)) := {:call, 0, {:remote, 0, {:atom, 0, Prim.str_to_atom(m)}, {:atom, 0, Prim.str_to_atom(fun)}}, inflate_all(args)}
   # `<>` — binary construction `<<L/binary, R/binary>>` (Rian.Beam), not an op.
   def inflate(FConcat(l, r)) := {:bin, 0, [{:bin_element, 0, inflate(l), :default, [:binary]}, {:bin_element, 0, inflate(r), :default, [:binary]}]}
+  # a variadic single-shot binary join (str_concat_all) — one `<<seg, …>>` form.
+  def inflate(FBinAll(parts)) := {:bin, 0, inflate_bin_segs(parts)}
+  # a Char's UTF-8 string `<<cp/utf8>>` (char_to_string).
+  def inflate(FCharBin(c)) := {:bin, 0, [{:bin_element, 0, inflate(c), :default, [:utf8]}]}
   # a nullary constructor (pattern or value) is its snake_case atom; an applied
   # constructor is a tagged tuple {tag, arg, …} — the BEAM rep of a sum value.
   def inflate(FCtorN(c)) := {:atom, 0, to_snake(c)}

@@ -68,6 +68,8 @@ mod SelfhostBeam do
              | FOp1(String, Form)
              | FOp2(String, Form, Form)
              | FConcat(Form, Form)
+             | FBinAll(Vec(Form))
+             | FCharBin(Form)
              | FCall(String, Vec(Form))
              | FRemote(String, String, Vec(Form))
              | FTuple(Vec(Form))
@@ -178,6 +180,16 @@ mod SelfhostBeam do
   def expr_form(CCall("__prim_str_chars", [s])) := FRemote("Elixir.String", "to_charlist", [expr_form(s)])
   def expr_form(CCall("__prim_str_from_chars", [cs])) := FRemote("Elixir.List", "to_string", [expr_form(cs)])
   def expr_form(CCall("__prim_char_code", [c])) := expr_form(c)
+  def expr_form(CCall("__prim_int_to_float", [n])) := FRemote("erlang", "float", [expr_form(n)])
+  # a Char's single-character UTF-8 string is `<<cp/utf8>>` (a Char IS its codepoint).
+  def expr_form(CCall("__prim_char_to_string", [c])) := FCharBin(expr_form(c))
+  # variadic single-shot join (ADR-0069 §6): ONE binary from all parts.
+  def expr_form(CCall("__prim_str_concat_all", args)) := FBinAll(expr_forms(args))
+  # portable Map ops -> a BEAM map literal + `:maps` calls (arg order: key, [val,] map).
+  def expr_form(CCall("__prim_map_new", [])) := FMap([])
+  def expr_form(CCall("__prim_map_get", [m, k])) := FRemote("maps", "get", [expr_form(k), expr_form(m)])
+  def expr_form(CCall("__prim_map_put", [m, k, v])) := FRemote("maps", "put", [expr_form(k), expr_form(v), expr_form(m)])
+  def expr_form(CCall("__prim_map_has", [m, k])) := FRemote("maps", "is_key", [expr_form(k), expr_form(m)])
   def expr_form(CCall(f, args))
     if pascal(f) do
       FCtor(f, expr_forms(args))

@@ -110,7 +110,18 @@ defmodule Rian.SelfhostBuildTest do
     # string escapes: the lexer decodes `\n`/`\t`/`\"`/`\\` to codepoints (reusing
     # char_esc), so an escaped string is the real bytes — not the literal backslash.
     {"string escape newline", ~S|def f() String := "a\nb"|, :f, [], "a\nb"},
-    {"string escape quote", ~S|def f() String := "a\"b"|, :f, [], "a\"b"}
+    {"string escape quote", ~S|def f() String := "a\"b"|, :f, [], "a\"b"},
+    # portable-prelude prims (ADR-0047): selfhost_beam lowers each to the same native
+    # Erlang form as Rian.Beam — Map ops (`:maps` + map literal), `char_to_string`
+    # (`<<cp/utf8>>`), `int_to_float`, and the variadic `str_concat_all` join.
+    {"prim map put/get", "def f() Int53 := Prim.map_get(Prim.map_put(Prim.map_new(), :a, 7), :a)",
+     :f, [], 7},
+    {"prim map has", "def f() Bool := Prim.map_has(Prim.map_put(Prim.map_new(), :a, 1), :b)", :f,
+     [], false},
+    {"prim char_to_string", "def f() String := Prim.char_to_string('Z')", :f, [], "Z"},
+    {"prim int_to_float", "def f() Float64 := Prim.int_to_float(3)", :f, [], 3.0},
+    {"prim str_concat_all", "def f() String := Prim.str_concat_all(\"a\", \"b\", \"c\")", :f, [],
+     "abc"}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do
