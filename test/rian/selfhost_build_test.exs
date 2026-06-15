@@ -106,7 +106,11 @@ defmodule Rian.SelfhostBuildTest do
     {"integer div/rem", "def dr(a Int53, b Int53) Tuple := {a div b, a rem b}", :dr, [17, 5],
      {3, 2}},
     {"not-equal", "def ne(a Int53, b Int53) Bool := a != b", :ne, [1, 2], true},
-    {"unary not", "def neg(b Bool) Bool := not b", :neg, [true], false}
+    {"unary not", "def neg(b Bool) Bool := not b", :neg, [true], false},
+    # string escapes: the lexer decodes `\n`/`\t`/`\"`/`\\` to codepoints (reusing
+    # char_esc), so an escaped string is the real bytes — not the literal backslash.
+    {"string escape newline", ~S|def f() String := "a\nb"|, :f, [], "a\nb"},
+    {"string escape quote", ~S|def f() String := "a\"b"|, :f, [], "a\"b"}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do

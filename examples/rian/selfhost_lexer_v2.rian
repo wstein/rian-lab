@@ -138,6 +138,10 @@ mod SelfhostLexerV2 do
   # ── string / char literals (slice 3) ─────────────────────────────────────
   def scan_str(cs Vec(Char), acc Vec(Char)) Vec(Tok)
   def scan_str(['"' | rest], acc) := [TStr(Prim.str_from_chars(rev(acc, []))) | lex(rest)]
+  # a backslash escape decodes to its codepoint (reusing `char_esc`, shared with the
+  # char-literal scanner): `\n` → 10, `\"` → 34 (an escaped quote is NOT the close),
+  # `\\` → 92. MUST precede the plain-char clause.
+  def scan_str(['\\', e | rest], acc) := scan_str(rest, [char_esc(e) | acc])
   def scan_str([c | rest], acc) := scan_str(rest, [c | acc])
   def scan_str([], acc) := [TStr(Prim.str_from_chars(rev(acc, [])))]
 
@@ -164,6 +168,7 @@ mod SelfhostLexerV2 do
   def char_esc('\\') := 92
   def char_esc('\'') := 39
   def char_esc('\"') := 34
+  def char_esc('$') := 36
 
   # ── identifiers / keyword classification (slices 1-2) ─────────────────────
   def lex_id(cs Vec(Char), chars Vec(Char)) Vec(Tok)

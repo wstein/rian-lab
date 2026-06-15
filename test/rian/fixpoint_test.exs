@@ -267,9 +267,10 @@ defmodule Rian.FixpointTest do
     {"line comment", "a # note\nb", true},
     {"significant newline", "a\nb", true},
     {"annotation @x", "@doc", true},
+    # string-body escapes now decode like the reference (`\n`/`\"`/`\\` via char_esc).
+    {"string-body escape", ~S|"a\nb"|, true},
     # --- the documented frontier: not yet lexed like the reference ---
     {"string interpolation ${}", ~S|"x=${n}"|, false},
-    {"string-body escape", ~S|"a\nb"|, false},
     {"char unicode escape", ~S|'\u{1F600}'|, false},
     {"heredoc", "\"\"\"\ndoc\n\"\"\"", false},
     {"keywords protocol/impl/opaque/abstract", "protocol", false}
