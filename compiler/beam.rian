@@ -201,6 +201,13 @@ mod SelfhostBeam do
   def expr_form(CCall("__prim_map_get", [m, k])) := FRemote("maps", "get", [expr_form(k), expr_form(m)])
   def expr_form(CCall("__prim_map_put", [m, k, v])) := FRemote("maps", "put", [expr_form(k), expr_form(v), expr_form(m)])
   def expr_form(CCall("__prim_map_has", [m, k])) := FRemote("maps", "is_key", [expr_form(k), expr_form(m)])
+  # Float64 shortest round-trip repr (ADR-0069 Show.float): native float_to_binary/2.
+  def expr_form(CCall("__prim_float_repr", [n])) := FRemote("erlang", "float_to_binary", [expr_form(n), FCons(FAtom("short"), FNil)])
+  # i64 two's-complement overflow ops (ADR-0035/0064): bind the sum once in a fun, then
+  # project — wrap to [-2^63, 2^63), saturate to the i64 bounds, or `Some`/`None` on overflow.
+  def expr_form(CCall("__prim_wrapping_add", [a, b])) := i64_ovf("wrapping", expr_form(a), expr_form(b))
+  def expr_form(CCall("__prim_saturating_add", [a, b])) := i64_ovf("saturating", expr_form(a), expr_form(b))
+  def expr_form(CCall("__prim_checked_add", [a, b])) := i64_ovf("checked", expr_form(a), expr_form(b))
   def expr_form(CCall(f, args))
     if pascal(f) do
       FCtor(f, expr_forms(args))
@@ -246,6 +253,20 @@ mod SelfhostBeam do
   def fld_pat_forms(Vec(FldP)) Vec(FFldP)
   def fld_pat_forms([]) := []
   def fld_pat_forms([FP(f, p) | rest]) := [FFP(f, pat_form(p)) | fld_pat_forms(rest)]
+
+  # ── i64 overflow projection (mirrors Rian.Beam.i64_overflow/i64_project) ──
+  # bind the sum once in a 1-clause fun, then project per kind. Masks exceed Int53 but
+  # are exact BEAM bignums at runtime; FInt only carries them through to the form.
+  def i64_ovf(kind String, a Form, b Form) Form := FApply(FFun(["OvfSum"], i64_project(kind, FVar("OvfSum"))), [FOp2("+", a, b)])
+
+  def i64_project(String, Form) Form
+  def i64_project("wrapping", sv) := FCase(FOp2(">=", i64_low(sv), FInt(9223372036854775808)), [FClause([FAtom("true")], GfNone, [FOp2("-", i64_low(sv), FInt(18446744073709551616))]), FClause([FAtom("false")], GfNone, [i64_low(sv)])])
+  def i64_project("saturating", sv) := FRemote("erlang", "max", [FRemote("erlang", "min", [sv, FInt(9223372036854775807)]), i64_min()])
+  def i64_project("checked", sv) := FCase(FOp2("and", FOp2(">=", sv, i64_min()), FOp2("<=", sv, FInt(9223372036854775807))), [FClause([FAtom("true")], GfNone, [FCtor("Some", [sv])]), FClause([FAtom("false")], GfNone, [FCtorN("None")])])
+
+  # the low 64 bits (`sum band (2^64-1)`); i64_min as `-(2^63)` (FInt is non-negative).
+  def i64_low(sv Form) Form := FOp2("band", sv, FInt(18446744073709551615))
+  def i64_min() Form := FOp1("-", FInt(9223372036854775808))
 
   # ── helpers (portable, FFI-free) ──
   def parse_int(s String) Int53 := digits(Prim.str_chars(s), 0)

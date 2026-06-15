@@ -142,7 +142,24 @@ defmodule Rian.SelfhostBuildTest do
      "def adder(n Int53) := (x) -> x + n\ndef f() Int53 := adder(10)(5)", :f, [], 15},
     {"two-param lambda",
      "def app2(g, a Int53, b Int53) Int53 := g(a, b)\n" <>
-       "def f() Int53 := app2((x, y) -> x * y, 6, 7)", :f, [], 42}
+       "def f() Int53 := app2((x, y) -> x * y, 6, 7)", :f, [], 42},
+    # niche prims (ADR-0035/0064/0069): the i64 two's-complement overflow ops and the
+    # Float64 shortest-round-trip repr. `wrapping_add` overflows MAX_i64 to MIN_i64;
+    # `checked_add` returns `:none` on overflow, `{:some, sum}` otherwise.
+    {"prim wrapping_add (no overflow)",
+     "def f(a Int64, b Int64) Int64 := Prim.wrapping_add(a, b)", :f, [40, 2], 42},
+    {"prim wrapping_add (overflow wraps)",
+     "def f(a Int64, b Int64) Int64 := Prim.wrapping_add(a, b)", :f,
+     [9_223_372_036_854_775_807, 1], -9_223_372_036_854_775_808},
+    {"prim saturating_add (caps at max)",
+     "def f(a Int64, b Int64) Int64 := Prim.saturating_add(a, b)", :f,
+     [9_223_372_036_854_775_807, 100], 9_223_372_036_854_775_807},
+    {"prim checked_add (none on overflow)",
+     "def f(a Int64, b Int64) Tuple := Prim.checked_add(a, b)", :f,
+     [9_223_372_036_854_775_807, 1], :none},
+    {"prim checked_add (some)", "def f(a Int64, b Int64) Tuple := Prim.checked_add(a, b)", :f,
+     [40, 2], {:some, 42}},
+    {"prim float_repr", "def f(x Float64) String := Prim.float_repr(x)", :f, [3.5], "3.5"}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do

@@ -640,6 +640,7 @@ mod SelfhostComposeRealSum do
   def op_atom("+") := :"+"
   def op_atom("-") := :"-"
   def op_atom("*") := :"*"
+  def op_atom("band") := :band
   def op_atom("/") := :"/"
   def op_atom("div") := :"div"
   def op_atom("rem") := :"rem"
