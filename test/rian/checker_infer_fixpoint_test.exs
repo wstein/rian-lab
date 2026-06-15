@@ -34,6 +34,11 @@ defmodule Rian.CheckerInferFixpointTest do
   defp inj(%Core.EIf{cond: c, then: t, else: e}), do: {:c_if, inj(c), inj(t), inj(e)}
   defp inj(%Core.EBlock{stmts: stmts}), do: {:c_block, Enum.map(stmts, &inj_stmt/1)}
   defp inj(%Core.ECase{scrut: s, arms: arms}), do: {:c_case, inj(s), Enum.map(arms, &inj_arm/1)}
+  defp inj(%Core.EList{elems: elems, tail: tail}), do: {:c_list, Enum.map(elems, &inj/1), inj_tail(tail)}
+
+  defp inj_tail(nil), do: :t_close
+  defp inj_tail(:close), do: :t_close
+  defp inj_tail(tail), do: {:t_cons, inj(tail)}
 
   defp inj_stmt({:expr, e}), do: {:s_expr, inj(e)}
   defp inj_stmt({:bind, n, e}), do: {:s_bind, n, inj(e)}
@@ -114,7 +119,12 @@ defmodule Rian.CheckerInferFixpointTest do
   _ -> "b"
 end|,
     "case n do\n  0 -> 1\n  _ -> true\nend",
-    "case n do\n  0 -> 1\n  m -> m\nend"
+    "case n do\n  0 -> 1\n  m -> m\nend",
+    # list literals — elements LUB-join to a concrete `Vec(T)`; empty / mixed → unknown
+    "[1, 2, 3]",
+    "[]",
+    "[1, 2.0]",
+    "[1, true]"
   ]
 
   describe "self-hosting checker fixpoint — Rian infer vs Rian.Check.infer" do
@@ -137,7 +147,9 @@ end|,
     "f" => "Float64",
     "w" => "Int8",
     "u8" => "UInt8",
-    "i64" => "Int64"
+    "i64" => "Int64",
+    "h" => "Int53",
+    "t" => "Vec(Int53)"
   }
   @env_corpus [
     "x",
@@ -181,7 +193,12 @@ end|,
     ~S|case s do
   "a" -> s
   v -> v
-end|
+end|,
+    # lists under the env: a cons `[h | t]` joins the head with the tail's element
+    # type; element widening applies.
+    "[h | t]",
+    "[x, y]",
+    "[x, f]"
   ]
 
   describe "self-hosting checker fixpoint — inference under a typing env" do
