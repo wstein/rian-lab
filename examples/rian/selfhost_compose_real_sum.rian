@@ -170,6 +170,18 @@ mod SelfhostComposeRealSum do
   # selfhost_decl's `If(cond, then, else)` (single-expr branches) -> selfhost_beam's
   # CIf with single-statement blocks; the backend lowers it to a `case` on the bool.
   def lower_surface({:"if", c, t, e}) := CIf(lower_surface(c), Block([SExpr(lower_surface(t))]), Block([SExpr(lower_surface(e))]))
+  # selfhost_decl's `Case(scrut, arms)` -> selfhost_beam's CCase; each arm's pattern
+  # reuses lower_pat, its single-expr body becomes a one-statement Block, and a
+  # `when` guard becomes GSome (CArm -> GNone).
+  def lower_surface({:"case", scrut, arms}) := CCase(lower_surface(scrut), lower_arms(arms))
+
+  def lower_arms(arms) Vec(Arm)
+  def lower_arms([]) := []
+  def lower_arms([a | rest]) := [lower_arm(a) | lower_arms(rest)]
+
+  def lower_arm(a) Arm
+  def lower_arm({:c_arm, pat, body}) := Arm(lower_pat(pat), GNone, Block([SExpr(lower_surface(body))]))
+  def lower_arm({:c_arm_g, pat, g, body}) := Arm(lower_pat(pat), GSome(lower_surface(g)), Block([SExpr(lower_surface(body))]))
 
   def callee_name(c) String
   # a `Prim.X(args)` dot-call normalizes to the canonical `__prim_X` intrinsic name
@@ -258,6 +270,8 @@ mod SelfhostComposeRealSum do
   def inflate(FCtor(c, args)) := {:tuple, 0, [{:atom, 0, to_snake(c)} | inflate_all(args)]}
   # `if` lowers (via selfhost_beam's FIf) to a `case` on the boolean condition.
   def inflate(FIf(c, t, e)) := {:"case", 0, inflate(c), [{:clause, 0, [{:atom, 0, :true}], [], inflate_all(t)}, {:clause, 0, [{:atom, 0, :false}], [], inflate_all(e)}]}
+  # `case` -> a real Erlang `case`; each arm is an FClause (single pattern, guard, body).
+  def inflate(FCase(scrut, clauses)) := {:"case", 0, inflate(scrut), inflate_clauses(clauses)}
 
   def var_atom(n String) Symbol := Prim.str_to_atom(cap(n))
 

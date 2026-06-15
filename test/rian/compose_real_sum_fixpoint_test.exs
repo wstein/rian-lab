@@ -101,6 +101,18 @@ defmodule Rian.ComposeRealSumFixpointTest do
       "def wrap(s) := \"[\" <> s <> \"]\"\ndef cat(a, b) := a <> b",
       "def wrap(s String) String := \"[\" <> s <> \"]\"\ndef cat(a String, b String) String := a <> b",
       [{:wrap, ["hi"]}, {:cat, ["foo", "bar"]}]
+    },
+    # `case` — literal/guarded/wildcard arms (the last surface gate before the lexer)
+    {
+      "def classify(n) := case n do\n  0 -> 100\n  m when m > 0 -> m * 2\n  _ -> 0\nend",
+      "def classify(n Int53) Int53 := case n do\n  0 -> 100\n  m when m > 0 -> m * 2\n  _ -> 0\nend",
+      [{:classify, [0]}, {:classify, [5]}, {:classify, [-3]}]
+    },
+    # `case` over a sum value — constructor arms dispatch on the tagged tuple/atom
+    {
+      "type Sign := Pos | Neg | Zero\ndef code(s) := case s do\n  Pos -> 1\n  Neg -> -1\n  Zero -> 0\nend",
+      "type Sign := Pos | Neg | Zero\ndef code(s Sign) Int53 := case s do\n  Pos -> 1\n  Neg -> -1\n  Zero -> 0\nend",
+      [{:code, [:pos]}, {:code, [:neg]}, {:code, [:zero]}]
     }
   ]
 
