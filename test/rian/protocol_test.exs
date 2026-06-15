@@ -675,4 +675,44 @@ defmodule Rian.ProtocolTest do
                    fn -> Protocol.expand(protocols, impls) end
     end
   end
+
+  describe "associated types — parse + IR (ADR-0074 Stage 1)" do
+    @assoc """
+    protocol Foldable do
+      type Elem
+      def to_list(self Self) Vec(Elem)
+    end
+
+    type Bag := Bag(items Vec(Int53))
+
+    impl Foldable for Bag do
+      type Elem := Int53
+      def to_list(b) := case b do Bag(xs) -> xs end
+    end
+    """
+
+    test "a protocol carries its associated type names; an impl carries the bindings" do
+      prog = Decl.parse(@assoc)
+
+      proto = Enum.find(prog.protocols, &(&1.name == "Foldable"))
+      assert proto.assoc == ["Elem"]
+      # the method that projects the associated type is still parsed (ret is a string;
+      # `Elem` is resolved by a later checker stage, not here)
+      assert Enum.any?(proto.methods, &(&1.name == "to_list"))
+
+      impl = Enum.find(prog.impl_decls, &(&1.proto == "Foldable" and &1.type == "Bag"))
+      assert impl.assoc == %{"Elem" => "Int53"}
+    end
+
+    test "a protocol/impl WITHOUT associated types is unchanged (empty assoc)" do
+      prog = Decl.parse("protocol Show do\n  def show(self Self) String\nend\n")
+      assert Enum.find(prog.protocols, &(&1.name == "Show")).assoc == []
+    end
+
+    test "the associated type is ERASED on the BEAM — the program still desugars + runs" do
+      m = load(@assoc, :assoc_beam_erase)
+      # `to_list` dispatches and runs; the `type Elem` line has no runtime effect
+      assert m.to_list({:bag, [1, 2, 3]}) == [1, 2, 3]
+    end
+  end
 end

@@ -153,7 +153,11 @@ defmodule Rian.Decl do
 
   defp protocol_struct(name, inner) do
     methods = for {:def, raw} <- inner, do: %{name: raw.name, params: raw.params, ret: raw.ret}
-    %{name: name, methods: methods}
+    # associated types (ADR-0074 Stage 1): a bodiless `type Elem` line declares an
+    # associated type the methods may project as `Self.Elem`. Parse + IR only — the
+    # checker resolution + lowering are later stages; the BEAM desugar ignores them.
+    assoc = for {:type, t, _, _} <- inner, do: String.trim(t)
+    %{name: name, methods: methods, assoc: assoc}
   end
 
   defp all_impl_decls(decls) do
@@ -167,7 +171,19 @@ defmodule Rian.Decl do
       for {:def, raw} <- inner,
           do: %{name: raw.name, params: raw.params, body: raw.body, guard: raw.guard}
 
-    %{proto: proto, type: type, methods: methods}
+    # associated-type bindings (ADR-0074 Stage 1): each `type Elem := Concrete` line
+    # fixes the protocol's associated type for this impl. `%{"Elem" => "Int53"}`.
+    assoc = for {:type, t, _, _} <- inner, into: %{}, do: parse_assoc_binding(t)
+    %{proto: proto, type: type, methods: methods, assoc: assoc}
+  end
+
+  # `"Elem := Int53"` -> `{"Elem", "Int53"}`; a binding-less `"Elem"` (an impl error a
+  # later checker stage will flag) keeps `nil`.
+  defp parse_assoc_binding(t) do
+    case String.split(t, ":=", parts: 2) do
+      [name, ty] -> {String.trim(name), String.trim(ty)}
+      [name] -> {String.trim(name), nil}
+    end
   end
 
   # apply `f` to the top-level decls and to each module's inner decls, concatenating
