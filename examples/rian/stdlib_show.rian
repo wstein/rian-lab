@@ -8,10 +8,12 @@
 # normalizes the *presentation* (`1.0` vs `1`, exponent style) to the single ECMA
 # canonical, so the output is byte-identical across targets by construction.
 #
-# Opt-in: call `Show.float(x)` explicitly (it is NOT yet wired into `${…}`
-# interpolation). Emits byte-identically on all three Tier-1 targets — `:ex`, `:js`,
-# and `:rs` (conformance-tested against ECMAScript `String(x)`). `:jvm` awaits
-# Tier-2 list/cons-pattern support (ADR-0049), the only remaining emitter gap.
+# Auto-wired into `${…}` interpolation: a `Float64` hole calls `Show.float`, and
+# `Rian.Decl` injects this module on demand (ADR-0069 §6). Emits byte-identically on
+# `:ex`, `:js`, and `:rs` (conformance-tested against ECMAScript `String(x)`). On
+# `:jvm` (Tier-2 list/cons emitter) it matches too, EXCEPT the tiniest denormal
+# extremes (< ~1e-322), where the JLS pins `Double.toString` to a non-shortest form
+# (`4.9E-324` vs ECMA `5e-324`) — a documented platform `toString` quirk.
 #
 # `__prim_float_repr` is an INTERNAL building block (each target's native shortest
 # string, which diverges in presentation) — never user-facing, only consumed here.

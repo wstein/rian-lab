@@ -9,10 +9,17 @@ defmodule Rian.ShowFloatTest do
   # The BEAM match is the real proof (a different engine reproducing ECMA exactly).
   #
   # Byte-identical on all three Tier-1 targets: BEAM, JS, and Rust (the Rust-emitter
-  # coverage for this collection-heavy shape landed alongside this). `:jvm` still
-  # awaits Tier-2 list-pattern support.
+  # coverage for this collection-heavy shape landed alongside this). On `:jvm` (the
+  # Tier-2 list/cons emitter) it matches ECMAScript too — EXCEPT the tiniest denormal
+  # extremes (< ~1e-322), where the JLS pins `Double.toString` to a non-shortest form
+  # (`4.9E-324` vs ECMA's `5e-324`). Those values are excluded from the JVM lane
+  # (`@jvm_skip`) and documented as a platform `toString` quirk (ADR-0069 §6 caveat).
 
   @src File.read!("examples/rian/stdlib_show.rian")
+
+  # denormal extremes whose Java `Double.toString` is not the ECMA-shortest digit
+  # string — excluded from the JVM conformance lane only (BEAM/JS/Rust still cover them).
+  @jvm_skip [5.0e-324]
 
   # curated corpus: integer-valued, decimals, signs, ±0, the exponent thresholds
   # (1e21 / 1e-7 where ECMA switches to scientific), subnormals, and extremes.
@@ -90,6 +97,32 @@ defmodule Rian.ShowFloatTest do
     end
   end
 
+  # the JVM corpus drops the denormal extremes (see `@jvm_skip`).
+  defp jvm_corpus, do: @corpus -- @jvm_skip
+
+  defp jvm_out do
+    case {System.find_executable("kotlinc"), System.find_executable("java")} do
+      {nil, _} ->
+        :skip
+
+      {_, nil} ->
+        :skip
+
+      {kotlinc, java} ->
+        kt = Rian.JVM.compile(@src)
+        body = Enum.map_join(jvm_corpus(), "\n", &"  println(float(#{lit(&1)}))")
+        dir = System.tmp_dir!()
+        f = Path.join(dir, "rian_show_#{System.unique_integer([:positive])}.kt")
+        jar = String.replace_suffix(f, ".kt", ".jar")
+        File.write!(f, kt <> "\n\nfun main() {\n" <> body <> "\n}\n")
+        {_, 0} = System.cmd(kotlinc, [f, "-include-runtime", "-d", jar], stderr_to_stdout: true)
+        out = run(java, ["-jar", jar])
+        File.rm(f)
+        File.rm(jar)
+        out
+    end
+  end
+
   # an exact-round-trip literal for the double (valid in Rian/Elixir, JS and Rust)
   defp lit(x), do: :erlang.float_to_binary(x, [:short])
 
@@ -119,8 +152,36 @@ defmodule Rian.ShowFloatTest do
     end
   end
 
-  defp diff(ref, got) do
-    Enum.zip([@corpus, ref, got])
+  @tag :jvm
+  test "Show.float equals ECMAScript String(x) on the JVM (denormal extremes aside)" do
+    case System.find_executable("node") do
+      nil ->
+        :ok
+
+      node ->
+        {ref, 0} =
+          System.cmd(node, [
+            "-e",
+            Enum.map_join(jvm_corpus(), "\n", &"console.log(String(#{lit(&1)}))")
+          ])
+
+        ref = ref |> String.trim() |> String.split("\n")
+
+        case jvm_out() do
+          :skip ->
+            :ok
+
+          got ->
+            assert got == ref,
+                   "JVM Show.float diverges:\n" <> diff(jvm_corpus(), ref, got)
+        end
+    end
+  end
+
+  defp diff(ref, got), do: diff(@corpus, ref, got)
+
+  defp diff(corpus, ref, got) do
+    Enum.zip([corpus, ref, got])
     |> Enum.reject(fn {_, r, g} -> r == g end)
     |> Enum.map_join("\n", fn {x, r, g} ->
       "  #{inspect(x)}: ecma=#{inspect(r)} got=#{inspect(g)}"

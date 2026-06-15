@@ -63,6 +63,7 @@ defmodule Rian.JVM do
     ECall,
     ECase,
     EChar,
+    EDot,
     EId,
     EIf,
     EList,
@@ -92,9 +93,9 @@ defmodule Rian.JVM do
     prog = Rian.Opaque.erase(prog)
     # the BEAM `:dispatcher` is a guarded runtime type-test, not the Kotlin shape;
     # protocol lowering for the JVM is a later increment.
-    funcs = prog |> funcs_of() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
+    funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
     reject_unsupported!(funcs)
-    type_decls = Enum.map_join(types_of(prog), "\n\n", &sum_decl/1)
+    type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt/1)
 
     [type_decls, fn_decls] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
@@ -193,11 +194,15 @@ defmodule Rian.JVM do
   defp kotlin_module(src, main) when is_binary(main),
     do: compile(src) <> "\n\nfun main() {\n  println(#{main}())\n}\n"
 
-  defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
-  defp funcs_of(%{funcs: funcs}), do: funcs
+  # every function/type the Kotlin file emits: the top-level ones plus every `mod`'s,
+  # flattened into one namespace — the JVM unit erases module boundaries, so a
+  # cross-module call `Mod.fun(…)` lowers to a bare `fun(…)` (see the `EDot`-call
+  # clause). This is how the injected `Show` module (ADR-0069 `${float}`) is emitted.
+  defp all_funcs(prog),
+    do: Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
 
-  defp types_of(%{types: [], mods: [m]}), do: m.types
-  defp types_of(%{types: types}), do: types
+  defp all_types(prog),
+    do: Map.get(prog, :types, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.types)
 
   # ── sum type -> a Kotlin sealed hierarchy ───────────────────────────────
   defp sum_decl(t) do
@@ -404,7 +409,12 @@ defmodule Rian.JVM do
     do: "(#{expr_kt(n)}).toString()"
 
   # float → shortest-round-trip string (ADR-0069 Float64 unlock); `Rian.Show.float`
-  # normalizes to the ECMAScript canonical. Kotlin `Double.toString` is shortest.
+  # normalizes to the ECMAScript canonical. Kotlin `Double.toString` is shortest for
+  # all normal doubles and ~all subnormals — EXCEPT the tiniest denormal extremes
+  # (< ~1e-322), where the JLS pins a non-shortest 2-digit form (`4.9E-324` vs ECMA's
+  # `5e-324`). So JVM `Show.float` matches ECMAScript everywhere but that handful of
+  # values (ADR-0069 §6, documented caveat) — a platform `toString` quirk, not fixable
+  # here without a hand-written shortest-float algorithm.
   defp expr_kt(%ECall{fun: %EId{name: "__prim_float_repr"}, args: [n]}),
     do: "(#{expr_kt(n)}).toString()"
 
@@ -437,6 +447,16 @@ defmodule Rian.JVM do
   # integer → float (ADR-0035 explicit conversion): Kotlin `Long.toDouble()`
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}),
     do: "(#{expr_kt(n)}).toDouble()"
+
+  # a user cross-module call `Mod.fun(args)` (Pascal-qualified): the JVM unit erases
+  # module boundaries — every `mod`'s funcs flatten into the one file (`all_funcs/1`)
+  # — so the qualifier drops and it lowers to a bare call. (ADR-0069: the `Show`
+  # module injected for `${float}` interpolation resolves through here.) The built-in
+  # interop namespaces have no JVM lowering, so they are excluded and raise via the
+  # `Unsupported` fallback (FFI is off `:jvm`).
+  defp expr_kt(%ECall{fun: %EDot{head: %EId{name: mod}, name: fun}, args: args})
+       when mod not in ~w(Map String List),
+       do: "#{fun}(#{Enum.map_join(args, ", ", &expr_kt/1)})"
 
   # a PascalCase call is sum-variant construction `Ctor(args)`; a lowercase call
   # is a local function call

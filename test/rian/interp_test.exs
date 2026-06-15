@@ -192,8 +192,13 @@ defmodule Rian.InterpTest do
       assert m.label(100.0) == "v = 100, half 50"
     end
 
-    test "it reaches `:ex`/`:rs`/`:js` but is honestly off `:jvm` (formatter Tier-2-pending)" do
-      assert reach(@fsrc, "label").reach |> MapSet.to_list() |> Enum.sort() == [:ex, :js, :rs]
+    test "it reaches all four targets (the portability win)" do
+      # `:jvm` included since the Tier-2 list/cons emitter landed; JVM `Show.float`
+      # matches ECMAScript except the tiniest denormal extremes (a `Double.toString`
+      # spec quirk, ADR-0069 §6 caveat) — outside any value a `${float}` realistically
+      # carries, so the reach is honest at the surface.
+      assert reach(@fsrc, "label").reach |> MapSet.to_list() |> Enum.sort() ==
+               [:ex, :js, :jvm, :rs]
     end
 
     test "JS lowers the cross-module `Show.float` call to a flat `float(…)` and runs" do

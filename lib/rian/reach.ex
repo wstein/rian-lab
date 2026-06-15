@@ -346,11 +346,6 @@ defmodule Rian.Reach do
   defp result_value_blocker,
     do: %{construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: :result, kills: [:jvm]}
 
-  # `${float}` interpolation lowers to the injected `Show.float` (ADR-0069), whose
-  # list/char-list patterns the JVM Tier-2 emitter cannot lower yet — off `:jvm`.
-  defp show_float_blocker,
-    do: %{construct: "Float64 interpolation (portable `Show.float`)", kind: :float, kills: [:jvm]}
-
   # Does any signature position — a parameter type or the return type — contain an
   # `Fn(...)` function type? The Rust emitter has no closure-as-value lowering: it
   # spells the type as the bare trait `Fn<...>` (rustc E0782) and an `Fn` *parameter*
@@ -563,24 +558,6 @@ defmodule Rian.Reach do
          {bl, ca}
        ),
        do: {[ffi(":#{m}.#{fun}", conc_erl?(m, fun)) | bl], ca}
-
-  # `Show.float` — the portable formatter injected for `${float}` interpolation
-  # (ADR-0069). It is written with list/char-list patterns the JVM Tier-2 emitter
-  # does not yet lower, so a body that interpolates a `Float64` (hence calls it) is
-  # honestly off `:jvm` until that subset lands — matching `Rian.JVM`'s
-  # `Unsupported`. It stays `:ex`/`:rs`/`:js` (conformance-proven byte-identical).
-  # Only when `Show` is the in-program Rian module; an unrelated Elixir `Show` falls
-  # through to the host-FFI treatment below. Must precede the generic `Mod.fun`
-  # clause, which treats Rian-module calls as portable (the §-noted under-approx).
-  defp classify(
-         %Core.ECall{fun: %Core.EDot{head: %Core.EId{name: "Show"}, name: "float"}},
-         modnames,
-         {bl, ca}
-       ) do
-    if MapSet.member?(modnames, "Show"),
-      do: {[show_float_blocker() | bl], ca},
-      else: {[ffi("Show.float", false) | bl], ca}
-  end
 
   # Elixir-module call `Mod.fun(…)` — host FFI unless `Mod` is a Rian module here
   defp classify(

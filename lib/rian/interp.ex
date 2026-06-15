@@ -23,9 +23,9 @@ defmodule Rian.Interp do
                             `Number::toString` formatter (examples/rian/stdlib_show.rian),
                             **auto-injected** into the program when first interpolated
                             (`Rian.Decl.inject_stdlib/1`), so it needs no explicit
-                            import. Byte-identical on `:ex`/`:rs`/`:js`; honestly off
-                            `:jvm` until the Tier-2 emitter lowers its list patterns
-                            (`Rian.Reach` pins it, ADR-0069 §6).
+                            import. Reaches all four targets, byte-identical on
+                            `:ex`/`:rs`/`:js` and on `:jvm` except the tiniest denormal
+                            extremes (a `Double.toString` spec quirk, ADR-0069 §6).
 
   `Float32` and a hole whose type cannot be inferred are a **compile error at the
   hole** — never a silent `inspect`-style fallback (ADR-0035). (`Float32` has no

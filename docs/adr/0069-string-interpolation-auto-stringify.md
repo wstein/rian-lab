@@ -1,7 +1,7 @@
 # ADR-0069 — String interpolation that auto-stringifies via a portable `Show`
 
-**Status:** Accepted · **Implemented (2026-06-15)** — the `${expr}` surface (decision A) + auto-stringify for `Char`/`Int*`/`Bool`/`String`/**`Float64`** holes, portable and byte-identical across the Tier-1 targets (`:ex`/`:rs`/`:js`); interpolation lowers to a single-shot join (§6). The lowering strategy is settled in §6 (canonical desugar, not target-native interpolation). User-type & derived `Show`/runtime dispatch remain deferred (see §6, *Open items*, and *Implementation* below).
-**Implemented:** partial — `${expr}` lexing (`{:istr}`), Pratt (`{:str_interp}`), `Rian.Interp` static resolution, `__prim_int_to_string` on Beam/JS/Lower(Rust+Elixir)/JVM; `Int*`/`Bool`/`String` holes reach all four targets, honestly via `Rian.Reach` (an `Int` hole inherits ADR-0064's `[:ex,:js]`). `test/rian/interp_test.exs`. **Float64 unlock — foundation landed:** `__prim_float_repr` (each target's native shortest-round-trip string) on Beam/JS/Lower(Rust+Elixir)/JVM, reaching all four; `test/rian/interp_float_conformance_test.exs` proves the premise — the shortest digits are **identical** across BEAM/Rust/JS/JVM (only presentation diverges). **Step 2 landed:** `Show.float` (`examples/rian/stdlib_show.rian`) — the canonical ECMA-262 §7.1.12.1 `Number::toString`, written ONCE in portable Rian over the repr (parse → shortest-digit `(s, n)` → ECMA presentation cases). `test/rian/show_float_test.exs` proves it **byte-identical to ECMAScript `String(x)` on all three Tier-1 targets — BEAM, JS, and Rust** — over a corpus (exponent thresholds, subnormals, ±0, extremes). The Rust-emitter coverage for this collection-heavy shape landed alongside (ADR-0061: `case`-over-`Vec` slice match, owned↔borrow coercion of sum-field/slice binders, `&str`→`String` branch unification). `:jvm` awaits Tier-2 list/cons patterns. **Step 3 landed — wired into `${…}`:** a `Float64` hole resolves to `Show.float(value)`, and `Rian.Decl.inject_stdlib/1` **auto-injects** the `Show` module the first time a program interpolates a float (conditional — a non-float program is untouched, and never inherits `Show`'s JVM-unlowerable list helpers). On the BEAM `Show` loads as a sibling `Elixir.Show` module (`Rian.Beam.load`); JS flattens it into the one module (`Rian.JS.all_funcs/1`, the cross-module `Show.float` call lowering to a bare `float(…)`); Rust emits it as `mod show`. `Rian.Reach` pins a float interpolation **off `:jvm`** (the `Show.float` blocker — matching the emitter) and keeps it `:ex`/`:rs`/`:js`. Deferred: `Char` (runtime dispatch only), user/derived `Show`, runtime dispatch.
+**Status:** Accepted · **Implemented (2026-06-15)** — the `${expr}` surface (decision A) + auto-stringify for `Char`/`Int*`/`Bool`/`String`/**`Float64`** holes, portable and byte-identical across **all four targets** (`:ex`/`:rs`/`:js`/`:jvm` — the JVM matching ECMAScript except the tiniest denormal extremes, a documented `Double.toString` quirk, §6); interpolation lowers to a single-shot join (§6). The lowering strategy is settled in §6 (canonical desugar, not target-native interpolation). User-type & derived `Show`/runtime dispatch remain deferred (see §6, *Open items*, and *Implementation* below).
+**Implemented:** partial — `${expr}` lexing (`{:istr}`), Pratt (`{:str_interp}`), `Rian.Interp` static resolution, `__prim_int_to_string` on Beam/JS/Lower(Rust+Elixir)/JVM; `Int*`/`Bool`/`String` holes reach all four targets, honestly via `Rian.Reach` (an `Int` hole inherits ADR-0064's `[:ex,:js]`). `test/rian/interp_test.exs`. **Float64 unlock — foundation landed:** `__prim_float_repr` (each target's native shortest-round-trip string) on Beam/JS/Lower(Rust+Elixir)/JVM, reaching all four; `test/rian/interp_float_conformance_test.exs` proves the premise — the shortest digits are **identical** across BEAM/Rust/JS/JVM (only presentation diverges). **Step 2 landed:** `Show.float` (`examples/rian/stdlib_show.rian`) — the canonical ECMA-262 §7.1.12.1 `Number::toString`, written ONCE in portable Rian over the repr (parse → shortest-digit `(s, n)` → ECMA presentation cases). `test/rian/show_float_test.exs` proves it **byte-identical to ECMAScript `String(x)` on BEAM, JS, Rust, and the JVM** — over a corpus (exponent thresholds, subnormals, ±0, extremes). The Rust-emitter coverage for this collection-heavy shape landed alongside (ADR-0061: `case`-over-`Vec` slice match, owned↔borrow coercion of sum-field/slice binders, `&str`→`String` branch unification); the JVM coverage came with the Tier-2 list/cons emitter (ADR-0049). **Step 3 landed — wired into `${…}`:** a `Float64` hole resolves to `Show.float(value)`, and `Rian.Decl.inject_stdlib/1` **auto-injects** the `Show` module the first time a program interpolates a float (conditional — a non-float program is untouched). On the BEAM `Show` loads as a sibling `Elixir.Show` module (`Rian.Beam.load`); JS and the JVM each flatten it into the one module (`Rian.JS.all_funcs/1` / `Rian.JVM.all_funcs/1`, the cross-module `Show.float` call lowering to a bare `float(…)`); Rust emits it as `mod show`. So a `Float64` interpolation reaches all four targets. The **one caveat** is the JVM: `Double.toString` is spec-pinned to a non-shortest digit string for the tiniest denormals (< ~1e-322, e.g. `4.9E-324` vs ECMA `5e-324`), so JVM `Show.float` matches ECMAScript everywhere but that handful of extremes (`@jvm_skip` in the conformance test). Deferred: `Char` (runtime dispatch only), user/derived `Show`, runtime dispatch.
 **Refs:** ADR-0042 (protocols & bounded generics — the dispatch this leans on), ADR-0061 (multi-target protocol lowering — BEAM/Rust/JS dispatch, the Rust owned-return gap), ADR-0047 (portable prelude/stdlib — the `Prim.*` intrinsic layer), ADR-0051 §"Open items" (interpolation deferred for doc heredocs — "probably no"), ADR-0035 (no hidden control flow — the central tension), ADR-0033 (surface vocabulary), ADR-0064 (portable numeric contract — `Int53` is the portable integer; `Int`/wide ints are off some targets), ADR-0057/0058 (target-environment sets; reachability), ADR-0065 (P7 surface freeze — this surface is *not* frozen).
 **Owners:** Maya Lin (surface / emitters) · Samir Patel (types / protocol bounds) · Kira Neri (honesty) · Mira (totality) · Tomás (BEAM performance) · Rachel Okafor (PM)
 
@@ -180,7 +180,8 @@ This also explains why **`Float64` was the hard, principled unlock**: portable f
 needs a *single canonical format* — `Show.float`, the ECMA-262 §7.1.12.1 normalizer written once in
 Rian over each target's native shortest-round-trip repr (`__prim_float_repr`) — explicitly *not*
 delegating to per-target `Display`/`toString` presentation. That landed (§"Open items", resolved): a
-`Float64` hole auto-injects `Show.float` and is byte-identical on `:ex`/`:rs`/`:js`, off `:jvm`.
+`Float64` hole auto-injects `Show.float` and is byte-identical on all four targets — the JVM aside
+from the tiniest denormals, where `Double.toString` is spec-pinned non-shortest (§"Open items").
 
 ## Ratings
 
@@ -246,9 +247,9 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
   FFI. `Rian.Reach` needs no new blocker: a hole inherits its value type's reach (an
   `Int` hole is `[:ex,:js]` per ADR-0064; a wide-int hole is off `:js`).
 - **`Float64` (resolved):** a `Float64` hole resolves to the auto-injected portable
-  `Show.float` (ECMA-262 §7.1.12.1; §6, *Implementation*) — byte-identical on
-  `:ex`/`:rs`/`:js`, honestly off `:jvm` (the formatter's list patterns await the
-  Tier-2 emitter; `Rian.Reach` pins it). A **`Float32`** hole (no portable
+  `Show.float` (ECMA-262 §7.1.12.1; §6, *Implementation*) — byte-identical on all four
+  targets, the JVM aside from the tiniest denormal extremes (a `Double.toString` spec
+  quirk, see below). A **`Float32`** hole (no portable
   formatter) and a hole whose type can't be statically inferred still raise a clear
   error at the hole — no `inspect`-style fallback (ADR-0035). User-type / derived
   `Show` through the full protocol (so a sum/struct can be interpolated) is the next
@@ -268,8 +269,16 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
   `format!("{}", …)` diverge on *presentation*, but the shortest-round-trip **digits are mathematically
   unique** — so a single portable normalizer (`Show.float`, ECMAScript `Number::toString` as the
   reference) over each target's native repr is byte-identical (`show_float_test.exs`). It is auto-injected
-  into a `${float}` hole (§6, *Implementation*); `:jvm` stays gated off until the Tier-2 emitter lowers
-  its list patterns.
+  into a `${float}` hole (§6, *Implementation*) and reaches all four targets.
+- **JVM denormal-extreme caveat (known limit, accepted).** The portability rests on each target's native
+  shortest-round-trip repr agreeing on *digits*. That holds for BEAM/Rust/JS and for the JVM on every
+  normal double and ~all subnormals — but Java's `Double.toString` is JLS-pinned to a **non-shortest**
+  2-digit string for the tiniest denormals (< ~1e-322, e.g. `4.9E-324` where ECMAScript emits the
+  1-digit `5e-324`). A 200k-double fuzz found *zero* digit divergences outside this denormal tail.
+  Fixing it would need a hand-written shortest-float algorithm on the JVM (Java exposes no shortest API
+  but `toString`); not worth it for values no realistic `${float}` carries. So JVM `Show.float` is
+  documented as ECMA-identical *except* those extremes, which the conformance lane excludes (`@jvm_skip`).
+  Reach reports `:jvm` (the surface contract is honest); the caveat lives in the docs and the emitter.
 - **Derived `Show`.** Auto-deriving `Show` for sums/structs (field-by-field) is the obvious ergonomics
   follow-up but a separate decision — it reopens the "is the derived output a *stable contract*?"
   question and risks an `inspect`-by-the-back-door. Spike only; commit nothing here.
