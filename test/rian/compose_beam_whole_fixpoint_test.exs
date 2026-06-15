@@ -31,7 +31,10 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
 
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
     {:ok, ref} = Beam.load(@beam_src, :"Elixir.SelfhostBeam")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
+    {:ok, _} =
+      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
@@ -98,8 +101,7 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
     {:func, "rem", 1,
      [
        {:clause, [{:p_var, "x"}], :g_none,
-        {:block,
-         [{:s_expr, {:c_remote, "Elixir.SelfhostDecl", "parse_program", [{:c_id, "x"}]}}]}}
+        {:block, [{:s_expr, {:c_remote, "Elixir.SelfhostDecl", "parse_program", [{:c_id, "x"}]}}]}}
      ]},
     # the str_to_atom prim (CCall → String.to_atom) — the driver interns names.
     {:func, "atm", 1,

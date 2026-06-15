@@ -42,7 +42,10 @@ defmodule Rian.ComposeBenchTest do
     {:ok, _} = Beam.load(@lexer, :"Elixir.SelfhostLexerV2")
     {:ok, _} = Beam.load(@decl, :"Elixir.SelfhostDecl")
     {:ok, _} = Beam.load(@beam, :"Elixir.SelfhostBeam")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
+    {:ok, _} =
+      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
     {:ok, gen0} = Beam.load(@driver, :rian_bench_gen0)
 
@@ -62,7 +65,10 @@ defmodule Rian.ComposeBenchTest do
     workloads = [{"selfhost_decl (~700 loc)", @decl}, {"selfhost_cap (~110 loc)", @cap}]
 
     IO.puts("\n=== Rian compiler compile-time — v1 (host-built) vs v2 (self-built) ===")
-    IO.puts("    (#{@iters} iters each; gen1/gen2 emit bit-identical .beam → v1≡v2 by construction)\n")
+
+    IO.puts(
+      "    (#{@iters} iters each; gen1/gen2 emit bit-identical .beam → v1≡v2 by construction)\n"
+    )
 
     IO.puts(
       String.pad_trailing("workload", 26) <>

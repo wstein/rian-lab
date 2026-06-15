@@ -15,6 +15,7 @@
 # times), not a correctness gate — its timings are noisy and it builds the compiler
 # twice. It is excluded from BOTH the default loop AND `mix test.all`, and runs only
 # on demand:  mix test --include bench
-exclude = if System.get_env("RIAN_TEST_ALL") == "1", do: [:bench], else: [:rust, :js, :jvm, :bench]
+exclude =
+  if System.get_env("RIAN_TEST_ALL") == "1", do: [:bench], else: [:rust, :js, :jvm, :bench]
 
 ExUnit.start(exclude: exclude)

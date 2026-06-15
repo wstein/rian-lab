@@ -27,7 +27,9 @@ defmodule Rian.ComposeStageWholeFixpointTest do
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_decl.rian"), :"Elixir.SelfhostDecl")
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_beam.rian"), :"Elixir.SelfhostBeam")
 
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+    {:ok, _} =
+      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
 
     {:ok, drv} =
@@ -36,12 +38,23 @@ defmodule Rian.ComposeStageWholeFixpointTest do
     core_src = File.read!("examples/rian/selfhost_core.rian")
     exh_src = File.read!("examples/rian/selfhost_exhaust.rian")
 
-    {:ok, core_b} = {:ok, drv.build(core_src, :"RianBuiltCore_#{System.unique_integer([:positive])}")}
+    {:ok, core_b} =
+      {:ok, drv.build(core_src, :"RianBuiltCore_#{System.unique_integer([:positive])}")}
+
     {:ok, core_r} = Beam.load(core_src, :"core_ref_#{System.unique_integer([:positive])}")
-    {:ok, exh_b} = {:ok, drv.build(exh_src, :"RianBuiltExh_#{System.unique_integer([:positive])}")}
+
+    {:ok, exh_b} =
+      {:ok, drv.build(exh_src, :"RianBuiltExh_#{System.unique_integer([:positive])}")}
+
     {:ok, exh_r} = Beam.load(exh_src, :"exh_ref_#{System.unique_integer([:positive])}")
 
-    {:ok, core_src: core_src, exh_src: exh_src, core_b: core_b, core_r: core_r, exh_b: exh_b, exh_r: exh_r}
+    {:ok,
+     core_src: core_src,
+     exh_src: exh_src,
+     core_b: core_b,
+     core_r: core_r,
+     exh_b: exh_b,
+     exh_r: exh_r}
   end
 
   # Surface AST nodes (the port's `Surface` sum; nullary→atom, applied→tagged tuple),
@@ -98,7 +111,9 @@ defmodule Rian.ComposeStageWholeFixpointTest do
 
       # the algorithm's teeth: a not-yet-covered ctor is useful; a full cover is not.
       assert b.useful(@env, [[{:p_ctor, "true", []}]], [{:p_ctor, "false", []}]) == true
-      assert b.useful(@env, [[{:p_ctor, "true", []}], [{:p_ctor, "false", []}]], [:p_wild]) == false
+
+      assert b.useful(@env, [[{:p_ctor, "true", []}], [{:p_ctor, "false", []}]], [:p_wild]) ==
+               false
     end
 
     test "it is the WHOLE real file", %{exh_src: src, exh_b: b} do

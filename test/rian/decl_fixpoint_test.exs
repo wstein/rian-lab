@@ -44,6 +44,7 @@ defmodule Rian.DeclFixpointTest do
   defp inject({:rbracket}), do: :tr_bracket
   defp inject({:lbrace}), do: :tl_brace
   defp inject({:rbrace}), do: :tr_brace
+  defp inject({:mapopen}), do: :t_map_open
   defp inject({:annot, name}), do: {:t_annot, name}
 
   defp front_decls(fe, src), do: fe.parse_program(src |> Lexer.tokenize() |> Enum.map(&inject/1))
@@ -723,6 +724,23 @@ defmodule Rian.DeclFixpointTest do
       # to nested `case` happens later, at lowering (ADR-0039), not in the parser.
       assert match?({:with, _, _, _}, body),
              "parser should keep `with` as a node, got: #{inspect(body)}"
+    end
+
+    test "selfhost_decl keeps `%{…}` as a `MapE` node of labels (intent preserved)", %{
+      frontend: fe
+    } do
+      src = "def m() Map := %{a: 1, b: 2}"
+
+      body =
+        case front_decls(fe, src) do
+          [{:d_func, _, "m", _, _, _, b}] -> b
+          other -> other
+        end
+
+      # `{:map_e, [{:label, k, v}, …]}` — the parser keeps the map literal as a node
+      # of labeled fields; the lowering to a Core map happens when emitting, not here.
+      assert match?({:map_e, [{:label, "a", _}, {:label, "b", _}]}, body),
+             "parser should keep `%{…}` as a MapE node, got: #{inspect(body)}"
     end
   end
 

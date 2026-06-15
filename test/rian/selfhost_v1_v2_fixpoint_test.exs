@@ -55,12 +55,16 @@ defmodule Rian.SelfhostV1V2FixpointTest do
     {:ok, _} = Beam.load(@lexer, :"Elixir.SelfhostLexerV2")
     {:ok, _} = Beam.load(@decl, :"Elixir.SelfhostDecl")
     {:ok, _} = Beam.load(@beam, :"Elixir.SelfhostBeam")
-    {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
+    {:ok, _} =
+      Beam.load(File.read!("examples/rian/selfhost_exhaust.rian"), :"Elixir.SelfhostExhaust")
+
     {:ok, _} = Beam.load(File.read!("examples/rian/selfhost_cap.rian"), :"Elixir.SelfhostCap")
     {:ok, gen0_driver} = Beam.load(@driver, :rian_gen0_driver)
 
     # gen1 — gen0 compiles each compiler source (canonical forms).
-    gen1 = for {n, src, name} <- modules(), into: %{}, do: {n, gen0_driver.compile_module(src, name)}
+    gen1 =
+      for {n, src, name} <- modules(), into: %{}, do: {n, gen0_driver.compile_module(src, name)}
 
     # load gen1 as the live compiler: the three stages under their Elixir atoms
     # (replacing gen0), and the gen1 driver under its own.
@@ -70,7 +74,8 @@ defmodule Rian.SelfhostV1V2FixpointTest do
     {gen1_driver, _} = load_forms(:SelfhostDriverFixedPoint, gen1["driver"])
 
     # gen2 — the self-built compiler recompiles the SAME sources.
-    gen2 = for {n, src, name} <- modules(), into: %{}, do: {n, gen1_driver.compile_module(src, name)}
+    gen2 =
+      for {n, src, name} <- modules(), into: %{}, do: {n, gen1_driver.compile_module(src, name)}
 
     {:ok, gen1: gen1, gen2: gen2}
   end

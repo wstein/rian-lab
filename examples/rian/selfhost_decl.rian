@@ -20,7 +20,8 @@
 #   capabilities: val / iso / ref / tag (default val); parametric types `Vec(T)`
 #   exprs: binops (precedence climbing) · prefix - / not · calls · `.field` access
 #          · String/Char literals · labeled construction `Name(f: v)`
-#          · list construction `[x | acc]`
+#          · list construction `[x | acc]` · map literal `%{k: v, …}` (kept as a
+#            `MapE` node of `Label` fields; lowered to a Core map when emitting)
 #          · `if COND do THEN else ELSE end` (single-expr branches; ADR-0063)
 #          · `case SCRUT do PAT [when G] -> BODY … end` (single-expr arms; ADR-0063)
 #          · `with C <- E [, …] do BODY [else ARMS] end` — kept as a `With` node
@@ -35,7 +36,7 @@
 mod SelfhostDecl do
   type Tok :=
       TNum(String) | TStr(String) | TChar(Int53) | TId(String) | TKw(String) | TOp(String)
-    | TAnnot(String) | TLP | TRP | TLBracket | TRBracket | TLBrace | TRBrace | TComma | TNL
+    | TAnnot(String) | TLP | TRP | TLBracket | TRBracket | TLBrace | TRBrace | TMapOpen | TComma | TNL
 
   # expression AST — Num/Id/Bin/Unary/Call lower to Rian.Pratt's surface tuples;
   # list construction is nil/cons (NilE / ConsE), flattened to `{:list_lit, …}` by
@@ -49,6 +50,7 @@ mod SelfhostDecl do
     | With(Vec(WithClause), Expr, Vec(CaseArm))
     | BlockE(Vec(Stmt))
     | Tuple(Vec(Expr))
+    | MapE(Vec(Expr))
     | NilE | ConsE(Expr, Expr) | EErr
 
   # a multi-statement block body (`def f() T <nl> b := e <nl> e <nl> end`): a
@@ -307,6 +309,7 @@ mod SelfhostDecl do
   def expand_e(m, With(cs, b, els)) := With(expand_wclauses(m, cs), expand_e(m, b), expand_arms(m, els))
   def expand_e(m, BlockE(stmts)) := BlockE(expand_stmts(m, stmts))
   def expand_e(m, Tuple(es)) := Tuple(expand_es(m, es))
+  def expand_e(m, MapE(es)) := MapE(expand_es(m, es))
   def expand_e(m, ConsE(h, t)) := ConsE(expand_e(m, h), expand_e(m, t))
   def expand_e(_, e) := e
 
@@ -350,6 +353,7 @@ mod SelfhostDecl do
   def subst_e(env, With(cs, b, els)) := With(subst_wclauses(env, cs), subst_e(env, b), subst_arms(env, els))
   def subst_e(env, BlockE(stmts)) := BlockE(subst_stmts(env, stmts))
   def subst_e(env, Tuple(es)) := Tuple(subst_es(env, es))
+  def subst_e(env, MapE(es)) := MapE(subst_es(env, es))
   def subst_e(env, ConsE(h, t)) := ConsE(subst_e(env, h), subst_e(env, t))
   def subst_e(_, e) := e
 
@@ -1111,6 +1115,11 @@ mod SelfhostDecl do
       AP(es, rest2) -> parse_postfix(Tuple(es), rest2)
     end
   end
+  def parse_primary([TMapOpen | rest])
+    case parse_map_expr(skip_nl(rest)) do
+      AP(es, rest2) -> parse_postfix(MapE(es), rest2)
+    end
+  end
   def parse_primary([TLBracket | rest]) := parse_list_expr(rest)
   def parse_primary([TKw("if") | rest]) := parse_if(rest)
   def parse_primary([TKw("case") | rest]) := parse_case(rest)
@@ -1276,6 +1285,21 @@ mod SelfhostDecl do
         end
       P(e, [TRBrace | rest]) -> AP([e], rest)
       P(e, rest) -> AP([e], rest)
+    end
+  end
+
+  # map literal body := ε | (Id ':' expr) (',' Id ':' expr)*  — each pair a `Label`,
+  # so map fields reuse the labeled-construction machinery (expand/subst, lowering).
+  def parse_map_expr(ts Vec(Tok)) Args
+  def parse_map_expr([TRBrace | rest]) := AP([], rest)
+  def parse_map_expr([TId(k), TOp(":") | rest])
+    case parse_bp(0, rest) do
+      P(v, [TComma | r2]) ->
+        case parse_map_expr(skip_nl(r2)) do
+          AP(more, r) -> AP([Label(k, v) | more], r)
+        end
+      P(v, [TRBrace | r2]) -> AP([Label(k, v)], r2)
+      P(v, rest2) -> AP([Label(k, v)], rest2)
     end
   end
 

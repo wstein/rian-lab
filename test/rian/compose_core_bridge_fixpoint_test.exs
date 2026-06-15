@@ -66,10 +66,15 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
   defp canon(%Core.EAtom{name: a}), do: "(atom #{a})"
   defp canon(%Core.EUnary{op: op, arg: x}), do: "(unary #{op} #{canon(x)})"
   defp canon(%Core.EBin{op: op, left: l, right: rr}), do: "(bin #{op} #{canon(l)} #{canon(rr)})"
-  defp canon(%Core.ECall{fun: f, args: as}), do: "(call #{canon(f)} [#{Enum.map_join(as, " ", &canon/1)}])"
+
+  defp canon(%Core.ECall{fun: f, args: as}),
+    do: "(call #{canon(f)} [#{Enum.map_join(as, " ", &canon/1)}])"
+
   defp canon(%Core.EDot{head: h, name: n}), do: "(dot #{canon(h)} #{n})"
   defp canon(%Core.ETuple{elems: es}), do: "(tuple [#{Enum.map_join(es, " ", &canon/1)}])"
-  defp canon(%Core.EList{elems: es, tail: tl}), do: "(list [#{Enum.map_join(es, " ", &canon/1)}] #{canon_tail(tl)})"
+
+  defp canon(%Core.EList{elems: es, tail: tl}),
+    do: "(list [#{Enum.map_join(es, " ", &canon/1)}] #{canon_tail(tl)})"
 
   defp canon_tail(nil), do: "close"
   defp canon_tail(:close), do: "close"
@@ -139,6 +144,7 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
       # here so the bridge's transitivity (driver ≡ selfhost_core ≡ Rian.Core) is local.
       for src <- @corpus do
         rian_surface = Pratt.parse(src)
+
         assert SelfhostCore.emit(inj(rian_surface)) == canon(Core.from_expr(rian_surface)),
                "selfhost_core diverged from Rian.Core on #{inspect(src)}"
       end
