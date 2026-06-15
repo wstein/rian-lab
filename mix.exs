@@ -29,7 +29,10 @@ defmodule RianLab.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]
+      extra_applications: [:logger],
+      # registers the Livebook `Kino.SmartCell` when Kino is present (a no-op
+      # otherwise — the compiler core has no runtime dependency on Kino).
+      mod: {Rian.Application, []}
     ]
   end
 
@@ -51,7 +54,14 @@ defmodule RianLab.MixProject do
   defp test_coverage do
     [
       summary: [threshold: 95],
-      ignore_modules: [~r/^Rian\.DocFormatter/, ~r/^Mix\.Tasks\./]
+      # `Rian.Livebook.SmartCell` is a UI surface — its `Kino.SmartCell` callbacks
+      # (the editor lifecycle) run only inside a live Livebook server, not under
+      # ExUnit; its pure `to_source/1` IS tested. Excluded like the CLI tasks.
+      ignore_modules: [
+        ~r/^Rian\.DocFormatter/,
+        ~r/^Mix\.Tasks\./,
+        ~r/^Rian\.Livebook\.SmartCell/
+      ]
     ]
   end
 
@@ -59,7 +69,12 @@ defmodule RianLab.MixProject do
     [
       # `:test` too — `Rian.DocFormatter` (in `lib/`) references `ExDoc.Autolink`,
       # so the test env must be able to compile it (CI runs `MIX_ENV=test`).
-      {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false}
+      {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false},
+      # The Livebook surface (`Rian.Livebook` + its `Kino.SmartCell`). `optional`
+      # so it is NOT forced on consumers of the compiler library; it is fetched for
+      # this project's own dev/test builds, and Livebook always provides Kino at
+      # runtime. The smart cell module conditionally compiles on `Kino.SmartCell`.
+      {:kino, "~> 0.14", optional: true}
     ]
   end
 

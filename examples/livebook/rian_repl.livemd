@@ -21,9 +21,10 @@ will reach for:
 2. session-threaded eval for stateful exploration
 3. defining types/functions and calling them across cells
 
-A purpose-built `Kino.SmartCell` would replace the `IO.puts` calls below with a
-proper UI; this notebook deliberately drives the engine directly to make the
-ADR-0053 contract — *the engine the surfaces share* — visible.
+The purpose-built **`Rian` smart cell** (`Rian.Livebook.SmartCell`, see the last
+section) wraps this in a proper UI; this notebook deliberately drives the engine
+directly first, to make the ADR-0053 contract — *the engine the surfaces share* —
+visible.
 
 ## One-shot eval
 
@@ -129,11 +130,37 @@ as an `expand_fun`; a smart-cell could bind it to a completion key the same way.
 }
 ```
 
-## Next: a `Kino.SmartCell` companion
+## The `Rian` smart cell
 
-Wrapping the above in a `Kino.SmartCell` — input editor, output area,
-session persistence across cell evaluations, syntax-highlighted output —
-belongs in a dedicated `kino_rian` companion package so it can iterate on
-its JS/UX without dragging `:kino` into this repo's runtime deps. The
-engine contract this notebook relies on (no-IO, ADR-0053) is what makes
-that package straightforward to build.
+The cells above drive the engine by hand. The same thing wrapped in a UI ships
+as **`Rian.Livebook.SmartCell`** — registered automatically whenever Kino is
+loaded (`:kino` is an *optional* dep, so the compiler core never pulls it in).
+Add one from the notebook's **+ Smart** menu → **Rian**: type Rian in the editor,
+evaluate, and the output renders below.
+
+A smart cell calls `Rian.Livebook.eval/1`, which splits the cell into
+`Rian.Repl.split_entries/1` entries and runs them against **one shared session**
+for the notebook — so `def`/`type`/`:=` made in one Rian cell are visible to the
+next, exactly like the threaded `session` above but without passing it around.
+You can also call the engine directly:
+
+```elixir
+Rian.Livebook.eval("""
+type Color := Red | Green
+def name(c Color) String := case c do
+  Red -> "red"
+  Green -> "green"
+end
+name(Red)
+""")
+```
+
+Start over with a fresh session at any point:
+
+```elixir
+Rian.Livebook.reset()
+```
+
+Because the smart cell is a thin driver over the no-IO engine (ADR-0053), what
+runs in a Rian cell passes the exact same compile gate as `mix rian.repl` — the
+surfaces share the engine and cannot drift from the real compiler.

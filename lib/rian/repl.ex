@@ -11,11 +11,14 @@ defmodule Rian.Repl do
   and every future surface (Livebook, the web playground) reuse this engine, so
   none can drift from the real compiler.
 
-  Surfaces also share three pure, no-IO introspection helpers: `info/1` (the
-  names a session knows), `type_of/2` (a form's type without evaluating it), and
-  `complete/2` (Rian-aware tab-completion over keywords, meta-commands, and
-  session names). The interactive loop wires `complete/2` into the terminal's
-  line editor as its `expand_fun`.
+  Surfaces also share pure, no-IO helpers: `info/1` (the names a session knows),
+  `type_of/2` (a form's type without evaluating it), `complete/2` (Rian-aware
+  tab-completion over keywords, meta-commands, and session names), and
+  `split_entries/1` (cut a block of source into the entries a *batch* surface — a
+  Livebook cell, the web playground — feeds to `eval/2`). The interactive loop
+  wires `complete/2` into the terminal's line editor as its `expand_fun`; the
+  Livebook surface ([`Rian.Livebook`](livebook.ex)) drives `split_entries/1` +
+  `eval/2` + `render/1`.
 
   ## Session model (ADR-0053 §3)
 
@@ -196,6 +199,54 @@ defmodule Rian.Repl do
   """
   @spec vocabulary() :: [String.t()]
   def vocabulary, do: @keywords ++ @word_ops ++ @meta_commands
+
+  @doc """
+  Split a multi-line block of source into the list of REPL **entries** a batch
+  surface (a Livebook cell, the web playground) should `eval/2` in order.
+
+  Mirrors the interactive reader's accumulation rule (`mix rian.repl`) without its
+  IO: an expression or `:=` bind is one entry per line; a **declaration**
+  (`def`/`type`/…) or an unbalanced `do …` block accumulates across lines until a
+  **blank line** (or end of input) completes it. Blank lines separate entries and
+  are never entries themselves. Pure and no-IO.
+
+      iex> Rian.Repl.split_entries("x := 1\\ny := 2\\nx + y")
+      ["x := 1\\n", "y := 2\\n", "x + y\\n"]
+  """
+  @spec split_entries(String.t()) :: [String.t()]
+  def split_entries(source) do
+    source
+    |> String.split("\n")
+    |> Enum.reduce({[], ""}, &accumulate_line/2)
+    |> flush_entries()
+  end
+
+  defp accumulate_line(line, {entries, ""}) do
+    if blank?(line), do: {entries, ""}, else: submit_or_continue(entries, line <> "\n")
+  end
+
+  defp accumulate_line(line, {entries, buffer}) do
+    if blank?(line),
+      do: {[buffer | entries], ""},
+      else: submit_or_continue(entries, buffer <> line <> "\n")
+  end
+
+  # an entry completes (without a blank line) when it is neither a declaration —
+  # which accumulates all its clauses until a blank — nor an unbalanced `do` block.
+  defp submit_or_continue(entries, buffer) do
+    trimmed = String.trim(buffer)
+
+    if not declaration?(trimmed) and balanced?(trimmed),
+      do: {[buffer | entries], ""},
+      else: {entries, buffer}
+  end
+
+  defp flush_entries({entries, ""}), do: Enum.reverse(entries)
+  defp flush_entries({entries, buffer}), do: Enum.reverse([buffer | entries])
+
+  defp balanced?(input), do: scan_count(input, ~r/\bdo\b/) <= scan_count(input, ~r/\bend\b/)
+  defp scan_count(input, regex), do: length(Regex.scan(regex, input))
+  defp blank?(string), do: String.trim(string) == ""
 
   @doc """
   Rian-aware tab-completion: given the text *before the cursor* and a `session`,
