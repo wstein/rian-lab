@@ -51,6 +51,7 @@ mod SelfhostDecl do
     | BlockE(Vec(Stmt))
     | Tuple(Vec(Expr))
     | MapE(Vec(Expr))
+    | Lam(Vec(String), Expr)
     | NilE | ConsE(Expr, Expr) | EErr
 
   # a multi-statement block body (`def f() T <nl> b := e <nl> e <nl> end`): a
@@ -133,6 +134,7 @@ mod SelfhostDecl do
 
   # result pairs (a value + the unconsumed tokens)
   type Parse := P(Expr, Vec(Tok))
+  type PrnRes := PRN(Vec(Expr), Vec(Tok))
   type Args := AP(Vec(Expr), Vec(Tok))
   type DeclRes := DR(Decl, Vec(Tok))
   type VarsRes := VR(Vec(Variant), Vec(Tok))
@@ -315,6 +317,7 @@ mod SelfhostDecl do
   def expand_e(m, BlockE(stmts)) := BlockE(expand_stmts(m, stmts))
   def expand_e(m, Tuple(es)) := Tuple(expand_es(m, es))
   def expand_e(m, MapE(es)) := MapE(expand_es(m, es))
+  def expand_e(m, Lam(ps, b)) := Lam(ps, expand_e(m, b))
   def expand_e(m, ConsE(h, t)) := ConsE(expand_e(m, h), expand_e(m, t))
   def expand_e(_, e) := e
 
@@ -359,6 +362,7 @@ mod SelfhostDecl do
   def subst_e(env, BlockE(stmts)) := BlockE(subst_stmts(env, stmts))
   def subst_e(env, Tuple(es)) := Tuple(subst_es(env, es))
   def subst_e(env, MapE(es)) := MapE(subst_es(env, es))
+  def subst_e(env, Lam(ps, b)) := Lam(ps, subst_e(env, b))
   def subst_e(env, ConsE(h, t)) := ConsE(subst_e(env, h), subst_e(env, t))
   def subst_e(_, e) := e
 
@@ -1149,13 +1153,43 @@ mod SelfhostDecl do
   def parse_primary([TKw("if") | rest]) := parse_if(rest)
   def parse_primary([TKw("case") | rest]) := parse_case(rest)
   def parse_primary([TKw("with") | rest]) := parse_with(rest)
+  # `(` opens EITHER a parenthesized expression OR a lambda `(params) -> body`
+  # (ADR-0042). Parse the comma-separated group, then a trailing `->` after the `)`
+  # selects the lambda reading (the params are simple `Id`s). MUST handle both.
   def parse_primary([TLP | rest])
-    case parse_bp(0, rest) do
-      P(e, [TRP | rest2]) -> parse_postfix(e, rest2)
-      P(_, other) -> P(EErr, other)
+    case parse_paren(rest) do
+      PRN(es, [TRP, TOp("->") | r2]) -> parse_lambda_body(es, r2)
+      PRN([e], [TRP | r2]) -> parse_postfix(e, r2)
+      PRN(_, other) -> P(EErr, other)
     end
   end
   def parse_primary(ts) := P(EErr, ts)
+
+  # the comma-separated group inside `(…)`, NOT consuming the closing `)`.
+  def parse_paren(ts Vec(Tok)) PrnRes
+  def parse_paren([TRP | rest]) := PRN([], [TRP | rest])
+  def parse_paren(ts)
+    case parse_bp(0, ts) do
+      P(e, [TComma | rest]) ->
+        case parse_paren(rest) do
+          PRN(more, r) -> PRN([e | more], r)
+        end
+      P(e, rest) -> PRN([e], rest)
+    end
+  end
+
+  # a lambda `(params) -> body`: the params were parsed as expressions, so each must
+  # be a plain `Id` (the var name); the body is a single expression.
+  def parse_lambda_body(params Vec(Expr), ts Vec(Tok)) Parse
+  def parse_lambda_body(params, ts)
+    case parse_bp(0, ts) do
+      P(body, rest) -> parse_postfix(Lam(param_names(params), body), rest)
+    end
+  end
+
+  def param_names(Vec(Expr)) Vec(String)
+  def param_names([]) := []
+  def param_names([Id(x) | rest]) := [x | param_names(rest)]
 
   # `if COND do THEN else ELSE end` — each part is a full sub-expression. The
   # projection (decl_fixpoint) wraps THEN/ELSE in `{:block, [{:expr, …}]}` to match

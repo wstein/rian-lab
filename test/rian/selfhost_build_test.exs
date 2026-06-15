@@ -13,9 +13,6 @@ defmodule Rian.SelfhostBuildTest do
   # Known gaps (the backlog — programs `build` cannot yet compile; all fail LOUDLY,
   # not silently, so they are honest — add coverage as they land). None is needed by
   # the self-hosting bootstrap (the compiler sources avoid them); they are user sugar:
-  #   * lambdas `(x) -> e` + variable application — needs a fun node across the three
-  #     selfhost modules and scope tracking to tell a fun-valued var from a local
-  #     call (the largest remaining gap; selfhost_beam currently emits no fun forms).
   #   * string interpolation `"…${e}…"` — blocked on type inference in the build
   #     loop (a hole is stringified by its static type, ADR-0069 §4); REFUSED loudly
   #     for now rather than silently mis-lowered (see the reject test below).
@@ -133,7 +130,19 @@ defmodule Rian.SelfhostBuildTest do
      [%{__struct__: :p, x: 5, y: 6}], 5},
     {"struct pattern roundtrip",
      "struct P(x Int53)\ndef gx(p P) Int53\ndef gx(P(x: v)) := v\ndef f() Int53 := gx(P(x: 9))",
-     :f, [], 9}
+     :f, [], 9},
+    # lambdas `(params) -> body` (ADR-0042): a Core closure -> an Erlang `fun`
+    # (BEAM captures lexically). Applying a fun-valued VARIABLE (a param) is variable
+    # application `Var(args)`, distinguished from a local call by the global
+    # function-name set (resolve_apply) — so higher-order functions work.
+    {"lambda immediate apply", "def f() Int53 := ((x) -> x + 1)(5)", :f, [], 6},
+    {"higher-order param",
+     "def ap(g, n Int53) Int53 := g(n)\ndef f() Int53 := ap((x) -> x * 2, 5)", :f, [], 10},
+    {"lambda closure over param",
+     "def adder(n Int53) := (x) -> x + n\ndef f() Int53 := adder(10)(5)", :f, [], 15},
+    {"two-param lambda",
+     "def app2(g, a Int53, b Int53) Int53 := g(a, b)\n" <>
+       "def f() Int53 := app2((x, y) -> x * y, 6, 7)", :f, [], 42}
   ]
 
   describe "the self-hosted Rian compiler compiles + runs real programs (no Elixir oracle)" do

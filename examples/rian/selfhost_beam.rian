@@ -14,7 +14,9 @@
 # `:compile.forms`, and RUNS it — asserting it behaves identically to
 # `Rian.Beam`. A numeric literal splits on its lexeme: a `.`/`e` marks a `Float64`
 # (parsed via `Prim.str_to_float` for correctly-rounded native parity), else `Int53`.
-# Variable-application (lambdas) is the remaining out-of-scope node.
+# Lambdas lower to `FFun` (an Erlang `fun`, BEAM closing over captures) and variable
+# application to `FApply`; the driver's `resolve_apply` tells a fun-valued var from a
+# local call. The remaining out-of-scope prims are the i64 overflow ops + `float_repr`.
 # ---------------------------------------------------------------------------
 
 mod SelfhostBeam do
@@ -27,6 +29,8 @@ mod SelfhostBeam do
              | CUnary(String, Core)
              | CBin(String, Core, Core)
              | CCall(String, Vec(Core))
+             | CLambda(Vec(String), Core)
+             | CApply(Core, Vec(Core))
              | CRemote(String, String, Vec(Core))
              | CDot(Core, String)
              | CStruct(String, Vec(SFld))
@@ -73,6 +77,8 @@ mod SelfhostBeam do
              | FBinAll(Vec(Form))
              | FCharBin(Form)
              | FCall(String, Vec(Form))
+             | FFun(Vec(String), Form)
+             | FApply(Form, Vec(Form))
              | FRemote(String, String, Vec(Form))
              | FTuple(Vec(Form))
              | FStruct(String, Vec(FFld))
@@ -209,6 +215,8 @@ mod SelfhostBeam do
   # struct field access `value.field` — a struct is a tagged map keyed by field-name
   # atoms (Rian.Beam), so reading a field is `maps:get(:field, value)`.
   def expr_form(CDot(h, f)) := FRemote("maps", "get", [FAtom(f), expr_form(h)])
+  def expr_form(CLambda(ps, b)) := FFun(ps, expr_form(b))
+  def expr_form(CApply(c, args)) := FApply(expr_form(c), expr_forms(args))
   def expr_form(CTuple(es)) := FTuple(expr_forms(es))
   # named struct construction `Name(f: v, …)` — a tagged map (the driver's inflater
   # adds the `__struct__` field + snake tag, matching Rian.Beam.expr_form).

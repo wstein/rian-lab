@@ -40,6 +40,8 @@ mod SelfhostComposeRealSum do
              | CUnary(String, Core)
              | CBin(String, Core, Core)
              | CCall(String, Vec(Core))
+             | CLambda(Vec(String), Core)
+             | CApply(Core, Vec(Core))
              | CTuple(Vec(Core))
              | CList(Vec(Core), Tail)
              | CIf(Core, Block, Block)
@@ -138,12 +140,92 @@ mod SelfhostComposeRealSum do
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
   pub def compile_module(src, modname)
     decls := inline_consts(SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src)))
-    grps := group(normalize(decls))
+    ncs := normalize(decls)
+    grps := group(resolve_ncs(nc_names(ncs), ncs))
     case first_bad(gate_env(decls), grps) do
       "" -> emit_checked(decls, grps, modname)
       bad -> refuse(bad)
     end
   end
+
+  # variable application (ADR-0042): a bare call `name(args)` is a LOCAL call only if
+  # `name` is a top-level function, a constructor (Pascal), or a prim (`__prim_*`);
+  # otherwise `name` is a fun-valued bound variable (a param / lambda-param / bind)
+  # and the call is variable application `Var(args)`. We rewrite `CCall -> CApply`
+  # for that case here, keyed on the GLOBAL function-name set — so no per-scope
+  # tracking is needed (a bound var is never a top-level function name).
+  def nc_names(Vec(NClause)) Vec(String)
+  def nc_names([]) := []
+  def nc_names([NC(name, _, _, _) | rest]) := [name | nc_names(rest)]
+
+  def resolve_ncs(fn Vec(String), ncs Vec(NClause)) Vec(NClause)
+  def resolve_ncs(_, []) := []
+  def resolve_ncs(fn, [NC(name, pats, g, body) | rest]) := [NC(name, pats, rapp_guard(fn, g), rapp_block(fn, body)) | resolve_ncs(fn, rest)]
+
+  def is_local_call(fn Vec(String), name String) Bool := is_ctorish(name) or is_primish(name) or member_str(fn, name)
+  def is_ctorish(name String) Bool := is_upper(first_code(name))
+  def is_primish(name String) Bool := first_code(name) == 95
+  def first_code(s String) Int53
+  def first_code(s)
+    case Prim.str_chars(s) do
+      [c | _] -> c
+      [] -> 0
+    end
+  end
+  def member_str(Vec(String), String) Bool
+  def member_str([], _) := false
+  def member_str([x | rest], name) := if x == name do true else member_str(rest, name) end
+
+  def rapp(fn Vec(String), c Core) Core
+  def rapp(fn, CCall(name, args))
+    if is_local_call(fn, name) do
+      CCall(name, rapp_all(fn, args))
+    else
+      CApply(CId(name), rapp_all(fn, args))
+    end
+  end
+  def rapp(fn, CApply(c, args)) := CApply(rapp(fn, c), rapp_all(fn, args))
+  def rapp(fn, CLambda(ps, b)) := CLambda(ps, rapp(fn, b))
+  def rapp(fn, CUnary(op, x)) := CUnary(op, rapp(fn, x))
+  def rapp(fn, CBin(op, l, r)) := CBin(op, rapp(fn, l), rapp(fn, r))
+  def rapp(fn, CTuple(es)) := CTuple(rapp_all(fn, es))
+  def rapp(fn, CList(es, t)) := CList(rapp_all(fn, es), rapp_tail(fn, t))
+  def rapp(fn, CIf(c, t, e)) := CIf(rapp(fn, c), rapp_block(fn, t), rapp_block(fn, e))
+  def rapp(fn, CCase(s, arms)) := CCase(rapp(fn, s), rapp_arms(fn, arms))
+  def rapp(fn, CStruct(name, flds)) := CStruct(name, rapp_flds(fn, flds))
+  def rapp(fn, CMap(flds)) := CMap(rapp_flds(fn, flds))
+  def rapp(fn, CDot(h, f)) := CDot(rapp(fn, h), f)
+  def rapp(fn, CRemote(m, f, args)) := CRemote(m, f, rapp_all(fn, args))
+  def rapp(_, c) := c
+
+  def rapp_all(fn Vec(String), cs Vec(Core)) Vec(Core)
+  def rapp_all(_, []) := []
+  def rapp_all(fn, [c | rest]) := [rapp(fn, c) | rapp_all(fn, rest)]
+
+  def rapp_tail(fn Vec(String), t Tail) Tail
+  def rapp_tail(_, TClose) := TClose
+  def rapp_tail(fn, TTail(c)) := TTail(rapp(fn, c))
+
+  def rapp_block(fn Vec(String), b Block) Block
+  def rapp_block(fn, Block(ss)) := Block(rapp_stmts(fn, ss))
+
+  def rapp_stmts(fn Vec(String), ss Vec(Stmt)) Vec(Stmt)
+  def rapp_stmts(_, []) := []
+  def rapp_stmts(fn, [SBind(n, c) | rest]) := [SBind(n, rapp(fn, c)) | rapp_stmts(fn, rest)]
+  def rapp_stmts(fn, [STypedBind(n, t, c) | rest]) := [STypedBind(n, t, rapp(fn, c)) | rapp_stmts(fn, rest)]
+  def rapp_stmts(fn, [SExpr(c) | rest]) := [SExpr(rapp(fn, c)) | rapp_stmts(fn, rest)]
+
+  def rapp_arms(fn Vec(String), arms Vec(Arm)) Vec(Arm)
+  def rapp_arms(_, []) := []
+  def rapp_arms(fn, [Arm(p, g, b) | rest]) := [Arm(p, rapp_guard(fn, g), rapp_block(fn, b)) | rapp_arms(fn, rest)]
+
+  def rapp_guard(fn Vec(String), g Guard) Guard
+  def rapp_guard(_, GNone) := GNone
+  def rapp_guard(fn, GSome(c)) := GSome(rapp(fn, c))
+
+  def rapp_flds(fn Vec(String), flds Vec(SFld)) Vec(SFld)
+  def rapp_flds(_, []) := []
+  def rapp_flds(fn, [SFld(k, v) | rest]) := [SFld(k, rapp(fn, v)) | rapp_flds(fn, rest)]
 
   # capability gate (ADR-0055/P5): after exhaustiveness, refuse any function with a
   # BEAM-illegal parameter capability (`ref` → `&mut`, not in the portable core).
@@ -326,7 +408,14 @@ mod SelfhostComposeRealSum do
   # named struct construction `Name(field: v, …)` — labeled args -> a tagged map.
   # (A call's args are all-labeled or none; matching the first label suffices.)
   def lower_surface({:call, {:id, ctor}, [{:label, k, v} | more]}) := CStruct(ctor, lower_flds([{:label, k, v} | more]))
-  def lower_surface({:call, callee, args}) := CCall(callee_name(callee), lower_all(args))
+  # a bare `name(args)` is a named call (resolved to variable application later if
+  # `name` is a bound var — see `resolve_apply`). A callee that is ANY OTHER
+  # expression — a lambda `((x) -> e)(…)`, a curried result `f(a)(b)`, … — is
+  # variable application: apply the callee VALUE to the args.
+  def lower_surface({:call, {:id, name}, args}) := CCall(name, lower_all(args))
+  def lower_surface({:call, callee, args}) := CApply(lower_surface(callee), lower_all(args))
+  # a lambda `(params) -> body` (ADR-0042) -> a Core closure; BEAM captures lexically.
+  def lower_surface({:lam, ps, b}) := CLambda(ps, lower_surface(b))
   # map literal `%{k: v, …}` — `MapE` of `Label` fields -> a Core map; the fields
   # reuse the labeled-construction lowering (`lower_flds`), but no `__struct__` tag.
   def lower_surface({:map_e, flds}) := CMap(lower_flds(flds))
@@ -376,13 +465,6 @@ mod SelfhostComposeRealSum do
   def else_lower(els) Core
   def else_lower([]) := CId("_with")
   def else_lower(els) := CCase(CId("_with"), lower_arms(els))
-
-  def callee_name(c) String
-  # a `Prim.X(args)` dot-call normalizes to the canonical `__prim_X` intrinsic name
-  # (mirrors Rian.Prim.normalize, which the verified backend keys on); selfhost_decl
-  # does NOT run that pass, so the driver does it here.
-  def callee_name({:dot, {:id, "Prim"}, name}) := Prim.str_concat("__prim_", name)
-  def callee_name({:id, f}) := f
 
   def lower_all(es) Vec(Core)
   def lower_all([]) := []
@@ -451,6 +533,11 @@ mod SelfhostComposeRealSum do
   def inflate_bin_segs([]) := []
   def inflate_bin_segs([f | rest]) := [{:bin_element, 0, inflate(f), :default, [:binary]} | inflate_bin_segs(rest)]
 
+  # a lambda's parameters -> Erlang variable forms (the fun clause head).
+  def param_vars(Vec(String)) Vec(Tuple)
+  def param_vars([]) := []
+  def param_vars([n | rest]) := [{:var, 0, var_atom(n)} | param_vars(rest)]
+
   # a struct pattern's field-exacts `field := pat` (FMapPat).
   def inflate_fld_pats(Vec(FFldP)) Vec(Tuple)
   def inflate_fld_pats([]) := []
@@ -473,6 +560,10 @@ mod SelfhostComposeRealSum do
   def inflate(FOp1(op, x)) := {:op, 0, op_atom(op), inflate(x)}
   def inflate(FOp2(op, l, r)) := {:op, 0, op_atom(op), inflate(l), inflate(r)}
   def inflate(FCall(f, args)) := {:call, 0, {:atom, 0, Prim.str_to_atom(f)}, inflate_all(args)}
+  # a lambda -> a single-clause Erlang `fun` (BEAM closes over free vars lexically).
+  def inflate(FFun(params, body)) := {:fun, 0, {:clauses, [{:clause, 0, param_vars(params), [], [inflate(body)]}]}}
+  # variable application -> a call whose callee is an EXPRESSION (a var or a fun).
+  def inflate(FApply(callee, args)) := {:call, 0, inflate(callee), inflate_all(args)}
   # a Prim lowered to a host remote call (str_chars → String.to_charlist, …).
   def inflate(FRemote(m, fun, args)) := {:call, 0, {:remote, 0, {:atom, 0, Prim.str_to_atom(m)}, {:atom, 0, Prim.str_to_atom(fun)}}, inflate_all(args)}
   # `<>` — binary construction `<<L/binary, R/binary>>` (Rian.Beam), not an op.
