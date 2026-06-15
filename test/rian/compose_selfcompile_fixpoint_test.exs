@@ -12,9 +12,10 @@ defmodule Rian.ComposeSelfcompileFixpointTest do
   # build (verified lexer + decl parser + beam backend, cross-module) compiles it
   # into a real loadable module that runs identically to `Rian.Beam`.
   #
-  # Caveat (honesty): the loop is self-COMPILING, not self-CHECKING — Rian.Check /
-  # Exhaustiveness / Capability are not in the `build` loop (see Rian.SelfHost
-  # @composition).
+  # Caveat (honesty): the loop is self-COMPILING and now PARTIALLY self-CHECKING —
+  # the Exhaustiveness gate runs in `build` (see compose_exhaust_gate_fixpoint_test),
+  # but Rian.Check and Rian.Capability are still not in the loop (see Rian.SelfHost
+  # @composition). `self_checking` stays false until all three gates are wired.
 
   @cap_file "examples/rian/selfhost_cap.rian"
   @cap_src File.read!(@cap_file)

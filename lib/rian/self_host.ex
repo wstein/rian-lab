@@ -165,13 +165,16 @@ defmodule Rian.SelfHost do
     source: "selfhost_compose_real_sum.rian",
     test: "test/rian/compose_real_sum_fixpoint_test.exs",
     # honesty distinction (ADR-0063): the composed loop is self-COMPILING (codegen —
-    # lex→parse→lower→emit→load) but NOT self-CHECKING — Rian.Check (inference/error
-    # sets), Rian.Exhaustiveness, and Rian.Capability are NOT in the build loop. `build`
-    # compiles known-good source; it does not yet reject ill-typed/non-exhaustive
-    # programs the way the full compiler does. A backend-only bootstrap must not
-    # masquerade as the whole compiler, so these are tracked separately.
+    # lex→parse→lower→emit→load). It is now PARTIALLY self-CHECKING: the
+    # EXHAUSTIVENESS gate runs in the build loop (`build` REFUSES a non-exhaustive
+    # sum-dispatch program via the verified SelfhostExhaust port). Full self-checking
+    # is NOT reached — Rian.Check (inference/error sets) and Rian.Capability are still
+    # NOT in the loop, so `build` does not yet reject ill-typed/capability-illegal
+    # programs the way the whole compiler does. Tracked granularly so a partial gate
+    # cannot masquerade as the whole checker.
     self_compiling: true,
     self_checking: false,
+    exhaustiveness_gated: true,
     # has `build` compiled a real selfhost_*.rian slice (not a toy corpus)? Yes —
     # the WHOLE capability checker (selfhost_cap.rian) and the whole lexer/decl/beam/
     # core/exhaust stages compile + run identically to Rian.Beam.
@@ -183,7 +186,7 @@ defmodule Rian.SelfHost do
     bootstrap_v1_v2: true,
     bootstrap_test: "test/rian/selfhost_v1_v2_fixpoint_test.exs",
     note:
-      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.Selfhost*\" atoms (Pascal calls, ADR-0041). `SelfhostLexerV2.tokenize` feeds `SelfhostDecl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING; a self-CHECKING compiler (Check/Exhaustiveness/Capability in the loop; the checker port is still infer-only over 5/12 Core nodes) remains the next terminus. Only host FFI in the loop: :compile.forms/:code.load_binary."
+      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.Selfhost*\" atoms (Pascal calls, ADR-0041). `SelfhostLexerV2.tokenize` feeds `SelfhostDecl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING and PARTIALLY self-CHECKING: the EXHAUSTIVENESS gate is now wired into the build loop — `build` refuses a non-exhaustive sum-dispatch program (`:erlang.error({:non_exhaustive, name})`) via the verified SelfhostExhaust port, with the env built from the program's `type` declarations (`compose_exhaust_gate_fixpoint_test`). Full self-CHECKING (Rian.Check inference + Rian.Capability also in the loop; the checker port is still infer-only over 5/12 Core nodes) remains the next terminus. Host FFI in the loop: :compile.forms/:code.load_binary/:erlang.error."
   }
 
   @doc """
