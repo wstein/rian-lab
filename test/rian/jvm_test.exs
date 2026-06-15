@@ -51,6 +51,7 @@ defmodule Rian.JVMTest do
       assert Exception.message(err) =~ "`f`: a list / `Vec` is not yet supported on :jvm"
     end
 
+    @tag :jvm
     test "float `/` lowers to Kotlin Double division (integer `div` stays `/` on Long)" do
       kt = JVM.compile("def half(x Float64) Float64 := x / 2.0")
       assert kt =~ "fun half(a0: Double): Double"
@@ -62,6 +63,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "a multi-clause function lowers to an if-dispatcher with Long literals" do
       kt =
         JVM.compile("""
@@ -80,6 +82,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "`:=` shadowing renames to a backtick-quoted fresh `val` (no Kotlin redeclaration)" do
       # Kotlin forbids re-declaring a `val` in a scope, and `$`/`@` are illegal in
       # plain identifiers, so a shadow `x := …; x := …` becomes a backtick-quoted
@@ -103,6 +106,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "a `:=` rebinding a parameter is renamed, not re-declared" do
       # the param `n` is already bound (`val n = a0`); rebinding it must rename.
       kt = JVM.compile("def f(n Int64) Int64\n  n := n + 1\n  n * 2\nend")
@@ -115,6 +119,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "a `ref` param is lowered to value semantics (sound: return-based surface)" do
       # `ref` (&mut) has no Kotlin analog; it only ever changed the Rust signature,
       # so JVM emits an ordinary `val` binding. Reach reports `ref` as reaching :jvm,
@@ -138,6 +143,7 @@ defmodule Rian.JVMTest do
       assert kt =~ "data class RGB(val f0: Long, val f1: Long, val f2: Long) : Color"
     end
 
+    @tag :jvm
     test "the self-hosting optimizer lowers to Kotlin and folds under java (multi-target)" do
       kt = JVM.compile(File.read!("examples/rian/selfhost_opt.rian"))
       # the Kotlin showcase: sealed hierarchy + smart-cast `is` patterns
@@ -165,6 +171,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "JVM jar assembly (rung B, ADR-0062)" do
+    @tag :jvm
     test "to_jar produces a runnable jar that runs under java" do
       case {System.find_executable("kotlinc"), System.find_executable("java")} do
         {nil, _} ->
@@ -187,6 +194,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "clause heads: guards, char patterns, and unsupported patterns" do
+    @tag :jvm
     test "a `when` guard lowers to a guarded `if (cond) { return .. }`" do
       kt =
         JVM.compile("""
@@ -207,6 +215,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "a guard-only first clause followed by literal and catch-all clauses runs" do
       kt =
         JVM.compile("""
@@ -229,6 +238,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "a char-literal pattern in a clause head matches on the codepoint" do
       kt =
         JVM.compile("""
@@ -290,6 +300,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "if-expressions and blocks" do
+    @tag :jvm
     test "an if-expression with a block then-branch emits `run { .. }`" do
       kt = JVM.compile("def step(n Int64) Int64 := if n > 0 do a := n * 2; a + 1 else 0 end")
 
@@ -365,6 +376,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "blocks whose last statement is a bind (stmt_value)" do
+    @tag :jvm
     test "a block ending in a plain bind yields that bind's value" do
       kt = JVM.compile("def g(n Int64) Int64 := if n > 0 do a := 5 else 0 end")
       # the block's last statement is `a := 5` -> stmt_value({:bind, _, e}) (jvm.ex:238)
@@ -376,6 +388,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "a block ending in a typed bind yields that bind's value" do
       kt = JVM.compile("def g(n Int64) Int64 := if n > 0 do a Int64 := 7 else 0 end")
       # last statement is `a Int64 := 7` -> stmt_value({:typed_bind, _, _, e}) (jvm.ex:239)
@@ -389,6 +402,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "string-literal clause-head patterns (lit_kt binary)" do
+    @tag :jvm
     test "a string-literal pattern matches by equality on the Kotlin String" do
       kt =
         JVM.compile("""
@@ -408,6 +422,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "JVM library jar (to_jar with no :main)" do
+    @tag :jvm
     test "to_jar without a :main opt assembles a plain library jar" do
       # kotlin_module(src, nil) = plain compile() — no generated `fun main`
       # (jvm.ex:87/113). Skip the actual kotlinc run when the toolchain is absent,
@@ -428,6 +443,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "string-literal escaping (full Elixir/Gleam set)" do
+    @tag :jvm
     test "quotes, control chars and `$` emit a valid, runnable Kotlin literal" do
       kt = JVM.compile(~S|def s() String := "\t\"$\a"|)
       assert kt =~ ~S|"\t\"\$\u0007"|
@@ -438,6 +454,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "backslash, newline and carriage-return escape to `\\\\`, `\\n`, `\\r`" do
       # exercises kt_str_cp/1 for ?\\, ?\n, ?\r (jvm.ex:375/378/379) — distinct
       # from the \t/\"/$ test above. A literal backslash doubles; LF/CR become
@@ -454,6 +471,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "string interpolation (ADR-0069) — integer and bool holes" do
+    @tag :jvm
     test "an Int64 hole lowers via `(n).toString()` and concatenation" do
       # `"${n}"` rewrites (Rian.Interp) to a stringify/join chain; the Int64 hole
       # uses `__prim_int_to_string`, which the JVM emitter lowers to Kotlin
@@ -467,6 +485,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "a Bool hole rewrites to a single-expr-block `if` (branch_kt block path)" do
       # `"${b}"` with a Bool hole rewrites (Rian.Interp) to `if (b) "true" else
       # "false"`; each branch is a single-expression `EBlock`, lowered through
@@ -482,6 +501,7 @@ defmodule Rian.JVMTest do
   end
 
   describe "case expressions" do
+    @tag :jvm
     test "a `case` over a sum lowers to a labelled `run` with smart-cast arms" do
       kt =
         JVM.compile("""
@@ -501,6 +521,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "a `case` with literal, guard, and catch-all arms runs" do
       kt =
         JVM.compile("""
@@ -522,6 +543,7 @@ defmodule Rian.JVMTest do
       end
     end
 
+    @tag :jvm
     test "nested `case` and a non-variable scrutinee compile and run" do
       kt =
         JVM.compile("""
