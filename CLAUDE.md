@@ -19,7 +19,7 @@ prose specs; `examples/rian/` is the annotated by-example tour and the self-host
 
 ```bash
 mix test                                  # fast inner loop — EXCLUDES external-toolchain tests (~10s)
-mix test.all                              # full suite incl. rustc/node/kotlinc — the enforced CI gate (~70s)
+mix test.all                              # full suite incl. rustc/node/kotlinc — the enforced CI gate (~30s)
 mix test test/rian/check_test.exs         # one file
 mix test test/rian/check_test.exs:51      # one test (by line number)
 mix test --only rust                      # only the rustc-backed tests
@@ -37,12 +37,16 @@ mix examples                                      # end-to-end lowering demo
 ```
 
 - External-toolchain tests are **excluded from the default `mix test`** for inner-loop speed:
-  `@tag :jvm` (kotlinc + java — the dominant cost, `kotlinc -include-runtime` rebundles the Kotlin
-  stdlib per test), `@tag :rust` (rustc), `@tag :js` (node). They are **not dropped** — `mix test.all`
-  runs everything and is the **enforced CI gate** (it sets `RIAN_TEST_ALL=1`); `mix test --include jvm`
-  adds one back. The exclude lives in `test/test_helper.exs`. `Rian.TestPolicyTest` guards the `:jvm`
-  tagging so a new toolchain test can't silently rejoin (and slow) the default loop. When adding a
-  test that spawns one of these, **tag it**.
+  `@tag :jvm` (kotlinc + java), `@tag :rust` (rustc), `@tag :js` (node). They are **not dropped** —
+  `mix test.all` runs everything and is the **enforced CI gate** (it sets `RIAN_TEST_ALL=1`);
+  `mix test --include jvm` adds one back. The exclude lives in `test/test_helper.exs`.
+  `Rian.TestPolicyTest` guards the `:jvm` tagging so a new toolchain test can't silently rejoin (and
+  slow) the default loop. When adding a test that spawns one of these, **tag it**.
+- The JVM execution tests **batch into one `kotlinc`** (`Rian.JVMTest`'s `@exec_cases` + `setup_all`):
+  each emitted snippet is compiled in its own `package` into a single jar, run once, and the per-case
+  stdout parsed back — `kotlinc -include-runtime` rebundles the whole Kotlin stdlib per invocation, so
+  one compile for ~20 cases instead of ~20 is the difference between a ~70s and a ~30s `test.all`. A
+  batch compile error falls back to per-case compiles to localize the regression.
 - Coverage (`mix test --cover`, `threshold: 95`) must be measured on the **full set** — the toolchain
   tests exercise the Rust/JVM emitters — so the honest number is `mix test.all --cover`. A plain
   `mix test --cover` runs the reduced default set and under-reports.
