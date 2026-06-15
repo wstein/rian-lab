@@ -516,4 +516,107 @@ defmodule Rian.DeclFixpointTest do
       assert mod.head([7, 8, 9]) == 7
     end
   end
+
+  # === reference-completeness ledger (self-hosted parser vs. the oracle) ========
+  #
+  # The fixpoint above proves the PORTED forms equal `Rian.Decl` over a corpus,
+  # but says nothing about forms the port doesn't cover — they are simply
+  # untested (and the port's final `parse_program([_|rest])` clause *silently
+  # skips* an unrecognized declaration). "Self-hosted and oracle must both be
+  # feature-complete" → this ledger makes the gap MEASURED and ENFORCED: every
+  # `Rian.Decl` declaration form is listed with a `ported?` flag, and the test
+  # checks the flag against reality (teeth, like the `@selfhost_ffi` ledger) — a
+  # missing form can't masquerade as covered, and porting one forces a flip.
+
+  # `port_parity?` = does selfhost_decl reproduce `Rian.Decl` for this source?
+  # Reuses the fixpoint's projection (`to_prog`/`norm_func`); additionally any
+  # oracle output in a field the port cannot represent (protocols/impls/ranges/
+  # opaques/consts/uses/…) means it cannot be matching.
+  defp port_parity?(fe, src) do
+    ref = Decl.parse(src)
+    prog = front_decls(fe, src) |> to_prog()
+
+    ref_unportable? =
+      ref
+      |> Map.drop([:types, :structs, :funcs, :mods])
+      |> Map.values()
+      |> Enum.any?(fn v -> v not in [[], nil, %{}] end)
+
+    not ref_unportable? and
+      prog.types == ref.types and
+      prog.structs == ref.structs and
+      Enum.map(prog.funcs, &norm_func/1) == Enum.map(ref.funcs, &norm_func/1) and
+      Enum.map(prog.mods, &norm_mod/1) == Enum.map(ref.mods, &norm_mod/1)
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
+  # Every `Rian.Decl` declaration form (the oracle's `take_decl` vocabulary), each
+  # with a representative source and whether selfhost_decl reproduces it today.
+  @oracle_forms [
+    {"type", "type C := A | RGB(Int64, Int64)", true},
+    {"struct", "struct P(x Int64, y Int64)", true},
+    {"def", "def f(n Int64) Int64 := n + 1", true},
+    {"pub def", "pub def f(n Int64) Int64 := n", true},
+    {"mod", "mod M do\n  def f() Int64 := 1\nend", true},
+    {"@external", ~S|@external(:ex, ":os.system_time()") def now() Int64|, true},
+    # --- not yet ported: the oracle handles these; the port skips / errors / drops a modifier ---
+    {"@doc", ~s|@doc "d"\ndef f() Int64 := 1|, false},
+    {"@test", "@test def t() Bool := true", false},
+    {"@targets", "@targets(ex, js)\nmod M do\n  def f() Int64 := 1\nend", false},
+    {"pub type", "pub type C := A | B", false},
+    {"range", "range Digit := 0 .. 9", false},
+    {"opaque", "opaque Id := Int64", false},
+    # tested IN USE: an alias only has an observable effect when a later signature
+    # uses it (the oracle substitutes `Id`→`Int64`; the port, skipping the alias,
+    # leaves `Id`), so the parity probe is non-vacuous.
+    {"alias", "alias Id := Int64\ndef f(x Id) Id := x", false},
+    {"const", "mod M do\n  const MAX Int64 := 100\nend", false},
+    {"use", "mod M do\n  use Foo\nend", false},
+    {"macro", "macro double(x) := x + x\ndef f() Int64 := double(2)", false},
+    {"protocol", "protocol Show do\n  def show(x Int64) String\nend", false},
+    {"impl",
+     "protocol Show do\n  def show(x Int64) String\nend\n" <>
+       "impl Show for Int64 do\n  def show(n) := \"an int\"\nend", false}
+  ]
+
+  describe "self-host declaration completeness ledger (vs Rian.Decl, the oracle)" do
+    test "the oracle (Rian.Decl) parses every listed form — the corpus is valid" do
+      for {form, src, _} <- @oracle_forms do
+        assert is_map(Decl.parse(src)),
+               "Rian.Decl failed to parse the `#{form}` example — fix the @oracle_forms entry"
+      end
+    end
+
+    test "every form's ported? flag matches the self-hosted parser's actual behaviour", %{
+      frontend: fe
+    } do
+      drift =
+        for {form, src, ported?} <- @oracle_forms,
+            actual = port_parity?(fe, src),
+            actual != ported? do
+          "#{form}: ledger says ported?=#{ported?} but selfhost_decl " <>
+            "#{if actual, do: "REPRODUCES", else: "does NOT reproduce"} Rian.Decl"
+        end
+
+      assert drift == [],
+             "self-host decl completeness ledger drifted from reality:\n" <>
+               Enum.join(drift, "\n") <>
+               "\n(flip the @oracle_forms flag — true means the form is now ported; teeth, like @selfhost_ffi)"
+    end
+
+    test "declaration-form coverage is measured and must not regress" do
+      ported = Enum.count(@oracle_forms, fn {_, _, p} -> p end)
+      total = length(@oracle_forms)
+
+      IO.puts(
+        "\n  selfhost_decl reference-completeness: #{ported}/#{total} Rian.Decl forms ported"
+      )
+
+      assert ported >= 6,
+             "selfhost_decl declaration coverage regressed below the baseline (6/#{total})"
+    end
+  end
 end
