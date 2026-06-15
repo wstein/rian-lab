@@ -61,6 +61,7 @@ mod SelfhostBeam do
              | FOp1(String, Form)
              | FOp2(String, Form, Form)
              | FCall(String, Vec(Form))
+             | FRemote(String, String, Vec(Form))
              | FTuple(Vec(Form))
              | FNil
              | FCons(Form, Form)
@@ -143,6 +144,13 @@ mod SelfhostBeam do
   def expr_form(CAtom(a)) := FAtom(a)
   def expr_form(CUnary(op, x)) := FOp1(op, expr_form(x))
   def expr_form(CBin(op, l, r)) := FOp2(op, expr_form(l), expr_form(r))
+  # portable-prelude prims (ADR-0047) — each lowers to the SAME native Erlang form
+  # Rian.Beam uses, so the composed build is byte-equivalent: str_chars →
+  # String.to_charlist, str_from_chars → List.to_string, char_code → identity
+  # (a Char IS its codepoint on the BEAM). MUST precede the generic CCall clause.
+  def expr_form(CCall("__prim_str_chars", [s])) := FRemote("Elixir.String", "to_charlist", [expr_form(s)])
+  def expr_form(CCall("__prim_str_from_chars", [cs])) := FRemote("Elixir.List", "to_string", [expr_form(cs)])
+  def expr_form(CCall("__prim_char_code", [c])) := expr_form(c)
   def expr_form(CCall(f, args))
     if pascal(f) do
       FCtor(f, expr_forms(args))

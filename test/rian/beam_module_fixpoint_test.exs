@@ -94,6 +94,11 @@ defmodule Rian.BeamModuleFixpointTest do
   defp inf({:f_call, f, args}),
     do: {:call, 0, {:atom, 0, String.to_atom(f)}, Enum.map(args, &inf/1)}
 
+  defp inf({:f_remote, m, fun, args}),
+    do:
+      {:call, 0, {:remote, 0, {:atom, 0, String.to_atom(m)}, {:atom, 0, String.to_atom(fun)}},
+       Enum.map(args, &inf/1)}
+
   defp inf({:f_tuple, es}), do: {:tuple, 0, Enum.map(es, &inf/1)}
   defp inf(:f_nil), do: {nil, 0}
   defp inf({:f_cons, h, t}), do: {:cons, 0, inf(h), inf(t)}
@@ -185,7 +190,12 @@ defmodule Rian.BeamModuleFixpointTest do
     {"def kind(c Char) Int64\ndef kind('+') := 1\ndef kind('-') := 2\ndef kind(_) := 0",
      [{:kind, [?+]}, {:kind, [?-]}, {:kind, [?x]}]},
     {"def sel(s String) Int64\ndef sel(\"a\") := 1\ndef sel(_) := 0",
-     [{:sel, ["a"]}, {:sel, ["z"]}]}
+     [{:sel, ["a"]}, {:sel, ["z"]}]},
+    # Prim.* — the portable string/char intrinsics the lexer leans on (str_chars →
+    # String.to_charlist, str_from_chars → List.to_string, char_code → identity)
+    {"def echo(s String) String := Prim.str_from_chars(Prim.str_chars(s))",
+     [{:echo, ["hi"]}, {:echo, ["ok"]}]},
+    {"def d(c Char) Int64 := Prim.char_code(c) - Prim.char_code('0')", [{:d, [?7]}, {:d, [?0]}]}
   ]
 
   describe "self-hosting BEAM-module fixpoint — Rian forms run identically to Rian.Beam" do
