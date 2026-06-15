@@ -185,14 +185,20 @@ mod SelfhostDecl do
   end
   def parse_type(ts) := DR(DErr, ts)
 
+  # a sum's variants, `|`-separated. The `|` may begin on the NEXT line (a multi-line
+  # `type X := A\n  | B\n  | C`, P1), so skip newlines before looking for it; the
+  # non-`|` tail keeps its original tokens (the newline separates the next decl).
   def parse_variants(ts Vec(Tok)) VarsRes
   def parse_variants(ts)
     case parse_variant(ts) do
-      OneV(v, [TOp("|") | rest]) ->
-        case parse_variants(rest) do
-          VR(more, rest2) -> VR([v | more], rest2)
+      OneV(v, after) ->
+        case skip_nl(after) do
+          [TOp("|") | rest] ->
+            case parse_variants(rest) do
+              VR(more, rest2) -> VR([v | more], rest2)
+            end
+          _ -> VR([v], after)
         end
-      OneV(v, rest) -> VR([v], rest)
     end
   end
 
@@ -205,15 +211,21 @@ mod SelfhostDecl do
   def parse_variant([TId(ctor) | rest]) := OneV(V(ctor, []), rest)
   def parse_variant(ts) := OneV(V("", []), ts)
 
+  # a variant's argument types, comma-separated up to `)`. Each element is a full
+  # type via `parse_ptype`, so a parametric arg like `Vec(Ty)` counts as ONE type
+  # (not truncated) — the arity the exhaustiveness gate reads must be correct.
   def parse_typelist(ts Vec(Tok)) TypeList
   def parse_typelist([TRP | rest]) := TL([], rest)
-  def parse_typelist([TId(t), TComma | rest])
-    case parse_typelist(rest) do
-      TL(more, r) -> TL([t | more], r)
+  def parse_typelist(ts)
+    case parse_ptype(ts) do
+      PT(t, [TComma | rest]) ->
+        case parse_typelist(rest) do
+          TL(more, r) -> TL([t | more], r)
+        end
+      PT(t, [TRP | rest]) -> TL([t], rest)
+      PT(t, rest) -> TL([t], rest)
     end
   end
-  def parse_typelist([TId(t), TRP | rest]) := TL([t], rest)
-  def parse_typelist(ts) := TL([], ts)
 
   # ── def: split the parenthesized head, then classify by what follows ──────
   def parse_def(pb Bool, ts Vec(Tok)) DeclRes

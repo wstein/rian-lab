@@ -247,6 +247,10 @@ defmodule Rian.DeclFixpointTest do
 
   @corpus [
     "type Color := Red | RGB(Int64, Int64)",
+    # multi-line `type` (variants on continuation lines, P1) + a parametric type as a
+    # multi-arg variant field (`Vec(Ty)`) — both must match Rian.Decl's variant fields.
+    "type Ty := TScalar(String)\n  | TString\n  | TNom(String)\n  | TVec(Ty)\n  | TGen(String, Vec(Ty), String)",
+    "type Pair := P(Vec(Int64), Int64)",
     "def sq(n Int64) Int64 := n * n",
     "def add(a Int64, b Int64) Int64 := a + b",
     "type Expr := Num(Int64) | Add(Expr, Expr) | Zero",

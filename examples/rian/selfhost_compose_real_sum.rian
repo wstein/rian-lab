@@ -92,6 +92,13 @@ mod SelfhostComposeRealSum do
   type NClause := NC(String, Vec(Pat), Guard, Block)
   type Grp := Grp(String, Int53, Vec(NClause))
 
+  # the exhaustiveness gate's env (ADR-0036) — same field shape as SelfhostExhaust's
+  # CDef/TDef/Env (which only field-READS them, ignoring the struct tag), so these
+  # locally-declared structs feed the verified `SelfhostExhaust.useful` directly.
+  struct CDef(name String, ar Int53, ty String)
+  struct TDef(ty String, ctors Vec(String))
+  struct Env(cdefs Vec(CDef), tdefs Vec(TDef))
+
   # ── the BEAM toolchain boundary: two @external(:ex) host calls (counted FFI) ──
   @external(:ex, ":compile.forms(forms, [:return_errors])")
   def compile_forms_host(forms Vec(Tuple)) Tuple
@@ -432,4 +439,114 @@ mod SelfhostComposeRealSum do
       c
     end
   end
+
+  # ── exhaustiveness gate (ADR-0036) — the verified SelfhostExhaust port, in-loop ──
+  # Build the usefulness env from the program's `type` declarations, then ask
+  # SelfhostExhaust.useful whether a wildcard row is useful against each function's
+  # clause matrix (useful ⇒ an uncovered case ⇒ NON-exhaustive). Read-only: returns
+  # "" if every CHECKABLE function is exhaustive, else the first that is not.
+  # Functions with guards or non-ctor/wild/var patterns (literals/lists/tuples) are
+  # conservatively SKIPPED — the gate decides the sum-type-dispatch subset.
+  pub def non_exhaustive(src String) String
+  pub def non_exhaustive(src)
+    decls := SelfhostDecl.parse_program(SelfhostLexerV2.tokenize(src))
+    first_bad(gate_env(decls), group(normalize(decls)))
+  end
+
+  def gate_env(decls Vec(Tuple)) Env := Env(cdefs: gate_cdefs(decls), tdefs: gate_tdefs(decls))
+
+  def gate_cdefs(decls Vec(Tuple)) Vec(CDef)
+  def gate_cdefs([]) := []
+  def gate_cdefs([{:d_type, name, vs} | rest]) := cat_cd(vs_cdefs(name, vs), gate_cdefs(rest))
+  def gate_cdefs([{:d_mod, _, inner} | rest]) := cat_cd(gate_cdefs(inner), gate_cdefs(rest))
+  def gate_cdefs([_ | rest]) := gate_cdefs(rest)
+
+  def vs_cdefs(ty String, vs Vec(Tuple)) Vec(CDef)
+  def vs_cdefs(_, []) := []
+  def vs_cdefs(ty, [{:v, c, argtys} | rest]) := [CDef(name: c, ar: vlen(argtys), ty: ty) | vs_cdefs(ty, rest)]
+
+  def gate_tdefs(decls Vec(Tuple)) Vec(TDef)
+  def gate_tdefs([]) := []
+  def gate_tdefs([{:d_type, name, vs} | rest]) := [TDef(ty: name, ctors: v_names(vs)) | gate_tdefs(rest)]
+  def gate_tdefs([{:d_mod, _, inner} | rest]) := cat_td(gate_tdefs(inner), gate_tdefs(rest))
+  def gate_tdefs([_ | rest]) := gate_tdefs(rest)
+
+  def v_names(vs Vec(Tuple)) Vec(String)
+  def v_names([]) := []
+  def v_names([{:v, c, _} | rest]) := [c | v_names(rest)]
+
+  def vlen(xs Vec(String)) Int53
+  def vlen([]) := 0
+  def vlen([_ | rest]) := 1 + vlen(rest)
+
+  def cat_cd(Vec(CDef), Vec(CDef)) Vec(CDef)
+  def cat_cd([], ys) := ys
+  def cat_cd([x | xs], ys) := [x | cat_cd(xs, ys)]
+
+  def cat_td(Vec(TDef), Vec(TDef)) Vec(TDef)
+  def cat_td([], ys) := ys
+  def cat_td([x | xs], ys) := [x | cat_td(xs, ys)]
+
+  def first_bad(env Env, grps Vec(Grp)) String
+  def first_bad(_, []) := ""
+  def first_bad(env, [Grp(name, ar, cls) | rest])
+    if grp_bad(env, ar, cls) do
+      name
+    else
+      first_bad(env, rest)
+    end
+  end
+
+  def grp_bad(env Env, ar Int53, cls Vec(NClause)) Bool
+    if checkable(cls) do
+      SelfhostExhaust.useful(env, matrix(cls), dup_wild(ar))
+    else
+      false
+    end
+  end
+
+  def checkable(Vec(NClause)) Bool
+  def checkable([]) := true
+  def checkable([NC(_, pats, GNone, _) | rest])
+    if pats_ok(pats) do
+      checkable(rest)
+    else
+      false
+    end
+  end
+  def checkable([NC(_, _, GSome(_), _) | rest]) := false
+
+  def pats_ok(Vec(Pat)) Bool
+  def pats_ok([]) := true
+  def pats_ok([p | rest])
+    if pat_ok(p) do
+      pats_ok(rest)
+    else
+      false
+    end
+  end
+
+  def pat_ok(p Pat) Bool
+  def pat_ok(PWild) := true
+  def pat_ok(PVar(_)) := true
+  def pat_ok(PCtor(_, args)) := pats_ok(args)
+  def pat_ok(_) := false
+
+  def matrix(Vec(NClause)) Vec(Vec(Pat))
+  def matrix([]) := []
+  def matrix([NC(_, pats, _, _) | rest]) := [exh_row(pats) | matrix(rest)]
+
+  def exh_row(Vec(Pat)) Vec(Pat)
+  def exh_row([]) := []
+  def exh_row([p | rest]) := [to_exh(p) | exh_row(rest)]
+
+  def to_exh(p Pat) Pat
+  def to_exh(PWild) := PWild
+  def to_exh(PVar(_)) := PWild
+  def to_exh(PCtor(c, args)) := PCtor(c, exh_row(args))
+  def to_exh(_) := PWild
+
+  def dup_wild(Int53) Vec(Pat)
+  def dup_wild(0) := []
+  def dup_wild(n) := [PWild | dup_wild(n - 1)]
 end
