@@ -49,6 +49,9 @@ defmodule Rian.Reach do
 
   @targets [:ex, :rs, :js, :jvm]
 
+  @typedoc "A lowering target (emitter-backed)."
+  @type target :: :ex | :rs | :js | :jvm
+
   # Erlang modules that are concurrency/process/state (ex-only AND native-per-target)
   @conc_erl ~w(ets dets mnesia gen_server gen_statem gen_event global pg pg2 sys supervisor)
   @conc_erl_fun ~w(spawn spawn_link spawn_monitor send send_after start_timer monitor link)
@@ -56,7 +59,7 @@ defmodule Rian.Reach do
   @conc_ex ~w(GenServer Task Process Agent Supervisor DynamicSupervisor Registry GenStage GenEvent Node)
 
   @doc "The closed target vocabulary (emitter-backed). Extends only when an emitter lands."
-  @spec targets() :: [atom()]
+  @spec targets() :: [target()]
   def targets, do: @targets
 
   @doc """
