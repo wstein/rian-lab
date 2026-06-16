@@ -39,11 +39,25 @@ defmodule Rian.Lexer do
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/
   @id_re ~r/^[A-Za-z_]\w*/
 
-  @doc "Full token stream, with collapsed `{:nl}` separators."
-  def tokenize(src), do: src |> lex([]) |> collapse_nl()
+  @doc "Full token stream, with collapsed `{:nl}` separators (comments stripped)."
+  def tokenize(src),
+    do: src |> lex([]) |> Enum.reject(&match?({:comment, _}, &1)) |> collapse_nl()
 
   @doc "Newline-free token stream for the expression grammar (`Rian.Pratt`)."
-  def expr_tokens(src), do: src |> lex([]) |> Enum.reject(&(&1 == {:nl}))
+  def expr_tokens(src),
+    do: src |> lex([]) |> Enum.reject(&(&1 == {:nl} or match?({:comment, _}, &1)))
+
+  @doc """
+  Trivia-preserving token stream for the source **formatter** (`Rian.Format`).
+
+  Unlike `tokenize/1`, this keeps everything the compiler pipeline throws away:
+  `{:comment, text}` tokens (the comment text incl. the leading `#`, trailing
+  whitespace trimmed) sit exactly between the tokens they followed in source, and
+  `{:nl}` separators are **not** collapsed — so a run of ≥2 `{:nl}` is a blank
+  line, recoverable by the formatter. Nothing downstream consumes this; it exists
+  solely so `Rian.Format` can re-print without losing comments or paragraphing.
+  """
+  def tokenize_trivia(src), do: lex(src, [])
 
   @doc """
   Render a token list back to a source string (space-joined; re-lexable).
@@ -86,6 +100,7 @@ defmodule Rian.Lexer do
   defp tok_str({:mapopen}, _), do: "%{"
   defp tok_str({:comma}, _), do: ","
   defp tok_str({:semi}, _), do: ";"
+  defp tok_str({:comment, text}, _), do: text
 
   defp advance(s, n), do: elem(String.split_at(s, n), 1)
 
@@ -296,7 +311,8 @@ defmodule Rian.Lexer do
         lex(advance(str, 1), [{:nl} | acc])
 
       String.starts_with?(str, "#") ->
-        lex(skip_line(str), acc)
+        {comment, rest} = take_comment(str)
+        lex(rest, [{:comment, comment} | acc])
 
       String.starts_with?(str, "%{") ->
         lex(advance(str, 2), [{:mapopen} | acc])
@@ -367,10 +383,13 @@ defmodule Rian.Lexer do
     end
   end
 
-  defp skip_line(str) do
+  # A `#` line comment, kept as a `{:comment, text}` token for the formatter.
+  # Returns the trimmed comment text (incl. the leading `#`) and the rest of the
+  # source with the terminating `\n` preserved, so the next `{:nl}` still fires.
+  defp take_comment(str) do
     case String.split(str, "\n", parts: 2) do
-      [_comment, rest] -> "\n" <> rest
-      [_only] -> ""
+      [comment, rest] -> {String.trim_trailing(comment), "\n" <> rest}
+      [only] -> {String.trim_trailing(only), ""}
     end
   end
 
