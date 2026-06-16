@@ -601,8 +601,10 @@ defmodule Rian.Decl do
       prog = Rian.Opaque.erase(prog)
 
     # protocol-method -> trait name, for the Rust UFCS call-site rewrite (ADR-0061
-    # §2). Set before lowering so `rust_fn` sees it; sums/impls flow per-target.
-    Process.put(:rian_proto_methods, proto_method_traits(prog))
+    # §2). Threaded into `Lower.compile` so `rust_fn` sees it; sums/impls flow
+    # per-target. (`Lower` carries it explicitly in its emitter context, no longer
+    # via the process dictionary.)
+    proto = proto_method_traits(prog)
 
     funs =
       Enum.map(funcs, fn f ->
@@ -612,7 +614,7 @@ defmodule Rian.Decl do
         out =
           if f.dispatch,
             do: Lower.compile_elixir(types, f, structs, ranges),
-            else: Lower.compile(types, f, structs, ranges)
+            else: Lower.compile(types, f, structs, ranges, proto)
 
         {f.name, out}
       end)
