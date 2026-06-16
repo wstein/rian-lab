@@ -3,129 +3,115 @@ defmodule Rian.Format do
   The canonical Rian source formatter — a gofmt-style, **opinionated, zero-config**
   re-printer. `format/1` takes `.rian` source and returns the formatted source.
 
-  ## How it works (and why it can't change meaning)
+  ## Pipeline
 
-  The formatter is a **token-stream pretty-printer** built on
-  `Rian.Lexer.tokenize_trivia/1`. It deliberately does **not** parse: it never
-  builds an AST, so it cannot mis-lower a construct the parser doesn't model, and
-  it cannot reorder or drop program structure.
+      tokenize_trivia → Cst.build → logical lines → per-line Doc → Doc.render
 
-  Two facts about Rian make this safe and total:
+  The formatter never builds a semantic AST and never reparses. It lexes with
+  trivia preserved (`Rian.Lexer.tokenize_trivia/1`), groups tokens into a
+  bracket-structured lossless tree (`Rian.Format.Cst`), splits the top level into
+  logical lines on significant newlines, lowers each line to a pretty-printing
+  document, and renders it with the Lindig engine (`Rian.Format.Doc`) against a
+  fixed column budget.
 
-    * **Indentation is never tokenized.** Leading whitespace is consumed silently
-      by the lexer, so the formatter may re-indent freely without touching the
-      token stream the compiler sees.
-    * **Newlines are significant** (`{:nl}` tokens drive declaration boundaries and
-      block bodies, ADR-0031). So the formatter **preserves newline placement
-      exactly** — it never inserts or removes a newline between code tokens. It
-      only (a) collapses runs of ≥2 blank lines to one, (b) normalizes indentation,
-      (c) normalizes intra-line spacing, and (d) trims trailing whitespace.
+  ## What it does
 
-  Together these give the correctness contract, enforced by the test suite:
+    * **Indentation + intra-line spacing** are re-derived from structure (2-space
+      indent, one level per `do`-block / block-form `def` body).
+    * **Bracket interiors reflow** (Tier 2): a call's arguments, a list/map/tuple,
+      or a parenthesized expression collapse onto one line when they fit the
+      #{98}-column budget, and otherwise break **one item per line** with a
+      trailing comma. A bracket region containing a line comment is forced to break.
+    * **Statement / block newline placement is preserved** — the formatter does not
+      collapse or expand `do…end` blocks, nor reflow pipe/operator chains. Those
+      newlines are significant, so re-deriving them is deferred (see ADR-0045).
+    * Blank-line runs collapse to one; comments and heredocs are kept verbatim at
+      their authored position.
 
-    * **Re-lex equivalence** — `tokenize(format(src)) == tokenize(src)`. Same
-      program. (The analog of `Rian.FormsEquiv` for the BEAM backend.)
-    * **Idempotence** — `format(format(src)) == format(src)`.
-    * **Comment fidelity** — every `{:comment}` survives at its authored position
-      (trailing comments stay on their line, own-line comments keep their place);
-      heredocs (`\"""…\"""`) are reproduced verbatim.
+  ## Why it can't change meaning
 
-  ## Style
-
-    * 2-space indent, one level per `do`-block / block-form `def` body / open
-      bracket; lines that open with a closer (`end`/`)`/`]`/`}`/`else`/`when`)
-      dedent one step; lines that open with a continuation operator (a leading
-      `|`, `|>`, …) indent one step.
-    * One space around binary operators and after `,`/`;`; none after an opener,
-      before a closer, around `.`, after a unary `-`/`+`, or inside `f(x)`/`xs[0]`.
-    * At most one blank line anywhere; no leading/trailing blank lines; the file
-      ends in a single newline.
+  `Rian.Decl.detokenize` is whitespace-invariant and the parser is newline-tolerant
+  inside brackets (and accepts a trailing comma identically), so **reflow that only
+  changes whitespace/newlines inside brackets — plus an optional trailing comma —
+  leaves `Rian.Decl.parse/1`'s AST unchanged**. That full-AST equality is the
+  semantic-preservation oracle, asserted over the whole corpus and in property tests
+  (the analog of `Rian.FormsEquiv` for the BEAM backend), alongside idempotence and
+  comment fidelity.
   """
 
   alias Rian.Lexer
+  alias Rian.Format.{Cst, Doc}
 
-  @doc "Format Rian source. Total: never raises on valid `.rian`, returns a string."
+  @width 98
+
+  @doc "Format Rian source. Total on valid `.rian`; returns a string."
   def format(src) when is_binary(src) do
     src
     |> Lexer.tokenize_trivia()
-    |> rows()
-    |> indent_rows([0], 0, [])
+    |> Cst.build()
+    |> logical_lines()
+    |> indent_and_render([0], 0, [])
     |> squeeze_blanks()
     |> Enum.map_join("", &(&1 <> "\n"))
   end
 
-  # ── split the token stream into rows (one per source line) ────────────────
-  # Each `{:nl}` ends a row; an empty row is a blank line. Comment/heredoc tokens
-  # ride along inside their row, so their position is preserved verbatim.
-  defp rows(tokens), do: rows(tokens, [], [])
-  defp rows([], cur, acc), do: Enum.reverse([Enum.reverse(cur) | acc])
-  defp rows([{:nl} | rest], cur, acc), do: rows(rest, [], [Enum.reverse(cur) | acc])
-  defp rows([t | rest], cur, acc), do: rows(rest, [t | cur], acc)
+  # ── split the CST into logical lines on top-level newlines ────────────────
+  # A bracket `{:group}` is one node, so a multi-line bracket stays within one
+  # logical line (its inner newlines are the group's children, not top-level).
+  defp logical_lines(nodes), do: ll(nodes, [], [])
+  defp ll([], cur, acc), do: Enum.reverse([Enum.reverse(cur) | acc])
+  defp ll([{:tok, {:nl}} | rest], cur, acc), do: ll(rest, [], [Enum.reverse(cur) | acc])
+  defp ll([n | rest], cur, acc), do: ll(rest, [n | cur], acc)
 
-  # ── assign each row an indent and render it ───────────────────────────────
-  # `stack` holds the indent level for content at each open nesting (top = the
-  # current body indent); `cont` is 1 when the previous code row ended in a
-  # trailing binary operator, so this row is its continuation and indents once.
-  # Each opener (`do` / block-form `def` / open bracket) pushes `line + 1`, so a
-  # block opened on a continued line nests under the *continued* position — which
-  # is why a multi-line `case` arm body lands correctly.
-  defp indent_rows([], _stack, _cont, acc), do: Enum.reverse(acc)
+  # ── per-line indent (stack) + Doc render ──────────────────────────────────
+  # `stack` holds the indent level for each open block; `cont` is 1 when the
+  # previous line ended in a trailing binary operator (this line continues it).
+  defp indent_and_render([], _stack, _cont, acc), do: Enum.reverse(acc)
 
-  defp indent_rows([row | rest], stack, cont, acc) do
-    if blank?(row) do
-      indent_rows(rest, stack, cont, ["" | acc])
+  defp indent_and_render([line | rest], stack, cont, acc) do
+    if blank?(line) do
+      indent_and_render(rest, stack, cont, ["" | acc])
     else
-      # resolve unary `-`/`+` and key/atom colons up front, so the indent rules
-      # see a leading unary minus (`-1`) as a value, not a continuation operator.
-      row = mark(row)
-      level = max(0, hd(stack) + cont + lead_adjust(row))
-      line = String.duplicate("  ", level) <> render(row)
-      stack = update_stack(row, rest, level, stack)
-      cont = if trailing_op?(row), do: 1, else: 0
-      indent_rows(rest, stack, cont, [line | acc])
+      line = mark(line)
+      base = max(0, hd(stack) + cont + lead_adjust(line))
+      rendered = render_line(line, base)
+      stack = update_stack(line, rest, base, stack)
+      cont = if trailing_op?(line), do: 1, else: 0
+      indent_and_render(rest, stack, cont, [rendered | acc])
     end
   end
 
-  # Apply this row's openers/closers to the indent stack. An opener pushes the
-  # body indent (`level + 1`); a closer pops back. A block-form `def`/`macro`
-  # head (no `do` token) pushes once for its implicit body.
-  defp update_stack(row, rest, level, stack) do
-    stack = Enum.reduce(row, stack, fn t, st -> apply_tok(t, level, st) end)
-    if block_head?(row, rest), do: push(level, stack), else: stack
-  end
-
-  defp apply_tok({:kw, "do"}, level, st), do: push(level, st)
-  defp apply_tok({:lparen}, level, st), do: push(level, st)
-  defp apply_tok({:lbracket}, level, st), do: push(level, st)
-  defp apply_tok({:lbrace}, level, st), do: push(level, st)
-  defp apply_tok({:mapopen}, level, st), do: push(level, st)
-  defp apply_tok({:kw, "end"}, _level, st), do: pop(st)
-  defp apply_tok({:rparen}, _level, st), do: pop(st)
-  defp apply_tok({:rbracket}, _level, st), do: pop(st)
-  defp apply_tok({:rbrace}, _level, st), do: pop(st)
-  defp apply_tok(_t, _level, st), do: st
-
-  defp push(level, st), do: [level + 1 | st]
-  defp pop([_top, next | rest]), do: [next | rest]
-  defp pop(st), do: st
-
-  defp trailing_op?(row) do
-    case List.last(row) do
-      {:op, _} -> true
-      _ -> false
-    end
-  end
-
-  # a row is blank iff it has no tokens at all (a comment-only row is NOT blank)
   defp blank?([]), do: true
   defp blank?(_), do: false
 
-  # First-token indent nudge: a row opening with a closer dedents one level; a row
-  # opening with a continuation operator (leading `|`, `|>`, `<>`, …) indents one.
+  # render one logical line as a Doc at indent `base` (in 2-space levels); a
+  # breaking bracket group produces multiple physical lines, nested under `base`.
+  defp render_line(nodes, base) do
+    doc =
+      Doc.concat([Doc.text(String.duplicate("  ", base)), Doc.nest(2 * base, line_doc(nodes))])
+
+    Doc.render(doc, @width)
+  end
+
+  # ── indent stack (driven by do/end + block-form def heads) ────────────────
+  defp update_stack(line, rest, base, stack) do
+    stack = Enum.reduce(line, stack, fn node, st -> apply_node(node, base, st) end)
+    if block_head?(line, rest), do: push(base, stack), else: stack
+  end
+
+  defp apply_node({:tok, {:kw, "do"}}, base, st), do: push(base, st)
+  defp apply_node({:tok, {:kw, "end"}}, _base, st), do: pop(st)
+  defp apply_node(_node, _base, st), do: st
+
+  defp push(base, st), do: [base + 1 | st]
+  defp pop([_top, next | rest]), do: [next | rest]
+  defp pop(st), do: st
+
+  # First-token nudge: closer-led line dedents; operator-led continuation indents.
   defp lead_adjust([first | _]) do
     cond do
-      closer_lead?(first) -> -1
-      cont_lead?(first) -> 1
+      closer_lead?(head_tok(first)) -> -1
+      cont_lead?(head_tok(first)) -> 1
       true -> 0
     end
   end
@@ -139,91 +125,215 @@ defmodule Rian.Format do
   defp cont_lead?({:op, _}), do: true
   defp cont_lead?(_), do: false
 
-  # A `def`/`macro` head opens a block body iff it carries no `:=` one-liner and
-  # the next code line is not a declaration boundary (mirrors `Rian.Decl`'s
-  # `take_head`/`decl_boundary?`). `do`-bearing heads are caught by `apply_tok`.
-  defp block_head?([{:kw, "pub"} | rest], next), do: block_head?(rest, next)
-
-  defp block_head?([{:kw, k} | _] = row, rest) when k in ~w(def macro) do
-    not has_assign?(row) and not has_do?(row) and not boundary?(next_code_row(rest))
+  defp trailing_op?(line) do
+    case tail_tok(List.last(line)) do
+      {:op, _} -> true
+      _ -> false
+    end
   end
 
-  defp block_head?(_, _), do: false
+  # A `def`/`macro` head opens a block body iff it has no `:=` and no `do`, and the
+  # next code line is not a declaration boundary (mirrors `Rian.Decl`).
+  defp block_head?([{:tok, {:kw, "pub"}} | line_rest], next), do: block_head?(line_rest, next)
 
-  defp has_assign?(row), do: Enum.any?(row, &(&1 == {:op, ":="}))
-  defp has_do?(row), do: Enum.any?(row, &(&1 == {:kw, "do"}))
-
-  # the next row carrying real code, skipping blank and comment-only rows
-  defp next_code_row([]), do: nil
-
-  defp next_code_row([row | rest]) do
-    if blank?(row) or comment_only?(row), do: next_code_row(rest), else: row
+  defp block_head?([{:tok, {:kw, k}} | _] = line, next) when k in ~w(def macro) do
+    not has_tok?(line, {:op, ":="}) and not has_tok?(line, {:kw, "do"}) and
+      not boundary?(next_code_line(next))
   end
 
-  # only reached for non-empty rows (callers guard with `blank?/1` first)
-  defp comment_only?(row), do: Enum.all?(row, &match?({:comment, _}, &1))
+  defp block_head?(_line, _next), do: false
+
+  defp has_tok?(line, t), do: Enum.any?(line, &(&1 == {:tok, t}))
+
+  defp next_code_line([]), do: nil
+
+  defp next_code_line([line | rest]) do
+    if blank?(line) or comment_only?(line), do: next_code_line(rest), else: line
+  end
+
+  defp comment_only?(line), do: Enum.all?(line, &match?({:tok, {:comment, _}}, &1))
 
   defp boundary?(nil), do: true
-  defp boundary?([{:kw, "end"} | _]), do: true
-  defp boundary?([{:annot, _} | _]), do: true
+  defp boundary?([first | _]), do: boundary_tok?(head_tok(first))
 
-  defp boundary?([{:kw, k} | _]),
+  defp boundary_tok?({:kw, "end"}), do: true
+  defp boundary_tok?({:annot, _}), do: true
+
+  defp boundary_tok?({:kw, k}),
     do:
       k in ~w(type def struct alias mod pub const macro use import protocol impl opaque abstract)
 
-  defp boundary?(_), do: false
+  defp boundary_tok?(_), do: false
 
-  # ── intra-line rendering with context-sensitive spacing ───────────────────
-  # only called on non-empty rows (blank rows short-circuit in `indent_rows`)
-  defp render([t | rest]), do: leaf(t) <> render_rest(rest, t)
+  # ── node → Doc, with context-sensitive spacing ────────────────────────────
+  # `reflow?` marks the zone where bracket groups may wrap. A **declaration head**
+  # (`def f(p) ret when g`) is NOT a safe reflow zone — `Rian.Decl`'s head parser
+  # is not newline-tolerant inside its parens — so for a declaration line the zone
+  # opens only after the top-level `:=`. Other lines (expressions/statements in a
+  # block body) reflow throughout.
+  defp line_doc(nodes), do: bd(nodes, nil, not declaration_line?(nodes))
 
-  defp render_rest([], _prev), do: ""
+  defp declaration_line?([first | _]), do: decl_kw?(head_tok(first))
+  defp declaration_line?([]), do: false
 
-  # a trailing comment (always the row's last token) sits two spaces off the code
-  defp render_rest([{:comment, _} = t | rest], _prev),
-    do: "  " <> leaf(t) <> render_rest(rest, t)
+  defp decl_kw?({:kw, k}),
+    do:
+      k in ~w(def type struct alias mod pub const macro use import protocol impl opaque abstract range)
 
-  defp render_rest([t | rest], prev) do
-    sep = if space?(prev, t), do: " ", else: ""
-    sep <> leaf(t) <> render_rest(rest, t)
+  defp decl_kw?(_), do: false
+
+  defp bd([], _prev, _rf), do: Doc.empty()
+
+  # an own-line comment (first node) prints inline; a trailing comment defers to
+  # end-of-line via line_suffix so it survives an earlier group break.
+  defp bd([{:tok, {:comment, c}} = node | rest], nil, rf),
+    do: Doc.concat([Doc.text(c), bd(rest, node, rf)])
+
+  defp bd([{:tok, {:comment, c}} = node | rest], _prev, rf),
+    do: Doc.concat([Doc.line_suffix(Doc.text("  " <> c)), bd(rest, node, rf)])
+
+  # the top-level `:=` opens the body (reflow) zone for the rest of the line
+  defp bd([{:tok, {:op, ":="}} = node | rest], prev, _rf) do
+    sep =
+      if prev != nil and space?(tail_tok(prev), {:op, ":="}), do: Doc.text(" "), else: Doc.empty()
+
+    Doc.concat([sep, Doc.text(":="), bd(rest, node, true)])
   end
 
+  defp bd([node | rest], prev, rf) do
+    sep =
+      if prev != nil and space?(tail_tok(prev), head_tok(node)),
+        do: Doc.text(" "),
+        else: Doc.empty()
+
+    Doc.concat([sep, node_doc(node, rf), bd(rest, node, rf)])
+  end
+
+  defp node_doc({:tok, {:comment, c}}, _rf), do: Doc.text(c)
+  defp node_doc({:tok, t}, _rf), do: Doc.text(leaf(t))
+  defp node_doc({:group, open, inner, close}, rf), do: group_doc(open, inner, close, rf)
+
+  # the reflow core: in the body zone a bracket group collapses if it fits, else
+  # breaks one item per line with a trailing comma; a comment inside forces a full
+  # break. In a head zone (`reflow? = false`) it always renders flat (one line).
+  defp group_doc(open, inner, close, reflow?) do
+    o = Doc.text(leaf(open))
+    c = Doc.text(leaf(close))
+    items = split_items(inner)
+
+    cond do
+      items == [] ->
+        Doc.concat([o, c])
+
+      not reflow? ->
+        body = Doc.join(Doc.text(", "), Enum.map(items, &bd(&1, nil, false)))
+        Doc.concat([o, body, c])
+
+      has_comment?(inner) ->
+        body =
+          Doc.join(
+            Doc.concat([Doc.text(","), Doc.hardline()]),
+            Enum.map(items, &bd(&1, nil, true))
+          )
+
+        Doc.concat([o, Doc.nest(2, Doc.concat([Doc.hardline(), body])), Doc.hardline(), c])
+
+      true ->
+        body =
+          Doc.join(Doc.concat([Doc.text(","), Doc.line()]), Enum.map(items, &bd(&1, nil, true)))
+
+        trailing =
+          if trailing_comma?(inner),
+            do: Doc.if_break(Doc.text(","), Doc.empty()),
+            else: Doc.empty()
+
+        Doc.group(
+          Doc.concat([
+            o,
+            Doc.nest(2, Doc.concat([Doc.softline(), body])),
+            trailing,
+            Doc.softline(),
+            c
+          ])
+        )
+    end
+  end
+
+  # split a group's inner nodes on top-level commas (newlines dropped — the group
+  # supplies its own breaks); a source trailing comma yields no extra empty item.
+  defp split_items(nodes) do
+    nodes
+    |> Enum.reject(&match?({:tok, {:nl}}, &1))
+    |> chunk_on_comma([], [])
+  end
+
+  defp chunk_on_comma([], cur, acc), do: finish_items(cur, acc)
+
+  defp chunk_on_comma([{:tok, {:comma}} | rest], cur, acc),
+    do: chunk_on_comma(rest, [], [Enum.reverse(cur) | acc])
+
+  defp chunk_on_comma([n | rest], cur, acc), do: chunk_on_comma(rest, [n | cur], acc)
+
+  defp finish_items(cur, acc) do
+    items = Enum.reverse([Enum.reverse(cur) | acc])
+
+    case List.last(items) do
+      [] -> Enum.drop(items, -1)
+      _ -> items
+    end
+  end
+
+  defp has_comment?(nodes), do: Enum.any?(nodes, &match?({:tok, {:comment, _}}, &1))
+  defp trailing_comma?(inner), do: Enum.any?(inner, &match?({:tok, {:comma}}, &1))
+
+  # ── leaf token text + node head/tail tokens ───────────────────────────────
   defp leaf({:uop, o}), do: o
   defp leaf({:kcolon}), do: ":"
   defp leaf({:acolon}), do: ":"
   defp leaf(t), do: Lexer.detokenize([t])
 
-  # `mark/1` resolves the two context-dependent tokens up front, so `space?/2`
-  # is a pure pairwise function: `-`/`+` → `{:uop}` when unary, `:` → `{:kcolon}`
-  # (map/keyword key) or `{:acolon}` (atom prefix like `:lists`).
-  defp mark(row), do: mark(row, nil, [])
+  defp head_tok({:group, open, _, _}), do: open
+  defp head_tok({:tok, t}), do: t
+  defp tail_tok({:group, _, _, close}), do: close
+  defp tail_tok({:tok, t}), do: t
+
+  # ── mark: resolve unary `-`/`+` and key/atom `:` up front (recurse groups) ─
+  defp mark(nodes), do: mark(nodes, nil, [])
   defp mark([], _prev, acc), do: Enum.reverse(acc)
 
-  defp mark([{:op, o} | rest], prev, acc) when o in ["-", "+"] do
-    t = if value_end?(prev), do: {:op, o}, else: {:uop, o}
+  defp mark([{:group, open, inner, close} | rest], _prev, acc) do
+    g = {:group, open, mark(inner), close}
+    mark(rest, g, [g | acc])
+  end
+
+  defp mark([{:tok, {:op, o}} | rest], prev, acc) when o in ["-", "+"] do
+    t = if value_end?(prev), do: {:tok, {:op, o}}, else: {:tok, {:uop, o}}
     mark(rest, t, [t | acc])
   end
 
-  defp mark([{:op, ":"} | rest], prev, acc) do
-    t = if value_end?(prev), do: {:kcolon}, else: {:acolon}
+  defp mark([{:tok, {:op, ":"}} | rest], prev, acc) do
+    t = if value_end?(prev), do: {:tok, {:kcolon}}, else: {:tok, {:acolon}}
     mark(rest, t, [t | acc])
   end
 
-  defp mark([t | rest], _prev, acc), do: mark(rest, t, [t | acc])
+  defp mark([node | rest], _prev, acc), do: mark(rest, node, [node | acc])
 
-  # a token that ends a value (so a following `-`/`+` is binary, a `:` is a key)
-  defp value_end?({:id, _}), do: true
-  defp value_end?({:num, _}), do: true
-  defp value_end?({:str, _}), do: true
-  defp value_end?({:istr, _}), do: true
-  defp value_end?({:char, _}), do: true
-  defp value_end?({:rparen}), do: true
-  defp value_end?({:rbracket}), do: true
-  defp value_end?({:rbrace}), do: true
-  defp value_end?(_), do: false
+  # value-end as a *node* (the next `-`/`+` is binary, the next `:` is a key)
+  defp value_end?(nil), do: false
+  defp value_end?(node), do: value_end_tok?(tail_tok(node))
 
-  # `space?(prev, cur)` — is a single space wanted between these two tokens?
-  # Clause order matters; the no-space cases come before the call/group cases.
+  defp value_end_tok?({:id, _}), do: true
+  defp value_end_tok?({:num, _}), do: true
+  defp value_end_tok?({:str, _}), do: true
+  defp value_end_tok?({:istr, _}), do: true
+  defp value_end_tok?({:char, _}), do: true
+  defp value_end_tok?({:heredoc, _}), do: true
+  defp value_end_tok?({:rparen}), do: true
+  defp value_end_tok?({:rbracket}), do: true
+  defp value_end_tok?({:rbrace}), do: true
+  defp value_end_tok?(_), do: false
+
+  # ── pairwise spacing (operates on the boundary tokens of two nodes) ────────
   defp space?(_prev, {:rparen}), do: false
   defp space?(_prev, {:rbracket}), do: false
   defp space?(_prev, {:rbrace}), do: false
@@ -238,24 +348,19 @@ defmodule Rian.Format do
   defp space?({:uop, _}, _cur), do: false
   defp space?({:acolon}, _cur), do: false
   defp space?(_prev, {:kcolon}), do: false
-  # `f(`, `xs[` — application/index binds tightly; grouping `(`/literal `[` does not.
-  defp space?(prev, {:lparen}), do: not value_end?(prev)
-  defp space?(prev, {:lbracket}), do: not value_end?(prev)
+  # `f(` / `xs[` bind tightly (application/index); grouping `(`/literal `[` don't.
+  defp space?(prev, {:lparen}), do: not value_end_tok?(prev)
+  defp space?(prev, {:lbracket}), do: not value_end_tok?(prev)
   defp space?(_prev, _cur), do: true
 
   # ── blank-line policy: collapse runs, trim edges ──────────────────────────
   defp squeeze_blanks(lines) do
     lines
-    |> drop_edge_blanks()
+    |> Enum.drop_while(&(&1 == ""))
+    |> Enum.reverse()
+    |> Enum.drop_while(&(&1 == ""))
+    |> Enum.reverse()
     |> collapse_runs([])
-  end
-
-  defp drop_edge_blanks(lines) do
-    lines
-    |> Enum.drop_while(&(&1 == ""))
-    |> Enum.reverse()
-    |> Enum.drop_while(&(&1 == ""))
-    |> Enum.reverse()
   end
 
   defp collapse_runs([], acc), do: Enum.reverse(acc)
