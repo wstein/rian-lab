@@ -1,7 +1,7 @@
 # ADR-0045 — Formatter: one canonical zero-config style, comment-preserving, deterministic
 
-**Status:** Accepted · **v1 implemented** as a token-stream pretty-printer over [`Rian.Lexer`](../../lib/rian/lexer.ex) (no second parser, no reparse)
-**Implemented:** yes (v1) — [`Rian.Format`](../../lib/rian/format.ex) + [`mix rian.format`](../../lib/mix/tasks/rian.format.ex) (in-place · `--check` · `--stdout`/stdin); invariants are property-tested over the whole `.rian` corpus ([`format_test.exs`](../../test/rian/format_test.exs)). Deferred to a later rung: line-wrapping/soft-wrap, the LSP backend, and the standalone `rian fmt` escript (§5, open items)
+**Status:** Accepted · **implemented incl. line wrapping** — a bracket-structured lossless CST + a Wadler/Lindig pretty-printer over [`Rian.Lexer`](../../lib/rian/lexer.ex) (no second parser, no reparse)
+**Implemented:** yes — [`Rian.Format`](../../lib/rian/format.ex) (engine [`Rian.Format.Doc`](../../lib/rian/format/doc.ex), tree [`Rian.Format.Cst`](../../lib/rian/format/cst.ex)) + [`mix rian.format`](../../lib/mix/tasks/rian.format.ex) (in-place · `--check` · `--diff` · `--stdout`/stdin). **Line wrapping (Tier 2) ships**: bracket interiors reflow to a 98-column budget. `format/1` is total (never corrupts on malformed input). Invariants — significant-token equivalence (meaning), idempotence, comment fidelity — are asserted over the whole corpus and in a seeded property/fuzz suite ([`format_test.exs`](../../test/rian/format_test.exs), [`format_property_test.exs`](../../test/rian/format_property_test.exs), [`doc_test.exs`](../../test/rian/format/doc_test.exs)). Deferred: pipe/operator-chain wrapping, the LSP backend (ADR-0038), the `rian fmt` escript (ADR-0031). Design note: [`docs/notes/formatter-tier2-design.md`](../notes/formatter-tier2-design.md)
 **Refs:** ADR-0035 (one obvious way; no hidden control flow as a *discipline*), ADR-0038 (LSP — closes its formatter-ownership open item), ADR-0026 (toolchain / CI parity), ADR-0032/0033 (family surface)
 **Owners:** Liam Davis (conventions) · Kira Neri (CI/determinism) · Julian Vance (style rules / CST) · Chloe Bennett (parser) · Samir Patel (invariants) · Maya Lin (LSP integration) · Rachel Okafor (PM)
 
@@ -32,65 +32,73 @@ camps and makes "formatted" ambiguous (so the CI gate below is worth less).
   **canonical owner**; the LSP is a consumer. (Closes the ADR-0038 formatter-ownership open item.)
 - Built on the compiler's **own lexer** (`Rian.Lexer`) — not a second parser.
 
-### 3. Token-stream pretty-printer (the enabling mechanism)
+### 3. Bracket-structured lossless CST + a Wadler/Lindig pretty-printer (the mechanism)
 
-The v1 formatter does **not** build a CST and **never reparses**. It consumes the compiler's own
-lexer in a **trivia-preserving mode** (`Rian.Lexer.tokenize_trivia/1`) that keeps `{:comment, …}`
-tokens at their authored position, uncollapsed `{:nl}` separators (so blank lines survive), and raw
-`{:heredoc, …}` tokens. It then re-derives **indentation and intra-line spacing only**, while
-**preserving newline placement exactly** (collapsing only blank-line runs).
+The formatter **never reparses** (no semantic AST). It runs in three stages:
 
-This is sounder than a CST for v1: because indentation is never tokenized and the compiler depends on
-newline *placement*, preserving newlines means the formatter **cannot change meaning by construction**,
-and it **degrades gracefully** on any construct the parser doesn't fully model (the tokens pass through
-with default spacing) — a CST would have to model every node. The cost is that v1 does not *reflow*
-lines (no soft-wrap); see §5. A comment-attaching CST remains the right substrate **if/when** line
-wrapping is added.
+1. **Lex with trivia** — `Rian.Lexer.tokenize_trivia/1` keeps `{:comment, …}` at their authored
+   position, uncollapsed `{:nl}` separators (so blank lines survive), and raw `{:heredoc, …}`.
+2. **Bracket-structured lossless CST** — [`Rian.Format.Cst`](../../lib/rian/format/cst.ex) (inspired by
+   Rowan / Roslyn / Swift libsyntax) preserves **every** token and nests only on matched
+   `( ) · [ ] · { } · %{ }`. `do`/`end` stay flat tokens (block/statement indentation is the line
+   skeleton's job). Building is total — an unbalanced opener degrades to a plain token.
+3. **Pretty-print** — each logical line is lowered to a document and rendered by
+   [`Rian.Format.Doc`](../../lib/rian/format/doc.ex), a Wadler-style algebra
+   (`text`/`line`/`softline`/`hardline`/`group`/`nest`/`line_suffix`/`if_break`) with **Lindig's
+   linear-time strict renderer** (*Strictly Pretty*, 2000) and Prettier-style break propagation.
+
+The statement/block **skeleton preserves the source's newline placement** (significant newlines →
+hardlines); only **bracket interiors reflow**. That split is the safety boundary (§4).
 
 ### 4. Invariants (the formatter's correctness spec)
 
 - **Idempotence:** `fmt(fmt(x)) == fmt(x)`.
-- **Semantic preservation**, in the concrete form the token-stream design makes checkable:
-  **re-lex equivalence** — `tokenize(fmt(x)) == tokenize(x)`. Equal compiler-token streams ⇒ same
-  program (the analog of `Rian.FormsEquiv` for the BEAM backend).
-- **Comment fidelity:** every comment survives at its authored position; heredocs are reproduced
-  verbatim.
+- **Semantic preservation = significant-token equivalence:** dropping the changes the formatter is
+  *allowed* to make — comments, `{:nl}` **inside brackets** (Rian is newline-tolerant there), blank-line
+  runs, and a trailing comma before a closer — the remaining token stream is **identical**.
+  `Rian.Decl.detokenize` is whitespace-invariant and the parser accepts those exact changes, so equal
+  significant streams ⇒ same parse. (This supersedes the earlier *re-lex equivalence*, which a reflowing
+  formatter cannot satisfy — reflow moves newlines; it is the analog of `Rian.FormsEquiv` for BEAM.)
+- **Comment fidelity:** every comment survives at its authored position; heredocs reproduced verbatim.
+- **Totality:** `format/1` never raises; unlexable input is returned unchanged.
 
-All three are property-tested over every `examples/rian/*` and `compiler/*` file
-([`format_test.exs`](../../test/rian/format_test.exs)); together they *are* the formatter's correctness
-specification.
+All four are asserted over every `examples/rian/*` and `compiler/*` file and in a seeded property/fuzz
+suite ([`format_test.exs`](../../test/rian/format_test.exs),
+[`format_property_test.exs`](../../test/rian/format_property_test.exs)); together they *are* the
+formatter's correctness specification.
 
-### 5. v1 style rules (family-aligned; numbers tunable, principle fixed)
+### 5. Style rules (family-aligned; numbers tunable, principle fixed)
 
-Implemented in v1:
-
-- **2-space indentation**, one level per `do`-block / block-form `def` body / open bracket; closer-led
-  lines (`end`/`)`/`]`/`}`/`else`/`when`) dedent; operator-led continuation lines (a leading `|`/`|>`)
-  and trailing-operator continuations indent one step.
+- **2-space indentation**, one level per `do`-block / block-form `def` body; closer-led lines
+  (`end`/`else`/`when`) dedent; operator-led continuation lines (a leading `|`) and trailing-operator
+  continuations indent one step.
 - **One space** around binary operators and after `,`/`;`; **none** after an opener, before a closer,
   around `.`, after a unary `-`/`+`, or inside `f(x)`/`xs[0]`. Map/keyword colons hug the key (`x: 0`);
   atom colons hug the atom (`:lists`).
-- **At most one blank line** anywhere; no leading/trailing blank lines; file ends in one newline.
-- **Trailing comments** sit two spaces off the code; own-line comments keep their place at context
-  indent.
-- snake_case values / PascalCase types are *lexical* (ADR-0033), not the formatter's job; it does not
-  rename.
+- **Line wrapping (98 columns):** a bracket interior (call args, list/map/tuple, parenthesized expr)
+  **collapses onto one line when it fits**, else **breaks one item per line** with a hanging indent and
+  an `if_break` **trailing comma**; an already-multiline literal that now fits is collapsed. A comment
+  inside a bracket forces a full break. **Declaration heads never reflow** (`def` params / `when`
+  guards) — `Rian.Decl`'s head parser is not newline-tolerant inside its parens — so wrapping is
+  confined to the body zone (after the top-level `:=`, or in non-declaration lines).
+- **At most one blank line** anywhere; no leading/trailing blanks; file ends in one newline. Trailing
+  comments sit two spaces off the code; own-line comments keep their place at context indent.
+- snake_case values / PascalCase types are *lexical* (ADR-0033), not the formatter's job.
 
-Deferred (require line reflow, which v1 does not do — it preserves newline placement):
-
-- **~98-column** soft wrap, **pipe chains** broken one-per-line when wrapped, and **trailing-comma**
-  expansion of multiline literals. These need a CST (§3) and are the natural v2 increment.
+Deferred to a later increment: **pipe/operator-chain wrapping** (breaking `a |> b |> c` one-per-line)
+needs the continuation-newline safety reasoning extended past brackets; and **magic trailing comma**
+(a source trailing comma *forcing* multiline). Both are tracked in Open items.
 
 ## Ratings
 
 | Decision | Rating |
 |---|---|
-| One canonical style, zero config (`gofmt`); fixed line width | 5/5 |
-| `mix rian.format` + `--check` CI gate; LSP delegates | 5/5 |
-| Token-stream pretty-printer (no reparse; meaning-safe by construction) | 5/5 — v1 mechanism; CST deferred to wrapping |
-| Idempotence + re-lex-equivalence + comment-fidelity property tests | 5/5 |
-| v1 rules (2-space, `do…end`, spacing, blank-line, comment placement) | 5/5 — shipped |
-| Line wrapping (~98-col, pipe-per-line, trailing comma) | deferred to v2 (needs a CST) |
+| One canonical style, zero config (`gofmt`); fixed 98-col width | 5/5 |
+| `mix rian.format` + `--check`/`--diff` CI gate; LSP delegates | 5/5 |
+| Bracket CST + Wadler/Lindig pretty-printer (no reparse; meaning-safe by construction) | 5/5 — shipped |
+| Idempotence + significant-token-equivalence + comment-fidelity + totality (corpus + fuzz) | 5/5 |
+| Style rules (2-space, spacing, blank-line, comment placement, 98-col bracket wrap, trailing comma) | 5/5 — shipped |
+| Pipe/operator-chain wrapping; magic trailing comma | deferred (next increment) |
 | Configurable style (`rustfmt` model) | 1/5 (rejected — fragmentation) |
 
 ## Consequences
@@ -106,12 +114,20 @@ Deferred (require line reflow, which v1 does not do — it preserves newline pla
 
 ## Open items
 
-- **Line wrapping** — soft-wrap width (`~98`), pipe-per-line breaking, and trailing-comma expansion.
-  This is the v2 increment and is what motivates building the **comment-attaching CST** (§3); v1
-  preserves newline placement and does not reflow.
-- **Format-on-save granularity in the LSP** — whole-file only, or range formatting (ADR-0038 Tier).
-- **Self-host port** — re-implement `Rian.Format` as `compiler/format.rian` (a pure, JS-reachable
-  pass, well suited to the playground); gate on v1 staying green.
+- **Pipe/operator-chain wrapping** — breaking `a |> b |> c` and long `and`/`or`/`<>` chains one-per-line.
+  Needs the bracket-only newline-safety argument (§4) extended to depth-0 continuation breaks (after a
+  trailing binary op / before a leading one), so it stays meaning-preserving.
+- **Magic trailing comma** (Black/Prettier-style: a source trailing comma *forces* multiline). Today a
+  trailing comma is purely cosmetic (collapsed when the group fits); adopting magic-comma would make it
+  load-bearing layout — decide deliberately.
+- **LSP integration (Tier 3, ADR-0038)** — `textDocument/formatting` delegates to `Rian.Format`; later
+  `rangeFormatting` (format a sub-region inheriting surrounding indent). `format/1`'s totality already
+  satisfies the format-on-save "never corrupt the buffer" requirement.
+- **Standalone `rian fmt` escript (Tier 3, ADR-0031)** — wrap `Rian.Format` in the self-contained
+  binary so formatting needs no Elixir/mix toolchain; the deterministic same-bytes-every-platform
+  guarantee lives here.
+- **Self-host port** — re-implement `Rian.Format` as `compiler/format.rian` (a pure, JS-reachable pass,
+  well suited to the playground); gate on the corpus staying green.
 
 ## Resolved (v1)
 

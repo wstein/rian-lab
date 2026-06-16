@@ -139,6 +139,12 @@ all exist and are tested.
 
 **Other open items:**
 
+- **`rian fmt` ships in the self-contained escript (Tier 3 of [ADR-0045](0045-formatter.md)).** The
+  formatter is already implemented and total ([`Rian.Format`](../../lib/rian/format.ex) +
+  [`mix rian.format`](../../lib/mix/tasks/rian.format.ex)); the open packaging work is wrapping it in
+  the escript (ADR-0026) so `rian fmt`/`--check`/`--diff` run with no Elixir/mix toolchain, giving the
+  deterministic same-bytes-every-platform CI gate a standalone home. Backend-independent — can ship
+  with the escript packaging, not gated on the 0.5 cutover.
 - **Concurrency is native-per-target — a deliberate boundary, not a gap** (clarified 2026-06-13;
   refines the 2026-06-12 lock). Rian's purpose is to **share sequential application logic and tests**
   across targets — the canonical proof is Rian's own lexer/parser running on the BEAM, Rust, and

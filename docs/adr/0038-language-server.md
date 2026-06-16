@@ -349,7 +349,12 @@ bespoke integrations.
 - **Self-hosted server (Stage 1+):** re-implement the analysis library in Rian under the same API; the
   protocol adapter is untouched — the dogfood payoff.
 - **DAP (debugging)** and **test-explorer** integration once a runtime/test story exists.
-- **Formatter** as a shared library backing both `lsp/formatting` and a CLI `rian fmt`.
+- **Formatter** as a shared library backing both `lsp/formatting` and a CLI `rian fmt`. **Shipped**
+  ([ADR-0045](0045-formatter.md)): [`Rian.Format`](../../lib/rian/format.ex) is the canonical owner —
+  meaning-preserving, idempotent, comment-preserving, wraps to 98 columns, and **total** (never raises;
+  unlexable input returned unchanged, which is exactly the format-on-save "never corrupt the buffer"
+  contract). `lsp/formatting` becomes a thin `format/1` call; `rangeFormatting` (format a sub-region
+  inheriting surrounding indent) is the remaining LSP-side work.
 
 ## Concrete next steps (sequenced)
 
@@ -374,6 +379,7 @@ bespoke integrations.
   dependency-tracked.
 - **Expansion fuel limits** — concrete time/memory/depth defaults for the sandbox (Marcus).
 - ~~**Formatter ownership** — is there a canonical Rian formatting style yet to back `lsp/formatting`?~~
-  **Resolved by [ADR-0045](0045-formatter.md):** one canonical zero-config style; `lsp/formatting`
-  delegates to the `rian fmt` formatter (the canonical owner), which needs a comment-preserving CST.
+  **Resolved & shipped by [ADR-0045](0045-formatter.md):** one canonical zero-config style; the
+  formatter (`Rian.Format`, a bracket CST + Wadler/Lindig pretty-printer) is the canonical owner.
+  `lsp/formatting` delegates to its total `format/1`. Remaining LSP-side: `rangeFormatting`.
 - **Structural-union hover** (the ADR-0034 open item) — how Tier 2 hover renders narrowed/union types.
