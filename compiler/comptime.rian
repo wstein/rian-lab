@@ -1,0 +1,180 @@
+# ===========================================================================
+# SELF-HOSTING — `comptime(expr)` compile-time folding, written in Rian
+# ===========================================================================
+# Goal (ADR-0056 — the target-conditional `comptime if` is dormant; this is the
+# `comptime(expr)` FOLD evaluator, active in the pipeline at Rian.Decl): the
+# Rian-written counterpart of `Rian.Comptime.fold` — evaluate a `comptime(expr)`
+# at compile time and replace it with its literal value, recursing through the
+# rest of the tree. Fixpoint-locked against `Rian.Comptime.fold` in
+# `test/rian/comptime_fixpoint_test.exs`.
+#
+# The evaluator is a PURE SANDBOX (ADR-0009): integer literals, unary `-`/`not`,
+# and the arithmetic (`+ - * div rem`) + comparison (`< <= > >= == !=`) operators.
+#
+# Scope vs the oracle (documented tails): FLOAT results are unported — there is no
+# `float → string` prim to format them like `Float.to_string` (so `/` float-division
+# and float literals are out of scope); and the oracle RAISES on a non-foldable body
+# (a call/identifier), whereas this port has no host raise, so it leaves the
+# `comptime(...)` call in place (its inner expression still folded). The corpus uses
+# only the integer/boolean subset, where the port and oracle agree.
+# ---------------------------------------------------------------------------
+
+mod Comptime do
+  # ── surface expression AST (mirrors Rian.Pratt tuples / core.rian's Surface) ──
+  type Surface := SNum(String)
+                | SStr(String)
+                | SChar(Int53)
+                | SId(String)
+                | SAtom(String)
+                | SUnary(String, Surface)
+                | SBin(String, Surface, Surface)
+                | SCall(Surface, Vec(Surface))
+                | SLabel(String, Surface)
+                | SDot(Surface, String)
+                | SIf(Surface, Surface, Surface)
+                | STuple(Vec(Surface))
+                | SList(Vec(Surface), STail)
+                | SMap(Vec(SPair))
+                | SBlock(Vec(SStmt))
+                | SCase(Surface, Vec(SArm))
+                | SLambda(Vec(SParam), Surface)
+                | SCapArg(Int53)
+                | SCapture(Surface)
+                | SCaptureNamed(Surface, Int53)
+                | SWith(Vec(SClause), Surface, Vec(SArm))
+
+  type STail := TClose | TTail(Surface)
+  type SPair := SP(String, Surface)
+  type SStmt := SBind(String, Surface) | STypedBind(String, String, Surface) | SExpr(Surface)
+  type SGuard := GNone | GSome(Surface)
+  type SArm := SArm(SPat, SGuard, Surface)
+  type SClause := SClause(SPat, Surface)
+  type SParamTy := PtNone | PtSome(String)
+  type SParam := SParam(String, SParamTy)
+
+  type SPat := PWild
+             | PVar(String)
+             | PLitInt(Int53)
+             | PLitStr(String)
+             | PPChar(Int53)
+             | PPAtom(String)
+             | PPTuple(Vec(SPat))
+             | PCtor(String, Vec(SPat))
+             | PPList(Vec(SPat), PTail)
+             | PPStruct(String, Vec(PPair))
+             | PPMap(Vec(PPair))
+
+  type PTail := PtlClose | PtlTail(SPat)
+  type PPair := PPr(String, SPat)
+
+  # a sandboxed comptime value: integer, boolean, or an "unfoldable" marker.
+  type Val := VInt(Int53) | VBool(Bool) | VErr(String)
+
+  # ── the fold walk ──
+  # the `comptime(e)` clause MUST precede the general call clause.
+  pub def fold(Surface) Surface
+  pub def fold(SCall(SId("comptime"), [e])) := to_lit(eval(e), e)
+  pub def fold(SNum(t)) := SNum(t)
+  pub def fold(SStr(s)) := SStr(s)
+  pub def fold(SChar(c)) := SChar(c)
+  pub def fold(SId(n)) := SId(n)
+  pub def fold(SAtom(a)) := SAtom(a)
+  pub def fold(SUnary(op, x)) := SUnary(op, fold(x))
+  pub def fold(SBin(op, l, r)) := SBin(op, fold(l), fold(r))
+  pub def fold(SCall(f, args)) := SCall(fold(f), fold_list(args))
+  pub def fold(SLabel(n, e)) := SLabel(n, fold(e))
+  pub def fold(SDot(h, n)) := SDot(fold(h), n)
+  pub def fold(SIf(c, t, e)) := SIf(fold(c), fold(t), fold(e))
+  pub def fold(STuple(es)) := STuple(fold_list(es))
+  pub def fold(SList(es, tl)) := SList(fold_list(es), fold_tail(tl))
+  pub def fold(SMap(ps)) := SMap(fold_pairs(ps))
+  pub def fold(SBlock(ss)) := SBlock(fold_stmts(ss))
+  pub def fold(SCase(s, arms)) := SCase(fold(s), fold_arms(arms))
+  pub def fold(SLambda(ps, b)) := SLambda(ps, fold(b))
+  pub def fold(SCapArg(n)) := SCapArg(n)
+  pub def fold(SCapture(b)) := SCapture(fold(b))
+  pub def fold(SCaptureNamed(p, a)) := SCaptureNamed(fold(p), a)
+  pub def fold(SWith(cs, b, els)) := SWith(fold_clauses(cs), fold(b), fold_arms(els))
+
+  # a folded value becomes a literal node; an unfoldable body leaves the comptime
+  # call (the oracle raises — a documented tail), with its inner expr still folded.
+  def to_lit(Val, Surface) Surface
+  def to_lit(VInt(n), _) := SNum(Prim.int_to_string(n))
+  def to_lit(VBool(b), _) := if b do SId("true") else SId("false") end
+  def to_lit(VErr(_), orig) := SCall(SId("comptime"), [fold(orig)])
+
+  def fold_list(Vec(Surface)) Vec(Surface)
+  def fold_list([]) := []
+  def fold_list([x | rest]) := [fold(x) | fold_list(rest)]
+
+  def fold_tail(STail) STail
+  def fold_tail(TClose) := TClose
+  def fold_tail(TTail(e)) := TTail(fold(e))
+
+  def fold_pairs(Vec(SPair)) Vec(SPair)
+  def fold_pairs([]) := []
+  def fold_pairs([SP(k, v) | rest]) := [SP(k, fold(v)) | fold_pairs(rest)]
+
+  def fold_stmts(Vec(SStmt)) Vec(SStmt)
+  def fold_stmts([]) := []
+  def fold_stmts([SBind(n, e) | rest]) := [SBind(n, fold(e)) | fold_stmts(rest)]
+  def fold_stmts([STypedBind(n, t, e) | rest]) := [STypedBind(n, t, fold(e)) | fold_stmts(rest)]
+  def fold_stmts([SExpr(e) | rest]) := [SExpr(fold(e)) | fold_stmts(rest)]
+
+  def fold_arms(Vec(SArm)) Vec(SArm)
+  def fold_arms([]) := []
+  def fold_arms([SArm(p, g, b) | rest]) := [SArm(p, fold_guard(g), fold(b)) | fold_arms(rest)]
+
+  def fold_guard(SGuard) SGuard
+  def fold_guard(GNone) := GNone
+  def fold_guard(GSome(e)) := GSome(fold(e))
+
+  def fold_clauses(Vec(SClause)) Vec(SClause)
+  def fold_clauses([]) := []
+  def fold_clauses([SClause(p, e) | rest]) := [SClause(p, fold(e)) | fold_clauses(rest)]
+
+  # ── pure sandboxed evaluator ──
+  def eval(Surface) Val
+  def eval(SNum(t)) := if is_int_lit(t) do VInt(parse_int(t)) else VErr("float-comptime-unported") end
+  def eval(SUnary("-", x)) := neg(eval(x))
+  def eval(SUnary("not", x)) := lnot(eval(x))
+  def eval(SBin(op, l, r)) := binop(op, eval(l), eval(r))
+  def eval(_) := VErr("unsupported in comptime")
+
+  def neg(Val) Val
+  def neg(VInt(n)) := VInt(0 - n)
+  def neg(_) := VErr("`-` expects an integer")
+
+  def lnot(Val) Val
+  def lnot(VBool(b)) := VBool(not b)
+  def lnot(_) := VErr("`not` expects a boolean")
+
+  # integer arithmetic (`/` is float division — out of scope) + comparisons.
+  def binop(String, Val, Val) Val
+  def binop("+", VInt(a), VInt(b)) := VInt(a + b)
+  def binop("-", VInt(a), VInt(b)) := VInt(a - b)
+  def binop("*", VInt(a), VInt(b)) := VInt(a * b)
+  def binop("div", VInt(a), VInt(b)) := if b == 0 do VErr("division by zero") else VInt(a div b) end
+  def binop("rem", VInt(a), VInt(b)) := if b == 0 do VErr("division by zero") else VInt(a rem b) end
+  def binop("<", VInt(a), VInt(b)) := VBool(a < b)
+  def binop("<=", VInt(a), VInt(b)) := VBool(a <= b)
+  def binop(">", VInt(a), VInt(b)) := VBool(a > b)
+  def binop(">=", VInt(a), VInt(b)) := VBool(a >= b)
+  def binop("==", VInt(a), VInt(b)) := VBool(a == b)
+  def binop("!=", VInt(a), VInt(b)) := VBool(a != b)
+  def binop(_, _, _) := VErr("operator not allowed in comptime")
+
+  # `is_int_lit`: a numeric lexeme with no `.`/`e`/`E` is an integer (floats unported).
+  def is_int_lit(s String) Bool := not has_float_mark(Prim.str_chars(s))
+
+  def has_float_mark(Vec(Int53)) Bool
+  def has_float_mark([]) := false
+  def has_float_mark([c | rest]) := if c == 46 or c == 101 or c == 69 do true else has_float_mark(rest) end
+
+  # parse a non-negative integer lexeme (digits, skipping `_` separators).
+  def parse_int(s String) Int53 := pdigits(Prim.str_chars(s), 0)
+
+  def pdigits(Vec(Int53), Int53) Int53
+  def pdigits([], acc) := acc
+  def pdigits([c | rest], acc) := if c == 95 do pdigits(rest, acc) else pdigits(rest, acc * 10 + (c - 48)) end
+end

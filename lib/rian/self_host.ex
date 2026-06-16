@@ -163,6 +163,15 @@ defmodule Rian.SelfHost do
       test: "test/rian/prim_fixpoint_test.exs",
       note:
         "PrimNorm.normalize rewrites `Prim.<name>(args)` → `__prim_<name>(args)` for the closed prim set, recursing through every expression position; equivalence-locked vs Rian.Prim.normalize over hand-built raw surface trees (ADR-0047 §2). Tail: the oracle RAISES on an unknown `Prim.x`; the port leaves it (no host raise)."
+    },
+    %{
+      id: :comptime_fold,
+      name: "Comptime fold (`comptime(expr)` → literal)",
+      oracle: "Rian.Comptime.fold",
+      source: "comptime.rian",
+      test: "test/rian/comptime_fixpoint_test.exs",
+      note:
+        "Comptime.fold evaluates a `comptime(expr)` in a pure sandbox (integer literals, unary `-`/`not`, arithmetic `+ - * div rem`, comparisons) and replaces it with its literal, recursing through the rest of the tree; equivalence-locked vs Rian.Comptime.fold (ADR-0009/0056). Tails: FLOAT results are unported (no `float → string` prim), and the oracle RAISES on a non-foldable body where the port leaves the call."
     }
   ]
 
