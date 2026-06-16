@@ -140,7 +140,7 @@ mod ComposeRealSum do
   # silently emitting it. Requires Exhaust to be loaded.
   pub def compile_module(src String, modname Symbol) Vec(Tuple)
   pub def compile_module(src, modname)
-    decls := inline_consts(Decl.parse_program(LexerV2.tokenize(src)))
+    decls := with_protocols(inline_consts(Decl.parse_program(LexerV2.tokenize(src))))
     ncs := normalize(decls)
     grps := group(resolve_ncs(nc_names(ncs), ncs))
     case first_bad(gate_env(decls), grps) do
@@ -148,6 +148,17 @@ mod ComposeRealSum do
       bad -> refuse(bad)
     end
   end
+
+  # protocol/impl emission (ADR-0042 §3): desugar every `protocol`/`impl` into its
+  # guarded BEAM dispatcher + mangled impl functions, rendered back to Rian source by
+  # `Decl.expand_protocols_src` and re-parsed through the same front end, then APPENDED
+  # to the decls so `normalize`/`emit_checked` emit them alongside the user functions.
+  def with_protocols(decls Vec(Tuple)) Vec(Tuple)
+  def with_protocols(decls) := cat(decls, proto_decls(Decl.expand_protocols_src(decls)))
+
+  def proto_decls(String) Vec(Tuple)
+  def proto_decls("") := []
+  def proto_decls(src) := Decl.parse_program(LexerV2.tokenize(src))
 
   # variable application (ADR-0042): a bare call `name(args)` is a LOCAL call only if
   # `name` is a top-level function, a constructor (Pascal), or a prim (`__prim_*`);
@@ -163,7 +174,12 @@ mod ComposeRealSum do
   def resolve_ncs(_, []) := []
   def resolve_ncs(fn, [NC(name, pats, g, body) | rest]) := [NC(name, pats, rapp_guard(fn, g), rapp_block(fn, body)) | resolve_ncs(fn, rest)]
 
-  def is_local_call(fn Vec(String), name String) Bool := is_ctorish(name) or is_primish(name) or member_str(fn, name)
+  def is_local_call(fn Vec(String), name String) Bool := is_ctorish(name) or is_primish(name) or is_guard_bif(name) or member_str(fn, name)
+
+  # the type-test guard BIFs the protocol dispatcher emits (`guard_for`): they are not
+  # top-level functions, but they ARE local calls (Erlang guard BIFs) and must NOT be
+  # rewritten to variable application — a `Var.(x)` apply is illegal in a guard.
+  def is_guard_bif(name String) Bool := name == "is_integer" or name == "is_binary" or name == "is_float" or name == "is_boolean"
   def is_ctorish(name String) Bool := is_upper(first_code(name))
   def is_primish(name String) Bool := first_code(name) == 95
   def first_code(s String) Int53

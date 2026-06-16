@@ -227,6 +227,10 @@ mod LexerV2 do
   def classify("macro") := TKw("macro")
   def classify("use") := TKw("use")
   def classify("with") := TKw("with")
+  def classify("protocol") := TKw("protocol")
+  def classify("impl") := TKw("impl")
+  def classify("opaque") := TKw("opaque")
+  def classify("abstract") := TKw("abstract")
   def classify(name) := TId(name)
 
   # reverse a Char list onto an accumulator (pure Rian, cons recursion)

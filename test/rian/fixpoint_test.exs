@@ -273,7 +273,7 @@ defmodule Rian.FixpointTest do
     {"string interpolation ${}", ~S|"x=${n}"|, false},
     {"char unicode escape", ~S|'\u{1F600}'|, false},
     {"heredoc", "\"\"\"\ndoc\n\"\"\"", false},
-    {"keywords protocol/impl/opaque/abstract", "protocol", false}
+    {"keywords protocol/impl/opaque/abstract", "protocol impl opaque abstract", true}
   ]
 
   describe "lexer completeness ledger (selfhost_lexer_v2 vs Rian.Lexer)" do

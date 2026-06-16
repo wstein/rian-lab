@@ -490,6 +490,44 @@ mod Decl do
   def join_gfs([], b) := b
   def join_gfs([x | xs], b) := [x | join_gfs(xs, b)]
 
+  # Render the generated protocol/impl functions back to Rian SOURCE TEXT so the
+  # self-hosted driver can re-parse them through the normal `Decl.parse_program`
+  # pipeline and EMIT them (the guarded BEAM dispatcher + mangled single-clause impl
+  # funcs). A bodiless dispatcher sig renders `def m(v0 Self) Ret forall Self`; each
+  # guarded clause `def m(v0) when <guard> := <mangled-call>`; each impl method a
+  # single typed clause `def impl_p_t_m(x T) Ret := <body>`. (`expand_protocols` owns
+  # the desugar; this is just the inverse of the GenFunc projection the decl-fixpoint
+  # test feeds to `Rian.Decl.build_func`.)
+  pub def expand_protocols_src(decls Vec(Decl)) String := join_nl(gf_sources(expand_protocols(decls)))
+
+  def gf_sources(Vec(GenFunc)) Vec(String)
+  def gf_sources([]) := []
+  def gf_sources([g | rest]) := [gf_source(g) | gf_sources(rest)]
+
+  def join_nl(Vec(String)) String
+  def join_nl([]) := ""
+  def join_nl([s]) := s
+  def join_nl([s | rest]) := Prim.str_concat(s, Prim.str_concat("\n", join_nl(rest)))
+
+  def gf_source(GenFunc) String
+  def gf_source(GF(name, params, ret, guard, body, _, tvars, dispatch, _))
+    if body == "" do
+      Prim.str_concat("def ", Prim.str_concat(name, Prim.str_concat("(", Prim.str_concat(params, Prim.str_concat(") ", Prim.str_concat(ret, forall_suffix(tvars)))))))
+    else
+      if dispatch == "dispatcher" do
+        Prim.str_concat("def ", Prim.str_concat(name, Prim.str_concat("(", Prim.str_concat(params, Prim.str_concat(") when ", Prim.str_concat(guard, Prim.str_concat(" := ", body)))))))
+      else
+        Prim.str_concat("def ", Prim.str_concat(name, Prim.str_concat("(", Prim.str_concat(params, Prim.str_concat(") ", Prim.str_concat(ret, Prim.str_concat(guard_suffix(guard), Prim.str_concat(" := ", body))))))))
+      end
+    end
+  end
+
+  def forall_suffix(Vec(String)) String
+  def forall_suffix([]) := ""
+  def forall_suffix(tvs) := Prim.str_concat(" forall ", join_commas(tvs))
+
+  def guard_suffix(g String) String := if g == "" do "" else Prim.str_concat(" when ", g) end
+
   # ── collect the protocol/impl declarations ────────────────────────────────
   def collect_protocols(decls Vec(Decl)) Vec(DProtoRec)
   def collect_protocols([]) := []
