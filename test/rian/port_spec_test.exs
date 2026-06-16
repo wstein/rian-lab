@@ -25,6 +25,11 @@ defmodule Rian.PortSpecTest do
     test "skips lines with no `=` and blank right-hand sides" do
       assert PortSpec.parse("Sum1\nSum2 =\nSum3 = Pat") == %{"Sum3" => "Pat"}
     end
+
+    test "strips an INLINE comment from the value (not part of the type)" do
+      assert PortSpec.parse("Sum1 = Expr   # the E* nodes\nUnk0607 = Vec(Tok) # tokens") ==
+               %{"Sum1" => "Expr", "Unk0607" => "Vec(Tok)"}
+    end
   end
 
   describe "apply_subs/2" do

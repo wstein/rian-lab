@@ -25,8 +25,9 @@ defmodule Rian.PortSpec do
   def parse(text) when is_binary(text) do
     text
     |> String.split("\n")
-    |> Enum.map(&String.trim/1)
-    |> Enum.reject(&(&1 == "" or String.starts_with?(&1, "#")))
+    # strip inline AND whole-line `#` comments (`Sum1 = Expr  # the E* nodes` → `Sum1 = Expr`)
+    |> Enum.map(fn line -> line |> String.split("#", parts: 2) |> hd() |> String.trim() end)
+    |> Enum.reject(&(&1 == ""))
     |> Enum.flat_map(fn line ->
       case String.split(line, "=", parts: 2) do
         [lhs, rhs] ->
