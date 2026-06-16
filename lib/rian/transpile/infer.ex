@@ -538,8 +538,26 @@ defmodule Rian.Transpile.Infer do
     end
   end
 
-  # anything else (tuples, maps, with, captures, …) — unconstrained hole
+  # tuples — ANALYSIS-only (gated on ctx.clusters): a structured `Tuple(…)` term so
+  # the components flow and SHARE (a parser's `{node, rest}` decomposes into the AST
+  # type and the token-stream type instead of a fresh opaque hole). The transpiler
+  # path (no clusters) leaves them free — `Tuple(…)` isn't a Rian signature type.
+  defp gen({a, b}, env, ctx, s), do: maybe_tuple([a, b], env, ctx, s)
+  defp gen({:{}, _, elems}, env, ctx, s) when is_list(elems), do: maybe_tuple(elems, env, ctx, s)
+
+  # anything else (maps, with, captures, …) — unconstrained hole
   defp gen(_other, _env, _ctx, s), do: fresh(s)
+
+  defp maybe_tuple(elems, env, ctx, s) do
+    case Map.get(ctx, :clusters) do
+      nil ->
+        fresh(s)
+
+      _ ->
+        {terms, s} = Enum.map_reduce(elems, s, fn e, s -> gen(e, env, ctx, s) end)
+        {app("Tuple", terms), s}
+    end
+  end
 
   defp gen_block([], _env, _ctx, s), do: fresh(s)
   defp gen_block([last], env, ctx, s), do: gen(last, env, ctx, s)

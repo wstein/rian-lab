@@ -1,0 +1,4203 @@
+# Port Analysis — Elixir → Rian
+
+**READ-ONLY, GENERATED** by `mix rian.port-analysis` (ADR-0075). Review the
+`REVIEW` sections and record decisions in a `port.spec` (feedback loop not yet
+wired). Regenerate to diff against source — do not hand-edit this file.
+
+## Summary
+
+- modules: 41 · type slots: 2824 · auto-filled: 578 (20%) · holes: 2246
+- structs seen: 49 · proposed sums: 2 · distinct error idioms: 31
+
+## 1. Inferred signatures — AUTO (high confidence, type-check-validated)
+
+| function | signature | return reach |
+|---|---|---|
+| `beam_func/1` | `(T) Vec(T) forall T` | ✓ all 4 |
+| `core_list_tail/1` | `(T) T forall T` | ✓ all 4 |
+| `union_t/1` | `(Vec(T)) T forall T` | ✓ all 4 |
+| `borrowed/1` | `(String) String` | ✓ all 4 |
+| `owned/1` | `(String) String` | ✓ all 4 |
+| `rust_name/1` | `(String) String` | ✓ all 4 |
+| `rust_scalar/1` | `(String) String` | ✓ all 4 |
+| `concretize/1` | `(T) T forall T` | ✓ all 4 |
+| `conservative/1` | `(T) T forall T` | ✓ all 4 |
+| `debottom/1` | `(T) T forall T` | ✓ all 4 |
+| `deplaceholder/1` | `(String) String` | ✓ all 4 |
+| `float_mantissa/1` | `(Int53) Int53` | ✓ all 4 |
+| `int_float_join/2` | `(Int53, Int53) String` | ✓ all 4 |
+| `join/2` | `(T, T) T forall T` | ✓ all 4 |
+| `ordinal_base/1` | `(String) String` | ✓ all 4 |
+| `unify/2` | `(T, T) T forall T` | ✓ all 4 |
+| `wildcard?/1` | `(String) Bool` | ✓ all 4 |
+| `truthy!/1` | `(T) T forall T` | ✓ all 4 |
+| `block_seps/5` | `(Vec(T), Int53, Int53, Int53, Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `inject_stdlib/1` | `(T) T forall T` | ✓ all 4 |
+| `skip_nl/1` | `(Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `chunk_on_comma/3` | `(Vec(T), Vec(T), Vec(Vec(T))) Vec(Vec(T)) forall T` | ✓ all 4 |
+| `collapse_runs/2` | `(Vec(String), Vec(String)) Vec(String)` | ✓ all 4 |
+| `finish_items/2` | `(Vec(T), Vec(Vec(T))) Vec(Vec(T)) forall T` | ✓ all 4 |
+| `format/1` | `(T) T forall T` | ✓ all 4 |
+| `ll/3` | `(Vec(T), Vec(T), Vec(Vec(T))) Vec(Vec(T)) forall T` | ✓ all 4 |
+| `logical_lines/1` | `(Vec(T)) Vec(Vec(T)) forall T` | ✓ all 4 |
+| `next_code_line/1` | `(Vec(Option(T))) Option(T) forall T` | ✓ all 4 |
+| `pop/1` | `(Vec(Vec(T))) Vec(T) forall T` | ✓ all 4 |
+| `push/2` | `(Int53, Vec(Int53)) Vec(Int53)` | ✓ all 4 |
+| `concat/1` | `(Vec(T)) T forall T` | ✓ all 4 |
+| `concat/2` | `(T, T) T forall T` | ✓ all 4 |
+| `canon_bool_case/1` | `(Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `fold_neg_literal/1` | `(Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `zero_anno/1` | `(Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `concat_chain/1` | `(Vec(T)) T forall T` | ✓ all 4 |
+| `cp_expr/1` | `(String) String` | ✓ all 4 |
+| `int_typeof/0` | `() String` | ✓ all 4 |
+| `js_fresh/2` | `(String, Int53) String` | ✓ all 4 |
+| `js_op/1` | `(String) String` | ✓ all 4 |
+| `js_str_cp/1` | `(Int53) String` | ✓ all 4 |
+| `float_repr_helper/0` | `() String` | ✓ all 4 |
+| `kt_fresh/2` | `(String, Int53) String` | ✓ all 4 |
+| `kt_op/1` | `(String) String` | ✓ all 4 |
+| `kt_str_cp/1` | `(Int53) String` | ✓ all 4 |
+| `num_kt/1` | `(String) String` | ✓ all 4 |
+| `char_source/1` | `(Int53) String` | ✓ all 4 |
+| `cp!/1` | `(T) T forall T` | ✓ all 4 |
+| `norm_num/1` | `(T) T forall T` | ✓ all 4 |
+| `str_cp_source/1` | `(Int53) String` | ✓ all 4 |
+| `coerce_ret/2` | `(String, String) String` | ✓ all 4 |
+| `flatten_concat/1` | `(T) Vec(T) forall T` | ✓ all 4 |
+| `join_doc/2` | `(String, String) String` | ✓ all 4 |
+| `owned_rtype?/1` | `(String) Bool` | ✓ all 4 |
+| `owned_value_type?/1` | `(String) Bool` | ✓ all 4 |
+| `prim_ex/1` | `(String) String` | ✓ all 4 |
+| `rust_char_lit/1` | `(Int53) String` | ✓ all 4 |
+| `str_lit_cp/1` | `(Int53) String` | ✓ all 4 |
+| `tail_expr/1` | `(T) T forall T` | ✓ all 4 |
+| `to_snake/1` | `(T) T forall T` | ✓ all 4 |
+| `after_paren/2` | `(Vec(T), Int53) Vec(T) forall T` | ✓ all 4 |
+| `expect_rbracket/1` | `(Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `expect_rparen/1` | `(Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `parse_body/1` | `(T) T forall T` | ✓ all 4 |
+| `with_prelude/1` | `(Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `normalize/1` | `(Vec(T)) Vec(T) forall T` | ✓ all 4 |
+| `validate_default/1` | `(Option(T)) Option(T) forall T` | ✓ all 4 |
+| `longest_common_prefix/1` | `(Vec(T)) T forall T` | ✓ all 4 |
+| `dedup_consecutive/1` | `(Vec(Vec(Vec(T)))) Vec(Vec(T)) forall T` | ✓ all 4 |
+| `block_stmts/1` | `(T) Vec(T) forall T` | ✓ all 4 |
+| `close_group/2` | `(Vec(T), T) Vec(T) forall T` | ✓ all 4 |
+| `expr/1` | `(Bool) String` | ✓ all 4 |
+| `indent/1` | `(String) String` | ✓ all 4 |
+| `interp_inner/1` | `(Bool) String` | ✓ all 4 |
+| `pat/1` | `(Bool) String` | ✓ all 4 |
+| `render_body/1` | `(Bool) String` | ✓ all 4 |
+| `stmt/1` | `(Bool) String` | ✓ all 4 |
+| `body_of/1` | `(T) T forall T` | ✓ all 4 |
+| `hole_or/2` | `(T, T) T forall T` | ✓ all 4 |
+| `tails/1` | `(T) Vec(T) forall T` | ✓ all 4 |
+
+## 2. Declarations to complete — REVIEW (whole-program inferred)
+
+Each function with a residual unknown, as an **editable Rian signature**:
+concrete types are inferred, structs resolve to their proposed `SumN` (§3), and
+a genuine unknown is a **shared `Unk####`** — the *same* logical type carries one
+name across the whole program (linked through the call graph), so you replace
+each `Unk####` **once** and it propagates to every site in the index below.
+
+```rian
+  # Application.maybe_register_smart_cell/0
+  pub def maybe_register_smart_cell() Unk0001 := …
+
+  # Application.start/2
+  pub def start(_type Unk0002, _args Unk0003) Unk0004 := …
+
+  # Beam.any_t/0
+  pub def any_t() Unk0005 := …
+
+  # Beam.arity/1
+  pub def arity(p0 Unk0006) Unk0007 := …
+
+  # Beam.beam_for/5
+  pub def beam_for(module Unk0008, funcs Vec(Unk0009), ranges Vec(Type), types Vec(Type), structs Vec(Type)) Unk0010 := …
+
+  # Beam.beam_func/1
+  pub def beam_func(p0 Unk0011) Vec(Unk0011) := …
+
+  # Beam.bin_seg/1
+  pub def bin_seg(form Tuple(Option(Unk0012), Unk0013)) Unk0014 := …
+
+  # Beam.bind_var/2
+  pub def bind_var(n String, s Map(String, Unk0015)) Tuple(Unk0015, Map(String, Unk0015)) := …
+
+  # Beam.block_forms/2
+  pub def block_forms(p0 Sum1, _s Map(String, Unk0015)) Vec(Tuple(Option(Unk0012), Unk0013)) := …
+
+  # Beam.body_forms/3
+  pub def body_forms(src Sum1, scope Map(String, Unk0015), rtable Map(Unk0017, Unk0016)) Vec(Tuple(Option(Unk0012), Unk0013)) := …
+
+  # Beam.body_seq/2
+  pub def body_seq(p0 Sum1, s Map(String, Unk0015)) Vec(Tuple(Option(Unk0012), Unk0013)) := …
+
+  # Beam.bump_var/1
+  pub def bump_var(cur Unk0015) Unk0015 := …
+
+  # Beam.cap_arity/1
+  pub def cap_arity(p0 Sum1) Int53 := …
+
+  # Beam.cap_arity_list/1
+  pub def cap_arity_list(es Vec(Sum1)) Int53 := …
+
+  # Beam.clause_form/2
+  pub def clause_form(p0 Unk0018, rtable Map(Unk0017, Unk0016)) Unk0019 := …
+
+  # Beam.compile/2
+  pub def compile(src String, module Unk0008) Unk0010 := …
+
+  # Beam.compile_ir/2
+  pub def compile_ir(prog Map(Unk0020, Vec(Type)), module Unk0008) Unk0010 := …
+
+  # Beam.compile_program/1
+  pub def compile_program(src String) Unk0021 := …
+
+  # Beam.compile_program_ir/1
+  pub def compile_program_ir(prog Map(Unk0020, Vec(Type))) Unk0022 := …
+
+  # Beam.cons/3
+  pub def cons(p0 Vec(Unk0023), tail Tuple(Option(Unk0012), Unk0013), _f Fn(Sum1, Tuple(Option(Unk0012), Unk0013))) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.core_list_tail/1
+  pub def core_list_tail(p0 Tuple(Option(Unk0012), Unk0013)) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.else_dispatch/3
+  pub def else_dispatch(p0 Vec(Unk0024), catch_var String, _s Map(String, Unk0015)) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.erl_op/1
+  pub def erl_op(p0 String) Unk0025 := …
+
+  # Beam.expr_form/2
+  pub def expr_form(p0 Sum1, _s Map(String, Unk0015)) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.fn_form/2
+  pub def fn_form(t String, tctx Unk0026) Unk0027 := …
+
+  # Beam.fun_ref/3
+  pub def fun_ref(mod Unk0028, fun Unk0029, arity Unk0030) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.funcs_of/1
+  pub def funcs_of(p0 Map(Unk0031, Vec(Type))) Vec(Unk0009) := …
+
+  # Beam.function_form/2
+  pub def function_form(p0 Unk0006, rtable Map(Unk0017, Unk0016)) Unk0032 := …
+
+  # Beam.guard_core/1
+  pub def guard_core(p0 Sum1) Sum1 := …
+
+  # Beam.guard_form/2
+  pub def guard_form(p0 Sum1, _scope Map(String, Unk0015)) Vec(Vec(Tuple(Option(Unk0012), Unk0013))) := …
+
+  # Beam.i64_overflow/4
+  pub def i64_overflow(kind Unk0033, a Sum1, b Sum1, s Map(String, Unk0015)) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.i64_project/2
+  pub def i64_project(p0 Unk0033, sv Unk0034) Unk0035 := …
+
+  # Beam.int_t/0
+  pub def int_t() Unk0036 := …
+
+  # Beam.load/2
+  pub def load(src String, module Unk0008) Tuple(Unk0037, Unk0008) := …
+
+  # Beam.load_aux_mods/1
+  pub def load_aux_mods(p0 Map(Unk0031, Vec(Type))) Unk0038 := …
+
+  # Beam.load_ir/2
+  pub def load_ir(prog Map(Unk0020, Vec(Type)), module Unk0008) Tuple(Unk0039, Unk0008) := …
+
+  # Beam.load_program/1
+  pub def load_program(src Unk0040) Unk0041 := …
+
+  # Beam.load_program_ir/1
+  pub def load_program_ir(prog Unk0042) Unk0043 := …
+
+  # Beam.map_field_pat/1
+  pub def map_field_pat(p0 Unk0044) Unk0045 := …
+
+  # Beam.num_form/1
+  pub def num_form(n Unk0046) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.pascal?/1
+  pub def pascal?(s Unk0047) Bool := …
+
+  # Beam.pat_form/1
+  pub def pat_form(p0 Sum2) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.pat_vars/2
+  pub def pat_vars(p0 Sum2, acc Map(String, Unk0015)) Map(String, Unk0015) := …
+
+  # Beam.ranges_of/1
+  pub def ranges_of(prog Map(Unk0031, Vec(Type))) Vec(Type) := …
+
+  # Beam.remote_call/4
+  pub def remote_call(mod Unk0048, fun String, args Vec(Sum1), scope Map(String, Unk0015)) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.spec_form/2
+  pub def spec_form(p0 Unk0006, tctx Unk0026) Unk0032 := …
+
+  # Beam.stmt_form/2
+  pub def stmt_form(p0 Unk0049, s Map(String, Unk0015)) Tuple(Tuple(Option(Unk0012), Unk0013), Map(String, Unk0015)) := …
+
+  # Beam.str_form/1
+  pub def str_form(s Unk0050) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.struct_form/2
+  pub def struct_form(p0 Type, tctx Unk0026) Unk0005 := …
+
+  # Beam.structs_of/1
+  pub def structs_of(p0 Map(Unk0031, Vec(Type))) Vec(Type) := …
+
+  # Beam.sum_form/2
+  pub def sum_form(variants Unk0051, tctx Unk0026) Unk0052 := …
+
+  # Beam.type_attrs/3
+  pub def type_attrs(types Vec(Type), structs Vec(Type), tctx Unk0026) Vec(Unk0032) := …
+
+  # Beam.type_ctx/3
+  pub def type_ctx(types Vec(Type), ranges Vec(Type), structs Vec(Type)) Unk0026 := …
+
+  # Beam.type_form/2
+  pub def type_form(p0 String, _tctx Unk0026) Unk0005 := …
+
+  # Beam.types_of/1
+  pub def types_of(p0 Map(Unk0031, Vec(Type))) Vec(Type) := …
+
+  # Beam.union_t/1
+  pub def union_t(p0 Vec(Unk0005)) Unk0005 := …
+
+  # Beam.var_atom/1
+  pub def var_atom(p0 String) Unk0015 := …
+
+  # Beam.var_form/1
+  pub def var_form(x String) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Beam.with_form/5
+  pub def with_form(p0 Vec(Unk0053), body Sum1, _els Vec(Unk0024), s Map(String, Unk0015), _d Int53) Tuple(Option(Unk0012), Unk0013) := …
+
+  # Capability.beam_legal!/1
+  pub def beam_legal!(p0 Unk0054) Unk0055 := …
+
+  # Capability.count_block/3
+  pub def count_block(p0 Vec(Unk0056), _bound Unk0057, acc Unk0058) Unk0058 := …
+
+  # Capability.count_uses/1
+  pub def count_uses(ast Unk0059) Unk0058 := …
+
+  # Capability.count_uses/2
+  pub def count_uses(p0 Unk0059, bound Unk0057) Unk0058 := …
+
+  # Capability.lin_check/2
+  pub def lin_check(env Map(Unk0060, Unk0061), ast Unk0059) Tuple(Unk0062, Vec(Unk0063)) := …
+
+  # Capability.lin_check_block/3
+  pub def lin_check_block(env Map(Unk0065, Unk0064), bindings Vec(Unk0066), final Unk0059) Tuple(Unk0062, Vec(Unk0063)) := …
+
+  # Capability.max_merge/2
+  pub def max_merge(a Unk0058, b Unk0058) Unk0058 := …
+
+  # Capability.merge/2
+  pub def merge(a Unk0058, b Unk0058) Unk0058 := …
+
+  # Capability.parametric/1
+  pub def parametric(t String) Tuple(String, Vec(Unk0067)) := …
+
+  # Capability.pat_vars/1
+  pub def pat_vars(p0 Unk0068) Unk0069 := …
+
+  # Capability.rust_param/2
+  pub def rust_param(p0 Unk0070, t String) String := …
+
+  # Capability.split_top_level/1
+  pub def split_top_level(s String) Vec(Unk0067) := …
+
+  # Capability.verdict/2
+  pub def verdict(env Map(Unk0060, Unk0061), uses Unk0058) Tuple(Unk0062, Vec(Unk0063)) := …
+
+  # Check.abstract_cast_ret/3
+  pub def abstract_cast_ret(ht String, cn Unk0071, ic Map(Unk0072, Map(String, String))) Option(Unk0073) := …
+
+  # Check.abstract_op_type/4
+  pub def abstract_op_type(op Unk0074, lt String, rt String, ic Map(Unk0072, Map(String, String))) Unk0075 := …
+
+  # Check.all_types/1
+  pub def all_types(prog Map(Unk0076, Vec(Type))) Vec(Type) := …
+
+  # Check.ann_each/3
+  pub def ann_each(nodes Vec(Sum1), env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Vec(String) := …
+
+  # Check.ann_stmts/3
+  pub def ann_stmts(p0 Vec(Unk0078), _env Map(Unk0077, String), _ic Map(Unk0072, Map(String, String))) String := …
+
+  # Check.annotate/3
+  pub def annotate(ast Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) String := …
+
+  # Check.arith_type/4
+  pub def arith_type(l Sum1, r Sum1, lt String, rt String) Unk0079 := …
+
+  # Check.bind_mismatch/5
+  pub def bind_mismatch(name Unk0080, ann String, e Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Option(Unk0081) := …
+
+  # Check.bind_tvar/4
+  pub def bind_tvar(_p Unk0082, p1 Unk0082, _tvars Unk0083, acc Map(Unk0084, String)) Map(Unk0084, String) := …
+
+  # Check.body_literal_adopts?/2
+  pub def body_literal_adopts?(p0 Sum1, ret String) Bool := …
+
+  # Check.branch_join/1
+  pub def branch_join(typed Vec(Tuple(Unk0085, String))) String := …
+
+  # Check.build_fn/2
+  pub def build_fn(args Vec(Unk0086), ret String) String := …
+
+  # Check.call_bound_error/5
+  pub def call_bound_error(g String, args Vec(Sum1), env Map(Unk0077, String), ic Map(Unk0072, Map(String, String)), fbounds Map(String, String)) Option(Unk0087) := …
+
+  # Check.call_name/1
+  pub def call_name(p0 Unk0088) Vec(Unk0089) := …
+
+  # Check.called_ret/2
+  pub def called_ret(ic Map(Unk0072, Map(String, String)), f String) String := …
+
+  # Check.called_ret_with/4
+  pub def called_ret_with(ic Map(Unk0072, Map(String, String)), f String, args_ast Vec(Sum1), env Map(Unk0077, String)) String := …
+
+  # Check.check/1
+  pub def check(src Unk0090) Unk0091 := …
+
+  # Check.check_bind_stmts/3
+  pub def check_bind_stmts(p0 Vec(Unk0092), _env Map(Unk0077, String), _ic Map(Unk0072, Map(String, String))) Option(Unk0081) := …
+
+  # Check.check_binds/2
+  pub def check_binds(p0 Func, ic Map(Unk0072, Map(String, String))) Unk0093 := …
+
+  # Check.check_bounds/2
+  pub def check_bounds(p0 Func, ic Map(Unk0072, Map(String, String))) Unk0094 := …
+
+  # Check.check_error_set/2
+  pub def check_error_set(p0 Unk0095, p1 Unk0096) Tuple(Unk0097, String) := …
+
+  # Check.check_external_caps/1
+  pub def check_external_caps(p0 Func) Tuple(Unk0098, String) := …
+
+  # Check.check_func/3
+  pub def check_func(p0 Unk0099, ic Map(Unk0072, Map(String, String)), eset Unk0096) Unk0100 := …
+
+  # Check.check_labels/1
+  pub def check_labels(p0 Func) Unk0101 := …
+
+  # Check.check_numeric_mix/2
+  pub def check_numeric_mix(p0 Func, ic Map(Unk0072, Map(String, String))) Unk0102 := …
+
+  # Check.check_program/1
+  pub def check_program(p0 Map(Unk0020, Vec(Type))) Unk0103 := …
+
+  # Check.check_return/2
+  pub def check_return(p0 Func, ic Map(Unk0072, Map(String, String))) Unk0104 := …
+
+  # Check.clause_env/3
+  pub def clause_env(pats Unk0105, params Unk0106, ic Map(Unk0072, Map(String, String))) Map(Unk0077, String) := …
+
+  # Check.comp_str/1
+  pub def comp_str(p0 Unk0107) String := …
+
+  # Check.const_int/1
+  pub def const_int(p0 Sum1) Tuple(Unk0109, Unk0108) := …
+
+  # Check.ctor_type/2
+  pub def ctor_type(ic Map(Unk0072, Map(String, String)), name String) String := …
+
+  # Check.ctor_types/2
+  pub def ctor_types(types Vec(Type), prog Map(Unk0111, Vec(Unk0110))) Map(Unk0112, Unk0113) := …
+
+  # Check.debottom/1
+  pub def debottom(p0 Unk0114) Unk0114 := …
+
+  # Check.declared_set/2
+  pub def declared_set(ret Unk0115, tsets Map(Unk0116, Vec(Unk0116))) Tuple(Unk0116, Unk0117) := …
+
+  # Check.direct_tags/1
+  pub def direct_tags(f Unk0118) Unk0119 := …
+
+  # Check.error_sets/1
+  pub def error_sets(types Vec(Type)) Map(Unk0116, Vec(Unk0116)) := …
+
+  # Check.error_tags/1
+  pub def error_tags(p0 Vec(Unk0120)) Vec(Option(Unk0121)) := …
+
+  # Check.fbound_table/1
+  pub def fbound_table(funcs Vec(Unk0122)) Unk0123 := …
+
+  # Check.first_bound_violation/4
+  pub def first_bound_violation(g String, bounds Unk0124, subs Map(Unk0084, String), ic Map(Unk0072, Map(String, String))) Option(Unk0087) := …
+
+  # Check.fixpoint/2
+  pub def fixpoint(facts Unk0125, table Map(Unk0127, Unk0126)) Map(Unk0127, Unk0126) := …
+
+  # Check.fn_parts/1
+  pub def fn_parts(p0 String) Unk0128 := …
+
+  # Check.fn_ret/1
+  pub def fn_ret(ft String) Option(Unk0073) := …
+
+  # Check.fsig/1
+  pub def fsig(f Unk0129) Unk0130 := …
+
+  # Check.gate!/1
+  pub def gate!(prog Map(Unk0020, Vec(Type))) Unk0131 := …
+
+  # Check.generic_ret?/2
+  pub def generic_ret?(_ret Unk0132, p1 Vec(Unk0133)) Bool := …
+
+  # Check.impl_table/1
+  pub def impl_table(prog Map(Unk0135, Vec(Unk0134))) Unk0136 := …
+
+  # Check.infer/3
+  pub def infer(ast Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) String := …
+
+  # Check.infer_block/4
+  pub def infer_block(p0 Vec(Unk0137), _env Map(Unk0077, String), _ic Map(Unk0072, Map(String, String)), value String) String := …
+
+  # Check.infer_tail/3
+  pub def infer_tail(p0 Sum1, _env Map(Unk0077, String), _ic Map(Unk0072, Map(String, String))) String := …
+
+  # Check.inner_of/1
+  pub def inner_of(p0 Unk0082) Unk0082 := …
+
+  # Check.instantiate_ret/2
+  pub def instantiate_ret(p0 Unk0138, arg_types Vec(String)) String := …
+
+  # Check.int_lit_expr?/1
+  pub def int_lit_expr?(p0 Sum1) Bool := …
+
+  # Check.int_literal?/1
+  pub def int_literal?(n Unk0139) Bool := …
+
+  # Check.join_all/1
+  pub def join_all(types Vec(Unk0140)) String := …
+
+  # Check.kind_prefix/1
+  pub def kind_prefix(p0 Unk0141) String := …
+
+  # Check.label_error/1
+  pub def label_error(p0 Sum1) Tuple(Unk0142, String) := …
+
+  # Check.label_error_children/1
+  pub def label_error_children(node Sum1) Tuple(Unk0142, String) := …
+
+  # Check.list_elem/1
+  pub def list_elem(p0 String) Unk0143 := …
+
+  # Check.list_elems/1
+  pub def list_elems(p0 Sum1) Vec(Unk0144) := …
+
+  # Check.lit_expr_adopts?/2
+  pub def lit_expr_adopts?(p0 Sum1, ret String) Bool := …
+
+  # Check.lit_range_error/3
+  pub def lit_range_error(expr Sum1, p1 String, name Unk0080) Option(Unk0145) := …
+
+  # Check.literal_adopts?/2
+  pub def literal_adopts?(p0 Sum1, ann String) Bool := …
+
+  # Check.literal_ordinal/2
+  pub def literal_ordinal(p0 Sum1, p1 String) Tuple(Unk0146, Int53) := …
+
+  # Check.missing_impl/5
+  pub def missing_impl(g String, tvar Unk0147, ty String, protos Unk0148, impls Map(String, String)) Option(Unk0149) := …
+
+  # Check.narrow/4
+  pub def narrow(p0 Sum2, type String, _ic Map(Unk0072, Map(String, String)), env Map(Unk0077, String)) Map(Unk0077, String) := …
+
+  # Check.num_bits/2
+  pub def num_bits(kind Unk0150, w Unk0151) Tuple(Unk0150, Unk0152) := …
+
+  # Check.num_join/2
+  pub def num_join(p0 Unk0153, p1 Unk0154) String := …
+
+  # Check.num_kind/1
+  pub def num_kind(p0 String) Tuple(Unk0150, Unk0152) := …
+
+  # Check.num_lub/2
+  pub def num_lub(x String, y String) Unk0155 := …
+
+  # Check.num_mix?/2
+  pub def num_mix?(p0 Unk0156, k Unk0157) Bool := …
+
+  # Check.num_mix_error/5
+  pub def num_mix_error(op Unk0158, l Sum1, r Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Unk0159 := …
+
+  # Check.num_widens?/2
+  pub def num_widens?(p0 Unk0160, p1 Unk0161) Bool := …
+
+  # Check.oor_scan/5
+  pub def oor_scan(p0 Sum1, ty String, lo Unk0162, hi Unk0163, n Unk0080) Tuple(Unk0164, String) := …
+
+  # Check.opaque_table/1
+  pub def opaque_table(prog Map(Unk0165, Vec(Unk0166))) Unk0167 := …
+
+  # Check.parse_parametric/1
+  pub def parse_parametric(s String) Tuple(String, Vec(Unk0067)) := …
+
+  # Check.pascal?/1
+  pub def pascal?(s Unk0168) Bool := …
+
+  # Check.produced_set/2
+  pub def produced_set(f Unk0118, table Map(Unk0169, Unk0170)) Unk0171 := …
+
+  # Check.program_ic/1
+  pub def program_ic(p0 Map(Unk0020, Vec(Type))) Map(Unk0072, Map(String, String)) := …
+
+  # Check.propagated_callees/1
+  pub def propagated_callees(f Unk0118) Unk0172 := …
+
+  # Check.range_base/2
+  pub def range_base(ic Map(Unk0072, Map(String, String)), n String) Option(Unk0173) := …
+
+  # Check.range_bind/6
+  pub def range_bind(name Unk0080, ann String, p2 Unk0174, ce Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Option(Unk0175) := …
+
+  # Check.range_table/1
+  pub def range_table(prog Map(Unk0177, Vec(Unk0176))) Unk0178 := …
+
+  # Check.resolve_range/2
+  pub def resolve_range(t String, ic Map(Unk0072, Map(String, String))) String := …
+
+  # Check.scan_bound_calls/4
+  pub def scan_bound_calls(p0 Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String)), fbounds Map(String, String)) Option(Unk0179) := …
+
+  # Check.scan_num_mix/3
+  pub def scan_num_mix(p0 Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Option(Unk0180) := …
+
+  # Check.scan_num_mix_children/3
+  pub def scan_num_mix_children(node Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Option(Unk0180) := …
+
+  # Check.solve_error_sets/2
+  pub def solve_error_sets(funcs Vec(Unk0181), tsets Map(Unk0116, Vec(Unk0116))) Map(Unk0127, Unk0126) := …
+
+  # Check.split_top_commas/1
+  pub def split_top_commas(s String) Vec(Unk0067) := …
+
+  # Check.tag_name/1
+  pub def tag_name(p0 Unk0182) Option(Unk0121) := …
+
+  # Check.type_table/1
+  pub def type_table(types Vec(Type)) Unk0183 := …
+
+  # Check.uint_signed_join/2
+  pub def uint_signed_join(u Unk0184, i Unk0184) String := …
+
+  # Check.walk_children/4
+  pub def walk_children(node Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String)), fbounds Map(String, String)) Option(Unk0179) := …
+
+  # Check.with_callees/1
+  pub def with_callees(p0 Vec(Unk0185)) Vec(Unk0089) := …
+
+  # Comptime.eval/1
+  pub def eval(p0 Unk0186) Tuple(Unk0187, String) := …
+
+  # Comptime.fold/1
+  pub def fold(p0 Sum1) Tuple(Unk0188, String) := …
+
+  # Comptime.int_div/3
+  pub def int_div(_a Unk0189, p1 Int53, _op Fn(Unk0191, Unk0190, Unk0192)) Tuple(Unk0193, Int53) := …
+
+  # Core.from_arm/1
+  pub def from_arm(p0 Unk0194) Unk0195 := …
+
+  # Core.from_expr/1
+  pub def from_expr(p0 Sum1) Sum1 := …
+
+  # Core.from_pairs/1
+  pub def from_pairs(pairs Vec(Unk0196)) Vec(Tuple(Unk0197, Sum1)) := …
+
+  # Core.from_pat/1
+  pub def from_pat(p0 Sum2) Sum2 := …
+
+  # Core.from_stmt/1
+  pub def from_stmt(p0 Unk0198) Tuple(Unk0199, Sum1) := …
+
+  # Core.from_tail/1
+  pub def from_tail(p0 Unk0200) Sum1 := …
+
+  # Cst.build/1
+  pub def build(tokens Vec(Unk0201)) Unk0202 := …
+
+  # Cst.open/4
+  pub def open(open_tok Unk0201, close Unk0203, rest Vec(Unk0201), acc Vec(Tuple(Unk0204, Unk0201))) Tuple(Vec(Tuple(Unk0204, Unk0201)), Vec(Unk0205)) := …
+
+  # Cst.seq/2
+  pub def seq(p0 Vec(Unk0201), acc Vec(Tuple(Unk0204, Unk0201))) Tuple(Vec(Tuple(Unk0204, Unk0201)), Vec(Unk0205)) := …
+
+  # Decl.all_impl_decls/1
+  pub def all_impl_decls(decls Vec(Unk0206)) Vec(Unk0207) := …
+
+  # Decl.all_impls/1
+  pub def all_impls(decls Vec(Unk0206)) Vec(Unk0208) := …
+
+  # Decl.all_protocols/1
+  pub def all_protocols(decls Vec(Unk0206)) Vec(Unk0207) := …
+
+  # Decl.assemble/3
+  pub def assemble(decls Vec(Unk0209), aliases Unk0210, p2 Unk0211) Unk0212 := …
+
+  # Decl.attach_doc/2
+  pub def attach_doc(p0 Tuple(Unk0214, Map(Unk0213, Bool)), doc Bool) Tuple(Unk0214, Map(Unk0213, Bool)) := …
+
+  # Decl.attach_external/3
+  pub def attach_external(p0 Unk0215, target Unk0216, spec Unk0217) Tuple(Unk0214, Map(Unk0213, Bool)) := …
+
+  # Decl.attach_targets/2
+  pub def attach_targets(p0 Unk0218, targets Unk0219) Tuple(Unk0214, Map(Unk0213, Bool)) := …
+
+  # Decl.balanced_parens/1
+  pub def balanced_parens(p0 Vec(Unk0220)) Tuple(Vec(Unk0220), Vec(Unk0220)) := …
+
+  # Decl.block_seps/5
+  pub def block_seps(p0 Vec(Unk0221), _d Int53, _w Int53, _p Int53, acc Vec(Unk0221)) Vec(Unk0221) := …
+
+  # Decl.build_func/1
+  pub def build_func(p0 Vec(Unk0222)) Func := …
+
+  # Decl.clause/2
+  pub def clause(p0 Unk0223, _arity Unk0224) Clause := …
+
+  # Decl.clause_env/2
+  pub def clause_env(p0 Clause, params Unk0225) Map(Unk0077, String) := …
+
+  # Decl.collapse_parens/1
+  pub def collapse_parens(s Unk0226) Unk0227 := …
+
+  # Decl.collect_aliases/1
+  pub def collect_aliases(decls Vec(Unk0206)) Unk0228 := …
+
+  # Decl.collect_macros/1
+  pub def collect_macros(decls Vec(Unk0206)) Map(Unk0230, Unk0229) := …
+
+  # Decl.compile/1
+  pub def compile(src String) Vec(Tuple(String, Unk0231)) := …
+
+  # Decl.compile_beam/1
+  pub def compile_beam(src String) Vec(Tuple(Unk0232, Unk0233)) := …
+
+  # Decl.decl_boundary?/1
+  pub def decl_boundary?(p0 Vec(Vec(Unk0220))) Bool := …
+
+  # Decl.decl_kw?/1
+  pub def decl_kw?(p0 Vec(Vec(Unk0220))) Bool := …
+
+  # Decl.def_raw/4
+  pub def def_raw(name Unk0234, params Unk0235, head_rev Vec(Vec(Unk0220)), body Option(Unk0236)) Unk0237 := …
+
+  # Decl.detok_block/1
+  pub def detok_block(tokens Unk0238) Option(Unk0236) := …
+
+  # Decl.extract_parens/1
+  pub def extract_parens(str Unk0239) Unk0240 := …
+
+  # Decl.field/1
+  pub def field(f Unk0241) Field := …
+
+  # Decl.fields/1
+  pub def fields(inside Unk0242) Vec(Unk0243) := …
+
+  # Decl.impl_struct/3
+  pub def impl_struct(proto Unk0244, type Unk0245, inner Unk0246) Unk0247 := …
+
+  # Decl.in_scope/2
+  pub def in_scope(decls Vec(Unk0206), f Fn(Unk0248, Unk0249)) Vec(Unk0207) := …
+
+  # Decl.inject_stdlib/1
+  pub def inject_stdlib(prog Tuple(Unk0250, Vec(Unk0251))) Tuple(Unk0250, Vec(Unk0251)) := …
+
+  # Decl.line_continues?/2
+  pub def line_continues?(p0 Vec(Vec(Unk0220)), _rest Vec(Vec(Unk0220))) Bool := …
+
+  # Decl.lower_meta/3
+  pub def lower_meta(funcs Vec(Unk0252), decls Vec(Unk0206), targets Option(Unk0253)) Vec(Unk0254) := …
+
+  # Decl.macro_param_names/1
+  pub def macro_param_names(pstr Unk0255) Unk0256 := …
+
+  # Decl.mark_pub/1
+  pub def mark_pub(p0 Unk0257) Tuple(Unk0214, Map(Unk0213, Bool)) := …
+
+  # Decl.mark_test/1
+  pub def mark_test(p0 Unk0258) Tuple(Unk0214, Map(Unk0213, Bool)) := …
+
+  # Decl.meta_clause/5
+  pub def meta_clause(p0 Unk0259, _env Map(Unk0230, Unk0229), _p Bool, _params Unk0225, _show Unk0260) Unk0261 := …
+
+  # Decl.nz/1
+  pub def nz(s String) Option(Unk0262) := …
+
+  # Decl.param/1
+  pub def param(p Unk0263) Unk0264 := …
+
+  # Decl.parse/1
+  pub def parse(src String) Map(Unk0020, Vec(Type)) := …
+
+  # Decl.parse_abstract/4
+  pub def parse_abstract(head Unk0265, body_toks Unk0266, pub? Unk0267, doc Unk0268) Opaque := …
+
+  # Decl.parse_abstract_members/1
+  pub def parse_abstract_members(toks Unk0266) Unk0269 := …
+
+  # Decl.parse_alias/1
+  pub def parse_alias(text Unk0265) Tuple(Unk0270, Unk0271) := …
+
+  # Decl.parse_assoc_binding/1
+  pub def parse_assoc_binding(t Unk0272) Tuple(Unk0274, Option(Unk0273)) := …
+
+  # Decl.parse_binder/1
+  pub def parse_binder(b Unk0275) Tuple(Unk0276, Vec(Unk0277)) := …
+
+  # Decl.parse_binders/1
+  pub def parse_binders(binders Unk0278) Vec(Unk0279) := …
+
+  # Decl.parse_bounds/1
+  pub def parse_bounds(text Unk0280) Unk0281 := …
+
+  # Decl.parse_cast_rule/1
+  pub def parse_cast_rule(p0 Unk0282) Unk0283 := …
+
+  # Decl.parse_const/3
+  pub def parse_const(text Unk0265, pub? Unk0284, doc Unk0285) Const := …
+
+  # Decl.parse_external/1
+  pub def parse_external(p0 Vec(Unk0286)) Tuple(Unk0287, Unk0288) := …
+
+  # Decl.parse_head/1
+  pub def parse_head(head String) Unk0289 := …
+
+  # Decl.parse_op_rule/1
+  pub def parse_op_rule(p0 Unk0282) Unk0290 := …
+
+  # Decl.parse_opaque/3
+  pub def parse_opaque(text Unk0265, pub? Unk0291, doc Unk0292) Opaque := …
+
+  # Decl.parse_ordinal/1
+  pub def parse_ordinal(p0 Unk0293) Tuple(Unk0295, Unk0294) := …
+
+  # Decl.parse_params/1
+  pub def parse_params(str Unk0296) Vec(Unk0297) := …
+
+  # Decl.parse_range/3
+  pub def parse_range(text Unk0265, pub? Unk0298, doc Unk0299) Range := …
+
+  # Decl.parse_struct/3
+  pub def parse_struct(text Unk0239, pub? Unk0300, doc Unk0301) Struct := …
+
+  # Decl.parse_targets/1
+  pub def parse_targets(toks Unk0302) Unk0219 := …
+
+  # Decl.parse_type/3
+  pub def parse_type(rest Unk0265, pub? Unk0303, doc Unk0304) Type := …
+
+  # Decl.parse_use/1
+  pub def parse_use(text Unk0305) Use := …
+
+  # Decl.proto_method_traits/1
+  pub def proto_method_traits(prog Map(Unk0020, Vec(Type))) Unk0306 := …
+
+  # Decl.protocol_defs/4
+  pub def protocol_defs(decls Vec(Unk0209), types Unk0307, structs Unk0308, targets Unk0309) Vec(Unk0310) := …
+
+  # Decl.protocol_struct/2
+  pub def protocol_struct(name Unk0311, inner Unk0312) Unk0313 := …
+
+  # Decl.protocol_unit/3
+  pub def protocol_unit(prog Map(Unk0020, Vec(Type)), types Vec(Type), structs Vec(Type)) Vec(Tuple(String, Unk0231)) := …
+
+  # Decl.req_ret/1
+  pub def req_ret(p0 Unk0314) Unk0315 := …
+
+  # Decl.show_module/0
+  pub def show_module() Unk0251 := …
+
+  # Decl.skip_nl/1
+  pub def skip_nl(p0 Vec(Unk0220)) Vec(Unk0220) := …
+
+  # Decl.split2/2
+  pub def split2(str Unk0316, sep Unk0317) Tuple(Unk0319, Unk0318) := …
+
+  # Decl.split_decls/1
+  pub def split_decls(p0 Vec(Vec(Unk0220))) Vec(Unk0320) := …
+
+  # Decl.split_forall/1
+  pub def split_forall(head Unk0321) Unk0322 := …
+
+  # Decl.split_once/2
+  pub def split_once(str Unk0265, sep String) Tuple(Unk0324, Unk0323) := …
+
+  # Decl.split_top/2
+  pub def split_top(str Unk0325, sep String) Unk0326 := …
+
+  # Decl.strip_type_params/1
+  pub def strip_type_params(name Unk0327) Unk0270 := …
+
+  # Decl.subst_const/2
+  pub def subst_const(p0 Unk0328, aliases Unk0210) Const := …
+
+  # Decl.subst_fields/2
+  pub def subst_fields(fs Vec(Unk0329), aliases Unk0330) Vec(Field) := …
+
+  # Decl.subst_func/2
+  pub def subst_func(p0 Unk0331, aliases Unk0210) Func := …
+
+  # Decl.subst_struct/2
+  pub def subst_struct(p0 Unk0332, aliases Unk0210) Struct := …
+
+  # Decl.subst_type/2
+  pub def subst_type(p0 Unk0333, aliases Unk0210) Type := …
+
+  # Decl.subst_type_str/2
+  pub def subst_type_str(type Unk0334, aliases Vec(Unk0335)) Unk0334 := …
+
+  # Decl.subst_variant/2
+  pub def subst_variant(p0 Unk0336, aliases Unk0337) Variant := …
+
+  # Decl.take_block/3
+  pub def take_block(p0 Vec(Vec(Unk0220)), depth Int53, acc Vec(Vec(Unk0220))) Tuple(Vec(Vec(Unk0220)), Vec(Vec(Unk0220))) := …
+
+  # Decl.take_decl/1
+  pub def take_decl(p0 Vec(Vec(Unk0220))) Tuple(Tuple(Unk0214, Map(Unk0213, Bool)), Vec(Unk0220)) := …
+
+  # Decl.take_def/1
+  pub def take_def(p0 Vec(Vec(Unk0220))) Tuple(Unk0237, Vec(Vec(Unk0220))) := …
+
+  # Decl.take_head/4
+  pub def take_head(name Unk0234, params Unk0235, p2 Vec(Vec(Unk0220)), head Vec(Vec(Unk0220))) Tuple(Unk0237, Vec(Vec(Unk0220))) := …
+
+  # Decl.take_line/2
+  pub def take_line(tokens Vec(Vec(Unk0220)), acc Vec(Vec(Unk0220))) Tuple(Vec(Vec(Unk0220)), Vec(Vec(Unk0220))) := …
+
+  # Decl.take_line/3
+  pub def take_line(p0 Vec(Vec(Unk0220)), acc Vec(Vec(Unk0220)), _depth Int53) Tuple(Vec(Vec(Unk0220)), Vec(Vec(Unk0220))) := …
+
+  # Decl.take_mod_body/2
+  pub def take_mod_body(p0 Vec(Unk0220), acc Vec(Unk0338)) Tuple(Vec(Unk0338), Vec(Unk0220)) := …
+
+  # Decl.take_parens/3
+  pub def take_parens(p0 Vec(Unk0220), p1 Int53, acc Vec(Unk0220)) Tuple(Vec(Unk0220), Vec(Unk0220)) := …
+
+  # Decl.take_type/2
+  pub def take_type(p0 Vec(Vec(Unk0220)), acc Vec(Vec(Unk0220))) Tuple(Vec(Vec(Unk0220)), Vec(Vec(Unk0220))) := …
+
+  # Decl.take_until_do/2
+  pub def take_until_do(p0 Vec(Vec(Unk0220)), acc Vec(Vec(Unk0220))) Tuple(Vec(Vec(Unk0220)), Unk0339) := …
+
+  # Decl.variant/1
+  pub def variant(v Unk0239) Variant := …
+
+  # Doc.concat/1
+  pub def concat(docs Vec(Tuple(Unk0340, String))) Tuple(Unk0340, String) := …
+
+  # Doc.concat/2
+  pub def concat(a Tuple(Unk0340, String), b Tuple(Unk0340, String)) Tuple(Unk0340, String) := …
+
+  # Doc.do_render/5
+  pub def do_render(_w Int53, _k Int53, p2 Vec(Unk0341), p3 Vec(Unk0342), out Vec(String)) Vec(String) := …
+
+  # Doc.empty/0
+  pub def empty() Tuple(Unk0340, String) := …
+
+  # Doc.fits?/2
+  pub def fits?(w Int53, _work Vec(Unk0341)) Bool := …
+
+  # Doc.flat_string/1
+  pub def flat_string(p0 Unk0342) String := …
+
+  # Doc.flush_suffix/2
+  pub def flush_suffix(p0 Vec(Unk0342), out Vec(String)) Vec(String) := …
+
+  # Doc.group/1
+  pub def group(doc Tuple(Unk0340, String)) Unk0343 := …
+
+  # Doc.hardline/0
+  pub def hardline() Tuple(Unk0340, String) := …
+
+  # Doc.if_break/2
+  pub def if_break(broken Tuple(Unk0340, String), flat Tuple(Unk0340, String)) Tuple(Unk0340, String) := …
+
+  # Doc.join/2
+  pub def join(_sep Tuple(Unk0340, String), p1 Vec(Tuple(Unk0340, String))) Tuple(Unk0340, String) := …
+
+  # Doc.line/0
+  pub def line() Tuple(Unk0340, String) := …
+
+  # Doc.line_suffix/1
+  pub def line_suffix(doc Tuple(Unk0340, String)) Tuple(Unk0340, String) := …
+
+  # Doc.must_break?/1
+  pub def must_break?(p0 Tuple(Unk0340, String)) Bool := …
+
+  # Doc.nest/2
+  pub def nest(n Vec(Unk0344), doc Tuple(Unk0340, String)) Tuple(Unk0340, String) := …
+
+  # Doc.render/2
+  pub def render(doc Tuple(Unk0340, String), width Int53) String := …
+
+  # Doc.softline/0
+  pub def softline() Tuple(Unk0340, String) := …
+
+  # Doc.text/1
+  pub def text(s String) Tuple(Unk0340, String) := …
+
+  # Doctest.augment/2
+  pub def augment(src String, examples Vec(Unk0345)) String := …
+
+  # Doctest.extract/1
+  pub def extract(src String) Vec(Unk0345) := …
+
+  # Doctest.exunit_cases/2
+  pub def exunit_cases(src String, mod Unk0346) Unk0347 := …
+
+  # Doctest.fences/1
+  pub def fences(md Unk0348) Unk0349 := …
+
+  # Doctest.module_doc_strings/1
+  pub def module_doc_strings(p0 Map(Unk0020, Vec(Type))) Vec(Unk0350) := …
+
+  # Doctest.pairs/1
+  pub def pairs(p0 Unk0351) Vec(Unk0352) := …
+
+  # Doctest.run/2
+  pub def run(src String, p1 Unk0353) Vec(Unk0354) := …
+
+  # Doctest.run_markdown/1
+  pub def run_markdown(md Unk0355) Unk0356 := …
+
+  # Exhaustiveness.add_range/4
+  pub def add_range(env Tuple(Unk0357, Map(String, String)), type_name String, lo Unk0358, hi Unk0359) Tuple(Unk0357, Map(String, String)) := …
+
+  # Exhaustiveness.add_type/3
+  pub def add_type(env Tuple(Unk0357, Map(String, String)), type_name String, variants Vec(Tuple(String, Unk0360))) Tuple(Unk0357, Map(String, String)) := …
+
+  # Exhaustiveness.analyze/3
+  pub def analyze(arms Vec(Unk0361), n Int53, env Map(Unk0362, Unk0363)) Unk0364 := …
+
+  # Exhaustiveness.arity/2
+  pub def arity(_env Map(Unk0362, Unk0363), p1 Unk0365) Int53 := …
+
+  # Exhaustiveness.base_env/0
+  pub def base_env() Tuple(Unk0357, Map(String, String)) := …
+
+  # Exhaustiveness.body_core/1
+  pub def body_core(body Sum1) Sum1 := …
+
+  # Exhaustiveness.check_case_bodies!/2
+  pub def check_case_bodies!(funcs Unk0366, env Unk0367) Unk0368 := …
+
+  # Exhaustiveness.check_match!/3
+  pub def check_match!(core Unk0369, env Map(Unk0362, Unk0363), where Unk0370) Unk0371 := …
+
+  # Exhaustiveness.check_one_case!/3
+  pub def check_one_case!(p0 Sum1, env Map(Unk0362, Unk0363), where Unk0370) Unk0372 := …
+
+  # Exhaustiveness.collect_cases/2
+  pub def collect_cases(p0 Vec(Unk0373), acc Vec(Unk0374)) Vec(Unk0374) := …
+
+  # Exhaustiveness.collect_children/2
+  pub def collect_children(struct Vec(Unk0373), acc Vec(Unk0374)) Vec(Unk0374) := …
+
+  # Exhaustiveness.default/1
+  pub def default(rows Vec(Unk0375)) Vec(Unk0375) := …
+
+  # Exhaustiveness.head_ctors/1
+  pub def head_ctors(rows Vec(Unk0375)) Vec(Unk0376) := …
+
+  # Exhaustiveness.missing_head/2
+  pub def missing_head(_env Map(Unk0362, Unk0363), p1 Vec(Unk0376)) Unk0377 := …
+
+  # Exhaustiveness.pascal/1
+  pub def pascal(c Unk0378) String := …
+
+  # Exhaustiveness.program_env/3
+  pub def program_env(types Vec(Type), structs Vec(Unk0379), ranges Vec(Unk0380)) Tuple(Unk0357, Map(String, String)) := …
+
+  # Exhaustiveness.render/1
+  pub def render(p0 Vec(Unk0381)) String := …
+
+  # Exhaustiveness.signature/2
+  pub def signature(_env Map(Unk0362, Unk0363), p1 Vec(Unk0376)) Tuple(Unk0383, Vec(Unk0382)) := …
+
+  # Exhaustiveness.specialize/3
+  pub def specialize(rows Vec(Unk0375), c Unk0365, env Map(Unk0362, Unk0363)) Vec(Unk0375) := …
+
+  # Exhaustiveness.useful?/3
+  pub def useful?(rows Vec(Unk0375), p1 Vec(Unk0384), _env Map(Unk0362, Unk0363)) Bool := …
+
+  # Exhaustiveness.witness/3
+  pub def witness(rows Vec(Unk0375), p1 Int53, _env Map(Unk0362, Unk0363)) Tuple(Unk0385, Vec(Unk0377)) := …
+
+  # Fixpoint.check/4
+  pub def check(mod Unk0386, corpus Unk0387, project Unk0388, p3 Unk0389) Unk0390 := …
+
+  # Fixpoint.load_lexer/2
+  pub def load_lexer(source String, mod Unk0008) Unk0008 := …
+
+  # Format.apply_node/3
+  pub def apply_node(p0 Option(Unk0391), base Vec(Unk0344), st Vec(Vec(Unk0344))) Vec(Vec(Unk0344)) := …
+
+  # Format.bd/3
+  pub def bd(p0 Vec(Option(Unk0391)), _prev Option(Unk0391), _rf Bool) Tuple(Unk0340, String) := …
+
+  # Format.blank?/1
+  pub def blank?(p0 Option(Unk0392)) Bool := …
+
+  # Format.block_head?/2
+  pub def block_head?(p0 Vec(Option(Unk0391)), next Vec(Option(Unk0392))) Bool := …
+
+  # Format.boundary?/1
+  pub def boundary?(p0 Option(Unk0392)) Bool := …
+
+  # Format.boundary_tok?/1
+  pub def boundary_tok?(p0 Tuple(Unk0393, String)) Bool := …
+
+  # Format.chunk_on_comma/3
+  pub def chunk_on_comma(p0 Vec(Unk0394), cur Vec(Unk0394), acc Vec(Vec(Unk0394))) Vec(Vec(Unk0394)) := …
+
+  # Format.closer_lead?/1
+  pub def closer_lead?(p0 Tuple(Unk0393, String)) Bool := …
+
+  # Format.comment_only?/1
+  pub def comment_only?(line Option(Unk0392)) Bool := …
+
+  # Format.cons_group?/1
+  pub def cons_group?(inner Vec(Unk0395)) Bool := …
+
+  # Format.cont_lead?/1
+  pub def cont_lead?(p0 Tuple(Unk0393, String)) Bool := …
+
+  # Format.decl_kw?/1
+  pub def decl_kw?(p0 Tuple(Unk0393, String)) Bool := …
+
+  # Format.declaration_line?/1
+  pub def declaration_line?(p0 Vec(Option(Unk0391))) Bool := …
+
+  # Format.finish_items/2
+  pub def finish_items(cur Vec(Unk0394), acc Vec(Vec(Unk0394))) Vec(Vec(Unk0394)) := …
+
+  # Format.format/1
+  pub def format(src Unk0396) Unk0396 := …
+
+  # Format.format_result/1
+  pub def format_result(src Unk0396) Tuple(Unk0397, Unk0398) := …
+
+  # Format.group_doc/4
+  pub def group_doc(open Unk0399, inner Vec(Unk0395), close Unk0399, reflow? Bool) Tuple(Unk0340, String) := …
+
+  # Format.has_comment?/1
+  pub def has_comment?(nodes Vec(Unk0395)) Bool := …
+
+  # Format.has_tok?/2
+  pub def has_tok?(line Vec(Tuple(Unk0401, Tuple(Unk0400, String))), t Tuple(Unk0400, String)) Bool := …
+
+  # Format.head_tok/1
+  pub def head_tok(p0 Option(Unk0391)) Tuple(Unk0393, String) := …
+
+  # Format.indent_and_render/4
+  pub def indent_and_render(p0 Vec(Option(Unk0392)), _stack Vec(Vec(Unk0344)), _cont Int53, acc Vec(String)) Vec(String) := …
+
+  # Format.lead_adjust/1
+  pub def lead_adjust(p0 Vec(Option(Unk0391))) Int53 := …
+
+  # Format.leaf/1
+  pub def leaf(p0 Unk0399) String := …
+
+  # Format.line_doc/1
+  pub def line_doc(nodes Vec(Option(Unk0391))) Tuple(Unk0340, String) := …
+
+  # Format.ll/3
+  pub def ll(p0 Vec(Unk0402), cur Vec(Unk0402), acc Vec(Vec(Unk0402))) Vec(Vec(Unk0402)) := …
+
+  # Format.logical_lines/1
+  pub def logical_lines(nodes Vec(Unk0402)) Vec(Vec(Unk0402)) := …
+
+  # Format.mark/1
+  pub def mark(nodes Option(Unk0392)) Vec(Option(Unk0391)) := …
+
+  # Format.mark/3
+  pub def mark(p0 Option(Unk0392), _prev Option(Unk0391), acc Vec(Option(Unk0391))) Vec(Option(Unk0391)) := …
+
+  # Format.next_code_line/1
+  pub def next_code_line(p0 Vec(Option(Unk0392))) Option(Unk0392) := …
+
+  # Format.node_doc/2
+  pub def node_doc(p0 Option(Unk0391), _rf Bool) Tuple(Unk0340, String) := …
+
+  # Format.pop/1
+  pub def pop(p0 Vec(Vec(Unk0344))) Vec(Vec(Unk0344)) := …
+
+  # Format.push/2
+  pub def push(base Vec(Unk0344), st Vec(Vec(Unk0344))) Vec(Vec(Unk0344)) := …
+
+  # Format.render_line/2
+  pub def render_line(nodes Vec(Option(Unk0391)), base Vec(Unk0344)) String := …
+
+  # Format.space?/2
+  pub def space?(_prev Unk0403, p1 Tuple(Unk0393, String)) Bool := …
+
+  # Format.split_items/1
+  pub def split_items(nodes Vec(Unk0395)) Vec(Vec(Option(Unk0391))) := …
+
+  # Format.squeeze_blanks/1
+  pub def squeeze_blanks(lines Unk0404) Unk0405 := …
+
+  # Format.tail_tok/1
+  pub def tail_tok(p0 Option(Unk0391)) Unk0403 := …
+
+  # Format.trailing_comma?/1
+  pub def trailing_comma?(inner Vec(Unk0395)) Bool := …
+
+  # Format.trailing_op?/1
+  pub def trailing_op?(line Vec(Option(Unk0391))) Bool := …
+
+  # Format.update_stack/4
+  pub def update_stack(line Vec(Option(Unk0391)), rest Vec(Option(Unk0392)), base Vec(Unk0344), stack Vec(Vec(Unk0344))) Vec(Vec(Unk0344)) := …
+
+  # Format.value_end?/1
+  pub def value_end?(p0 Option(Unk0391)) Bool := …
+
+  # Format.value_end_tok?/1
+  pub def value_end_tok?(p0 Unk0403) Bool := …
+
+  # FormsEquiv.abstract_code/1
+  pub def abstract_code(beam Unk0406) Unk0407 := …
+
+  # FormsEquiv.alpha_rename/1
+  pub def alpha_rename(form Unk0408) Unk0409 := …
+
+  # FormsEquiv.bool_clause/1
+  pub def bool_clause(p0 Unk0410) Tuple(Unk0411, Unk0412) := …
+
+  # FormsEquiv.bool_clause_pair/1
+  pub def bool_clause_pair(p0 Vec(Unk0410)) Tuple(Unk0410, Unk0410) := …
+
+  # FormsEquiv.canon_bool_case/1
+  pub def canon_bool_case(p0 Vec(Unk0413)) Vec(Unk0413) := …
+
+  # FormsEquiv.diff/2
+  pub def diff(a Unk0414, b Unk0414) Tuple(Unk0415, Vec(Unk0416)) := …
+
+  # FormsEquiv.equivalent?/2
+  pub def equivalent?(a Unk0414, b Unk0414) Bool := …
+
+  # FormsEquiv.fold_neg_literal/1
+  pub def fold_neg_literal(p0 Vec(Unk0417)) Vec(Unk0417) := …
+
+  # FormsEquiv.key/1
+  pub def key(p0 Unk0418) Tuple(Unk0419, Unk0420) := …
+
+  # FormsEquiv.normalize/1
+  pub def normalize(beam Unk0414) Unk0421 := …
+
+  # FormsEquiv.user_function?/1
+  pub def user_function?(p0 Unk0422) Bool := …
+
+  # FormsEquiv.verified?/2
+  pub def verified?(oracle Unk0414, port Unk0414) Bool := …
+
+  # FormsEquiv.verify/2
+  pub def verify(oracle Unk0414, port Unk0414) Vec(Unk0423) := …
+
+  # FormsEquiv.walk_rename/2
+  pub def walk_rename(p0 Unk0408, map Map(Unk0424, Unk0425)) Tuple(Unk0408, Map(Unk0424, Unk0425)) := …
+
+  # FormsEquiv.zero_anno/1
+  pub def zero_anno(tuple Vec(Unk0426)) Vec(Unk0426) := …
+
+  # History.add/1
+  pub def add(line Unk0427) Unk0428 := …
+
+  # History.dedup_consecutive/1
+  pub def dedup_consecutive(p0 Vec(Vec(Unk0429))) Vec(Vec(Unk0429)) := …
+
+  # History.load/0
+  pub def load() Vec(Unk0430) := …
+
+  # History.path/0
+  pub def path() Unk0431 := …
+
+  # Infer.app/2
+  pub def app(head String, args Vec(Unk0432)) Tuple(Unk0433, String) := …
+
+  # Infer.app1/2
+  pub def app1(head String, s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.bind/3
+  pub def bind(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), id Unk0435, t Tuple(Unk0433, String)) Unk0436 := …
+
+  # Infer.bind_checked/3
+  pub def bind_checked(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), i Unk0435, t Tuple(Unk0433, String)) Tuple(Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), Unk0437) := …
+
+  # Infer.bind_params/3
+  pub def bind_params(args Unk0438, pvars Unk0439, store Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Unk0440 := …
+
+  # Infer.build_ctx/2
+  pub def build_ctx(stdlib_map Unk0441, p1 Unk0442) Unk0443 := …
+
+  # Infer.build_ledger/2
+  pub def build_ledger(params Unk0444, ret String) Vec(Tuple(String, Unk0445)) := …
+
+  # Infer.call_sig/6
+  pub def call_sig(ctx Map(Unk0447, Unk0446), key Unk0448, args Vec(Bool), env Map(String, Tuple(Unk0433, String)), _outer Map(Unk0447, Unk0446), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.case_arm/1
+  pub def case_arm(p0 Unk0449) Tuple(Unk0451, Option(Unk0450)) := …
+
+  # Infer.clear_xmod/0
+  pub def clear_xmod() Unk0452 := …
+
+  # Infer.cluster_name/2
+  pub def cluster_name(clusters Unk0446, struct String) String := …
+
+  # Infer.con/1
+  pub def con(name String) Tuple(Unk0433, String) := …
+
+  # Infer.do_unify/3
+  pub def do_unify(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), t Tuple(Unk0433, String), t Tuple(Unk0433, String)) Tuple(Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), Unk0437) := …
+
+  # Infer.free_vars/2
+  pub def free_vars(store Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), t Tuple(Unk0433, String)) Vec(Unk0453) := …
+
+  # Infer.fresh/1
+  pub def fresh(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.fresh_n/2
+  pub def fresh_n(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), k Int53) Tuple(Vec(Unk0454), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.fresh_num/1
+  pub def fresh_num(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.freshen_tvars/2
+  pub def freshen_tvars(tvars Vec(Unk0455), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Map(Unk0455, Unk0456), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.gen/4
+  pub def gen(n Bool, _env Map(String, Tuple(Unk0433, String)), _ctx Map(Unk0447, Unk0446), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.gen_args_then_fresh/4
+  pub def gen_args_then_fresh(args Vec(Bool), env Map(String, Tuple(Unk0433, String)), ctx Map(Unk0447, Unk0446), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.gen_block/4
+  pub def gen_block(p0 Vec(Bool), _env Map(String, Tuple(Unk0433, String)), _ctx Map(Unk0447, Unk0446), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.gen_cons/5
+  pub def gen_cons(h Bool, t Bool, env Map(String, Tuple(Unk0433, String)), ctx Map(Unk0447, Unk0446), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.gen_pat/4
+  pub def gen_pat(p0 Vec(Unk0457), pv Tuple(Unk0433, String), env Map(String, Tuple(Unk0433, String)), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Map(String, Tuple(Unk0433, String)), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.gen_pat_cons/5
+  pub def gen_pat_cons(h Vec(Unk0457), t Vec(Unk0457), pv Tuple(Unk0433, String), env Map(String, Tuple(Unk0433, String)), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Map(String, Tuple(Unk0433, String)), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.generalize_map/3
+  pub def generalize_map(pvars Unk0458, rvar Tuple(Unk0433, String), store Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Map(Unk0460, Unk0459) := …
+
+  # Infer.hole_or/2
+  pub def hole_or(p0 Unk0461, h Unk0461) Unk0461 := …
+
+  # Infer.hole_sig?/1
+  pub def hole_sig?(p0 Unk0462) Bool := …
+
+  # Infer.infer_group/2
+  pub def infer_group(p0 Unk0463, ctx Tuple(Unk0465, Unk0464)) Unk0462 := …
+
+  # Infer.instantiate/5
+  pub def instantiate(p0 Unk0466, args Vec(Bool), env Map(String, Tuple(Unk0433, String)), ctx Map(Unk0447, Unk0446), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.load_prelude_sigs/0
+  pub def load_prelude_sigs() Unk0467 := …
+
+  # Infer.mark_num/2
+  pub def mark_num(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), t Tuple(Unk0433, String)) Tuple(Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), Unk0468) := …
+
+  # Infer.max_ph/1
+  pub def max_ph(p0 Vec(Unk0469)) Int53 := …
+
+  # Infer.maybe_tuple/4
+  pub def maybe_tuple(elems Vec(Unk0470), env Map(String, Tuple(Unk0433, String)), ctx Map(Unk0447, Unk0446), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Tuple(Unk0433, String), Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) := …
+
+  # Infer.mod_name/1
+  pub def mod_name(p0 Unk0471) String := …
+
+  # Infer.num_conflict?/3
+  pub def num_conflict?(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), i Unk0435, t Tuple(Unk0433, String)) Bool := …
+
+  # Infer.numeric_con?/1
+  pub def numeric_con?(p0 Tuple(Unk0433, String)) Bool := …
+
+  # Infer.occurs?/3
+  pub def occurs?(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), i Unk0435, t Tuple(Unk0433, String)) Bool := …
+
+  # Infer.ok_payload/3
+  pub def ok_payload(tail_pairs Vec(Unk0472), ctx Map(Unk0447, Unk0446), store Unk0473) Unk0474 := …
+
+  # Infer.parse_type/2
+  pub def parse_type(str Unk0475, fmap Map(Unk0476, Unk0477)) Tuple(Unk0433, String) := …
+
+  # Infer.prelude_sigs/0
+  pub def prelude_sigs() Unk0467 := …
+
+  # Infer.prime_xmod/2
+  pub def prime_xmod(modules Unk0478, stdlib_map Unk0479) Unk0480 := …
+
+  # Infer.put_slot/3
+  pub def put_slot(sig Tuple(Unk0481, String), p1 String, ts String) Unk0482 := …
+
+  # Infer.render/3
+  pub def render(store Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), gmap Map(Unk0460, Unk0459), t Tuple(Unk0433, String)) String := …
+
+  # Infer.render_wp/3
+  pub def render_wp(store Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), unk_names Map(Unk0483, String), t Tuple(Unk0433, String)) String := …
+
+  # Infer.resolve/2
+  pub def resolve(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), p1 Tuple(Unk0433, String)) Tuple(Unk0433, String) := …
+
+  # Infer.resolve_program/2
+  pub def resolve_program(sigvars Vec(Unk0484), store Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Unk0485 := …
+
+  # Infer.resolve_struct_params/4
+  pub def resolve_struct_params(args Unk0486, pvars Unk0487, ctx Map(Unk0447, Unk0446), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))) := …
+
+  # Infer.result_analysis/3
+  pub def result_analysis(clause_envs Vec(Unk0488), ctx Tuple(Unk0465, Unk0464), store Unk0473) Unk0489 := …
+
+  # Infer.result_tag/1
+  pub def result_tag(p0 Unk0490) Tuple(Unk0492, Unk0491) := …
+
+  # Infer.sig_of/1
+  pub def sig_of(f Unk0493) Unk0494 := …
+
+  # Infer.sigvar_call/5
+  pub def sigvar_call(ctx Map(Unk0447, Unk0446), key Unk0495, args Unk0496, env Map(String, Tuple(Unk0433, String)), s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String)))) Unk0497 := …
+
+  # Infer.slot_sig/3
+  pub def slot_sig(p0 String, ts String, _ Vec(Unk0498)) Unk0499 := …
+
+  # Infer.store_new/0
+  pub def store_new() Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))) := …
+
+  # Infer.tvar?/1
+  pub def tvar?(s Unk0476) Unk0500 := …
+
+  # Infer.tvar_name/1
+  pub def tvar_name(i Unk0501) Unk0502 := …
+
+  # Infer.unify/3
+  pub def unify(s Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), a Tuple(Unk0433, String), b Tuple(Unk0433, String)) Tuple(Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), Unk0437) := …
+
+  # Infer.unk_vars/2
+  pub def unk_vars(store Tuple(Unk0434, Map(Unk0435, Tuple(Unk0433, String))), v Tuple(Unk0433, String)) Vec(Unk0503) := …
+
+  # Infer.whole_program/3
+  pub def whole_program(modules Vec(Tuple(String, Vec(Unk0504))), stdlib Unk0505, p2 Unk0506) Unk0485 := …
+
+  # Infer.xmod_cache/0
+  pub def xmod_cache() Unk0507 := …
+
+  # Interp.concat_chain/1
+  pub def concat_chain(parts Vec(Tuple(Unk0508, String))) Tuple(Unk0508, String) := …
+
+  # Interp.resolve/4
+  pub def resolve(p0 Tuple(Unk0188, String), env Map(Unk0077, String), ic Map(Unk0072, Map(String, String)), show Unk0260) Sum1 := …
+
+  # Interp.resolve_part/4
+  pub def resolve_part(p0 Unk0509, _env Map(Unk0077, String), _ic Map(Unk0072, Map(String, String)), _show Unk0260) Tuple(Unk0510, Unk0511) := …
+
+  # Interp.stringify/3
+  pub def stringify(expr Sum1, p1 String, _show Unk0260) Tuple(Unk0510, Unk0511) := …
+
+  # JS.all_funcs/1
+  pub def all_funcs(prog Map(Unk0512, Vec(Unk0513))) Vec(Unk0513) := …
+
+  # JS.arm_return/2
+  pub def arm_return(body Unk0514, p1 Unk0515) String := …
+
+  # JS.bind_lines/1
+  pub def bind_lines(binds Vec(Unk0516)) Vec(String) := …
+
+  # JS.block_return/1
+  pub def block_return(p0 Vec(Unk0517)) String := …
+
+  # JS.branch_js/1
+  pub def branch_js(p0 Sum1) String := …
+
+  # JS.case_arm_js/1
+  pub def case_arm_js(p0 Unk0518) String := …
+
+  # JS.clause_js/1
+  pub def clause_js(p0 Unk0519) String := …
+
+  # JS.clause_return/2
+  pub def clause_return(src Sum1, params Vec(Unk0520)) String := …
+
+  # JS.cp_lit/1
+  pub def cp_lit(cp Unk0521) String := …
+
+  # JS.dispatcher_js/4
+  pub def dispatcher_js(proto Unk0522, method Unk0523, impl_types Vec(Unk0524), reg Unk0525) String := …
+
+  # JS.expr_js/1
+  pub def expr_js(p0 Sum1) String := …
+
+  # JS.first_unsupported/2
+  pub def first_unsupported(node Unk0526, unsup Map(Unk0527, Option(Unk0528))) Option(Unk0528) := …
+
+  # JS.float?/1
+  pub def float?(n Unk0529) Bool := …
+
+  # JS.function_js/1
+  pub def function_js(p0 Unk0530) String := …
+
+  # JS.guarded_return/3
+  pub def guarded_return(body Sum1, p1 Unk0531, params Vec(Unk0520)) String := …
+
+  # JS.js_atom/1
+  pub def js_atom(name Unk0532) String := …
+
+  # JS.js_guard!/3
+  pub def js_guard!(type String, proto Unk0533, reg Unk0534) Unk0535 := …
+
+  # JS.js_number_int?/1
+  pub def js_number_int?(t Unk0536) Bool := …
+
+  # JS.js_str/1
+  pub def js_str(s Unk0532) String := …
+
+  # JS.lit_js/1
+  pub def lit_js(v Unk0532) String := …
+
+  # JS.mangle/3
+  pub def mangle(proto Unk0537, type Unk0538, method Unk0539) String := …
+
+  # JS.match_elems/2
+  pub def match_elems(es Unk0540, acc String) Unk0541 := …
+
+  # JS.num_js/1
+  pub def num_js(n Unk0529) String := …
+
+  # JS.paren/1
+  pub def paren(e Unk0542) String := …
+
+  # JS.pascal?/1
+  pub def pascal?(s Unk0543) Bool := …
+
+  # JS.pat_match/2
+  pub def pat_match(p0 Sum2, _acc String) Tuple(Vec(String), Vec(Tuple(Unk0544, String))) := …
+
+  # JS.program_number_mode?/1
+  pub def program_number_mode?(prog Map(Unk0031, Vec(Type))) Bool := …
+
+  # JS.protocol_dispatchers_js/1
+  pub def protocol_dispatchers_js(prog Map(Unk0031, Vec(Type))) String := …
+
+  # JS.reject_mixed_int_mode!/1
+  pub def reject_mixed_int_mode!(prog Map(Unk0031, Vec(Type))) Unk0545 := …
+
+  # JS.reject_unsupported!/1
+  pub def reject_unsupported!(funcs Vec(Unk0546)) Unk0547 := …
+
+  # JS.reject_wide_int!/2
+  pub def reject_wide_int!(name Unk0548, p1 Unk0549) Unk0550 := …
+
+  # JS.split_top_commas/1
+  pub def split_top_commas(s String) Vec(Unk0067) := …
+
+  # JS.stmt_js/1
+  pub def stmt_js(p0 Unk0551) String := …
+
+  # JS.stmt_return/1
+  pub def stmt_return(p0 Unk0552) String := …
+
+  # JS.struct_name_set/1
+  pub def struct_name_set(prog Map(Unk0031, Vec(Type))) Unk0553 := …
+
+  # JS.sum_ctor_map/1
+  pub def sum_ctor_map(prog Map(Unk0031, Vec(Type))) Unk0554 := …
+
+  # JS.sum_guard_js/1
+  pub def sum_guard_js(ctors Vec(Unk0555)) String := …
+
+  # JVM.all_funcs/1
+  pub def all_funcs(prog Map(Unk0556, Vec(Unk0557))) Vec(Unk0557) := …
+
+  # JVM.all_types/1
+  pub def all_types(prog Map(Unk0031, Vec(Type))) Vec(Type) := …
+
+  # JVM.bind_str/1
+  pub def bind_str(p0 Vec(Unk0558)) String := …
+
+  # JVM.block_value/1
+  pub def block_value(p0 Vec(Unk0517)) String := …
+
+  # JVM.branch_kt/1
+  pub def branch_kt(p0 Sum1) String := …
+
+  # JVM.case_arms/2
+  pub def case_arms(arms Unk0559, acc String) Tuple(Vec(Unk0561), Unk0560) := …
+
+  # JVM.clause_lines/1
+  pub def clause_lines(clauses Unk0562) Tuple(Unk0564, Unk0563) := …
+
+  # JVM.clause_match/1
+  pub def clause_match(pats Unk0565) Unk0566 := …
+
+  # JVM.clause_value/2
+  pub def clause_value(src Sum1, params Vec(Unk0520)) String := …
+
+  # JVM.expr_kt/1
+  pub def expr_kt(p0 Sum1) String := …
+
+  # JVM.first_unsupported/2
+  pub def first_unsupported(node Unk0567, unsup Map(Unk0568, Option(Unk0569))) Option(Unk0569) := …
+
+  # JVM.function_kt/1
+  pub def function_kt(p0 Unk0570) String := …
+
+  # JVM.guarded_arm/2
+  pub def guarded_arm(body_kt String, p1 Unk0571) String := …
+
+  # JVM.guarded_return/3
+  pub def guarded_return(body Unk0572, p1 Unk0573, params Vec(Unk0574)) String := …
+
+  # JVM.kotlin_module/2
+  pub def kotlin_module(src String, p1 Unk0575) String := …
+
+  # JVM.kt_str/1
+  pub def kt_str(s Unk0576) String := …
+
+  # JVM.kt_type/1
+  pub def kt_type(p0 String) Unk0577 := …
+
+  # JVM.lit_kt/1
+  pub def lit_kt(v Unk0576) String := …
+
+  # JVM.pat_match/2
+  pub def pat_match(p0 Sum2, _acc String) Tuple(Vec(String), Vec(Tuple(Unk0578, String))) := …
+
+  # JVM.reject_unsupported!/1
+  pub def reject_unsupported!(funcs Vec(Unk0579)) Unk0580 := …
+
+  # JVM.stmt_kt/1
+  pub def stmt_kt(p0 Unk0581) String := …
+
+  # JVM.stmt_value/1
+  pub def stmt_value(p0 Unk0582) String := …
+
+  # JVM.sum_decl/1
+  pub def sum_decl(t Unk0583) String := …
+
+  # JVM.to_jar/3
+  pub def to_jar(src String, jar_path String, p2 Unk0584) Unk0585 := …
+
+  # JVM.variant_decl/2
+  pub def variant_decl(p0 Unk0586, tname Unk0587) String := …
+
+  # Lexer.binify/1
+  pub def binify(acc Vec(String)) Unk0588 := …
+
+  # Lexer.capture_hole/3
+  pub def capture_hole(p0 String, _d Int53, _acc Vec(String)) Tuple(Unk0588, Unk0589) := …
+
+  # Lexer.char_escape/1
+  pub def char_escape(p0 Unk0590) Tuple(Int53, Unk0591) := …
+
+  # Lexer.close_char/1
+  pub def close_char(p0 String) Unk0592 := …
+
+  # Lexer.collapse_nl/1
+  pub def collapse_nl(tokens Unk0593) Unk0594 := …
+
+  # Lexer.detokenize/2
+  pub def detokenize(tokens Unk0595, p1 Unk0596) Unk0597 := …
+
+  # Lexer.escape_str/1
+  pub def escape_str(s Unk0598) String := …
+
+  # Lexer.expr_tokens/1
+  pub def expr_tokens(src Sum1) Vec(Vec(Vec(Unk0599))) := …
+
+  # Lexer.lex/2
+  pub def lex(str String, acc Vec(Tuple(Unk0600, String))) Unk0601 := …
+
+  # Lexer.lex_char/1
+  pub def lex_char(p0 String) Tuple(Unk0602, Unk0592) := …
+
+  # Lexer.lex_parts/3
+  pub def lex_parts(p0 String, _lit Vec(String), _parts Vec(Tuple(Unk0603, Unk0588))) Tuple(Vec(Tuple(Unk0603, Unk0588)), Unk0604) := …
+
+  # Lexer.lex_string_token/1
+  pub def lex_string_token(str String) Tuple(Tuple(Unk0607, Vec(Unk0606)), Unk0605) := …
+
+  # Lexer.parse_hex!/1
+  pub def parse_hex!(hex Unk0591) Int53 := …
+
+  # Lexer.punct/1
+  pub def punct(str String) Option(Unk0608) := …
+
+  # Lexer.string_token/1
+  pub def string_token(parts Vec(Unk0606)) Tuple(Unk0607, Vec(Unk0606)) := …
+
+  # Lexer.strip_trivia/1
+  pub def strip_trivia(tokens Unk0609) Unk0610 := …
+
+  # Lexer.take_comment/1
+  pub def take_comment(str String) Tuple(Unk0611, String) := …
+
+  # Lexer.take_hex/2
+  pub def take_hex(str Unk0612, max Int53) Tuple(String, Unk0612) := …
+
+  # Lexer.take_hex/3
+  pub def take_hex(p0 Unk0612, max Int53, acc String) Tuple(String, Unk0612) := …
+
+  # Lexer.tok_str/2
+  pub def tok_str(p0 Unk0613, nl_as String) String := …
+
+  # Lexer.tokenize/1
+  pub def tokenize(src Unk0614) Unk0615 := …
+
+  # Lexer.tokenize_trivia/1
+  pub def tokenize_trivia(src String) Unk0601 := …
+
+  # Lexer.word/1
+  pub def word(w String) Tuple(Unk0600, String) := …
+
+  # Livebook.eval/1
+  pub def eval(source Unk0616) Unk0617 := …
+
+  # Livebook.output/1
+  pub def output(p0 Vec(String)) Unk0617 := …
+
+  # Livebook.reset/0
+  pub def reset() Unk0618 := …
+
+  # Livebook.run/2
+  pub def run(session Unk0619, source Unk0616) Tuple(Unk0620, Unk0619) := …
+
+  # Livebook.session_pid/0
+  pub def session_pid() Unk0621 := …
+
+  # Lower.add_list_elem_vars/2
+  pub def add_list_elem_vars(acc Unk0622, p1 Unk0623) Unk0622 := …
+
+  # Lower.add_var/2
+  pub def add_var(acc Unk0622, p1 Unk0624) Unk0622 := …
+
+  # Lower.all_pat_vars/1
+  pub def all_pat_vars(p0 Sum2) Vec(Unk0625) := …
+
+  # Lower.arm_rebinds/3
+  pub def arm_rebinds(pats Unk0626, iso Unk0627, used Unk0628) Vec(Unk0629) := …
+
+  # Lower.assoc/1
+  pub def assoc(op String) Unk0630 := …
+
+  # Lower.assoc_proj/2
+  pub def assoc_proj(s String, assoc Vec(Unk0631)) String := …
+
+  # Lower.body_ast/2
+  pub def body_ast(src Unk0632, ctx Unk0633) Unk0634 := …
+
+  # Lower.borrow_arg/4
+  pub def borrow_arg(a Tuple(Unk0188, String), pt String, funs Map(Unk0636, Unk0635), borrowed Option(Unk0637)) Unk0638 := …
+
+  # Lower.borrow_value/2
+  pub def borrow_value(p0 Tuple(Unk0188, String), _borrowed Option(Unk0637)) Tuple(Unk0188, String) := …
+
+  # Lower.borrowed_in_pat/2
+  pub def borrowed_in_pat(p0 Sum2, p1 Bool) Vec(Unk0639) := …
+
+  # Lower.borrowed_vars/2
+  pub def borrowed_vars(params Unk0640, pats Unk0641) Option(Unk0642) := …
+
+  # Lower.build_env/3
+  pub def build_env(types Vec(Type), structs Vec(Unk0643), ranges Vec(Unk0644)) Unk0645 := …
+
+  # Lower.build_meta/1
+  pub def build_meta(types Vec(Type)) Unk0646 := …
+
+  # Lower.build_struct_meta/1
+  pub def build_struct_meta(structs Vec(Type)) Unk0647 := …
+
+  # Lower.cap_arity/1
+  pub def cap_arity(p0 Sum1) Int53 := …
+
+  # Lower.case_guard/2
+  pub def case_guard(p0 Sum1, _ Unk0648) String := …
+
+  # Lower.catchall_pat?/1
+  pub def catchall_pat?(p0 Sum2) Bool := …
+
+  # Lower.char_vars/2
+  pub def char_vars(params Unk0649, pats Unk0650) Unk0651 := …
+
+  # Lower.check!/2
+  pub def check!(p0 Map(Unk0652, Vec(Unk0653)), _env Unk0645) Unk0654 := …
+
+  # Lower.coerce_string_ast/1
+  pub def coerce_string_ast(p0 Sum1) String := …
+
+  # Lower.coerce_string_branch/1
+  pub def coerce_string_branch(p0 Sum1) String := …
+
+  # Lower.collect_ids/2
+  pub def collect_ids(p0 Vec(Unk0655), acc Unk0628) Unk0628 := …
+
+  # Lower.collect_owned_field_vars/3
+  pub def collect_owned_field_vars(p0 Unk0656, ctx Map(Unk0658, Unk0657), acc Unk0659) Unk0659 := …
+
+  # Lower.compile/4
+  pub def compile(types Vec(Type), func Map(Unk0652, Vec(Unk0653)), p2 Unk0660, p3 Unk0661) Unk0231 := …
+
+  # Lower.compile_beam/4
+  pub def compile_beam(types Vec(Type), func Map(Unk0652, Vec(Unk0653)), p2 Unk0662, p3 Unk0663) Unk0233 := …
+
+  # Lower.compile_elixir/4
+  pub def compile_elixir(types Vec(Type), func Map(Unk0652, Vec(Unk0653)), p2 Unk0664, p3 Unk0665) Unk0231 := …
+
+  # Lower.compile_module/1
+  pub def compile_module(p0 Unk0666) Unk0231 := …
+
+  # Lower.compile_module_beam/1
+  pub def compile_module_beam(p0 Unk0667) Unk0233 := …
+
+  # Lower.cons_tail_names/1
+  pub def cons_tail_names(p0 Sum2) Vec(Unk0668) := …
+
+  # Lower.cons_tail_rebinds/1
+  pub def cons_tail_rebinds(p0 Sum2) Vec(String) := …
+
+  # Lower.const_set/1
+  pub def const_set(consts Vec(Unk0669)) Unk0670 := …
+
+  # Lower.core_pat_ex/1
+  pub def core_pat_ex(surface Sum2) String := …
+
+  # Lower.core_pat_rs/2
+  pub def core_pat_rs(surface Sum2, meta Unk0671) String := …
+
+  # Lower.core_pat_vars/1
+  pub def core_pat_vars(p0 Sum2) Vec(Unk0672) := …
+
+  # Lower.ctx/4
+  pub def ctx(meta Unk0646, smeta Unk0647, cset Unk0670, p3 Unk0673) Map(Unk0658, Unk0657) := …
+
+  # Lower.deref_ids/2
+  pub def deref_ids(ast Tuple(Unk0674, String), p1 Vec(Unk0675)) Tuple(Unk0674, String) := …
+
+  # Lower.disp/2
+  pub def disp(p0 String, p1 Unk0648) String := …
+
+  # Lower.elixir_clauses/3
+  pub def elixir_clauses(func Map(Unk0652, Vec(Unk0653)), ctx Unk0676, def_kw String) String := …
+
+  # Lower.emit/2
+  pub def emit(p0 Sum1, _t Unk0648) Tuple(String, Int53) := …
+
+  # Lower.emit_ast/2
+  pub def emit_ast(ast Sum1, target Unk0648) Unk0677 := …
+
+  # Lower.emit_block/2
+  pub def emit_block(p0 Sum1, p1 Unk0648) String := …
+
+  # Lower.emit_expr/2
+  pub def emit_expr(src Sum1, target Unk0648) Unk0678 := …
+
+  # Lower.enum_generics/1
+  pub def enum_generics(name Unk0679) String := …
+
+  # Lower.err_payload/1
+  pub def err_payload(e Sum1) String := …
+
+  # Lower.ex_const/2
+  pub def ex_const(c Unk0669, ctx Unk0676) String := …
+
+  # Lower.ex_doc/2
+  pub def ex_doc(p0 Vec(Unk0653), _attr String) String := …
+
+  # Lower.ex_scope/0
+  pub def ex_scope() Unk0680 := …
+
+  # Lower.ex_struct/1
+  pub def ex_struct(s Unk0681) String := …
+
+  # Lower.ex_typespec/1
+  pub def ex_typespec(t Map(Unk0682, Vec(Unk0653))) String := …
+
+  # Lower.ex_use/1
+  pub def ex_use(p0 Unk0683) String := …
+
+  # Lower.flatten_concat/1
+  pub def flatten_concat(p0 Sum1) Vec(Sum1) := …
+
+  # Lower.fn_all_tvars/2
+  pub def fn_all_tvars(func Map(Unk0652, Vec(Unk0653)), pinst Unk0684) Vec(Unk0653) := …
+
+  # Lower.guard_kw/1
+  pub def guard_kw(p0 Unk0648) String := …
+
+  # Lower.guard_str/3
+  pub def guard_str(c Map(Unk0685, Sum1), target Unk0648, p2 Unk0686) String := …
+
+  # Lower.impl_param/2
+  pub def impl_param(p0 Unk0687, rust_type String) String := …
+
+  # Lower.infer_concrete_params/2
+  pub def infer_concrete_params(func Map(Unk0652, Vec(Unk0653)), params Vec(Unk0688)) Vec(String) := …
+
+  # Lower.infer_tvar_binding/1
+  pub def infer_tvar_binding(p0 Unk0689) Unk0690 := …
+
+  # Lower.insert_borrows/3
+  pub def insert_borrows(p0 Sum1, funs Map(Unk0636, Unk0635), borrowed Option(Unk0637)) Tuple(Unk0188, String) := …
+
+  # Lower.iso_cons_positions/1
+  pub def iso_cons_positions(func Map(Unk0652, Vec(Unk0653))) Unk0627 := …
+
+  # Lower.list_rpat?/1
+  pub def list_rpat?(p0 Unk0691) Bool := …
+
+  # Lower.module_elixir/1
+  pub def module_elixir(p0 Unk0692) String := …
+
+  # Lower.module_rust/1
+  pub def module_rust(p0 Unk0693) String := …
+
+  # Lower.name_type/1
+  pub def name_type(p Unk0067) Tuple(String, String) := …
+
+  # Lower.ofb/3
+  pub def ofb(p0 Vec(Unk0694), ctx Map(Unk0658, Unk0657), acc Unk0659) Unk0659 := …
+
+  # Lower.ok_payload/1
+  pub def ok_payload(v Sum1) String := …
+
+  # Lower.owned_arg?/2
+  pub def owned_arg?(p0 Tuple(Unk0188, String), _funs Map(Unk0636, Unk0635)) Bool := …
+
+  # Lower.owned_field_binders/2
+  pub def owned_field_binders(ast Vec(Unk0694), ctx Map(Unk0658, Unk0657)) Unk0659 := …
+
+  # Lower.owned_field_var?/1
+  pub def owned_field_var?(p0 Tuple(Unk0188, String)) Bool := …
+
+  # Lower.owned_scrut?/2
+  pub def owned_scrut?(p0 Unk0695, _ctx Map(Unk0658, Unk0657)) Bool := …
+
+  # Lower.owned_str_arg/1
+  pub def owned_str_arg(s Unk0696) Unk0697 := …
+
+  # Lower.p/3
+  pub def p(node Sum1, ctx Int53, t Unk0648) String := …
+
+  # Lower.pair_inst/1
+  pub def pair_inst(func Map(Unk0652, Vec(Unk0653))) Unk0684 := …
+
+  # Lower.param_rtypes/2
+  pub def param_rtypes(name Unk0636, funs Map(Unk0636, Unk0635)) Vec(String) := …
+
+  # Lower.parametric_param_map/1
+  pub def parametric_param_map(types Vec(Type)) Unk0698 := …
+
+  # Lower.parametric_used?/2
+  pub def parametric_used?(func Map(Unk0652, Vec(Unk0653)), name Unk0699) Bool := …
+
+  # Lower.pascal?/1
+  pub def pascal?(s Unk0700) Bool := …
+
+  # Lower.pat_ex/1
+  pub def pat_ex(p0 Sum2) String := …
+
+  # Lower.pat_rs/2
+  pub def pat_rs(p0 Sum2, _ Unk0671) String := …
+
+  # Lower.pcommas/1
+  pub def pcommas(s String) Vec(Unk0067) := …
+
+  # Lower.pipe_to_call/2
+  pub def pipe_to_call(l Unk0701, p1 Sum1) Sum1 := …
+
+  # Lower.proto_method_traits/1
+  pub def proto_method_traits(protocols Vec(Type)) Unk0702 := …
+
+  # Lower.proto_methods/0
+  pub def proto_methods() Unk0703 := …
+
+  # Lower.pub_sig_type_names/1
+  pub def pub_sig_type_names(funcs Unk0704) Unk0705 := …
+
+  # Lower.put_ex_scope/1
+  pub def put_ex_scope(s Unk0680) Unk0706 := …
+
+  # Lower.put_result_str_flags/1
+  pub def put_result_str_flags(ret Unk0707) Unk0708 := …
+
+  # Lower.ref_type/2
+  pub def ref_type(p0 String, self_repr Unk0709) String := …
+
+  # Lower.resolve_consts/2
+  pub def resolve_consts(p0 Sum1, cset Unk0710) Tuple(Unk0188, String) := …
+
+  # Lower.resolve_rust_pats/2
+  pub def resolve_rust_pats(p0 Sum1, meta Unk0671) Tuple(Unk0188, String) := …
+
+  # Lower.resolve_structs/2
+  pub def resolve_structs(p0 Sum1, smeta Unk0711) Tuple(Unk0188, String) := …
+
+  # Lower.resolve_variants/2
+  pub def resolve_variants(p0 Sum1, meta Map(Unk0713, Option(Unk0712))) Tuple(Unk0188, String) := …
+
+  # Lower.rest_pat_rs/1
+  pub def rest_pat_rs(p0 Sum2) String := …
+
+  # Lower.result_parts/1
+  pub def result_parts(ret Unk0707) Tuple(Unk0714, Unk0707) := …
+
+  # Lower.rewrite_proto_calls/2
+  pub def rewrite_proto_calls(p0 Vec(Unk0715), methods Unk0716) Vec(Unk0715) := …
+
+  # Lower.rpat/1
+  pub def rpat(p0 Sum2) String := …
+
+  # Lower.rs_doc/2
+  pub def rs_doc(p0 Vec(Unk0653), _prefix String) String := …
+
+  # Lower.rust_arm_body/2
+  pub def rust_arm_body(p0 Sum1, s String) String := …
+
+  # Lower.rust_case/3
+  pub def rust_case(scrut Sum1, arms Vec(Unk0717), body_fn Fn(Sum1, String)) String := …
+
+  # Lower.rust_const/2
+  pub def rust_const(c Unk0669, ctx Map(Unk0658, Unk0657)) String := …
+
+  # Lower.rust_enum/2
+  pub def rust_enum(t Map(Unk0718, Vec(Unk0653)), p1 Unk0719) String := …
+
+  # Lower.rust_fn/3
+  pub def rust_fn(p0 Map(Unk0652, Vec(Unk0653)), _ctx Map(Unk0658, Unk0657), vis String) String := …
+
+  # Lower.rust_generics/1
+  pub def rust_generics(p0 Unk0720) String := …
+
+  # Lower.rust_impl/3
+  pub def rust_impl(p0 Type, protocols Vec(Type), c Map(Unk0658, Unk0657)) String := …
+
+  # Lower.rust_impl_method/5
+  pub def rust_impl_method(method Unk0721, sig Unk0722, rust_type String, c Map(Unk0658, Unk0657), copy_recv? Bool) String := …
+
+  # Lower.rust_lit_type/1
+  pub def rust_lit_type(p0 Unk0723) String := …
+
+  # Lower.rust_owned_elem/1
+  pub def rust_owned_elem(p0 Sum1) String := …
+
+  # Lower.rust_program/1
+  pub def rust_program(prog Map(Unk0020, Vec(Type))) String := …
+
+  # Lower.rust_proto_body/2
+  pub def rust_proto_body(src Unk0724, c Map(Unk0725, Unk0726)) Unk0727 := …
+
+  # Lower.rust_protocols/4
+  pub def rust_protocols(protocols Vec(Type), impl_decls Vec(Type), types Vec(Type), structs Vec(Type)) Unk0728 := …
+
+  # Lower.rust_ret/1
+  pub def rust_ret(ret Unk0707) String := …
+
+  # Lower.rust_scrut/2
+  pub def rust_scrut(params Unk0729, iso Unk0627) String := …
+
+  # Lower.rust_struct/2
+  pub def rust_struct(s Unk0730, p1 Unk0731) String := …
+
+  # Lower.rust_total_shim?/1
+  pub def rust_total_shim?(func Map(Unk0652, Vec(Unk0653))) Bool := …
+
+  # Lower.rust_trait/1
+  pub def rust_trait(p0 Unk0732) String := …
+
+  # Lower.rust_use/1
+  pub def rust_use(p0 Unk0733) String := …
+
+  # Lower.rustify_parametric/2
+  pub def rustify_parametric(rust_type Unk0734, pinst Vec(Unk0735)) Unk0734 := …
+
+  # Lower.scalar_literal?/1
+  pub def scalar_literal?(p0 Tuple(Unk0188, String)) Bool := …
+
+  # Lower.self_subst/2
+  pub def self_subst(t Unk0736, repr String) Unk0707 := …
+
+  # Lower.sig_param/2
+  pub def sig_param(p Unk0067, self_repr Unk0737) String := …
+
+  # Lower.slice_binders/2
+  pub def slice_binders(params Unk0738, pats Vec(Sum2)) Unk0739 := …
+
+  # Lower.slice_elem_vars/1
+  pub def slice_elem_vars(p0 Sum2) Vec(Unk0740) := …
+
+  # Lower.slice_var?/1
+  pub def slice_var?(p0 Sum1) Bool := …
+
+  # Lower.str_lit/1
+  pub def str_lit(s Unk0741) String := …
+
+  # Lower.struct_pairs/4
+  pub def struct_pairs(name Unk0742, labels Vec(Unk0743), args Vec(Sum1), smeta Unk0711) Unk0744 := …
+
+  # Lower.subst_assoc/2
+  pub def subst_assoc(t Unk0745, assoc_rust Vec(Unk0746)) Unk0745 := …
+
+  # Lower.tail_expr/1
+  pub def tail_expr(p0 Unk0747) Unk0747 := …
+
+  # Lower.tail_slice_id?/1
+  pub def tail_slice_id?(p0 Sum1) Bool := …
+
+  # Lower.to_elixir/4
+  pub def to_elixir(func Map(Unk0652, Vec(Unk0653)), types Vec(Type), p2 Unk0748, p3 Unk0647) Unk0749 := …
+
+  # Lower.to_rust/5
+  pub def to_rust(func Map(Unk0652, Vec(Unk0653)), types Vec(Type), meta Unk0646, p3 Unk0750, p4 Unk0647) Unk0751 := …
+
+  # Lower.trait_impl_block/3
+  pub def trait_impl_block(protocols Vec(Type), impl_decls Vec(Type), c Map(Unk0658, Unk0657)) String := …
+
+  # Lower.trait_params/2
+  pub def trait_params(param_str String, self_repr Unk0737) String := …
+
+  # Lower.tuple_or_one/2
+  pub def tuple_or_one(p0 Vec(Sum2), f Fn(Sum2, String)) String := …
+
+  # Lower.tvar_name?/1
+  pub def tvar_name?(t Unk0752) Bool := …
+
+  # Lower.type_idents/1
+  pub def type_idents(p0 Unk0753) Vec(Unk0754) := …
+
+  # Lower.type_param_tvars/1
+  pub def type_param_tvars(t Unk0755) Unk0756 := …
+
+  # Lower.used_ids/1
+  pub def used_ids(ast Sum1) Unk0628 := …
+
+  # Lower.user_type?/2
+  pub def user_type?(t Unk0757, ctx Map(Unk0658, Unk0657)) Bool := …
+
+  # Lower.variant_info/2
+  pub def variant_info(meta Map(Unk0713, Option(Unk0712)), name Unk0700) Option(Unk0712) := …
+
+  # Lower.variant_lit/2
+  pub def variant_lit(info Option(Unk0712), pairs Vec(Unk0758)) Tuple(Unk0188, String) := …
+
+  # Lower.variant_pairs/3
+  pub def variant_pairs(info Option(Unk0712), args Vec(Sum1), meta Map(Unk0713, Option(Unk0712))) Vec(Unk0758) := …
+
+  # Lower.widen_char_arith/2
+  pub def widen_char_arith(p0 Sum1, cvars Unk0759) Tuple(Unk0188, String) := …
+
+  # Lower.with_chain_rs/3
+  pub def with_chain_rs(p0 Vec(Unk0760), body String, _else_rs String) String := …
+
+  # Lower.with_ex_scope/2
+  pub def with_ex_scope(names Vec(Unk0672), fun Fn(String)) String := …
+
+  # Lower.wrap_char/2
+  pub def wrap_char(p0 Tuple(Unk0188, String), _cvars Unk0759) Tuple(Unk0188, String) := …
+
+  # Macro.binders_here/1
+  pub def binders_here(p0 Vec(Unk0761)) Vec(Unk0762) := …
+
+  # Macro.build_env/1
+  pub def build_env(defs Unk0763) Map(Unk0230, Unk0229) := …
+
+  # Macro.check_portable!/2
+  pub def check_portable!(name Unk0764, tmpl Sum1) Unk0765 := …
+
+  # Macro.collect_binders/1
+  pub def collect_binders(node Vec(Unk0761)) Vec(Unk0762) := …
+
+  # Macro.do_expand/4
+  pub def do_expand(_env Map(Unk0230, Unk0229), _ast Sum1, d Int53, _p Bool) Tuple(Unk0188, String) := …
+
+  # Macro.expand/3
+  pub def expand(env Map(Unk0230, Unk0229), ast Sum1, p2 Vec(Tuple(Unk0766, Bool))) Sum1 := …
+
+  # Macro.freshen/2
+  pub def freshen(tmpl Vec(Unk0761), params Unk0767) Tuple(Unk0188, Vec(Unk0768)) := …
+
+  # Macro.introduces_failable_bind?/1
+  pub def introduces_failable_bind?(node Sum1) Bool := …
+
+  # Macro.map_node/2
+  pub def map_node(p0 Sum1, f Fn(Sum1, Tuple(Unk0188, String))) Tuple(Unk0188, String) := …
+
+  # Macro.rename/2
+  pub def rename(p0 Vec(Unk0761), ren Map(Unk0769, Vec(Unk0768))) Tuple(Unk0188, Vec(Unk0768)) := …
+
+  # Macro.substitute/2
+  pub def substitute(p0 Tuple(Unk0188, Vec(Unk0768)), subst Map(Unk0770, Sum1)) Sum1 := …
+
+  # Macro.walk_for_with/1
+  pub def walk_for_with(p0 Sum1) Tuple(Unk0188, String) := …
+
+  # Opaque.do_erase/2
+  pub def do_erase(prog Unk0771, ctx Tuple(Unk0773, Unk0772)) Map(Unk0031, Vec(Type)) := …
+
+  # Opaque.erase/1
+  pub def erase(p0 Map(Unk0020, Vec(Type))) Map(Unk0031, Vec(Type)) := …
+
+  # Opaque.erase_clause/3
+  pub def erase_clause(p0 Unk0774, _ctx Unk0775, _env Unk0776) Clause := …
+
+  # Opaque.erase_const/2
+  pub def erase_const(p0 Unk0777, p1 Unk0778) Const := …
+
+  # Opaque.erase_ctx/1
+  pub def erase_ctx(all Vec(Unk0779)) Tuple(Unk0773, Unk0772) := …
+
+  # Opaque.erase_func/2
+  pub def erase_func(p0 Unk0780, p1 Tuple(Unk0773, Unk0772)) Func := …
+
+  # Opaque.erase_mod/2
+  pub def erase_mod(p0 Unk0781, ctx Tuple(Unk0773, Unk0772)) Mod := …
+
+  # Opaque.erase_struct/2
+  pub def erase_struct(p0 Unk0782, p1 Tuple(Unk0773, Unk0772)) Struct := …
+
+  # Opaque.erase_type/2
+  pub def erase_type(p0 Unk0783, p1 Tuple(Unk0773, Unk0772)) Type := …
+
+  # Opaque.erase_variant/2
+  pub def erase_variant(p0 Unk0784, names Unk0785) Variant := …
+
+  # Opaque.opaques/1
+  pub def opaques(prog Map(Unk0786, Vec(Unk0779))) Vec(Unk0779) := …
+
+  # Opaque.strip/3
+  pub def strip(p0 Vec(Unk0787), p1 Unk0788, env Map(Unk0077, String)) Vec(Unk0787) := …
+
+  # Opaque.strip_into/3
+  pub def strip_into(ast Vec(Unk0787), ctx Unk0788, env Map(Unk0077, String)) Vec(Unk0787) := …
+
+  # Opaque.subst/2
+  pub def subst(p0 Option(Unk0789), _names Unk0790) Option(Unk0789) := …
+
+  # Opaque.subst_fix/4
+  pub def subst_fix(type Option(Unk0789), _names Unk0790, _re Unk0791, p3 Int53) Option(Unk0789) := …
+
+  # PatternLower.add_struct/3
+  pub def add_struct(env Tuple(Unk0357, Map(String, String)), name String, fields Vec(String)) Tuple(Unk0357, Map(String, String)) := …
+
+  # PatternLower.lower/2
+  pub def lower(pat Sum2, env Map(Unk0362, Unk0363)) Tuple(Unk0792, Bool) := …
+
+  # PatternLower.lower_clause/2
+  pub def lower_clause(p0 Unk0793, env Map(Unk0362, Unk0363)) Unk0361 := …
+
+  # PatternLower.lower_list/3
+  pub def lower_list(p0 Vec(Sum2), p1 Sum2, _env Map(Unk0362, Unk0363)) Tuple(Unk0792, Bool) := …
+
+  # PatternLower.lower_many/2
+  pub def lower_many(ps Vec(Sum2), env Map(Unk0362, Unk0363)) Unk0794 := …
+
+  # PortAnalysis.analyze/1
+  pub def analyze(sources Unk0795) Unk0796 := …
+
+  # PortAnalysis.case_arm_sets/1
+  pub def case_arm_sets(ast Unk0797) Vec(Unk0798) := …
+
+  # PortAnalysis.clause_head_sets/1
+  pub def clause_head_sets(ast Unk0797) Vec(Unk0798) := …
+
+  # PortAnalysis.cluster_sums/1
+  pub def cluster_sums(sets Vec(Unk0799)) Unk0506 := …
+
+  # PortAnalysis.collect_errors/2
+  pub def collect_errors(ast Unk0800, acc Unk0801) Unk0801 := …
+
+  # PortAnalysis.collect_groups/1
+  pub def collect_groups(p0 Unk0802) Vec(Unk0504) := …
+
+  # PortAnalysis.collect_structs/2
+  pub def collect_structs(ast Unk0803, acc Unk0804) Unk0804 := …
+
+  # PortAnalysis.dispatch_sets/1
+  pub def dispatch_sets(ast Unk0797) Vec(Unk0799) := …
+
+  # PortAnalysis.error_proposal/1
+  pub def error_proposal(p0 Unk0805) Unk0806 := …
+
+  # PortAnalysis.error_shape/1
+  pub def error_shape(p0 Unk0807) Tuple(Unk0808, Option(Unk0809)) := …
+
+  # PortAnalysis.errors_section/1
+  pub def errors_section(data Unk0810) String := …
+
+  # PortAnalysis.head_name_pats/1
+  pub def head_name_pats(p0 Unk0811) Tuple(Unk0812, Vec(Unk0813)) := …
+
+  # PortAnalysis.holes_section/1
+  pub def holes_section(data Unk0810) String := …
+
+  # PortAnalysis.module_name/1
+  pub def module_name(p0 Unk0814) String := …
+
+  # PortAnalysis.module_report/3
+  pub def module_report(file Unk0815, ast Unk0814, src Unk0816) Unk0817 := …
+
+  # PortAnalysis.needs_review?/1
+  pub def needs_review?(p0 Unk0818) Bool := …
+
+  # PortAnalysis.param_name_index/1
+  pub def param_name_index(mods_groups Vec(Tuple(String, Vec(Unk0504)))) Unk0819 := …
+
+  # PortAnalysis.parse/1
+  pub def parse(src Unk0820) Option(Unk0821) := …
+
+  # PortAnalysis.pascal/1
+  pub def pascal(atom_str Unk0822) Unk0823 := …
+
+  # PortAnalysis.pattern_structs/1
+  pub def pattern_structs(p0 Unk0824) Vec(Unk0825) := …
+
+  # PortAnalysis.reach_note/1
+  pub def reach_note(type Unk0826) Unk0827 := …
+
+  # PortAnalysis.short/1
+  pub def short(p0 Unk0828) String := …
+
+  # PortAnalysis.sigs_section/1
+  pub def sigs_section(data Unk0810) String := …
+
+  # PortAnalysis.src_of/2
+  pub def src_of(sources Unk0795, file Unk0829) Unk0816 := …
+
+  # PortAnalysis.summary_section/1
+  pub def summary_section(data Unk0810) String := …
+
+  # PortAnalysis.sums_section/1
+  pub def sums_section(data Unk0810) String := …
+
+  # PortAnalysis.to_markdown/1
+  pub def to_markdown(data Unk0810) Unk0830 := …
+
+  # Pratt.after_paren/2
+  pub def after_paren(tokens Vec(Unk0831), p1 Int53) Vec(Unk0831) := …
+
+  # Pratt.assoc/1
+  pub def assoc(op Option(Unk0832)) Unk0833 := …
+
+  # Pratt.bp/1
+  pub def bp(op Option(Unk0832)) Tuple(Int53, Int53) := …
+
+  # Pratt.climb/3
+  pub def climb(lhs Option(Unk0834), tokens Vec(Vec(Vec(Unk0599))), min_bp Int53) Tuple(Option(Unk0834), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.collect_dots/2
+  pub def collect_dots(node Tuple(Unk0836, Unk0835), p1 Vec(Vec(Unk0599))) Tuple(Tuple(Unk0836, Unk0835), Vec(Vec(Unk0599))) := …
+
+  # Pratt.desugar_prop/2
+  pub def desugar_prop(stmts Vec(Tuple(Unk0837, Unk0838)), depth Int53) Tuple(Unk0839, Vec(Tuple(Unk0837, Unk0838))) := …
+
+  # Pratt.desugar_propagation/1
+  pub def desugar_propagation(stmts Vec(Tuple(Unk0837, Unk0838))) Tuple(Unk0839, Vec(Tuple(Unk0837, Unk0838))) := …
+
+  # Pratt.expect_kw/2
+  pub def expect_kw(p0 Vec(Vec(Vec(Unk0599))), k String) Vec(Vec(Vec(Unk0599))) := …
+
+  # Pratt.expect_op/2
+  pub def expect_op(p0 Vec(Vec(Vec(Unk0599))), o String) Vec(Vec(Vec(Unk0599))) := …
+
+  # Pratt.expect_rbracket/1
+  pub def expect_rbracket(p0 Vec(Vec(Vec(Unk0599)))) Vec(Vec(Vec(Unk0599))) := …
+
+  # Pratt.expect_rparen/1
+  pub def expect_rparen(p0 Vec(Vec(Vec(Unk0599)))) Vec(Vec(Vec(Unk0599))) := …
+
+  # Pratt.finish_arg/2
+  pub def finish_arg(a Unk0840, p1 Vec(Vec(Vec(Unk0599)))) Tuple(Vec(Unk0840), Vec(Vec(Vec(Vec(Unk0599))))) := …
+
+  # Pratt.here/1
+  pub def here(p0 Vec(Unk0841)) String := …
+
+  # Pratt.int_of/1
+  pub def int_of(n Unk0842) Vec(Tuple(Unk0843, Unk0844)) := …
+
+  # Pratt.lambda_ahead?/1
+  pub def lambda_ahead?(p0 Vec(Unk0831)) Bool := …
+
+  # Pratt.level/1
+  pub def level(op Option(Unk0832)) Unk0845 := …
+
+  # Pratt.opinfo/1
+  pub def opinfo(op String) Unk0846 := …
+
+  # Pratt.parse/1
+  pub def parse(ast Sum1) Sum1 := …
+
+  # Pratt.parse_args/1
+  pub def parse_args(p0 Vec(Vec(Vec(Vec(Unk0599))))) Tuple(Vec(Unk0840), Vec(Vec(Vec(Vec(Unk0599))))) := …
+
+  # Pratt.parse_arms/2
+  pub def parse_arms(p0 Vec(Vec(Vec(Unk0599))), acc Vec(Unk0847)) Tuple(Vec(Unk0847), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_block/1
+  pub def parse_block(tokens Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0839, Vec(Tuple(Unk0837, Unk0838))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_body/1
+  pub def parse_body(ast Sum1) Sum1 := …
+
+  # Pratt.parse_capture/1
+  pub def parse_capture(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_case/1
+  pub def parse_case(tokens Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_expr/2
+  pub def parse_expr(tokens Vec(Vec(Vec(Unk0599))), min_bp Int53) Tuple(Option(Unk0834), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_if/1
+  pub def parse_if(tokens Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_lambda/1
+  pub def parse_lambda(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_list/2
+  pub def parse_list(p0 Vec(Vec(Vec(Unk0599))), acc Vec(Unk0849)) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_map/2
+  pub def parse_map(p0 Vec(Vec(Vec(Unk0599))), acc Vec(Tuple(Unk0843, Unk0844))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_param/1
+  pub def parse_param(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0850, Option(Unk0851)), Vec(Vec(Unk0599))) := …
+
+  # Pratt.parse_params/1
+  pub def parse_params(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Vec(Unk0852), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_pat/1
+  pub def parse_pat(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0853, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_pat_args/2
+  pub def parse_pat_args(p0 Vec(Vec(Vec(Unk0599))), acc Vec(Unk0854)) Tuple(Vec(Unk0854), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_pat_fields/2
+  pub def parse_pat_fields(p0 Vec(Vec(Vec(Vec(Unk0599)))), acc Vec(Tuple(Unk0856, Unk0855))) Tuple(Vec(Tuple(Unk0856, Unk0855)), Vec(Vec(Vec(Vec(Unk0599))))) := …
+
+  # Pratt.parse_pat_list/2
+  pub def parse_pat_list(p0 Vec(Vec(Vec(Unk0599))), acc Vec(Unk0857)) Tuple(Tuple(Unk0853, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_pat_map/2
+  pub def parse_pat_map(p0 Vec(Vec(Vec(Vec(Unk0599)))), acc Vec(Tuple(Unk0843, Unk0844))) Tuple(Tuple(Unk0853, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Vec(Unk0599))))) := …
+
+  # Pratt.parse_pat_tuple/2
+  pub def parse_pat_tuple(p0 Vec(Vec(Vec(Unk0599))), acc Vec(Tuple(Unk0843, Unk0844))) Tuple(Tuple(Unk0853, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_path/1
+  pub def parse_path(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0836, Unk0835), Vec(Vec(Unk0599))) := …
+
+  # Pratt.parse_pats/1
+  pub def parse_pats(str Sum1) Vec(Unk0858) := …
+
+  # Pratt.parse_pats/2
+  pub def parse_pats(tokens Vec(Vec(Vec(Unk0599))), acc Vec(Unk0858)) Vec(Unk0858) := …
+
+  # Pratt.parse_postfix/2
+  pub def parse_postfix(node Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), p1 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_prefix/1
+  pub def parse_prefix(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_primary/1
+  pub def parse_primary(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_sexpr/1
+  pub def parse_sexpr(str Sum1) String := …
+
+  # Pratt.parse_stmt/1
+  pub def parse_stmt(p0 Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0860, Unk0859), Vec(Vec(Unk0599))) := …
+
+  # Pratt.parse_stmts/2
+  pub def parse_stmts(p0 Vec(Vec(Vec(Unk0599))), acc Vec(Unk0861)) Tuple(Vec(Unk0861), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_tuple/2
+  pub def parse_tuple(p0 Vec(Vec(Vec(Unk0599))), acc Vec(Tuple(Unk0843, Unk0844))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_type/1
+  pub def parse_type(p0 Vec(Vec(Vec(Unk0599)))) Tuple(String, Vec(Vec(Unk0599))) := …
+
+  # Pratt.parse_type_args/2
+  pub def parse_type_args(tokens Vec(Vec(Unk0599)), acc Vec(Unk0862)) Tuple(Vec(Unk0862), Vec(Vec(Unk0599))) := …
+
+  # Pratt.parse_with/1
+  pub def parse_with(tokens Vec(Vec(Vec(Unk0599)))) Tuple(Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.parse_with_clauses/2
+  pub def parse_with_clauses(tokens Vec(Vec(Vec(Unk0599))), acc Vec(Tuple(Unk0863, Unk0864))) Tuple(Vec(Tuple(Unk0863, Unk0864)), Vec(Vec(Vec(Unk0599)))) := …
+
+  # Pratt.pascal?/1
+  pub def pascal?(s Unk0865) Bool := …
+
+  # Pratt.peek_infix/1
+  pub def peek_infix(p0 Vec(Vec(Vec(Unk0599)))) Option(Unk0832) := …
+
+  # Pratt.same_level_root?/2
+  pub def same_level_root?(p0 Option(Unk0834), op Option(Unk0832)) Bool := …
+
+  # Pratt.sexpr/1
+  pub def sexpr(p0 Sum1) String := …
+
+  # Pratt.sexpr_pat/1
+  pub def sexpr_pat(p0 Unk0866) String := …
+
+  # Pratt.sexpr_stmt/1
+  pub def sexpr_stmt(p0 Unk0867) String := …
+
+  # Pratt.str_interp/1
+  pub def str_interp(parts Vec(Unk0868)) Tuple(Unk0848, Vec(Tuple(Unk0843, Unk0844))) := …
+
+  # Pratt.tok_desc/1
+  pub def tok_desc(p0 Unk0841) String := …
+
+  # Prim.names/0
+  pub def names() Unk0869 := …
+
+  # Prim.normalize/1
+  pub def normalize(p0 Sum1) Sum1 := …
+
+  # Prim.overflow_ops/0
+  pub def overflow_ops() Unk0870 := …
+
+  # Protocol.check_assoc!/2
+  pub def check_assoc!(protocols Vec(Unk0207), impl_decls Vec(Unk0207)) Unk0871 := …
+
+  # Protocol.check_impl/3
+  pub def check_impl(p0 Unk0872, protocols Unk0873, reg Unk0874) Unk0875 := …
+
+  # Protocol.check_no_overlap/3
+  pub def check_no_overlap(impls Vec(Unk0876), reg Unk0874, targets Unk0877) Unk0878 := …
+
+  # Protocol.dispatcher/4
+  pub def dispatcher(proto Unk0879, sig Unk0880, impls Vec(Unk0876), reg Unk0874) Vec(Unk0881) := …
+
+  # Protocol.dispatcher_params/2
+  pub def dispatcher_params(sig_params Unk0882, vars Vec(String)) Unk0883 := …
+
+  # Protocol.expand/5
+  pub def expand(protocols Unk0873, impls Vec(Unk0876), p2 Unk0307, p3 Unk0308, p4 Unk0309) Vec(Unk0310) := …
+
+  # Protocol.guard_for!/3
+  pub def guard_for!(type String, proto Unk0879, reg Unk0874) Unk0884 := …
+
+  # Protocol.impl_methods/2
+  pub def impl_methods(p0 Unk0876, protocols Unk0873) Vec(Unk0310) := …
+
+  # Protocol.mangle/3
+  pub def mangle(proto Unk0885, type Unk0886, method Unk0887) String := …
+
+  # Protocol.param_type/1
+  pub def param_type(p Unk0888) Unk0889 := …
+
+  # Protocol.registry/2
+  pub def registry(types Unk0890, structs Vec(Unk0891)) Unk0874 := …
+
+  # Protocol.runtime_dispatch_target?/1
+  pub def runtime_dispatch_target?(p0 Unk0877) Bool := …
+
+  # Protocol.split_commas/1
+  pub def split_commas(s String) Vec(Unk0067) := …
+
+  # Protocol.subst_self/2
+  pub def subst_self(p0 Unk0892, _type Unk0893) Option(Unk0894) := …
+
+  # Protocol.sum_guard/1
+  pub def sum_guard(variants Unk0895) String := …
+
+  # Protocol.tag_disjunction/2
+  pub def tag_disjunction(variants Vec(Unk0896), lhs Unk0897) String := …
+
+  # Range.check/3
+  pub def check(lo Unk0898, hi Unk0899, a Sum1) Sum1 := …
+
+  # Range.expand_of/2
+  pub def expand_of(node Sum1, table Map(Unk0017, Unk0016)) Sum1 := …
+
+  # Range.lit/1
+  pub def lit(n Unk0900) Sum1 := …
+
+  # Range.table/1
+  pub def table(ranges Vec(Type)) Map(Unk0017, Unk0016) := …
+
+  # Range.walk/2
+  pub def walk(node Sum1, table Map(Unk0017, Unk0016)) Sum1 := …
+
+  # Reach.all_emittable?/2
+  pub def all_emittable?(f Map(Unk0901, Vec(Unk0902)), pctx Unk0903) Bool := …
+
+  # Reach.all_funcs/1
+  pub def all_funcs(prog Map(Unk0020, Vec(Map(Unk0905, Vec(Unk0904))))) Vec(Map(Unk0905, Vec(Unk0904))) := …
+
+  # Reach.analyze/1
+  pub def analyze(prog Map(Unk0020, Vec(Map(Unk0905, Vec(Unk0904))))) Unk0906 := …
+
+  # Reach.atom_prim_blocker/0
+  pub def atom_prim_blocker() Unk0907 := …
+
+  # Reach.bare_atom_blocker/0
+  pub def bare_atom_blocker() Unk0907 := …
+
+  # Reach.build_default/0
+  pub def build_default() Option(Unk0908) := …
+
+  # Reach.builder_tail_ok?/2
+  pub def builder_tail_ok?(f Map(Unk0901, Vec(Unk0902)), generics Unk0909) Bool := …
+
+  # Reach.check_contracts/2
+  pub def check_contracts(prog Map(Unk0020, Vec(Map(Unk0905, Vec(Unk0904)))), p1 Option(Unk0908)) Tuple(Unk0910, String) := …
+
+  # Reach.classify/3
+  pub def classify(p0 Sum1, _modnames Unk0911, p2 Tuple(Vec(Unk0907), Unk0912)) Tuple(Vec(Unk0907), Unk0912) := …
+
+  # Reach.collect_ctors/2
+  pub def collect_ctors(p0 Sum1, ctors Map(Unk0913, Unk0914)) Vec(Tuple(Unk0915, Unk0916)) := …
+
+  # Reach.conc_erl?/2
+  pub def conc_erl?(m String, fun Unk0917) Bool := …
+
+  # Reach.contract_message/1
+  pub def contract_message(violations Vec(Unk0918)) String := …
+
+  # Reach.core/2
+  pub def core(src Unk0919, parser Fn(Unk0921, Unk0920)) Sum1 := …
+
+  # Reach.ctor_aligned?/2
+  pub def ctor_aligned?(p0 Tuple(Unk0915, Unk0916), f Map(Unk0901, Vec(Unk0902))) Bool := …
+
+  # Reach.deep/1
+  pub def deep(t Vec(Unk0922)) Vec(Unk0923) := …
+
+  # Reach.emittable_parametric?/1
+  pub def emittable_parametric?(t Unk0924) Unk0925 := …
+
+  # Reach.ffi/2
+  pub def ffi(construct String, conc? Bool) Unk0907 := …
+
+  # Reach.find_atom_ordering/1
+  pub def find_atom_ordering(p0 Vec(Unk0922)) Vec(Unk0923) := …
+
+  # Reach.fixpoint/2
+  pub def fixpoint(facts Unk0926, table Map(Unk0927, Unk0928)) Map(Unk0927, Unk0928) := …
+
+  # Reach.fn_type_blocker/0
+  pub def fn_type_blocker() Unk0907 := …
+
+  # Reach.func_symbol_violations/1
+  pub def func_symbol_violations(f Unk0929) Vec(Unk0923) := …
+
+  # Reach.gate!/1
+  pub def gate!(prog Map(Unk0020, Vec(Type))) Unk0930 := …
+
+  # Reach.gate!/2
+  pub def gate!(prog Map(Unk0020, Vec(Type)), default Option(Unk0908)) Unk0930 := …
+
+  # Reach.int_blocker/0
+  pub def int_blocker() Unk0907 := …
+
+  # Reach.js_wide_int?/1
+  pub def js_wide_int?(t Unk0931) Bool := …
+
+  # Reach.mix_default/0
+  pub def mix_default() Unk0932 := …
+
+  # Reach.parametric_blocker/0
+  pub def parametric_blocker() Unk0907 := …
+
+  # Reach.parametric_constructions/2
+  pub def parametric_constructions(f Map(Unk0901, Vec(Unk0902)), ctors Map(Unk0913, Unk0914)) Vec(Tuple(Unk0915, Unk0916)) := …
+
+  # Reach.parametric_ctx/2
+  pub def parametric_ctx(prog Map(Unk0020, Vec(Map(Unk0905, Vec(Unk0904)))), funs Vec(Map(Unk0905, Vec(Unk0904)))) Unk0903 := …
+
+  # Reach.parametric_rs_ok?/2
+  pub def parametric_rs_ok?(f Map(Unk0901, Vec(Unk0902)), pctx Unk0903) Bool := …
+
+  # Reach.parametric_type?/1
+  pub def parametric_type?(t Unk0933) Bool := …
+
+  # Reach.pascal?/1
+  pub def pascal?(s Unk0934) Bool := …
+
+  # Reach.ref_blocker/0
+  pub def ref_blocker() Unk0907 := …
+
+  # Reach.result_value_blocker/0
+  pub def result_value_blocker() Unk0907 := …
+
+  # Reach.scan/3
+  pub def scan(p0 Sum1, modnames Unk0911, p2 Tuple(Vec(Unk0907), Unk0912)) Tuple(Vec(Unk0907), Unk0912) := …
+
+  # Reach.scan_func/3
+  pub def scan_func(f Map(Unk0901, Vec(Unk0902)), modnames Unk0911, pctx Unk0903) Tuple(Vec(Unk0907), Unk0912) := …
+
+  # Reach.sig_idents/1
+  pub def sig_idents(f Map(Unk0935, Vec(Unk0936))) Unk0937 := …
+
+  # Reach.sig_uses_fn_type?/1
+  pub def sig_uses_fn_type?(f Map(Unk0901, Vec(Unk0902))) Bool := …
+
+  # Reach.symbol_lint!/1
+  pub def symbol_lint!(prog Map(Unk0020, Vec(Map(Unk0905, Vec(Unk0904))))) Unk0938 := …
+
+  # Reach.tail_calls_generic?/2
+  pub def tail_calls_generic?(p0 Unk0939, generics Unk0909) Bool := …
+
+  # Reach.targets/0
+  pub def targets() Unk0940 := …
+
+  # Reach.tvar?/1
+  pub def tvar?(t Unk0941) Unk0942 := …
+
+  # Reach.type_has_tvar?/1
+  pub def type_has_tvar?(t Unk0943) Bool := …
+
+  # Reach.type_idents/1
+  pub def type_idents(t Unk0943) Vec(Unk0944) := …
+
+  # Reach.uses_parametric?/2
+  pub def uses_parametric?(f Map(Unk0901, Vec(Unk0902)), names Unk0945) Bool := …
+
+  # Reach.validate_default/1
+  pub def validate_default(p0 Option(Unk0908)) Option(Unk0908) := …
+
+  # Reach.wide_prim_blocker/0
+  pub def wide_prim_blocker() Unk0907 := …
+
+  # Reach.width_blocker/0
+  pub def width_blocker() Unk0907 := …
+
+  # Repl.accumulate_line/2
+  pub def accumulate_line(line String, p1 Unk0946) Tuple(Vec(String), String) := …
+
+  # Repl.balanced?/1
+  pub def balanced?(input Sum1) Bool := …
+
+  # Repl.bind_env/2
+  pub def bind_env(binds Vec(Unk0947), ic Map(Unk0072, Map(String, String))) Map(Unk0077, String) := …
+
+  # Repl.bind_with_type/4
+  pub def bind_with_type(s Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948))), input Sum1, name Sum1, type Option(Unk0950)) Tuple(Tuple(Unk0951, String), Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948)))) := …
+
+  # Repl.candidate_pool/2
+  pub def candidate_pool(p0 Unk0952, _s Session) Vec(Unk0953) := …
+
+  # Repl.common_prefix/2
+  pub def common_prefix(a Unk0954, b Unk0955) String := …
+
+  # Repl.common_prefix/3
+  pub def common_prefix(p0 Unk0954, p1 Unk0955, acc String) String := …
+
+  # Repl.complete/2
+  pub def complete(before_cursor Unk0956, p1 Unk0957) Tuple(Vec(Unk0958), String) := …
+
+  # Repl.continuation/2
+  pub def continuation(_word String, p1 Vec(Unk0958)) String := …
+
+  # Repl.decl_names/1
+  pub def decl_names(input Sum1) Sum1 := …
+
+  # Repl.declaration?/1
+  pub def declaration?(input Sum1) Bool := …
+
+  # Repl.describe/1
+  pub def describe(p0 Unk0959) Unk0960 := …
+
+  # Repl.eval/2
+  pub def eval(p0 Unk0961, input Sum1) Unk0962 := …
+
+  # Repl.eval_bind/4
+  pub def eval_bind(s Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948))), input Sum1, name Sum1, rhs Sum1) Tuple(Tuple(Unk0951, String), Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948)))) := …
+
+  # Repl.eval_decl/2
+  pub def eval_decl(s Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948))), input Sum1) Tuple(Tuple(Unk0964, Sum1), Unk0963) := …
+
+  # Repl.eval_expr/2
+  pub def eval_expr(s Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948))), input Sum1) Tuple(Tuple(Unk0951, String), Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948)))) := …
+
+  # Repl.eval_stmt/2
+  pub def eval_stmt(s Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948))), input Sum1) Tuple(Tuple(Unk0951, String), Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948)))) := …
+
+  # Repl.flush_entries/1
+  pub def flush_entries(p0 Unk0965) Vec(Unk0966) := …
+
+  # Repl.infer_or_unknown/3
+  pub def infer_or_unknown(ast Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Option(Unk0950) := …
+
+  # Repl.info/1
+  pub def info(p0 Session) Unk0967 := …
+
+  # Repl.longest_common_prefix/1
+  pub def longest_common_prefix(p0 Vec(Unk0968)) Unk0968 := …
+
+  # Repl.module_name/1
+  pub def module_name(p0 Session) Unk0008 := …
+
+  # Repl.program/3
+  pub def program(units Vec(Tuple(Sum1, Unk0948)), binds Vec(Tuple(Sum1, Unk0948)), expr_src Sum1) String := …
+
+  # Repl.reload/2
+  pub def reload(s Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948))), src String) Unk0008 := …
+
+  # Repl.render/1
+  pub def render(p0 Unk0969) String := …
+
+  # Repl.run/4
+  pub def run(s Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948))), binds Vec(Tuple(Sum1, Unk0948)), units Vec(Tuple(Sum1, Unk0948)), expr_src Sum1) Tuple(Unk0970, Unk0971) := …
+
+  # Repl.safe_decl/1
+  pub def safe_decl(units Vec(Tuple(Sum1, Unk0948))) Map(Unk0020, Vec(Type)) := …
+
+  # Repl.safe_infer/3
+  pub def safe_infer(ast Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Option(Unk0950) := …
+
+  # Repl.safe_infer_input/3
+  pub def safe_infer_input(input Sum1, env Map(Unk0077, String), ic Map(Unk0072, Map(String, String))) Option(Unk0950) := …
+
+  # Repl.safe_parse_body/1
+  pub def safe_parse_body(input Sum1) Tuple(Unk0972, Sum1) := …
+
+  # Repl.scan_count/2
+  pub def scan_count(input Sum1, regex Unk0973) Unk0974 := …
+
+  # Repl.session_ic/1
+  pub def session_ic(p0 Tuple(Unk0949, Vec(Tuple(Sum1, Unk0948)))) Map(Unk0072, Map(String, String)) := …
+
+  # Repl.split_entries/1
+  pub def split_entries(source Unk0975) Unk0976 := …
+
+  # Repl.trailing_token/1
+  pub def trailing_token(text Unk0956) String := …
+
+  # Repl.type_of/2
+  pub def type_of(p0 Unk0977, input Sum1) Option(Unk0950) := …
+
+  # Repl.units_src/1
+  pub def units_src(units Vec(Tuple(Sum1, Unk0948))) String := …
+
+  # Repl.vocabulary/0
+  pub def vocabulary() Vec(Unk0978) := …
+
+  # SelfHost.badge/1
+  pub def badge(p0 Unk0979) String := …
+
+  # SelfHost.composition/0
+  pub def composition() Unk0980 := …
+
+  # SelfHost.count/1
+  pub def count(status Unk0981) Int53 := …
+
+  # SelfHost.evidence/1
+  pub def evidence(p0 Unk0982) String := …
+
+  # SelfHost.evidence_files/0
+  pub def evidence_files() Unk0983 := …
+
+  # SelfHost.external_host_calls/1
+  pub def external_host_calls(prog Map(Unk0984, Vec(Map(Unk0985, Vec(Unk0986))))) Vec(Unk0987) := …
+
+  # SelfHost.ffi_in_file/1
+  pub def ffi_in_file(path Unk0988) Unk0989 := …
+
+  # SelfHost.ffi_ledger/0
+  pub def ffi_ledger() Unk0990 := …
+
+  # SelfHost.passes/0
+  pub def passes() Unk0991 := …
+
+  # SelfHost.percent/0
+  pub def percent() Unk0992 := …
+
+  # SelfHost.selfhost_files/0
+  pub def selfhost_files() Unk0993 := …
+
+  # SelfHost.selfhost_module_names/0
+  pub def selfhost_module_names() Unk0994 := …
+
+  # SelfHost.sibling_compose_call?/2
+  pub def sibling_compose_call?(construct Unk0995, siblings Unk0996) Bool := …
+
+  # SelfHost.stages/0
+  pub def stages() Unk0997 := …
+
+  # SelfHost.status_markdown/1
+  pub def status_markdown(stages Vec(Unk0998)) String := …
+
+  # Shadow.ded_bind/5
+  pub def ded_bind(n Unk0999, t Bool, e Vec(Unk1000), p3 Unk1001, fresh Fn(Unk1002, Unk1003, Unk1004)) Unk1005 := …
+
+  # Shadow.ded_block/4
+  pub def ded_block(stmts Vec(Unk1006), r Map(Unk1008, Unk1007), ver Unk1009, fresh Fn(Unk1002, Unk1003, Unk1004)) Vec(Unk0517) := …
+
+  # Shadow.ded_expr/3
+  pub def ded_expr(p0 Vec(Unk1000), r Map(Unk1008, Unk1007), _fresh Fn(Unk1002, Unk1003, Unk1004)) Vec(Unk1000) := …
+
+  # Shadow.dedup/3
+  pub def dedup(stmts Vec(Unk1006), params Vec(Unk0520), fresh Fn(Unk1002, Unk1003, Unk1004)) Vec(Unk0517) := …
+
+  # Shadow.pat_var_names/1
+  pub def pat_var_names(p0 Sum2) Vec(Unk1010) := …
+
+  # Test.compile!/2
+  pub def compile!(src String, mod Unk0008) Unk0008 := …
+
+  # Test.default_mod/1
+  pub def default_mod(src String) Unk1011 := …
+
+  # Test.run/2
+  pub def run(src String, p1 Unk1012) Unk1013 := …
+
+  # Test.run_one/2
+  pub def run_one(mod Unk0008, name Unk1014) Bool := …
+
+  # Test.rust/1
+  pub def rust(src String) Unk1015 := …
+
+  # Test.tests/1
+  pub def tests(src String) Vec(Unk1016) := …
+
+  # Tour.build_cell/1
+  pub def build_cell(p0 Unk1017) Unk1018 := …
+
+  # Tour.build_reach_example/1
+  pub def build_reach_example(p0 Unk1019) Unk1020 := …
+
+  # Tour.elixir_module/1
+  pub def elixir_module(src String) Unk1021 := …
+
+  # Tour.encode/2
+  pub def encode(map Vec(Unk1022), indent Int53) String := …
+
+  # Tour.encode_string/1
+  pub def encode_string(s Vec(Unk1022)) String := …
+
+  # Tour.generate/0
+  pub def generate() Unk1023 := …
+
+  # Tour.reach_map/1
+  pub def reach_map(prog Map(Unk0020, Vec(Type))) Unk1024 := …
+
+  # Tour.to_json/0
+  pub def to_json() Unk1025 := …
+
+  # Transpile.add_clause/2
+  pub def add_clause(open Tuple(Unk1027, Vec(Unk1026)), clause Unk1026) Option(Unk1028) := …
+
+  # Transpile.block_stmts/1
+  pub def block_stmts(p0 Unk1029) Vec(Unk1029) := …
+
+  # Transpile.build_clause/2
+  pub def build_clause(head Unk1030, kw Unk1031) Unk1026 := …
+
+  # Transpile.case_arm/1
+  pub def case_arm(p0 Unk1032) String := …
+
+  # Transpile.classify/1
+  pub def classify(p0 String) Tuple(Unk1033, String) := …
+
+  # Transpile.close_group/2
+  pub def close_group(acc Vec(Unk1034), p1 Unk1034) Vec(Unk1034) := …
+
+  # Transpile.def_groups/1
+  pub def def_groups(stmts Vec(String)) Vec(Unk1034) := …
+
+  # Transpile.escape/1
+  pub def escape(s Unk1035) Unk1036 := …
+
+  # Transpile.escape_lit/1
+  pub def escape_lit(s Unk1037) String := …
+
+  # Transpile.flush/2
+  pub def flush(p0 Unk1038, _sigmap Map(Tuple(Unk1039, Unk1040), Bool)) Vec(String) := …
+
+  # Transpile.hole_sig?/1
+  pub def hole_sig?(p0 Unk1041) Bool := …
+
+  # Transpile.infer_program/1
+  pub def infer_program(ast Unk1042) Tuple(Unk1043, Vec(String)) := …
+
+  # Transpile.infer_report/1
+  pub def infer_report(source Unk1044) Unk1045 := …
+
+  # Transpile.infer_sigs/1
+  pub def infer_sigs(p0 Unk1042) Unk1043 := …
+
+  # Transpile.inferred/1
+  pub def inferred(source Unk0816) Tuple(Unk1043, Vec(String)) := …
+
+  # Transpile.max_placeholder/1
+  pub def max_placeholder(p0 Vec(Unk1046)) Int53 := …
+
+  # Transpile.mod_str/1
+  pub def mod_str(p0 Unk1047) String := …
+
+  # Transpile.module_groups/1
+  pub def module_groups(src Unk1048) Tuple(String, Unk1049) := …
+
+  # Transpile.moduledoc_lines/1
+  pub def moduledoc_lines(text Unk1050) Vec(String) := …
+
+  # Transpile.name_str/1
+  pub def name_str(n Unk1051) Unk1052 := …
+
+  # Transpile.new_group/3
+  pub def new_group(vis Unk1053, clause Unk1026, doc Option(Unk1054)) Option(Unk1028) := …
+
+  # Transpile.one_line/1
+  pub def one_line(s Unk1055) Unk1056 := …
+
+  # Transpile.prime_xmod/1
+  pub def prime_xmod(sources Unk1057) Unk1058 := …
+
+  # Transpile.rank/1
+  pub def rank(entries Unk1059) Unk1060 := …
+
+  # Transpile.render_body/1
+  pub def render_body(p0 Bool) Option(Unk1061) := …
+
+  # Transpile.render_clause/2
+  pub def render_clause(kw String, c Unk1062) String := …
+
+  # Transpile.render_items/2
+  pub def render_items(stmts Vec(String), sigmap Map(Tuple(Unk1039, Unk1040), Bool)) Vec(String) := …
+
+  # Transpile.same_group?/3
+  pub def same_group?(open Unk1063, vis Unk1064, clause Unk1026) Bool := …
+
+  # Transpile.short_name/1
+  pub def short_name(p0 Unk1047) String := …
+
+  # Transpile.sibling_module?/2
+  pub def sibling_module?(p0 Unk1065, m String) Bool := …
+
+  # Transpile.simple?/1
+  pub def simple?(p0 Vec(Unk1066)) Bool := …
+
+  # Transpile.snippet/1
+  pub def snippet(node Unk1047) String := …
+
+  # Transpile.stdlib_map/0
+  pub def stdlib_map() Unk0505 := …
+
+  # Transpile.string_part/1
+  pub def string_part(s Unk1037) Tuple(Unk1067, String) := …
+
+  # Transpile.string_parts/1
+  pub def string_parts(segments Unk1068) Unk1069 := …
+
+  # Transpile.subst_ph/2
+  pub def subst_ph(p0 Vec(Unk1070), ps Unk1071) Vec(Unk1070) := …
+
+  # Transpile.toplevel/3
+  pub def toplevel(p0 Unk1072, sigmap Unk1073, types Vec(String)) Vec(String) := …
+
+  # Transpile.transpile/2
+  pub def transpile(source Unk1074, p1 Unk1075) Unk1076 := …
+
+  # Transpile.transpile_with_stats/2
+  pub def transpile_with_stats(source Unk1074, p1 Unk1077) Tuple(Unk1076, Unk1078) := …
+
+  # Transpile.underscore_var/1
+  pub def underscore_var(name Unk1079) String := …
+
+  # Transpile.var?/1
+  pub def var?(p0 Unk1080) Bool := …
+
+  # Transpile.var_name/1
+  pub def var_name(p0 Unk1047) String := …
+
+  # TypeStr.split_top_commas/1
+  pub def split_top_commas(p0 String) Vec(Unk0067) := …
+```
+
+### Placeholder index (replace once → applies to all sites)
+
+| placeholder | sites | references |
+|---|---|---|
+| `Unk0001` | 1 | `Application.maybe_register_smart_cell/0:ret` |
+| `Unk0002` | 1 | `Application.start/2:p0` |
+| `Unk0003` | 1 | `Application.start/2:p1` |
+| `Unk0004` | 1 | `Application.start/2:ret` |
+| `Unk0005` | 5 | `Beam.any_t/0:ret`, `Beam.struct_form/2:ret`, `Beam.type_form/2:ret`, `Beam.union_t/1:p0`, `Beam.union_t/1:ret` |
+| `Unk0006` | 3 | `Beam.arity/1:p0`, `Beam.function_form/2:p0`, `Beam.spec_form/2:p0` |
+| `Unk0007` | 1 | `Beam.arity/1:ret` |
+| `Unk0008` | 14 | `Beam.beam_for/5:p0`, `Beam.compile/2:p1`, `Beam.compile_ir/2:p1`, `Beam.load/2:p1`, `Beam.load/2:ret`, `Beam.load_ir/2:p1`, `Beam.load_ir/2:ret`, `Fixpoint.load_lexer/2:p1`, `Fixpoint.load_lexer/2:ret`, `Repl.module_name/1:ret`, `Repl.reload/2:ret`, `Test.compile!/2:p1`, `Test.compile!/2:ret`, `Test.run_one/2:p0` |
+| `Unk0009` | 2 | `Beam.beam_for/5:p1`, `Beam.funcs_of/1:ret` |
+| `Unk0010` | 3 | `Beam.beam_for/5:ret`, `Beam.compile/2:ret`, `Beam.compile_ir/2:ret` |
+| `Unk0011` | 2 | `Beam.beam_func/1:p0`, `Beam.beam_func/1:ret` |
+| `Unk0012` | 21 | `Beam.bin_seg/1:p0`, `Beam.block_forms/2:ret`, `Beam.body_forms/3:ret`, `Beam.body_seq/2:ret`, `Beam.cons/3:p1`, `Beam.cons/3:p2`, `Beam.cons/3:ret`, `Beam.core_list_tail/1:p0`, `Beam.core_list_tail/1:ret`, `Beam.else_dispatch/3:ret`, `Beam.expr_form/2:ret`, `Beam.fun_ref/3:ret`, `Beam.guard_form/2:ret`, `Beam.i64_overflow/4:ret`, `Beam.num_form/1:ret`, `Beam.pat_form/1:ret`, `Beam.remote_call/4:ret`, `Beam.stmt_form/2:ret`, `Beam.str_form/1:ret`, `Beam.var_form/1:ret`, `Beam.with_form/5:ret` |
+| `Unk0013` | 21 | `Beam.bin_seg/1:p0`, `Beam.block_forms/2:ret`, `Beam.body_forms/3:ret`, `Beam.body_seq/2:ret`, `Beam.cons/3:p1`, `Beam.cons/3:p2`, `Beam.cons/3:ret`, `Beam.core_list_tail/1:p0`, `Beam.core_list_tail/1:ret`, `Beam.else_dispatch/3:ret`, `Beam.expr_form/2:ret`, `Beam.fun_ref/3:ret`, `Beam.guard_form/2:ret`, `Beam.i64_overflow/4:ret`, `Beam.num_form/1:ret`, `Beam.pat_form/1:ret`, `Beam.remote_call/4:ret`, `Beam.stmt_form/2:ret`, `Beam.str_form/1:ret`, `Beam.var_form/1:ret`, `Beam.with_form/5:ret` |
+| `Unk0014` | 1 | `Beam.bin_seg/1:ret` |
+| `Unk0015` | 18 | `Beam.bind_var/2:p1`, `Beam.bind_var/2:ret`, `Beam.block_forms/2:p1`, `Beam.body_forms/3:p1`, `Beam.body_seq/2:p1`, `Beam.bump_var/1:p0`, `Beam.bump_var/1:ret`, `Beam.else_dispatch/3:p2`, `Beam.expr_form/2:p1`, `Beam.guard_form/2:p1`, `Beam.i64_overflow/4:p3`, `Beam.pat_vars/2:p1`, `Beam.pat_vars/2:ret`, `Beam.remote_call/4:p3`, `Beam.stmt_form/2:p1`, `Beam.stmt_form/2:ret`, `Beam.var_atom/1:ret`, `Beam.with_form/5:p3` |
+| `Unk0016` | 6 | `Beam.body_forms/3:p2`, `Beam.clause_form/2:p1`, `Beam.function_form/2:p1`, `Range.expand_of/2:p1`, `Range.table/1:ret`, `Range.walk/2:p1` |
+| `Unk0017` | 6 | `Beam.body_forms/3:p2`, `Beam.clause_form/2:p1`, `Beam.function_form/2:p1`, `Range.expand_of/2:p1`, `Range.table/1:ret`, `Range.walk/2:p1` |
+| `Unk0018` | 1 | `Beam.clause_form/2:p0` |
+| `Unk0019` | 1 | `Beam.clause_form/2:ret` |
+| `Unk0020` | 21 | `Beam.compile_ir/2:p0`, `Beam.compile_program_ir/1:p0`, `Beam.load_ir/2:p0`, `Check.check_program/1:p0`, `Check.gate!/1:p0`, `Check.program_ic/1:p0`, `Decl.parse/1:ret`, `Decl.proto_method_traits/1:p0`, `Decl.protocol_unit/3:p0`, `Doctest.module_doc_strings/1:p0`, `Lower.rust_program/1:p0`, `Opaque.erase/1:p0`, `Reach.all_funcs/1:p0`, `Reach.analyze/1:p0`, `Reach.check_contracts/2:p0`, `Reach.gate!/1:p0`, `Reach.gate!/2:p0`, `Reach.parametric_ctx/2:p0`, `Reach.symbol_lint!/1:p0`, `Repl.safe_decl/1:ret`, `Tour.reach_map/1:p0` |
+| `Unk0021` | 1 | `Beam.compile_program/1:ret` |
+| `Unk0022` | 1 | `Beam.compile_program_ir/1:ret` |
+| `Unk0023` | 1 | `Beam.cons/3:p0` |
+| `Unk0024` | 2 | `Beam.else_dispatch/3:p0`, `Beam.with_form/5:p2` |
+| `Unk0025` | 1 | `Beam.erl_op/1:ret` |
+| `Unk0026` | 7 | `Beam.fn_form/2:p1`, `Beam.spec_form/2:p1`, `Beam.struct_form/2:p1`, `Beam.sum_form/2:p1`, `Beam.type_attrs/3:p2`, `Beam.type_ctx/3:ret`, `Beam.type_form/2:p1` |
+| `Unk0027` | 1 | `Beam.fn_form/2:ret` |
+| `Unk0028` | 1 | `Beam.fun_ref/3:p0` |
+| `Unk0029` | 1 | `Beam.fun_ref/3:p1` |
+| `Unk0030` | 1 | `Beam.fun_ref/3:p2` |
+| `Unk0031` | 13 | `Beam.funcs_of/1:p0`, `Beam.load_aux_mods/1:p0`, `Beam.ranges_of/1:p0`, `Beam.structs_of/1:p0`, `Beam.types_of/1:p0`, `JS.program_number_mode?/1:p0`, `JS.protocol_dispatchers_js/1:p0`, `JS.reject_mixed_int_mode!/1:p0`, `JS.struct_name_set/1:p0`, `JS.sum_ctor_map/1:p0`, `JVM.all_types/1:p0`, `Opaque.do_erase/2:ret`, `Opaque.erase/1:ret` |
+| `Unk0032` | 3 | `Beam.function_form/2:ret`, `Beam.spec_form/2:ret`, `Beam.type_attrs/3:ret` |
+| `Unk0033` | 2 | `Beam.i64_overflow/4:p0`, `Beam.i64_project/2:p0` |
+| `Unk0034` | 1 | `Beam.i64_project/2:p1` |
+| `Unk0035` | 1 | `Beam.i64_project/2:ret` |
+| `Unk0036` | 1 | `Beam.int_t/0:ret` |
+| `Unk0037` | 1 | `Beam.load/2:ret` |
+| `Unk0038` | 1 | `Beam.load_aux_mods/1:ret` |
+| `Unk0039` | 1 | `Beam.load_ir/2:ret` |
+| `Unk0040` | 1 | `Beam.load_program/1:p0` |
+| `Unk0041` | 1 | `Beam.load_program/1:ret` |
+| `Unk0042` | 1 | `Beam.load_program_ir/1:p0` |
+| `Unk0043` | 1 | `Beam.load_program_ir/1:ret` |
+| `Unk0044` | 1 | `Beam.map_field_pat/1:p0` |
+| `Unk0045` | 1 | `Beam.map_field_pat/1:ret` |
+| `Unk0046` | 1 | `Beam.num_form/1:p0` |
+| `Unk0047` | 1 | `Beam.pascal?/1:p0` |
+| `Unk0048` | 1 | `Beam.remote_call/4:p0` |
+| `Unk0049` | 1 | `Beam.stmt_form/2:p0` |
+| `Unk0050` | 1 | `Beam.str_form/1:p0` |
+| `Unk0051` | 1 | `Beam.sum_form/2:p0` |
+| `Unk0052` | 1 | `Beam.sum_form/2:ret` |
+| `Unk0053` | 1 | `Beam.with_form/5:p0` |
+| `Unk0054` | 1 | `Capability.beam_legal!/1:p0` |
+| `Unk0055` | 1 | `Capability.beam_legal!/1:ret` |
+| `Unk0056` | 1 | `Capability.count_block/3:p0` |
+| `Unk0057` | 2 | `Capability.count_block/3:p1`, `Capability.count_uses/2:p1` |
+| `Unk0058` | 11 | `Capability.count_block/3:p2`, `Capability.count_block/3:ret`, `Capability.count_uses/1:ret`, `Capability.count_uses/2:ret`, `Capability.max_merge/2:p0`, `Capability.max_merge/2:p1`, `Capability.max_merge/2:ret`, `Capability.merge/2:p0`, `Capability.merge/2:p1`, `Capability.merge/2:ret`, `Capability.verdict/2:p1` |
+| `Unk0059` | 4 | `Capability.count_uses/1:p0`, `Capability.count_uses/2:p0`, `Capability.lin_check/2:p1`, `Capability.lin_check_block/3:p2` |
+| `Unk0060` | 2 | `Capability.lin_check/2:p0`, `Capability.verdict/2:p0` |
+| `Unk0061` | 2 | `Capability.lin_check/2:p0`, `Capability.verdict/2:p0` |
+| `Unk0062` | 3 | `Capability.lin_check/2:ret`, `Capability.lin_check_block/3:ret`, `Capability.verdict/2:ret` |
+| `Unk0063` | 3 | `Capability.lin_check/2:ret`, `Capability.lin_check_block/3:ret`, `Capability.verdict/2:ret` |
+| `Unk0064` | 1 | `Capability.lin_check_block/3:p0` |
+| `Unk0065` | 1 | `Capability.lin_check_block/3:p0` |
+| `Unk0066` | 1 | `Capability.lin_check_block/3:p1` |
+| `Unk0067` | 10 | `Capability.parametric/1:ret`, `Capability.split_top_level/1:ret`, `Check.parse_parametric/1:ret`, `Check.split_top_commas/1:ret`, `JS.split_top_commas/1:ret`, `Lower.name_type/1:p0`, `Lower.pcommas/1:ret`, `Lower.sig_param/2:p0`, `Protocol.split_commas/1:ret`, `TypeStr.split_top_commas/1:ret` |
+| `Unk0068` | 1 | `Capability.pat_vars/1:p0` |
+| `Unk0069` | 1 | `Capability.pat_vars/1:ret` |
+| `Unk0070` | 1 | `Capability.rust_param/2:p0` |
+| `Unk0071` | 1 | `Check.abstract_cast_ret/3:p1` |
+| `Unk0072` | 38 | `Check.abstract_cast_ret/3:p2`, `Check.abstract_op_type/4:p3`, `Check.ann_each/3:p2`, `Check.ann_stmts/3:p2`, `Check.annotate/3:p2`, `Check.bind_mismatch/5:p4`, `Check.call_bound_error/5:p3`, `Check.called_ret/2:p0`, `Check.called_ret_with/4:p0`, `Check.check_bind_stmts/3:p2`, `Check.check_binds/2:p1`, `Check.check_bounds/2:p1`, `Check.check_func/3:p1`, `Check.check_numeric_mix/2:p1`, `Check.check_return/2:p1`, `Check.clause_env/3:p2`, `Check.ctor_type/2:p0`, `Check.first_bound_violation/4:p3`, `Check.infer/3:p2`, `Check.infer_block/4:p2`, `Check.infer_tail/3:p2`, `Check.narrow/4:p2`, `Check.num_mix_error/5:p4`, `Check.program_ic/1:ret`, `Check.range_base/2:p0`, `Check.range_bind/6:p5`, `Check.resolve_range/2:p1`, `Check.scan_bound_calls/4:p2`, `Check.scan_num_mix/3:p2`, `Check.scan_num_mix_children/3:p2`, `Check.walk_children/4:p2`, `Interp.resolve/4:p2`, `Interp.resolve_part/4:p2`, `Repl.bind_env/2:p1`, `Repl.infer_or_unknown/3:p2`, `Repl.safe_infer/3:p2`, `Repl.safe_infer_input/3:p2`, `Repl.session_ic/1:ret` |
+| `Unk0073` | 2 | `Check.abstract_cast_ret/3:ret`, `Check.fn_ret/1:ret` |
+| `Unk0074` | 1 | `Check.abstract_op_type/4:p0` |
+| `Unk0075` | 1 | `Check.abstract_op_type/4:ret` |
+| `Unk0076` | 1 | `Check.all_types/1:p0` |
+| `Unk0077` | 28 | `Check.ann_each/3:p1`, `Check.ann_stmts/3:p1`, `Check.annotate/3:p1`, `Check.bind_mismatch/5:p3`, `Check.call_bound_error/5:p2`, `Check.called_ret_with/4:p3`, `Check.check_bind_stmts/3:p1`, `Check.clause_env/3:ret`, `Check.infer/3:p1`, `Check.infer_block/4:p1`, `Check.infer_tail/3:p1`, `Check.narrow/4:p3`, `Check.narrow/4:ret`, `Check.num_mix_error/5:p3`, `Check.range_bind/6:p4`, `Check.scan_bound_calls/4:p1`, `Check.scan_num_mix/3:p1`, `Check.scan_num_mix_children/3:p1`, `Check.walk_children/4:p1`, `Decl.clause_env/2:ret`, `Interp.resolve/4:p1`, `Interp.resolve_part/4:p1`, `Opaque.strip/3:p2`, `Opaque.strip_into/3:p2`, `Repl.bind_env/2:ret`, `Repl.infer_or_unknown/3:p1`, `Repl.safe_infer/3:p1`, `Repl.safe_infer_input/3:p1` |
+| `Unk0078` | 1 | `Check.ann_stmts/3:p0` |
+| `Unk0079` | 1 | `Check.arith_type/4:ret` |
+| `Unk0080` | 4 | `Check.bind_mismatch/5:p0`, `Check.lit_range_error/3:p2`, `Check.oor_scan/5:p4`, `Check.range_bind/6:p0` |
+| `Unk0081` | 2 | `Check.bind_mismatch/5:ret`, `Check.check_bind_stmts/3:ret` |
+| `Unk0082` | 4 | `Check.bind_tvar/4:p0`, `Check.bind_tvar/4:p1`, `Check.inner_of/1:p0`, `Check.inner_of/1:ret` |
+| `Unk0083` | 1 | `Check.bind_tvar/4:p2` |
+| `Unk0084` | 3 | `Check.bind_tvar/4:p3`, `Check.bind_tvar/4:ret`, `Check.first_bound_violation/4:p2` |
+| `Unk0085` | 1 | `Check.branch_join/1:p0` |
+| `Unk0086` | 1 | `Check.build_fn/2:p0` |
+| `Unk0087` | 2 | `Check.call_bound_error/5:ret`, `Check.first_bound_violation/4:ret` |
+| `Unk0088` | 1 | `Check.call_name/1:p0` |
+| `Unk0089` | 2 | `Check.call_name/1:ret`, `Check.with_callees/1:ret` |
+| `Unk0090` | 1 | `Check.check/1:p0` |
+| `Unk0091` | 1 | `Check.check/1:ret` |
+| `Unk0092` | 1 | `Check.check_bind_stmts/3:p0` |
+| `Unk0093` | 1 | `Check.check_binds/2:ret` |
+| `Unk0094` | 1 | `Check.check_bounds/2:ret` |
+| `Unk0095` | 1 | `Check.check_error_set/2:p0` |
+| `Unk0096` | 2 | `Check.check_error_set/2:p1`, `Check.check_func/3:p2` |
+| `Unk0097` | 1 | `Check.check_error_set/2:ret` |
+| `Unk0098` | 1 | `Check.check_external_caps/1:ret` |
+| `Unk0099` | 1 | `Check.check_func/3:p0` |
+| `Unk0100` | 1 | `Check.check_func/3:ret` |
+| `Unk0101` | 1 | `Check.check_labels/1:ret` |
+| `Unk0102` | 1 | `Check.check_numeric_mix/2:ret` |
+| `Unk0103` | 1 | `Check.check_program/1:ret` |
+| `Unk0104` | 1 | `Check.check_return/2:ret` |
+| `Unk0105` | 1 | `Check.clause_env/3:p0` |
+| `Unk0106` | 1 | `Check.clause_env/3:p1` |
+| `Unk0107` | 1 | `Check.comp_str/1:p0` |
+| `Unk0108` | 1 | `Check.const_int/1:ret` |
+| `Unk0109` | 1 | `Check.const_int/1:ret` |
+| `Unk0110` | 1 | `Check.ctor_types/2:p1` |
+| `Unk0111` | 1 | `Check.ctor_types/2:p1` |
+| `Unk0112` | 1 | `Check.ctor_types/2:ret` |
+| `Unk0113` | 1 | `Check.ctor_types/2:ret` |
+| `Unk0114` | 2 | `Check.debottom/1:p0`, `Check.debottom/1:ret` |
+| `Unk0115` | 1 | `Check.declared_set/2:p0` |
+| `Unk0116` | 4 | `Check.declared_set/2:p1`, `Check.declared_set/2:ret`, `Check.error_sets/1:ret`, `Check.solve_error_sets/2:p1` |
+| `Unk0117` | 1 | `Check.declared_set/2:ret` |
+| `Unk0118` | 3 | `Check.direct_tags/1:p0`, `Check.produced_set/2:p0`, `Check.propagated_callees/1:p0` |
+| `Unk0119` | 1 | `Check.direct_tags/1:ret` |
+| `Unk0120` | 1 | `Check.error_tags/1:p0` |
+| `Unk0121` | 2 | `Check.error_tags/1:ret`, `Check.tag_name/1:ret` |
+| `Unk0122` | 1 | `Check.fbound_table/1:p0` |
+| `Unk0123` | 1 | `Check.fbound_table/1:ret` |
+| `Unk0124` | 1 | `Check.first_bound_violation/4:p1` |
+| `Unk0125` | 1 | `Check.fixpoint/2:p0` |
+| `Unk0126` | 3 | `Check.fixpoint/2:p1`, `Check.fixpoint/2:ret`, `Check.solve_error_sets/2:ret` |
+| `Unk0127` | 3 | `Check.fixpoint/2:p1`, `Check.fixpoint/2:ret`, `Check.solve_error_sets/2:ret` |
+| `Unk0128` | 1 | `Check.fn_parts/1:ret` |
+| `Unk0129` | 1 | `Check.fsig/1:p0` |
+| `Unk0130` | 1 | `Check.fsig/1:ret` |
+| `Unk0131` | 1 | `Check.gate!/1:ret` |
+| `Unk0132` | 1 | `Check.generic_ret?/2:p0` |
+| `Unk0133` | 1 | `Check.generic_ret?/2:p1` |
+| `Unk0134` | 1 | `Check.impl_table/1:p0` |
+| `Unk0135` | 1 | `Check.impl_table/1:p0` |
+| `Unk0136` | 1 | `Check.impl_table/1:ret` |
+| `Unk0137` | 1 | `Check.infer_block/4:p0` |
+| `Unk0138` | 1 | `Check.instantiate_ret/2:p0` |
+| `Unk0139` | 1 | `Check.int_literal?/1:p0` |
+| `Unk0140` | 1 | `Check.join_all/1:p0` |
+| `Unk0141` | 1 | `Check.kind_prefix/1:p0` |
+| `Unk0142` | 2 | `Check.label_error/1:ret`, `Check.label_error_children/1:ret` |
+| `Unk0143` | 1 | `Check.list_elem/1:ret` |
+| `Unk0144` | 1 | `Check.list_elems/1:ret` |
+| `Unk0145` | 1 | `Check.lit_range_error/3:ret` |
+| `Unk0146` | 1 | `Check.literal_ordinal/2:ret` |
+| `Unk0147` | 1 | `Check.missing_impl/5:p1` |
+| `Unk0148` | 1 | `Check.missing_impl/5:p3` |
+| `Unk0149` | 1 | `Check.missing_impl/5:ret` |
+| `Unk0150` | 3 | `Check.num_bits/2:p0`, `Check.num_bits/2:ret`, `Check.num_kind/1:ret` |
+| `Unk0151` | 1 | `Check.num_bits/2:p1` |
+| `Unk0152` | 2 | `Check.num_bits/2:ret`, `Check.num_kind/1:ret` |
+| `Unk0153` | 1 | `Check.num_join/2:p0` |
+| `Unk0154` | 1 | `Check.num_join/2:p1` |
+| `Unk0155` | 1 | `Check.num_lub/2:ret` |
+| `Unk0156` | 1 | `Check.num_mix?/2:p0` |
+| `Unk0157` | 1 | `Check.num_mix?/2:p1` |
+| `Unk0158` | 1 | `Check.num_mix_error/5:p0` |
+| `Unk0159` | 1 | `Check.num_mix_error/5:ret` |
+| `Unk0160` | 1 | `Check.num_widens?/2:p0` |
+| `Unk0161` | 1 | `Check.num_widens?/2:p1` |
+| `Unk0162` | 1 | `Check.oor_scan/5:p2` |
+| `Unk0163` | 1 | `Check.oor_scan/5:p3` |
+| `Unk0164` | 1 | `Check.oor_scan/5:ret` |
+| `Unk0165` | 1 | `Check.opaque_table/1:p0` |
+| `Unk0166` | 1 | `Check.opaque_table/1:p0` |
+| `Unk0167` | 1 | `Check.opaque_table/1:ret` |
+| `Unk0168` | 1 | `Check.pascal?/1:p0` |
+| `Unk0169` | 1 | `Check.produced_set/2:p1` |
+| `Unk0170` | 1 | `Check.produced_set/2:p1` |
+| `Unk0171` | 1 | `Check.produced_set/2:ret` |
+| `Unk0172` | 1 | `Check.propagated_callees/1:ret` |
+| `Unk0173` | 1 | `Check.range_base/2:ret` |
+| `Unk0174` | 1 | `Check.range_bind/6:p2` |
+| `Unk0175` | 1 | `Check.range_bind/6:ret` |
+| `Unk0176` | 1 | `Check.range_table/1:p0` |
+| `Unk0177` | 1 | `Check.range_table/1:p0` |
+| `Unk0178` | 1 | `Check.range_table/1:ret` |
+| `Unk0179` | 2 | `Check.scan_bound_calls/4:ret`, `Check.walk_children/4:ret` |
+| `Unk0180` | 2 | `Check.scan_num_mix/3:ret`, `Check.scan_num_mix_children/3:ret` |
+| `Unk0181` | 1 | `Check.solve_error_sets/2:p0` |
+| `Unk0182` | 1 | `Check.tag_name/1:p0` |
+| `Unk0183` | 1 | `Check.type_table/1:ret` |
+| `Unk0184` | 2 | `Check.uint_signed_join/2:p0`, `Check.uint_signed_join/2:p1` |
+| `Unk0185` | 1 | `Check.with_callees/1:p0` |
+| `Unk0186` | 1 | `Comptime.eval/1:p0` |
+| `Unk0187` | 1 | `Comptime.eval/1:ret` |
+| `Unk0188` | 24 | `Comptime.fold/1:ret`, `Interp.resolve/4:p0`, `Lower.borrow_arg/4:p0`, `Lower.borrow_value/2:p0`, `Lower.borrow_value/2:ret`, `Lower.insert_borrows/3:ret`, `Lower.owned_arg?/2:p0`, `Lower.owned_field_var?/1:p0`, `Lower.resolve_consts/2:ret`, `Lower.resolve_rust_pats/2:ret`, `Lower.resolve_structs/2:ret`, `Lower.resolve_variants/2:ret`, `Lower.scalar_literal?/1:p0`, `Lower.variant_lit/2:ret`, `Lower.widen_char_arith/2:ret`, `Lower.wrap_char/2:p0`, `Lower.wrap_char/2:ret`, `Macro.do_expand/4:ret`, `Macro.freshen/2:ret`, `Macro.map_node/2:p1`, `Macro.map_node/2:ret`, `Macro.rename/2:ret`, `Macro.substitute/2:p0`, `Macro.walk_for_with/1:ret` |
+| `Unk0189` | 1 | `Comptime.int_div/3:p0` |
+| `Unk0190` | 1 | `Comptime.int_div/3:p2` |
+| `Unk0191` | 1 | `Comptime.int_div/3:p2` |
+| `Unk0192` | 1 | `Comptime.int_div/3:p2` |
+| `Unk0193` | 1 | `Comptime.int_div/3:ret` |
+| `Unk0194` | 1 | `Core.from_arm/1:p0` |
+| `Unk0195` | 1 | `Core.from_arm/1:ret` |
+| `Unk0196` | 1 | `Core.from_pairs/1:p0` |
+| `Unk0197` | 1 | `Core.from_pairs/1:ret` |
+| `Unk0198` | 1 | `Core.from_stmt/1:p0` |
+| `Unk0199` | 1 | `Core.from_stmt/1:ret` |
+| `Unk0200` | 1 | `Core.from_tail/1:p0` |
+| `Unk0201` | 8 | `Cst.build/1:p0`, `Cst.open/4:p0`, `Cst.open/4:p2`, `Cst.open/4:p3`, `Cst.open/4:ret`, `Cst.seq/2:p0`, `Cst.seq/2:p1`, `Cst.seq/2:ret` |
+| `Unk0202` | 1 | `Cst.build/1:ret` |
+| `Unk0203` | 1 | `Cst.open/4:p1` |
+| `Unk0204` | 4 | `Cst.open/4:p3`, `Cst.open/4:ret`, `Cst.seq/2:p1`, `Cst.seq/2:ret` |
+| `Unk0205` | 2 | `Cst.open/4:ret`, `Cst.seq/2:ret` |
+| `Unk0206` | 7 | `Decl.all_impl_decls/1:p0`, `Decl.all_impls/1:p0`, `Decl.all_protocols/1:p0`, `Decl.collect_aliases/1:p0`, `Decl.collect_macros/1:p0`, `Decl.in_scope/2:p0`, `Decl.lower_meta/3:p1` |
+| `Unk0207` | 5 | `Decl.all_impl_decls/1:ret`, `Decl.all_protocols/1:ret`, `Decl.in_scope/2:ret`, `Protocol.check_assoc!/2:p0`, `Protocol.check_assoc!/2:p1` |
+| `Unk0208` | 1 | `Decl.all_impls/1:ret` |
+| `Unk0209` | 2 | `Decl.assemble/3:p0`, `Decl.protocol_defs/4:p0` |
+| `Unk0210` | 5 | `Decl.assemble/3:p1`, `Decl.subst_const/2:p1`, `Decl.subst_func/2:p1`, `Decl.subst_struct/2:p1`, `Decl.subst_type/2:p1` |
+| `Unk0211` | 1 | `Decl.assemble/3:p2` |
+| `Unk0212` | 1 | `Decl.assemble/3:ret` |
+| `Unk0213` | 7 | `Decl.attach_doc/2:p0`, `Decl.attach_doc/2:ret`, `Decl.attach_external/3:ret`, `Decl.attach_targets/2:ret`, `Decl.mark_pub/1:ret`, `Decl.mark_test/1:ret`, `Decl.take_decl/1:ret` |
+| `Unk0214` | 7 | `Decl.attach_doc/2:p0`, `Decl.attach_doc/2:ret`, `Decl.attach_external/3:ret`, `Decl.attach_targets/2:ret`, `Decl.mark_pub/1:ret`, `Decl.mark_test/1:ret`, `Decl.take_decl/1:ret` |
+| `Unk0215` | 1 | `Decl.attach_external/3:p0` |
+| `Unk0216` | 1 | `Decl.attach_external/3:p1` |
+| `Unk0217` | 1 | `Decl.attach_external/3:p2` |
+| `Unk0218` | 1 | `Decl.attach_targets/2:p0` |
+| `Unk0219` | 2 | `Decl.attach_targets/2:p1`, `Decl.parse_targets/1:ret` |
+| `Unk0220` | 37 | `Decl.balanced_parens/1:p0`, `Decl.balanced_parens/1:ret`, `Decl.decl_boundary?/1:p0`, `Decl.decl_kw?/1:p0`, `Decl.def_raw/4:p2`, `Decl.line_continues?/2:p0`, `Decl.line_continues?/2:p1`, `Decl.skip_nl/1:p0`, `Decl.skip_nl/1:ret`, `Decl.split_decls/1:p0`, `Decl.take_block/3:p0`, `Decl.take_block/3:p2`, `Decl.take_block/3:ret`, `Decl.take_decl/1:p0`, `Decl.take_decl/1:ret`, `Decl.take_def/1:p0`, `Decl.take_def/1:ret`, `Decl.take_head/4:p2`, `Decl.take_head/4:p3`, `Decl.take_head/4:ret`, `Decl.take_line/2:p0`, `Decl.take_line/2:p1`, `Decl.take_line/2:ret`, `Decl.take_line/3:p0`, `Decl.take_line/3:p1`, `Decl.take_line/3:ret`, `Decl.take_mod_body/2:p0`, `Decl.take_mod_body/2:ret`, `Decl.take_parens/3:p0`, `Decl.take_parens/3:p2`, `Decl.take_parens/3:ret`, `Decl.take_type/2:p0`, `Decl.take_type/2:p1`, `Decl.take_type/2:ret`, `Decl.take_until_do/2:p0`, `Decl.take_until_do/2:p1`, `Decl.take_until_do/2:ret` |
+| `Unk0221` | 3 | `Decl.block_seps/5:p0`, `Decl.block_seps/5:p4`, `Decl.block_seps/5:ret` |
+| `Unk0222` | 1 | `Decl.build_func/1:p0` |
+| `Unk0223` | 1 | `Decl.clause/2:p0` |
+| `Unk0224` | 1 | `Decl.clause/2:p1` |
+| `Unk0225` | 2 | `Decl.clause_env/2:p1`, `Decl.meta_clause/5:p3` |
+| `Unk0226` | 1 | `Decl.collapse_parens/1:p0` |
+| `Unk0227` | 1 | `Decl.collapse_parens/1:ret` |
+| `Unk0228` | 1 | `Decl.collect_aliases/1:ret` |
+| `Unk0229` | 5 | `Decl.collect_macros/1:ret`, `Decl.meta_clause/5:p1`, `Macro.build_env/1:ret`, `Macro.do_expand/4:p0`, `Macro.expand/3:p0` |
+| `Unk0230` | 5 | `Decl.collect_macros/1:ret`, `Decl.meta_clause/5:p1`, `Macro.build_env/1:ret`, `Macro.do_expand/4:p0`, `Macro.expand/3:p0` |
+| `Unk0231` | 5 | `Decl.compile/1:ret`, `Decl.protocol_unit/3:ret`, `Lower.compile/4:ret`, `Lower.compile_elixir/4:ret`, `Lower.compile_module/1:ret` |
+| `Unk0232` | 1 | `Decl.compile_beam/1:ret` |
+| `Unk0233` | 3 | `Decl.compile_beam/1:ret`, `Lower.compile_beam/4:ret`, `Lower.compile_module_beam/1:ret` |
+| `Unk0234` | 2 | `Decl.def_raw/4:p0`, `Decl.take_head/4:p0` |
+| `Unk0235` | 2 | `Decl.def_raw/4:p1`, `Decl.take_head/4:p1` |
+| `Unk0236` | 2 | `Decl.def_raw/4:p3`, `Decl.detok_block/1:ret` |
+| `Unk0237` | 3 | `Decl.def_raw/4:ret`, `Decl.take_def/1:ret`, `Decl.take_head/4:ret` |
+| `Unk0238` | 1 | `Decl.detok_block/1:p0` |
+| `Unk0239` | 3 | `Decl.extract_parens/1:p0`, `Decl.parse_struct/3:p0`, `Decl.variant/1:p0` |
+| `Unk0240` | 1 | `Decl.extract_parens/1:ret` |
+| `Unk0241` | 1 | `Decl.field/1:p0` |
+| `Unk0242` | 1 | `Decl.fields/1:p0` |
+| `Unk0243` | 1 | `Decl.fields/1:ret` |
+| `Unk0244` | 1 | `Decl.impl_struct/3:p0` |
+| `Unk0245` | 1 | `Decl.impl_struct/3:p1` |
+| `Unk0246` | 1 | `Decl.impl_struct/3:p2` |
+| `Unk0247` | 1 | `Decl.impl_struct/3:ret` |
+| `Unk0248` | 1 | `Decl.in_scope/2:p1` |
+| `Unk0249` | 1 | `Decl.in_scope/2:p1` |
+| `Unk0250` | 2 | `Decl.inject_stdlib/1:p0`, `Decl.inject_stdlib/1:ret` |
+| `Unk0251` | 3 | `Decl.inject_stdlib/1:p0`, `Decl.inject_stdlib/1:ret`, `Decl.show_module/0:ret` |
+| `Unk0252` | 1 | `Decl.lower_meta/3:p0` |
+| `Unk0253` | 1 | `Decl.lower_meta/3:p2` |
+| `Unk0254` | 1 | `Decl.lower_meta/3:ret` |
+| `Unk0255` | 1 | `Decl.macro_param_names/1:p0` |
+| `Unk0256` | 1 | `Decl.macro_param_names/1:ret` |
+| `Unk0257` | 1 | `Decl.mark_pub/1:p0` |
+| `Unk0258` | 1 | `Decl.mark_test/1:p0` |
+| `Unk0259` | 1 | `Decl.meta_clause/5:p0` |
+| `Unk0260` | 4 | `Decl.meta_clause/5:p4`, `Interp.resolve/4:p3`, `Interp.resolve_part/4:p3`, `Interp.stringify/3:p2` |
+| `Unk0261` | 1 | `Decl.meta_clause/5:ret` |
+| `Unk0262` | 1 | `Decl.nz/1:ret` |
+| `Unk0263` | 1 | `Decl.param/1:p0` |
+| `Unk0264` | 1 | `Decl.param/1:ret` |
+| `Unk0265` | 7 | `Decl.parse_abstract/4:p0`, `Decl.parse_alias/1:p0`, `Decl.parse_const/3:p0`, `Decl.parse_opaque/3:p0`, `Decl.parse_range/3:p0`, `Decl.parse_type/3:p0`, `Decl.split_once/2:p0` |
+| `Unk0266` | 2 | `Decl.parse_abstract/4:p1`, `Decl.parse_abstract_members/1:p0` |
+| `Unk0267` | 1 | `Decl.parse_abstract/4:p2` |
+| `Unk0268` | 1 | `Decl.parse_abstract/4:p3` |
+| `Unk0269` | 1 | `Decl.parse_abstract_members/1:ret` |
+| `Unk0270` | 2 | `Decl.parse_alias/1:ret`, `Decl.strip_type_params/1:ret` |
+| `Unk0271` | 1 | `Decl.parse_alias/1:ret` |
+| `Unk0272` | 1 | `Decl.parse_assoc_binding/1:p0` |
+| `Unk0273` | 1 | `Decl.parse_assoc_binding/1:ret` |
+| `Unk0274` | 1 | `Decl.parse_assoc_binding/1:ret` |
+| `Unk0275` | 1 | `Decl.parse_binder/1:p0` |
+| `Unk0276` | 1 | `Decl.parse_binder/1:ret` |
+| `Unk0277` | 1 | `Decl.parse_binder/1:ret` |
+| `Unk0278` | 1 | `Decl.parse_binders/1:p0` |
+| `Unk0279` | 1 | `Decl.parse_binders/1:ret` |
+| `Unk0280` | 1 | `Decl.parse_bounds/1:p0` |
+| `Unk0281` | 1 | `Decl.parse_bounds/1:ret` |
+| `Unk0282` | 2 | `Decl.parse_cast_rule/1:p0`, `Decl.parse_op_rule/1:p0` |
+| `Unk0283` | 1 | `Decl.parse_cast_rule/1:ret` |
+| `Unk0284` | 1 | `Decl.parse_const/3:p1` |
+| `Unk0285` | 1 | `Decl.parse_const/3:p2` |
+| `Unk0286` | 1 | `Decl.parse_external/1:p0` |
+| `Unk0287` | 1 | `Decl.parse_external/1:ret` |
+| `Unk0288` | 1 | `Decl.parse_external/1:ret` |
+| `Unk0289` | 1 | `Decl.parse_head/1:ret` |
+| `Unk0290` | 1 | `Decl.parse_op_rule/1:ret` |
+| `Unk0291` | 1 | `Decl.parse_opaque/3:p1` |
+| `Unk0292` | 1 | `Decl.parse_opaque/3:p2` |
+| `Unk0293` | 1 | `Decl.parse_ordinal/1:p0` |
+| `Unk0294` | 1 | `Decl.parse_ordinal/1:ret` |
+| `Unk0295` | 1 | `Decl.parse_ordinal/1:ret` |
+| `Unk0296` | 1 | `Decl.parse_params/1:p0` |
+| `Unk0297` | 1 | `Decl.parse_params/1:ret` |
+| `Unk0298` | 1 | `Decl.parse_range/3:p1` |
+| `Unk0299` | 1 | `Decl.parse_range/3:p2` |
+| `Unk0300` | 1 | `Decl.parse_struct/3:p1` |
+| `Unk0301` | 1 | `Decl.parse_struct/3:p2` |
+| `Unk0302` | 1 | `Decl.parse_targets/1:p0` |
+| `Unk0303` | 1 | `Decl.parse_type/3:p1` |
+| `Unk0304` | 1 | `Decl.parse_type/3:p2` |
+| `Unk0305` | 1 | `Decl.parse_use/1:p0` |
+| `Unk0306` | 1 | `Decl.proto_method_traits/1:ret` |
+| `Unk0307` | 2 | `Decl.protocol_defs/4:p1`, `Protocol.expand/5:p2` |
+| `Unk0308` | 2 | `Decl.protocol_defs/4:p2`, `Protocol.expand/5:p3` |
+| `Unk0309` | 2 | `Decl.protocol_defs/4:p3`, `Protocol.expand/5:p4` |
+| `Unk0310` | 3 | `Decl.protocol_defs/4:ret`, `Protocol.expand/5:ret`, `Protocol.impl_methods/2:ret` |
+| `Unk0311` | 1 | `Decl.protocol_struct/2:p0` |
+| `Unk0312` | 1 | `Decl.protocol_struct/2:p1` |
+| `Unk0313` | 1 | `Decl.protocol_struct/2:ret` |
+| `Unk0314` | 1 | `Decl.req_ret/1:p0` |
+| `Unk0315` | 1 | `Decl.req_ret/1:ret` |
+| `Unk0316` | 1 | `Decl.split2/2:p0` |
+| `Unk0317` | 1 | `Decl.split2/2:p1` |
+| `Unk0318` | 1 | `Decl.split2/2:ret` |
+| `Unk0319` | 1 | `Decl.split2/2:ret` |
+| `Unk0320` | 1 | `Decl.split_decls/1:ret` |
+| `Unk0321` | 1 | `Decl.split_forall/1:p0` |
+| `Unk0322` | 1 | `Decl.split_forall/1:ret` |
+| `Unk0323` | 1 | `Decl.split_once/2:ret` |
+| `Unk0324` | 1 | `Decl.split_once/2:ret` |
+| `Unk0325` | 1 | `Decl.split_top/2:p0` |
+| `Unk0326` | 1 | `Decl.split_top/2:ret` |
+| `Unk0327` | 1 | `Decl.strip_type_params/1:p0` |
+| `Unk0328` | 1 | `Decl.subst_const/2:p0` |
+| `Unk0329` | 1 | `Decl.subst_fields/2:p0` |
+| `Unk0330` | 1 | `Decl.subst_fields/2:p1` |
+| `Unk0331` | 1 | `Decl.subst_func/2:p0` |
+| `Unk0332` | 1 | `Decl.subst_struct/2:p0` |
+| `Unk0333` | 1 | `Decl.subst_type/2:p0` |
+| `Unk0334` | 2 | `Decl.subst_type_str/2:p0`, `Decl.subst_type_str/2:ret` |
+| `Unk0335` | 1 | `Decl.subst_type_str/2:p1` |
+| `Unk0336` | 1 | `Decl.subst_variant/2:p0` |
+| `Unk0337` | 1 | `Decl.subst_variant/2:p1` |
+| `Unk0338` | 2 | `Decl.take_mod_body/2:p1`, `Decl.take_mod_body/2:ret` |
+| `Unk0339` | 1 | `Decl.take_until_do/2:ret` |
+| `Unk0340` | 27 | `Doc.concat/1:p0`, `Doc.concat/1:ret`, `Doc.concat/2:p0`, `Doc.concat/2:p1`, `Doc.concat/2:ret`, `Doc.empty/0:ret`, `Doc.group/1:p0`, `Doc.hardline/0:ret`, `Doc.if_break/2:p0`, `Doc.if_break/2:p1`, `Doc.if_break/2:ret`, `Doc.join/2:p0`, `Doc.join/2:p1`, `Doc.join/2:ret`, `Doc.line/0:ret`, `Doc.line_suffix/1:p0`, `Doc.line_suffix/1:ret`, `Doc.must_break?/1:p0`, `Doc.nest/2:p1`, `Doc.nest/2:ret`, `Doc.render/2:p0`, `Doc.softline/0:ret`, `Doc.text/1:ret`, `Format.bd/3:ret`, `Format.group_doc/4:ret`, `Format.line_doc/1:ret`, `Format.node_doc/2:ret` |
+| `Unk0341` | 2 | `Doc.do_render/5:p2`, `Doc.fits?/2:p1` |
+| `Unk0342` | 3 | `Doc.do_render/5:p3`, `Doc.flat_string/1:p0`, `Doc.flush_suffix/2:p0` |
+| `Unk0343` | 1 | `Doc.group/1:ret` |
+| `Unk0344` | 14 | `Doc.nest/2:p0`, `Format.apply_node/3:p1`, `Format.apply_node/3:p2`, `Format.apply_node/3:ret`, `Format.indent_and_render/4:p1`, `Format.pop/1:p0`, `Format.pop/1:ret`, `Format.push/2:p0`, `Format.push/2:p1`, `Format.push/2:ret`, `Format.render_line/2:p1`, `Format.update_stack/4:p2`, `Format.update_stack/4:p3`, `Format.update_stack/4:ret` |
+| `Unk0345` | 2 | `Doctest.augment/2:p1`, `Doctest.extract/1:ret` |
+| `Unk0346` | 1 | `Doctest.exunit_cases/2:p1` |
+| `Unk0347` | 1 | `Doctest.exunit_cases/2:ret` |
+| `Unk0348` | 1 | `Doctest.fences/1:p0` |
+| `Unk0349` | 1 | `Doctest.fences/1:ret` |
+| `Unk0350` | 1 | `Doctest.module_doc_strings/1:ret` |
+| `Unk0351` | 1 | `Doctest.pairs/1:p0` |
+| `Unk0352` | 1 | `Doctest.pairs/1:ret` |
+| `Unk0353` | 1 | `Doctest.run/2:p1` |
+| `Unk0354` | 1 | `Doctest.run/2:ret` |
+| `Unk0355` | 1 | `Doctest.run_markdown/1:p0` |
+| `Unk0356` | 1 | `Doctest.run_markdown/1:ret` |
+| `Unk0357` | 8 | `Exhaustiveness.add_range/4:p0`, `Exhaustiveness.add_range/4:ret`, `Exhaustiveness.add_type/3:p0`, `Exhaustiveness.add_type/3:ret`, `Exhaustiveness.base_env/0:ret`, `Exhaustiveness.program_env/3:ret`, `PatternLower.add_struct/3:p0`, `PatternLower.add_struct/3:ret` |
+| `Unk0358` | 1 | `Exhaustiveness.add_range/4:p2` |
+| `Unk0359` | 1 | `Exhaustiveness.add_range/4:p3` |
+| `Unk0360` | 1 | `Exhaustiveness.add_type/3:p2` |
+| `Unk0361` | 2 | `Exhaustiveness.analyze/3:p0`, `PatternLower.lower_clause/2:ret` |
+| `Unk0362` | 13 | `Exhaustiveness.analyze/3:p2`, `Exhaustiveness.arity/2:p0`, `Exhaustiveness.check_match!/3:p1`, `Exhaustiveness.check_one_case!/3:p1`, `Exhaustiveness.missing_head/2:p0`, `Exhaustiveness.signature/2:p0`, `Exhaustiveness.specialize/3:p2`, `Exhaustiveness.useful?/3:p2`, `Exhaustiveness.witness/3:p2`, `PatternLower.lower/2:p1`, `PatternLower.lower_clause/2:p1`, `PatternLower.lower_list/3:p2`, `PatternLower.lower_many/2:p1` |
+| `Unk0363` | 13 | `Exhaustiveness.analyze/3:p2`, `Exhaustiveness.arity/2:p0`, `Exhaustiveness.check_match!/3:p1`, `Exhaustiveness.check_one_case!/3:p1`, `Exhaustiveness.missing_head/2:p0`, `Exhaustiveness.signature/2:p0`, `Exhaustiveness.specialize/3:p2`, `Exhaustiveness.useful?/3:p2`, `Exhaustiveness.witness/3:p2`, `PatternLower.lower/2:p1`, `PatternLower.lower_clause/2:p1`, `PatternLower.lower_list/3:p2`, `PatternLower.lower_many/2:p1` |
+| `Unk0364` | 1 | `Exhaustiveness.analyze/3:ret` |
+| `Unk0365` | 2 | `Exhaustiveness.arity/2:p1`, `Exhaustiveness.specialize/3:p1` |
+| `Unk0366` | 1 | `Exhaustiveness.check_case_bodies!/2:p0` |
+| `Unk0367` | 1 | `Exhaustiveness.check_case_bodies!/2:p1` |
+| `Unk0368` | 1 | `Exhaustiveness.check_case_bodies!/2:ret` |
+| `Unk0369` | 1 | `Exhaustiveness.check_match!/3:p0` |
+| `Unk0370` | 2 | `Exhaustiveness.check_match!/3:p2`, `Exhaustiveness.check_one_case!/3:p2` |
+| `Unk0371` | 1 | `Exhaustiveness.check_match!/3:ret` |
+| `Unk0372` | 1 | `Exhaustiveness.check_one_case!/3:ret` |
+| `Unk0373` | 2 | `Exhaustiveness.collect_cases/2:p0`, `Exhaustiveness.collect_children/2:p0` |
+| `Unk0374` | 4 | `Exhaustiveness.collect_cases/2:p1`, `Exhaustiveness.collect_cases/2:ret`, `Exhaustiveness.collect_children/2:p1`, `Exhaustiveness.collect_children/2:ret` |
+| `Unk0375` | 7 | `Exhaustiveness.default/1:p0`, `Exhaustiveness.default/1:ret`, `Exhaustiveness.head_ctors/1:p0`, `Exhaustiveness.specialize/3:p0`, `Exhaustiveness.specialize/3:ret`, `Exhaustiveness.useful?/3:p0`, `Exhaustiveness.witness/3:p0` |
+| `Unk0376` | 3 | `Exhaustiveness.head_ctors/1:ret`, `Exhaustiveness.missing_head/2:p1`, `Exhaustiveness.signature/2:p1` |
+| `Unk0377` | 2 | `Exhaustiveness.missing_head/2:ret`, `Exhaustiveness.witness/3:ret` |
+| `Unk0378` | 1 | `Exhaustiveness.pascal/1:p0` |
+| `Unk0379` | 1 | `Exhaustiveness.program_env/3:p1` |
+| `Unk0380` | 1 | `Exhaustiveness.program_env/3:p2` |
+| `Unk0381` | 1 | `Exhaustiveness.render/1:p0` |
+| `Unk0382` | 1 | `Exhaustiveness.signature/2:ret` |
+| `Unk0383` | 1 | `Exhaustiveness.signature/2:ret` |
+| `Unk0384` | 1 | `Exhaustiveness.useful?/3:p1` |
+| `Unk0385` | 1 | `Exhaustiveness.witness/3:ret` |
+| `Unk0386` | 1 | `Fixpoint.check/4:p0` |
+| `Unk0387` | 1 | `Fixpoint.check/4:p1` |
+| `Unk0388` | 1 | `Fixpoint.check/4:p2` |
+| `Unk0389` | 1 | `Fixpoint.check/4:p3` |
+| `Unk0390` | 1 | `Fixpoint.check/4:ret` |
+| `Unk0391` | 19 | `Format.apply_node/3:p0`, `Format.bd/3:p0`, `Format.bd/3:p1`, `Format.block_head?/2:p0`, `Format.declaration_line?/1:p0`, `Format.head_tok/1:p0`, `Format.lead_adjust/1:p0`, `Format.line_doc/1:p0`, `Format.mark/1:ret`, `Format.mark/3:p1`, `Format.mark/3:p2`, `Format.mark/3:ret`, `Format.node_doc/2:p0`, `Format.render_line/2:p0`, `Format.split_items/1:ret`, `Format.tail_tok/1:p0`, `Format.trailing_op?/1:p0`, `Format.update_stack/4:p0`, `Format.value_end?/1:p0` |
+| `Unk0392` | 10 | `Format.blank?/1:p0`, `Format.block_head?/2:p1`, `Format.boundary?/1:p0`, `Format.comment_only?/1:p0`, `Format.indent_and_render/4:p0`, `Format.mark/1:p0`, `Format.mark/3:p0`, `Format.next_code_line/1:p0`, `Format.next_code_line/1:ret`, `Format.update_stack/4:p1` |
+| `Unk0393` | 6 | `Format.boundary_tok?/1:p0`, `Format.closer_lead?/1:p0`, `Format.cont_lead?/1:p0`, `Format.decl_kw?/1:p0`, `Format.head_tok/1:ret`, `Format.space?/2:p1` |
+| `Unk0394` | 7 | `Format.chunk_on_comma/3:p0`, `Format.chunk_on_comma/3:p1`, `Format.chunk_on_comma/3:p2`, `Format.chunk_on_comma/3:ret`, `Format.finish_items/2:p0`, `Format.finish_items/2:p1`, `Format.finish_items/2:ret` |
+| `Unk0395` | 5 | `Format.cons_group?/1:p0`, `Format.group_doc/4:p1`, `Format.has_comment?/1:p0`, `Format.split_items/1:p0`, `Format.trailing_comma?/1:p0` |
+| `Unk0396` | 3 | `Format.format/1:p0`, `Format.format/1:ret`, `Format.format_result/1:p0` |
+| `Unk0397` | 1 | `Format.format_result/1:ret` |
+| `Unk0398` | 1 | `Format.format_result/1:ret` |
+| `Unk0399` | 3 | `Format.group_doc/4:p0`, `Format.group_doc/4:p2`, `Format.leaf/1:p0` |
+| `Unk0400` | 2 | `Format.has_tok?/2:p0`, `Format.has_tok?/2:p1` |
+| `Unk0401` | 1 | `Format.has_tok?/2:p0` |
+| `Unk0402` | 6 | `Format.ll/3:p0`, `Format.ll/3:p1`, `Format.ll/3:p2`, `Format.ll/3:ret`, `Format.logical_lines/1:p0`, `Format.logical_lines/1:ret` |
+| `Unk0403` | 3 | `Format.space?/2:p0`, `Format.tail_tok/1:ret`, `Format.value_end_tok?/1:p0` |
+| `Unk0404` | 1 | `Format.squeeze_blanks/1:p0` |
+| `Unk0405` | 1 | `Format.squeeze_blanks/1:ret` |
+| `Unk0406` | 1 | `FormsEquiv.abstract_code/1:p0` |
+| `Unk0407` | 1 | `FormsEquiv.abstract_code/1:ret` |
+| `Unk0408` | 3 | `FormsEquiv.alpha_rename/1:p0`, `FormsEquiv.walk_rename/2:p0`, `FormsEquiv.walk_rename/2:ret` |
+| `Unk0409` | 1 | `FormsEquiv.alpha_rename/1:ret` |
+| `Unk0410` | 3 | `FormsEquiv.bool_clause/1:p0`, `FormsEquiv.bool_clause_pair/1:p0`, `FormsEquiv.bool_clause_pair/1:ret` |
+| `Unk0411` | 1 | `FormsEquiv.bool_clause/1:ret` |
+| `Unk0412` | 1 | `FormsEquiv.bool_clause/1:ret` |
+| `Unk0413` | 2 | `FormsEquiv.canon_bool_case/1:p0`, `FormsEquiv.canon_bool_case/1:ret` |
+| `Unk0414` | 9 | `FormsEquiv.diff/2:p0`, `FormsEquiv.diff/2:p1`, `FormsEquiv.equivalent?/2:p0`, `FormsEquiv.equivalent?/2:p1`, `FormsEquiv.normalize/1:p0`, `FormsEquiv.verified?/2:p0`, `FormsEquiv.verified?/2:p1`, `FormsEquiv.verify/2:p0`, `FormsEquiv.verify/2:p1` |
+| `Unk0415` | 1 | `FormsEquiv.diff/2:ret` |
+| `Unk0416` | 1 | `FormsEquiv.diff/2:ret` |
+| `Unk0417` | 2 | `FormsEquiv.fold_neg_literal/1:p0`, `FormsEquiv.fold_neg_literal/1:ret` |
+| `Unk0418` | 1 | `FormsEquiv.key/1:p0` |
+| `Unk0419` | 1 | `FormsEquiv.key/1:ret` |
+| `Unk0420` | 1 | `FormsEquiv.key/1:ret` |
+| `Unk0421` | 1 | `FormsEquiv.normalize/1:ret` |
+| `Unk0422` | 1 | `FormsEquiv.user_function?/1:p0` |
+| `Unk0423` | 1 | `FormsEquiv.verify/2:ret` |
+| `Unk0424` | 2 | `FormsEquiv.walk_rename/2:p1`, `FormsEquiv.walk_rename/2:ret` |
+| `Unk0425` | 2 | `FormsEquiv.walk_rename/2:p1`, `FormsEquiv.walk_rename/2:ret` |
+| `Unk0426` | 2 | `FormsEquiv.zero_anno/1:p0`, `FormsEquiv.zero_anno/1:ret` |
+| `Unk0427` | 1 | `History.add/1:p0` |
+| `Unk0428` | 1 | `History.add/1:ret` |
+| `Unk0429` | 2 | `History.dedup_consecutive/1:p0`, `History.dedup_consecutive/1:ret` |
+| `Unk0430` | 1 | `History.load/0:ret` |
+| `Unk0431` | 1 | `History.path/0:ret` |
+| `Unk0432` | 1 | `Infer.app/2:p1` |
+| `Unk0433` | 83 | `Infer.app/2:ret`, `Infer.app1/2:p1`, `Infer.app1/2:ret`, `Infer.bind/3:p0`, `Infer.bind/3:p2`, `Infer.bind_checked/3:p0`, `Infer.bind_checked/3:p2`, `Infer.bind_checked/3:ret`, `Infer.bind_params/3:p2`, `Infer.call_sig/6:p3`, `Infer.call_sig/6:p5`, `Infer.call_sig/6:ret`, `Infer.con/1:ret`, `Infer.do_unify/3:p0`, `Infer.do_unify/3:p1`, `Infer.do_unify/3:p2`, `Infer.do_unify/3:ret`, `Infer.free_vars/2:p0`, `Infer.free_vars/2:p1`, `Infer.fresh/1:p0`, `Infer.fresh/1:ret`, `Infer.fresh_n/2:p0`, `Infer.fresh_n/2:ret`, `Infer.fresh_num/1:p0`, `Infer.fresh_num/1:ret`, `Infer.freshen_tvars/2:p1`, `Infer.freshen_tvars/2:ret`, `Infer.gen/4:p1`, `Infer.gen/4:p3`, `Infer.gen/4:ret`, `Infer.gen_args_then_fresh/4:p1`, `Infer.gen_args_then_fresh/4:p3`, `Infer.gen_args_then_fresh/4:ret`, `Infer.gen_block/4:p1`, `Infer.gen_block/4:p3`, `Infer.gen_block/4:ret`, `Infer.gen_cons/5:p2`, `Infer.gen_cons/5:p4`, `Infer.gen_cons/5:ret`, `Infer.gen_pat/4:p1`, `Infer.gen_pat/4:p2`, `Infer.gen_pat/4:p3`, `Infer.gen_pat/4:ret`, `Infer.gen_pat_cons/5:p2`, `Infer.gen_pat_cons/5:p3`, `Infer.gen_pat_cons/5:p4`, `Infer.gen_pat_cons/5:ret`, `Infer.generalize_map/3:p1`, `Infer.generalize_map/3:p2`, `Infer.instantiate/5:p2`, `Infer.instantiate/5:p4`, `Infer.instantiate/5:ret`, `Infer.mark_num/2:p0`, `Infer.mark_num/2:p1`, `Infer.mark_num/2:ret`, `Infer.maybe_tuple/4:p1`, `Infer.maybe_tuple/4:p3`, `Infer.maybe_tuple/4:ret`, `Infer.num_conflict?/3:p0`, `Infer.num_conflict?/3:p2`, `Infer.numeric_con?/1:p0`, `Infer.occurs?/3:p0`, `Infer.occurs?/3:p2`, `Infer.parse_type/2:ret`, `Infer.render/3:p0`, `Infer.render/3:p2`, `Infer.render_wp/3:p0`, `Infer.render_wp/3:p2`, `Infer.resolve/2:p0`, `Infer.resolve/2:p1`, `Infer.resolve/2:ret`, `Infer.resolve_program/2:p1`, `Infer.resolve_struct_params/4:p3`, `Infer.resolve_struct_params/4:ret`, `Infer.sigvar_call/5:p3`, `Infer.sigvar_call/5:p4`, `Infer.store_new/0:ret`, `Infer.unify/3:p0`, `Infer.unify/3:p1`, `Infer.unify/3:p2`, `Infer.unify/3:ret`, `Infer.unk_vars/2:p0`, `Infer.unk_vars/2:p1` |
+| `Unk0434` | 51 | `Infer.app1/2:p1`, `Infer.app1/2:ret`, `Infer.bind/3:p0`, `Infer.bind_checked/3:p0`, `Infer.bind_checked/3:ret`, `Infer.bind_params/3:p2`, `Infer.call_sig/6:p5`, `Infer.call_sig/6:ret`, `Infer.do_unify/3:p0`, `Infer.do_unify/3:ret`, `Infer.free_vars/2:p0`, `Infer.fresh/1:p0`, `Infer.fresh/1:ret`, `Infer.fresh_n/2:p0`, `Infer.fresh_n/2:ret`, `Infer.fresh_num/1:p0`, `Infer.fresh_num/1:ret`, `Infer.freshen_tvars/2:p1`, `Infer.freshen_tvars/2:ret`, `Infer.gen/4:p3`, `Infer.gen/4:ret`, `Infer.gen_args_then_fresh/4:p3`, `Infer.gen_args_then_fresh/4:ret`, `Infer.gen_block/4:p3`, `Infer.gen_block/4:ret`, `Infer.gen_cons/5:p4`, `Infer.gen_cons/5:ret`, `Infer.gen_pat/4:p3`, `Infer.gen_pat/4:ret`, `Infer.gen_pat_cons/5:p4`, `Infer.gen_pat_cons/5:ret`, `Infer.generalize_map/3:p2`, `Infer.instantiate/5:p4`, `Infer.instantiate/5:ret`, `Infer.mark_num/2:p0`, `Infer.mark_num/2:ret`, `Infer.maybe_tuple/4:p3`, `Infer.maybe_tuple/4:ret`, `Infer.num_conflict?/3:p0`, `Infer.occurs?/3:p0`, `Infer.render/3:p0`, `Infer.render_wp/3:p0`, `Infer.resolve/2:p0`, `Infer.resolve_program/2:p1`, `Infer.resolve_struct_params/4:p3`, `Infer.resolve_struct_params/4:ret`, `Infer.sigvar_call/5:p4`, `Infer.store_new/0:ret`, `Infer.unify/3:p0`, `Infer.unify/3:ret`, `Infer.unk_vars/2:p0` |
+| `Unk0435` | 55 | `Infer.app1/2:p1`, `Infer.app1/2:ret`, `Infer.bind/3:p0`, `Infer.bind/3:p1`, `Infer.bind_checked/3:p0`, `Infer.bind_checked/3:p1`, `Infer.bind_checked/3:ret`, `Infer.bind_params/3:p2`, `Infer.call_sig/6:p5`, `Infer.call_sig/6:ret`, `Infer.do_unify/3:p0`, `Infer.do_unify/3:ret`, `Infer.free_vars/2:p0`, `Infer.fresh/1:p0`, `Infer.fresh/1:ret`, `Infer.fresh_n/2:p0`, `Infer.fresh_n/2:ret`, `Infer.fresh_num/1:p0`, `Infer.fresh_num/1:ret`, `Infer.freshen_tvars/2:p1`, `Infer.freshen_tvars/2:ret`, `Infer.gen/4:p3`, `Infer.gen/4:ret`, `Infer.gen_args_then_fresh/4:p3`, `Infer.gen_args_then_fresh/4:ret`, `Infer.gen_block/4:p3`, `Infer.gen_block/4:ret`, `Infer.gen_cons/5:p4`, `Infer.gen_cons/5:ret`, `Infer.gen_pat/4:p3`, `Infer.gen_pat/4:ret`, `Infer.gen_pat_cons/5:p4`, `Infer.gen_pat_cons/5:ret`, `Infer.generalize_map/3:p2`, `Infer.instantiate/5:p4`, `Infer.instantiate/5:ret`, `Infer.mark_num/2:p0`, `Infer.mark_num/2:ret`, `Infer.maybe_tuple/4:p3`, `Infer.maybe_tuple/4:ret`, `Infer.num_conflict?/3:p0`, `Infer.num_conflict?/3:p1`, `Infer.occurs?/3:p0`, `Infer.occurs?/3:p1`, `Infer.render/3:p0`, `Infer.render_wp/3:p0`, `Infer.resolve/2:p0`, `Infer.resolve_program/2:p1`, `Infer.resolve_struct_params/4:p3`, `Infer.resolve_struct_params/4:ret`, `Infer.sigvar_call/5:p4`, `Infer.store_new/0:ret`, `Infer.unify/3:p0`, `Infer.unify/3:ret`, `Infer.unk_vars/2:p0` |
+| `Unk0436` | 1 | `Infer.bind/3:ret` |
+| `Unk0437` | 3 | `Infer.bind_checked/3:ret`, `Infer.do_unify/3:ret`, `Infer.unify/3:ret` |
+| `Unk0438` | 1 | `Infer.bind_params/3:p0` |
+| `Unk0439` | 1 | `Infer.bind_params/3:p1` |
+| `Unk0440` | 1 | `Infer.bind_params/3:ret` |
+| `Unk0441` | 1 | `Infer.build_ctx/2:p0` |
+| `Unk0442` | 1 | `Infer.build_ctx/2:p1` |
+| `Unk0443` | 1 | `Infer.build_ctx/2:ret` |
+| `Unk0444` | 1 | `Infer.build_ledger/2:p0` |
+| `Unk0445` | 1 | `Infer.build_ledger/2:ret` |
+| `Unk0446` | 12 | `Infer.call_sig/6:p0`, `Infer.call_sig/6:p4`, `Infer.cluster_name/2:p0`, `Infer.gen/4:p2`, `Infer.gen_args_then_fresh/4:p2`, `Infer.gen_block/4:p2`, `Infer.gen_cons/5:p3`, `Infer.instantiate/5:p3`, `Infer.maybe_tuple/4:p2`, `Infer.ok_payload/3:p1`, `Infer.resolve_struct_params/4:p2`, `Infer.sigvar_call/5:p0` |
+| `Unk0447` | 11 | `Infer.call_sig/6:p0`, `Infer.call_sig/6:p4`, `Infer.gen/4:p2`, `Infer.gen_args_then_fresh/4:p2`, `Infer.gen_block/4:p2`, `Infer.gen_cons/5:p3`, `Infer.instantiate/5:p3`, `Infer.maybe_tuple/4:p2`, `Infer.ok_payload/3:p1`, `Infer.resolve_struct_params/4:p2`, `Infer.sigvar_call/5:p0` |
+| `Unk0448` | 1 | `Infer.call_sig/6:p1` |
+| `Unk0449` | 1 | `Infer.case_arm/1:p0` |
+| `Unk0450` | 1 | `Infer.case_arm/1:ret` |
+| `Unk0451` | 1 | `Infer.case_arm/1:ret` |
+| `Unk0452` | 1 | `Infer.clear_xmod/0:ret` |
+| `Unk0453` | 1 | `Infer.free_vars/2:ret` |
+| `Unk0454` | 1 | `Infer.fresh_n/2:ret` |
+| `Unk0455` | 2 | `Infer.freshen_tvars/2:p0`, `Infer.freshen_tvars/2:ret` |
+| `Unk0456` | 1 | `Infer.freshen_tvars/2:ret` |
+| `Unk0457` | 3 | `Infer.gen_pat/4:p0`, `Infer.gen_pat_cons/5:p0`, `Infer.gen_pat_cons/5:p1` |
+| `Unk0458` | 1 | `Infer.generalize_map/3:p0` |
+| `Unk0459` | 2 | `Infer.generalize_map/3:ret`, `Infer.render/3:p1` |
+| `Unk0460` | 2 | `Infer.generalize_map/3:ret`, `Infer.render/3:p1` |
+| `Unk0461` | 3 | `Infer.hole_or/2:p0`, `Infer.hole_or/2:p1`, `Infer.hole_or/2:ret` |
+| `Unk0462` | 2 | `Infer.hole_sig?/1:p0`, `Infer.infer_group/2:ret` |
+| `Unk0463` | 1 | `Infer.infer_group/2:p0` |
+| `Unk0464` | 2 | `Infer.infer_group/2:p1`, `Infer.result_analysis/3:p1` |
+| `Unk0465` | 2 | `Infer.infer_group/2:p1`, `Infer.result_analysis/3:p1` |
+| `Unk0466` | 1 | `Infer.instantiate/5:p0` |
+| `Unk0467` | 2 | `Infer.load_prelude_sigs/0:ret`, `Infer.prelude_sigs/0:ret` |
+| `Unk0468` | 1 | `Infer.mark_num/2:ret` |
+| `Unk0469` | 1 | `Infer.max_ph/1:p0` |
+| `Unk0470` | 1 | `Infer.maybe_tuple/4:p0` |
+| `Unk0471` | 1 | `Infer.mod_name/1:p0` |
+| `Unk0472` | 1 | `Infer.ok_payload/3:p0` |
+| `Unk0473` | 2 | `Infer.ok_payload/3:p2`, `Infer.result_analysis/3:p2` |
+| `Unk0474` | 1 | `Infer.ok_payload/3:ret` |
+| `Unk0475` | 1 | `Infer.parse_type/2:p0` |
+| `Unk0476` | 2 | `Infer.parse_type/2:p1`, `Infer.tvar?/1:p0` |
+| `Unk0477` | 1 | `Infer.parse_type/2:p1` |
+| `Unk0478` | 1 | `Infer.prime_xmod/2:p0` |
+| `Unk0479` | 1 | `Infer.prime_xmod/2:p1` |
+| `Unk0480` | 1 | `Infer.prime_xmod/2:ret` |
+| `Unk0481` | 1 | `Infer.put_slot/3:p0` |
+| `Unk0482` | 1 | `Infer.put_slot/3:ret` |
+| `Unk0483` | 1 | `Infer.render_wp/3:p1` |
+| `Unk0484` | 1 | `Infer.resolve_program/2:p0` |
+| `Unk0485` | 2 | `Infer.resolve_program/2:ret`, `Infer.whole_program/3:ret` |
+| `Unk0486` | 1 | `Infer.resolve_struct_params/4:p0` |
+| `Unk0487` | 1 | `Infer.resolve_struct_params/4:p1` |
+| `Unk0488` | 1 | `Infer.result_analysis/3:p0` |
+| `Unk0489` | 1 | `Infer.result_analysis/3:ret` |
+| `Unk0490` | 1 | `Infer.result_tag/1:p0` |
+| `Unk0491` | 1 | `Infer.result_tag/1:ret` |
+| `Unk0492` | 1 | `Infer.result_tag/1:ret` |
+| `Unk0493` | 1 | `Infer.sig_of/1:p0` |
+| `Unk0494` | 1 | `Infer.sig_of/1:ret` |
+| `Unk0495` | 1 | `Infer.sigvar_call/5:p1` |
+| `Unk0496` | 1 | `Infer.sigvar_call/5:p2` |
+| `Unk0497` | 1 | `Infer.sigvar_call/5:ret` |
+| `Unk0498` | 1 | `Infer.slot_sig/3:p2` |
+| `Unk0499` | 1 | `Infer.slot_sig/3:ret` |
+| `Unk0500` | 1 | `Infer.tvar?/1:ret` |
+| `Unk0501` | 1 | `Infer.tvar_name/1:p0` |
+| `Unk0502` | 1 | `Infer.tvar_name/1:ret` |
+| `Unk0503` | 1 | `Infer.unk_vars/2:ret` |
+| `Unk0504` | 3 | `Infer.whole_program/3:p0`, `PortAnalysis.collect_groups/1:ret`, `PortAnalysis.param_name_index/1:p0` |
+| `Unk0505` | 2 | `Infer.whole_program/3:p1`, `Transpile.stdlib_map/0:ret` |
+| `Unk0506` | 2 | `Infer.whole_program/3:p2`, `PortAnalysis.cluster_sums/1:ret` |
+| `Unk0507` | 1 | `Infer.xmod_cache/0:ret` |
+| `Unk0508` | 2 | `Interp.concat_chain/1:p0`, `Interp.concat_chain/1:ret` |
+| `Unk0509` | 1 | `Interp.resolve_part/4:p0` |
+| `Unk0510` | 2 | `Interp.resolve_part/4:ret`, `Interp.stringify/3:ret` |
+| `Unk0511` | 2 | `Interp.resolve_part/4:ret`, `Interp.stringify/3:ret` |
+| `Unk0512` | 1 | `JS.all_funcs/1:p0` |
+| `Unk0513` | 2 | `JS.all_funcs/1:p0`, `JS.all_funcs/1:ret` |
+| `Unk0514` | 1 | `JS.arm_return/2:p0` |
+| `Unk0515` | 1 | `JS.arm_return/2:p1` |
+| `Unk0516` | 1 | `JS.bind_lines/1:p0` |
+| `Unk0517` | 4 | `JS.block_return/1:p0`, `JVM.block_value/1:p0`, `Shadow.ded_block/4:ret`, `Shadow.dedup/3:ret` |
+| `Unk0518` | 1 | `JS.case_arm_js/1:p0` |
+| `Unk0519` | 1 | `JS.clause_js/1:p0` |
+| `Unk0520` | 4 | `JS.clause_return/2:p1`, `JS.guarded_return/3:p2`, `JVM.clause_value/2:p1`, `Shadow.dedup/3:p1` |
+| `Unk0521` | 1 | `JS.cp_lit/1:p0` |
+| `Unk0522` | 1 | `JS.dispatcher_js/4:p0` |
+| `Unk0523` | 1 | `JS.dispatcher_js/4:p1` |
+| `Unk0524` | 1 | `JS.dispatcher_js/4:p2` |
+| `Unk0525` | 1 | `JS.dispatcher_js/4:p3` |
+| `Unk0526` | 1 | `JS.first_unsupported/2:p0` |
+| `Unk0527` | 1 | `JS.first_unsupported/2:p1` |
+| `Unk0528` | 2 | `JS.first_unsupported/2:p1`, `JS.first_unsupported/2:ret` |
+| `Unk0529` | 2 | `JS.float?/1:p0`, `JS.num_js/1:p0` |
+| `Unk0530` | 1 | `JS.function_js/1:p0` |
+| `Unk0531` | 1 | `JS.guarded_return/3:p1` |
+| `Unk0532` | 3 | `JS.js_atom/1:p0`, `JS.js_str/1:p0`, `JS.lit_js/1:p0` |
+| `Unk0533` | 1 | `JS.js_guard!/3:p1` |
+| `Unk0534` | 1 | `JS.js_guard!/3:p2` |
+| `Unk0535` | 1 | `JS.js_guard!/3:ret` |
+| `Unk0536` | 1 | `JS.js_number_int?/1:p0` |
+| `Unk0537` | 1 | `JS.mangle/3:p0` |
+| `Unk0538` | 1 | `JS.mangle/3:p1` |
+| `Unk0539` | 1 | `JS.mangle/3:p2` |
+| `Unk0540` | 1 | `JS.match_elems/2:p0` |
+| `Unk0541` | 1 | `JS.match_elems/2:ret` |
+| `Unk0542` | 1 | `JS.paren/1:p0` |
+| `Unk0543` | 1 | `JS.pascal?/1:p0` |
+| `Unk0544` | 1 | `JS.pat_match/2:ret` |
+| `Unk0545` | 1 | `JS.reject_mixed_int_mode!/1:ret` |
+| `Unk0546` | 1 | `JS.reject_unsupported!/1:p0` |
+| `Unk0547` | 1 | `JS.reject_unsupported!/1:ret` |
+| `Unk0548` | 1 | `JS.reject_wide_int!/2:p0` |
+| `Unk0549` | 1 | `JS.reject_wide_int!/2:p1` |
+| `Unk0550` | 1 | `JS.reject_wide_int!/2:ret` |
+| `Unk0551` | 1 | `JS.stmt_js/1:p0` |
+| `Unk0552` | 1 | `JS.stmt_return/1:p0` |
+| `Unk0553` | 1 | `JS.struct_name_set/1:ret` |
+| `Unk0554` | 1 | `JS.sum_ctor_map/1:ret` |
+| `Unk0555` | 1 | `JS.sum_guard_js/1:p0` |
+| `Unk0556` | 1 | `JVM.all_funcs/1:p0` |
+| `Unk0557` | 2 | `JVM.all_funcs/1:p0`, `JVM.all_funcs/1:ret` |
+| `Unk0558` | 1 | `JVM.bind_str/1:p0` |
+| `Unk0559` | 1 | `JVM.case_arms/2:p0` |
+| `Unk0560` | 1 | `JVM.case_arms/2:ret` |
+| `Unk0561` | 1 | `JVM.case_arms/2:ret` |
+| `Unk0562` | 1 | `JVM.clause_lines/1:p0` |
+| `Unk0563` | 1 | `JVM.clause_lines/1:ret` |
+| `Unk0564` | 1 | `JVM.clause_lines/1:ret` |
+| `Unk0565` | 1 | `JVM.clause_match/1:p0` |
+| `Unk0566` | 1 | `JVM.clause_match/1:ret` |
+| `Unk0567` | 1 | `JVM.first_unsupported/2:p0` |
+| `Unk0568` | 1 | `JVM.first_unsupported/2:p1` |
+| `Unk0569` | 2 | `JVM.first_unsupported/2:p1`, `JVM.first_unsupported/2:ret` |
+| `Unk0570` | 1 | `JVM.function_kt/1:p0` |
+| `Unk0571` | 1 | `JVM.guarded_arm/2:p1` |
+| `Unk0572` | 1 | `JVM.guarded_return/3:p0` |
+| `Unk0573` | 1 | `JVM.guarded_return/3:p1` |
+| `Unk0574` | 1 | `JVM.guarded_return/3:p2` |
+| `Unk0575` | 1 | `JVM.kotlin_module/2:p1` |
+| `Unk0576` | 2 | `JVM.kt_str/1:p0`, `JVM.lit_kt/1:p0` |
+| `Unk0577` | 1 | `JVM.kt_type/1:ret` |
+| `Unk0578` | 1 | `JVM.pat_match/2:ret` |
+| `Unk0579` | 1 | `JVM.reject_unsupported!/1:p0` |
+| `Unk0580` | 1 | `JVM.reject_unsupported!/1:ret` |
+| `Unk0581` | 1 | `JVM.stmt_kt/1:p0` |
+| `Unk0582` | 1 | `JVM.stmt_value/1:p0` |
+| `Unk0583` | 1 | `JVM.sum_decl/1:p0` |
+| `Unk0584` | 1 | `JVM.to_jar/3:p2` |
+| `Unk0585` | 1 | `JVM.to_jar/3:ret` |
+| `Unk0586` | 1 | `JVM.variant_decl/2:p0` |
+| `Unk0587` | 1 | `JVM.variant_decl/2:p1` |
+| `Unk0588` | 4 | `Lexer.binify/1:ret`, `Lexer.capture_hole/3:ret`, `Lexer.lex_parts/3:p2`, `Lexer.lex_parts/3:ret` |
+| `Unk0589` | 1 | `Lexer.capture_hole/3:ret` |
+| `Unk0590` | 1 | `Lexer.char_escape/1:p0` |
+| `Unk0591` | 2 | `Lexer.char_escape/1:ret`, `Lexer.parse_hex!/1:p0` |
+| `Unk0592` | 2 | `Lexer.close_char/1:ret`, `Lexer.lex_char/1:ret` |
+| `Unk0593` | 1 | `Lexer.collapse_nl/1:p0` |
+| `Unk0594` | 1 | `Lexer.collapse_nl/1:ret` |
+| `Unk0595` | 1 | `Lexer.detokenize/2:p0` |
+| `Unk0596` | 1 | `Lexer.detokenize/2:p1` |
+| `Unk0597` | 1 | `Lexer.detokenize/2:ret` |
+| `Unk0598` | 1 | `Lexer.escape_str/1:p0` |
+| `Unk0599` | 75 | `Lexer.expr_tokens/1:ret`, `Pratt.climb/3:p1`, `Pratt.climb/3:ret`, `Pratt.collect_dots/2:p1`, `Pratt.collect_dots/2:ret`, `Pratt.expect_kw/2:p0`, `Pratt.expect_kw/2:ret`, `Pratt.expect_op/2:p0`, `Pratt.expect_op/2:ret`, `Pratt.expect_rbracket/1:p0`, `Pratt.expect_rbracket/1:ret`, `Pratt.expect_rparen/1:p0`, `Pratt.expect_rparen/1:ret`, `Pratt.finish_arg/2:p1`, `Pratt.finish_arg/2:ret`, `Pratt.parse_args/1:p0`, `Pratt.parse_args/1:ret`, `Pratt.parse_arms/2:p0`, `Pratt.parse_arms/2:ret`, `Pratt.parse_block/1:p0`, `Pratt.parse_block/1:ret`, `Pratt.parse_capture/1:p0`, `Pratt.parse_capture/1:ret`, `Pratt.parse_case/1:p0`, `Pratt.parse_case/1:ret`, `Pratt.parse_expr/2:p0`, `Pratt.parse_expr/2:ret`, `Pratt.parse_if/1:p0`, `Pratt.parse_if/1:ret`, `Pratt.parse_lambda/1:p0`, `Pratt.parse_lambda/1:ret`, `Pratt.parse_list/2:p0`, `Pratt.parse_list/2:ret`, `Pratt.parse_map/2:p0`, `Pratt.parse_map/2:ret`, `Pratt.parse_param/1:p0`, `Pratt.parse_param/1:ret`, `Pratt.parse_params/1:p0`, `Pratt.parse_params/1:ret`, `Pratt.parse_pat/1:p0`, `Pratt.parse_pat/1:ret`, `Pratt.parse_pat_args/2:p0`, `Pratt.parse_pat_args/2:ret`, `Pratt.parse_pat_fields/2:p0`, `Pratt.parse_pat_fields/2:ret`, `Pratt.parse_pat_list/2:p0`, `Pratt.parse_pat_list/2:ret`, `Pratt.parse_pat_map/2:p0`, `Pratt.parse_pat_map/2:ret`, `Pratt.parse_pat_tuple/2:p0`, `Pratt.parse_pat_tuple/2:ret`, `Pratt.parse_path/1:p0`, `Pratt.parse_path/1:ret`, `Pratt.parse_pats/2:p0`, `Pratt.parse_postfix/2:p1`, `Pratt.parse_postfix/2:ret`, `Pratt.parse_prefix/1:p0`, `Pratt.parse_prefix/1:ret`, `Pratt.parse_primary/1:p0`, `Pratt.parse_primary/1:ret`, `Pratt.parse_stmt/1:p0`, `Pratt.parse_stmt/1:ret`, `Pratt.parse_stmts/2:p0`, `Pratt.parse_stmts/2:ret`, `Pratt.parse_tuple/2:p0`, `Pratt.parse_tuple/2:ret`, `Pratt.parse_type/1:p0`, `Pratt.parse_type/1:ret`, `Pratt.parse_type_args/2:p0`, `Pratt.parse_type_args/2:ret`, `Pratt.parse_with/1:p0`, `Pratt.parse_with/1:ret`, `Pratt.parse_with_clauses/2:p0`, `Pratt.parse_with_clauses/2:ret`, `Pratt.peek_infix/1:p0` |
+| `Unk0600` | 2 | `Lexer.lex/2:p1`, `Lexer.word/1:ret` |
+| `Unk0601` | 2 | `Lexer.lex/2:ret`, `Lexer.tokenize_trivia/1:ret` |
+| `Unk0602` | 1 | `Lexer.lex_char/1:ret` |
+| `Unk0603` | 2 | `Lexer.lex_parts/3:p2`, `Lexer.lex_parts/3:ret` |
+| `Unk0604` | 1 | `Lexer.lex_parts/3:ret` |
+| `Unk0605` | 1 | `Lexer.lex_string_token/1:ret` |
+| `Unk0606` | 3 | `Lexer.lex_string_token/1:ret`, `Lexer.string_token/1:p0`, `Lexer.string_token/1:ret` |
+| `Unk0607` | 2 | `Lexer.lex_string_token/1:ret`, `Lexer.string_token/1:ret` |
+| `Unk0608` | 1 | `Lexer.punct/1:ret` |
+| `Unk0609` | 1 | `Lexer.strip_trivia/1:p0` |
+| `Unk0610` | 1 | `Lexer.strip_trivia/1:ret` |
+| `Unk0611` | 1 | `Lexer.take_comment/1:ret` |
+| `Unk0612` | 4 | `Lexer.take_hex/2:p0`, `Lexer.take_hex/2:ret`, `Lexer.take_hex/3:p0`, `Lexer.take_hex/3:ret` |
+| `Unk0613` | 1 | `Lexer.tok_str/2:p0` |
+| `Unk0614` | 1 | `Lexer.tokenize/1:p0` |
+| `Unk0615` | 1 | `Lexer.tokenize/1:ret` |
+| `Unk0616` | 2 | `Livebook.eval/1:p0`, `Livebook.run/2:p1` |
+| `Unk0617` | 2 | `Livebook.eval/1:ret`, `Livebook.output/1:ret` |
+| `Unk0618` | 1 | `Livebook.reset/0:ret` |
+| `Unk0619` | 2 | `Livebook.run/2:p0`, `Livebook.run/2:ret` |
+| `Unk0620` | 1 | `Livebook.run/2:ret` |
+| `Unk0621` | 1 | `Livebook.session_pid/0:ret` |
+| `Unk0622` | 4 | `Lower.add_list_elem_vars/2:p0`, `Lower.add_list_elem_vars/2:ret`, `Lower.add_var/2:p0`, `Lower.add_var/2:ret` |
+| `Unk0623` | 1 | `Lower.add_list_elem_vars/2:p1` |
+| `Unk0624` | 1 | `Lower.add_var/2:p1` |
+| `Unk0625` | 1 | `Lower.all_pat_vars/1:ret` |
+| `Unk0626` | 1 | `Lower.arm_rebinds/3:p0` |
+| `Unk0627` | 3 | `Lower.arm_rebinds/3:p1`, `Lower.iso_cons_positions/1:ret`, `Lower.rust_scrut/2:p1` |
+| `Unk0628` | 4 | `Lower.arm_rebinds/3:p2`, `Lower.collect_ids/2:p1`, `Lower.collect_ids/2:ret`, `Lower.used_ids/1:ret` |
+| `Unk0629` | 1 | `Lower.arm_rebinds/3:ret` |
+| `Unk0630` | 1 | `Lower.assoc/1:ret` |
+| `Unk0631` | 1 | `Lower.assoc_proj/2:p1` |
+| `Unk0632` | 1 | `Lower.body_ast/2:p0` |
+| `Unk0633` | 1 | `Lower.body_ast/2:p1` |
+| `Unk0634` | 1 | `Lower.body_ast/2:ret` |
+| `Unk0635` | 4 | `Lower.borrow_arg/4:p2`, `Lower.insert_borrows/3:p1`, `Lower.owned_arg?/2:p1`, `Lower.param_rtypes/2:p1` |
+| `Unk0636` | 5 | `Lower.borrow_arg/4:p2`, `Lower.insert_borrows/3:p1`, `Lower.owned_arg?/2:p1`, `Lower.param_rtypes/2:p0`, `Lower.param_rtypes/2:p1` |
+| `Unk0637` | 3 | `Lower.borrow_arg/4:p3`, `Lower.borrow_value/2:p1`, `Lower.insert_borrows/3:p2` |
+| `Unk0638` | 1 | `Lower.borrow_arg/4:ret` |
+| `Unk0639` | 1 | `Lower.borrowed_in_pat/2:ret` |
+| `Unk0640` | 1 | `Lower.borrowed_vars/2:p0` |
+| `Unk0641` | 1 | `Lower.borrowed_vars/2:p1` |
+| `Unk0642` | 1 | `Lower.borrowed_vars/2:ret` |
+| `Unk0643` | 1 | `Lower.build_env/3:p1` |
+| `Unk0644` | 1 | `Lower.build_env/3:p2` |
+| `Unk0645` | 2 | `Lower.build_env/3:ret`, `Lower.check!/2:p1` |
+| `Unk0646` | 3 | `Lower.build_meta/1:ret`, `Lower.ctx/4:p0`, `Lower.to_rust/5:p2` |
+| `Unk0647` | 4 | `Lower.build_struct_meta/1:ret`, `Lower.ctx/4:p1`, `Lower.to_elixir/4:p3`, `Lower.to_rust/5:p4` |
+| `Unk0648` | 9 | `Lower.case_guard/2:p1`, `Lower.disp/2:p1`, `Lower.emit/2:p1`, `Lower.emit_ast/2:p1`, `Lower.emit_block/2:p1`, `Lower.emit_expr/2:p1`, `Lower.guard_kw/1:p0`, `Lower.guard_str/3:p1`, `Lower.p/3:p2` |
+| `Unk0649` | 1 | `Lower.char_vars/2:p0` |
+| `Unk0650` | 1 | `Lower.char_vars/2:p1` |
+| `Unk0651` | 1 | `Lower.char_vars/2:ret` |
+| `Unk0652` | 14 | `Lower.check!/2:p0`, `Lower.compile/4:p1`, `Lower.compile_beam/4:p1`, `Lower.compile_elixir/4:p1`, `Lower.elixir_clauses/3:p0`, `Lower.fn_all_tvars/2:p0`, `Lower.infer_concrete_params/2:p0`, `Lower.iso_cons_positions/1:p0`, `Lower.pair_inst/1:p0`, `Lower.parametric_used?/2:p0`, `Lower.rust_fn/3:p0`, `Lower.rust_total_shim?/1:p0`, `Lower.to_elixir/4:p0`, `Lower.to_rust/5:p0` |
+| `Unk0653` | 19 | `Lower.check!/2:p0`, `Lower.compile/4:p1`, `Lower.compile_beam/4:p1`, `Lower.compile_elixir/4:p1`, `Lower.elixir_clauses/3:p0`, `Lower.ex_doc/2:p0`, `Lower.ex_typespec/1:p0`, `Lower.fn_all_tvars/2:p0`, `Lower.fn_all_tvars/2:ret`, `Lower.infer_concrete_params/2:p0`, `Lower.iso_cons_positions/1:p0`, `Lower.pair_inst/1:p0`, `Lower.parametric_used?/2:p0`, `Lower.rs_doc/2:p0`, `Lower.rust_enum/2:p0`, `Lower.rust_fn/3:p0`, `Lower.rust_total_shim?/1:p0`, `Lower.to_elixir/4:p0`, `Lower.to_rust/5:p0` |
+| `Unk0654` | 1 | `Lower.check!/2:ret` |
+| `Unk0655` | 1 | `Lower.collect_ids/2:p0` |
+| `Unk0656` | 1 | `Lower.collect_owned_field_vars/3:p0` |
+| `Unk0657` | 11 | `Lower.collect_owned_field_vars/3:p1`, `Lower.ctx/4:ret`, `Lower.ofb/3:p1`, `Lower.owned_field_binders/2:p1`, `Lower.owned_scrut?/2:p1`, `Lower.rust_const/2:p1`, `Lower.rust_fn/3:p1`, `Lower.rust_impl/3:p2`, `Lower.rust_impl_method/5:p3`, `Lower.trait_impl_block/3:p2`, `Lower.user_type?/2:p1` |
+| `Unk0658` | 11 | `Lower.collect_owned_field_vars/3:p1`, `Lower.ctx/4:ret`, `Lower.ofb/3:p1`, `Lower.owned_field_binders/2:p1`, `Lower.owned_scrut?/2:p1`, `Lower.rust_const/2:p1`, `Lower.rust_fn/3:p1`, `Lower.rust_impl/3:p2`, `Lower.rust_impl_method/5:p3`, `Lower.trait_impl_block/3:p2`, `Lower.user_type?/2:p1` |
+| `Unk0659` | 5 | `Lower.collect_owned_field_vars/3:p2`, `Lower.collect_owned_field_vars/3:ret`, `Lower.ofb/3:p2`, `Lower.ofb/3:ret`, `Lower.owned_field_binders/2:ret` |
+| `Unk0660` | 1 | `Lower.compile/4:p2` |
+| `Unk0661` | 1 | `Lower.compile/4:p3` |
+| `Unk0662` | 1 | `Lower.compile_beam/4:p2` |
+| `Unk0663` | 1 | `Lower.compile_beam/4:p3` |
+| `Unk0664` | 1 | `Lower.compile_elixir/4:p2` |
+| `Unk0665` | 1 | `Lower.compile_elixir/4:p3` |
+| `Unk0666` | 1 | `Lower.compile_module/1:p0` |
+| `Unk0667` | 1 | `Lower.compile_module_beam/1:p0` |
+| `Unk0668` | 1 | `Lower.cons_tail_names/1:ret` |
+| `Unk0669` | 3 | `Lower.const_set/1:p0`, `Lower.ex_const/2:p0`, `Lower.rust_const/2:p0` |
+| `Unk0670` | 2 | `Lower.const_set/1:ret`, `Lower.ctx/4:p2` |
+| `Unk0671` | 3 | `Lower.core_pat_rs/2:p1`, `Lower.pat_rs/2:p1`, `Lower.resolve_rust_pats/2:p1` |
+| `Unk0672` | 2 | `Lower.core_pat_vars/1:ret`, `Lower.with_ex_scope/2:p0` |
+| `Unk0673` | 1 | `Lower.ctx/4:p3` |
+| `Unk0674` | 2 | `Lower.deref_ids/2:p0`, `Lower.deref_ids/2:ret` |
+| `Unk0675` | 1 | `Lower.deref_ids/2:p1` |
+| `Unk0676` | 2 | `Lower.elixir_clauses/3:p1`, `Lower.ex_const/2:p1` |
+| `Unk0677` | 1 | `Lower.emit_ast/2:ret` |
+| `Unk0678` | 1 | `Lower.emit_expr/2:ret` |
+| `Unk0679` | 1 | `Lower.enum_generics/1:p0` |
+| `Unk0680` | 2 | `Lower.ex_scope/0:ret`, `Lower.put_ex_scope/1:p0` |
+| `Unk0681` | 1 | `Lower.ex_struct/1:p0` |
+| `Unk0682` | 1 | `Lower.ex_typespec/1:p0` |
+| `Unk0683` | 1 | `Lower.ex_use/1:p0` |
+| `Unk0684` | 2 | `Lower.fn_all_tvars/2:p1`, `Lower.pair_inst/1:ret` |
+| `Unk0685` | 1 | `Lower.guard_str/3:p0` |
+| `Unk0686` | 1 | `Lower.guard_str/3:p2` |
+| `Unk0687` | 1 | `Lower.impl_param/2:p0` |
+| `Unk0688` | 1 | `Lower.infer_concrete_params/2:p1` |
+| `Unk0689` | 1 | `Lower.infer_tvar_binding/1:p0` |
+| `Unk0690` | 1 | `Lower.infer_tvar_binding/1:ret` |
+| `Unk0691` | 1 | `Lower.list_rpat?/1:p0` |
+| `Unk0692` | 1 | `Lower.module_elixir/1:p0` |
+| `Unk0693` | 1 | `Lower.module_rust/1:p0` |
+| `Unk0694` | 2 | `Lower.ofb/3:p0`, `Lower.owned_field_binders/2:p0` |
+| `Unk0695` | 1 | `Lower.owned_scrut?/2:p0` |
+| `Unk0696` | 1 | `Lower.owned_str_arg/1:p0` |
+| `Unk0697` | 1 | `Lower.owned_str_arg/1:ret` |
+| `Unk0698` | 1 | `Lower.parametric_param_map/1:ret` |
+| `Unk0699` | 1 | `Lower.parametric_used?/2:p1` |
+| `Unk0700` | 2 | `Lower.pascal?/1:p0`, `Lower.variant_info/2:p1` |
+| `Unk0701` | 1 | `Lower.pipe_to_call/2:p0` |
+| `Unk0702` | 1 | `Lower.proto_method_traits/1:ret` |
+| `Unk0703` | 1 | `Lower.proto_methods/0:ret` |
+| `Unk0704` | 1 | `Lower.pub_sig_type_names/1:p0` |
+| `Unk0705` | 1 | `Lower.pub_sig_type_names/1:ret` |
+| `Unk0706` | 1 | `Lower.put_ex_scope/1:ret` |
+| `Unk0707` | 5 | `Lower.put_result_str_flags/1:p0`, `Lower.result_parts/1:p0`, `Lower.result_parts/1:ret`, `Lower.rust_ret/1:p0`, `Lower.self_subst/2:ret` |
+| `Unk0708` | 1 | `Lower.put_result_str_flags/1:ret` |
+| `Unk0709` | 1 | `Lower.ref_type/2:p1` |
+| `Unk0710` | 1 | `Lower.resolve_consts/2:p1` |
+| `Unk0711` | 2 | `Lower.resolve_structs/2:p1`, `Lower.struct_pairs/4:p3` |
+| `Unk0712` | 6 | `Lower.resolve_variants/2:p1`, `Lower.variant_info/2:p0`, `Lower.variant_info/2:ret`, `Lower.variant_lit/2:p0`, `Lower.variant_pairs/3:p0`, `Lower.variant_pairs/3:p2` |
+| `Unk0713` | 3 | `Lower.resolve_variants/2:p1`, `Lower.variant_info/2:p0`, `Lower.variant_pairs/3:p2` |
+| `Unk0714` | 1 | `Lower.result_parts/1:ret` |
+| `Unk0715` | 2 | `Lower.rewrite_proto_calls/2:p0`, `Lower.rewrite_proto_calls/2:ret` |
+| `Unk0716` | 1 | `Lower.rewrite_proto_calls/2:p1` |
+| `Unk0717` | 1 | `Lower.rust_case/3:p1` |
+| `Unk0718` | 1 | `Lower.rust_enum/2:p0` |
+| `Unk0719` | 1 | `Lower.rust_enum/2:p1` |
+| `Unk0720` | 1 | `Lower.rust_generics/1:p0` |
+| `Unk0721` | 1 | `Lower.rust_impl_method/5:p0` |
+| `Unk0722` | 1 | `Lower.rust_impl_method/5:p1` |
+| `Unk0723` | 1 | `Lower.rust_lit_type/1:p0` |
+| `Unk0724` | 1 | `Lower.rust_proto_body/2:p0` |
+| `Unk0725` | 1 | `Lower.rust_proto_body/2:p1` |
+| `Unk0726` | 1 | `Lower.rust_proto_body/2:p1` |
+| `Unk0727` | 1 | `Lower.rust_proto_body/2:ret` |
+| `Unk0728` | 1 | `Lower.rust_protocols/4:ret` |
+| `Unk0729` | 1 | `Lower.rust_scrut/2:p0` |
+| `Unk0730` | 1 | `Lower.rust_struct/2:p0` |
+| `Unk0731` | 1 | `Lower.rust_struct/2:p1` |
+| `Unk0732` | 1 | `Lower.rust_trait/1:p0` |
+| `Unk0733` | 1 | `Lower.rust_use/1:p0` |
+| `Unk0734` | 2 | `Lower.rustify_parametric/2:p0`, `Lower.rustify_parametric/2:ret` |
+| `Unk0735` | 1 | `Lower.rustify_parametric/2:p1` |
+| `Unk0736` | 1 | `Lower.self_subst/2:p0` |
+| `Unk0737` | 2 | `Lower.sig_param/2:p1`, `Lower.trait_params/2:p1` |
+| `Unk0738` | 1 | `Lower.slice_binders/2:p0` |
+| `Unk0739` | 1 | `Lower.slice_binders/2:ret` |
+| `Unk0740` | 1 | `Lower.slice_elem_vars/1:ret` |
+| `Unk0741` | 1 | `Lower.str_lit/1:p0` |
+| `Unk0742` | 1 | `Lower.struct_pairs/4:p0` |
+| `Unk0743` | 1 | `Lower.struct_pairs/4:p1` |
+| `Unk0744` | 1 | `Lower.struct_pairs/4:ret` |
+| `Unk0745` | 2 | `Lower.subst_assoc/2:p0`, `Lower.subst_assoc/2:ret` |
+| `Unk0746` | 1 | `Lower.subst_assoc/2:p1` |
+| `Unk0747` | 2 | `Lower.tail_expr/1:p0`, `Lower.tail_expr/1:ret` |
+| `Unk0748` | 1 | `Lower.to_elixir/4:p2` |
+| `Unk0749` | 1 | `Lower.to_elixir/4:ret` |
+| `Unk0750` | 1 | `Lower.to_rust/5:p3` |
+| `Unk0751` | 1 | `Lower.to_rust/5:ret` |
+| `Unk0752` | 1 | `Lower.tvar_name?/1:p0` |
+| `Unk0753` | 1 | `Lower.type_idents/1:p0` |
+| `Unk0754` | 1 | `Lower.type_idents/1:ret` |
+| `Unk0755` | 1 | `Lower.type_param_tvars/1:p0` |
+| `Unk0756` | 1 | `Lower.type_param_tvars/1:ret` |
+| `Unk0757` | 1 | `Lower.user_type?/2:p0` |
+| `Unk0758` | 2 | `Lower.variant_lit/2:p1`, `Lower.variant_pairs/3:ret` |
+| `Unk0759` | 2 | `Lower.widen_char_arith/2:p1`, `Lower.wrap_char/2:p1` |
+| `Unk0760` | 1 | `Lower.with_chain_rs/3:p0` |
+| `Unk0761` | 4 | `Macro.binders_here/1:p0`, `Macro.collect_binders/1:p0`, `Macro.freshen/2:p0`, `Macro.rename/2:p0` |
+| `Unk0762` | 2 | `Macro.binders_here/1:ret`, `Macro.collect_binders/1:ret` |
+| `Unk0763` | 1 | `Macro.build_env/1:p0` |
+| `Unk0764` | 1 | `Macro.check_portable!/2:p0` |
+| `Unk0765` | 1 | `Macro.check_portable!/2:ret` |
+| `Unk0766` | 1 | `Macro.expand/3:p2` |
+| `Unk0767` | 1 | `Macro.freshen/2:p1` |
+| `Unk0768` | 4 | `Macro.freshen/2:ret`, `Macro.rename/2:p1`, `Macro.rename/2:ret`, `Macro.substitute/2:p0` |
+| `Unk0769` | 1 | `Macro.rename/2:p1` |
+| `Unk0770` | 1 | `Macro.substitute/2:p1` |
+| `Unk0771` | 1 | `Opaque.do_erase/2:p0` |
+| `Unk0772` | 6 | `Opaque.do_erase/2:p1`, `Opaque.erase_ctx/1:ret`, `Opaque.erase_func/2:p1`, `Opaque.erase_mod/2:p1`, `Opaque.erase_struct/2:p1`, `Opaque.erase_type/2:p1` |
+| `Unk0773` | 6 | `Opaque.do_erase/2:p1`, `Opaque.erase_ctx/1:ret`, `Opaque.erase_func/2:p1`, `Opaque.erase_mod/2:p1`, `Opaque.erase_struct/2:p1`, `Opaque.erase_type/2:p1` |
+| `Unk0774` | 1 | `Opaque.erase_clause/3:p0` |
+| `Unk0775` | 1 | `Opaque.erase_clause/3:p1` |
+| `Unk0776` | 1 | `Opaque.erase_clause/3:p2` |
+| `Unk0777` | 1 | `Opaque.erase_const/2:p0` |
+| `Unk0778` | 1 | `Opaque.erase_const/2:p1` |
+| `Unk0779` | 3 | `Opaque.erase_ctx/1:p0`, `Opaque.opaques/1:p0`, `Opaque.opaques/1:ret` |
+| `Unk0780` | 1 | `Opaque.erase_func/2:p0` |
+| `Unk0781` | 1 | `Opaque.erase_mod/2:p0` |
+| `Unk0782` | 1 | `Opaque.erase_struct/2:p0` |
+| `Unk0783` | 1 | `Opaque.erase_type/2:p0` |
+| `Unk0784` | 1 | `Opaque.erase_variant/2:p0` |
+| `Unk0785` | 1 | `Opaque.erase_variant/2:p1` |
+| `Unk0786` | 1 | `Opaque.opaques/1:p0` |
+| `Unk0787` | 4 | `Opaque.strip/3:p0`, `Opaque.strip/3:ret`, `Opaque.strip_into/3:p0`, `Opaque.strip_into/3:ret` |
+| `Unk0788` | 2 | `Opaque.strip/3:p1`, `Opaque.strip_into/3:p1` |
+| `Unk0789` | 4 | `Opaque.subst/2:p0`, `Opaque.subst/2:ret`, `Opaque.subst_fix/4:p0`, `Opaque.subst_fix/4:ret` |
+| `Unk0790` | 2 | `Opaque.subst/2:p1`, `Opaque.subst_fix/4:p1` |
+| `Unk0791` | 1 | `Opaque.subst_fix/4:p2` |
+| `Unk0792` | 2 | `PatternLower.lower/2:ret`, `PatternLower.lower_list/3:ret` |
+| `Unk0793` | 1 | `PatternLower.lower_clause/2:p0` |
+| `Unk0794` | 1 | `PatternLower.lower_many/2:ret` |
+| `Unk0795` | 2 | `PortAnalysis.analyze/1:p0`, `PortAnalysis.src_of/2:p0` |
+| `Unk0796` | 1 | `PortAnalysis.analyze/1:ret` |
+| `Unk0797` | 3 | `PortAnalysis.case_arm_sets/1:p0`, `PortAnalysis.clause_head_sets/1:p0`, `PortAnalysis.dispatch_sets/1:p0` |
+| `Unk0798` | 2 | `PortAnalysis.case_arm_sets/1:ret`, `PortAnalysis.clause_head_sets/1:ret` |
+| `Unk0799` | 2 | `PortAnalysis.cluster_sums/1:p0`, `PortAnalysis.dispatch_sets/1:ret` |
+| `Unk0800` | 1 | `PortAnalysis.collect_errors/2:p0` |
+| `Unk0801` | 2 | `PortAnalysis.collect_errors/2:p1`, `PortAnalysis.collect_errors/2:ret` |
+| `Unk0802` | 1 | `PortAnalysis.collect_groups/1:p0` |
+| `Unk0803` | 1 | `PortAnalysis.collect_structs/2:p0` |
+| `Unk0804` | 2 | `PortAnalysis.collect_structs/2:p1`, `PortAnalysis.collect_structs/2:ret` |
+| `Unk0805` | 1 | `PortAnalysis.error_proposal/1:p0` |
+| `Unk0806` | 1 | `PortAnalysis.error_proposal/1:ret` |
+| `Unk0807` | 1 | `PortAnalysis.error_shape/1:p0` |
+| `Unk0808` | 1 | `PortAnalysis.error_shape/1:ret` |
+| `Unk0809` | 1 | `PortAnalysis.error_shape/1:ret` |
+| `Unk0810` | 6 | `PortAnalysis.errors_section/1:p0`, `PortAnalysis.holes_section/1:p0`, `PortAnalysis.sigs_section/1:p0`, `PortAnalysis.summary_section/1:p0`, `PortAnalysis.sums_section/1:p0`, `PortAnalysis.to_markdown/1:p0` |
+| `Unk0811` | 1 | `PortAnalysis.head_name_pats/1:p0` |
+| `Unk0812` | 1 | `PortAnalysis.head_name_pats/1:ret` |
+| `Unk0813` | 1 | `PortAnalysis.head_name_pats/1:ret` |
+| `Unk0814` | 2 | `PortAnalysis.module_name/1:p0`, `PortAnalysis.module_report/3:p1` |
+| `Unk0815` | 1 | `PortAnalysis.module_report/3:p0` |
+| `Unk0816` | 3 | `PortAnalysis.module_report/3:p2`, `PortAnalysis.src_of/2:ret`, `Transpile.inferred/1:p0` |
+| `Unk0817` | 1 | `PortAnalysis.module_report/3:ret` |
+| `Unk0818` | 1 | `PortAnalysis.needs_review?/1:p0` |
+| `Unk0819` | 1 | `PortAnalysis.param_name_index/1:ret` |
+| `Unk0820` | 1 | `PortAnalysis.parse/1:p0` |
+| `Unk0821` | 1 | `PortAnalysis.parse/1:ret` |
+| `Unk0822` | 1 | `PortAnalysis.pascal/1:p0` |
+| `Unk0823` | 1 | `PortAnalysis.pascal/1:ret` |
+| `Unk0824` | 1 | `PortAnalysis.pattern_structs/1:p0` |
+| `Unk0825` | 1 | `PortAnalysis.pattern_structs/1:ret` |
+| `Unk0826` | 1 | `PortAnalysis.reach_note/1:p0` |
+| `Unk0827` | 1 | `PortAnalysis.reach_note/1:ret` |
+| `Unk0828` | 1 | `PortAnalysis.short/1:p0` |
+| `Unk0829` | 1 | `PortAnalysis.src_of/2:p1` |
+| `Unk0830` | 1 | `PortAnalysis.to_markdown/1:ret` |
+| `Unk0831` | 3 | `Pratt.after_paren/2:p0`, `Pratt.after_paren/2:ret`, `Pratt.lambda_ahead?/1:p0` |
+| `Unk0832` | 5 | `Pratt.assoc/1:p0`, `Pratt.bp/1:p0`, `Pratt.level/1:p0`, `Pratt.peek_infix/1:ret`, `Pratt.same_level_root?/2:p1` |
+| `Unk0833` | 1 | `Pratt.assoc/1:ret` |
+| `Unk0834` | 4 | `Pratt.climb/3:p0`, `Pratt.climb/3:ret`, `Pratt.parse_expr/2:ret`, `Pratt.same_level_root?/2:p0` |
+| `Unk0835` | 3 | `Pratt.collect_dots/2:p0`, `Pratt.collect_dots/2:ret`, `Pratt.parse_path/1:ret` |
+| `Unk0836` | 3 | `Pratt.collect_dots/2:p0`, `Pratt.collect_dots/2:ret`, `Pratt.parse_path/1:ret` |
+| `Unk0837` | 5 | `Pratt.desugar_prop/2:p0`, `Pratt.desugar_prop/2:ret`, `Pratt.desugar_propagation/1:p0`, `Pratt.desugar_propagation/1:ret`, `Pratt.parse_block/1:ret` |
+| `Unk0838` | 5 | `Pratt.desugar_prop/2:p0`, `Pratt.desugar_prop/2:ret`, `Pratt.desugar_propagation/1:p0`, `Pratt.desugar_propagation/1:ret`, `Pratt.parse_block/1:ret` |
+| `Unk0839` | 3 | `Pratt.desugar_prop/2:ret`, `Pratt.desugar_propagation/1:ret`, `Pratt.parse_block/1:ret` |
+| `Unk0840` | 3 | `Pratt.finish_arg/2:p0`, `Pratt.finish_arg/2:ret`, `Pratt.parse_args/1:ret` |
+| `Unk0841` | 2 | `Pratt.here/1:p0`, `Pratt.tok_desc/1:p0` |
+| `Unk0842` | 1 | `Pratt.int_of/1:p0` |
+| `Unk0843` | 22 | `Pratt.int_of/1:ret`, `Pratt.parse_capture/1:ret`, `Pratt.parse_case/1:ret`, `Pratt.parse_if/1:ret`, `Pratt.parse_lambda/1:ret`, `Pratt.parse_list/2:ret`, `Pratt.parse_map/2:p1`, `Pratt.parse_map/2:ret`, `Pratt.parse_pat/1:ret`, `Pratt.parse_pat_list/2:ret`, `Pratt.parse_pat_map/2:p1`, `Pratt.parse_pat_map/2:ret`, `Pratt.parse_pat_tuple/2:p1`, `Pratt.parse_pat_tuple/2:ret`, `Pratt.parse_postfix/2:p0`, `Pratt.parse_postfix/2:ret`, `Pratt.parse_prefix/1:ret`, `Pratt.parse_primary/1:ret`, `Pratt.parse_tuple/2:p1`, `Pratt.parse_tuple/2:ret`, `Pratt.parse_with/1:ret`, `Pratt.str_interp/1:ret` |
+| `Unk0844` | 22 | `Pratt.int_of/1:ret`, `Pratt.parse_capture/1:ret`, `Pratt.parse_case/1:ret`, `Pratt.parse_if/1:ret`, `Pratt.parse_lambda/1:ret`, `Pratt.parse_list/2:ret`, `Pratt.parse_map/2:p1`, `Pratt.parse_map/2:ret`, `Pratt.parse_pat/1:ret`, `Pratt.parse_pat_list/2:ret`, `Pratt.parse_pat_map/2:p1`, `Pratt.parse_pat_map/2:ret`, `Pratt.parse_pat_tuple/2:p1`, `Pratt.parse_pat_tuple/2:ret`, `Pratt.parse_postfix/2:p0`, `Pratt.parse_postfix/2:ret`, `Pratt.parse_prefix/1:ret`, `Pratt.parse_primary/1:ret`, `Pratt.parse_tuple/2:p1`, `Pratt.parse_tuple/2:ret`, `Pratt.parse_with/1:ret`, `Pratt.str_interp/1:ret` |
+| `Unk0845` | 1 | `Pratt.level/1:ret` |
+| `Unk0846` | 1 | `Pratt.opinfo/1:ret` |
+| `Unk0847` | 2 | `Pratt.parse_arms/2:p1`, `Pratt.parse_arms/2:ret` |
+| `Unk0848` | 13 | `Pratt.parse_capture/1:ret`, `Pratt.parse_case/1:ret`, `Pratt.parse_if/1:ret`, `Pratt.parse_lambda/1:ret`, `Pratt.parse_list/2:ret`, `Pratt.parse_map/2:ret`, `Pratt.parse_postfix/2:p0`, `Pratt.parse_postfix/2:ret`, `Pratt.parse_prefix/1:ret`, `Pratt.parse_primary/1:ret`, `Pratt.parse_tuple/2:ret`, `Pratt.parse_with/1:ret`, `Pratt.str_interp/1:ret` |
+| `Unk0849` | 1 | `Pratt.parse_list/2:p1` |
+| `Unk0850` | 1 | `Pratt.parse_param/1:ret` |
+| `Unk0851` | 1 | `Pratt.parse_param/1:ret` |
+| `Unk0852` | 1 | `Pratt.parse_params/1:ret` |
+| `Unk0853` | 4 | `Pratt.parse_pat/1:ret`, `Pratt.parse_pat_list/2:ret`, `Pratt.parse_pat_map/2:ret`, `Pratt.parse_pat_tuple/2:ret` |
+| `Unk0854` | 2 | `Pratt.parse_pat_args/2:p1`, `Pratt.parse_pat_args/2:ret` |
+| `Unk0855` | 2 | `Pratt.parse_pat_fields/2:p1`, `Pratt.parse_pat_fields/2:ret` |
+| `Unk0856` | 2 | `Pratt.parse_pat_fields/2:p1`, `Pratt.parse_pat_fields/2:ret` |
+| `Unk0857` | 1 | `Pratt.parse_pat_list/2:p1` |
+| `Unk0858` | 3 | `Pratt.parse_pats/1:ret`, `Pratt.parse_pats/2:p1`, `Pratt.parse_pats/2:ret` |
+| `Unk0859` | 1 | `Pratt.parse_stmt/1:ret` |
+| `Unk0860` | 1 | `Pratt.parse_stmt/1:ret` |
+| `Unk0861` | 2 | `Pratt.parse_stmts/2:p1`, `Pratt.parse_stmts/2:ret` |
+| `Unk0862` | 2 | `Pratt.parse_type_args/2:p1`, `Pratt.parse_type_args/2:ret` |
+| `Unk0863` | 2 | `Pratt.parse_with_clauses/2:p1`, `Pratt.parse_with_clauses/2:ret` |
+| `Unk0864` | 2 | `Pratt.parse_with_clauses/2:p1`, `Pratt.parse_with_clauses/2:ret` |
+| `Unk0865` | 1 | `Pratt.pascal?/1:p0` |
+| `Unk0866` | 1 | `Pratt.sexpr_pat/1:p0` |
+| `Unk0867` | 1 | `Pratt.sexpr_stmt/1:p0` |
+| `Unk0868` | 1 | `Pratt.str_interp/1:p0` |
+| `Unk0869` | 1 | `Prim.names/0:ret` |
+| `Unk0870` | 1 | `Prim.overflow_ops/0:ret` |
+| `Unk0871` | 1 | `Protocol.check_assoc!/2:ret` |
+| `Unk0872` | 1 | `Protocol.check_impl/3:p0` |
+| `Unk0873` | 3 | `Protocol.check_impl/3:p1`, `Protocol.expand/5:p0`, `Protocol.impl_methods/2:p1` |
+| `Unk0874` | 5 | `Protocol.check_impl/3:p2`, `Protocol.check_no_overlap/3:p1`, `Protocol.dispatcher/4:p3`, `Protocol.guard_for!/3:p2`, `Protocol.registry/2:ret` |
+| `Unk0875` | 1 | `Protocol.check_impl/3:ret` |
+| `Unk0876` | 4 | `Protocol.check_no_overlap/3:p0`, `Protocol.dispatcher/4:p2`, `Protocol.expand/5:p1`, `Protocol.impl_methods/2:p0` |
+| `Unk0877` | 2 | `Protocol.check_no_overlap/3:p2`, `Protocol.runtime_dispatch_target?/1:p0` |
+| `Unk0878` | 1 | `Protocol.check_no_overlap/3:ret` |
+| `Unk0879` | 2 | `Protocol.dispatcher/4:p0`, `Protocol.guard_for!/3:p1` |
+| `Unk0880` | 1 | `Protocol.dispatcher/4:p1` |
+| `Unk0881` | 1 | `Protocol.dispatcher/4:ret` |
+| `Unk0882` | 1 | `Protocol.dispatcher_params/2:p0` |
+| `Unk0883` | 1 | `Protocol.dispatcher_params/2:ret` |
+| `Unk0884` | 1 | `Protocol.guard_for!/3:ret` |
+| `Unk0885` | 1 | `Protocol.mangle/3:p0` |
+| `Unk0886` | 1 | `Protocol.mangle/3:p1` |
+| `Unk0887` | 1 | `Protocol.mangle/3:p2` |
+| `Unk0888` | 1 | `Protocol.param_type/1:p0` |
+| `Unk0889` | 1 | `Protocol.param_type/1:ret` |
+| `Unk0890` | 1 | `Protocol.registry/2:p0` |
+| `Unk0891` | 1 | `Protocol.registry/2:p1` |
+| `Unk0892` | 1 | `Protocol.subst_self/2:p0` |
+| `Unk0893` | 1 | `Protocol.subst_self/2:p1` |
+| `Unk0894` | 1 | `Protocol.subst_self/2:ret` |
+| `Unk0895` | 1 | `Protocol.sum_guard/1:p0` |
+| `Unk0896` | 1 | `Protocol.tag_disjunction/2:p0` |
+| `Unk0897` | 1 | `Protocol.tag_disjunction/2:p1` |
+| `Unk0898` | 1 | `Range.check/3:p0` |
+| `Unk0899` | 1 | `Range.check/3:p1` |
+| `Unk0900` | 1 | `Range.lit/1:p0` |
+| `Unk0901` | 8 | `Reach.all_emittable?/2:p0`, `Reach.builder_tail_ok?/2:p0`, `Reach.ctor_aligned?/2:p1`, `Reach.parametric_constructions/2:p0`, `Reach.parametric_rs_ok?/2:p0`, `Reach.scan_func/3:p0`, `Reach.sig_uses_fn_type?/1:p0`, `Reach.uses_parametric?/2:p0` |
+| `Unk0902` | 8 | `Reach.all_emittable?/2:p0`, `Reach.builder_tail_ok?/2:p0`, `Reach.ctor_aligned?/2:p1`, `Reach.parametric_constructions/2:p0`, `Reach.parametric_rs_ok?/2:p0`, `Reach.scan_func/3:p0`, `Reach.sig_uses_fn_type?/1:p0`, `Reach.uses_parametric?/2:p0` |
+| `Unk0903` | 4 | `Reach.all_emittable?/2:p1`, `Reach.parametric_ctx/2:ret`, `Reach.parametric_rs_ok?/2:p1`, `Reach.scan_func/3:p2` |
+| `Unk0904` | 7 | `Reach.all_funcs/1:p0`, `Reach.all_funcs/1:ret`, `Reach.analyze/1:p0`, `Reach.check_contracts/2:p0`, `Reach.parametric_ctx/2:p0`, `Reach.parametric_ctx/2:p1`, `Reach.symbol_lint!/1:p0` |
+| `Unk0905` | 7 | `Reach.all_funcs/1:p0`, `Reach.all_funcs/1:ret`, `Reach.analyze/1:p0`, `Reach.check_contracts/2:p0`, `Reach.parametric_ctx/2:p0`, `Reach.parametric_ctx/2:p1`, `Reach.symbol_lint!/1:p0` |
+| `Unk0906` | 1 | `Reach.analyze/1:ret` |
+| `Unk0907` | 15 | `Reach.atom_prim_blocker/0:ret`, `Reach.bare_atom_blocker/0:ret`, `Reach.classify/3:p2`, `Reach.classify/3:ret`, `Reach.ffi/2:ret`, `Reach.fn_type_blocker/0:ret`, `Reach.int_blocker/0:ret`, `Reach.parametric_blocker/0:ret`, `Reach.ref_blocker/0:ret`, `Reach.result_value_blocker/0:ret`, `Reach.scan/3:p2`, `Reach.scan/3:ret`, `Reach.scan_func/3:ret`, `Reach.wide_prim_blocker/0:ret`, `Reach.width_blocker/0:ret` |
+| `Unk0908` | 5 | `Reach.build_default/0:ret`, `Reach.check_contracts/2:p1`, `Reach.gate!/2:p1`, `Reach.validate_default/1:p0`, `Reach.validate_default/1:ret` |
+| `Unk0909` | 2 | `Reach.builder_tail_ok?/2:p1`, `Reach.tail_calls_generic?/2:p1` |
+| `Unk0910` | 1 | `Reach.check_contracts/2:ret` |
+| `Unk0911` | 3 | `Reach.classify/3:p1`, `Reach.scan/3:p1`, `Reach.scan_func/3:p1` |
+| `Unk0912` | 5 | `Reach.classify/3:p2`, `Reach.classify/3:ret`, `Reach.scan/3:p2`, `Reach.scan/3:ret`, `Reach.scan_func/3:ret` |
+| `Unk0913` | 2 | `Reach.collect_ctors/2:p1`, `Reach.parametric_constructions/2:p1` |
+| `Unk0914` | 2 | `Reach.collect_ctors/2:p1`, `Reach.parametric_constructions/2:p1` |
+| `Unk0915` | 3 | `Reach.collect_ctors/2:ret`, `Reach.ctor_aligned?/2:p0`, `Reach.parametric_constructions/2:ret` |
+| `Unk0916` | 3 | `Reach.collect_ctors/2:ret`, `Reach.ctor_aligned?/2:p0`, `Reach.parametric_constructions/2:ret` |
+| `Unk0917` | 1 | `Reach.conc_erl?/2:p1` |
+| `Unk0918` | 1 | `Reach.contract_message/1:p0` |
+| `Unk0919` | 1 | `Reach.core/2:p0` |
+| `Unk0920` | 1 | `Reach.core/2:p1` |
+| `Unk0921` | 1 | `Reach.core/2:p1` |
+| `Unk0922` | 2 | `Reach.deep/1:p0`, `Reach.find_atom_ordering/1:p0` |
+| `Unk0923` | 3 | `Reach.deep/1:ret`, `Reach.find_atom_ordering/1:ret`, `Reach.func_symbol_violations/1:ret` |
+| `Unk0924` | 1 | `Reach.emittable_parametric?/1:p0` |
+| `Unk0925` | 1 | `Reach.emittable_parametric?/1:ret` |
+| `Unk0926` | 1 | `Reach.fixpoint/2:p0` |
+| `Unk0927` | 2 | `Reach.fixpoint/2:p1`, `Reach.fixpoint/2:ret` |
+| `Unk0928` | 2 | `Reach.fixpoint/2:p1`, `Reach.fixpoint/2:ret` |
+| `Unk0929` | 1 | `Reach.func_symbol_violations/1:p0` |
+| `Unk0930` | 2 | `Reach.gate!/1:ret`, `Reach.gate!/2:ret` |
+| `Unk0931` | 1 | `Reach.js_wide_int?/1:p0` |
+| `Unk0932` | 1 | `Reach.mix_default/0:ret` |
+| `Unk0933` | 1 | `Reach.parametric_type?/1:p0` |
+| `Unk0934` | 1 | `Reach.pascal?/1:p0` |
+| `Unk0935` | 1 | `Reach.sig_idents/1:p0` |
+| `Unk0936` | 1 | `Reach.sig_idents/1:p0` |
+| `Unk0937` | 1 | `Reach.sig_idents/1:ret` |
+| `Unk0938` | 1 | `Reach.symbol_lint!/1:ret` |
+| `Unk0939` | 1 | `Reach.tail_calls_generic?/2:p0` |
+| `Unk0940` | 1 | `Reach.targets/0:ret` |
+| `Unk0941` | 1 | `Reach.tvar?/1:p0` |
+| `Unk0942` | 1 | `Reach.tvar?/1:ret` |
+| `Unk0943` | 2 | `Reach.type_has_tvar?/1:p0`, `Reach.type_idents/1:p0` |
+| `Unk0944` | 1 | `Reach.type_idents/1:ret` |
+| `Unk0945` | 1 | `Reach.uses_parametric?/2:p1` |
+| `Unk0946` | 1 | `Repl.accumulate_line/2:p1` |
+| `Unk0947` | 1 | `Repl.bind_env/2:p0` |
+| `Unk0948` | 18 | `Repl.bind_with_type/4:p0`, `Repl.bind_with_type/4:ret`, `Repl.eval_bind/4:p0`, `Repl.eval_bind/4:ret`, `Repl.eval_decl/2:p0`, `Repl.eval_expr/2:p0`, `Repl.eval_expr/2:ret`, `Repl.eval_stmt/2:p0`, `Repl.eval_stmt/2:ret`, `Repl.program/3:p0`, `Repl.program/3:p1`, `Repl.reload/2:p0`, `Repl.run/4:p0`, `Repl.run/4:p1`, `Repl.run/4:p2`, `Repl.safe_decl/1:p0`, `Repl.session_ic/1:p0`, `Repl.units_src/1:p0` |
+| `Unk0949` | 12 | `Repl.bind_with_type/4:p0`, `Repl.bind_with_type/4:ret`, `Repl.eval_bind/4:p0`, `Repl.eval_bind/4:ret`, `Repl.eval_decl/2:p0`, `Repl.eval_expr/2:p0`, `Repl.eval_expr/2:ret`, `Repl.eval_stmt/2:p0`, `Repl.eval_stmt/2:ret`, `Repl.reload/2:p0`, `Repl.run/4:p0`, `Repl.session_ic/1:p0` |
+| `Unk0950` | 5 | `Repl.bind_with_type/4:p3`, `Repl.infer_or_unknown/3:ret`, `Repl.safe_infer/3:ret`, `Repl.safe_infer_input/3:ret`, `Repl.type_of/2:ret` |
+| `Unk0951` | 4 | `Repl.bind_with_type/4:ret`, `Repl.eval_bind/4:ret`, `Repl.eval_expr/2:ret`, `Repl.eval_stmt/2:ret` |
+| `Unk0952` | 1 | `Repl.candidate_pool/2:p0` |
+| `Unk0953` | 1 | `Repl.candidate_pool/2:ret` |
+| `Unk0954` | 2 | `Repl.common_prefix/2:p0`, `Repl.common_prefix/3:p0` |
+| `Unk0955` | 2 | `Repl.common_prefix/2:p1`, `Repl.common_prefix/3:p1` |
+| `Unk0956` | 2 | `Repl.complete/2:p0`, `Repl.trailing_token/1:p0` |
+| `Unk0957` | 1 | `Repl.complete/2:p1` |
+| `Unk0958` | 2 | `Repl.complete/2:ret`, `Repl.continuation/2:p1` |
+| `Unk0959` | 1 | `Repl.describe/1:p0` |
+| `Unk0960` | 1 | `Repl.describe/1:ret` |
+| `Unk0961` | 1 | `Repl.eval/2:p0` |
+| `Unk0962` | 1 | `Repl.eval/2:ret` |
+| `Unk0963` | 1 | `Repl.eval_decl/2:ret` |
+| `Unk0964` | 1 | `Repl.eval_decl/2:ret` |
+| `Unk0965` | 1 | `Repl.flush_entries/1:p0` |
+| `Unk0966` | 1 | `Repl.flush_entries/1:ret` |
+| `Unk0967` | 1 | `Repl.info/1:ret` |
+| `Unk0968` | 2 | `Repl.longest_common_prefix/1:p0`, `Repl.longest_common_prefix/1:ret` |
+| `Unk0969` | 1 | `Repl.render/1:p0` |
+| `Unk0970` | 1 | `Repl.run/4:ret` |
+| `Unk0971` | 1 | `Repl.run/4:ret` |
+| `Unk0972` | 1 | `Repl.safe_parse_body/1:ret` |
+| `Unk0973` | 1 | `Repl.scan_count/2:p1` |
+| `Unk0974` | 1 | `Repl.scan_count/2:ret` |
+| `Unk0975` | 1 | `Repl.split_entries/1:p0` |
+| `Unk0976` | 1 | `Repl.split_entries/1:ret` |
+| `Unk0977` | 1 | `Repl.type_of/2:p0` |
+| `Unk0978` | 1 | `Repl.vocabulary/0:ret` |
+| `Unk0979` | 1 | `SelfHost.badge/1:p0` |
+| `Unk0980` | 1 | `SelfHost.composition/0:ret` |
+| `Unk0981` | 1 | `SelfHost.count/1:p0` |
+| `Unk0982` | 1 | `SelfHost.evidence/1:p0` |
+| `Unk0983` | 1 | `SelfHost.evidence_files/0:ret` |
+| `Unk0984` | 1 | `SelfHost.external_host_calls/1:p0` |
+| `Unk0985` | 1 | `SelfHost.external_host_calls/1:p0` |
+| `Unk0986` | 1 | `SelfHost.external_host_calls/1:p0` |
+| `Unk0987` | 1 | `SelfHost.external_host_calls/1:ret` |
+| `Unk0988` | 1 | `SelfHost.ffi_in_file/1:p0` |
+| `Unk0989` | 1 | `SelfHost.ffi_in_file/1:ret` |
+| `Unk0990` | 1 | `SelfHost.ffi_ledger/0:ret` |
+| `Unk0991` | 1 | `SelfHost.passes/0:ret` |
+| `Unk0992` | 1 | `SelfHost.percent/0:ret` |
+| `Unk0993` | 1 | `SelfHost.selfhost_files/0:ret` |
+| `Unk0994` | 1 | `SelfHost.selfhost_module_names/0:ret` |
+| `Unk0995` | 1 | `SelfHost.sibling_compose_call?/2:p0` |
+| `Unk0996` | 1 | `SelfHost.sibling_compose_call?/2:p1` |
+| `Unk0997` | 1 | `SelfHost.stages/0:ret` |
+| `Unk0998` | 1 | `SelfHost.status_markdown/1:p0` |
+| `Unk0999` | 1 | `Shadow.ded_bind/5:p0` |
+| `Unk1000` | 3 | `Shadow.ded_bind/5:p2`, `Shadow.ded_expr/3:p0`, `Shadow.ded_expr/3:ret` |
+| `Unk1001` | 1 | `Shadow.ded_bind/5:p3` |
+| `Unk1002` | 4 | `Shadow.ded_bind/5:p4`, `Shadow.ded_block/4:p3`, `Shadow.ded_expr/3:p2`, `Shadow.dedup/3:p2` |
+| `Unk1003` | 4 | `Shadow.ded_bind/5:p4`, `Shadow.ded_block/4:p3`, `Shadow.ded_expr/3:p2`, `Shadow.dedup/3:p2` |
+| `Unk1004` | 4 | `Shadow.ded_bind/5:p4`, `Shadow.ded_block/4:p3`, `Shadow.ded_expr/3:p2`, `Shadow.dedup/3:p2` |
+| `Unk1005` | 1 | `Shadow.ded_bind/5:ret` |
+| `Unk1006` | 2 | `Shadow.ded_block/4:p0`, `Shadow.dedup/3:p0` |
+| `Unk1007` | 2 | `Shadow.ded_block/4:p1`, `Shadow.ded_expr/3:p1` |
+| `Unk1008` | 2 | `Shadow.ded_block/4:p1`, `Shadow.ded_expr/3:p1` |
+| `Unk1009` | 1 | `Shadow.ded_block/4:p2` |
+| `Unk1010` | 1 | `Shadow.pat_var_names/1:ret` |
+| `Unk1011` | 1 | `Test.default_mod/1:ret` |
+| `Unk1012` | 1 | `Test.run/2:p1` |
+| `Unk1013` | 1 | `Test.run/2:ret` |
+| `Unk1014` | 1 | `Test.run_one/2:p1` |
+| `Unk1015` | 1 | `Test.rust/1:ret` |
+| `Unk1016` | 1 | `Test.tests/1:ret` |
+| `Unk1017` | 1 | `Tour.build_cell/1:p0` |
+| `Unk1018` | 1 | `Tour.build_cell/1:ret` |
+| `Unk1019` | 1 | `Tour.build_reach_example/1:p0` |
+| `Unk1020` | 1 | `Tour.build_reach_example/1:ret` |
+| `Unk1021` | 1 | `Tour.elixir_module/1:ret` |
+| `Unk1022` | 2 | `Tour.encode/2:p0`, `Tour.encode_string/1:p0` |
+| `Unk1023` | 1 | `Tour.generate/0:ret` |
+| `Unk1024` | 1 | `Tour.reach_map/1:ret` |
+| `Unk1025` | 1 | `Tour.to_json/0:ret` |
+| `Unk1026` | 5 | `Transpile.add_clause/2:p0`, `Transpile.add_clause/2:p1`, `Transpile.build_clause/2:ret`, `Transpile.new_group/3:p1`, `Transpile.same_group?/3:p2` |
+| `Unk1027` | 1 | `Transpile.add_clause/2:p0` |
+| `Unk1028` | 2 | `Transpile.add_clause/2:ret`, `Transpile.new_group/3:ret` |
+| `Unk1029` | 2 | `Transpile.block_stmts/1:p0`, `Transpile.block_stmts/1:ret` |
+| `Unk1030` | 1 | `Transpile.build_clause/2:p0` |
+| `Unk1031` | 1 | `Transpile.build_clause/2:p1` |
+| `Unk1032` | 1 | `Transpile.case_arm/1:p0` |
+| `Unk1033` | 1 | `Transpile.classify/1:ret` |
+| `Unk1034` | 4 | `Transpile.close_group/2:p0`, `Transpile.close_group/2:p1`, `Transpile.close_group/2:ret`, `Transpile.def_groups/1:ret` |
+| `Unk1035` | 1 | `Transpile.escape/1:p0` |
+| `Unk1036` | 1 | `Transpile.escape/1:ret` |
+| `Unk1037` | 2 | `Transpile.escape_lit/1:p0`, `Transpile.string_part/1:p0` |
+| `Unk1038` | 1 | `Transpile.flush/2:p0` |
+| `Unk1039` | 2 | `Transpile.flush/2:p1`, `Transpile.render_items/2:p1` |
+| `Unk1040` | 2 | `Transpile.flush/2:p1`, `Transpile.render_items/2:p1` |
+| `Unk1041` | 1 | `Transpile.hole_sig?/1:p0` |
+| `Unk1042` | 2 | `Transpile.infer_program/1:p0`, `Transpile.infer_sigs/1:p0` |
+| `Unk1043` | 3 | `Transpile.infer_program/1:ret`, `Transpile.infer_sigs/1:ret`, `Transpile.inferred/1:ret` |
+| `Unk1044` | 1 | `Transpile.infer_report/1:p0` |
+| `Unk1045` | 1 | `Transpile.infer_report/1:ret` |
+| `Unk1046` | 1 | `Transpile.max_placeholder/1:p0` |
+| `Unk1047` | 4 | `Transpile.mod_str/1:p0`, `Transpile.short_name/1:p0`, `Transpile.snippet/1:p0`, `Transpile.var_name/1:p0` |
+| `Unk1048` | 1 | `Transpile.module_groups/1:p0` |
+| `Unk1049` | 1 | `Transpile.module_groups/1:ret` |
+| `Unk1050` | 1 | `Transpile.moduledoc_lines/1:p0` |
+| `Unk1051` | 1 | `Transpile.name_str/1:p0` |
+| `Unk1052` | 1 | `Transpile.name_str/1:ret` |
+| `Unk1053` | 1 | `Transpile.new_group/3:p0` |
+| `Unk1054` | 1 | `Transpile.new_group/3:p2` |
+| `Unk1055` | 1 | `Transpile.one_line/1:p0` |
+| `Unk1056` | 1 | `Transpile.one_line/1:ret` |
+| `Unk1057` | 1 | `Transpile.prime_xmod/1:p0` |
+| `Unk1058` | 1 | `Transpile.prime_xmod/1:ret` |
+| `Unk1059` | 1 | `Transpile.rank/1:p0` |
+| `Unk1060` | 1 | `Transpile.rank/1:ret` |
+| `Unk1061` | 1 | `Transpile.render_body/1:ret` |
+| `Unk1062` | 1 | `Transpile.render_clause/2:p1` |
+| `Unk1063` | 1 | `Transpile.same_group?/3:p0` |
+| `Unk1064` | 1 | `Transpile.same_group?/3:p1` |
+| `Unk1065` | 1 | `Transpile.sibling_module?/2:p0` |
+| `Unk1066` | 1 | `Transpile.simple?/1:p0` |
+| `Unk1067` | 1 | `Transpile.string_part/1:ret` |
+| `Unk1068` | 1 | `Transpile.string_parts/1:p0` |
+| `Unk1069` | 1 | `Transpile.string_parts/1:ret` |
+| `Unk1070` | 2 | `Transpile.subst_ph/2:p0`, `Transpile.subst_ph/2:ret` |
+| `Unk1071` | 1 | `Transpile.subst_ph/2:p1` |
+| `Unk1072` | 1 | `Transpile.toplevel/3:p0` |
+| `Unk1073` | 1 | `Transpile.toplevel/3:p1` |
+| `Unk1074` | 2 | `Transpile.transpile/2:p0`, `Transpile.transpile_with_stats/2:p0` |
+| `Unk1075` | 1 | `Transpile.transpile/2:p1` |
+| `Unk1076` | 2 | `Transpile.transpile/2:ret`, `Transpile.transpile_with_stats/2:ret` |
+| `Unk1077` | 1 | `Transpile.transpile_with_stats/2:p1` |
+| `Unk1078` | 1 | `Transpile.transpile_with_stats/2:ret` |
+| `Unk1079` | 1 | `Transpile.underscore_var/1:p0` |
+| `Unk1080` | 1 | `Transpile.var?/1:p0` |
+
+## 3. Proposed sum-type groupings — REVIEW (heuristic from dispatch co-occurrence)
+
+Structs clustered by co-occurrence in multi-clause heads + `case` arms. This is
+the non-local decision a human cannot make from a single draft file. Confirm or
+split each cluster; ambiguous structs (bridging two clusters) are merged here and
+may need splitting.
+
+**Cluster 1** (co-occur in dispatch) — propose `type <NAME?> := EAtom | EBin | EBlock | ECall | ECapArg | ECapture | ECaptureNamed | ECase | EChar | EConstRef | EDot | EId | EIf | ELambda | EList | EMap | ENum | EStr | EStruct | ETuple | EUnary | EVariant | EWith`
+  - `EAtom` { name }
+  - `EBin` { left, op, right }
+  - `EBlock` { stmts }
+  - `ECall` { args, fun }
+  - `ECapArg` { n }
+  - `ECapture` { body }
+  - `ECaptureNamed` { arity, path }
+  - `ECase` { arms, scrut }
+  - `EChar` { value }
+  - `EConstRef` { name }
+  - `EDot` { head, name }
+  - `EId` { name }
+  - `EIf` { cond, else, then }
+  - `ELambda` { body, params }
+  - `EList` { elems, tail }
+  - `EMap` { pairs }
+  - `ENum` { text }
+  - `EStr` { value }
+  - `EStruct` { name, pairs }
+  - `ETuple` { elems }
+  - `EUnary` { arg, op }
+  - `EVariant` { ctor, enum, named, pairs }
+  - `EWith` { body, clauses, els }
+  - [ ] human: name the sum, confirm membership, set field types/reach
+
+**Cluster 2** (co-occur in dispatch) — propose `type <NAME?> := PAs | PAtom | PChar | PCtor | PList | PLit | PMap | PPin | PStruct | PTuple | PVar | PWild`
+  - `PAs` { name, pat }
+  - `PAtom` { name }
+  - `PChar` { value }
+  - `PCtor` { args, ctor }
+  - `PList` { elems, tail }
+  - `PLit` { value }
+  - `PMap` { pairs }
+  - `PPin` { expr }
+  - `PStruct` { fields, name }
+  - `PTuple` { elems }
+  - `PVar` { name }
+  - `PWild` {  }
+  - [ ] human: name the sum, confirm membership, set field types/reach
+
+**Standalone structs** (never dispatched): `Clause`, `Const`, `ELabel`, `Field`, `Func`, `Mod`, `Opaque`, `Param`, `Range`, `Session`, `Struct`, `Type`, `Use`, `Variant`
+
+## 4. Error idioms — REVIEW (Elixir `{:error, _}` → Rian sum variant)
+
+A Rian `Result` (`T | E`) needs a Capitalized sum variant; Elixir uses atoms/
+strings/structs. Each distinct shape needs a human decision (atoms have a
+proposed PascalCase variant; strings/structs/vars need a named variant).
+
+| `{:error, X}` shape | count | proposed Rian variant | reach |
+|---|---|---|---|
+| `message` (var/propagation) | 7 | propagated `E` (no fixed tag) | — |
+| `"…"` (string) | 5 | **NEEDS DECISION** — name a variant | — |
+| `Exception.message(e)` (expr) | 4 | **NEEDS DECISION** | — |
+| `_` (var/propagation) | 2 | propagated `E` (no fixed tag) | — |
+| `_reason` (var/propagation) | 2 | propagated `E` (no fixed tag) | — |
+| `msg` (var/propagation) | 2 | propagated `E` (no fixed tag) | — |
+| `"`#{f.name}`: returns error(s)` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{f}(…)`: labeled arguments ` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{g}` requires `#{tvar}: #{p` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{name}`: an `@external` par` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{name}`: an integer literal` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{name}`: binding declared `` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{name}`: body has type `#{b` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{name}`: literal #{v} is ou` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{name}`: range `#{ann}` is ` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{name}`: value of type `#{t` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{n}`: literal #{v} is out o` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{op}`: no implicit Int↔Floa` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`#{x}` is not a compile-time ` (expr) | 1 | **NEEDS DECISION** | — |
+| `"`<~` is in-place mutation of ` (expr) | 1 | **NEEDS DECISION** | — |
+| `"operator `#{op}` not allowed ` (expr) | 1 | **NEEDS DECISION** | — |
+| `"unsupported in comptime: #{in` (expr) | 1 | **NEEDS DECISION** | — |
+| `String.t()` (expr) | 1 | **NEEDS DECISION** | — |
+| `contract_message(vs)` (expr) | 1 | **NEEDS DECISION** | — |
+| `parts |> List.last() |> to_str` (expr) | 1 | **NEEDS DECISION** | — |
+| `{:__aliases__, _, parts}` (expr) | 1 | **NEEDS DECISION** | — |
+| `{:already_started, pid}` (expr) | 1 | **NEEDS DECISION** | — |
+| `bad` (var/propagation) | 1 | propagated `E` (no fixed tag) | — |
+| `reason` (var/propagation) | 1 | propagated `E` (no fixed tag) | — |
+| `tag` (var/propagation) | 1 | propagated `E` (no fixed tag) | — |
+| `x` (var/propagation) | 1 | propagated `E` (no fixed tag) | — |
+
