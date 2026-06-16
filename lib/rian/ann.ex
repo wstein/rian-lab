@@ -44,10 +44,18 @@ defmodule Rian.Ann do
   @spec from_source(String.t()) :: [String.t()]
   def from_source(source) when is_binary(source) do
     case Code.string_to_quoted(source) do
-      {:ok, ast} -> collect(ast)
+      {:ok, ast} -> from_ast(ast)
       _ -> []
     end
   end
+
+  @doc """
+  Extract every `@rian` annotation STRING from an ALREADY-PARSED Elixir AST — no
+  re-parse. The live-source path: the transpiler already holds the module AST, so it
+  reads annotations from it rather than parsing the text a second time.
+  """
+  @spec from_ast(Macro.t()) :: [String.t()]
+  def from_ast(ast), do: collect(ast)
 
   defp collect(ast) do
     {_, anns} =

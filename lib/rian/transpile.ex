@@ -122,8 +122,9 @@ defmodule Rian.Transpile do
     {sigmap, types} = if opts[:infer], do: infer_program(ast), else: {%{}, []}
 
     # `@rian` annotations are authoritative — merge `def` sigs OVER inference, hand the
-    # `struct`/`type` decls to the renderer.
-    {def_anns, struct_anns, type_anns} = classify_annotations(Rian.Ann.from_source(source))
+    # `struct`/`type` decls to the renderer. Read from the AST we ALREADY parsed (no
+    # second parse of the source text); `Rian.Ann.from_beam/1` is the no-source reader.
+    {def_anns, struct_anns, type_anns} = classify_annotations(Rian.Ann.from_ast(ast))
 
     ast
     |> toplevel(Map.merge(sigmap, def_anns), types ++ type_anns, struct_anns)

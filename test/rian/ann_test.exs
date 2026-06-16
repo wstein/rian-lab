@@ -44,6 +44,20 @@ defmodule Rian.AnnTest do
     assert Enum.any?(anns, &(&1 =~ "struct S(a String, b Int53)"))
   end
 
+  test "from_ast/1 extracts from an already-parsed AST (no re-parse) — matches from_source" do
+    src = ~S'''
+    defmodule M do
+      use Rian.Ann
+      @rian "pub def f(Int53) Int53"
+      def f(x), do: x
+    end
+    '''
+
+    {:ok, ast} = Code.string_to_quoted(src)
+    assert Rian.Ann.from_ast(ast) == Rian.Ann.from_source(src)
+    assert Rian.Ann.from_ast(ast) == ["pub def f(Int53) Int53"]
+  end
+
   test "from_beam on a module without @rian is empty (not a crash)" do
     assert Rian.Ann.from_beam(Enum) == []
   end
