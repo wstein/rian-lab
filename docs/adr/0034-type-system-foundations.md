@@ -49,6 +49,20 @@ from the defaults and return-inference debates):
 - **Private functions, `:=` bindings, and lambda bodies: inferred.** A body edit can't change a
   caller because there is no exported inferred type.
 
+**Implementation status (infer-local).** A private function's **return type** is now inferred and
+need not be declared (`Rian.InferLocal` + `Rian.Check.infer_return_type/2`): `def f(x Int53) := x + 1`
+type-checks, lowers, and runs, with the return recovered as `Int53`. `Rian.Decl.parse` runs the pass
+after assembly (a no-op unless a private return was omitted); a fixpoint resolves private→private
+chains; `pub` still must declare its return; and a return that cannot be recovered (self-recursion, an
+`@external` with no body, an unmodelled body) raises a clear *"annotate it"* error rather than
+guessing. The Elixir→Rian transpiler emits private `defp`s **without** a return hole (one fewer `_Unk`
+per private function). **Private parameter inference is NOT yet implemented**: the surface
+`def f(x)` already reads a bare token as the parameter's *type* (anonymous-typed parameter), and the
+self-hosted compiler relies on this — `pub def lower_pat(p) Pat` carries a permissive bare-name param
+and dispatches on raw AST in its clauses. A strict inference that re-reads `x` as a *name* conflicts
+with that grammar and convention, so parameters keep their explicit/permissive surface for now; closing
+this needs a dedicated syntax or a non-breaking lenient pass (deferred).
+
 **Integer-literal width:** a bare integer literal defaults to **`Int64`** (ADR-0033 vocabulary);
 other widths require an annotation (`n Int32`). **Overflow/precision is native-per-target**
 (decision-lock 2026-06-12): `Int*` types declare representation *intent* / minimum precision, **not

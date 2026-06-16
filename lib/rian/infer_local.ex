@@ -5,16 +5,20 @@ defmodule Rian.InferLocal do
   signature the compiler can recover. `pub` functions are untouched — they remain the
   explicit, declared boundary.
 
-  This pass runs after parsing and before `Rian.Check`/the emitters, so everything
-  downstream sees fully-typed functions exactly as if the human had written the sig.
+  This pass runs after parsing (`Rian.Decl.parse`) and before `Rian.Check`/the emitters,
+  so everything downstream sees fully-typed functions exactly as if the human had written
+  the sig.
 
-  **Phase 1 (here): return types.** For every private function with `ret: nil` (params
-  still declared), infer the return from its clause bodies via `Check.infer_return_type/2`
-  and write it back. A **fixpoint** handles private→private call chains: a callee's
-  return fills first, then its callers see it on the next pass. A return that cannot be
-  inferred (e.g. a self-recursive function, or a body touching something unmodelled) is
-  left `nil` — honest partiality; the caller (Phase 3) turns that into an
-  "annotate this" error rather than a guess.
+  **Scope: return types.** For every private function with `ret: nil` (params still
+  declared), infer the return from its clause bodies via `Check.infer_return_type/2` and
+  write it back. A **fixpoint** handles private→private call chains: a callee's return
+  fills first, then its callers see it on the next pass. A return that cannot be inferred
+  (a self-recursive function, an `@external` with no body, or a body touching something
+  unmodelled) raises a clear *"annotate it"* error rather than reaching the checker as
+  `nil` — sound partiality, never a guess.
+
+  Private *parameter* inference is not done here — see ADR-0034 (the `def f(x)` grammar
+  reads a bare token as the parameter's type, which conflicts with a name-based inference).
   """
 
   alias Rian.{Check, IR}

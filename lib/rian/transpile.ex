@@ -23,7 +23,9 @@ defmodule Rian.Transpile do
       supplies the sums and signatures. With `--infer` (ADR-0075) the engine fills
       every *provable* slot, **harvesting any `@spec`** as a cross-checked hint (a
       consumed `@spec` becomes a passive `# spec:` provenance line, not a TODO);
-      whatever stays unproven remains an honest `_Unk` hole for the human.
+      whatever stays unproven remains an honest `_Unk` hole for the human. A **private**
+      function (`defp` → `def`) omits its return hole — `Rian.InferLocal` recovers the
+      return once its params are typed (infer-local, ADR-0034), one fewer hole per `defp`.
 
   Usage: `mix rian.transpile lib/rian/range.ex [-o out.rian]`.
 
