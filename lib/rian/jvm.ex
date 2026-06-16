@@ -291,34 +291,39 @@ defmodule Rian.JVM do
     "#{vis}fun #{name}(#{sig_params}): #{kt_type(ret)} {\n#{lines}#{tail}}"
   end
 
-  # Emit clauses top-to-bottom; an unconditional clause (no structural tests)
-  # always matches, so it closes the function — drop the rest and the trailing
-  # throw (Kotlin flags unreachable code).
-  defp clause_lines(clauses) do
-    {acc, closed?} =
-      Enum.reduce_while(clauses, {[], false}, fn c, {acc, _} ->
-        {tests, binds} = clause_match(c.pats)
-        param_names = Enum.map(binds, fn {n, _} -> n end)
-        body = bind_str(binds) <> guarded_return(c.body, c.guard, param_names)
+  # Emit clauses top-to-bottom; an unconditional clause (no tests, no guard)
+  # always matches, so it closes the function — return without emitting the rest
+  # (or the trailing throw, which Kotlin would flag as unreachable). Dispatching
+  # on the guard and recursing — rather than threading a `{acc, closed?}` tuple
+  # through `reduce_while` — lets "closes" be "don't recurse" instead of `:halt`.
+  defp clause_lines([]), do: {"", false}
 
-        case {tests, c.guard} do
-          {[], nil} ->
-            {:halt, {["  #{body}\n" | acc], true}}
+  defp clause_lines([c | rest]) do
+    {tests, binds} = clause_match(c.pats)
+    param_names = Enum.map(binds, fn {n, _} -> n end)
+    line = bind_str(binds) <> guarded_return(c.body, c.guard, param_names)
 
-          # A guard with no structural tests carries its condition in the inner
-          # `if` that `guarded_return/3` emits; wrap it in a scoped `run { … }`
-          # (an empty `if () { … }` is not valid Kotlin) so the clause's binds
-          # stay local and a matched guard returns non-locally from the function.
-          {[], _guard} ->
-            {:cont, {["  run { #{body} }\n" | acc], false}}
-
-          _ ->
-            {:cont, {["  if (#{Enum.join(tests, " && ")}) { #{body} }\n" | acc], false}}
-        end
-      end)
-
-    {acc |> Enum.reverse() |> Enum.join(""), closed?}
+    case c.guard do
+      nil -> closed_or_cond(tests, line, rest)
+      _ -> run_or_cond(tests, line, rest)
+    end
   end
+
+  # no guard: empty tests -> unconditional (closes the function); else an `if`.
+  defp closed_or_cond([], line, _rest), do: {"  #{line}\n", true}
+  defp closed_or_cond(tests, line, rest), do: prepend_if(tests, line, rest)
+
+  # guarded: a guard with no structural tests carries its condition in the inner
+  # `if` that `guarded_return/3` emits; wrap it in a scoped `run { … }` (an empty
+  # `if () { … }` is not valid Kotlin) so the binds stay local and a matched guard
+  # returns non-locally from the function. With tests, it's a plain conditional `if`.
+  defp run_or_cond([], line, rest), do: prepend("  run { #{line} }\n", clause_lines(rest))
+  defp run_or_cond(tests, line, rest), do: prepend_if(tests, line, rest)
+
+  defp prepend_if(tests, line, rest),
+    do: prepend("  if (#{Enum.join(tests, " && ")}) { #{line} }\n", clause_lines(rest))
+
+  defp prepend(s, {lines, closed?}), do: {s <> lines, closed?}
 
   defp clause_match(pats) do
     pats
