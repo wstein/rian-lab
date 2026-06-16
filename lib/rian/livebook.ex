@@ -24,6 +24,7 @@ defmodule Rian.Livebook do
   Evaluate a cell's worth of Rian `source` against the notebook's shared session,
   returning a `Kino` output of the rendered results. Advances the shared session.
   """
+  @spec eval(String.t()) :: term()
   def eval(source) when is_binary(source) do
     {lines, _session} =
       Agent.get_and_update(session_pid(), fn session ->
