@@ -35,8 +35,36 @@ defmodule Rian.Transpile.Infer do
   optional sibling-signature table for intra-module calls.
   """
   def build_ctx(stdlib_map, siblings \\ %{}) do
-    %{prelude: prelude_sigs(), stdlib: stdlib_map, siblings: siblings}
+    %{prelude: prelude_sigs(), stdlib: stdlib_map, siblings: siblings, xmod: xmod_cache()}
   end
+
+  @doc """
+  Phase A — whole-program cross-module signatures. Infer every module's def groups
+  in isolation and cache the non-hole sigs keyed `{short_module, fun, arity}`, so a
+  cross-module call `Core.from_expr(x)` can be resolved. Accident-free: a hole sig
+  is simply not recorded, and recorded sigs are anchor-derived. `modules` is a list
+  of `{short_module_name, [group]}`.
+  """
+  def prime_xmod(modules, stdlib_map) do
+    base = %{prelude: prelude_sigs(), stdlib: stdlib_map, siblings: %{}, xmod: %{}}
+
+    table =
+      for {short, groups} <- modules, g <- groups, reduce: %{} do
+        acc ->
+          sig = infer_group(g, base)
+          k = {short, to_string(hd(g.clauses).name), hd(g.clauses).arity}
+          if hole_sig?(sig), do: acc, else: Map.put(acc, k, sig)
+      end
+
+    :persistent_term.put({__MODULE__, :xmod}, table)
+    table
+  end
+
+  def clear_xmod, do: :persistent_term.erase({__MODULE__, :xmod})
+
+  defp xmod_cache, do: :persistent_term.get({__MODULE__, :xmod}, %{})
+
+  defp hole_sig?(%{params: ps, ret: r}), do: r == "_Ret" or Enum.any?(ps, &(&1 == "_Ty"))
 
   # parse the prelude `fsigs` once and cache (the perf-sensitive path when
   # transpiling all of `lib/rian`; re-run the OS process to pick up prelude edits).
@@ -292,8 +320,15 @@ defmodule Rian.Transpile.Infer do
     m = mod_name(mod)
 
     case Map.get(ctx.stdlib, {m, fun, length(args)}) do
-      {rmod, rfun} -> call_sig(ctx, {rmod, rfun, length(args)}, args, env, ctx, s)
-      nil -> gen_args_then_fresh(args, env, ctx, s)
+      {rmod, rfun} ->
+        call_sig(ctx, {rmod, rfun, length(args)}, args, env, ctx, s)
+
+      nil ->
+        # a cross-module call to a sibling Rian module (Phase A whole-program table)
+        case Map.get(ctx.xmod, {m, to_string(fun), length(args)}) do
+          nil -> gen_args_then_fresh(args, env, ctx, s)
+          sig -> instantiate(sig, args, env, ctx, s)
+        end
     end
   end
 

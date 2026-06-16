@@ -109,6 +109,10 @@ defmodule Mix.Tasks.Rian.Transpile do
     files = Path.wildcard(Path.join(dir, "**/*.ex"))
     if files == [], do: Mix.raise("no .ex files under #{dir}")
 
+    # Phase A: prime the whole-program cross-module signature table once so
+    # cross-module calls resolve during per-file inference.
+    if o.infer, do: Rian.Transpile.prime_xmod(Enum.map(files, &File.read!/1))
+
     entries =
       Enum.map(files, fn file ->
         {text, stats} = Rian.Transpile.transpile_with_stats(File.read!(file), infer: o.infer)

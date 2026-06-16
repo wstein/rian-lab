@@ -66,6 +66,25 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "Phase A — whole-program cross-module signatures" do
+    test "a cross-module call adopts the callee's inferred signature" do
+      a = "defmodule A do\n  def foo(x), do: x + 1\nend"
+      b = "defmodule B do\n  def bar(y), do: A.foo(y)\nend"
+      Transpile.prime_xmod([a, b])
+
+      try do
+        line =
+          Transpile.transpile(b, infer: true)
+          |> String.split("\n")
+          |> Enum.find(&String.contains?(&1, "def bar"))
+
+        assert line == "  pub def bar(y Int53) Int53 := A.foo(y)"
+      after
+        Rian.Transpile.Infer.clear_xmod()
+      end
+    end
+  end
+
   describe "honesty — leave a hole when nothing pins it" do
     test "an unknown callee leaves _Ty/_Ret" do
       assert sig("  def h(x), do: unknown_fn(x)", "h") == "  pub def h(x _Ty) _Ret := unknown_fn(x)"

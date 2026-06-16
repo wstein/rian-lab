@@ -161,6 +161,28 @@ defmodule Rian.Transpile do
     for {k, v} <- infer_sigs(ast), v.ledger != [], do: {k, v.ledger}
   end
 
+  @doc """
+  Phase A: prime the whole-program cross-module signature table from a list of
+  Elixir sources, so a subsequent `transpile(_, infer: true)` resolves
+  cross-module calls (`OtherMod.fun(…)`). Call once before folder-mode rendering.
+  """
+  def prime_xmod(sources) when is_list(sources) do
+    sources
+    |> Enum.map(&module_groups/1)
+    |> Enum.reject(&is_nil/1)
+    |> Rian.Transpile.Infer.prime_xmod(@stdlib)
+  end
+
+  defp module_groups(src) do
+    case Code.string_to_quoted(src) do
+      {:ok, {:defmodule, _, [aliases, [do: body]]}} ->
+        {short_name(aliases), body |> block_stmts() |> def_groups()}
+
+      _ ->
+        nil
+    end
+  end
+
   defp hole_sig?(%{params: ps, ret: r}), do: r == "_Ret" or Enum.any?(ps, &(&1 == "_Ty"))
 
   # Collect just the def groups (reusing the clause grouping), no rendering.
