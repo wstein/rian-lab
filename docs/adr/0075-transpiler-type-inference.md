@@ -3,11 +3,13 @@
 **Status:** Accepted (direction) · implemented (MVP: `Rian.Transpile.Infer`, `--infer`)
 **Implemented:** Algorithm-J whole-program inference over the Elixir AST with occurs-check, `[Gen]`
 generalization, `Int53` cross-target defaulting, two-pass intra-module sibling propagation,
-Phase A cross-module sigs, and Phase B Result/error-set inference + synthesis — all accident-free
-(type-check-gated). Measured ceiling on the Elixir compiler corpus is ~31% (corpus-bound; see below);
-sum-type reconstruction for struct IR remains the open lever
+Phase A cross-module sigs, Phase B Result/error-set inference + synthesis, and Phase C `@spec`
+harvesting (cross-checked) — all accident-free (type-check-gated). Measured ceiling on the Elixir
+compiler corpus is ~31% (corpus-bound; see below); `@spec` harvest adds 51 spec-backed slots with
+0 regressions; sum-type reconstruction for struct IR remains the open lever
 **Refs:** ADR-0034 (type-system foundations / infer-local·declare-public), ADR-0040 (error
-handling / `T | E`), ADR-0042 (`Fn(…)`), ADR-0064 (portable numerics / `Int53`), ADR-0063
+handling / `T | E`), ADR-0042 (`Fn(…)`), ADR-0064 (portable numerics / `Int53`), ADR-0026
+(Dialyzer `-spec` *emission* — the inverse map), ADR-0076 (`__Unknown` ← `any()`/`term()`), ADR-0063
 (self-host porting track)
 **Owners:** inference · multi-target · rigor (PM)
 
@@ -103,6 +105,22 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
   - **Sum-type reconstruction** (the IR): collecting `%Mod{…}` and synthesizing `type` decls hits
     the same wall — field types are themselves nested structs/tuples, so synthesizing them safely is
     effectively reconstructing the whole type system (the human-judgment "which sum" part).
+- **Phase C — `@spec` harvesting (IMPLEMENTED, cross-checked).** Elixir is untyped, so inference can
+  only *reconstruct* types from usage — but a large fraction of real Elixir carries `@spec`, which
+  **is** the human-written type the engine was reconstructing. `Rian.Transpile.Infer.collect_specs/1`
+  harvests every `@spec`, `translate_spec/1` maps the Erlang/Elixir spec-type AST → a Rian term (the
+  inverse of ADR-0026's `-spec` *emission*: `integer()`→`Int53`, `String.t()`/`binary()`→`String`,
+  `[t]`→`Vec(t)`, `t1 | t2`→union, `atom()`/`module()`→`Symbol`, `%Mod{}`→the sum name, and —
+  deliberately — `any()`/`term()`→**`__Unknown`** the gradual open type, ADR-0076). Tuples, maps,
+  pids, and local `t()` refs have no clean Rian image → **no hint** (a `nil` slot). The seed is
+  **cross-checked, never authoritative** (`seed_spec/6`): each sig var is unified with its spec term
+  *after* the body pass, so a body-**hole** var **adopts** the spec (the fill) while a body-**concrete**
+  var that **conflicts** keeps its proven type (unify reports `:conflict` and leaves it) — a stale or
+  wrong `@spec` (e.g. `@spec f(integer()) :: integer()` over `def f(s), do: s <> "!"`) never forces an
+  accidental fill, upholding rule 2. The consumed `@spec` is reclassified from a `TODO[port]` action
+  marker to a passive `# spec:` provenance line. **Measured gain on `lib/rian`: 51 slots filled,
+  0 regressions** — modest because the corpus's specs are param-heavy (`String.t()`/`module()`) with
+  *tuple* returns (the `Result` idiom → no hint), but every fill is a real, type-checking recovery.
 - **Honest, measured ceiling.** Across `lib/rian`, per-file fill spans 0–60% and aggregates ~31%;
   Phase A (cross-module) and Phase B (Result) each add ~0 *on this corpus* because it is a compiler
   written in Elixir-idiomatic structs + atom/string errors. **80% on this corpus is not safely

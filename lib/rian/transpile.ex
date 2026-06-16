@@ -17,8 +17,11 @@ defmodule Rian.Transpile do
     * everything else is left **in place** as a greppable `TODO_PORT("…")`
       sentinel (carrying the original Elixir) or a `# TODO[port]: …` line comment,
       so nothing untranslated can masquerade as done;
-    * **types are always holes** (`_Ty`, `_Ret`) — Elixir is untyped, so the human
-      supplies the sums and signatures.
+    * **types are holes** (`_Ty`, `_Ret`) by default — Elixir is untyped, so the human
+      supplies the sums and signatures. With `--infer` (ADR-0075) the engine fills
+      every *provable* slot, **harvesting any `@spec`** as a cross-checked hint (a
+      consumed `@spec` becomes a passive `# spec:` provenance line, not a TODO); with
+      `--open` (ADR-0076) residual holes become `__Unknown` so the draft runs on Ex/JS.
 
   Usage: `mix rian.transpile lib/rian/range.ex [-o out.rian]`.
 
@@ -197,11 +200,15 @@ defmodule Rian.Transpile do
   # the fully-resolved sigs as an intra-module sibling table (so a local call can
   # adopt a callee's inferred type). Returns `{name, arity} => %{params, ret, tvars}`.
   defp infer_sigs({:defmodule, _, [_, [do: body]]}) do
-    groups = body |> block_stmts() |> def_groups()
+    stmts = block_stmts(body)
+    groups = def_groups(stmts)
     key = fn g -> {to_string(hd(g.clauses).name), hd(g.clauses).arity} end
 
+    # harvest `@spec` hints once; they seed both passes (cross-checked in infer_group).
+    specs = Rian.Transpile.Infer.collect_specs(stmts)
+
     # build the context (parses the prelude) ONCE per pass, not per group.
-    ctx1 = Rian.Transpile.Infer.build_ctx(@stdlib)
+    ctx1 = Map.put(Rian.Transpile.Infer.build_ctx(@stdlib), :specs, specs)
     pass1 = Map.new(groups, fn g -> {key.(g), Rian.Transpile.Infer.infer_group(g, ctx1)} end)
 
     siblings =
@@ -372,6 +379,12 @@ defmodule Rian.Transpile do
                 {acc ++ flush(open, sigmap), nil, new_group(vis, clause, doc)}
             end
 
+          {:spec, node} ->
+            # `@spec` is HARVESTED into the typed signature when inferring (seeded +
+            # cross-checked in Infer.seed_spec/6) — keep it as passive provenance, not a
+            # `TODO[port]` action marker (the type info now lives in the signature).
+            {acc ++ flush(open, sigmap) ++ ["# spec: #{snippet(node)}"], doc, nil}
+
           {:other, node} ->
             {acc ++ flush(open, sigmap) ++ ["# TODO[port]: #{snippet(node)}"], doc, nil}
         end
@@ -386,6 +399,7 @@ defmodule Rian.Transpile do
   defp classify({:alias, _, _} = n), do: {:drop, "alias", n}
   defp classify({:import, _, _} = n), do: {:drop, "import", n}
   defp classify({:require, _, _} = n), do: {:drop, "require", n}
+  defp classify({:@, _, [{:spec, _, _}]} = n), do: {:spec, n}
   defp classify({:def, _, [head, kw]}), do: {:clause, :pub, head, kw}
   defp classify({:defp, _, [head, kw]}), do: {:clause, :priv, head, kw}
   defp classify(other), do: {:other, other}

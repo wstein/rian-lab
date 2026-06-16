@@ -188,6 +188,72 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "`@spec` harvesting — declared types seed inference, cross-checked (ADR-0075)" do
+    test "a String.t() spec fills the param and return holes" do
+      body = "  @spec greet(String.t()) :: String.t()\n  def greet(name), do: name"
+      assert sig(body, "greet") == "  pub def greet(name String) String := name"
+    end
+
+    test "a list spec fills Vec(_) — [String.t()] -> Vec(String)" do
+      body = "  @spec names([String.t()]) :: integer()\n  def names(xs), do: xs"
+      assert sig(body, "names") =~ "pub def names(xs Vec(String))"
+    end
+
+    test "boolean primitive translates" do
+      body = "  @spec ok?(boolean()) :: boolean()\n  def ok?(b), do: b"
+      assert sig(body, "ok?") =~ "pub def ok?(b Bool) Bool"
+    end
+
+    test "float primitive translates" do
+      body = "  @spec half(float()) :: float()\n  def half(x), do: x"
+      assert sig(body, "half") =~ "pub def half(x Float64) Float64"
+    end
+
+    test "any()/term() is the user's openness -> __Unknown (the gradual open type)" do
+      body = "  @spec wrap(any()) :: any()\n  def wrap(x), do: x"
+      assert sig(body, "wrap") == "  pub def wrap(x __Unknown) __Unknown := x"
+    end
+
+    test "a proven body type WINS over a contradictory spec (the cross-check)" do
+      # body concatenates -> String; the bogus `integer()` spec is dropped, not adopted.
+      body = "  @spec shout(integer()) :: integer()\n  def shout(s), do: s <> \"!\""
+      assert sig(body, "shout") == "  pub def shout(s String) String := s <> \"!\""
+    end
+
+    test "an untranslatable spec (tuple return) leaves the body inference untouched" do
+      # {:ok, _} has no clean Rian image -> no hint; the param is still spec-filled.
+      body = "  @spec find(String.t()) :: {:ok, integer()}\n  def find(k), do: k"
+      assert sig(body, "find") =~ "pub def find(k String)"
+    end
+
+    test "a spec-less function is unaffected (generic inference still applies)" do
+      body = "  def mystery(z), do: z"
+      assert sig(body, "mystery") =~ "forall T"
+    end
+
+    test "the consumed @spec becomes passive provenance, not a TODO[port] action marker" do
+      out = infer("  @spec greet(String.t()) :: String.t()\n  def greet(name), do: name")
+      assert Enum.any?(out, &(&1 =~ "# spec: @spec greet"))
+      refute Enum.any?(out, &(&1 =~ "TODO[port]: @spec"))
+    end
+
+    test "off by default: without :infer, specs are not harvested (holes remain)" do
+      out =
+        Transpile.transpile(
+          "defmodule M do\n  @spec g(String.t()) :: String.t()\n  def g(s), do: s\nend"
+        )
+
+      assert out =~ "pub def g(s _Ty) _Ret := s"
+      # but the spec is still surfaced as provenance, never lost
+      assert out =~ "# spec: @spec g"
+    end
+
+    test "a spec-filled draft compiles (the fill is real, well-formed Rian)" do
+      body = "  @spec greet(String.t()) :: String.t()\n  def greet(name), do: name"
+      assert {:ok, :compiled} = safe_compile("mod M do\n#{sig(body, "greet")}\nend")
+    end
+  end
+
   defp safe_compile(src) do
     Rian.Decl.compile(src)
     {:ok, :compiled}

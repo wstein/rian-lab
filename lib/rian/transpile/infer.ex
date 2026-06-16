@@ -18,6 +18,13 @@ defmodule Rian.Transpile.Infer do
   `Int53` — the portable all-target integer (`:ex/:rs/:js/:jvm`) — never `Int64`
   (off `:js`) or `Int` (off `:rs/:jvm`), so inferred functions stay maximally
   portable. MVP solves each def group in isolation (no cross-def fixpoint).
+
+  **`@spec` harvesting (ADR-0075 Phase C):** Elixir's own `@spec` annotations *are*
+  the human-written types inference tries to reconstruct, so `collect_specs/1` +
+  `translate_spec/1` map them into terms and `seed_spec/6` unifies each sig var with
+  its spec term *after* the body pass — a body-hole var ADOPTS the spec, a conflicting
+  body-concrete var keeps its proven type. Hints, cross-checked: a stale/wrong `@spec`
+  never forces an accidental fill. `any()`/`term()` map to `__Unknown` (ADR-0076).
   """
 
   alias Rian.Decl
@@ -130,6 +137,12 @@ defmodule Rian.Transpile.Infer do
     # (e.g. a `{:ok, div(a,b)}` pins `a`/`b`) that the param types must reflect.
     {res, store} = result_analysis(clause_envs, ctx, store)
 
+    # `@spec` harvest (cross-checked): unify each sig var with its declared spec
+    # type. A body-hole var ADOPTS the spec (the hint fills it); a body-concrete
+    # var that conflicts with the spec keeps the proven body type — the spec yields
+    # to body inference, so a stale/wrong `@spec` never causes an accidental fill.
+    store = seed_spec(ctx, to_string(hd(clauses).name), arity, pvars, rvar, store)
+
     gmap = generalize_map(pvars, rvar, store)
     params = pvars |> Enum.map(&(render(store, gmap, &1) |> hole_or("_Ty")))
     tvars = gmap |> Map.values() |> Enum.uniq() |> Enum.sort()
@@ -156,6 +169,107 @@ defmodule Rian.Transpile.Infer do
       error_tags: tags,
       result: result
     }
+  end
+
+  @doc """
+  Harvest Elixir `@spec` annotations from a module's statements into a hint map
+  `%{{name, arity} => %{params: [term | nil], ret: term | nil}}`. A `nil` slot is a
+  spec type with no clean Rian image (tuples, maps, pids, user-local refs) — no hint.
+  `@spec`s are *documentary* in Elixir (unenforced, possibly stale), so these are
+  hints, cross-checked against the body in `seed_spec/6`, never ground truth.
+  """
+  def collect_specs(stmts) when is_list(stmts) do
+    for stmt <- stmts, pair = spec_pair(stmt), pair != nil, into: %{}, do: pair
+  end
+
+  def collect_specs(_), do: %{}
+
+  defp spec_pair({:@, _, [{:spec, _, [body]}]}) do
+    body =
+      case body do
+        # drop `when x: t` bounded quantifiers; translate the bare head/return
+        {:when, _, [s, _]} -> s
+        s -> s
+      end
+
+    case body do
+      {:"::", _, [{name, _, args}, ret]} when is_atom(name) ->
+        args = args || []
+
+        {{to_string(name), length(args)},
+         %{params: Enum.map(args, &translate_spec/1), ret: translate_spec(ret)}}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp spec_pair(_), do: nil
+
+  # Elixir/Erlang spec-type AST -> internal Infer term (`con`/`app`), or `nil` for
+  # types with no clean Rian image. The inverse of ADR-0026's `-spec` *emission*.
+  defp translate_spec({:integer, _, _}), do: con("Int53")
+
+  defp translate_spec({t, _, _})
+       when t in [:non_neg_integer, :pos_integer, :neg_integer, :byte, :char, :arity],
+       do: con("Int53")
+
+  defp translate_spec({:float, _, _}), do: con("Float64")
+  defp translate_spec({:boolean, _, _}), do: con("Bool")
+
+  defp translate_spec({t, _, _}) when t in [:binary, :bitstring, :iodata, :iolist],
+    do: con("String")
+
+  defp translate_spec({t, _, _}) when t in [:atom, :module, :node], do: con("Symbol")
+  # `any()`/`term()` is the user's stated openness -> the gradual open type (ADR-0076).
+  defp translate_spec({t, _, _}) when t in [:any, :term], do: con("__Unknown")
+  defp translate_spec({{:., _, [{:__aliases__, _, [:String]}, :t]}, _, _}), do: con("String")
+  defp translate_spec([elem]), do: vec_spec(elem)
+  defp translate_spec({:list, _, [elem]}), do: vec_spec(elem)
+  defp translate_spec({:|, _, [a, b]}), do: union_spec(a, b)
+
+  defp translate_spec({:%, _, [{:__aliases__, _, parts}, _]}),
+    do: con(to_string(List.last(parts)))
+
+  defp translate_spec(a) when is_atom(a) and a not in [nil, true, false], do: con("Symbol")
+  # tuples, maps, pids, `Mod.t()`, user-local `t()` refs — no clean Rian hint.
+  defp translate_spec(_), do: nil
+
+  defp vec_spec(elem) do
+    case translate_spec(elem) do
+      nil -> nil
+      t -> app("Vec", [t])
+    end
+  end
+
+  defp union_spec(a, b) do
+    with ta when ta != nil <- translate_spec(a),
+         tb when tb != nil <- translate_spec(b) do
+      con("#{spec_str(ta)} | #{spec_str(tb)}")
+    else
+      _ -> nil
+    end
+  end
+
+  defp spec_str({:con, n}), do: n
+  defp spec_str({:app, h, parts}), do: "#{h}(#{Enum.map_join(parts, ", ", &spec_str/1)})"
+
+  # Cross-checked `@spec` seeding: unify each sig var with its declared spec term
+  # AFTER the body pass. A free (body-hole) var ADOPTS the spec; a body-concrete var
+  # that conflicts keeps its proven type (unify reports `:conflict` and leaves it),
+  # so a stale/wrong `@spec` never forces an accidental fill.
+  defp seed_spec(ctx, name, arity, pvars, rvar, store) do
+    case Map.get(Map.get(ctx, :specs, %{}), {name, arity}) do
+      nil ->
+        store
+
+      %{params: ps, ret: r} ->
+        store =
+          Enum.zip(pvars, ps)
+          |> Enum.reduce(store, fn {pv, t}, s -> if t, do: elem(unify(s, pv, t), 0), else: s end)
+
+        if r, do: elem(unify(store, rvar, r), 0), else: store
+    end
   end
 
   # bind each clause's parameter pattern against the shared param var
