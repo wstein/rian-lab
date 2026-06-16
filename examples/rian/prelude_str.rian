@@ -23,6 +23,10 @@ mod Str do
   pub def from_chars(cs Vec(Char)) String := Prim.str_from_chars(cs)
   pub def concat(a String, b String) String := Prim.str_concat(a, b)
 
+  # decimal rendering of an integer (BEAM integer_to_binary | JS String | Rust
+  # to_string) — the portable image of `Integer.to_string/1`.
+  pub def from_int(n Int53) String := Prim.int_to_string(n)
+
   # ── composite ops — written ONCE in Rian, portable to every backend ─────
   # length in codepoints: count the char list (cons recursion, no host FFI)
   pub def length(s String) Int53 := count(Prim.str_chars(s))

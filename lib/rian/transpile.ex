@@ -76,7 +76,8 @@ defmodule Rian.Transpile do
     {"Map", :get, 3} => {"Dict", "get_or"},
     {"Map", :put, 3} => {"Dict", "put"},
     {"Map", :has_key?, 2} => {"Dict", "has"},
-    {"String", :length, 1} => {"Str", "length"}
+    {"String", :length, 1} => {"Str", "length"},
+    {"Integer", :to_string, 1} => {"Str", "from_int"}
   }
 
   # Elixir-stdlib modules with no (or only partial) Rian image — calls to these
