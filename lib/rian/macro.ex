@@ -26,6 +26,7 @@ defmodule Rian.Macro do
   @max_depth 200
 
   @doc "Build a macro env from defs: [%{name, params: [String], template: String}]."
+  @spec build_env([map()]) :: map()
   def build_env(defs) do
     Map.new(defs, fn %{name: n, params: ps, template: t} ->
       {n, %{params: ps, template: Pratt.parse(t)}}
@@ -38,6 +39,7 @@ defmodule Rian.Macro do
   is rejected. Driven by `Rian.Decl.assemble/3`, which passes `portable: true` for
   `@targets`-declared modules.
   """
+  @spec expand(map(), term(), keyword()) :: term()
   def expand(env, ast, opts \\ []),
     do: do_expand(env, ast, 0, Keyword.get(opts, :portable, false))
 
@@ -80,6 +82,7 @@ defmodule Rian.Macro do
   defp walk_for_with(node), do: map_node(node, fn c -> walk_for_with(c) && c end)
 
   # ── generic child mapping (also reused by Rian.Comptime) ───────────────
+  @spec map_node(term(), (term() -> term())) :: term()
   def map_node({:bin, op, l, r}, f), do: {:bin, op, f.(l), f.(r)}
   def map_node({:unary, op, x}, f), do: {:unary, op, f.(x)}
   def map_node({:call, fun, args}, f), do: {:call, f.(fun), Enum.map(args, f)}

@@ -29,6 +29,7 @@ defmodule Rian.Shadow do
   `params` are the clause parameter names (seeded so a param rebind renames);
   `fresh` is `fn base, count -> fresh_name end`, the target's fresh-name scheme.
   """
+  @spec dedup(list(), list(), fun()) :: term()
   def dedup(stmts, params, fresh), do: ded_block(stmts, %{}, Map.new(params, &{&1, 1}), fresh)
 
   defp ded_block(stmts, r, ver, fresh) do

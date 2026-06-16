@@ -18,6 +18,7 @@ defmodule Rian.Prelude do
   alias Rian.IR.{Field, Type, Variant}
 
   @doc "The built-in prelude types (known everywhere, never re-emitted as user types)."
+  @spec types() :: [struct()]
   def types do
     [
       %Type{
@@ -31,5 +32,6 @@ defmodule Rian.Prelude do
   end
 
   @doc "Prepend the prelude types to a program's user types (for env/meta/inference)."
+  @spec with_prelude([struct()]) :: [struct()]
   def with_prelude(types), do: types() ++ types
 end

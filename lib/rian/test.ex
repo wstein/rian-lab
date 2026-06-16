@@ -37,21 +37,25 @@ defmodule Rian.Test do
   alias Rian.{Beam, Decl}
 
   @doc "The names of the `@test def`s declared in `src`, in source order."
+  @spec tests(String.t()) :: [String.t()]
   def tests(src), do: Decl.parse(src).funcs |> Enum.filter(& &1.test?) |> Enum.map(& &1.name)
 
   @doc "Compile `src` to bytecode under `mod` and load it (idempotent reload)."
+  @spec compile!(String.t(), module()) :: module()
   def compile!(src, mod) do
     {:ok, ^mod} = Beam.load(src, mod)
     mod
   end
 
   @doc "Invoke one compiled test by name; returns its `Bool` result."
+  @spec run_one(module(), String.t()) :: boolean()
   def run_one(mod, name), do: apply(mod, String.to_atom(name), [])
 
   @doc """
   Compile `src` and run every `@test`, returning `[{name, :pass | {:fail, value}}]`.
   A test passes iff it returns `true`.
   """
+  @spec run(String.t(), module() | nil) :: [{String.t(), :pass | {:fail, term()}}]
   def run(src, mod \\ nil) do
     mod = mod || default_mod(src)
     compile!(src, mod)
@@ -65,6 +69,7 @@ defmodule Rian.Test do
   end
 
   @doc "A stable module atom derived from the source (for one-off runs)."
+  @spec default_mod(String.t()) :: module()
   def default_mod(src), do: :"rian_test_#{:erlang.phash2(src)}"
 
   @doc """
@@ -72,6 +77,7 @@ defmodule Rian.Test do
   `#[test]` wrapper per `@test` asserting it returns `true`. Compile/run with
   `rustc --test`.
   """
+  @spec rust(String.t()) :: String.t()
   def rust(src) do
     # Use the **whole-program** Rust assembly (`rust_program`), not the per-function
     # `Decl.compile` path: it threads the cross-function signature table the call-site
@@ -91,6 +97,7 @@ defmodule Rian.Test do
   Lower `src` to a **JS** test module (ADR-0060 §3): the functions plus a
   `node:test` case per `@test` asserting it returns `true`. Run with `node --test`.
   """
+  @spec js(String.t()) :: String.t()
   def js(src) do
     header = ~s|import { test } from "node:test";\nimport assert from "node:assert";\n|
 

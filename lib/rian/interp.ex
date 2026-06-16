@@ -48,6 +48,7 @@ defmodule Rian.Interp do
   of such a type lowers to `show(value)` (the protocol dispatcher routes it to the
   impl; ADR-0069 §6, user `Show`). It is statically resolved, so still monomorphic.
   """
+  @spec resolve(term(), map(), map(), term()) :: term()
   def resolve(ast, env, ic, show \\ MapSet.new())
 
   def resolve({:str_interp, parts}, env, ic, show) do

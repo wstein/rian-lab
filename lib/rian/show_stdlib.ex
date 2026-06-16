@@ -22,5 +22,6 @@ defmodule Rian.ShowStdlib do
           |> Enum.find(&(&1.name == "Show"))
 
   @doc "The parsed `Show` stdlib `%Rian.IR.Mod{}`, evaluated at compile time."
+  @spec module() :: struct()
   def module, do: @module
 end

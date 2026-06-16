@@ -24,6 +24,7 @@ defmodule Rian.Opaque do
   alias Rian.IR.{Clause, Const, Func, Struct, Type, Variant}
 
   @doc "Erase all opaque types from a parsed program. A no-op when it has none."
+  @spec erase(map()) :: map()
   def erase(%{} = prog) do
     all = opaques(prog)
     if all == [], do: prog, else: do_erase(prog, erase_ctx(all))

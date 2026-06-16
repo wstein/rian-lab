@@ -11,6 +11,7 @@ defmodule Rian.Comptime do
   """
   alias Rian.Macro
 
+  @spec fold(term()) :: term()
   def fold({:call, {:id, "comptime"}, [e]}) do
     case eval(e) do
       {:ok, v} when is_integer(v) -> {:num, Integer.to_string(v)}
