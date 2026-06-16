@@ -237,7 +237,11 @@ mod ComposeRealSum do
         case first_num_mix(decls) do
           "" ->
             case first_ret_error(decls) do
-              "" -> assemble(modname, funcs(grps))
+              "" ->
+                case first_bind_bad(decls) do
+                  "" -> assemble(modname, funcs(grps))
+                  bad -> refuse_type(bad)
+                end
               bad -> refuse_type(bad)
             end
           bad -> refuse_type(bad)
@@ -394,6 +398,7 @@ mod ComposeRealSum do
   def di_stmts(env Vec(Tuple), ss Vec(Tuple)) Vec(Tuple)
   def di_stmts(_, []) := []
   def di_stmts(env, [{:s_bind, n, e} | rest]) := [{:s_bind, n, desugar_interp(env, e)} | di_stmts(env, rest)]
+  def di_stmts(env, [{:s_typed_bind, n, ty, e} | rest]) := [{:s_typed_bind, n, ty, desugar_interp(env, e)} | di_stmts(env, rest)]
   def di_stmts(env, [{:s_expr, e} | rest]) := [{:s_expr, desugar_interp(env, e)} | di_stmts(env, rest)]
 
   def stringify_segs(env Vec(Tuple), segs Vec(Tuple)) Vec(Tuple)
@@ -455,6 +460,7 @@ mod ComposeRealSum do
   def lower_stmts(ss) Vec(Stmt)
   def lower_stmts([]) := []
   def lower_stmts([{:s_bind, n, e} | rest]) := [SBind(n, lower_surface(e)) | lower_stmts(rest)]
+  def lower_stmts([{:s_typed_bind, n, ty, e} | rest]) := [STypedBind(n, ty, lower_surface(e)) | lower_stmts(rest)]
   def lower_stmts([{:s_expr, e} | rest]) := [SExpr(lower_surface(e)) | lower_stmts(rest)]
 
   # ── the surface→Core lowering: selfhost_decl Pat/Expr -> selfhost_beam Pat/Core ──
@@ -1096,6 +1102,63 @@ mod ComposeRealSum do
   def last_expr([STypedBind(_, _, e)]) := e
   def last_expr([_ | rest]) := last_expr(rest)
 
+  # ── the THIRD type gate: typed-binding mismatch (Checker.binds_bad, ADR-0034/0064) ──
+  # the self-built compiler REFUSES a `name Ann := value` whose value provably contradicts
+  # `Ann` ({:type_error, name}). Mirrors `first_ret_error` but hands the body's FULL block
+  # statements (structure-preserving `to_chk_stmts`, so the bind annotations survive) to
+  # `Checker.binds_bad`, which walks them threading the param env.
+  def first_bind_bad(decls Vec(Tuple)) String := fbb(sig_index(decls), decls)
+
+  def fbb(Vec(Tuple), Vec(Tuple)) String
+  def fbb(_, []) := ""
+  def fbb(sigs, [{:d_func, _, name, params, _, _, body} | rest])
+    if func_binds_bad(params, body) do
+      name
+    else
+      fbb(sigs, rest)
+    end
+  end
+  def fbb(sigs, [{:d_clause, name, pats, expr} | rest]) := clause_binds_or(sigs, name, pats, expr, rest)
+  def fbb(sigs, [{:d_clause_g, name, pats, _, expr} | rest]) := clause_binds_or(sigs, name, pats, expr, rest)
+  def fbb(sigs, [{:d_mod, _, inner} | rest]) := combine_binds(first_bind_bad(inner), sigs, rest)
+  def fbb(sigs, [_ | rest]) := fbb(sigs, rest)
+
+  def combine_binds(inner String, sigs Vec(Tuple), rest Vec(Tuple)) String
+    if inner == "" do
+      fbb(sigs, rest)
+    else
+      inner
+    end
+  end
+
+  def clause_binds_or(sigs Vec(Tuple), name String, pats Vec(Tuple), expr Tuple, rest Vec(Tuple)) String
+    case sig_lookup(sigs, name) do
+      SSome(params, _) -> clause_binds_decide(clause_binds_bad(params, pats, expr), name, sigs, rest)
+      SNone -> fbb(sigs, rest)
+    end
+  end
+
+  def clause_binds_decide(bad Bool, name String, sigs Vec(Tuple), rest Vec(Tuple)) String
+    if bad do
+      name
+    else
+      fbb(sigs, rest)
+    end
+  end
+
+  def clause_binds_bad(sigParams Vec(Tuple), pats Vec(Tuple), expr Tuple) Bool
+    env := clause_env(pats, sigParams)
+    Checker.binds_bad(block_stmts_chk(lower_body(desugar_interp(env, expr))), tenv_dict(env), Prim.map_new())
+  end
+
+  def func_binds_bad(params Vec(Tuple), body Tuple) Bool
+    tenv := param_tenv(params)
+    Checker.binds_bad(block_stmts_chk(lower_body(desugar_interp(tenv, body))), tenv_dict(tenv), Prim.map_new())
+  end
+
+  def block_stmts_chk(Block) Vec(Stmt)
+  def block_stmts_chk(Block(stmts)) := to_chk_stmts(stmts)
+
   # an UNTYPED param carries type "" — omit it so the checker infers `unknown` for it
   # (conservative) rather than treating "" as a concrete type that unifies with nothing.
   def tenv_dict(Vec(Tuple)) Dict(String, String)
@@ -1146,6 +1209,16 @@ mod ComposeRealSum do
   def to_chk_stmt_exprs([SBind(_, e) | rest]) := [to_chk(e) | to_chk_stmt_exprs(rest)]
   def to_chk_stmt_exprs([STypedBind(_, _, e) | rest]) := [to_chk(e) | to_chk_stmt_exprs(rest)]
   def to_chk_stmt_exprs([SExpr(e) | rest]) := [to_chk(e) | to_chk_stmt_exprs(rest)]
+
+  # STRUCTURE-preserving projection (unlike `to_chk_stmt_exprs`, which keeps only the
+  # expressions for the num-mix walk): the binding gate needs each stmt's full shape —
+  # the bind name + annotation survive so `Checker.binds_bad` sees the typed binds. The
+  # driver's `Stmt` tuples are the checker's `Stmt` tuples, so only the VALUE is reprojected.
+  def to_chk_stmts(Vec(Stmt)) Vec(Stmt)
+  def to_chk_stmts([]) := []
+  def to_chk_stmts([SBind(n, e) | rest]) := [SBind(n, to_chk(e)) | to_chk_stmts(rest)]
+  def to_chk_stmts([STypedBind(n, ty, e) | rest]) := [STypedBind(n, ty, to_chk(e)) | to_chk_stmts(rest)]
+  def to_chk_stmts([SExpr(e) | rest]) := [SExpr(to_chk(e)) | to_chk_stmts(rest)]
 
   def to_chk_arms(Vec(Arm)) Vec(Core)
   def to_chk_arms([]) := []

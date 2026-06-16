@@ -62,10 +62,12 @@ mod Decl do
   type ISeg := SLit(String) | SHole(Expr)
 
   # a multi-statement block body (`def f() T <nl> b := e <nl> e <nl> end`): a
-  # sequence of `name := expr` binds (SBind) and bare expressions (SExpr) ending in
-  # a value. The projection (decl_fixpoint) lowers `BlockE` to Rian.Pratt's
-  # `{:block, [{:bind, n, e} | {:expr, e}, …]}` (what `Pratt.parse_body` builds).
-  type Stmt := SBind(String, Expr) | SExpr(Expr)
+  # sequence of `name := expr` binds (SBind), `name Ty := expr` typed binds
+  # (STypedBind, ADR-0034 — the annotation enables the binding type gate), and bare
+  # expressions (SExpr) ending in a value. The projection (decl_fixpoint) lowers
+  # `BlockE` to Rian.Pratt's `{:block, [{:bind, n, e} | {:typed_bind, n, t, e} |
+  # {:expr, e}, …]}` (what `Pratt.parse_body` builds).
+  type Stmt := SBind(String, Expr) | STypedBind(String, String, Expr) | SExpr(Expr)
 
   # clause PATTERNS — Wild/Var/Lit/Ctor lower straight to Rian.Decl's tuples
   # (:wild / {:var,n} / {:lit,k} / {:ctor,c,ps}); list patterns are nil/cons
@@ -350,6 +352,7 @@ mod Decl do
   def expand_stmts(m Macro, ss Vec(Stmt)) Vec(Stmt)
   def expand_stmts(_, []) := []
   def expand_stmts(m, [SBind(n, e) | rest]) := [SBind(n, expand_e(m, e)) | expand_stmts(m, rest)]
+  def expand_stmts(m, [STypedBind(n, t, e) | rest]) := [STypedBind(n, t, expand_e(m, e)) | expand_stmts(m, rest)]
   def expand_stmts(m, [SExpr(e) | rest]) := [SExpr(expand_e(m, e)) | expand_stmts(m, rest)]
 
   # instantiate the template: substitute each `Id(param)` by its bound argument.
@@ -401,6 +404,7 @@ mod Decl do
   def subst_stmts(env Vec(Subst), ss Vec(Stmt)) Vec(Stmt)
   def subst_stmts(_, []) := []
   def subst_stmts(env, [SBind(n, e) | rest]) := [SBind(n, subst_e(env, e)) | subst_stmts(env, rest)]
+  def subst_stmts(env, [STypedBind(n, t, e) | rest]) := [STypedBind(n, t, subst_e(env, e)) | subst_stmts(env, rest)]
   def subst_stmts(env, [SExpr(e) | rest]) := [SExpr(subst_e(env, e)) | subst_stmts(env, rest)]
 
   # ── protocol method parsing ───────────────────────────────────────────────
@@ -919,6 +923,14 @@ mod Decl do
   def parse_stmts([TId(n), TOp(":=") | rest])
     case parse_bp(0, rest) do
       P(e, rest2) -> [SBind(n, e) | parse_stmts(rest2)]
+    end
+  end
+  # a TYPED bind `name Ty := expr` (ADR-0034): a single-identifier annotation between
+  # the name and `:=` (the binding type gate's input). A parametric annotation
+  # (`Vec(Int8)`) is out of this slice — it falls through to the SExpr path.
+  def parse_stmts([TId(n), TId(ty), TOp(":=") | rest])
+    case parse_bp(0, rest) do
+      P(e, rest2) -> [STypedBind(n, ty, e) | parse_stmts(rest2)]
     end
   end
   def parse_stmts(ts)
