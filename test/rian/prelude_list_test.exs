@@ -45,4 +45,17 @@ defmodule Rian.PreludeListTest do
     assert m.join([], ", ") == ""
     assert m.map_join([1, 2, 3], "-", fn x -> "v#{x}" end) == "v1-v2-v3"
   end
+
+  test "member / take / drop / count_by", %{mod: m} do
+    assert m.member([1, 2, 3], 2)
+    refute m.member([1, 2, 3], 9)
+    assert m.take([1, 2, 3, 4], 2) == [1, 2]
+    assert m.drop([1, 2, 3, 4], 2) == [3, 4]
+    assert m.count_by([1, 2, 3, 4], fn x -> rem(x, 2) == 0 end) == 2
+  end
+
+  test "find returns an Option (Some/None), not a bare value/nil", %{mod: m} do
+    assert m.find([1, 2, 3], fn x -> x > 1 end) == {:some, 2}
+    assert m.find([1, 2, 3], fn x -> x > 9 end) == :none
+  end
 end

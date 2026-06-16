@@ -109,4 +109,31 @@ mod List do
 
   pub def map_join(xs Vec(T), sep String, f Fn(T, String)) String forall T
   pub def map_join(xs, sep, f) := join(map(xs, f), sep)
+
+  # member — structural membership (`Enum.member?/2`), via generic `==`.
+  pub def member(xs Vec(T), x T) Bool forall T
+  pub def member([], _) := false
+  pub def member([h | t], x) := if h == x do true else member(t, x) end
+
+  # take / drop — prefix and its complement (`Enum.take/2`, `Enum.drop/2`).
+  pub def take(xs Vec(T), n Int53) Vec(T) forall T
+  pub def take(_, 0) := []
+  pub def take([], _) := []
+  pub def take([h | t], n) := [h | take(t, n - 1)]
+
+  pub def drop(xs Vec(T), n Int53) Vec(T) forall T
+  pub def drop(xs, 0) := xs
+  pub def drop([], _) := []
+  pub def drop([_ | t], n) := drop(t, n - 1)
+
+  # count_by — count elements satisfying `f` (`Enum.count/2`).
+  pub def count_by(xs Vec(T), f Fn(T, Bool)) Int53 forall T
+  pub def count_by([], _) := 0
+  pub def count_by([h | t], f) := if f(h) do 1 + count_by(t, f) else count_by(t, f) end
+
+  # find — first element satisfying `f`, as an `Option` (`Enum.find/2` returns
+  # the bare value or nil; the portable Rian image is `Option`).
+  pub def find(xs Vec(T), f Fn(T, Bool)) Option(T) forall T
+  pub def find([], _) := None
+  pub def find([h | t], f) := if f(h) do Some(h) else find(t, f) end
 end
