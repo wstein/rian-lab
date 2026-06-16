@@ -889,10 +889,11 @@ mod Decl do
     end
   end
   def classify_def(pb, name, inside, [TId(rb) | rb_rest])
-    case parse_ptype([TId(rb) | rb_rest]) do
+    case maybe_err_set(parse_ptype([TId(rb) | rb_rest])) do
       PT(ret, after) -> finish_sig(pb, name, inside, ret, after)
     end
   end
+
   # an UNTYPED clause with a multi-statement block body: `def f(pats) <nl> stmts end`
   # (no `:=`, no return type — the dominant form for a multi-clause function's
   # clauses). Collect the block to its matching `end` and parse its statements.
@@ -902,6 +903,16 @@ mod Decl do
     end
   end
   def classify_def(pb, name, inside, after) := DR(DErr, after)
+
+  # a `T | E` return (ADR-0040): after the OK type, an optional `| E` error set. Join it
+  # back as the `"T | E"` string Rian.Decl stores, so the error-set type gate sees the
+  # declared set. (Without this the `| E` was dropped and the body silently lost.)
+  def maybe_err_set(PType) PType
+  def maybe_err_set(PT(ret, [TOp("|") | rest])) := es_join(ret, parse_ptype(rest))
+  def maybe_err_set(pt) := pt
+
+  def es_join(String, PType) PType
+  def es_join(ret, PT(err, after)) := PT(Prim.str_concat(ret, Prim.str_concat(" | ", err)), after)
 
   # after the return type comes an optional `forall T, U: Bound` binder list, then
   # either `:= body` (a typed single clause) or nothing (a bodiless signature).

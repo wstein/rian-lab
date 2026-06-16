@@ -257,7 +257,11 @@ mod ComposeRealSum do
                 case first_bind_bad(decls) do
                   "" ->
                     case first_bound_bad(decls) do
-                      "" -> assemble(modname, funcs(grps))
+                      "" ->
+                        case first_error_set_bad(decls) do
+                          "" -> assemble(modname, funcs(grps))
+                          bad -> refuse_type(bad)
+                        end
                       bad -> refuse_type(bad)
                     end
                   bad -> refuse_type(bad)
@@ -1270,6 +1274,63 @@ mod ComposeRealSum do
   def add_impl(String, String, Dict(String, Vec(String))) Dict(String, Vec(String))
   def add_impl(proto, ty, acc) := if Prim.map_has(acc, proto) do Prim.map_put(acc, proto, [ty | Prim.map_get(acc, proto)]) else Prim.map_put(acc, proto, [ty]) end
 
+  # ── the FIFTH type gate: `T | E` error-set check (Checker.error_set_bad, ADR-0040 §4) ──
+  # the self-built compiler REFUSES a `T | E` function that returns an `{:error, Tag}` whose
+  # tag is not in `E`'s set ({:type_error, name}). `tsets` (each sum type -> its variant tags)
+  # is built from the `d_type` decls; the body is projected with the atom/tuple-PRESERVING
+  # `to_chk_es` so `error_set_bad` can see the error tuples. (`ts` is left untyped via a sig +
+  # clause head — its `Dict(String, Vec(String))` type carries an internal comma.)
+  def first_error_set_bad(decls Vec(Tuple)) String := fes(sig_index(decls), tset_tab(decls), decls)
+
+  def fes(Vec(Tuple), Dict(String, Vec(String)), Vec(Tuple)) String
+  def fes(_, _, []) := ""
+  def fes(sigs, ts, [{:d_func, _, name, params, ret, _, body} | rest])
+    if func_es_bad(params, ret, body, ts) do
+      name
+    else
+      fes(sigs, ts, rest)
+    end
+  end
+  def fes(sigs, ts, [{:d_clause, name, pats, expr} | rest]) := clause_es_or(sigs, ts, name, pats, expr, rest)
+  def fes(sigs, ts, [{:d_clause_g, name, pats, _, expr} | rest]) := clause_es_or(sigs, ts, name, pats, expr, rest)
+  def fes(sigs, ts, [{:d_mod, _, inner} | rest]) := combine_es(first_error_set_bad(inner), sigs, ts, rest)
+  def fes(sigs, ts, [_ | rest]) := fes(sigs, ts, rest)
+
+  def combine_es(String, Vec(Tuple), Dict(String, Vec(String)), Vec(Tuple)) String
+  def combine_es(inner, sigs, ts, rest) := if inner == "" do fes(sigs, ts, rest) else inner end
+
+  def clause_es_or(Vec(Tuple), Dict(String, Vec(String)), String, Vec(Tuple), Tuple, Vec(Tuple)) String
+  def clause_es_or(sigs, ts, name, pats, expr, rest) :=
+    case sig_lookup(sigs, name) do
+      SSome(params, ret) -> es_decide(clause_es_bad(params, ret, pats, expr, ts), name, sigs, ts, rest)
+      SNone -> fes(sigs, ts, rest)
+    end
+
+  def es_decide(Bool, String, Vec(Tuple), Dict(String, Vec(String)), Vec(Tuple)) String
+  def es_decide(bad, name, sigs, ts, rest) := if bad do name else fes(sigs, ts, rest) end
+
+  def clause_es_bad(Vec(Tuple), String, Vec(Tuple), Tuple, Dict(String, Vec(String))) Bool
+  def clause_es_bad(sigParams, ret, pats, expr, ts) :=
+    Checker.error_set_bad(to_chk_es_block(lower_body(desugar_interp(clause_env(pats, sigParams), expr))), ret, ts)
+
+  def func_es_bad(Vec(Tuple), String, Tuple, Dict(String, Vec(String))) Bool
+  def func_es_bad(params, ret, body, ts) :=
+    Checker.error_set_bad(to_chk_es_block(lower_body(desugar_interp(param_tenv(params), body))), ret, ts)
+
+  # tsets: each sum type -> its variant tags (a named error set), from the `d_type` decls.
+  def tset_tab(Vec(Tuple)) Dict(String, Vec(String))
+  def tset_tab(decls) := ttab(decls, Prim.map_new())
+
+  def ttab(Vec(Tuple), Dict(String, Vec(String))) Dict(String, Vec(String))
+  def ttab([], acc) := acc
+  def ttab([{:d_type, name, variants} | rest], acc) := ttab(rest, Prim.map_put(acc, name, variant_ctors(variants)))
+  def ttab([{:d_mod, _, inner} | rest], acc) := ttab(rest, ttab(inner, acc))
+  def ttab([_ | rest], acc) := ttab(rest, acc)
+
+  def variant_ctors(Vec(Tuple)) Vec(String)
+  def variant_ctors([]) := []
+  def variant_ctors([{:v, ctor, _} | rest]) := [ctor | variant_ctors(rest)]
+
   # an UNTYPED param carries type "" — omit it so the checker infers `unknown` for it
   # (conservative) rather than treating "" as a concrete type that unifies with nothing.
   def tenv_dict(Vec(Tuple)) Dict(String, String)
@@ -1342,6 +1403,54 @@ mod ComposeRealSum do
   def to_chk_flds(Vec(SFld)) Vec(Core)
   def to_chk_flds([]) := []
   def to_chk_flds([SFld(_, v) | rest]) := [to_chk(v) | to_chk_flds(rest)]
+
+  # like `to_chk` but PRESERVES atoms + tuples — the error-set gate needs the `{:error, Tag}`
+  # shape that `to_chk` collapses to `__atom`/`__tuple`. Everything else collapses the same
+  # (`error_set_bad` walks `CCall(__blk/__if/…)` args, so the structure is reached anyway).
+  def to_chk_es(Core) Core
+  def to_chk_es(CNum(s)) := CNum(s)
+  def to_chk_es(CStr(s)) := CStr(s)
+  def to_chk_es(CChar(c)) := CChar(c)
+  def to_chk_es(CId(x)) := CId(x)
+  def to_chk_es(CAtom(a)) := CAtom(a)
+  def to_chk_es(CUnary(op, x)) := CUnary(op, to_chk_es(x))
+  def to_chk_es(CBin(op, l, r)) := CBin(op, to_chk_es(l), to_chk_es(r))
+  def to_chk_es(CCall(f, args)) := CCall(f, to_chk_es_all(args))
+  def to_chk_es(CLambda(_, body)) := CCall("__lam", [to_chk_es(body)])
+  def to_chk_es(CApply(callee, args)) := CCall("__apply", [to_chk_es(callee) | to_chk_es_all(args)])
+  def to_chk_es(CTuple(es)) := CTuple(to_chk_es_all(es))
+  def to_chk_es(CList(es, tail)) := CCall("__list", cat_core(to_chk_es_all(es), to_chk_es_tail(tail)))
+  def to_chk_es(CIf(c, t, e)) := CCall("__if", [to_chk_es(c), to_chk_es_block(t), to_chk_es_block(e)])
+  def to_chk_es(CCase(scrut, arms)) := CCall("__case", [to_chk_es(scrut) | to_chk_es_arms(arms)])
+  def to_chk_es(CDot(obj, _)) := CCall("__dot", [to_chk_es(obj)])
+  def to_chk_es(CRemote(_, _, args)) := CCall("__remote", to_chk_es_all(args))
+  def to_chk_es(CStruct(_, flds)) := CCall("__struct", to_chk_es_flds(flds))
+  def to_chk_es(CMap(flds)) := CCall("__map", to_chk_es_flds(flds))
+
+  def to_chk_es_all(Vec(Core)) Vec(Core)
+  def to_chk_es_all([]) := []
+  def to_chk_es_all([e | rest]) := [to_chk_es(e) | to_chk_es_all(rest)]
+
+  def to_chk_es_block(Block) Core
+  def to_chk_es_block(Block(stmts)) := CCall("__blk", to_chk_es_stmt_exprs(stmts))
+
+  def to_chk_es_stmt_exprs(Vec(Stmt)) Vec(Core)
+  def to_chk_es_stmt_exprs([]) := []
+  def to_chk_es_stmt_exprs([SBind(_, e) | rest]) := [to_chk_es(e) | to_chk_es_stmt_exprs(rest)]
+  def to_chk_es_stmt_exprs([STypedBind(_, _, e) | rest]) := [to_chk_es(e) | to_chk_es_stmt_exprs(rest)]
+  def to_chk_es_stmt_exprs([SExpr(e) | rest]) := [to_chk_es(e) | to_chk_es_stmt_exprs(rest)]
+
+  def to_chk_es_arms(Vec(Arm)) Vec(Core)
+  def to_chk_es_arms([]) := []
+  def to_chk_es_arms([Arm(_, _, blk) | rest]) := [to_chk_es_block(blk) | to_chk_es_arms(rest)]
+
+  def to_chk_es_tail(Tail) Vec(Core)
+  def to_chk_es_tail(TClose) := []
+  def to_chk_es_tail(TTail(e)) := [to_chk_es(e)]
+
+  def to_chk_es_flds(Vec(SFld)) Vec(Core)
+  def to_chk_es_flds([]) := []
+  def to_chk_es_flds([SFld(_, v) | rest]) := [to_chk_es(v) | to_chk_es_flds(rest)]
 
   def cat_core(Vec(Core), Vec(Core)) Vec(Core)
   def cat_core([], ys) := ys
