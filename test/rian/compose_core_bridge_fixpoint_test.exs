@@ -2,7 +2,7 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
   # async: false — loads the verified ports + the driver into the VM.
   use ExUnit.Case, async: false
 
-  alias Rian.{Beam, Core, Lexer, Pratt}
+  alias Rian.{Beam, Core, Pratt}
 
   # STEP 3 (verification bridge) — the driver's surface→Core lowering is
   # equivalence-locked to `Rian.Core` via the verified `selfhost_core` oracle.
