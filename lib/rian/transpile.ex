@@ -125,6 +125,29 @@ defmodule Rian.Transpile do
   # Phase C+: harvest `@type` decls — synthesize `type Name := …` and resolve local
   # type refs in `@spec`s (`type_env`).
   defp infer_program({:defmodule, _, [aliases, [do: body]]} = ast) do
+    case wp_table() do
+      nil -> infer_program_local(ast)
+      table -> infer_program_wp(ast, aliases, body, table)
+    end
+  end
+
+  defp infer_program(_), do: {%{}, []}
+
+  # whole-program + port.spec (ADR-0075): use the primed `{mod, fn, arity}` table for
+  # this module's signatures (named types from the spec, holes elsewhere); keep the
+  # local `@type` synthesis so `type …` decls still ride along.
+  defp infer_program_wp(_ast, aliases, body, table) do
+    mod = short_name(aliases)
+    stmts = block_stmts(body)
+    {_env, type_decls} = Rian.Transpile.Infer.collect_types(stmts, mod)
+
+    sigmap =
+      for {{m, fn_, ar}, sig} <- table, m == mod, into: %{}, do: {{fn_, ar}, sig}
+
+    {sigmap, type_decls}
+  end
+
+  defp infer_program_local({:defmodule, _, [aliases, [do: body]]} = ast) do
     stmts = block_stmts(body)
     {type_env, type_decls} = Rian.Transpile.Infer.collect_types(stmts, short_name(aliases))
     sigmap = infer_sigs(ast, type_env)
@@ -148,8 +171,6 @@ defmodule Rian.Transpile do
     error_decls = if tags == [], do: [], else: ["type Errors := #{Enum.join(tags, " | ")}"]
     {sigmap, type_decls ++ error_decls}
   end
-
-  defp infer_program(_), do: {%{}, []}
 
   @doc """
   Transpile and report `{text, stats}` — `ports` counts unresolved markers,
@@ -246,6 +267,47 @@ defmodule Rian.Transpile do
     |> Enum.reject(&is_nil/1)
     |> Rian.Transpile.Infer.prime_xmod(@stdlib)
   end
+
+  @doc """
+  Prime the **whole-program + `port.spec`** signature table (ADR-0075): run
+  `Rian.PortAnalysis` over all `[{file, src}]` to get shared `Sum#`/`Unk####` sigs,
+  apply the `port.spec` substitutions (`subs`), and cache a `{mod, fn, arity} => sig`
+  table so a subsequent `transpile(_, infer: true)` emits drafts whose signatures carry
+  the human-named types (`Sum1 = Expr` → `Expr`) instead of holes. A slot left with any
+  undecided placeholder renders as a whole `_Unk` hole. Call once before folder-mode
+  rendering; `clear_wp/0` after.
+  """
+  @spec prime_wp([{String.t(), String.t()}], %{String.t() => String.t()}) :: :ok
+  def prime_wp(sources, subs) when is_list(sources) do
+    data = Rian.PortAnalysis.analyze(sources)
+
+    table =
+      Map.new(data.wp.sigs, fn {{mod, fn_, ar}, sig} ->
+        {{mod, fn_, ar},
+         %{
+           params: Enum.map(sig.params, &resolve_wp_type(&1, subs)),
+           ret: resolve_wp_type(sig.ret, subs),
+           tvars: []
+         }}
+      end)
+
+    :persistent_term.put({__MODULE__, :wp}, table)
+    :ok
+  end
+
+  @doc "Clear the whole-program + port.spec table (`prime_wp/2`)."
+  def clear_wp, do: :persistent_term.erase({__MODULE__, :wp})
+
+  defp wp_table, do: :persistent_term.get({__MODULE__, :wp}, nil)
+
+  # apply the port.spec, then fall a still-placeholdered slot back to a whole `_Unk`
+  # hole — a partially-resolved type (`Vec(Unk0078)`) isn't valid draft Rian.
+  defp resolve_wp_type(t, subs) when is_binary(t) do
+    t = Rian.PortSpec.apply_subs(t, subs)
+    if t =~ ~r/\b(?:Sum\d+|Unk\d+)\b/, do: "_Unk", else: t
+  end
+
+  defp resolve_wp_type(t, _subs), do: t
 
   defp module_groups(src) do
     case Code.string_to_quoted(src) do

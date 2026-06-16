@@ -19,6 +19,12 @@ defmodule Mix.Tasks.Rian.Transpile do
   markers, and markers-per-def, ranked easiest-first, so you can see which modules
   are cheap to port and which are struct-reflection-heavy before committing.
 
+  **`--spec port.spec`** (folder mode, ADR-0075) — runs **whole-program** inference over
+  the dir and applies your `port.spec` decisions (`Sum1 = Expr`, …) so every emitted
+  draft signature carries the human-named types. The spec must come from
+  `mix rian.port_analysis` over the *same* dir (the shared `Sum#`/`Unk####` numbering
+  must match); an undecided slot stays a whole `_Unk` hole.
+
   This is **not** a one-shot port: the output will not compile until a human fills
   the `_Unk` holes, resolves every marker, makes matches exhaustive, and
   adds a fixpoint test. See `Rian.Transpile` for the translated-vs-flagged split.
@@ -26,6 +32,7 @@ defmodule Mix.Tasks.Rian.Transpile do
       mix rian.transpile lib/rian/range.ex
       mix rian.transpile lib/rian/range.ex -o compiler/range.rian
       mix rian.transpile lib/rian/ -o compiler/drafts
+      mix rian.transpile lib/rian/ -o compiler/drafts --spec port.spec
   """
 
   use Mix.Task
@@ -34,7 +41,7 @@ defmodule Mix.Tasks.Rian.Transpile do
   def run(args) do
     {opts, argv, _invalid} =
       OptionParser.parse(args,
-        strict: [output: :string, infer: :boolean, infer_report: :boolean],
+        strict: [output: :string, infer: :boolean, infer_report: :boolean, spec: :string],
         aliases: [o: :output, i: :infer]
       )
 
@@ -44,12 +51,14 @@ defmodule Mix.Tasks.Rian.Transpile do
           p
 
         [] ->
-          Mix.raise("usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report]")
+          Mix.raise(
+            "usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report] [--spec port.spec]"
+          )
       end
 
-    # --infer-report implies --infer
-    infer? = !!opts[:infer] or !!opts[:infer_report]
-    o = %{out: opts[:output], infer: infer?, report: !!opts[:infer_report]}
+    # --infer-report and --spec both imply --infer (whole-program for --spec)
+    infer? = !!opts[:infer] or !!opts[:infer_report] or !!opts[:spec]
+    o = %{out: opts[:output], infer: infer?, report: !!opts[:infer_report], spec: opts[:spec]}
 
     cond do
       File.dir?(path) -> run_dir(path, o)
@@ -113,9 +122,19 @@ defmodule Mix.Tasks.Rian.Transpile do
     files = Path.wildcard(Path.join(dir, "**/*.ex"))
     if files == [], do: Mix.raise("no .ex files under #{dir}")
 
-    # Phase A: prime the whole-program cross-module signature table once so
-    # cross-module calls resolve during per-file inference.
-    if o.infer, do: Rian.Transpile.prime_xmod(Enum.map(files, &File.read!/1))
+    # `--spec`: whole-program + port.spec — drafts carry the human-named types (the
+    # spec must come from `mix rian.port_analysis` over the SAME dir, so the shared
+    # `Sum#`/`Unk####` numbering matches). Else Phase A: prime the cross-module table
+    # so cross-module calls resolve during per-file inference.
+    wp? = !!o.spec
+
+    if wp? do
+      subs = Rian.PortSpec.load(o.spec)
+      Rian.Transpile.prime_wp(Enum.map(files, &{&1, File.read!(&1)}), subs)
+      IO.puts(:stderr, "applying #{map_size(subs)} port.spec decision(s) (whole-program)")
+    else
+      if o.infer, do: Rian.Transpile.prime_xmod(Enum.map(files, &File.read!/1))
+    end
 
     entries =
       Enum.map(files, fn file ->
@@ -125,6 +144,8 @@ defmodule Mix.Tasks.Rian.Transpile do
         if o.out, do: write_draft(text, dir, file, o.out)
         {Path.relative_to(file, dir), stats}
       end)
+
+    if wp?, do: Rian.Transpile.clear_wp()
 
     print_report(Rian.Transpile.rank(entries), o.out)
     if o.infer, do: print_hole_total(entries)

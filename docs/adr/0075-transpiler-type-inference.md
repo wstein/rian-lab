@@ -193,8 +193,19 @@ unknowns with site counts) as a checklist. A named sum's now-fully-resolved sigs
 out of the §2 review list, and the placeholder index shows only the undecided remainder —
 so the report doubles as a porting *burndown*. The substitution is a rename of shared
 names, not a re-inference, so it cannot introduce an accidental fill (the human owns each
-`= RianType` decision). Still deferred: feeding the resolved spec into the transpiler's
-emitted drafts (`Rian.Check`-gated), and mapping error idioms through the same file.
+`= RianType` decision).
+
+**The spec also drives the transpiler's drafts (IMPLEMENTED).** `mix rian.transpile DIR
+--spec port.spec` runs the **whole-program** inference over `DIR` (so the shared
+`Sum#`/`Unk####` numbering matches the report the spec was authored against),
+`prime_wp/2` applies the spec, and each emitted `.rian` draft's signatures carry the
+**named types** (`def ev(x Expr) …`) where decided, falling back to a whole `_Unk` hole
+for any slot still holding an undecided placeholder (a partially-resolved `Vec(Unk…)` is
+not valid draft Rian). So the same `port.spec` that cleans the *report* now also types
+the *drafts* a human finishes — name a sum once, every draft signature over it resolves.
+On `lib/rian`, the two-sum spec yields `Expr`/`Pat` in ~38/31 draft slots. Still deferred:
+running `Rian.Check` per emitted draft as a hard accident gate, and mapping error idioms
+through the same file.
 
 ## Open items
 

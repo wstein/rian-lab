@@ -352,6 +352,41 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "whole-program + port.spec drafts (ADR-0075)" do
+    test "a named sum flows from the port.spec into the emitted draft signature" do
+      src = """
+      defmodule M do
+        def ev(x) do
+          case x do
+            %ENum{} -> 1
+            %ECall{} -> 2
+          end
+        end
+      end
+      """
+
+      Transpile.prime_wp([{"m.ex", src}], %{"Sum1" => "Expr"})
+
+      try do
+        # `ev`'s scrutinee (the dispatch sum) renders as the human-named `Expr`
+        assert Transpile.transpile(src, infer: true) =~ ~r/def ev\(x Expr\)/
+      after
+        Transpile.clear_wp()
+      end
+    end
+
+    test "an undecided placeholder renders as a whole `_Unk` hole, not a partial type" do
+      src = "defmodule M do\n  def thread(x), do: combine(x)\nend"
+      Transpile.prime_wp([{"m.ex", src}], %{})
+
+      try do
+        assert Transpile.transpile(src, infer: true) =~ "def thread(x _Unk)"
+      after
+        Transpile.clear_wp()
+      end
+    end
+  end
+
   describe "struct vocabulary in inference — Lever B" do
     test "struct construction types the return to the struct" do
       assert sig("  def mk(n), do: %ENum{text: n}", "mk") =~ ~r/\) ENum :=/
