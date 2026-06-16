@@ -60,8 +60,28 @@ defmodule Rian.TranspileTest do
       assert out =~ "pub def double(x _Unk) _Unk := x + x"
     end
 
-    test "defp is private (`def`, no `pub`)" do
-      assert rian("defmodule M do\n  defp f(x), do: x\nend") =~ ~r/\n  def f\(x _Unk\) _Unk :=/
+    test "defp is private (`def`, no `pub`) and OMITS the return (infer-local, ADR-0034)" do
+      # a private function needn't declare its return — `Rian.InferLocal` recovers it.
+      out = rian("defmodule M do\n  defp f(x), do: x\nend")
+      assert out =~ ~r/\n  def f\(x _Unk\) :=/
+      refute out =~ "def f(x _Unk) _Unk"
+    end
+
+    test "a `pub def` (from Elixir `def`) KEEPS its return hole (declare-public)" do
+      out = rian("defmodule M do\n  def f(x), do: x\nend")
+      assert out =~ "pub def f(x _Unk) _Unk := x"
+    end
+
+    test "omitting the private return drops one hole per defp" do
+      {_pub, ps} =
+        {nil, Rian.Transpile.transpile_with_stats("defmodule M do\n  def f(x), do: x\nend")}
+
+      {_priv, qs} =
+        {nil, Rian.Transpile.transpile_with_stats("defmodule M do\n  defp f(x), do: x\nend")}
+
+      # public f has 2 holes (param + return); private f has 1 (param only).
+      assert elem(ps, 1).holes == 2
+      assert elem(qs, 1).holes == 1
     end
 
     test "multi-clause def emits one sig + per-clause bodies" do

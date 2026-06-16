@@ -509,6 +509,12 @@ defmodule Rian.Transpile do
     ret = if sig, do: sig.ret, else: "_Unk"
     forall = if sig && sig.tvars != [], do: " forall #{Enum.join(sig.tvars, ", ")}", else: ""
 
+    # infer-local (ADR-0034): a PRIVATE function needn't declare its return — drop the
+    # `_Unk` return hole so `Rian.InferLocal` recovers it once the params are typed
+    # (one fewer hole per `defp`). `pub` keeps its declared boundary; a return inference
+    # already resolved (a real type) is kept as useful signal.
+    ret_part = if vis != :pub and ret == "_Unk", do: "", else: " #{ret}"
+
     body_lines =
       if simple?(clauses) do
         [c] = clauses
@@ -518,9 +524,9 @@ defmodule Rian.Transpile do
           |> Enum.zip(ptypes)
           |> Enum.map_join(", ", fn {a, t} -> "#{var_name(a)} #{t}" end)
 
-        ["#{kw} #{name}(#{params}) #{ret}#{forall} := #{render_body(c.body)}"]
+        ["#{kw} #{name}(#{params})#{ret_part}#{forall} := #{render_body(c.body)}"]
       else
-        sig_line = "#{kw} #{name}(#{Enum.join(ptypes, ", ")}) #{ret}#{forall}"
+        sig_line = "#{kw} #{name}(#{Enum.join(ptypes, ", ")})#{ret_part}#{forall}"
         [sig_line | Enum.map(clauses, &render_clause(kw, &1))]
       end
 
