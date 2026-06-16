@@ -348,4 +348,31 @@ defmodule Rian.Core do
 
   def from_pat({:map, kvs}),
     do: %PMap{pairs: Enum.map(kvs, fn {k, p} -> {k, from_pat(p)} end)}
+
+  @doc """
+  Generic typed-core walk used by the partial emitters (`Rian.JS`, `Rian.JVM`):
+  the friendly label of the first node whose struct is a key in `unsup`, else
+  `nil`. Each emitter supplies its own struct→label map and raises its own
+  `Unsupported` from the result. (Mirrors `Rian.Reach.scan/3`'s shape.)
+  """
+  def first_unsupported(node, unsup) when is_struct(node) do
+    case Map.get(unsup, node.__struct__) do
+      nil ->
+        node
+        |> Map.from_struct()
+        |> Map.values()
+        |> Enum.find_value(&first_unsupported(&1, unsup))
+
+      label ->
+        label
+    end
+  end
+
+  def first_unsupported(l, unsup) when is_list(l),
+    do: Enum.find_value(l, &first_unsupported(&1, unsup))
+
+  def first_unsupported(t, unsup) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.find_value(&first_unsupported(&1, unsup))
+
+  def first_unsupported(_node, _unsup), do: nil
 end

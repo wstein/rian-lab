@@ -59,4 +59,24 @@ defmodule Rian.CoreTest do
       assert %ENum{type: nil} = Core.from_expr({:num, "1"})
     end
   end
+
+  describe "first_unsupported/2 — generic core walk for the partial emitters" do
+    @unsup %{ETuple => "a tuple", Core.EMap => "a map"}
+
+    test "returns the label of the first node whose struct is in the map" do
+      tree = Core.from_expr({:tuple, [{:atom, "ok"}, {:id, "v"}]})
+      assert Core.first_unsupported(tree, @unsup) == "a tuple"
+    end
+
+    test "descends into nested struct / list / tuple children to find a match" do
+      # the unsupported `ETuple` is buried in a call argument list
+      tree = Core.from_expr({:call, {:id, "f"}, [{:tuple, [{:id, "a"}]}]})
+      assert Core.first_unsupported(tree, @unsup) == "a tuple"
+    end
+
+    test "returns nil when no node is unsupported" do
+      tree = Core.from_expr({:bin, "+", {:id, "a"}, {:num, "1"}})
+      assert Core.first_unsupported(tree, @unsup) == nil
+    end
+  end
 end

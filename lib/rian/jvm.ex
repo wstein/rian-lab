@@ -147,34 +147,13 @@ defmodule Rian.JVM do
       Enum.each(f.clauses, fn c ->
         body = c.body |> Pratt.parse_body() |> Core.from_expr()
 
-        case first_unsupported(body, @jvm_unsupported) do
+        case Core.first_unsupported(body, @jvm_unsupported) do
           nil -> :ok
           label -> raise Unsupported, "`#{f.name}`: #{label} is not yet supported on :jvm"
         end
       end)
     end)
   end
-
-  defp first_unsupported(node, unsup) when is_struct(node) do
-    case Map.get(unsup, node.__struct__) do
-      nil ->
-        node
-        |> Map.from_struct()
-        |> Map.values()
-        |> Enum.find_value(&first_unsupported(&1, unsup))
-
-      label ->
-        label
-    end
-  end
-
-  defp first_unsupported(l, unsup) when is_list(l),
-    do: Enum.find_value(l, &first_unsupported(&1, unsup))
-
-  defp first_unsupported(t, unsup) when is_tuple(t),
-    do: t |> Tuple.to_list() |> Enum.find_value(&first_unsupported(&1, unsup))
-
-  defp first_unsupported(_node, _unsup), do: nil
 
   @doc """
   Assemble `src` into a JVM `.jar` at `jar_path` by emitting Kotlin (`compile/1`)
