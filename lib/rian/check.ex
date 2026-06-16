@@ -1381,7 +1381,14 @@ defmodule Rian.Check do
   # Bind names introduced by the clause head, narrowing constructor patterns
   # against their parameter type (flow narrowing applies to clause heads too —
   # a clause head is a one-arm `case` on the parameters).
-  defp clause_env(pats, params, ic) do
+  @doc """
+  The typing environment (`name -> type`) for a clause: each clause-head pattern
+  flow-narrowed against its parameter's declared type. Public so the emitters can
+  build the same per-clause env the checker uses, to annotate the typed Core IR
+  (ADR-0050 §3).
+  """
+  @spec clause_env([term()], [map()], map()) :: map()
+  def clause_env(pats, params, ic) do
     pats
     |> Enum.zip(params)
     |> Enum.reduce(%{}, fn {pat, param}, env ->

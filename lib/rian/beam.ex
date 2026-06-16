@@ -112,7 +112,14 @@ defmodule Rian.Beam do
     load_aux_mods(prog)
 
     {:ok, ^module, bin} =
-      beam_for(module, funcs_of(prog), ranges_of(prog), types_of(prog), structs_of(prog))
+      beam_for(
+        module,
+        funcs_of(prog),
+        ranges_of(prog),
+        types_of(prog),
+        structs_of(prog),
+        Rian.Check.program_ic(prog)
+      )
 
     {:module, ^module} = :code.load_binary(module, ~c"#{module}.beam", bin)
     {:ok, module}
@@ -135,7 +142,8 @@ defmodule Rian.Beam do
           m.funcs,
           top ++ Map.get(m, :ranges, []),
           Map.get(m, :types, []),
-          Map.get(m, :structs, [])
+          Map.get(m, :structs, []),
+          Rian.Check.program_ic(prog)
         )
 
       {:module, ^atom} = :code.load_binary(atom, ~c"#{atom}.beam", bin)
@@ -153,7 +161,15 @@ defmodule Rian.Beam do
     prog = Decl.parse(src)
     :ok = Rian.Reach.gate!(prog)
     prog = Rian.Opaque.erase(prog)
-    beam_for(module, funcs_of(prog), ranges_of(prog), types_of(prog), structs_of(prog))
+
+    beam_for(
+      module,
+      funcs_of(prog),
+      ranges_of(prog),
+      types_of(prog),
+      structs_of(prog),
+      Rian.Check.program_ic(prog)
+    )
   end
 
   @doc """
@@ -178,7 +194,8 @@ defmodule Rian.Beam do
           m.funcs,
           top ++ Map.get(m, :ranges, []),
           Map.get(m, :types, []),
-          Map.get(m, :structs, [])
+          Map.get(m, :structs, []),
+          Rian.Check.program_ic(prog)
         )
 
       {atom, bin}
@@ -213,7 +230,15 @@ defmodule Rian.Beam do
   def compile_ir(prog, module) when is_atom(module) do
     :ok = Rian.Reach.gate!(prog)
     prog = Rian.Opaque.erase(prog)
-    beam_for(module, funcs_of(prog), ranges_of(prog), types_of(prog), structs_of(prog))
+
+    beam_for(
+      module,
+      funcs_of(prog),
+      ranges_of(prog),
+      types_of(prog),
+      structs_of(prog),
+      Rian.Check.program_ic(prog)
+    )
   end
 
   @doc "Compile and load a pre-built program IR (see `compile_ir/2`)."
@@ -243,7 +268,8 @@ defmodule Rian.Beam do
           m.funcs,
           top ++ Map.get(m, :ranges, []),
           Map.get(m, :types, []),
-          Map.get(m, :structs, [])
+          Map.get(m, :structs, []),
+          Rian.Check.program_ic(prog)
         )
 
       {atom, bin}
@@ -264,7 +290,7 @@ defmodule Rian.Beam do
   # build one module's `.beam` from its function list. `ranges` (a list of
   # `%IR.Range{}`) lets `Name.of(n)` construction desugar (ADR-0036). `types` and
   # `structs` let `-spec` attributes expand sum/struct types (Stage 0.5).
-  defp beam_for(module, funcs, ranges, types, structs) do
+  defp beam_for(module, funcs, ranges, types, structs, ic) do
     funcs = Enum.flat_map(funcs, &beam_func/1)
     rtable = Rian.Range.table(ranges)
     tctx = type_ctx(types, ranges, structs)
@@ -276,7 +302,7 @@ defmodule Rian.Beam do
       ] ++
         type_attrs(types, structs, tctx) ++
         Enum.map(funcs, &spec_form(&1, tctx)) ++
-        Enum.map(funcs, &function_form(&1, rtable))
+        Enum.map(funcs, &function_form(&1, rtable, ic))
 
     # `:debug_info` retains the abstract code (incl. the `-spec` attributes) in
     # the `.beam`, so Dialyzer can read the contracts (Stage 0.5).
@@ -450,33 +476,37 @@ defmodule Rian.Beam do
   end
 
   # ── function / clause forms ─────────────────────────────────────────────
-  defp function_form(%{name: name, clauses: clauses}, rtable) do
+  defp function_form(%{name: name, clauses: clauses} = func, rtable, ic) do
     {:function, @ln, String.to_atom(name), length(hd(clauses).pats),
-     Enum.map(clauses, &clause_form(&1, rtable))}
+     Enum.map(clauses, &clause_form(&1, Map.get(func, :params, []), rtable, ic))}
   end
 
-  defp clause_form(%{pats: pats, body: body, guard: guard}, rtable) do
+  defp clause_form(%{pats: pats, body: body, guard: guard}, params, rtable, ic) do
     core_pats = Enum.map(pats, &Core.from_pat/1)
     # the names bound by the clause head are in scope for the body — so a call to
     # one of them is a *variable application* (a fun value), not a local call
     scope = Enum.reduce(core_pats, %{}, &pat_vars/2)
+    # the per-clause typing env (params narrowed by the head patterns) lets us emit
+    # from the **typed** core IR: every node carries its inferred type (ADR-0050 §3).
+    tenv = Rian.Check.clause_env(pats, params, ic)
 
-    {:clause, @ln, Enum.map(core_pats, &pat_form/1), guard_form(guard_core(guard), scope),
-     body_forms(body, scope, rtable)}
+    {:clause, @ln, Enum.map(core_pats, &pat_form/1),
+     guard_form(guard_core(guard, tenv, ic), scope), body_forms(body, scope, rtable, tenv, ic)}
   end
 
   # a clause guard is a source string (from `Rian.Decl`) or an already-parsed AST
   # (from a Rian-written front-end, ADR-0063); `Pratt.parse/1` accepts either.
-  defp guard_core(nil), do: nil
-  defp guard_core(g), do: Core.from_expr(Pratt.parse(g))
+  defp guard_core(nil, _tenv, _ic), do: nil
+  defp guard_core(g, tenv, ic), do: Rian.Check.annotate(Pratt.parse(g), tenv, ic)
 
   defp guard_form(nil, _scope), do: []
   defp guard_form(core, scope), do: [[expr_form(core, scope)]]
 
   # a clause body is a non-empty sequence of Erlang expressions; `Name.of(n)`
-  # range construction (ADR-0036) is desugared here before lowering
-  defp body_forms(src, scope, rtable),
-    do: block_forms(Rian.Range.expand_of(Core.from_expr(Pratt.parse_body(src)), rtable), scope)
+  # range construction (ADR-0036) is desugared here before lowering. The body is
+  # lowered from the **typed** core IR (`Check.annotate` fills each node's type).
+  defp body_forms(src, scope, rtable, tenv, ic),
+    do: block_forms(Rian.Range.expand_of(Rian.Check.annotate(Pratt.parse_body(src), tenv, ic), rtable), scope)
 
   # A block statement lowers to one Erlang form *and* threads the block scope
   # (the `map_reduce` reducer in `block_forms`). A `:=` bind emits `Var = Expr`;
