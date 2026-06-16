@@ -701,17 +701,12 @@ defmodule Rian.Transpile.Infer do
       {:con, name} ->
         name
 
-      {:app, "Vec", [e]} ->
-        "Vec(#{render(store, gmap, e)})"
-
-      {:app, "Option", [e]} ->
-        "Option(#{render(store, gmap, e)})"
-
-      {:app, "Fn", parts} ->
-        "Fn(#{Enum.map_join(parts, ", ", &render(store, gmap, &1))})"
-
       {:app, head, parts} ->
-        "#{head}(#{Enum.map_join(parts, ", ", &render(store, gmap, &1))})"
+        # a parametric type is concrete only if EVERY argument is — an unresolved
+        # element (`Vec(<unknown>)`) makes the whole slot a hole, never `Vec(hole)`
+        # (which would be invalid Rian — an accidental fill).
+        rendered = Enum.map(parts, &render(store, gmap, &1))
+        if Enum.any?(rendered, &(&1 == :hole)), do: :hole, else: "#{head}(#{Enum.join(rendered, ", ")})"
 
       {:var, id} ->
         cond do

@@ -172,6 +172,14 @@ defmodule Rian.Transpile do
   defp infer_sigs(_), do: %{}
 
   @doc """
+  The inferred signature map `{name, arity} => sig` plus synthesized type decls
+  for a source — the raw inference result the port-analysis report consumes.
+  """
+  def inferred(source) when is_binary(source) do
+    infer_program(Code.string_to_quoted!(source))
+  end
+
+  @doc """
   Per-def inference ledger for `--infer-report`: `[{ {name, arity}, ledger }]`
   where each ledger lists the remaining holes and why (`:unresolved`, …).
   """

@@ -118,6 +118,22 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
 - Fill rate becomes a tracked, ratcheting metric — but always paired with the type-check gate, so
   it measures *correct* fills only.
 
+## Pre-step port-analysis (the human-judgment bridge)
+
+Since the wall is human-judgment-shaped, a team debate converged on a **read-only,
+generated `PORT.analysis.md`** (`mix rian.port_analysis`, `Rian.PortAnalysis`) as the
+first increment: it surfaces (1) inferred sigs with reach, (2) holes-with-reasons,
+(3) **proposed sum-type groupings** clustered from cross-module dispatch
+co-occurrence, and (4) an **error-idiom inventory** with proposed variants. It feeds
+nothing back yet (no accident surface) and is regenerable (anti-drift). It earns its
+keep: run cross-module on `lib/rian` it reconstructs the two real `Core` sums
+(`Expr` = the `E*` nodes, `Pat` = the `P*` nodes) from non-local dispatch evidence —
+the decision a human cannot make from a single draft. Generating it also caught a
+latent bug: a partially-resolved parametric type (`Vec(<unknown>)`) was rendered
+`Vec(hole)` (invalid Rian); it now falls back to a whole-slot hole. Next gate
+(per the debate): measure porting-time saved before wiring a reviewed `port.spec`
+back into the transpiler (`Rian.Check`-gated).
+
 ## Open items
 
 - Cross-def fixpoint (mutual recursion) beyond the 2-pass approximation.
