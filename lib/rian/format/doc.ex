@@ -59,8 +59,11 @@ defmodule Rian.Format.Doc do
   @doc """
   A group: render flat if it fits, else broken. Computes break propagation up
   front — a group containing a `hardline` (at any depth) is permanently broken.
+  Pass `force: true` to mark the group must-break regardless of width (used for the
+  magic trailing comma: a source trailing comma keeps a group expanded even if it
+  would fit).
   """
-  def group(doc), do: {:group, must_break?(doc), doc}
+  def group(doc, force \\ false), do: {:group, force or must_break?(doc), doc}
 
   # ── break propagation (Prettier's propagateBreaks) ────────────────────────
   # True if `doc` transitively contains a hard break, so every enclosing group

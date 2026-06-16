@@ -169,8 +169,27 @@ defmodule Rian.FormatTest do
              """
     end
 
-    test "an already-multiline literal that now fits is collapsed" do
-      assert Format.format("def xs() := [\n  1,\n  2,\n  3,\n]\n") == "def xs() := [1, 2, 3]\n"
+    test "an already-multiline literal that now fits is collapsed (no trailing comma)" do
+      assert Format.format("def xs() := [\n  1,\n  2,\n  3\n]\n") == "def xs() := [1, 2, 3]\n"
+    end
+
+    test "magic trailing comma: an author's trailing comma keeps the group expanded" do
+      assert Format.format("def xs() := [1, 2, 3,]\n") == """
+             def xs() := [
+               1,
+               2,
+               3,
+             ]
+             """
+    end
+
+    test "magic trailing comma is idempotent" do
+      out = Format.format("def xs() := [1, 2, 3,]\n")
+      assert Format.format(out) == out
+    end
+
+    test "no magic comma without a trailing comma — a fitting list stays inline" do
+      assert Format.format("def xs() := [1, 2, 3]\n") == "def xs() := [1, 2, 3]\n"
     end
 
     test "no formatted line exceeds the column budget when the body is breakable" do

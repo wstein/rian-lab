@@ -359,10 +359,14 @@ defmodule Rian.Format do
         # after a cons tail — `[a, b | tail,]` is a syntax error — so a cons group
         # never gets one. A trailing comma is never *required*, so suppressing it is
         # always meaning-safe.
-        trailing =
-          if trailing_comma?(inner) and not cons_group?(inner),
-            do: Doc.if_break(Doc.text(","), Doc.empty()),
-            else: Doc.empty()
+        comma? = trailing_comma?(inner) and not cons_group?(inner)
+        trailing = if comma?, do: Doc.if_break(Doc.text(","), Doc.empty()), else: Doc.empty()
+
+        # **magic trailing comma:** a comma the *author* left before the closer keeps
+        # the group expanded even when it would fit (Black/Prettier). It is idempotent
+        # because a broken group re-emits the trailing comma. Cons groups can't carry
+        # one, so they never get this treatment.
+        force = comma? and magic_comma?(inner)
 
         Doc.group(
           Doc.concat([
@@ -371,8 +375,20 @@ defmodule Rian.Format do
             trailing,
             Doc.softline(),
             c
-          ])
+          ]),
+          force
         )
+    end
+  end
+
+  # a trailing comma the author wrote: the last meaningful inner node is a `,`
+  defp magic_comma?(inner) do
+    inner
+    |> Enum.reject(&(match?({:tok, {:nl}}, &1) or match?({:tok, {:comment, _}}, &1)))
+    |> List.last()
+    |> case do
+      {:tok, {:comma}} -> true
+      _ -> false
     end
   end
 
