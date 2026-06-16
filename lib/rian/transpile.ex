@@ -1,0 +1,347 @@
+defmodule Rian.Transpile do
+  @moduledoc """
+  **Assisted-scaffolding** Elixir→Rian transpiler — the porting accelerator for
+  the Elixir-pass-retirement track (the freeze plan in ADR-0063's orbit).
+
+  This is deliberately **not** a one-shot replacement. Translating untyped,
+  full-surface Elixir (macros, `Enum`/`Map`, struct reflection, comprehensions)
+  into typed, capability-disciplined Rian that survives `Rian.Check` /
+  `Rian.Exhaustiveness` / `Rian.Reach` is the *hard* direction — it requires type
+  reconstruction a transpiler cannot do alone. So this tool produces a **draft
+  skeleton** a human then finishes and equiv-locks against the oracle:
+
+    * forms with a clear Rian image are translated — `def`/`defp` clauses,
+      `if`/`case` (incl. `when` arms), binary/unary operators, ctor & struct
+      patterns (`%ECall{fun: f}` → `ECall(fun: f)`), tuples, lists/cons, atoms,
+      string/number literals, local calls;
+    * everything else is left **in place** as a greppable `TODO_PORT("…")`
+      sentinel (carrying the original Elixir) or a `# TODO[port]: …` line comment,
+      so nothing untranslated can masquerade as done;
+    * **types are always holes** (`_Ty`, `_Ret`) — Elixir is untyped, so the human
+      supplies the sums and signatures.
+
+  Usage: `mix rian.transpile lib/rian/range.ex [-o out.rian]`.
+
+  The honest contract: the output **will not compile** until a human fills the
+  holes and resolves the markers. The value is the diff between "blank file" and
+  "annotated draft", and the TODO summary that quantifies the remaining work per
+  module before you commit to porting it.
+  """
+
+  @header [
+    "# ─────────────────────────────────────────────────────────────────────────",
+    "# DRAFT skeleton — transpiled from Elixir by `mix rian.transpile`. NOT done.",
+    "# Translated: defs/clauses, if/case, operators, ctor/struct patterns,",
+    "#   tuples, lists, atoms, literals, local calls.",
+    "# You must still: (1) fill type holes `_Ty`/`_Ret`, (2) resolve every",
+    "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
+    "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
+    "# ─────────────────────────────────────────────────────────────────────────",
+    ""
+  ]
+
+  # Elixir binary operators that map to a Rian infix spelling unchanged.
+  @binops ~w(+ - * / <> ++ <= >= < > == != and or)a
+  # Elixir local calls that Rian spells as infix operators.
+  @infix_calls %{div: "div", rem: "rem"}
+
+  @doc "Transpile Elixir source text to a draft Rian skeleton string."
+  def transpile(source) when is_binary(source) do
+    source
+    |> Code.string_to_quoted!()
+    |> toplevel()
+    |> Enum.join("\n")
+    |> Kernel.<>("\n")
+  end
+
+  @doc """
+  Transpile and report `{text, %{ports: n, defs: n}}` — `ports` counts unresolved
+  markers (the remaining hand-work), `defs` counts emitted function groups.
+  """
+  def transpile_with_stats(source) when is_binary(source) do
+    text = transpile(source)
+    lines = String.split(text, "\n")
+    ports = Enum.count(lines, &(String.contains?(&1, "TODO_PORT") or String.contains?(&1, "TODO[port]")))
+    defs = Enum.count(lines, &Regex.match?(~r/^\s+(pub )?def \w+\(.*\) _Ret/, &1))
+    {text, %{ports: ports, defs: defs}}
+  end
+
+  # ── module ────────────────────────────────────────────────────────────────
+
+  defp toplevel({:defmodule, _, [aliases, [do: body]]}) do
+    name = short_name(aliases)
+    inner = body |> block_stmts() |> render_items() |> Enum.map(&indent/1)
+    @header ++ ["mod #{name} do" | inner] ++ ["end"]
+  end
+
+  defp toplevel(other) do
+    @header ++ ["# TODO[port]: top-level is not a single `defmodule`", "# #{snippet(other)}"]
+  end
+
+  defp short_name({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
+  defp short_name(other), do: snippet(other)
+
+  defp block_stmts({:__block__, _, stmts}), do: stmts
+  defp block_stmts(single), do: [single]
+
+  # ── declarations ────────────────────────────────────────────────────────────
+  #
+  # Walk the statement list, attaching a pending `@doc` to the next def, and
+  # merging consecutive same-name/arity clauses into one rendered group.
+
+  defp render_items(stmts) do
+    {lines, _pending_doc, open} =
+      Enum.reduce(stmts, {[], nil, nil}, fn stmt, {acc, doc, open} ->
+        case classify(stmt) do
+          {:moduledoc, text} ->
+            {acc ++ flush(open) ++ [""] ++ moduledoc_lines(text), doc, nil}
+
+          {:doc, text} ->
+            {acc ++ flush(open), text, nil}
+
+          {:drop, what, node} ->
+            {acc ++ flush(open) ++ ["# TODO[port]: dropped Elixir `#{what}` — #{snippet(node)}"], doc, nil}
+
+          {:clause, vis, head, kw} ->
+            clause = build_clause(head, kw)
+
+            cond do
+              open && same_group?(open, vis, clause) ->
+                {acc, doc, add_clause(open, clause)}
+
+              true ->
+                {acc ++ flush(open), nil, new_group(vis, clause, doc)}
+            end
+
+          {:other, node} ->
+            {acc ++ flush(open) ++ ["# TODO[port]: #{snippet(node)}"], doc, nil}
+        end
+      end)
+
+    lines ++ flush(open)
+  end
+
+  defp classify({:@, _, [{:moduledoc, _, [text]}]}) when is_binary(text), do: {:moduledoc, text}
+  defp classify({:@, _, [{:moduledoc, _, _}]}), do: {:moduledoc, ""}
+  defp classify({:@, _, [{:doc, _, [text]}]}) when is_binary(text), do: {:doc, text}
+  defp classify({:alias, _, _} = n), do: {:drop, "alias", n}
+  defp classify({:import, _, _} = n), do: {:drop, "import", n}
+  defp classify({:require, _, _} = n), do: {:drop, "require", n}
+  defp classify({:def, _, [head, kw]}), do: {:clause, :pub, head, kw}
+  defp classify({:defp, _, [head, kw]}), do: {:clause, :priv, head, kw}
+  defp classify(other), do: {:other, other}
+
+  # A clause: name, arity, parameter/pattern nodes, optional guard, body AST.
+  defp build_clause(head, kw) do
+    {call, guard} =
+      case head do
+        {:when, _, [c, g]} -> {c, g}
+        c -> {c, nil}
+      end
+
+    {name, args} =
+      case call do
+        {n, _, a} when is_atom(n) and is_list(a) -> {n, a}
+        {n, _, a} when is_atom(n) and is_nil(a) -> {n, []}
+      end
+
+    # Distinguish a *present* `nil` body (`def f, do: nil`) from a truly bodyless
+    # def (no `:do` key): both reduce to the atom `nil`, but only the former should
+    # route through the `nil → Option` marker. The sentinel marks genuine absence.
+    body = if kw && Keyword.has_key?(kw, :do), do: Keyword.get(kw, :do), else: :__no_body__
+    %{name: name, arity: length(args), args: args, guard: guard, body: body}
+  end
+
+  defp new_group(vis, clause, doc), do: %{vis: vis, doc: doc, clauses: [clause]}
+  defp add_clause(open, clause), do: %{open | clauses: open.clauses ++ [clause]}
+
+  defp same_group?(open, vis, clause) do
+    open.vis == vis and hd(open.clauses).name == clause.name and
+      hd(open.clauses).arity == clause.arity
+  end
+
+  # ── rendering a def group ───────────────────────────────────────────────────
+
+  defp flush(nil), do: []
+
+  defp flush(%{vis: vis, doc: doc, clauses: clauses}) do
+    kw = if vis == :pub, do: "pub def", else: "def"
+    doc_lines = if doc, do: [~s(@doc "#{escape(one_line(doc))}")], else: []
+    name = hd(clauses).name
+    arity = hd(clauses).arity
+
+    body_lines =
+      if simple?(clauses) do
+        [c] = clauses
+        params = c.args |> Enum.map(&"#{var_name(&1)} _Ty") |> Enum.join(", ")
+        ["#{kw} #{name}(#{params}) _Ret := #{render_body(c.body)}  # TODO[port]: fill types"]
+      else
+        holes = List.duplicate("_Ty", arity) |> Enum.join(", ")
+        sig = "#{kw} #{name}(#{holes}) _Ret  # TODO[port]: fill types"
+        [sig | Enum.map(clauses, &render_clause(kw, &1))]
+      end
+
+    [""] ++ doc_lines ++ body_lines
+  end
+
+  # "Simple" = a single clause whose params are all plain variables and no guard;
+  # render inline `def f(a _Ty) _Ret := body`. Anything else gets a sig + clauses.
+  defp simple?([%{args: args, guard: nil}]), do: Enum.all?(args, &var?/1)
+  defp simple?(_), do: false
+
+  defp render_clause(kw, c) do
+    pats = c.args |> Enum.map(&pat/1) |> Enum.join(", ")
+    guard_note = if c.guard, do: "  # TODO[port]: clause guard `when #{snippet(c.guard)}`", else: ""
+    "#{kw} #{name_str(c.name)}(#{pats}) := #{render_body(c.body)}#{guard_note}"
+  end
+
+  defp name_str(n), do: to_string(n)
+  defp var_name({n, _, ctx}) when is_atom(n) and is_atom(ctx), do: to_string(n)
+  defp var_name(other), do: snippet(other)
+
+  # ── bodies ──────────────────────────────────────────────────────────────────
+
+  defp render_body(:__no_body__), do: ~s|TODO_PORT("bodyless clause")|
+
+  defp render_body({:__block__, _, stmts}) when length(stmts) > 1 do
+    rendered = stmts |> Enum.map(&expr/1) |> Enum.join("; ")
+    ~s|TODO_PORT("multi-statement body: #{escape(rendered)}")|
+  end
+
+  defp render_body({:__block__, _, [one]}), do: expr(one)
+  defp render_body(node), do: expr(node)
+
+  # ── expressions ─────────────────────────────────────────────────────────────
+
+  defp expr(n) when is_integer(n) or is_float(n), do: to_string(n)
+  defp expr(s) when is_binary(s), do: ~s|"#{escape(s)}"|
+  defp expr(true), do: "true"
+  defp expr(false), do: "false"
+  defp expr(nil), do: ~s|TODO_PORT("nil — Rian has no nil; use Option")|
+  defp expr(a) when is_atom(a), do: ":#{a}"
+
+  # 2-tuples are genuine Elixir tuples in quoted form; n-tuples are {:{}, _, _}.
+  defp expr({l, r}), do: "{#{expr(l)}, #{expr(r)}}"
+  defp expr({:{}, _, elems}), do: "{#{Enum.map_join(elems, ", ", &expr/1)}}"
+
+  # struct construction `%Mod{f: e, …}` → Rian ctor call `Mod(f: e, …)` (the
+  # expression-side dual of the struct *pattern* clause below). Must precede the
+  # generic local-call clause, else `{:%, _, [aliases, map]}` is mistaken for a
+  # 2-arg call named `:%` and emits a malformed `%(__aliases__(...), …)`.
+  defp expr({:%, _, [aliases, {:%{}, _, kvs}]}) do
+    fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{expr(v)}" end)
+    "#{short_name(aliases)}(#{fields})"
+  end
+
+  defp expr({:%{}, _, _} = m), do: ~s|TODO_PORT("map literal #{escape(snippet(m))}")|
+
+  defp expr({op, _, [l, r]}) when op in @binops,
+    do: "#{expr(l)} #{op} #{expr(r)}"
+
+  defp expr({:-, _, [x]}), do: "-#{expr(x)}"
+  defp expr({:not, _, [x]}), do: "not #{expr(x)}"
+  defp expr({:!, _, [x]}), do: "not #{expr(x)}"
+
+  defp expr({:if, _, [c, kw]}) do
+    t = render_body(Keyword.get(kw, :do))
+    e = if Keyword.has_key?(kw, :else), do: render_body(Keyword.get(kw, :else)), else: nil
+    if e, do: "if #{expr(c)} do #{t} else #{e} end", else: "if #{expr(c)} do #{t} end"
+  end
+
+  defp expr({:case, _, [subj, [do: arms]]}) do
+    rendered = Enum.map_join(arms, "\n", fn arm -> indent(case_arm(arm)) end)
+    "case #{expr(subj)} do\n#{rendered}\nend"
+  end
+
+  # cons `[h | t]` and proper list literals.
+  defp expr({:|, _, [h, t]}), do: "#{expr(h)} | #{expr(t)}"
+
+  defp expr(list) when is_list(list),
+    do: "[#{Enum.map_join(list, ", ", &expr/1)}]"
+
+  # local call mapped to a Rian infix operator (`div`, `rem`).
+  defp expr({op, _, [l, r]}) when is_map_key(@infix_calls, op),
+    do: "#{expr(l)} #{@infix_calls[op]} #{expr(r)}"
+
+  # remote call `Mod.fun(args)` / `:erl.fun(args)` — surfaced for review (stdlib
+  # mapping is per-API and must be done by hand).
+  defp expr({{:., _, [mod, fun]}, _, args}) when is_list(args) do
+    rendered = "#{mod_str(mod)}.#{fun}(#{Enum.map_join(args, ", ", &expr/1)})"
+    ~s|TODO_PORT("remote/stdlib call: #{escape(rendered)}")|
+  end
+
+  # local call / nullary var reference.
+  defp expr({name, _, args}) when is_atom(name) and is_list(args),
+    do: "#{name}(#{Enum.map_join(args, ", ", &expr/1)})"
+
+  defp expr({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: to_string(name)
+
+  defp expr(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  defp mod_str({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
+  defp mod_str(a) when is_atom(a), do: ":#{a}"
+  defp mod_str(other), do: snippet(other)
+
+  # case arm: `pat -> body` or `pat when guard -> body`.
+  defp case_arm({:->, _, [[{:when, _, [p, g]}], body]}),
+    do: "#{pat(p)} when #{expr(g)} -> #{render_body(body)}"
+
+  defp case_arm({:->, _, [[p], body]}),
+    do: "#{pat(p)} -> #{render_body(body)}"
+
+  defp case_arm(other), do: "# TODO[port]: case arm #{snippet(other)}"
+
+  # ── patterns ────────────────────────────────────────────────────────────────
+
+  defp pat(n) when is_integer(n) or is_float(n), do: to_string(n)
+  defp pat(s) when is_binary(s), do: ~s|"#{escape(s)}"|
+  defp pat(true), do: "true"
+  defp pat(false), do: "false"
+  defp pat(a) when is_atom(a), do: ":#{a}"
+  defp pat({l, r}), do: "{#{pat(l)}, #{pat(r)}}"
+  defp pat({:{}, _, elems}), do: "{#{Enum.map_join(elems, ", ", &pat/1)}}"
+  defp pat({:|, _, [h, t]}), do: "#{pat(h)} | #{pat(t)}"
+  defp pat(list) when is_list(list), do: "[#{Enum.map_join(list, ", ", &pat/1)}]"
+
+  # struct pattern `%Mod{f: p, …}` → Rian ctor pattern `Mod(f: p, …)`.
+  defp pat({:%, _, [aliases, {:%{}, _, kvs}]}) do
+    fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{pat(v)}" end)
+    "#{short_name(aliases)}(#{fields})"
+  end
+
+  # bare map pattern `%{k: p}` → Rian map pattern.
+  defp pat({:%{}, _, kvs}) do
+    fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{pat(k)}: #{pat(v)}" end)
+    "%{#{fields}}"
+  end
+
+  # binding `_` and vars.
+  defp pat({:_, _, ctx}) when is_atom(ctx), do: "_"
+  defp pat({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: underscore_var(name)
+
+  # as-pattern `x = p` has no direct Rian image here.
+  defp pat({:=, _, _} = node), do: ~s|TODO_PORT("as-pattern #{escape(snippet(node))}")|
+  defp pat(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  defp var?({n, _, ctx}) when is_atom(n) and is_atom(ctx), do: true
+  defp var?(_), do: false
+
+  defp underscore_var(name) do
+    s = to_string(name)
+    if String.starts_with?(s, "_"), do: "_", else: s
+  end
+
+  # ── helpers ─────────────────────────────────────────────────────────────────
+
+  defp indent(line), do: if(line == "", do: "", else: "  " <> line)
+
+  defp moduledoc_lines(text) do
+    text
+    |> one_line()
+    |> then(&["# #{&1}"])
+  end
+
+  defp snippet(node), do: node |> Macro.to_string() |> one_line()
+  defp one_line(s), do: s |> to_string() |> String.replace(~r/\s+/, " ") |> String.trim()
+  defp escape(s), do: s |> to_string() |> String.replace("\"", "\\\"")
+end
