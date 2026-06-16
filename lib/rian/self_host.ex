@@ -172,6 +172,15 @@ defmodule Rian.SelfHost do
       test: "test/rian/comptime_fixpoint_test.exs",
       note:
         "Comptime.fold evaluates a `comptime(expr)` in a pure sandbox (integer literals, unary `-`/`not`, arithmetic `+ - * div rem`, comparisons) and replaces it with its literal, recursing through the rest of the tree; equivalence-locked vs Rian.Comptime.fold (ADR-0009/0056). Tails: FLOAT results are unported (no `float → string` prim), and the oracle RAISES on a non-foldable body where the port leaves the call."
+    },
+    %{
+      id: :interp_desugar,
+      name: "Interpolation desugar (`${expr}` → `<>`/stringify)",
+      oracle: "Rian.Interp.resolve (desugar half)",
+      source: "interp.rian",
+      test: "test/rian/interp_fixpoint_test.exs",
+      note:
+        "Interp.desugar rewrites a `${…}` string into a single-shot `__prim_str_concat_all` chain, stringifying each hole by its STATIC type (String→identity, Int*/UInt*→__prim_int_to_string, Bool→if, Char→__prim_char_to_string, Float64→Show.float, impl-Show type→show); equivalence-locked vs Rian.Interp.resolve's desugar (ADR-0069). Inference is delegated to the separately-ported checker (the test feeds the types Check.infer produces). Tails: the Show.float Process-flag side-effect, Float32/no-Show RAISE (port emits a marker), and nested interpolation inside a hole."
     }
   ]
 

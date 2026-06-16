@@ -1,0 +1,136 @@
+# ===========================================================================
+# SELF-HOSTING — string-interpolation desugar (`${expr}`), written in Rian
+# ===========================================================================
+# Goal (ADR-0069 / ADR-0063 #2): the Rian-written counterpart of the DESUGAR in
+# `Rian.Interp.resolve` — rewrite a `${…}`-interpolated string into a plain
+# `<>`/stringify chain, choosing each hole's stringify path by the hole's STATIC
+# type. Fixpoint-locked against `Rian.Interp.resolve` in
+# `test/rian/interp_fixpoint_test.exs`.
+#
+# Factoring (honest scope): `Rian.Interp.resolve` couples two jobs — (1) INFER each
+# hole's type (`Check.infer`) and (2) DESUGAR by that type. Inference is a SEPARATE
+# pass already self-hosted in `compiler/checker.rian` (infer_ic). This port owns the
+# Interp-SPECIFIC half — the stringify-by-type + single-shot concat — taking each
+# hole's already-inferred type as input. The fixpoint test feeds it the very types
+# `Check.infer` produces, so the desugar is locked exactly against the oracle.
+#
+# Tails (vs the oracle): the `Show.float` auto-injection side-effect (Process flag),
+# `Float32`/no-Show RAISES (the port emits a marker call), and nested interpolation
+# inside a hole (the oracle resolves it first) — none exercised by the corpus.
+# ---------------------------------------------------------------------------
+
+mod Interp do
+  # ── surface expression AST (mirrors Rian.Pratt tuples / core.rian's Surface) ──
+  # holes carry an arbitrary Surface expression; the desugar treats it opaquely.
+  type Surface := SNum(String)
+                | SStr(String)
+                | SChar(Int53)
+                | SId(String)
+                | SAtom(String)
+                | SUnary(String, Surface)
+                | SBin(String, Surface, Surface)
+                | SCall(Surface, Vec(Surface))
+                | SLabel(String, Surface)
+                | SDot(Surface, String)
+                | SIf(Surface, Surface, Surface)
+                | STuple(Vec(Surface))
+                | SList(Vec(Surface), STail)
+                | SMap(Vec(SPair))
+                | SBlock(Vec(SStmt))
+                | SCase(Surface, Vec(SArm))
+                | SLambda(Vec(SParam), Surface)
+                | SCapArg(Int53)
+                | SCapture(Surface)
+                | SCaptureNamed(Surface, Int53)
+                | SWith(Vec(SClause), Surface, Vec(SArm))
+
+  type STail := TClose | TTail(Surface)
+  type SPair := SP(String, Surface)
+  type SStmt := SBind(String, Surface) | STypedBind(String, String, Surface) | SExpr(Surface)
+  type SGuard := GNone | GSome(Surface)
+  type SArm := SArm(SPat, SGuard, Surface)
+  type SClause := SClause(SPat, Surface)
+  type SParamTy := PtNone | PtSome(String)
+  type SParam := SParam(String, SParamTy)
+
+  type SPat := PWild
+             | PVar(String)
+             | PLitInt(Int53)
+             | PLitStr(String)
+             | PPChar(Int53)
+             | PPAtom(String)
+             | PPTuple(Vec(SPat))
+             | PCtor(String, Vec(SPat))
+             | PPList(Vec(SPat), PTail)
+             | PPStruct(String, Vec(PPair))
+             | PPMap(Vec(PPair))
+
+  type PTail := PtlClose | PtlTail(SPat)
+  type PPair := PPr(String, SPat)
+
+  # an interpolation part: a literal segment, or a hole carrying its expression.
+  type IPart := ILit(String) | IHole(Surface)
+
+  # ── the desugar ──
+  # `types` are the holes' inferred types in part order (the checker's output, fed in);
+  # `show` is the set of type names with an `impl Show for T`.
+  pub def desugar(parts Vec(IPart), types Vec(String), show Vec(String)) Surface
+  pub def desugar(parts, types, show) := concat_chain(drop_empty(resolve_parts(parts, types, show)))
+
+  def resolve_parts(Vec(IPart), Vec(String), Vec(String)) Vec(Surface)
+  def resolve_parts([], _, _) := []
+  def resolve_parts([ILit(s) | rest], types, show) := [SStr(s) | resolve_parts(rest, types, show)]
+  def resolve_parts([IHole(e) | rest], [t | ts], show) := [stringify(e, t, show) | resolve_parts(rest, ts, show)]
+  def resolve_parts([IHole(e) | rest], [], show) := [stringify(e, "unknown", show) | resolve_parts(rest, [], show)]
+
+  # stringify a hole by its static type (Rian.Interp.stringify).
+  def stringify(e Surface, ty String, show Vec(String)) Surface
+  def stringify(e, "String", _) := e
+  def stringify(e, "Bool", _) := SIf(e, SBlock([SExpr(SStr("true"))]), SBlock([SExpr(SStr("false"))]))
+  def stringify(e, "Char", _) := SCall(SId("__prim_char_to_string"), [e])
+  def stringify(e, "Float64", _) := SCall(SDot(SId("Show"), "float"), [e])
+  def stringify(e, ty, show)
+    if int_type(ty) do
+      SCall(SId("__prim_int_to_string"), [e])
+    else
+      if member_str(ty, show) do
+        SCall(SId("show"), [e])
+      else
+        # Float32 / no-Show / unknown: the oracle RAISES — the port emits a marker
+        # call (a documented tail; the corpus uses only stringifiable types).
+        SCall(SId("__interp_no_show"), [e])
+      end
+    end
+  end
+
+  # join the stringified parts: drop empty-string literals, then 0 -> "", 1 -> itself,
+  # ≥2 -> a single-shot `__prim_str_concat_all` (Rian.Interp.concat_chain).
+  def concat_chain(Vec(Surface)) Surface
+  def concat_chain([]) := SStr("")
+  def concat_chain([only]) := only
+  def concat_chain([x | rest]) := SCall(SId("__prim_str_concat_all"), [x | rest])
+
+  def drop_empty(Vec(Surface)) Vec(Surface)
+  def drop_empty([]) := []
+  def drop_empty([SStr("") | rest]) := drop_empty(rest)
+  def drop_empty([x | rest]) := [x | drop_empty(rest)]
+
+  def member_str(String, Vec(String)) Bool
+  def member_str(_, []) := false
+  def member_str(x, [y | rest]) := if x == y do true else member_str(x, rest) end
+
+  # `^U?Int\d*$` — an optional `U`, then `Int`, then zero or more digits.
+  def int_type(t String) Bool := after_u(Prim.str_chars(t))
+
+  def after_u(Vec(Int53)) Bool
+  def after_u([85 | rest]) := int_word(rest)
+  def after_u(cs) := int_word(cs)
+
+  def int_word(Vec(Int53)) Bool
+  def int_word([73, 110, 116 | rest]) := all_digits(rest)
+  def int_word(_) := false
+
+  def all_digits(Vec(Int53)) Bool
+  def all_digits([]) := true
+  def all_digits([c | rest]) := if c >= 48 and c <= 57 do all_digits(rest) else false end
+end
