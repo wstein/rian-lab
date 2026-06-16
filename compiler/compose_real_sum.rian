@@ -943,24 +943,78 @@ mod ComposeRealSum do
   # a float. Scoped to `d_func` (the inline `def f(p T) R := body` form); separate-clause
   # functions carry their param types in a sibling `d_sig` and are conservatively skipped
   # (a documented tail — the gate never false-rejects them, so v1==v2 is unaffected).
-  def first_num_mix(decls Vec(Tuple)) String
-  def first_num_mix([]) := ""
-  def first_num_mix([{:d_func, _, name, params, _, _, body} | rest])
+  # ── sig↔clause correlation (P3 d_clause widening) ──────────────────────────────────
+  # The type gates run on `d_func` (inline `def f(p T) R := body`) AND separate-clause
+  # functions: a `d_clause`'s param types + return live in its sibling `d_sig`, which
+  # `sig_index` collects so `clause_env` can pair the clause's VARIABLE patterns with the
+  # declared param types. A clause with no sibling sig is conservatively skipped (no types).
+  type SigOpt := SNone | SSome(Vec(Tuple), String)
+
+  def sig_index(Vec(Tuple)) Vec(Tuple)
+  def sig_index([]) := []
+  def sig_index([{:d_sig, _, name, params, ret, _} | rest]) := [{name, params, ret} | sig_index(rest)]
+  def sig_index([_ | rest]) := sig_index(rest)
+
+  def sig_lookup(Vec(Tuple), String) SigOpt
+  def sig_lookup([], _) := SNone
+  def sig_lookup([{n, params, ret} | rest], name)
+    if n == name do
+      SSome(params, ret)
+    else
+      sig_lookup(rest, name)
+    end
+  end
+
+  # a VARIABLE pattern binds {name -> the sig's positional param type}; any other pattern
+  # (literal/ctor/cons/wild) binds nothing — so its position infers `unknown` (conservative).
+  def clause_env(Vec(Tuple), Vec(Tuple)) Vec(Tuple)
+  def clause_env([], _) := []
+  def clause_env(_, []) := []
+  def clause_env([{:var, n} | ps], [{:par, _, _, t} | sps]) := [{n, t} | clause_env(ps, sps)]
+  def clause_env([_ | ps], [_ | sps]) := clause_env(ps, sps)
+
+  def first_num_mix(decls Vec(Tuple)) String := fnm(sig_index(decls), decls)
+
+  def fnm(Vec(Tuple), Vec(Tuple)) String
+  def fnm(_, []) := ""
+  def fnm(sigs, [{:d_func, _, name, params, _, _, body} | rest])
     if func_mixes(params, body) do
       name
     else
-      first_num_mix(rest)
+      fnm(sigs, rest)
     end
   end
-  def first_num_mix([{:d_mod, _, inner} | rest]) := mod_mix(first_num_mix(inner), rest)
-  def first_num_mix([_ | rest]) := first_num_mix(rest)
+  def fnm(sigs, [{:d_clause, name, pats, expr} | rest]) := clause_mix_or(sigs, name, pats, expr, rest)
+  def fnm(sigs, [{:d_clause_g, name, pats, _, expr} | rest]) := clause_mix_or(sigs, name, pats, expr, rest)
+  def fnm(sigs, [{:d_mod, _, inner} | rest]) := combine_mix(first_num_mix(inner), sigs, rest)
+  def fnm(sigs, [_ | rest]) := fnm(sigs, rest)
 
-  def mod_mix(inner String, rest Vec(Tuple)) String
+  def combine_mix(inner String, sigs Vec(Tuple), rest Vec(Tuple)) String
     if inner == "" do
-      first_num_mix(rest)
+      fnm(sigs, rest)
     else
       inner
     end
+  end
+
+  def clause_mix_or(sigs Vec(Tuple), name String, pats Vec(Tuple), expr Tuple, rest Vec(Tuple)) String
+    case sig_lookup(sigs, name) do
+      SSome(params, _) -> clause_mix_decide(clause_mixes(params, pats, expr), name, sigs, rest)
+      SNone -> fnm(sigs, rest)
+    end
+  end
+
+  def clause_mix_decide(bad Bool, name String, sigs Vec(Tuple), rest Vec(Tuple)) String
+    if bad do
+      name
+    else
+      fnm(sigs, rest)
+    end
+  end
+
+  def clause_mixes(sigParams Vec(Tuple), pats Vec(Tuple), expr Tuple) Bool
+    env := clause_env(pats, sigParams)
+    Checker.num_mix(to_chk_block(lower_body(desugar_interp(env, expr))), tenv_dict(env), Prim.map_new())
   end
 
   # lower the body to driver Core, project it onto checker.rian's Core, and ask the
@@ -978,24 +1032,48 @@ mod ComposeRealSum do
   # REFUSED with `{:type_error, name}`. Same `d_func` scoping + collapsing-projection tail
   # as the numeric-mix gate — an `if`/`case`/block-BODIED return infers `unknown` under the
   # collapse and is conservatively skipped (never a false reject, so v1==v2 is unaffected).
-  def first_ret_error(decls Vec(Tuple)) String
-  def first_ret_error([]) := ""
-  def first_ret_error([{:d_func, _, name, params, ret, _, body} | rest])
+  def first_ret_error(decls Vec(Tuple)) String := fre(sig_index(decls), decls)
+
+  def fre(Vec(Tuple), Vec(Tuple)) String
+  def fre(_, []) := ""
+  def fre(sigs, [{:d_func, _, name, params, ret, _, body} | rest])
     if func_ret_bad(params, ret, body) do
       name
     else
-      first_ret_error(rest)
+      fre(sigs, rest)
     end
   end
-  def first_ret_error([{:d_mod, _, inner} | rest]) := mod_ret(first_ret_error(inner), rest)
-  def first_ret_error([_ | rest]) := first_ret_error(rest)
+  def fre(sigs, [{:d_clause, name, pats, expr} | rest]) := clause_ret_or(sigs, name, pats, expr, rest)
+  def fre(sigs, [{:d_clause_g, name, pats, _, expr} | rest]) := clause_ret_or(sigs, name, pats, expr, rest)
+  def fre(sigs, [{:d_mod, _, inner} | rest]) := combine_ret(first_ret_error(inner), sigs, rest)
+  def fre(sigs, [_ | rest]) := fre(sigs, rest)
 
-  def mod_ret(inner String, rest Vec(Tuple)) String
+  def combine_ret(inner String, sigs Vec(Tuple), rest Vec(Tuple)) String
     if inner == "" do
-      first_ret_error(rest)
+      fre(sigs, rest)
     else
       inner
     end
+  end
+
+  def clause_ret_or(sigs Vec(Tuple), name String, pats Vec(Tuple), expr Tuple, rest Vec(Tuple)) String
+    case sig_lookup(sigs, name) do
+      SSome(params, ret) -> clause_ret_decide(clause_ret_bad(params, ret, pats, expr), name, sigs, rest)
+      SNone -> fre(sigs, rest)
+    end
+  end
+
+  def clause_ret_decide(bad Bool, name String, sigs Vec(Tuple), rest Vec(Tuple)) String
+    if bad do
+      name
+    else
+      fre(sigs, rest)
+    end
+  end
+
+  def clause_ret_bad(sigParams Vec(Tuple), ret String, pats Vec(Tuple), expr Tuple) Bool
+    env := clause_env(pats, sigParams)
+    Checker.ret_bad(to_chk(block_result(lower_body(desugar_interp(env, expr)))), ret, tenv_dict(env), Prim.map_new())
   end
 
   # unlike num_mix (which WALKS the body for a mix anywhere), the return gate needs the

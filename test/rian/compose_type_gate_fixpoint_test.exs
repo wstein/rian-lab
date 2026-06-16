@@ -107,15 +107,31 @@ defmodule Rian.ComposeTypeGateFixpointTest do
     end
   end
 
-  describe "documented boundary — the gate is scoped to d_func" do
-    test "a SEPARATE-CLAUSE function with a mix is NOT caught (the d_sig/d_clause tail)",
+  describe "d_clause widening — both gates also cover separate-clause functions (P3)" do
+    # `def f(a Int64) Float64` (a d_sig) + `def f(a) := a + 1.5` (a d_clause): the clause's
+    # param types come from its sibling sig (sig_index/clause_env), so the gates now bite on
+    # the common multi-clause form, not just inline `d_func`.
+    test "a separate-clause numeric mix is REFUSED", %{drv: drv} do
+      src = "def f(a Int64) Float64\ndef f(a) := a + 1.5"
+      assert catch_error(drv.compile_module(src, uniq(:ClauseMix))) == {:type_error, "f"}
+    end
+
+    test "a separate-clause return mismatch is REFUSED", %{drv: drv} do
+      src = "def g(a Int64) Float64\ndef g(a) := a"
+      assert catch_error(drv.compile_module(src, uniq(:ClauseRet))) == {:type_error, "g"}
+    end
+
+    test "a well-typed separate-clause function compiles + runs", %{drv: drv} do
+      m = drv.build("def h(a Int64) Int64\ndef h(a) := a + 1", uniq(:ClauseOk))
+      assert m.h(41) == 42
+    end
+
+    test "a clause with NO sibling sig is conservatively skipped (untyped → unknown)",
          %{drv: drv} do
-      # `def f(a Int64) Float64` (a d_sig) + `def f(a) := a + 1.5` (a d_clause) carries the
-      # same int↔float mix, but the gate only inspects inline `d_func` bodies — so this
-      # compiles today. Widening the gate to correlate a d_sig's param types with its
-      # d_clause bodies is the next increment; asserted here so the boundary is explicit.
-      m = drv.build("def f(a Int64) Float64\ndef f(a) := a + 1.5", uniq(:ClauseTail))
-      assert m.f(2) == 3.5
+      # no `d_sig` → the clause's `a` has no declared type → the gates can't prove anything,
+      # so it compiles even though `a + 1.5` would mix were `a` an Int.
+      m = drv.build("def k(a) := a + 1.5", uniq(:NoSig))
+      assert m.k(2) == 3.5
     end
   end
 end
