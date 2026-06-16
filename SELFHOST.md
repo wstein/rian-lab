@@ -309,6 +309,24 @@ guard.) The corpus exercises the ladder (`a or b and c` ⇒ `a or (b and c)`,
 Prefix operators, calls, pipes, and Pratt's non-assoc *raise* (`a < b < c`) are
 later slices; each widening is a regression test, not a fresh demo.
 
+### Formatter port — slice 1: the pretty-printing engine (fixpoint-locked against `Rian.Format.Doc`)
+
+[`compiler/format.rian`](compiler/format.rian) ports the formatter's **Wadler/Lindig
+pretty-printing engine** (`Rian.Format.Doc`, ADR-0045) — the cleanest slice to
+self-host because it is pure recursion over lists/strings/ints with no host lexer.
+It carries the full `Doc` algebra (`DEmpty`/`DText`/`DConcat`/`DNest`/`DLine`/`DHard`/
+`DGroup`/`DSuffix`/`DIfBreak`), break propagation (`has_hard`), the bounded `fits`
+lookahead, and the linear worklist renderer `go/5`, and compiles to real `.beam`.
+
+`test/rian/format_doc_fixpoint_test.exs` builds the *same* document from a shared
+recipe via each engine's own `pub` constructors (so break-propagation is each
+engine's own) and asserts `render/2` is **byte-identical** to `Rian.Format.Doc.render/2`
+across 6 widths × 10 doc shapes — including hardline propagation, `line_suffix`
+flushing, `if_break`, forced (magic-comma) groups, and nested groups. The remaining
+formatter tail — the trivia lexer, the bracket CST, and the line/indent + chain-wrap
+lowering — stays BEAM-only for now (it leans on the host lexer and richer
+collections); porting it is gated on the self-host collection/lexer work.
+
 ### Bootstrap plan + the fixed-point ladder (rungs 3-4, ADR-0063)
 
 The boundary and the finish line are now **defined** (ADR-0063): the minimal viable

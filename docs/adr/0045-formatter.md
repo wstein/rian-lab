@@ -1,7 +1,7 @@
 # ADR-0045 — Formatter: one canonical zero-config style, comment-preserving, deterministic
 
 **Status:** Accepted · **implemented incl. line wrapping** — a bracket-structured lossless CST + a Wadler/Lindig pretty-printer over [`Rian.Lexer`](../../lib/rian/lexer.ex) (no second parser, no reparse)
-**Implemented:** yes — [`Rian.Format`](../../lib/rian/format.ex) (engine [`Rian.Format.Doc`](../../lib/rian/format/doc.ex), tree [`Rian.Format.Cst`](../../lib/rian/format/cst.ex)) + [`mix rian.format`](../../lib/mix/tasks/rian.format.ex) (in-place · `--check` · `--diff` · `--stdout`/stdin). **Line wrapping ships**: bracket interiors reflow to a 98-column budget, and a top-level `:=` body that is a flat `|>`/`and`/`or`/`<>` chain wraps leading-operator one-stage-per-line. `format/1` is total (never corrupts on malformed input). Invariants — significant-token equivalence (meaning), parse-still-valid, idempotence, comment fidelity — are asserted over the whole corpus and in a seeded property/fuzz suite ([`format_test.exs`](../../test/rian/format_test.exs), [`format_property_test.exs`](../../test/rian/format_property_test.exs), [`doc_test.exs`](../../test/rian/format/doc_test.exs)). Deferred: magic trailing comma, the LSP backend (ADR-0038), the `rian fmt` escript (ADR-0031). Design note: [`docs/notes/formatter-tier2-design.md`](../notes/formatter-tier2-design.md)
+**Implemented:** yes — [`Rian.Format`](../../lib/rian/format.ex) (engine [`Rian.Format.Doc`](../../lib/rian/format/doc.ex), tree [`Rian.Format.Cst`](../../lib/rian/format/cst.ex)) + [`mix rian.format`](../../lib/mix/tasks/rian.format.ex) (in-place · `--check` · `--diff` · `--stdout`/stdin). **Line wrapping ships**: bracket interiors reflow to a 98-column budget; a **magic trailing comma** keeps a group expanded; and a top-level `:=` body that is an operator chain (full `@cont_ops`) wraps leading-operator, **precedence-aware** (breaks at the loosest level). `format/1` is total (never corrupts on malformed input). Invariants — significant-token equivalence (meaning), parse-still-valid, idempotence, comment fidelity — are asserted over the whole corpus and in a seeded property/fuzz suite. The **LSP formatting + rangeFormatting** backend ([`Rian.LSP.Formatting`](../../lib/rian/lsp/formatting.ex)) and the **`rian fmt` escript** (`Rian.CLI`/`Rian.Format.CLI`) ship; the Doc engine is **self-hosted** in [`compiler/format.rian`](../../compiler/format.rian), fixpoint-locked to `Rian.Format.Doc`. Design note: [`docs/notes/formatter-tier2-design.md`](../notes/formatter-tier2-design.md)
 **Refs:** ADR-0035 (one obvious way; no hidden control flow as a *discipline*), ADR-0038 (LSP — closes its formatter-ownership open item), ADR-0026 (toolchain / CI parity), ADR-0032/0033 (family surface)
 **Owners:** Liam Davis (conventions) · Kira Neri (CI/determinism) · Julian Vance (style rules / CST) · Chloe Bennett (parser) · Samir Patel (invariants) · Maya Lin (LSP integration) · Rachel Okafor (PM)
 
@@ -81,19 +81,21 @@ formatter's correctness specification.
   inside a bracket forces a full break. **Declaration heads never reflow** (`def` params / `when`
   guards) — `Rian.Decl`'s head parser is not newline-tolerant inside its parens — so wrapping is
   confined to the body zone (after the top-level `:=`, or in non-declaration lines).
-- **Operator-chain wrapping (depth-0 continuation):** a top-level `:=` body that is a flat
-  `|>`/`and`/`or`/`<>` chain **collapses when it fits**, else breaks **leading-operator, one stage per
-  line** with a one-level hanging indent. These are exactly the `Rian.Decl` `@cont_ops` the parser
+- **Magic trailing comma:** a trailing comma the author leaves before a closer keeps the group expanded
+  even when it would fit (Black/Prettier). Idempotent (a broken group re-emits its comma); cons groups
+  are exempt (they can't carry one).
+- **Operator-chain wrapping (depth-0 continuation):** a top-level `:=` body that is a flat operator
+  chain **collapses when it fits**, else breaks **leading-operator, one stage per line** with a
+  one-level hanging indent. Covers the full `Rian.Decl` `@cont_ops` set — the operators the parser
   treats as newline-insignificant in a `:=` body (`take_line`, P1), so breaking before one is
-  meaning-safe. Confined to **declaration bodies** — a block-internal bind's newline becomes a `;`
-  (`detok_block`), so those chains are left intact. A merge pass rejoins a source-multiline chain into
-  one unit before deciding, which makes wrapping idempotent. `|` (cons/sum) is excluded.
+  meaning-safe — and is **precedence-aware**: a chain breaks only at its **loosest** level, so
+  `a * b + c` breaks at `+` and keeps `a * b` intact. Confined to **declaration bodies** — a
+  block-internal bind's newline becomes a `;` (`detok_block`), so those chains are left intact. A merge
+  pass rejoins a source-multiline chain into one unit before deciding, which makes wrapping idempotent.
+  `|` (cons/sum) is excluded.
 - **At most one blank line** anywhere; no leading/trailing blanks; file ends in one newline. Trailing
   comments sit two spaces off the code; own-line comments keep their place at context indent.
 - snake_case values / PascalCase types are *lexical* (ADR-0033), not the formatter's job.
-
-Deferred to a later increment: **magic trailing comma** (a source trailing comma *forcing* multiline),
-tracked in Open items.
 
 ## Ratings
 
@@ -103,8 +105,8 @@ tracked in Open items.
 | `mix rian.format` + `--check`/`--diff` CI gate; LSP delegates | 5/5 |
 | Bracket CST + Wadler/Lindig pretty-printer (no reparse; meaning-safe by construction) | 5/5 — shipped |
 | Idempotence + significant-token-equivalence + comment-fidelity + totality (corpus + fuzz) | 5/5 |
-| Style rules (2-space, spacing, blank-line, comments, 98-col bracket wrap + trailing comma, pipe/boolean/concat chain wrap) | 5/5 — shipped |
-| Magic trailing comma | deferred (next increment) |
+| Style rules (2-space, spacing, blank-line, comments, 98-col bracket wrap + trailing comma, precedence-aware chain wrap, magic comma) | 5/5 — shipped |
+| LSP formatting + rangeFormatting backend; `rian fmt` escript; Doc engine self-hosted | 5/5 — shipped |
 | Configurable style (`rustfmt` model) | 1/5 (rejected — fragmentation) |
 
 ## Consequences
@@ -120,24 +122,21 @@ tracked in Open items.
 
 ## Open items
 
-- **Wider operator-chain wrapping** — the depth-0 wrap covers `|>`/`and`/`or`/`<>`; the rest of
-  `@cont_ops` (arithmetic `+ - * /`, comparisons) is parser-safe to wrap too but intentionally left
-  inline for now (less churn). Revisit if the corpus wants it.
-- **Magic trailing comma** (Black/Prettier-style: a source trailing comma *forces* multiline). Today a
-  trailing comma is purely cosmetic (collapsed when the group fits); adopting magic-comma would make it
-  load-bearing layout — decide deliberately.
-- **LSP integration (Tier 3, ADR-0038)** — `textDocument/formatting` delegates to `Rian.Format`; later
-  `rangeFormatting` (format a sub-region inheriting surrounding indent). `format/1`'s totality already
-  satisfies the format-on-save "never corrupt the buffer" requirement.
-- **Standalone `rian fmt` escript (Tier 3, ADR-0031)** — wrap `Rian.Format` in the self-contained
-  binary so formatting needs no Elixir/mix toolchain; the deterministic same-bytes-every-platform
-  guarantee lives here.
-- **Self-host port** — re-implement `Rian.Format` as `compiler/format.rian` (a pure, JS-reachable pass,
-  well suited to the playground); gate on the corpus staying green.
+- **GenLSP transport** — `Rian.LSP.Formatting` is the data-level backend (returns `TextEdit[]` for
+  whole-document and range formatting); the actual JSON-RPC server (ADR-0038 Tier 0) is still to be
+  built and would call it.
+- **Full formatter self-host** — the **Doc engine** is ported (`compiler/format.rian`, fixpoint-locked);
+  the trivia lexer, bracket CST, and line/indent + chain-wrap lowering remain BEAM-only (they lean on
+  the host lexer and richer collections). Porting them is gated on the self-host collection/lexer work
+  (SELFHOST.md).
+- **`rangeFormatting` granularity** — formats the selection as a fragment (re-indented to context); best
+  on whole-declaration/statement selections, total but possibly odd on a cut-across-`do…end` selection.
 
-## Resolved (v1)
+## Resolved
 
+- **Magic trailing comma**, **operator-chain wrapping** (precedence-aware, full `@cont_ops`), and the
+  **`rian fmt` escript** + **LSP formatting/rangeFormatting backend** all ship (see headers above).
 - **Comment attachment** — comments are preserved at their authored token position (trailing comments
   stay on their line, two spaces off the code; own-line comments keep their place). No leading/trailing/
-  floating taxonomy is needed because the formatter never moves tokens across newlines.
+  floating taxonomy is needed because the formatter never moves tokens across a *significant* newline.
 - **Blank-line normalization** — runs of blank lines collapse to one; leading/trailing blanks trimmed.

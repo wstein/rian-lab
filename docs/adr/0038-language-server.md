@@ -353,8 +353,11 @@ bespoke integrations.
   ([ADR-0045](0045-formatter.md)): [`Rian.Format`](../../lib/rian/format.ex) is the canonical owner —
   meaning-preserving, idempotent, comment-preserving, wraps to 98 columns, and **total** (never raises;
   unlexable input returned unchanged, which is exactly the format-on-save "never corrupt the buffer"
-  contract). `lsp/formatting` becomes a thin `format/1` call; `rangeFormatting` (format a sub-region
-  inheriting surrounding indent) is the remaining LSP-side work.
+  contract). The **formatting backend ships** as a data-only module
+  [`Rian.LSP.Formatting`](../../lib/rian/lsp/formatting.ex): `formatting/1` returns whole-document
+  `TextEdit[]` (minimal line hunks via Myers diff) and `range_formatting/3` returns a single edit that
+  formats the selection as a fragment, re-indented to context. An `lsp/formatting` /
+  `lsp/rangeFormatting` handler is a thin call into it; only the JSON-RPC transport remains.
 
 ## Concrete next steps (sequenced)
 
@@ -381,5 +384,6 @@ bespoke integrations.
 - ~~**Formatter ownership** — is there a canonical Rian formatting style yet to back `lsp/formatting`?~~
   **Resolved & shipped by [ADR-0045](0045-formatter.md):** one canonical zero-config style; the
   formatter (`Rian.Format`, a bracket CST + Wadler/Lindig pretty-printer) is the canonical owner.
-  `lsp/formatting` delegates to its total `format/1`. Remaining LSP-side: `rangeFormatting`.
+  `lsp/formatting` and `lsp/rangeFormatting` delegate to `Rian.LSP.Formatting` (both shipped as a
+  data API). Remaining LSP-side: the JSON-RPC transport that calls it.
 - **Structural-union hover** (the ADR-0034 open item) — how Tier 2 hover renders narrowed/union types.
