@@ -77,6 +77,38 @@ defmodule Rian.TranspileTest do
     end
   end
 
+  describe "stdlib auto-mapping (A1)" do
+    test "Map.get/put map to Dict.* and stop being markers" do
+      out = rian("defmodule M do\n  def f(m, k), do: Map.put(m, k, 1)\nend")
+      assert out =~ "Dict.put(m, k, 1)"
+      refute out =~ ~s|TODO_PORT("remote/stdlib call: Map.put|
+    end
+
+    test "Map.get is arity-sensitive: /2 → Dict.get, /3 → Dict.get_or" do
+      g2 = rian("defmodule M do\n  def f(m, k), do: Map.get(m, k)\nend")
+      g3 = rian("defmodule M do\n  def f(m, k), do: Map.get(m, k, 0)\nend")
+      assert g2 =~ "Dict.get(m, k)"
+      assert g3 =~ "Dict.get_or(m, k, 0)"
+    end
+
+    test "Enum.sum → List.sum" do
+      assert rian("defmodule M do\n  def f(xs), do: Enum.sum(xs)\nend") =~ "List.sum(xs)"
+    end
+
+    test "honesty: an unmapped call stays a marker, never a phantom List.map" do
+      out = rian("defmodule M do\n  def f(xs), do: Enum.map(xs, fn x -> x end)\nend")
+      assert out =~ ~s|TODO_PORT("remote/stdlib call: Enum.map|
+      refute out =~ "List.map"
+    end
+
+    test "stats counts auto-mapped calls" do
+      {_t, stats} =
+        Transpile.transpile_with_stats("defmodule M do\n  def f(m, k), do: Map.put(m, k, 1)\nend")
+
+      assert stats.mapped == 1
+    end
+  end
+
   describe "rank/1 — folder-mode port-difficulty triage" do
     test "sorts easiest-first by markers/def and tags difficulty" do
       rows =

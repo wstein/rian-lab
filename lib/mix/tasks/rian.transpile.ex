@@ -64,7 +64,8 @@ defmodule Mix.Tasks.Rian.Transpile do
 
     IO.puts(
       :stderr,
-      "TODO summary: #{stats.defs} def group(s), #{stats.ports} marker(s) to resolve by hand"
+      "TODO summary: #{stats.defs} def group(s), #{stats.ports} marker(s) to resolve by hand, " <>
+        "#{stats.mapped} stdlib call(s) auto-mapped (verify semantics)"
     )
   end
 
@@ -94,20 +95,25 @@ defmodule Mix.Tasks.Rian.Transpile do
     if out, do: IO.puts(:stderr, "wrote #{length(rows)} draft(s) → #{out}/")
 
     IO.puts(:stderr, "\nport-difficulty triage (easiest first):")
-    IO.puts(:stderr, "  #{pad("module", 40)} defs  markers  mk/def  tag")
+    IO.puts(:stderr, "  #{pad("module", 40)} defs  markers  mapped  mk/def  tag")
 
     for r <- rows do
       ratio = :erlang.float_to_binary(r.ratio, decimals: 1)
 
       IO.puts(
         :stderr,
-        "  #{pad(r.name, 40)} #{pad(r.defs, 4)}  #{pad(r.ports, 7)}  #{pad(ratio, 6)}  #{r.tag}"
+        "  #{pad(r.name, 40)} #{pad(r.defs, 4)}  #{pad(r.ports, 7)}  #{pad(r.mapped, 6)}  #{pad(ratio, 6)}  #{r.tag}"
       )
     end
 
     tot_defs = Enum.sum(Enum.map(rows, & &1.defs))
     tot_mk = Enum.sum(Enum.map(rows, & &1.ports))
-    IO.puts(:stderr, "  #{pad("TOTAL", 40)} #{pad(tot_defs, 4)}  #{pad(tot_mk, 7)}")
+    tot_mapped = Enum.sum(Enum.map(rows, & &1.mapped))
+
+    IO.puts(
+      :stderr,
+      "  #{pad("TOTAL", 40)} #{pad(tot_defs, 4)}  #{pad(tot_mk, 7)}  #{pad(tot_mapped, 6)}"
+    )
   end
 
   defp pad(v, n), do: v |> to_string() |> String.pad_trailing(n)

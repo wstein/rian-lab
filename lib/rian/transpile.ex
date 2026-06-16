@@ -36,6 +36,8 @@ defmodule Rian.Transpile do
     "# You must still: (1) fill type holes `_Ty`/`_Ret`, (2) resolve every",
     "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
     "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
+    "# Auto-mapped stdlib calls (List./Dict./Str.) are spelled inline but NOT",
+    "#   semantics-verified — check arg-order/edge-cases against the Elixir source.",
     "# ─────────────────────────────────────────────────────────────────────────",
     ""
   ]
@@ -44,6 +46,26 @@ defmodule Rian.Transpile do
   @binops ~w(+ - * / <> ++ <= >= < > == != and or)a
   # Elixir local calls that Rian spells as infix operators.
   @infix_calls %{div: "div", rem: "rem"}
+
+  # Stdlib auto-mapping (A1): `{ElixirMod, fun, arity} => {RianMod, rian_fun}`.
+  # **Only** entries whose Rian image genuinely exists in the prelude
+  # (`examples/rian/prelude_*.rian`) are listed — mapping to a non-existent
+  # `List.map`/`reduce` would emit Rian that references nothing, so those stay
+  # `TODO_PORT`. Mapped calls are spelled inline but still need a semantics check
+  # (arg-order/edge-cases), flagged in the draft header — the prelude op is not
+  # guaranteed bug-for-bug identical to the Elixir original.
+  @stdlib %{
+    {"Enum", :sum, 1} => {"List", "sum"},
+    {"Enum", :product, 1} => {"List", "product"},
+    {"Enum", :count, 1} => {"List", "length"},
+    {"Enum", :any?, 1} => {"List", "any"},
+    {"Enum", :all?, 1} => {"List", "all"},
+    {"Map", :get, 2} => {"Dict", "get"},
+    {"Map", :get, 3} => {"Dict", "get_or"},
+    {"Map", :put, 3} => {"Dict", "put"},
+    {"Map", :has_key?, 2} => {"Dict", "has"},
+    {"String", :length, 1} => {"Str", "length"}
+  }
 
   @doc "Transpile Elixir source text to a draft Rian skeleton string."
   def transpile(source) when is_binary(source) do
@@ -63,7 +85,10 @@ defmodule Rian.Transpile do
     lines = String.split(text, "\n")
     ports = Enum.count(lines, &(String.contains?(&1, "TODO_PORT") or String.contains?(&1, "TODO[port]")))
     defs = Enum.count(lines, &Regex.match?(~r/^\s+(pub )?def \w+\(.*\) _Ret/, &1))
-    {text, %{ports: ports, defs: defs}}
+    # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics
+    # check; counted (occurrences, not lines) so the report can surface them.
+    mapped = (Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, text) |> length())
+    {text, %{ports: ports, defs: defs, mapped: mapped}}
   end
 
   @doc """
@@ -75,7 +100,8 @@ defmodule Rian.Transpile do
   """
   def rank(entries) do
     entries
-    |> Enum.map(fn {name, %{defs: defs, ports: ports}} ->
+    |> Enum.map(fn {name, stats} ->
+      %{defs: defs, ports: ports} = stats
       ratio = if defs > 0, do: ports / defs, else: ports * 1.0
 
       tag =
@@ -86,7 +112,7 @@ defmodule Rian.Transpile do
           true -> "med"
         end
 
-      %{name: name, defs: defs, ports: ports, ratio: ratio, tag: tag}
+      %{name: name, defs: defs, ports: ports, mapped: Map.get(stats, :mapped, 0), ratio: ratio, tag: tag}
     end)
     |> Enum.sort_by(& &1.ratio)
   end
@@ -294,11 +320,18 @@ defmodule Rian.Transpile do
   defp expr({op, _, [l, r]}) when is_map_key(@infix_calls, op),
     do: "#{expr(l)} #{@infix_calls[op]} #{expr(r)}"
 
-  # remote call `Mod.fun(args)` / `:erl.fun(args)` — surfaced for review (stdlib
-  # mapping is per-API and must be done by hand).
+  # remote call `Mod.fun(args)` — auto-mapped to a Rian prelude call when the
+  # image exists (`@stdlib`), else surfaced as a marker for hand-porting.
   defp expr({{:., _, [mod, fun]}, _, args}) when is_list(args) do
-    rendered = "#{mod_str(mod)}.#{fun}(#{Enum.map_join(args, ", ", &expr/1)})"
-    ~s|TODO_PORT("remote/stdlib call: #{escape(rendered)}")|
+    arg_strs = Enum.map_join(args, ", ", &expr/1)
+
+    case Map.get(@stdlib, {mod_str(mod), fun, length(args)}) do
+      {rmod, rfun} ->
+        "#{rmod}.#{rfun}(#{arg_strs})"
+
+      nil ->
+        ~s|TODO_PORT("remote/stdlib call: #{escape("#{mod_str(mod)}.#{fun}(#{arg_strs})")}")|
+    end
   end
 
   # local call / nullary var reference.
