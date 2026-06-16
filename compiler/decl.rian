@@ -154,7 +154,7 @@ mod Decl do
   type FldPatList := FPL(Vec(FldP), Vec(Tok))
   type ModBody := MB(Vec(Tok), Vec(Tok))
   type BlockRes := BRes(Vec(Tok), Vec(Tok))
-  type ArmRes := AR(CaseArm, Vec(Tok))
+  type ArmRes := AR(CaseArm, Vec(Tok)) | ArmErr(Vec(Tok))
   type ArmsRes := ARs(Vec(CaseArm), Vec(Tok))
   type WClausesRes := WCs(Vec(WithClause), Vec(Tok))
   type Gen := GR(Vec(TVar), Vec(Tok))
@@ -1236,6 +1236,7 @@ mod Decl do
   def parse_if(ts)
     case parse_bp(0, ts) do
       P(cnd, [TKw("do") | r2]) -> parse_if_then(cnd, skip_nl(r2))
+      P(_, other) -> P(EErr, other)
     end
   end
 
@@ -1245,6 +1246,7 @@ mod Decl do
       P(thn, rest) ->
         case skip_nl(rest) do
           [TKw("else") | r3] -> parse_if_else(cnd, thn, skip_nl(r3))
+          other -> P(EErr, other)
         end
     end
   end
@@ -1255,6 +1257,7 @@ mod Decl do
       P(els, rest) ->
         case skip_nl(rest) do
           [TKw("end") | r4] -> parse_postfix(If(cnd, thn, els), r4)
+          other -> P(EErr, other)
         end
     end
   end
@@ -1270,6 +1273,7 @@ mod Decl do
         case parse_arms(r2, []) do
           ARs(arms, r3) -> parse_postfix(Case(scrut, arms), r3)
         end
+      P(_, other) -> P(EErr, other)
     end
   end
 
@@ -1279,6 +1283,7 @@ mod Decl do
   def parse_arms(ts, acc)
     case parse_arm(ts) do
       AR(arm, rest) -> parse_arms(rest, [arm | acc])
+      ArmErr(rest) -> ARs(rev_arms([CArm(Wild, EErr) | acc], []), rest)
     end
   end
 
@@ -1291,11 +1296,13 @@ mod Decl do
             case parse_bp(0, skip_nl(r2)) do
               P(body, r3) -> AR(CArmG(pat, g, body), r3)
             end
+          P(_, other) -> ArmErr(other)
         end
       PP(pat, [TOp("->") | r1]) ->
         case parse_bp(0, skip_nl(r1)) do
           P(body, r2) -> AR(CArm(pat, body), r2)
         end
+      PP(_, other) -> ArmErr(other)
     end
   end
 
@@ -1309,6 +1316,7 @@ mod Decl do
         case parse_bp(0, skip_nl(r2)) do
           P(body, r3) -> parse_with_else(clauses, body, skip_nl(r3))
         end
+      WCs(_, other) -> P(EErr, other)
     end
   end
 
@@ -1321,6 +1329,7 @@ mod Decl do
           P(src, [TComma | r2]) -> parse_wclauses(skip_nl(r2), [WC(pat, src) | acc])
           P(src, rest) -> WCs(rev_wclauses([WC(pat, src) | acc], []), rest)
         end
+      PP(_, other) -> WCs(rev_wclauses(acc, []), other)
     end
   end
 

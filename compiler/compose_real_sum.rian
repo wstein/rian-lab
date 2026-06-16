@@ -125,6 +125,7 @@ mod ComposeRealSum do
   pub def build(src, modname)
     case compile_forms_host(compile_module(src, modname)) do
       {:ok, m, bin} -> loaded(load_binary(m, Prim.str_chars("nofile"), bin))
+      bad -> refuse_compile(bad)
     end
   end
 
@@ -244,6 +245,12 @@ mod ComposeRealSum do
 
   @external(:ex, ":erlang.error({:not_beam_legal, name})")
   def refuse_cap(name String) Vec(Tuple)
+
+  # the BEAM toolchain rejected the emitted forms (`:compile.forms` returned a
+  # non-`{:ok, _, _}` result — e.g. `{:error, errors, warnings}`). A compile failure
+  # is raised loudly, never silently dropped; `bad` is the raw failure term.
+  @external(:ex, ":erlang.error({:compile_failed, bad})")
+  def refuse_compile(bad Tuple) Symbol
 
   # an interpolation hole whose static type the AOT resolver cannot determine is
   # REFUSED, not guessed (ADR-0069 §4 — the stringify is chosen by the hole's static
