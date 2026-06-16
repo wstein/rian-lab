@@ -11,8 +11,10 @@ defmodule Rian.Transpile do
   skeleton** a human then finishes and equiv-locks against the oracle:
 
     * forms with a clear Rian image are translated — `def`/`defp` clauses,
-      `defstruct` (→ a `struct Mod(…)` record skeleton), `if`/`case` (incl. `when`
-      arms), binary/unary operators, ctor & struct patterns (`%ECall{fun: f}` →
+      `defstruct` (→ a `struct Mod(…)` record skeleton), nested `defmodule`s (a
+      struct-only wrapper flattens to its `struct`, else nests as `mod`), `@type` (→
+      a synthesized `type …` decl and/or resolved into `@spec`s), `if`/`case` (incl.
+      `when` arms), binary/unary operators, ctor & struct patterns (`%ECall{fun: f}` →
       `ECall(fun: f)`), tuples, lists/cons, atoms, string/number literals, local calls;
     * everything else is left **in place** as a greppable `TODO_PORT("…")`
       sentinel (carrying the original Elixir) or a `# TODO[port]: …` line comment,
@@ -118,8 +120,12 @@ defmodule Rian.Transpile do
 
   # Phase B: assemble Result returns (`Payload | Errors`) and synthesize the
   # `type Errors := Tag | …` declaration from the error tags the inferer collected.
-  defp infer_program(ast) do
-    sigmap = infer_sigs(ast)
+  # Phase C+: harvest `@type` decls — synthesize `type Name := …` and resolve local
+  # type refs in `@spec`s (`type_env`).
+  defp infer_program({:defmodule, _, [aliases, [do: body]]} = ast) do
+    stmts = block_stmts(body)
+    {type_env, type_decls} = Rian.Transpile.Infer.collect_types(stmts, short_name(aliases))
+    sigmap = infer_sigs(ast, type_env)
 
     tags =
       sigmap
@@ -137,9 +143,11 @@ defmodule Rian.Transpile do
         end)
       end
 
-    types = if tags == [], do: [], else: ["type Errors := #{Enum.join(tags, " | ")}"]
-    {sigmap, types}
+    error_decls = if tags == [], do: [], else: ["type Errors := #{Enum.join(tags, " | ")}"]
+    {sigmap, type_decls ++ error_decls}
   end
+
+  defp infer_program(_), do: {%{}, []}
 
   @doc """
   Transpile and report `{text, stats}` — `ports` counts unresolved markers,
@@ -175,13 +183,16 @@ defmodule Rian.Transpile do
   # Two passes: pass 1 infers each def group in isolation; pass 2 re-infers with
   # the fully-resolved sigs as an intra-module sibling table (so a local call can
   # adopt a callee's inferred type). Returns `{name, arity} => %{params, ret, tvars}`.
-  defp infer_sigs({:defmodule, _, [_, [do: body]]}) do
+  defp infer_sigs(ast, type_env \\ %{})
+
+  defp infer_sigs({:defmodule, _, [_, [do: body]]}, type_env) do
     stmts = block_stmts(body)
     groups = def_groups(stmts)
     key = fn g -> {to_string(hd(g.clauses).name), hd(g.clauses).arity} end
 
-    # harvest `@spec` hints once; they seed both passes (cross-checked in infer_group).
-    specs = Rian.Transpile.Infer.collect_specs(stmts)
+    # harvest `@spec` hints once (local `@type` refs resolved via type_env); they seed
+    # both passes (cross-checked in infer_group).
+    specs = Rian.Transpile.Infer.collect_specs(stmts, type_env)
 
     # build the context (parses the prelude) ONCE per pass, not per group.
     ctx1 = Map.put(Rian.Transpile.Infer.build_ctx(@stdlib), :specs, specs)
@@ -196,7 +207,7 @@ defmodule Rian.Transpile do
     Map.new(groups, fn g -> {key.(g), Rian.Transpile.Infer.infer_group(g, ctx2)} end)
   end
 
-  defp infer_sigs(_), do: %{}
+  defp infer_sigs(_, _), do: %{}
 
   @doc """
   The inferred signature map `{name, arity} => sig` plus synthesized type decls
@@ -332,6 +343,16 @@ defmodule Rian.Transpile do
     {lines, _pending_doc, open} =
       Enum.reduce(stmts, {[], nil, nil}, fn stmt, {acc, doc, open} ->
         case classify(stmt) do
+          :skip ->
+            # subsumed by Rian's type system (e.g. `@enforce_keys`) — emit nothing.
+            {acc, doc, open}
+
+          {:submodule, name, body} ->
+            # Elixir nests struct/util modules; recurse. A struct-only wrapper flattens
+            # to its `struct …` decl (the module is just a namespace for the struct);
+            # a submodule with other content nests as `mod Name do … end`.
+            {acc ++ flush(open, sigmap) ++ render_submodule(name, body, sigmap), doc, nil}
+
           {:defstruct, fields} ->
             # an Elixir `defstruct` IS the module's record type → a Rian `struct`
             # decl named for the module, fields as `_Unk` holes for a human to type.
@@ -366,6 +387,11 @@ defmodule Rian.Transpile do
             # `TODO[port]` action marker (the type info now lives in the signature).
             {acc ++ flush(open, sigmap) ++ ["# spec: #{snippet(node)}"], doc, nil}
 
+          {:type_decl, node} ->
+            # `@type` is HARVESTED (synthesized to a `type …` decl and/or resolved into
+            # `@spec` types when inferring) — passive provenance, not a TODO action.
+            {acc ++ flush(open, sigmap) ++ ["# type: #{snippet(node)}"], doc, nil}
+
           {:other, node} ->
             {acc ++ flush(open, sigmap) ++ ["# TODO[port]: #{snippet(node)}"], doc, nil}
         end
@@ -381,6 +407,12 @@ defmodule Rian.Transpile do
   defp classify({:import, _, _} = n), do: {:drop, "import", n}
   defp classify({:require, _, _} = n), do: {:drop, "require", n}
   defp classify({:@, _, [{:spec, _, _}]} = n), do: {:spec, n}
+  defp classify({:@, _, [{:type, _, _}]} = n), do: {:type_decl, n}
+  # `@enforce_keys` is an Elixir runtime concern subsumed by Rian's typed fields.
+  defp classify({:@, _, [{:enforce_keys, _, _}]}), do: :skip
+
+  defp classify({:defmodule, _, [{:__aliases__, _, _} = al, [do: body]]}),
+    do: {:submodule, short_name(al), body}
 
   defp classify({:defstruct, _, [fields]} = n) when is_list(fields) do
     if Enum.all?(fields, &struct_field?/1), do: {:defstruct, fields}, else: {:other, n}
@@ -389,6 +421,31 @@ defmodule Rian.Transpile do
   defp classify({:def, _, [head, kw]}), do: {:clause, :pub, head, kw}
   defp classify({:defp, _, [head, kw]}), do: {:clause, :priv, head, kw}
   defp classify(other), do: {:other, other}
+
+  # render a nested `defmodule`: flatten a struct-only wrapper to its `struct` decl
+  # (Elixir's one-struct-per-module idiom), else nest it as a `mod … do … end`.
+  defp render_submodule(name, body, sigmap) do
+    stmts = block_stmts(body)
+    inner = render_items(stmts, sigmap, name)
+
+    if struct_only_module?(stmts) do
+      inner
+    else
+      ["mod #{name} do"] ++ Enum.map(inner, &indent/1) ++ ["end"]
+    end
+  end
+
+  # a wrapper whose only real declaration is a `defstruct` (the rest is docs /
+  # `@enforce_keys` / `@type`) — its `mod` shell is noise in Rian.
+  defp struct_only_module?(stmts) do
+    match?([{:defstruct, _, _}], Enum.reject(stmts, &struct_mod_noise?/1))
+  end
+
+  defp struct_mod_noise?({:@, _, [{a, _, _}]})
+       when a in [:moduledoc, :doc, :typedoc, :enforce_keys, :type, :typep],
+       do: true
+
+  defp struct_mod_noise?(_), do: false
 
   # a `defstruct` field: a bare atom (`:x`) or a `{atom, default}` keyword pair.
   defp struct_field?(a) when is_atom(a), do: true

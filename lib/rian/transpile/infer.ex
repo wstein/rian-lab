@@ -175,17 +175,75 @@ defmodule Rian.Transpile.Infer do
   @doc """
   Harvest Elixir `@spec` annotations from a module's statements into a hint map
   `%{{name, arity} => %{params: [term | nil], ret: term | nil}}`. A `nil` slot is a
-  spec type with no clean Rian image (tuples, maps, pids, user-local refs) — no hint.
+  spec type with no clean Rian image (tuples, maps, pids) — no hint. `type_env` (from
+  `collect_types/2`) resolves local `@type` refs (`t()`, `expr()`) to their Rian type.
   `@spec`s are *documentary* in Elixir (unenforced, possibly stale), so these are
   hints, cross-checked against the body in `seed_spec/6`, never ground truth.
   """
-  def collect_specs(stmts) when is_list(stmts) do
-    for stmt <- stmts, pair = spec_pair(stmt), pair != nil, into: %{}, do: pair
+  def collect_specs(stmts, type_env \\ %{})
+
+  def collect_specs(stmts, type_env) when is_list(stmts) do
+    for stmt <- stmts, pair = spec_pair(stmt, type_env), pair != nil, into: %{}, do: pair
   end
 
-  def collect_specs(_), do: %{}
+  def collect_specs(_, _), do: %{}
 
-  defp spec_pair({:@, _, [{:spec, _, [body]}]}) do
+  @doc """
+  Harvest Elixir `@type` declarations into `{type_env, decls}`: `type_env` maps each
+  local type NAME to its Rian term (so `@spec`s referencing `t()`/`expr()` resolve),
+  and `decls` are synthesized Rian `type Name := …` declaration strings for the
+  union-shaped `@type`s (a single-type alias resolves *inline*, no decl). `%__MODULE__{}`
+  resolves to the module's own struct; a remote `Mod.t()` to `Mod`. Untranslatable
+  `@type`s (tuples/maps) are dropped — no hint, no decl.
+  """
+  def collect_types(stmts, mod_name) when is_list(stmts) do
+    raw =
+      for {:@, _, [{:type, _, [body]}]} <- stmts,
+          {name, term} <- [type_pair(body, mod_name)],
+          term != nil,
+          into: %{},
+          do: {name, term}
+
+    decls =
+      for {name, {:con, str}} <- raw, String.contains?(str, " | ") do
+        "type #{pascal(name)} := #{str}"
+      end
+
+    # a union @type resolves to its synthesized name; everything else inlines.
+    env =
+      Map.new(raw, fn
+        {name, {:con, str} = t} ->
+          if String.contains?(str, " | "), do: {name, con(pascal(name))}, else: {name, t}
+
+        {name, t} ->
+          {name, t}
+      end)
+
+    {env, Enum.sort(decls)}
+  end
+
+  def collect_types(_, _), do: {%{}, []}
+
+  defp type_pair({:"::", _, [{name, _, _}, rhs]}, mod_name) when is_atom(name),
+    do: {name, translate_type(rhs, mod_name)}
+
+  defp type_pair(_, _), do: nil
+
+  # `@type` RHS → a Rian term; like `translate_spec` but also resolves `%__MODULE__{}`
+  # (the module's own struct) and a remote `Mod.t()` (→ `Mod`).
+  defp translate_type({:%, _, [{:__MODULE__, _, _}, _]}, mod_name), do: con(mod_name)
+
+  defp translate_type({{:., _, [{:__aliases__, _, parts}, :t]}, _, _}, _mod)
+       when parts != [:String],
+       do: con(to_string(List.last(parts)))
+
+  defp translate_type(ast, _mod), do: translate_spec(ast)
+
+  defp pascal(name) do
+    name |> to_string() |> String.split("_") |> Enum.map_join(&String.capitalize/1)
+  end
+
+  defp spec_pair({:@, _, [{:spec, _, [body]}]}, type_env) do
     body =
       case body do
         # drop `when x: t` bounded quantifiers; translate the bare head/return
@@ -198,55 +256,65 @@ defmodule Rian.Transpile.Infer do
         args = args || []
 
         {{to_string(name), length(args)},
-         %{params: Enum.map(args, &translate_spec/1), ret: translate_spec(ret)}}
+         %{
+           params: Enum.map(args, &translate_spec(&1, type_env)),
+           ret: translate_spec(ret, type_env)
+         }}
 
       _ ->
         nil
     end
   end
 
-  defp spec_pair(_), do: nil
+  defp spec_pair(_, _), do: nil
 
   # Elixir/Erlang spec-type AST -> internal Infer term (`con`/`app`), or `nil` for
   # types with no clean Rian image. The inverse of ADR-0026's `-spec` *emission*.
-  defp translate_spec({:integer, _, _}), do: con("Int53")
+  # `type_env` resolves local `@type` refs (`t()`/`expr()`) to their Rian term.
+  defp translate_spec(ast, type_env \\ %{})
+  defp translate_spec({:integer, _, _}, _e), do: con("Int53")
 
-  defp translate_spec({t, _, _})
+  defp translate_spec({t, _, _}, _e)
        when t in [:non_neg_integer, :pos_integer, :neg_integer, :byte, :char, :arity],
        do: con("Int53")
 
-  defp translate_spec({:float, _, _}), do: con("Float64")
-  defp translate_spec({:boolean, _, _}), do: con("Bool")
+  defp translate_spec({:float, _, _}, _e), do: con("Float64")
+  defp translate_spec({:boolean, _, _}, _e), do: con("Bool")
 
-  defp translate_spec({t, _, _}) when t in [:binary, :bitstring, :iodata, :iolist],
+  defp translate_spec({t, _, _}, _e) when t in [:binary, :bitstring, :iodata, :iolist],
     do: con("String")
 
-  defp translate_spec({t, _, _}) when t in [:atom, :module, :node], do: con("Symbol")
+  defp translate_spec({t, _, _}, _e) when t in [:atom, :module, :node], do: con("Symbol")
   # `any()`/`term()` carries no concrete type -> leave the slot a `_Unk` hole
   # (an honest "human must type this" marker, not an auto-filled placeholder).
-  defp translate_spec({t, _, _}) when t in [:any, :term], do: nil
-  defp translate_spec({{:., _, [{:__aliases__, _, [:String]}, :t]}, _, _}), do: con("String")
-  defp translate_spec([elem]), do: vec_spec(elem)
-  defp translate_spec({:list, _, [elem]}), do: vec_spec(elem)
-  defp translate_spec({:|, _, [a, b]}), do: union_spec(a, b)
+  defp translate_spec({t, _, _}, _e) when t in [:any, :term], do: nil
+  defp translate_spec({{:., _, [{:__aliases__, _, [:String]}, :t]}, _, _}, _e), do: con("String")
+  defp translate_spec([elem], e), do: vec_spec(elem, e)
+  defp translate_spec({:list, _, [elem]}, e), do: vec_spec(elem, e)
+  defp translate_spec({:|, _, [a, b]}, e), do: union_spec(a, b, e)
 
-  defp translate_spec({:%, _, [{:__aliases__, _, parts}, _]}),
+  defp translate_spec({:%, _, [{:__aliases__, _, parts}, _]}, _e),
     do: con(to_string(List.last(parts)))
 
-  defp translate_spec(a) when is_atom(a) and a not in [nil, true, false], do: con("Symbol")
-  # tuples, maps, pids, `Mod.t()`, user-local `t()` refs — no clean Rian hint.
-  defp translate_spec(_), do: nil
+  # a local `@type` ref (`t()`, `expr()`) resolves through `type_env` (ADR-0075 Phase C+).
+  defp translate_spec({name, _, args}, type_env)
+       when is_atom(name) and (is_list(args) or is_nil(args)),
+       do: Map.get(type_env, name)
 
-  defp vec_spec(elem) do
-    case translate_spec(elem) do
+  defp translate_spec(a, _e) when is_atom(a) and a not in [nil, true, false], do: con("Symbol")
+  # tuples, maps, pids — no clean Rian hint.
+  defp translate_spec(_, _e), do: nil
+
+  defp vec_spec(elem, e) do
+    case translate_spec(elem, e) do
       nil -> nil
       t -> app("Vec", [t])
     end
   end
 
-  defp union_spec(a, b) do
-    with ta when ta != nil <- translate_spec(a),
-         tb when tb != nil <- translate_spec(b) do
+  defp union_spec(a, b, e) do
+    with ta when ta != nil <- translate_spec(a, e),
+         tb when tb != nil <- translate_spec(b, e) do
       con("#{spec_str(ta)} | #{spec_str(tb)}")
     else
       _ -> nil

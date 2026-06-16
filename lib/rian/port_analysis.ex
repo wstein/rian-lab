@@ -31,12 +31,15 @@ defmodule Rian.PortAnalysis do
     # structs resolved to their proposed sum, residual unknowns named `Unk####`.
     mods_groups = Enum.map(asts, fn {_, ast} -> {module_name(ast), collect_groups(ast)} end)
 
-    # harvested `@spec` hints, re-keyed by {mod, fn, arity} for the whole-program path.
+    # harvested `@spec` hints, re-keyed by {mod, fn, arity} for the whole-program path
+    # (local `@type` refs resolved per module via collect_types/2).
     specs =
       Enum.reduce(asts, %{}, fn {_, ast}, acc ->
         mod = module_name(ast)
+        stmts = module_stmts(ast)
+        {type_env, _decls} = Rian.Transpile.Infer.collect_types(stmts, mod)
 
-        Rian.Transpile.Infer.collect_specs(module_stmts(ast))
+        Rian.Transpile.Infer.collect_specs(stmts, type_env)
         |> Enum.reduce(acc, fn {{fn_, ar}, sig}, acc -> Map.put(acc, {mod, fn_, ar}, sig) end)
       end)
 

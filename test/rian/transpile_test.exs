@@ -21,6 +21,36 @@ defmodule Rian.TranspileTest do
       out = rian("defmodule D do\n  @fields [:a]\n  defstruct @fields\nend")
       assert out =~ "# TODO[port]: defstruct @fields"
     end
+
+    test "nested struct modules (the `ir.ex` shape) flatten to `struct` decls" do
+      src = """
+      defmodule IR do
+        defmodule Field do
+          @enforce_keys [:type]
+          defstruct [:label, :type]
+        end
+
+        defmodule Variant do
+          defstruct ctor: nil, fields: []
+        end
+      end
+      """
+
+      out = rian(src)
+      assert out =~ "mod IR do"
+      assert out =~ "struct Field(label _Unk, type _Unk)"
+      assert out =~ "struct Variant(ctor _Unk, fields _Unk)"
+      # the wrapper `defmodule`s and `@enforce_keys` are absorbed, not left as markers
+      refute out =~ "TODO[port]: defmodule"
+      refute out =~ "enforce_keys"
+    end
+
+    test "a nested module with functions nests as `mod`, not flattened" do
+      src = "defmodule Outer do\n  defmodule Helper do\n    def h(x), do: x\n  end\nend"
+      out = rian(src)
+      assert out =~ "mod Helper do"
+      assert out =~ "def h("
+    end
   end
 
   describe "structure that has a clear Rian image" do

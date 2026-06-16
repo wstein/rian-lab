@@ -112,6 +112,24 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
     stay `_Unk` holes (the IR wall above). A non-literal `defstruct @fields` still falls back to a
     marker rather than emit a wrong decl. `port_analysis` already inventoried struct fields (the §3
     proposed-sum clusters); this closes the matching gap on the transpiler side.
+  - **Nested struct modules (IMPLEMENTED).** The Elixir one-struct-per-module idiom (an outer
+    `defmodule` wrapping many `defmodule Sub do @enforce_keys … defstruct … end`, e.g. `lib/rian/ir.ex`'s
+    12 IR structs) no longer drops each inner module to a `TODO[port]`. A nested `defmodule` is
+    recursed: a **struct-only wrapper flattens** to its `struct Sub(…)` decl (the module is just a
+    namespace for the struct), and a submodule with real content nests as `mod Sub do … end`.
+    `@enforce_keys` is skipped (subsumed by Rian's typed fields). So `ir.ex` now yields all 12
+    `struct` skeletons instead of a wall of markers.
+  - **`@type` harvesting (IMPLEMENTED).** `Rian.Transpile.Infer.collect_types/2` reads every `@type`
+    into a **type-env** (local name → Rian term) and a list of synthesized decls. A *union* `@type`
+    (`@type ty :: String.t() | atom()`) synthesizes a named `type Ty := String | Symbol` decl; a
+    *single-type* alias (`@type m :: module()`) or struct alias (`@type t :: %__MODULE__{}` → the
+    module's struct, `@type t :: Session.t()` → `Session`) **inlines** with no decl. The type-env then
+    **resolves local refs in `@spec`s** (`@spec unwrap(t()) :: t()` → `unwrap(b Box) Box`), amplifying
+    Phase C: specs that mention local types now fill instead of bailing. Untranslatable `@type`s
+    (tuples/maps) synthesize nothing and resolve nothing — honest. A consumed `@type` becomes a passive
+    `# type:` provenance line. Wired into both the transpiler and the `whole_program` (port-analysis)
+    path. Like `@spec`, the *mechanism* is general; `lib/rian`'s own `@type`s are mostly tuples, so the
+    gain on this corpus is small.
 - **Phase C — `@spec` harvesting (IMPLEMENTED, cross-checked).** Elixir is untyped, so inference can
   only *reconstruct* types from usage — but a large fraction of real Elixir carries `@spec`, which
   **is** the human-written type the engine was reconstructing. `Rian.Transpile.Infer.collect_specs/1`

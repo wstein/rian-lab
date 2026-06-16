@@ -261,6 +261,97 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "`@type` harvesting — synthesize type decls + resolve local refs (ADR-0075)" do
+    test "@type t :: %__MODULE__{} resolves t() refs to the module's struct" do
+      src = """
+      defmodule Box do
+        defstruct [:v]
+        @type t :: %__MODULE__{}
+        @spec unwrap(t()) :: t()
+        def unwrap(b), do: b
+      end
+      """
+
+      out = Transpile.transpile(src, infer: true)
+      assert out =~ "pub def unwrap(b Box) Box := b"
+    end
+
+    test "a union @type synthesizes `type Name := …` AND resolves refs to the name" do
+      src = """
+      defmodule M do
+        @type ty :: String.t() | atom()
+        @spec norm(ty()) :: ty()
+        def norm(x), do: x
+      end
+      """
+
+      out = Transpile.transpile(src, infer: true)
+      assert out =~ "type Ty := String | Symbol"
+      assert out =~ "pub def norm(x Ty) Ty := x"
+    end
+
+    test "a single-type @type alias inlines (no decl) — module() → Symbol" do
+      src = """
+      defmodule M do
+        @type modname :: module()
+        @spec load(modname()) :: integer()
+        def load(m), do: m
+      end
+      """
+
+      out = Transpile.transpile(src, infer: true)
+      refute out =~ "type Modname"
+      assert out =~ "pub def load(m Symbol)"
+    end
+
+    test "a remote @type alias resolves to the module name — Session.t() → Session" do
+      src = """
+      defmodule M do
+        @type t :: Session.t()
+        @spec cur(t()) :: t()
+        def cur(s), do: s
+      end
+      """
+
+      assert Transpile.transpile(src, infer: true) =~ "pub def cur(s Session) Session := s"
+    end
+
+    test "an untranslatable @type (tuple) yields no resolution — no decl, no spec fill" do
+      src = """
+      defmodule M do
+        @type pair :: {integer(), integer()}
+        @spec mk(pair()) :: pair()
+        def mk(p), do: p
+      end
+      """
+
+      out = Transpile.transpile(src, infer: true)
+      # no synthesized decl (untranslatable), and the tuple ref gives no hint
+      refute out =~ "type Pair :="
+      assert out =~ "# type: @type pair"
+      # the spec adds nothing, so identity inference still generalizes (not a wrong fill)
+      assert out =~ "pub def mk(p T) T forall T := p"
+    end
+
+    test "a synthesized union-type draft compiles (the decl + its use are valid Rian)" do
+      src = """
+      defmodule M do
+        @type ty :: String.t() | atom()
+        @spec norm(ty()) :: ty()
+        def norm(x), do: x
+      end
+      """
+
+      body =
+        Transpile.transpile(src, infer: true)
+        |> String.split("\n")
+        |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+        |> Enum.join("\n")
+
+      assert {:ok, :compiled} = safe_compile(body)
+    end
+  end
+
   defp safe_compile(src) do
     Rian.Decl.compile(src)
     {:ok, :compiled}
