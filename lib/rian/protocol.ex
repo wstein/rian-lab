@@ -46,6 +46,7 @@ defmodule Rian.Protocol do
   (`[{proto, type, [method_raw_map]}]`) into a list of raw `def` maps to append
   to a scope's function stream. Raises `Error` on any coherence violation.
   """
+  @spec expand(list(), list(), list(), list(), term()) :: term()
   def expand(protocols, impls, types \\ [], structs \\ [], targets \\ nil) do
     reg = registry(types, structs)
     Enum.each(impls, &check_impl(&1, protocols, reg))
@@ -67,6 +68,7 @@ defmodule Rian.Protocol do
   BEAM desugar erases. Raises `Error`; the analogue of the method-set coherence in
   `check_impl/3`, for the type side. A protocol with no associated types is unaffected.
   """
+  @spec check_assoc!(list(), list()) :: term()
   def check_assoc!(protocols, impl_decls) do
     declared = Map.new(protocols, fn p -> {p.name, MapSet.new(Map.get(p, :assoc, []))} end)
 

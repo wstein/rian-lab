@@ -46,6 +46,7 @@ defmodule Rian.FormsEquiv do
   the canonical value two modules must share to be forms-equivalent. Accepts a
   `.beam` binary or an already-extracted abstract-code form list.
   """
+  @spec normalize(binary() | list()) :: list()
   def normalize(beam) when is_binary(beam), do: beam |> abstract_code() |> normalize()
 
   def normalize(forms) when is_list(forms) do
@@ -59,12 +60,14 @@ defmodule Rian.FormsEquiv do
   `true` iff the two inputs (each a `.beam` binary or abstract-code form list)
   share the same normalized function forms.
   """
+  @spec equivalent?(binary() | list(), binary() | list()) :: boolean()
   def equivalent?(a, b), do: normalize(a) == normalize(b)
 
   @doc """
   Structured diff for debugging: `:equal`, or `{:diff, forms_only_in_a,
   forms_only_in_b}` over the normalized function forms (matched by name/arity).
   """
+  @spec diff(binary() | list(), binary() | list()) :: term()
   def diff(a, b) do
     na = Map.new(normalize(a), &{key(&1), &1})
     nb = Map.new(normalize(b), &{key(&1), &1})
@@ -90,6 +93,7 @@ defmodule Rian.FormsEquiv do
 
   A port passes iff every entry is `:equiv` (see `verified?/2`).
   """
+  @spec verify(term(), term()) :: [{term(), atom()}]
   def verify(oracle, port) do
     na = Map.new(normalize(oracle), &{key(&1), &1})
     nb = Map.new(normalize(port), &{key(&1), &1})
@@ -111,11 +115,13 @@ defmodule Rian.FormsEquiv do
   end
 
   @doc "True iff every function in the oracle is matched `:equiv` by the port."
+  @spec verified?(term(), term()) :: boolean()
   def verified?(oracle, port), do: Enum.all?(verify(oracle, port), &(elem(&1, 1) == :equiv))
 
   defp key({:function, _, name, arity, _}), do: {name, arity}
 
   @doc "Extract the Erlang abstract code from a `.beam` binary (raises if absent)."
+  @spec abstract_code(binary()) :: list()
   def abstract_code(beam) when is_binary(beam) do
     case :beam_lib.chunks(beam, [:abstract_code]) do
       {:ok, {_mod, [{:abstract_code, {_vsn, ac}}]}} -> ac

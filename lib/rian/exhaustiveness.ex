@@ -36,6 +36,7 @@ defmodule Rian.Exhaustiveness do
   # ── Environment helpers ────────────────────────────────────────────────
 
   @doc "Base env with built-in bool, list, and the infinite primitive types."
+  @spec base_env() :: map()
   def base_env do
     %{
       arity: %{nil: 0, cons: 2, true: 0, false: 0},
@@ -52,6 +53,7 @@ defmodule Rian.Exhaustiveness do
   end
 
   @doc "Register a sum type: variants is [{ctor_id, arity}, ...]."
+  @spec add_type(map(), term(), list()) :: map()
   def add_type(env, type_name, variants) do
     ids = Enum.map(variants, fn {c, _} -> c end)
     arity = Enum.reduce(variants, env.arity, fn {c, a}, acc -> Map.put(acc, c, a) end)
@@ -66,6 +68,7 @@ defmodule Rian.Exhaustiveness do
   covers the whole interval is exhaustive — unlike a bare `Int64`, whose
   signature stays infinite and still demands a `_`.
   """
+  @spec add_range(map(), term(), integer(), integer()) :: map()
   def add_range(env, type_name, lo, hi) when lo <= hi do
     members = for v <- lo..hi, do: {:lit, v}
     typeof = Enum.reduce(members, env.type_of, fn m, acc -> Map.put(acc, m, type_name) end)
@@ -129,6 +132,7 @@ defmodule Rian.Exhaustiveness do
   # ── Usefulness U(P, q) ─────────────────────────────────────────────────
 
   @doc "Is pattern vector `q` useful w.r.t. matrix `rows`?"
+  @spec useful?(list(), list(), map()) :: boolean()
   def useful?(rows, [], _env), do: rows == []
 
   def useful?(rows, [{:ctor, c, args} | qrest], env) do
@@ -203,6 +207,7 @@ defmodule Rian.Exhaustiveness do
   Returns `%{exhaustive?:, missing:, unreachable:}` where `missing` is a witness
   pattern vector (or nil) and `unreachable` is a list of 0-based clause indices.
   """
+  @spec analyze(list(), integer(), map()) :: term()
   def analyze(arms, n, env) do
     unguarded = arms |> Enum.reject(& &1.guard) |> Enum.map(& &1.pat)
     exhaustive = not useful?(unguarded, List.duplicate(:wild, n), env)
@@ -231,6 +236,7 @@ defmodule Rian.Exhaustiveness do
 
   # ── Rendering (for diagnostics) ────────────────────────────────────────
 
+  @spec render(term()) :: String.t()
   def render(:wild), do: "_"
   def render({:ctor, {:lit, v}, []}), do: inspect(v)
   def render({:ctor, {:tuple, _}, args}), do: "{" <> Enum.map_join(args, ", ", &render/1) <> "}"
@@ -256,6 +262,7 @@ defmodule Rian.Exhaustiveness do
   # usefulness analysis on every `case` arm matrix, refusing to emit on a gap.
 
   @doc "The signature env for a whole program (types + ranges + structs)."
+  @spec program_env(list(), list(), list()) :: map()
   def program_env(types, structs, ranges) do
     env =
       Enum.reduce(Prelude.with_prelude(types), base_env(), fn t, env ->
@@ -273,6 +280,7 @@ defmodule Rian.Exhaustiveness do
   end
 
   @doc "Refuse to emit any function whose body holds a non-exhaustive `case`."
+  @spec check_case_bodies!(list(), map()) :: term()
   def check_case_bodies!(funcs, env) do
     for func <- funcs, not Map.get(func, :synthetic, false), clause <- func.clauses do
       clause.body |> body_core() |> check_match!(env, func.name)
@@ -285,6 +293,7 @@ defmodule Rian.Exhaustiveness do
   defp body_core(ast), do: Core.from_expr(ast)
 
   @doc "Check every `case` reachable in a Core expression; raise on the first gap."
+  @spec check_match!(term(), map(), term()) :: term()
   def check_match!(core, env, where) do
     core |> collect_cases([]) |> Enum.each(&check_one_case!(&1, env, where))
   end

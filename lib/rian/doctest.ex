@@ -36,6 +36,7 @@ defmodule Rian.Doctest do
   Extract `{expr, expected}` example pairs from a source's `@doc`s — top-level
   functions and functions inside a single `mod`.
   """
+  @spec extract(String.t()) :: list()
   def extract(src) do
     prog = Decl.parse(src)
     docs = Enum.map(prog.funcs, & &1.doc) ++ module_doc_strings(prog)
@@ -64,6 +65,7 @@ defmodule Rian.Doctest do
   Compile `src` with its doctests and run them. Returns
   `[{expr, :pass | {:fail, got, expected}}]`, one per example.
   """
+  @spec run(String.t(), module() | nil) :: [{String.t(), :pass | {:fail, term(), term()}}]
   def run(src, mod \\ nil) do
     case extract(src) do
       [] ->
@@ -132,12 +134,14 @@ defmodule Rian.Doctest do
   @fence ~r/```rian\n(?<body>.*?)\n```/s
 
   @doc "Each ` ```rian ` fenced block in `md`, as a Rian source string."
+  @spec fences(String.t()) :: [String.t()]
   def fences(md), do: Regex.scan(@fence, md, capture: ["body"]) |> Enum.map(&hd/1)
 
   @doc """
   Run every ` ```rian ` fence in a Markdown string as a self-contained program,
   returning `[{expr, :pass | {:fail, got, expected}}]` across all fences.
   """
+  @spec run_markdown(String.t()) :: list()
   def run_markdown(md), do: md |> fences() |> Enum.flat_map(&run/1)
 
   @doc """

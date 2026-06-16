@@ -20,6 +20,7 @@ defmodule Rian.PortAnalysis do
   alias Rian.Transpile
 
   @doc "Analyze `[{filename, source}]` into report data."
+  @spec analyze(list()) :: term()
   def analyze(sources) when is_list(sources) do
     asts =
       for {file, src} <- sources, ast = parse(src), ast != nil, do: {file, ast}
@@ -253,6 +254,7 @@ defmodule Rian.PortAnalysis do
   # ── reach annotation (which targets a type can reach) ───────────────────────
 
   @doc false
+  @spec reach_note(String.t()) :: String.t()
   def reach_note(type) when is_binary(type) do
     cond do
       Regex.match?(~r/\bFn\(/, type) -> "off :rs (closure)"
@@ -271,6 +273,7 @@ defmodule Rian.PortAnalysis do
   # ── markdown rendering ──────────────────────────────────────────────────────
 
   @doc "Render report data as the reviewable `PORT.analysis.md` string."
+  @spec to_markdown(term()) :: String.t()
   def to_markdown(data) do
     [
       "# Port Analysis — Elixir → Rian",
