@@ -167,15 +167,30 @@ Since the wall is human-judgment-shaped, a team debate converged on a **read-onl
 generated `PORT.analysis.md`** (`mix rian.port_analysis`, `Rian.PortAnalysis`) as the
 first increment: it surfaces (1) inferred sigs with reach, (2) holes-with-reasons,
 (3) **proposed sum-type groupings** clustered from cross-module dispatch
-co-occurrence, and (4) an **error-idiom inventory** with proposed variants. It feeds
-nothing back yet (no accident surface) and is regenerable (anti-drift). It earns its
-keep: run cross-module on `lib/rian` it reconstructs the two real `Core` sums
-(`Expr` = the `E*` nodes, `Pat` = the `P*` nodes) from non-local dispatch evidence —
-the decision a human cannot make from a single draft. Generating it also caught a
-latent bug: a partially-resolved parametric type (`Vec(<unknown>)`) was rendered
-`Vec(hole)` (invalid Rian); it now falls back to a whole-slot hole. Next gate
-(per the debate): measure porting-time saved before wiring a reviewed `port.spec`
-back into the transpiler (`Rian.Check`-gated).
+co-occurrence, and (4) an **error-idiom inventory** with proposed variants. It is
+regenerable (anti-drift). It earns its keep: run cross-module on `lib/rian` it
+reconstructs the two real `Core` sums (`Expr` = the `E*` nodes, `Pat` = the `P*` nodes)
+from non-local dispatch evidence — the decision a human cannot make from a single draft.
+Generating it also caught a latent bug: a partially-resolved parametric type
+(`Vec(<unknown>)`) was rendered `Vec(hole)` (invalid Rian); it now falls back to a
+whole-slot hole.
+
+### The `port.spec` feedback loop (IMPLEMENTED, `Rian.PortSpec`)
+
+The report's placeholders aren't hundreds of distinct types — they're a few dozen real
+ones, each carrying **one shared name** across the whole program (the whole-program
+unification links every site). So the loop is **decision amplification**: the human edits
+a `port.spec` of `Placeholder = RianType` lines (`Sum1 = Expr`, `Unk0042 = String`), and
+`mix rian.port_analysis --spec port.spec` substitutes program-wide — **one decision per
+shared placeholder re-resolves every site**. On `lib/rian`, naming the two dispatch sums
+(`Sum1 = Expr`, `Sum2 = Pat`) re-resolves ~90+ `Expr` sites (and the `Pat` sites) from two
+edits; `--emit-spec` writes a stub listing every decision to make (sums with members,
+unknowns with site counts) as a checklist. A named sum's now-fully-resolved sigs graduate
+out of the §2 review list, and the placeholder index shows only the undecided remainder —
+so the report doubles as a porting *burndown*. The substitution is a rename of shared
+names, not a re-inference, so it cannot introduce an accidental fill (the human owns each
+`= RianType` decision). Still deferred: feeding the resolved spec into the transpiler's
+emitted drafts (`Rian.Check`-gated), and mapping error idioms through the same file.
 
 ## Open items
 

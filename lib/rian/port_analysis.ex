@@ -13,8 +13,11 @@ defmodule Rian.PortAnalysis do
     4. **error-idiom inventory** — every distinct `{:error, X}` shape with a
        proposed-but-blank Rian variant for the human to decide.
 
-  It produces NO fills and feeds nothing back yet — it is the artifact a human
-  reviews. Generated, so it stays diffable against the source (anti-drift).
+  It produces NO fills directly, but it **feeds back** through a `port.spec`
+  (`Rian.PortSpec`): the human records a few decisions (name a proposed `Sum#`, pin a
+  residual `Unk####`) and `to_markdown/2` applies them **program-wide** — each
+  placeholder is shared, so one decision re-resolves every site. Generated, so it stays
+  diffable against the source (anti-drift).
   """
 
   alias Rian.Transpile
@@ -292,43 +295,55 @@ defmodule Rian.PortAnalysis do
 
   @doc "Render report data as the reviewable `PORT.analysis.md` string."
   @spec to_markdown(term()) :: String.t()
-  def to_markdown(data) do
+  def to_markdown(data, subs \\ %{}) do
     [
       "# Port Analysis — Elixir → Rian",
       "",
       "**READ-ONLY, GENERATED** by `mix rian.port-analysis` (ADR-0075). Review the",
-      "`REVIEW` sections and record decisions in a `port.spec` (feedback loop not yet",
-      "wired). Regenerate to diff against source — do not hand-edit this file.",
+      "`REVIEW` sections and record decisions in a `port.spec` — `mix rian.port_analysis",
+      "--spec port.spec` applies them program-wide (one decision per *shared* placeholder",
+      "re-resolves every site). Regenerate to diff against source — do not hand-edit this file.",
       "",
-      summary_section(data),
-      sigs_section(data),
-      holes_section(data),
-      sums_section(data),
+      summary_section(data, subs),
+      sigs_section(data, subs),
+      holes_section(data, subs),
+      sums_section(data, subs),
       errors_section(data)
     ]
     |> Enum.join("\n")
     |> Kernel.<>("\n")
   end
 
-  defp summary_section(data) do
+  # how many of the program's shared placeholders (`Sum#` + `Unk####`) the spec decided.
+  defp decision_stats(data, subs) do
+    all = Enum.map(1..max(length(data.sums), 1)//1, &"Sum#{&1}") ++ Map.keys(data.wp.unks)
+    all = if data.sums == [], do: Map.keys(data.wp.unks), else: all
+    decided = Enum.count(all, &Map.has_key?(subs, &1))
+    {decided, length(all) - decided}
+  end
+
+  defp summary_section(data, subs) do
     ts = Enum.sum(for m <- data.modules, do: m.total_slots)
     fs = Enum.sum(for m <- data.modules, do: m.filled_slots)
     pct = if ts > 0, do: round(fs * 100 / ts), else: 0
+    {decided, remaining} = decision_stats(data, subs)
 
     """
     ## Summary
 
     - modules: #{length(data.modules)} · type slots: #{ts} · auto-filled: #{fs} (#{pct}%) · holes: #{ts - fs}
     - structs seen: #{map_size(data.structs)} · proposed sums: #{length(data.sums)} · distinct error idioms: #{map_size(data.errors)}
+    - port.spec decisions applied: #{decided} · placeholders remaining: #{remaining}
     """
   end
 
-  defp sigs_section(data) do
+  defp sigs_section(data, subs) do
     rows =
       for m <- data.modules, {n, ar, sig} <- m.filled do
-        params = Enum.join(sig.params, ", ")
+        params = Enum.map_join(sig.params, ", ", &Rian.PortSpec.apply_subs(&1, subs))
+        ret = Rian.PortSpec.apply_subs(sig.ret, subs)
         fa = if sig.tvars != [], do: " forall " <> Enum.join(sig.tvars, ", "), else: ""
-        "| `#{n}/#{ar}` | `(#{params}) #{sig.ret}#{fa}` | #{reach_note(sig.ret)} |"
+        "| `#{n}/#{ar}` | `(#{params}) #{ret}#{fa}` | #{reach_note(ret)} |"
       end
 
     """
@@ -344,9 +359,19 @@ defmodule Rian.PortAnalysis do
   # an editable Rian signature — concrete types resolved by inference, structs as
   # their proposed `SumN`, and genuine unknowns as SHARED `Unk####` (the same
   # logical type carries one name everywhere). Replace each `Unk####` once.
-  defp holes_section(data) do
+  defp holes_section(data, subs) do
     decls =
       data.wp.sigs
+      # apply the spec FIRST, then keep only sigs that still carry a placeholder — a
+      # sig whose every `Sum#`/`Unk####` was decided graduates out of the review list.
+      |> Enum.map(fn {k, sig} ->
+        {k,
+         %{
+           sig
+           | params: Enum.map(sig.params, &Rian.PortSpec.apply_subs(&1, subs)),
+             ret: Rian.PortSpec.apply_subs(sig.ret, subs)
+         }}
+      end)
       |> Enum.filter(fn {_k, sig} -> needs_review?(sig) end)
       |> Enum.sort()
       |> Enum.map(fn {{mod, fn_, ar}, sig} ->
@@ -355,8 +380,11 @@ defmodule Rian.PortAnalysis do
         "  # #{mod}.#{fn_}/#{ar}\n  pub def #{fn_}(#{params}) #{sig.ret} := …"
       end)
 
+    # the index lists only UNDECIDED unknowns (the remaining work); a pinned `Unk####`
+    # has been re-resolved everywhere and drops out.
     index =
       data.wp.unks
+      |> Enum.reject(fn {name, _} -> Map.has_key?(subs, name) end)
       |> Enum.sort()
       |> Enum.map(fn {name, sites} ->
         refs = Enum.map_join(sites, ", ", fn {{m, f, a}, slot} -> "`#{m}.#{f}/#{a}:#{slot}`" end)
@@ -390,7 +418,7 @@ defmodule Rian.PortAnalysis do
     end)
   end
 
-  defp sums_section(data) do
+  defp sums_section(data, subs) do
     clustered = data.sums
     grouped = clustered |> List.flatten() |> MapSet.new()
 
@@ -407,7 +435,17 @@ defmodule Rian.PortAnalysis do
             "  - `#{s}` { #{fields} }"
           end)
 
-        "**Cluster #{i}** (co-occur in dispatch) — propose `type <NAME?> := #{Enum.join(members, " | ")}`\n#{variants}\n  - [ ] human: name the sum, confirm membership, set field types/reach"
+        # named in the port.spec? show the decision and `type Name := …`; else prompt.
+        decision =
+          case Map.get(subs, "Sum#{i}") do
+            nil ->
+              "**Cluster #{i}** (`Sum#{i}`, co-occur in dispatch) — propose `type <NAME?> := #{Enum.join(members, " | ")}`\n#{variants}\n  - [ ] human: name the sum (`Sum#{i} = <Name>` in port.spec), confirm membership"
+
+            name ->
+              "**Cluster #{i}** → ✓ `type #{name} := #{Enum.join(members, " | ")}` (named in port.spec)\n#{variants}"
+          end
+
+        decision
       end)
 
     """

@@ -118,4 +118,38 @@ defmodule Rian.PortAnalysisTest do
       refute out =~ ~r/ev\(x Unk/
     end
   end
+
+  describe "port.spec feedback loop applies decisions program-wide (Levers C+D)" do
+    # `ev` dispatches on the struct sum; `wrap` calls it AND threads an unknown, so it
+    # keeps a residual `Unk####` and stays in the §2 review list even after naming.
+    @dispatch """
+    defmodule M do
+      def ev(x) do
+        case x do
+          %ENum{} -> 1
+          %ECall{} -> 2
+        end
+      end
+
+      def wrap(x, acc), do: combine(ev(x), acc)
+    end
+    """
+
+    test "naming one sum re-resolves it at every site (incl. a still-reviewed sig)" do
+      data = PortAnalysis.analyze([{"m.ex", @dispatch}])
+      out = PortAnalysis.to_markdown(data, %{"Sum1" => "Expr"})
+
+      assert out =~ ~r/type Expr := /
+      # `wrap`'s `Sum1` param is renamed in place (it stays in §2 via its residual Unk)
+      assert out =~ ~r/wrap\(x Expr/
+      refute out =~ "Sum1"
+      assert out =~ "port.spec decisions applied: 1"
+    end
+
+    test "without a spec, the proposed sum stays `Sum1` (no decision)" do
+      out = md([{"m.ex", @dispatch}])
+      assert out =~ "Sum1"
+      assert out =~ "port.spec decisions applied: 0"
+    end
+  end
 end
