@@ -48,3 +48,6 @@ bun.lock
 
 # escript build artifact (mix escript.build)
 /rian
+
+# Dialyzer PLT cache (mix dialyzer)
+/priv/plts/

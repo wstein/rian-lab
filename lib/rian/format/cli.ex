@@ -12,6 +12,7 @@ defmodule Rian.Format.CLI do
   alias Rian.Format
 
   @doc "Run the fmt CLI over `argv` (already stripped of any `fmt` subcommand)."
+  @spec run([String.t()]) :: 0 | 1 | 2
   def run(argv) do
     case OptionParser.parse(argv, strict: [check: :boolean, diff: :boolean, stdout: :boolean]) do
       {_opts, _files, [_ | _] = invalid} ->
@@ -43,7 +44,13 @@ defmodule Rian.Format.CLI do
   defp each(files, fun), do: files |> Enum.map(fun) |> Enum.max(fn -> 0 end)
 
   defp format_stdin do
-    src = IO.read(:stdio, :eof) || ""
+    # IO.read/2 returns `:eof` (not nil) on empty input, and `{:error, _}` on a
+    # read failure — neither is a binary, so normalize before formatting.
+    src =
+      case IO.read(:stdio, :eof) do
+        data when is_binary(data) -> data
+        _eof_or_error -> ""
+      end
 
     case Format.format_result(src) do
       {:ok, out} ->

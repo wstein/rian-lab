@@ -26,8 +26,9 @@ mix test test/rian/check_test.exs:51      # one test (by line number)
 mix test --only rust                      # only the rustc-backed tests
 mix test --include jvm                    # default loop plus one toolchain back (rust|js|jvm)
 
-mix format                                # THE linter — no credo/dialyzer in this repo
+mix format                                # the formatter/linter — no credo in this repo
 mix compile --warnings-as-errors          # warnings are errors; run before every commit
+mix dialyzer                              # success-typing analysis (dialyxir); must stay clean (config in mix.exs `dialyzer/0`, false positives in .dialyzer_ignore.exs)
 
 mix rian.compile FILE [--beam|--rust|--js|--jvm] [--show-elixir]  # BEAM bytecode (Rian.Beam) + Rust/JS/Kotlin source; --show-elixir = text debug view
 mix rian.jar FILE [-o OUT.jar] [--main FUNC]      # runnable JVM .jar via Kotlin+kotlinc (ADR-0049/0062 rung B)

@@ -18,6 +18,7 @@ defmodule Rian.CLI do
   """
 
   @doc "escript entry point."
+  @spec main([String.t()]) :: no_return()
   def main(argv) do
     argv
     |> dispatch()

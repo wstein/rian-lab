@@ -89,6 +89,7 @@ defmodule Rian.Format do
   format-on-save can never corrupt a buffer mid-edit. Use `format_result/1` when
   you need to distinguish "already formatted" from "could not be formatted".
   """
+  @spec format(String.t()) :: String.t()
   def format(src) when is_binary(src) do
     case format_result(src) do
       {:ok, out} -> out
@@ -101,6 +102,7 @@ defmodule Rian.Format do
   when the source cannot be lexed). Lets the CLI report unformattable files instead
   of silently passing them.
   """
+  @spec format_result(String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def format_result(src) when is_binary(src) do
     out =
       src

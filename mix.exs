@@ -17,6 +17,7 @@ defmodule RianLab.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       test_coverage: test_coverage(),
       escript: escript(),
+      dialyzer: dialyzer(),
       deps: deps(),
       name: "RianLab",
       description:
@@ -53,6 +54,24 @@ defmodule RianLab.MixProject do
     [main_module: Rian.CLI, name: "rian"]
   end
 
+  # `mix dialyzer` (dialyxir) — success-typing analysis of the compiler's own
+  # Elixir. The PLT is cached under `priv/plts` (gitignored) so CI can restore it.
+  # `:mix` is added because the `Mix.Tasks.Rian.*` tasks call `Mix.*`. The flags
+  # catch dropped error returns and impossible/missing returns — high signal, low
+  # noise; `:unmatched_returns` is intentionally omitted (it flags every ignored
+  # side-effecting call — IO/ETS/Mix.shell — without surfacing real bugs here).
+  # Genuine false positives go in `.dialyzer_ignore.exs`.
+  defp dialyzer do
+    [
+      plt_local_path: "priv/plts/project.plt",
+      plt_core_path: "priv/plts/core.plt",
+      plt_add_apps: [:mix, :ex_unit, :eex],
+      flags: [:error_handling, :extra_return, :missing_return],
+      ignore_warnings: ".dialyzer_ignore.exs",
+      list_unused_filters: true
+    ]
+  end
+
   # `mix test --cover` (built-in) gate. Excluded from the denominator:
   #   * `Rian.DocFormatter*` — the dev-only ExDoc/Starlight doc formatter (it
   #     drives ExDoc, exercised by `mix docs`, not unit-tested);
@@ -77,6 +96,9 @@ defmodule RianLab.MixProject do
       # `:test` too — `Rian.DocFormatter` (in `lib/`) references `ExDoc.Autolink`,
       # so the test env must be able to compile it (CI runs `MIX_ENV=test`).
       {:ex_doc, "~> 0.34", only: [:dev, :test], runtime: false},
+      # Static analysis: Dialyzer (success typing) over the compiler's own Elixir.
+      # `mix dialyzer`; config in `dialyzer/0`. dev-only, never a runtime dep.
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       # The Livebook surface (`Rian.Livebook` + its `Kino.SmartCell`). `optional`
       # so it is NOT forced on consumers of the compiler library; it is fetched for
       # this project's own dev/test builds, and Livebook always provides Kino at
