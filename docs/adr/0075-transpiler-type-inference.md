@@ -183,8 +183,12 @@ unification links every site). So the loop is **decision amplification**: the hu
 a `port.spec` of `Placeholder = RianType` lines (`Sum1 = Expr`, `Unk0042 = String`), and
 `mix rian.port_analysis --spec port.spec` substitutes program-wide — **one decision per
 shared placeholder re-resolves every site**. On `lib/rian`, naming the two dispatch sums
-(`Sum1 = Expr`, `Sum2 = Pat`) re-resolves ~90+ `Expr` sites (and the `Pat` sites) from two
-edits; `--emit-spec` writes a stub listing every decision to make (sums with members,
+(`Sum1 = Expr`, `Sum2 = Pat`) re-resolves **65 signature slots** (37 `Expr` + 28 `Pat`) and
+**fully resolves 18 functions** out of the §2 review list, from two edits. The far bigger
+lever is the **threaded context types** — three unknowns (`Check`'s `ic` ≈ 112 sites,
+`Infer`'s store ≈ 101, `Beam`'s program IR ≈ 91) carry ~300 sites between them, each one
+decision — but those need a real design call (what Rian type is the inference context?).
+`--emit-spec` writes a stub listing every decision to make (sums with members,
 unknowns with site counts) as a checklist. A named sum's now-fully-resolved sigs graduate
 out of the §2 review list, and the placeholder index shows only the undecided remainder —
 so the report doubles as a porting *burndown*. The substitution is a rename of shared
