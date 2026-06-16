@@ -366,8 +366,8 @@ defmodule Rian.Transpile.Infer do
 
   Returns `%{sigs: %{{mod,fn,arity} => %{params, ret}}, unks: %{name => [sites]}}`.
   """
-  @spec whole_program(list(), term(), list()) :: term()
-  def whole_program(modules, stdlib, clusters \\ []) do
+  @spec whole_program(list(), term(), list(), map()) :: term()
+  def whole_program(modules, stdlib, clusters \\ [], specs \\ %{}) do
     s0 = store_new()
 
     # 1. allocate a shared sig var for every param + return slot.
