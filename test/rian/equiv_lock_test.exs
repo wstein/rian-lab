@@ -121,7 +121,8 @@ defmodule Rian.EquivLockTest do
         {"Bc2", "defmodule Bc2 do\n  def abs(x), do: if x < 0, do: -x, else: x\nend",
          "mod Bc2 do\n  pub def abs(x Int53) Int53 := if x < 0 do -x else x end\nend", :abs},
         {"Bc3", "defmodule Bc3 do\n  def st(n), do: if n <= 0, do: 0, else: n + st(n - 1)\nend",
-         "mod Bc3 do\n  pub def st(n Int53) Int53 := if n <= 0 do 0 else n + st(n - 1) end\nend", :st}
+         "mod Bc3 do\n  pub def st(n Int53) Int53 := if n <= 0 do 0 else n + st(n - 1) end\nend",
+         :st}
       ]
 
       for {name, ex, rian, fname} <- cases do

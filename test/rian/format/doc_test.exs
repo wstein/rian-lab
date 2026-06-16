@@ -17,7 +17,11 @@ defmodule Rian.Format.DocTest do
   end
 
   test "a hardline forces the enclosing group to break regardless of width" do
-    doc = group(concat([text("do"), nest(2, concat([hardline(), text("s")])), hardline(), text("end")]))
+    doc =
+      group(
+        concat([text("do"), nest(2, concat([hardline(), text("s")])), hardline(), text("end")])
+      )
+
     assert render(doc, 999) == "do\n  s\nend"
   end
 
@@ -27,7 +31,18 @@ defmodule Rian.Format.DocTest do
   end
 
   test "if_break picks the flat form when the group fits, broken form when it breaks" do
-    g = fn -> group(concat([text("["), nest(2, concat([softline(), text("1")])), if_break(text(","), empty()), softline(), text("]")])) end
+    g = fn ->
+      group(
+        concat([
+          text("["),
+          nest(2, concat([softline(), text("1")])),
+          if_break(text(","), empty()),
+          softline(),
+          text("]")
+        ])
+      )
+    end
+
     assert render(g.(), 80) == "[1]"
     assert render(g.(), 2) == "[\n  1,\n]"
   end

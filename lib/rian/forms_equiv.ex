@@ -124,9 +124,14 @@ defmodule Rian.FormsEquiv do
   @spec abstract_code(binary()) :: list()
   def abstract_code(beam) when is_binary(beam) do
     case :beam_lib.chunks(beam, [:abstract_code]) do
-      {:ok, {_mod, [{:abstract_code, {_vsn, ac}}]}} -> ac
-      {:ok, {_mod, [{:abstract_code, :no_abstract_code}]}} -> raise "beam has no abstract_code (compile with :debug_info)"
-      other -> raise "could not read abstract_code: #{inspect(other)}"
+      {:ok, {_mod, [{:abstract_code, {_vsn, ac}}]}} ->
+        ac
+
+      {:ok, {_mod, [{:abstract_code, :no_abstract_code}]}} ->
+        raise "beam has no abstract_code (compile with :debug_info)"
+
+      other ->
+        raise "could not read abstract_code: #{inspect(other)}"
     end
   end
 
@@ -210,7 +215,9 @@ defmodule Rian.FormsEquiv do
 
   defp walk_rename({:var, 0, name}, map) do
     case Map.fetch(map, name) do
-      {:ok, canon} -> {{:var, 0, canon}, map}
+      {:ok, canon} ->
+        {{:var, 0, canon}, map}
+
       :error ->
         canon = :"V#{map_size(map) + 1}"
         {{:var, 0, canon}, Map.put(map, name, canon)}

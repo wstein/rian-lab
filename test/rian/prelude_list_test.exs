@@ -24,7 +24,8 @@ defmodule Rian.PreludeListTest do
   test "reduce matches Enum.reduce order f(elem, acc)", %{mod: m} do
     assert m.reduce([1, 2, 3, 4], 0, fn x, acc -> x + acc end) == 10
     # subtraction exposes argument order: ((((0)-1)... ) reduces left-to-right
-    assert m.reduce([1, 2, 3], 0, fn x, acc -> acc - x end) == Enum.reduce([1, 2, 3], 0, fn x, acc -> acc - x end)
+    assert m.reduce([1, 2, 3], 0, fn x, acc -> acc - x end) ==
+             Enum.reduce([1, 2, 3], 0, fn x, acc -> acc - x end)
   end
 
   test "concat / flat_map / reverse", %{mod: m} do

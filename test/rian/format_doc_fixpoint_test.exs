@@ -66,7 +66,13 @@ defmodule Rian.FormatDocFixpointTest do
         b.text.("outer("),
         b.nest.(
           2,
-          b.concat.([b.soft.(), call(b, ["aa", "bb"]), b.text.(","), b.line.(), call(b, ["cc", "dd"])])
+          b.concat.([
+            b.soft.(),
+            call(b, ["aa", "bb"]),
+            b.text.(","),
+            b.line.(),
+            call(b, ["cc", "dd"])
+          ])
         ),
         b.soft.(),
         b.text.(")")

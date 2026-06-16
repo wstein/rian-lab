@@ -24,16 +24,17 @@ defmodule Rian.TranspileTest do
     end
 
     test "case with a ctor/struct pattern arm" do
-      out = rian("""
-      defmodule M do
-        def g(x) do
-          case x do
-            %Foo{a: y} -> y
-            _ -> 0
+      out =
+        rian("""
+        defmodule M do
+          def g(x) do
+            case x do
+              %Foo{a: y} -> y
+              _ -> 0
+            end
           end
         end
-      end
-      """)
+        """)
 
       assert out =~ "case x do"
       assert out =~ "Foo(a: y) -> y"
