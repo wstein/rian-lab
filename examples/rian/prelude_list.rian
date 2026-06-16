@@ -50,4 +50,63 @@ mod List do
   pub def length(val Vec(T)) Int53 forall T
   pub def length([]) := 0
   pub def length([_ | t]) := 1 + length(t)
+
+  # ─── higher-order combinators (ADR-0042 `Fn(…)`) ─────────────────────────
+  # The `Enum`-family workhorses, written as pure cons recursion over `Fn`-typed
+  # callbacks. Argument order matches Elixir's `Enum.*` (collection first, then
+  # callback), so a transpiled `Enum.map(xs, f)` maps to `List.map(xs, f)` verbatim.
+
+  # map — `f` over each element. `f(elem)`, like `Enum.map/2`.
+  pub def map(xs Vec(T), f Fn(T, U)) Vec(U) forall T, U
+  pub def map([], _) := []
+  pub def map([h | t], f) := [f(h) | map(t, f)]
+
+  # filter — keep elements where `f(elem)` holds; reject — keep where it does not.
+  pub def filter(xs Vec(T), f Fn(T, Bool)) Vec(T) forall T
+  pub def filter([], _) := []
+  pub def filter([h | t], f) := if f(h) do [h | filter(t, f)] else filter(t, f) end
+
+  pub def reject(xs Vec(T), f Fn(T, Bool)) Vec(T) forall T
+  pub def reject([], _) := []
+  pub def reject([h | t], f) := if f(h) do reject(t, f) else [h | reject(t, f)] end
+
+  # reduce — left fold with explicit seed; `f(elem, acc)`, like `Enum.reduce/3`.
+  pub def reduce(xs Vec(T), acc U, f Fn(T, U, U)) U forall T, U
+  pub def reduce([], acc, _) := acc
+  pub def reduce([h | t], acc, f) := reduce(t, f(h, acc), f)
+
+  # concat — append two lists; flat_map — map then concat (`Enum.flat_map/2`).
+  pub def concat(xs Vec(T), ys Vec(T)) Vec(T) forall T
+  pub def concat([], ys) := ys
+  pub def concat([h | t], ys) := [h | concat(t, ys)]
+
+  pub def flat_map(xs Vec(T), f Fn(T, Vec(U))) Vec(U) forall T, U
+  pub def flat_map([], _) := []
+  pub def flat_map([h | t], f) := concat(f(h), flat_map(t, f))
+
+  # reverse — in linear time via an accumulator.
+  pub def reverse(xs Vec(T)) Vec(T) forall T
+  pub def reverse(xs) := rev_onto(xs, [])
+  def rev_onto(xs Vec(T), acc Vec(T)) Vec(T) forall T
+  def rev_onto([], acc) := acc
+  def rev_onto([h | t], acc) := rev_onto(t, [h | acc])
+
+  # any_by / all_by — the predicate forms of `Enum.any?/2` and `Enum.all?/2`.
+  pub def any_by(xs Vec(T), f Fn(T, Bool)) Bool forall T
+  pub def any_by([], _) := false
+  pub def any_by([h | t], f) := if f(h) do true else any_by(t, f) end
+
+  pub def all_by(xs Vec(T), f Fn(T, Bool)) Bool forall T
+  pub def all_by([], _) := true
+  pub def all_by([h | t], f) := if f(h) do all_by(t, f) else false end
+
+  # join — concatenate string elements with a separator (`Enum.join/2`); map_join
+  # maps first (`Enum.map_join/3`). Uses the `<>` string operator.
+  pub def join(xs Vec(String), sep String) String
+  pub def join([], _) := ""
+  pub def join([x], _) := x
+  pub def join([h | t], sep) := h <> sep <> join(t, sep)
+
+  pub def map_join(xs Vec(T), sep String, f Fn(T, String)) String forall T
+  pub def map_join(xs, sep, f) := join(map(xs, f), sep)
 end

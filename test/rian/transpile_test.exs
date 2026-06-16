@@ -49,14 +49,9 @@ defmodule Rian.TranspileTest do
   end
 
   describe "honest quarantine — nothing untranslated masquerades as done" do
-    test "remote/stdlib calls become greppable TODO_PORT markers" do
-      out = rian("defmodule M do\n  def t(xs), do: Enum.map(xs, fn x -> x end)\nend")
-      assert out =~ "TODO_PORT(\"remote/stdlib call:"
-    end
-
-    test "an unmapped Elixir stdlib call (Enum.map) stays a marker" do
-      out = rian("defmodule M do\n  def t(xs), do: Enum.map(xs, fn x -> x end)\nend")
-      assert out =~ "TODO_PORT(\"remote/stdlib call: Enum.map"
+    test "an unmapped stdlib call (no Rian image) stays a greppable marker" do
+      out = rian("defmodule M do\n  def t(s), do: String.split(s, \",\")\nend")
+      assert out =~ "TODO_PORT(\"remote/stdlib call: String.split"
     end
   end
 
@@ -122,10 +117,14 @@ end|) =~ ~S|"v=${x}!"|
       assert rian("defmodule M do\n  def f(xs), do: Enum.sum(xs)\nend") =~ "List.sum(xs)"
     end
 
-    test "honesty: an unmapped call stays a marker, never a phantom List.map" do
-      out = rian("defmodule M do\n  def f(xs), do: Enum.map(xs, fn x -> x end)\nend")
-      assert out =~ ~s|TODO_PORT("remote/stdlib call: Enum.map|
-      refute out =~ "List.map"
+    test "Enum.map → List.map with its lambda eta-translated" do
+      out = rian("defmodule M do\n  def f(xs), do: Enum.map(xs, &(&1 + 1))\nend")
+      assert out =~ "List.map(xs, (p1) -> p1 + 1)"
+    end
+
+    test "honesty: a stdlib call with NO Rian image stays a marker, never faked" do
+      out = rian("defmodule M do\n  def f(s), do: MapSet.new(s)\nend")
+      assert out =~ ~s|TODO_PORT("remote/stdlib call: MapSet.new|
     end
 
     test "stats counts auto-mapped calls" do

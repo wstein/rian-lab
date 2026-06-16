@@ -61,6 +61,17 @@ defmodule Rian.Transpile do
     {"Enum", :count, 1} => {"List", "length"},
     {"Enum", :any?, 1} => {"List", "any"},
     {"Enum", :all?, 1} => {"List", "all"},
+    {"Enum", :map, 2} => {"List", "map"},
+    {"Enum", :filter, 2} => {"List", "filter"},
+    {"Enum", :reject, 2} => {"List", "reject"},
+    {"Enum", :reduce, 3} => {"List", "reduce"},
+    {"Enum", :flat_map, 2} => {"List", "flat_map"},
+    {"Enum", :concat, 2} => {"List", "concat"},
+    {"Enum", :reverse, 1} => {"List", "reverse"},
+    {"Enum", :any?, 2} => {"List", "any_by"},
+    {"Enum", :all?, 2} => {"List", "all_by"},
+    {"Enum", :join, 2} => {"List", "join"},
+    {"Enum", :map_join, 3} => {"List", "map_join"},
     {"Map", :get, 2} => {"Dict", "get"},
     {"Map", :get, 3} => {"Dict", "get_or"},
     {"Map", :put, 3} => {"Dict", "put"},
@@ -359,6 +370,36 @@ defmodule Rian.Transpile do
     "case #{expr(subj)} do\n#{rendered}\nend"
   end
 
+  # single-clause anonymous fn `fn a, b -> body end` → Rian lambda `(a, b) -> body`
+  # (ADR-0042). Multi-clause `fn` has no single-expression Rian image — flagged.
+  defp expr({:fn, _, [{:->, _, [args, body]}]}) do
+    params = Enum.map_join(args, ", ", &pat/1)
+    "(#{params}) -> #{render_body(body)}"
+  end
+
+  defp expr({:fn, _, _} = n), do: ~s|TODO_PORT("multi-clause fn #{escape(snippet(n))}")|
+
+  # function captures (ADR-0042) → eta-expanded Rian lambdas.
+  # `&name/arity` → `(p1,…) -> name(p1,…)`
+  defp expr({:&, _, [{:/, _, [{name, _, ctx}, arity]}]})
+       when is_atom(name) and is_atom(ctx) and is_integer(arity) do
+    ps = capture_params(arity)
+    "(#{Enum.join(ps, ", ")}) -> #{name}(#{Enum.join(ps, ", ")})"
+  end
+
+  # `&Mod.fun/arity` → `(p1,…) -> Mod.fun(p1,…)` (reusing the remote-call lowering)
+  defp expr({:&, _, [{:/, _, [{{:., _, [_, _]} = dot, _, []}, arity]}]}) when is_integer(arity) do
+    ps = capture_params(arity)
+    args = Enum.map(ps, &{String.to_atom(&1), [], nil})
+    "(#{Enum.join(ps, ", ")}) -> #{expr({dot, [], args})}"
+  end
+
+  # `&(… &1 … &2 …)` → eta-expand: bind `p1..pN`, substitute the placeholders.
+  defp expr({:&, _, [body]}) do
+    ps = capture_params(max_placeholder(body))
+    "(#{Enum.join(ps, ", ")}) -> #{expr(subst_ph(body, ps))}"
+  end
+
   # cons `[h | t]` and proper list literals.
   defp expr({:|, _, [h, t]}), do: "#{expr(h)} | #{expr(t)}"
 
@@ -406,6 +447,23 @@ defmodule Rian.Transpile do
   # as a sibling Rian module (its call has a direct Rian image).
   defp sibling_module?({:__aliases__, _, _}, m), do: m not in @elixir_stdlib
   defp sibling_module?(_, _), do: false
+
+  # ── capture (`&…`) eta-expansion ──────────────────────────────────────────
+  defp capture_params(n), do: Enum.map(1..n//1, &"p#{&1}")
+
+  # highest `&N` placeholder index in a capture body (0 if none).
+  defp max_placeholder({:&, _, [k]}) when is_integer(k), do: k
+  defp max_placeholder(t) when is_tuple(t), do: t |> Tuple.to_list() |> max_placeholder()
+  defp max_placeholder(l) when is_list(l), do: Enum.reduce(l, 0, &max(max_placeholder(&1), &2))
+  defp max_placeholder(_), do: 0
+
+  # substitute each `&N` placeholder with the var `pN`.
+  defp subst_ph({:&, _, [k]}, ps) when is_integer(k), do: {String.to_atom(Enum.at(ps, k - 1)), [], nil}
+  defp subst_ph(t, ps) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.map(&subst_ph(&1, ps)) |> List.to_tuple()
+
+  defp subst_ph(l, ps) when is_list(l), do: Enum.map(l, &subst_ph(&1, ps))
+  defp subst_ph(x, _), do: x
 
   # ── string interpolation segments ─────────────────────────────────────────
   # `{:ok, parts}` when every `<<>>` segment is a string literal or an interpolated
