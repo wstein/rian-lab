@@ -94,6 +94,38 @@ defmodule Rian.FormsEquivTest do
     end
   end
 
+  describe "verify/2 — per-function gate for the generate-and-verify loop" do
+    test "a faithful multi-function port reports all :equiv and verified?" do
+      {ex_bin, rian_bin} =
+        both(
+          "  def a(x), do: x + x\n  def b(x), do: -x",
+          "  pub def a(x Int53) Int53 := x + x\n  pub def b(x Int53) Int53 := -x"
+        )
+
+      assert FormsEquiv.verify(ex_bin, rian_bin) == [{{:a, 1}, :equiv}, {{:b, 1}, :equiv}]
+      assert FormsEquiv.verified?(ex_bin, rian_bin)
+    end
+
+    test "a wrong candidate is rejected (:diverges), not accepted" do
+      {ex_bin, rian_bin} =
+        both("  def a(x), do: x + x", "  pub def a(x Int53) Int53 := x * x")
+
+      assert FormsEquiv.verify(ex_bin, rian_bin) == [{{:a, 1}, :diverges}]
+      refute FormsEquiv.verified?(ex_bin, rian_bin)
+    end
+
+    test "a partial port marks the unported function :only_oracle" do
+      {ex_bin, rian_bin} =
+        both(
+          "  def a(x), do: x + x\n  def b(x), do: -x",
+          "  pub def a(x Int53) Int53 := x + x"
+        )
+
+      assert FormsEquiv.verify(ex_bin, rian_bin) == [{{:a, 1}, :equiv}, {{:b, 1}, :only_oracle}]
+      refute FormsEquiv.verified?(ex_bin, rian_bin)
+    end
+  end
+
   describe "normalization details" do
     test "drops Elixir-injected __info__/module_info and keeps only user funcs" do
       {ex, _ri} = both("  def only(x), do: x", "  pub def only(x Int53) Int53 := x")

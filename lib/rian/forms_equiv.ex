@@ -78,6 +78,41 @@ defmodule Rian.FormsEquiv do
     if mismatches == [], do: :equal, else: {:diff, mismatches}
   end
 
+  @doc """
+  Per-function verification ledger between an Elixir oracle and a candidate Rian
+  port — the accept/reject gate for the generate-and-verify porting loop. Returns
+  `[{{name, arity}, status}]` sorted by name/arity, where status is:
+
+    * `:equiv`       — normalized forms match (the port is faithful)
+    * `:diverges`    — both define it but the forms differ (reject the candidate)
+    * `:only_oracle` — Elixir has it, the Rian port doesn't yet (unported)
+    * `:only_port`   — the Rian port has it, the oracle doesn't (extra/renamed)
+
+  A port passes iff every entry is `:equiv` (see `verified?/2`).
+  """
+  def verify(oracle, port) do
+    na = Map.new(normalize(oracle), &{key(&1), &1})
+    nb = Map.new(normalize(port), &{key(&1), &1})
+
+    (Map.keys(na) ++ Map.keys(nb))
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.map(fn k ->
+      status =
+        cond do
+          not Map.has_key?(nb, k) -> :only_oracle
+          not Map.has_key?(na, k) -> :only_port
+          Map.fetch!(na, k) == Map.fetch!(nb, k) -> :equiv
+          true -> :diverges
+        end
+
+      {k, status}
+    end)
+  end
+
+  @doc "True iff every function in the oracle is matched `:equiv` by the port."
+  def verified?(oracle, port), do: Enum.all?(verify(oracle, port), &(elem(&1, 1) == :equiv))
+
   defp key({:function, _, name, arity, _}), do: {name, arity}
 
   @doc "Extract the Erlang abstract code from a `.beam` binary (raises if absent)."
