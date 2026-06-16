@@ -90,12 +90,13 @@ defmodule Rian.Lower do
     %{elixir: to_elixir(func, types, structs, build_struct_meta(structs))}
   end
 
-  @doc "Compile to the BEAM target only (for functions using BEAM-only constructs)."
-  def compile_beam(types, func, structs \\ [], ranges \\ []) do
-    env = build_env(types, structs, ranges)
-    :ok = check!(func, env)
-    %{elixir: to_elixir(func, types, structs, build_struct_meta(structs))}
-  end
+  @doc """
+  Compile to the BEAM target only (for functions using BEAM-only constructs).
+  The BEAM text view is exactly the Elixir one, so this delegates to
+  `compile_elixir/4` — a distinct entry point kept for call-site intent.
+  """
+  def compile_beam(types, func, structs \\ [], ranges \\ []),
+    do: compile_elixir(types, func, structs, ranges)
 
   @doc """
   Compile a whole `%Rian.IR.Mod{}` to both targets: a `defmodule` (BEAM) and a
@@ -1045,14 +1046,9 @@ defmodule Rian.Lower do
   # the payload of `Ok(_)`/`Err(_)` must be owned: a borrowed `&T` (a generic ok-type,
   # `def f() T | E := {:ok, x}`) is `.clone()`d like any owned-position value
   # (`rust_owned_elem`), and a `&str` for a `String` ok/err-type additionally `.to_string()`s.
-  defp ok_payload(v) do
-    s = rust_owned_elem(v)
-    if Process.get(:rian_rust_ok_string, false), do: "(#{s}).to_string()", else: s
-  end
-
-  defp err_payload(e) do
-    s = rust_owned_elem(e)
-    if Process.get(:rian_rust_err_string, false), do: "(#{s}).to_string()", else: s
+  defp result_payload(val, string_flag) do
+    s = rust_owned_elem(val)
+    if Process.get(string_flag, false), do: "(#{s}).to_string()", else: s
   end
 
   defp impl_param({name, sig_p}, rust_type) do
@@ -2016,8 +2012,11 @@ defmodule Rian.Lower do
   # tuple literal — a BEAM tuple / a Rust tuple. The `{:ok, v}` / `{:error, e}`
   # shapes are the canonical Result surface (ADR-0040): they keep their tagged
   # tuple on the BEAM but lower to Rust `Ok(…)` / `Err(…)`.
-  defp emit(%ETuple{elems: [%EAtom{name: "ok"}, v]}, :rust), do: {"Ok(#{ok_payload(v)})", 12}
-  defp emit(%ETuple{elems: [%EAtom{name: "error"}, e]}, :rust), do: {"Err(#{err_payload(e)})", 12}
+  defp emit(%ETuple{elems: [%EAtom{name: "ok"}, v]}, :rust),
+    do: {"Ok(#{result_payload(v, :rian_rust_ok_string)})", 12}
+
+  defp emit(%ETuple{elems: [%EAtom{name: "error"}, e]}, :rust),
+    do: {"Err(#{result_payload(e, :rian_rust_err_string)})", 12}
   defp emit(%ETuple{elems: es}, :rust), do: {"(#{Enum.map_join(es, ", ", &p(&1, 0, :rust))})", 12}
 
   defp emit(%ETuple{elems: es}, :elixir),
