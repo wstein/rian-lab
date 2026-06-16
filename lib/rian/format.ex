@@ -141,7 +141,7 @@ defmodule Rian.Format do
 
   # A `def`/`macro` head opens a block body iff it carries no `:=` one-liner and
   # the next code line is not a declaration boundary (mirrors `Rian.Decl`'s
-  # `take_head`/`decl_boundary?`). `do`-bearing heads are caught by `tok_delta`.
+  # `take_head`/`decl_boundary?`). `do`-bearing heads are caught by `apply_tok`.
   defp block_head?([{:kw, "pub"} | rest], next), do: block_head?(rest, next)
 
   defp block_head?([{:kw, k} | _] = row, rest) when k in ~w(def macro) do
@@ -155,6 +155,7 @@ defmodule Rian.Format do
 
   # the next row carrying real code, skipping blank and comment-only rows
   defp next_code_row([]), do: nil
+
   defp next_code_row([row | rest]) do
     if blank?(row) or comment_only?(row), do: next_code_row(rest), else: row
   end
@@ -167,7 +168,8 @@ defmodule Rian.Format do
   defp boundary?([{:annot, _} | _]), do: true
 
   defp boundary?([{:kw, k} | _]),
-    do: k in ~w(type def struct alias mod pub const macro use import protocol impl opaque abstract)
+    do:
+      k in ~w(type def struct alias mod pub const macro use import protocol impl opaque abstract)
 
   defp boundary?(_), do: false
 

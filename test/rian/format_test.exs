@@ -22,6 +22,7 @@ defmodule Rian.FormatTest do
 
     test "member access dot has no surrounding space" do
       assert Format.format("def f() := Enum.map(xs, g)\n") == "def f() := Enum.map(xs, g)\n"
+
       assert Format.format("def f() := :lists.foldl(g, 0, xs)\n") ==
                "def f() := :lists.foldl(g, 0, xs)\n"
     end
@@ -44,6 +45,7 @@ defmodule Rian.FormatTest do
   describe "indentation" do
     test "do/end blocks indent two spaces per level" do
       src = "def sign(n)\nif n >= 0 do\n1\nelse\n-1\nend\nend\n"
+
       assert Format.format(src) == """
              def sign(n)
                if n >= 0 do
