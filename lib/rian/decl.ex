@@ -95,9 +95,6 @@ defmodule Rian.Decl do
   # ── Public API ─────────────────────────────────────────────────────────
   @doc "Parse source into `%{types: [...], structs: [...], funcs: [...], mods: [...]}` (pipeline IR)."
   def parse(src) do
-    # cleared per parse; `Rian.Interp` sets it when a `${float}` hole desugars to a
-    # `Show.float` call, so `inject_stdlib/1` knows to supply the `Show` module.
-    Process.delete(:rian_needs_show_float)
     decls = src |> Lexer.tokenize() |> split_decls()
     aliases = collect_aliases(decls)
     prog = assemble(decls, aliases)
@@ -158,14 +155,29 @@ defmodule Rian.Decl do
   # already defines one. Conditional — injected ONLY when used, so a non-float
   # program is untouched (and never inherits `Show`'s list helpers, which the JVM
   # emitter cannot yet lower).
+  #
+  # The need is read straight off the rewritten program — `Rian.Interp` emits a
+  # `Show.float` call iff a `Float64` hole was interpolated — rather than from a
+  # process-dict flag set during desugar, so the interpolation pass stays pure.
   defp inject_stdlib(prog) do
-    if Process.get(:rian_needs_show_float, false) and
-         not Enum.any?(prog.mods, &(&1.name == "Show")) do
+    if needs_show_float?(prog) and not Enum.any?(prog.mods, &(&1.name == "Show")) do
       %{prog | mods: [show_module() | prog.mods]}
     else
       prog
     end
   end
+
+  # does any clause body call `Show.float`? (the interpolation desugar's signal that
+  # the `Show` stdlib is needed — see `Rian.Interp`'s `Float64` case.)
+  defp needs_show_float?(prog) do
+    (prog.funcs ++ Enum.flat_map(prog.mods, & &1.funcs))
+    |> Enum.any?(fn f -> Enum.any?(f.clauses, &calls_show_float?(&1.body)) end)
+  end
+
+  defp calls_show_float?({:call, {:dot, {:id, "Show"}, "float"}, _args}), do: true
+  defp calls_show_float?(t) when is_tuple(t), do: t |> Tuple.to_list() |> calls_show_float?()
+  defp calls_show_float?(list) when is_list(list), do: Enum.any?(list, &calls_show_float?/1)
+  defp calls_show_float?(_), do: false
 
   # the canonical `Show` source, embedded at compile time (single source of truth
   # with the documented/tested `examples/rian/stdlib_show.rian`); parsed once.

@@ -90,9 +90,10 @@ defmodule Rian.Interp do
 
       type == "Float64" ->
         # the canonical portable ECMAScript formatter (`Show.float`, ADR-0069 §6).
-        # The flag asks `Rian.Decl.parse` to inject the `Show` stdlib module so the
-        # call resolves without the program importing it (prelude-function injection).
-        Process.put(:rian_needs_show_float, true)
+        # Emitting this call is the *only* signal that the program needs the `Show`
+        # stdlib module — `Rian.Decl.inject_stdlib/1` supplies it by inspecting the
+        # rewritten program for this call, so this pass stays a pure function (no
+        # process-dict side-channel). Cf. the self-hosted `compiler/interp.rian`.
         {:call, {:dot, {:id, "Show"}, "float"}, [expr]}
 
       type == "Float32" ->
