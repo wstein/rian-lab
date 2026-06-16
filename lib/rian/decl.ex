@@ -149,6 +149,10 @@ defmodule Rian.Decl do
     |> Map.put(:protocols, protocols)
     |> Map.put(:impl_decls, impl_decls)
     |> inject_stdlib()
+    # infer-local (ADR-0034): fill undeclared private-function return types so the
+    # rest of the pipeline sees fully-typed functions. A no-op unless a private
+    # function omitted its return.
+    |> Rian.InferLocal.fill_returns()
   end
 
   # Prelude-function injection (ADR-0047 / ADR-0069 §6): a program that interpolates
@@ -1334,8 +1338,16 @@ defmodule Rian.Decl do
     end
   end
 
-  defp req_ret(%{ret: nil, name: n}), do: raise(Error, "function `#{n}` needs a return type")
-  defp req_ret(%{ret: ret}), do: ret
+  # declare-public / infer-local (ADR-0034): a `pub` function MUST declare its return
+  # type (the explicit boundary); a private function MAY omit it (`ret: nil`) — it is
+  # filled by `Rian.InferLocal` after parsing.
+  defp req_ret(%{ret: ret}) when not is_nil(ret), do: ret
+
+  defp req_ret(%{ret: nil} = d) do
+    if d[:pub] == true,
+      do: raise(Error, "public function `#{d[:name]}` needs a return type"),
+      else: nil
+  end
 
   # ── string helpers ─────────────────────────────────────────────────────
   defp nz(s), do: if(String.trim(s) == "", do: nil, else: String.trim(s))

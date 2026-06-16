@@ -1034,10 +1034,15 @@ defmodule Rian.DeclTest do
       end
     end
 
-    test "a function with a body but no return type is rejected" do
-      assert_raise Decl.Error, ~r/function `f` needs a return type/, fn ->
-        Decl.parse("def f(n Int64) := n")
+    test "a PUBLIC function with no return type is rejected (declare-public, ADR-0034)" do
+      assert_raise Decl.Error, ~r/public function `f` needs a return type/, fn ->
+        Decl.parse("pub def f(n Int64) := n")
       end
+    end
+
+    test "a PRIVATE function may omit its return type — it is inferred (infer-local)" do
+      prog = Decl.parse("def f(n Int64) := n")
+      assert %{ret: "Int64"} = Enum.find(prog.funcs, &(&1.name == "f"))
     end
   end
 

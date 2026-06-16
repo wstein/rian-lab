@@ -56,9 +56,10 @@ defmodule Rian.InferLocalTest do
     assert ret_of(out, "f") == nil
   end
 
-  test "an un-inferable return (self-recursion) is left nil, not guessed" do
-    out = infer("mod M do\n  def loop(n Int53) Int53 := loop(n)\nend", ["loop"])
-    assert ret_of(out, "loop") == nil
+  test "an un-inferable return (self-recursion) raises 'annotate it', not a guess" do
+    assert_raise Rian.Decl.Error, ~r/cannot infer the return type of private `loop`/, fn ->
+      infer("mod M do\n  def loop(n Int53) Int53 := loop(n)\nend", ["loop"])
+    end
   end
 
   test "an already-declared private return is left exactly as written" do

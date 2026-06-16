@@ -19,9 +19,37 @@ defmodule Rian.InferLocal do
 
   alias Rian.{Check, IR}
 
-  @doc "Fill undeclared private-function return types by local inference (ADR-0034)."
+  @doc """
+  Fill undeclared private-function return types by local inference (ADR-0034). A
+  no-op (no inference context built) unless some private function omitted its return.
+  A return that cannot be inferred — self-recursion, an `@external` with no body, a
+  body touching something unmodelled — raises a clear "annotate it" error rather than
+  letting a `nil` return reach the checker.
+  """
   @spec fill_returns(map()) :: map()
-  def fill_returns(prog) when is_map(prog), do: fixpoint(prog)
+  def fill_returns(prog) when is_map(prog) do
+    if Enum.any?(all_funcs(prog), &untyped_ret?/1) do
+      prog = fixpoint(prog)
+
+      case Enum.filter(all_funcs(prog), &untyped_ret?/1) do
+        [] ->
+          prog
+
+        [%IR.Func{name: n} | _] ->
+          raise Rian.Decl.Error,
+                "cannot infer the return type of private `#{n}` — annotate it " <>
+                  "(`def #{n}(…) <Type> := …`)"
+      end
+    else
+      prog
+    end
+  end
+
+  defp all_funcs(prog),
+    do: Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
+
+  defp untyped_ret?(%IR.Func{pub?: false, ret: nil}), do: true
+  defp untyped_ret?(_), do: false
 
   # rebuild the inference context each round so a return filled this pass is visible
   # to its callers next pass; stop when a pass fills nothing new (bounded by the
