@@ -28,8 +28,11 @@ defmodule Rian.SelfHostStatusTest do
     pct = SelfHost.percent()
     assert pct in 0..100
 
-    # the headline number must appear in the rendered doc (not a hardcoded string)
-    assert SelfHost.status_markdown() =~ "#{pct}% self-hosted"
+    # the headline number must appear in the rendered doc (not a hardcoded string) — and
+    # it is now labelled honestly as PER-STAGE EQUIVALENCE, not bare "self-hosted" (the
+    # single number conflated per-stage isolation with the bootstrap loop; the doc reports
+    # both axes separately).
+    assert SelfHost.status_markdown() =~ "#{pct}% per-stage equivalence"
 
     # honesty floor: not every stage is fully self-hosted, so we are not at 100%.
     # (Every stage is now at least :partial, so :not_started may legitimately be 0;

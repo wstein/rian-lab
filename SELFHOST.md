@@ -358,11 +358,16 @@ over time. The proof is a four-stage ladder:
   **Remaining (documented tails, not whole forms):** string/char clause patterns,
   sum/struct dispatch guards + multi-method coherence, embedded-`Self` substitution,
   and the portable `Enum`/`Map`/`String` stdlib breadth (ADR-0047).
-- **Stage 3 — bootstrap fixed point** (future; **determinism prerequisite verified**):
-  the whole compiler in Rian; compile its source with the Elixir host → v1, compile
-  with v1 → v2, assert **v1 == v2** (bit-identical `.beam`). The canonical terminus.
-  Its precondition already holds — `Rian.Beam` emits **byte-identical** bytecode on
-  recompilation (the optimizer/parser/module sources round-trip identically).
+- **Stage 3 — bootstrap fixed point** (**CLOSED, forms-level**): the four BEAM compiler
+  sources in Rian; the Elixir host compiles them → gen0, gen0 compiles the same sources →
+  gen1, gen1 recompiles them → gen2, assert **gen1 == gen2** (identical canonical forms
+  AND bit-identical `.beam` under `:deterministic`). The honest claim is **self-COMPILING
+  (BEAM, forms-level)**, *not* bare "self-hosting": the loop is not yet self-CHECKING
+  (`Rian.Check`'s error sets are not in `build` — only the structural exhaustiveness +
+  capability gates are), it is BEAM-only (the portable Rust/JS terminus is unstarted), and
+  it compiles the compiler's own *subset* of Rian, not arbitrary Rian. Three real gaps,
+  none hidden. See [`test/rian/selfhost_v1_v2_fixpoint_test.exs`](test/rian/selfhost_v1_v2_fixpoint_test.exs).
+  The canonical BEAM terminus; the portable one is further still.
 
 **Next:** the *full* Stage 2 — port `Rian.Decl`'s declaration parsing in Rian
 (producing the Core IR, diffed against `Rian.Decl.parse`) and the stdlib breadth the
