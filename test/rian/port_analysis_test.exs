@@ -98,4 +98,24 @@ defmodule Rian.PortAnalysisTest do
       assert out =~ ~r/`Unk0001` \| [2-9] \|/
     end
   end
+
+  describe "struct vocabulary resolves dispatch (Lever B)" do
+    test "a case-dispatch scrutinee resolves to the proposed sum, not an Unk" do
+      src = """
+      defmodule M do
+        def ev(x) do
+          case x do
+            %ENum{} -> 1
+            %ECall{} -> 2
+          end
+        end
+      end
+      """
+
+      out = md([{"m.ex", src}])
+      # ev's param `x` is the dispatch sum (Sum1), recovered from the case arms
+      assert out =~ ~r/ev\(x Sum1\)/
+      refute out =~ ~r/ev\(x Unk/
+    end
+  end
 end

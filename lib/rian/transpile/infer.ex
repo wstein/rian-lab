@@ -128,7 +128,7 @@ defmodule Rian.Transpile.Infer do
     # build the store; keep each clause's body + bound env for Result analysis.
     {store, clause_envs} =
       Enum.reduce(clauses, {s2, []}, fn clause, {s, envs} ->
-        {env, s} = bind_params(clause.args, pvars, s)
+        {env, s} = bind_params(clause.args, pvars, ctx, s)
         {bt, s} = gen(clause.body, env, ctx, s)
         {s, _} = unify(s, rvar, bt)
         {s, envs ++ [{clause.body, env}]}
@@ -345,10 +345,10 @@ defmodule Rian.Transpile.Infer do
   end
 
   # bind each clause's parameter pattern against the shared param var
-  defp bind_params(args, pvars, store) do
+  defp bind_params(args, pvars, ctx, store) do
     Enum.zip(args, pvars)
     |> Enum.reduce({%{}, store}, fn {pat, pv}, {env, s} ->
-      gen_pat(pat, pv, env, s)
+      gen_pat(pat, pv, env, ctx, s)
     end)
   end
 
@@ -401,7 +401,7 @@ defmodule Rian.Transpile.Infer do
           s =
             Enum.reduce(g.clauses, s, fn clause, s ->
               s = resolve_struct_params(clause.args, pvars, cm, s)
-              {env, s} = bind_params(clause.args, pvars, s)
+              {env, s} = bind_params(clause.args, pvars, cm, s)
               {bt, s} = gen(clause.body, env, cm, s)
               {s, _} = unify(s, rvar, bt)
               s
@@ -610,7 +610,7 @@ defmodule Rian.Transpile.Infer do
     s =
       Enum.reduce(arms, s, fn arm, s ->
         {pat, body} = case_arm(arm)
-        {env2, s} = gen_pat(pat, st, env, s)
+        {env2, s} = gen_pat(pat, st, env, ctx, s)
         {bt, s} = gen(body, env2, ctx, s)
         {s, _} = unify(s, r, bt)
         s
@@ -643,7 +643,7 @@ defmodule Rian.Transpile.Infer do
 
     {env2, s} =
       Enum.zip(args, avars)
-      |> Enum.reduce({env, s}, fn {a, av}, {e, s} -> gen_pat(a, av, e, s) end)
+      |> Enum.reduce({env, s}, fn {a, av}, {e, s} -> gen_pat(a, av, e, ctx, s) end)
 
     {bt, s} = gen(body, env2, ctx, s)
     {app("Fn", avars ++ [bt]), s}
@@ -682,15 +682,17 @@ defmodule Rian.Transpile.Infer do
     {app("Fn", pvars ++ [bt]), s}
   end
 
-  # struct construction `%Mod{…}` — ANALYSIS-only (gated on ctx.clusters): resolve
-  # to the struct's proposed sum so its type SHARES a name everywhere. The
-  # transpiler path (no clusters) leaves it free — emitting a struct type would be
-  # an accidental fill (the `type` decl isn't synthesized). Must precede the
-  # local-call clause (`{:%, _, [a, b]}` otherwise looks like a call to `:%`).
+  # struct construction `%Mod{…}` — the value IS that struct's type (Lever B): its
+  # proposed SUM in the whole-program path (`ctx.clusters`, shared name everywhere), else
+  # the struct's own declared name — sound now that the transpiler emits a `struct Mod(…)`
+  # decl for every `defstruct`/nested struct module. Must precede the local-call clause
+  # (`{:%, _, [a, b]}` otherwise looks like a call to `:%`).
   defp gen({:%, _, [{:__aliases__, _, parts}, {:%{}, _, _}]}, _env, ctx, s) do
+    name = parts |> List.last() |> to_string()
+
     case Map.get(ctx, :clusters) do
-      nil -> fresh(s)
-      clusters -> {con(cluster_name(clusters, List.last(parts) |> to_string())), s}
+      nil -> {con(name), s}
+      clusters -> {con(cluster_name(clusters, name)), s}
     end
   end
 
@@ -765,7 +767,7 @@ defmodule Rian.Transpile.Infer do
 
   defp gen_block([{:=, _, [lhs, rhs]} | rest], env, ctx, s) do
     {rt, s} = gen(rhs, env, ctx, s)
-    {env2, s} = gen_pat(lhs, rt, env, s)
+    {env2, s} = gen_pat(lhs, rt, env, ctx, s)
     gen_block(rest, env2, ctx, s)
   end
 
@@ -857,7 +859,35 @@ defmodule Rian.Transpile.Infer do
 
   # ── patterns → constraints + bindings ─────────────────────────────────────
 
-  defp gen_pat({name, _, c}, pv, env, s) when is_atom(name) and is_atom(c) do
+  # struct pattern `%Mod{…}` — the matched value IS that struct's type, so constrain
+  # the param/scrutinee to it (Lever B): its proposed SUM in the whole-program path
+  # (`ctx.clusters`, so a `case x do %ENum{} -> _ ; %ECall{} -> _ end` pins `x` to the
+  # one shared sum), else the struct's own declared name. Field sub-patterns recurse.
+  # Must precede the var clause (`%Mod{}` is `{:%, _, […]}`, not `{name, _, ctx}`).
+  defp gen_pat({:%, _, [{:__aliases__, _, parts}, {:%{}, _, fields}]}, pv, env, ctx, s) do
+    name = parts |> List.last() |> to_string()
+
+    t =
+      case Map.get(ctx, :clusters) do
+        nil -> con(name)
+        clusters -> con(cluster_name(clusters, name))
+      end
+
+    s = elem(unify(s, pv, t), 0)
+
+    # bind field sub-patterns (`%ENum{text: t}` binds `t`) — fresh vars (field types
+    # aren't modelled), so nested names are at least in scope.
+    Enum.reduce(fields, {env, s}, fn
+      {_k, sub}, {env, s} ->
+        {fv, s} = fresh(s)
+        gen_pat(sub, fv, env, ctx, s)
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp gen_pat({name, _, c}, pv, env, _ctx, s) when is_atom(name) and is_atom(c) do
     sname = to_string(name)
 
     if sname == "_" or String.starts_with?(sname, "_"),
@@ -865,19 +895,22 @@ defmodule Rian.Transpile.Infer do
       else: {Map.put(env, sname, pv), s}
   end
 
-  defp gen_pat(n, pv, env, s) when is_integer(n) do
+  defp gen_pat(n, pv, env, _ctx, s) when is_integer(n) do
     {s, _} = mark_num(s, pv)
     {env, s}
   end
 
-  defp gen_pat(x, pv, env, s) when is_float(x), do: {env, elem(unify(s, pv, con("Float64")), 0)}
-  defp gen_pat(b, pv, env, s) when is_binary(b), do: {env, elem(unify(s, pv, con("String")), 0)}
+  defp gen_pat(x, pv, env, _ctx, s) when is_float(x),
+    do: {env, elem(unify(s, pv, con("Float64")), 0)}
 
-  defp gen_pat(bool, pv, env, s) when is_boolean(bool),
+  defp gen_pat(b, pv, env, _ctx, s) when is_binary(b),
+    do: {env, elem(unify(s, pv, con("String")), 0)}
+
+  defp gen_pat(bool, pv, env, _ctx, s) when is_boolean(bool),
     do: {env, elem(unify(s, pv, con("Bool")), 0)}
 
   # `[]` and `[h | t]` constrain the param to a Vec
-  defp gen_pat([], pv, env, s) do
+  defp gen_pat([], pv, env, _ctx, s) do
     {ev, s} = fresh(s)
     {s, _} = unify(s, pv, app("Vec", [ev]))
     {env, s}
@@ -885,23 +918,23 @@ defmodule Rian.Transpile.Infer do
 
   # `[h | t]` parses as a 1-element list holding a `{:|, …}` cons cell — must
   # precede the proper-list clause so the cons isn't treated as an element.
-  defp gen_pat([{:|, _, [h, t]}], pv, env, s), do: gen_pat_cons(h, t, pv, env, s)
-  defp gen_pat({:|, _, [h, t]}, pv, env, s), do: gen_pat_cons(h, t, pv, env, s)
+  defp gen_pat([{:|, _, [h, t]}], pv, env, ctx, s), do: gen_pat_cons(h, t, pv, env, ctx, s)
+  defp gen_pat({:|, _, [h, t]}, pv, env, ctx, s), do: gen_pat_cons(h, t, pv, env, ctx, s)
 
-  defp gen_pat(list, pv, env, s) when is_list(list) do
+  defp gen_pat(list, pv, env, ctx, s) when is_list(list) do
     {ev, s} = fresh(s)
     {s, _} = unify(s, pv, app("Vec", [ev]))
-    Enum.reduce(list, {env, s}, fn el, {env, s} -> gen_pat(el, ev, env, s) end)
+    Enum.reduce(list, {env, s}, fn el, {env, s} -> gen_pat(el, ev, env, ctx, s) end)
   end
 
-  # anything else (tuples, ctor/struct patterns) — no constraint in the MVP
-  defp gen_pat(_other, _pv, env, s), do: {env, s}
+  # anything else (tuples, ctor patterns) — no constraint in the MVP
+  defp gen_pat(_other, _pv, env, _ctx, s), do: {env, s}
 
-  defp gen_pat_cons(h, t, pv, env, s) do
+  defp gen_pat_cons(h, t, pv, env, ctx, s) do
     {ev, s} = fresh(s)
     {s, _} = unify(s, pv, app("Vec", [ev]))
-    {env, s} = gen_pat(h, ev, env, s)
-    gen_pat(t, pv, env, s)
+    {env, s} = gen_pat(h, ev, env, ctx, s)
+    gen_pat(t, pv, env, ctx, s)
   end
 
   # ── union-find store over terms ───────────────────────────────────────────

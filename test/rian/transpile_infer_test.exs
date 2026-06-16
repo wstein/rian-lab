@@ -352,6 +352,26 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "struct vocabulary in inference — Lever B" do
+    test "struct construction types the return to the struct" do
+      assert sig("  def mk(n), do: %ENum{text: n}", "mk") =~ ~r/\) ENum :=/
+    end
+
+    test "a single-struct case-arm pattern types the scrutinee" do
+      out =
+        sig(
+          "  def t(x) do\n    case x do\n      %ENum{text: v} -> v\n      _ -> 0\n    end\n  end",
+          "t"
+        )
+
+      assert out =~ "def t(x ENum)"
+    end
+
+    test "a struct clause-head pattern types the parameter" do
+      assert sig("  def text(%ENum{text: t}), do: t", "text") =~ "def text(ENum)"
+    end
+  end
+
   defp safe_compile(src) do
     Rian.Decl.compile(src)
     {:ok, :compiled}
