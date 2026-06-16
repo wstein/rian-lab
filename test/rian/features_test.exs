@@ -230,7 +230,7 @@ defmodule Rian.FeaturesTest do
           # the pub enum + pub fn means external code can name `Token` and call it
           File.write!(
             src,
-            "#![allow(dead_code)]\n#{rust}\nfn main() { let ts: Vec<selfhost_lexer::Token> = selfhost_lexer::tokenize(\"12 + 3 * 4\"); println!(\"{}\", ts.len()); }"
+            "#![allow(dead_code)]\n#{rust}\nfn main() { let ts: Vec<lexer::Token> = lexer::tokenize(\"12 + 3 * 4\"); println!(\"{}\", ts.len()); }"
           )
 
           {_, 0} = System.cmd(rustc, ["--edition", "2021", src, "-o", bin])
