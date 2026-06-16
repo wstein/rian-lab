@@ -31,6 +31,8 @@ defmodule Rian.Exhaustiveness do
   a bare `Int64`/`Char`/`String` still requires a `_` arm.
   """
 
+  alias Rian.{Core, PatternLower, Pratt, Prelude}
+
   # ── Environment helpers ────────────────────────────────────────────────
 
   @doc "Base env with built-in bool, list, and the infinite primitive types."
@@ -246,4 +248,70 @@ defmodule Rian.Exhaustiveness do
   defp pascal(c) when is_atom(c) do
     c |> Atom.to_string() |> String.split("_") |> Enum.map_join(&String.capitalize/1)
   end
+
+  # ── `case`-expression exhaustiveness (the body gate) ─────────────────────
+  # The clause-head gate (`Rian.Lower.check!`) only sees a function's argument
+  # patterns; a non-exhaustive `case` INSIDE a body slips through and crashes at
+  # runtime with `case_clause`. These walk a program's bodies and run the SAME
+  # usefulness analysis on every `case` arm matrix, refusing to emit on a gap.
+
+  @doc "The signature env for a whole program (types + ranges + structs)."
+  def program_env(types, structs, ranges) do
+    env =
+      Enum.reduce(Prelude.with_prelude(types), base_env(), fn t, env ->
+        variants =
+          Enum.map(t.variants, fn v -> {PatternLower.to_snake(v.ctor), length(v.fields)} end)
+
+        add_type(env, PatternLower.to_snake(t.name), variants)
+      end)
+
+    env = Enum.reduce(ranges, env, fn r, env -> add_range(env, r.name, r.lo, r.hi) end)
+
+    Enum.reduce(structs, env, fn s, env ->
+      PatternLower.add_struct(env, s.name, Enum.map(s.fields, &PatternLower.to_snake(&1.label)))
+    end)
+  end
+
+  @doc "Refuse to emit any function whose body holds a non-exhaustive `case`."
+  def check_case_bodies!(funcs, env) do
+    for func <- funcs, not Map.get(func, :synthetic, false), clause <- func.clauses do
+      clause.body |> body_core() |> check_match!(env, func.name)
+    end
+
+    :ok
+  end
+
+  defp body_core(body) when is_binary(body), do: Core.from_expr(Pratt.parse_body(body))
+  defp body_core(ast), do: Core.from_expr(ast)
+
+  @doc "Check every `case` reachable in a Core expression; raise on the first gap."
+  def check_match!(core, env, where) do
+    core |> collect_cases([]) |> Enum.each(&check_one_case!(&1, env, where))
+  end
+
+  defp check_one_case!(%Core.ECase{arms: arms}, env, where) do
+    rows =
+      Enum.map(arms, fn {pat, guard, _body} ->
+        PatternLower.lower_clause(%{pats: [pat], guard: guard != nil}, env)
+      end)
+
+    r = analyze(rows, 1, env)
+
+    unless r.exhaustive? do
+      raise "non-exhaustive `case` in `#{where}`: pattern `#{render(r.missing)}` not covered"
+    end
+  end
+
+  # generic Core walk — collect every `ECase` node (recursing into arm bodies too).
+  defp collect_cases(%Core.ECase{} = n, acc), do: collect_children(n, [n | acc])
+  defp collect_cases(node, acc) when is_struct(node), do: collect_children(node, acc)
+  defp collect_cases(list, acc) when is_list(list), do: Enum.reduce(list, acc, &collect_cases/2)
+
+  defp collect_cases(tuple, acc) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.reduce(acc, &collect_cases/2)
+
+  defp collect_cases(_, acc), do: acc
+
+  defp collect_children(struct, acc),
+    do: struct |> Map.from_struct() |> Map.values() |> Enum.reduce(acc, &collect_cases/2)
 end

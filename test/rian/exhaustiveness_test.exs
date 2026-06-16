@@ -195,4 +195,52 @@ defmodule Rian.ExhaustivenessTest do
       assert E.render(r.missing) == "{None, _}"
     end
   end
+
+  # The clause-head gate never saw `case` arms inside a body; a non-exhaustive
+  # `case` slipped through and crashed at runtime with `case_clause`. The body gate
+  # (`check_case_bodies!`, wired into `Rian.Lower.check!`) closes that — `case` arms
+  # run through the SAME usefulness analysis as clause heads.
+  describe "case-expression exhaustiveness (the body gate, via Rian.Decl.compile)" do
+    defp compile_ok?(src) do
+      Rian.Decl.compile(src)
+      :ok
+    rescue
+      e in RuntimeError -> {:refused, Exception.message(e)}
+    end
+
+    test "a non-exhaustive `case` over a sum type is REFUSED" do
+      assert {:refused, msg} =
+               compile_ok?("type C := A | B\npub def f(c C) Int53 := case c do\n  A -> 1\nend")
+
+      assert msg =~ "non-exhaustive `case` in `f`"
+      assert msg =~ "`B`"
+    end
+
+    test "an exhaustive `case` (all variants, or a `_`) compiles" do
+      assert :ok =
+               compile_ok?(
+                 "type C := A | B\npub def f(c C) Int53 := case c do\n  A -> 1\n  B -> 2\nend"
+               )
+
+      assert :ok =
+               compile_ok?(
+                 "type C := A | B\npub def f(c C) Int53 := case c do\n  A -> 1\n  _ -> 0\nend"
+               )
+    end
+
+    test "a NESTED non-exhaustive `case` (in an arm body) is caught too" do
+      src =
+        "type C := A | B\npub def f(x C, c C) Int53 := case x do\n  A -> case c do\n    A -> 1\n  end\n  B -> 2\nend"
+
+      assert {:refused, msg} = compile_ok?(src)
+      assert msg =~ "non-exhaustive `case`"
+    end
+
+    test "a non-exhaustive `case` over literals (no `_`) is REFUSED" do
+      assert {:refused, msg} =
+               compile_ok?("pub def f(n Int53) Int53 := case n do\n  0 -> 0\n  1 -> 1\nend")
+
+      assert msg =~ "non-exhaustive `case`"
+    end
+  end
 end

@@ -281,7 +281,8 @@ defmodule Rian.Lower do
         raise "unreachable clauses in `#{func.name}`: #{inspect(r.unreachable)}"
 
       true ->
-        :ok
+        # clause HEADS are total — now gate every `case` reachable in the body too.
+        E.check_case_bodies!([func], env)
     end
   end
 
