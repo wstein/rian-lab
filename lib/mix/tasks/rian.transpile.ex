@@ -40,8 +40,11 @@ defmodule Mix.Tasks.Rian.Transpile do
 
     path =
       case argv do
-        [p | _] -> p
-        [] -> Mix.raise("usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report]")
+        [p | _] ->
+          p
+
+        [] ->
+          Mix.raise("usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report]")
       end
 
     # --infer-report implies --infer
@@ -73,7 +76,8 @@ defmodule Mix.Tasks.Rian.Transpile do
     IO.puts(
       :stderr,
       "TODO summary: #{stats.defs} def group(s), #{stats.ports} marker(s) to resolve by hand, " <>
-        "#{stats.mapped} stdlib call(s) auto-mapped (verify semantics)" <> infer_suffix(src, stats, o)
+        "#{stats.mapped} stdlib call(s) auto-mapped (verify semantics)" <>
+        infer_suffix(src, stats, o)
     )
 
     if o.report, do: print_infer_report(src)

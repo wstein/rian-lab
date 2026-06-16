@@ -25,7 +25,8 @@ defmodule Rian.PortAnalysis do
       for {file, src} <- sources, ast = parse(src), ast != nil, do: {file, ast}
 
     %{
-      modules: Enum.map(asts, fn {file, ast} -> module_report(file, ast, src_of(sources, file)) end),
+      modules:
+        Enum.map(asts, fn {file, ast} -> module_report(file, ast, src_of(sources, file)) end),
       sums: cluster_sums(Enum.flat_map(asts, fn {_, ast} -> dispatch_sets(ast) end)),
       structs: Enum.reduce(asts, %{}, fn {_, ast}, acc -> collect_structs(ast, acc) end),
       errors: Enum.reduce(asts, %{}, fn {_, ast}, acc -> collect_errors(ast, acc) end)
@@ -113,7 +114,10 @@ defmodule Rian.PortAnalysis do
         {:case, _, [_, [do: arms]]} = node, acc ->
           structs =
             arms
-            |> Enum.flat_map(fn {:->, _, [[p | _], _]} -> pattern_structs(p); _ -> [] end)
+            |> Enum.flat_map(fn
+              {:->, _, [[p | _], _]} -> pattern_structs(p)
+              _ -> []
+            end)
             |> MapSet.new()
 
           {node, [structs | acc]}
@@ -130,7 +134,9 @@ defmodule Rian.PortAnalysis do
   defp head_name_pats({name, _, _}) when is_atom(name), do: {name, []}
 
   # struct names mentioned in a pattern (`%Mod{…}`)
-  defp pattern_structs({:%, _, [{:__aliases__, _, parts}, _]}), do: [List.last(parts) |> to_string()]
+  defp pattern_structs({:%, _, [{:__aliases__, _, parts}, _]}),
+    do: [List.last(parts) |> to_string()]
+
   defp pattern_structs({:=, _, [l, r]}), do: pattern_structs(l) ++ pattern_structs(r)
   defp pattern_structs(_), do: []
 
@@ -169,7 +175,10 @@ defmodule Rian.PortAnalysis do
   defp error_shape({:__aliases__, _, parts}), do: {:ctor, List.last(parts) |> to_string()}
   defp error_shape(a) when is_atom(a) and a not in [nil, true, false], do: {:atom, to_string(a)}
   defp error_shape(s) when is_binary(s), do: {:string, nil}
-  defp error_shape({:%, _, [{:__aliases__, _, parts}, _]}), do: {:struct, List.last(parts) |> to_string()}
+
+  defp error_shape({:%, _, [{:__aliases__, _, parts}, _]}),
+    do: {:struct, List.last(parts) |> to_string()}
+
   defp error_shape({n, _, c}) when is_atom(n) and is_atom(c), do: {:var, to_string(n)}
   defp error_shape(other), do: {:expr, Macro.to_string(other) |> String.slice(0, 30)}
 
@@ -260,7 +269,9 @@ defmodule Rian.PortAnalysis do
   defp sums_section(data) do
     clustered = data.sums
     grouped = clustered |> List.flatten() |> MapSet.new()
-    standalone = data.structs |> Map.keys() |> Enum.reject(&MapSet.member?(grouped, &1)) |> Enum.sort()
+
+    standalone =
+      data.structs |> Map.keys() |> Enum.reject(&MapSet.member?(grouped, &1)) |> Enum.sort()
 
     groups =
       clustered
@@ -311,11 +322,20 @@ defmodule Rian.PortAnalysis do
     """
   end
 
-  defp error_proposal({:ctor, name}), do: {"`#{name}` (ctor)", "`#{name}` ✓ already a variant", "✓ all 4"}
+  defp error_proposal({:ctor, name}),
+    do: {"`#{name}` (ctor)", "`#{name}` ✓ already a variant", "✓ all 4"}
+
   defp error_proposal({:atom, a}), do: {"`:#{a}` (atom)", "`#{pascal(a)}` ? (confirm)", "✓ all 4"}
-  defp error_proposal({:string, _}), do: {"`\"…\"` (string)", "**NEEDS DECISION** — name a variant", "—"}
-  defp error_proposal({:struct, name}), do: {"`%#{name}{}` (struct)", "**NEEDS DECISION** — variant or payload", "—"}
-  defp error_proposal({:var, v}), do: {"`#{v}` (var/propagation)", "propagated `E` (no fixed tag)", "—"}
+
+  defp error_proposal({:string, _}),
+    do: {"`\"…\"` (string)", "**NEEDS DECISION** — name a variant", "—"}
+
+  defp error_proposal({:struct, name}),
+    do: {"`%#{name}{}` (struct)", "**NEEDS DECISION** — variant or payload", "—"}
+
+  defp error_proposal({:var, v}),
+    do: {"`#{v}` (var/propagation)", "propagated `E` (no fixed tag)", "—"}
+
   defp error_proposal({:expr, e}), do: {"`#{e}` (expr)", "**NEEDS DECISION**", "—"}
 
   defp pascal(atom_str) do

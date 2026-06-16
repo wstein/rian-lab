@@ -18,7 +18,8 @@ defmodule Rian.TranspileInferTest do
     end
 
     test "string concat pins String" do
-      assert sig("  def g(s), do: s <> \"!\"", "g") == "  pub def g(s String) String := s <> \"!\""
+      assert sig("  def g(s), do: s <> \"!\"", "g") ==
+               "  pub def g(s String) String := s <> \"!\""
     end
 
     test "if condition is Bool, branches join to Int53" do
@@ -107,7 +108,9 @@ defmodule Rian.TranspileInferTest do
 
     test "honesty: a non-Capitalized error tag (Elixir idiom) is NOT made a Result" do
       # {:error, :atom} / {:error, "msg"} can't be a synthesized variant → leave holes.
-      out = Transpile.transpile("defmodule M do\n  def f(x), do: {:error, :nope}\nend", infer: true)
+      out =
+        Transpile.transpile("defmodule M do\n  def f(x), do: {:error, :nope}\nend", infer: true)
+
       refute out =~ "Errors"
       assert out =~ "_Ret"
     end
@@ -134,7 +137,8 @@ defmodule Rian.TranspileInferTest do
 
   describe "honesty — leave a hole when nothing pins it" do
     test "an unknown callee leaves _Ty/_Ret" do
-      assert sig("  def h(x), do: unknown_fn(x)", "h") == "  pub def h(x _Ty) _Ret := unknown_fn(x)"
+      assert sig("  def h(x), do: unknown_fn(x)", "h") ==
+               "  pub def h(x _Ty) _Ret := unknown_fn(x)"
     end
 
     test "a tuple return is left a hole in the MVP" do

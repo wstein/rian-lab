@@ -115,7 +115,13 @@ defmodule Rian.Transpile do
   # `type Errors := Tag | …` declaration from the error tags the inferer collected.
   defp infer_program(ast) do
     sigmap = infer_sigs(ast)
-    tags = sigmap |> Map.values() |> Enum.flat_map(&Map.get(&1, :error_tags, [])) |> Enum.uniq() |> Enum.sort()
+
+    tags =
+      sigmap
+      |> Map.values()
+      |> Enum.flat_map(&Map.get(&1, :error_tags, []))
+      |> Enum.uniq()
+      |> Enum.sort()
 
     sigmap =
       if tags == [] do
@@ -139,7 +145,13 @@ defmodule Rian.Transpile do
   def transpile_with_stats(source, opts \\ []) when is_binary(source) do
     text = transpile(source, opts)
     lines = String.split(text, "\n")
-    ports = Enum.count(lines, &(String.contains?(&1, "TODO_PORT") or String.contains?(&1, "TODO[port]")))
+
+    ports =
+      Enum.count(
+        lines,
+        &(String.contains?(&1, "TODO_PORT") or String.contains?(&1, "TODO[port]"))
+      )
+
     defs = Enum.count(lines, &Regex.match?(~r/^\s+(pub )?def \w+\(/, &1))
     # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics
     # check; counted (occurrences, not lines) so the report can surface them.
@@ -256,7 +268,14 @@ defmodule Rian.Transpile do
           true -> "med"
         end
 
-      %{name: name, defs: defs, ports: ports, mapped: Map.get(stats, :mapped, 0), ratio: ratio, tag: tag}
+      %{
+        name: name,
+        defs: defs,
+        ports: ports,
+        mapped: Map.get(stats, :mapped, 0),
+        ratio: ratio,
+        tag: tag
+      }
     end)
     |> Enum.sort_by(& &1.ratio)
   end
@@ -299,7 +318,8 @@ defmodule Rian.Transpile do
           {:drop, what, node} ->
             # alias/import/require are intentionally dropped (Rian resolves modules
             # differently) — a plain note, NOT a porting marker.
-            {acc ++ flush(open, sigmap) ++ ["# (dropped Elixir `#{what}`: #{snippet(node)})"], doc, nil}
+            {acc ++ flush(open, sigmap) ++ ["# (dropped Elixir `#{what}`: #{snippet(node)})"],
+             doc, nil}
 
           {:clause, vis, head, kw} ->
             clause = build_clause(head, kw)
@@ -594,7 +614,9 @@ defmodule Rian.Transpile do
   defp max_placeholder(_), do: 0
 
   # substitute each `&N` placeholder with the var `pN`.
-  defp subst_ph({:&, _, [k]}, ps) when is_integer(k), do: {String.to_atom(Enum.at(ps, k - 1)), [], nil}
+  defp subst_ph({:&, _, [k]}, ps) when is_integer(k),
+    do: {String.to_atom(Enum.at(ps, k - 1)), [], nil}
+
   defp subst_ph(t, ps) when is_tuple(t),
     do: t |> Tuple.to_list() |> Enum.map(&subst_ph(&1, ps)) |> List.to_tuple()
 

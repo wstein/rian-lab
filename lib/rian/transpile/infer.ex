@@ -405,7 +405,12 @@ defmodule Rian.Transpile.Infer do
   end
 
   defp gen_args_then_fresh(args, env, ctx, s) do
-    s = Enum.reduce(args, s, fn a, s -> {_, s} = gen(a, env, ctx, s); s end)
+    s =
+      Enum.reduce(args, s, fn a, s ->
+        {_, s} = gen(a, env, ctx, s)
+        s
+      end)
+
     fresh(s)
   end
 
@@ -445,7 +450,10 @@ defmodule Rian.Transpile.Infer do
 
   defp gen_pat({name, _, c}, pv, env, s) when is_atom(name) and is_atom(c) do
     sname = to_string(name)
-    if sname == "_" or String.starts_with?(sname, "_"), do: {env, s}, else: {Map.put(env, sname, pv), s}
+
+    if sname == "_" or String.starts_with?(sname, "_"),
+      do: {env, s},
+      else: {Map.put(env, sname, pv), s}
   end
 
   defp gen_pat(n, pv, env, s) when is_integer(n) do
@@ -455,7 +463,9 @@ defmodule Rian.Transpile.Infer do
 
   defp gen_pat(x, pv, env, s) when is_float(x), do: {env, elem(unify(s, pv, con("Float64")), 0)}
   defp gen_pat(b, pv, env, s) when is_binary(b), do: {env, elem(unify(s, pv, con("String")), 0)}
-  defp gen_pat(bool, pv, env, s) when is_boolean(bool), do: {env, elem(unify(s, pv, con("Bool")), 0)}
+
+  defp gen_pat(bool, pv, env, s) when is_boolean(bool),
+    do: {env, elem(unify(s, pv, con("Bool")), 0)}
 
   # `[]` and `[h | t]` constrain the param to a Vec
   defp gen_pat([], pv, env, s) do
@@ -508,6 +518,7 @@ defmodule Rian.Transpile.Infer do
 
   defp con(name), do: {:con, name}
   defp app(head, args), do: {:app, head, args}
+
   defp app1(head, s) do
     {v, s} = fresh(s)
     {app(head, [v]), s}
@@ -619,11 +630,21 @@ defmodule Rian.Transpile.Infer do
     shapes = Enum.map(tail_pairs, fn {t, _} -> result_tag(t) end)
 
     cond do
-      shapes == [] -> {:no, store}
-      Enum.any?(shapes, &(&1 == :other)) -> {:no, store}
-      Enum.any?(shapes, &(&1 == :bad_tag)) -> {:no, store}
-      not Enum.any?(shapes, &match?({:ok, _}, &1)) -> {:no, store}
-      not Enum.any?(shapes, &match?({:error, _}, &1)) -> {:no, store}
+      shapes == [] ->
+        {:no, store}
+
+      Enum.any?(shapes, &(&1 == :other)) ->
+        {:no, store}
+
+      Enum.any?(shapes, &(&1 == :bad_tag)) ->
+        {:no, store}
+
+      not Enum.any?(shapes, &match?({:ok, _}, &1)) ->
+        {:no, store}
+
+      not Enum.any?(shapes, &match?({:error, _}, &1)) ->
+        {:no, store}
+
       true ->
         {payload_term, store} = ok_payload(tail_pairs, ctx, store)
         tags = for {:error, tag} <- shapes, uniq: true, do: tag
@@ -647,13 +668,17 @@ defmodule Rian.Transpile.Infer do
   end
 
   defp result_tag({:ok, v}), do: {:ok, v}
-  defp result_tag({:error, {:__aliases__, _, parts}}), do: {:error, parts |> List.last() |> to_string()}
+
+  defp result_tag({:error, {:__aliases__, _, parts}}),
+    do: {:error, parts |> List.last() |> to_string()}
+
   defp result_tag({:error, _}), do: :bad_tag
   defp result_tag(_), do: :other
 
   # tail expressions of a body (the values it can evaluate to), recursing into
   # `if`/`case`/blocks. Anything else is its own single tail.
-  defp tails({:__block__, _, stmts}) when is_list(stmts) and stmts != [], do: tails(List.last(stmts))
+  defp tails({:__block__, _, stmts}) when is_list(stmts) and stmts != [],
+    do: tails(List.last(stmts))
 
   defp tails({:if, _, [_, kw]}) do
     tails(body_of(Keyword.get(kw, :do))) ++
@@ -661,7 +686,10 @@ defmodule Rian.Transpile.Infer do
   end
 
   defp tails({:case, _, [_, [do: arms]]}) do
-    Enum.flat_map(arms, fn arm -> {_, body} = case_arm(arm); tails(body) end)
+    Enum.flat_map(arms, fn arm ->
+      {_, body} = case_arm(arm)
+      tails(body)
+    end)
   end
 
   defp tails(node), do: [node]
@@ -706,7 +734,10 @@ defmodule Rian.Transpile.Infer do
         # element (`Vec(<unknown>)`) makes the whole slot a hole, never `Vec(hole)`
         # (which would be invalid Rian — an accidental fill).
         rendered = Enum.map(parts, &render(store, gmap, &1))
-        if Enum.any?(rendered, &(&1 == :hole)), do: :hole, else: "#{head}(#{Enum.join(rendered, ", ")})"
+
+        if Enum.any?(rendered, &(&1 == :hole)),
+          do: :hole,
+          else: "#{head}(#{Enum.join(rendered, ", ")})"
 
       {:var, id} ->
         cond do
