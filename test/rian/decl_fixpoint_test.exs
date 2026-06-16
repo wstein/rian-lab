@@ -2,6 +2,10 @@ defmodule Rian.DeclFixpointTest do
   # async: false — loads real modules into the VM via :code.load_binary.
   use ExUnit.Case, async: false
 
+  # `Calc` is compiled into the VM at runtime by a test (via the real backend), so
+  # it is undefined at compile time — don't warn on the references to it.
+  @compile {:no_warn_undefined, [Calc]}
+
   alias Rian.{Beam, Decl, Lexer, Pratt}
   alias Rian.IR.{Clause, Field, Func, Mod, Param, Struct, Type, Variant}
 

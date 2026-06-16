@@ -2,6 +2,10 @@ defmodule Rian.MacroTest do
   use ExUnit.Case, async: false
   alias Rian.{Pratt, Macro, Comptime, Lower}
 
+  # `MacT` is compiled into the VM at runtime by a test (Code.eval_string), so it is
+  # undefined at compile time — don't warn on the references to it.
+  @compile {:no_warn_undefined, [MacT]}
+
   @env Macro.build_env([
          %{name: "unless", params: ["cond", "body"], template: "if not cond do body else 0 end"},
          %{name: "square", params: ["x"], template: "x * x"},

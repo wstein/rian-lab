@@ -2,6 +2,11 @@ defmodule Rian.FfiTest do
   use ExUnit.Case, async: false
   alias Rian.Lower
 
+  # `FfiT` is compiled into the VM at runtime by `setup_all` (via `Code.eval_string`),
+  # so its functions are genuinely undefined at compile time — tell the compiler not
+  # to warn about the `FfiT.*` calls in the assertions below.
+  @compile {:no_warn_undefined, FfiT}
+
   setup_all do
     defs =
       [

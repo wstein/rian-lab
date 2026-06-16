@@ -2,6 +2,10 @@ defmodule Rian.SelfhostParserRobustnessTest do
   # async: false — the runtime teeth load the Rian-written parser into the VM.
   use ExUnit.Case, async: false
 
+  # The Rian-written parser modules are loaded into the VM at runtime (the teeth
+  # below), so they are undefined at compile time — don't warn on the references.
+  @compile {:no_warn_undefined, [Decl, LexerV2]}
+
   alias Rian.{Beam, Core, Exhaustiveness, PatternLower, Pratt}
 
   # The self-hosted parser used to assume well-formed input: every

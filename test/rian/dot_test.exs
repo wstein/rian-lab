@@ -2,6 +2,10 @@ defmodule Rian.DotTest do
   use ExUnit.Case, async: false
   alias Rian.Lower
 
+  # `EvT` is compiled into the VM at runtime by a test (Code.eval_string), so it is
+  # undefined at compile time — don't warn on the references to it.
+  @compile {:no_warn_undefined, [EvT]}
+
   describe "`.` is the universal qualifier (case-disambiguated)" do
     test "Rian module path: Elixir `.`, Rust `::` (lowercased)" do
       assert Lower.emit_expr("Geometry.area(x)", :elixir) == "Geometry.area(x)"

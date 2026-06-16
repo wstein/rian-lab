@@ -2,6 +2,12 @@ defmodule Rian.ComposeCoreBridgeFixpointTest do
   # async: false — loads the verified ports + the driver into the VM.
   use ExUnit.Case, async: false
 
+  # The self-hosted compiler modules are compiled from `compiler/*.rian` and loaded
+  # into the VM at runtime (setup below), so they are undefined at compile time —
+  # don't warn on the references. `Core` is aliased to `Rian.Core` here, so the
+  # runtime bare module is suppressed by its fully-qualified atom.
+  @compile {:no_warn_undefined, [Decl, LexerV2, :"Elixir.Core"]}
+
   alias Rian.{Beam, Core, Pratt}
 
   # STEP 3 (verification bridge) — the driver's surface→Core lowering is

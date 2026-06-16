@@ -2,6 +2,38 @@ defmodule Rian.DeclTest do
   # async: false — the execution tests define modules via Code.eval_string.
   use ExUnit.Case, async: false
 
+  # The execution tests define modules into the VM at runtime (via Code.eval_string
+  # of emitted Elixir), so they are undefined at compile time — don't warn on the
+  # references to them.
+  @compile {:no_warn_undefined,
+            [
+              AddFromSource,
+              AreaCaseFromSource,
+              AreaFromSource,
+              ClampFromSource,
+              ClassifyFromSource,
+              ClsT,
+              Ctor1,
+              Ctor2,
+              EvalFromSource,
+              Geometry,
+              HeadT,
+              MakeFromSource,
+              Max2FromSource,
+              NegT,
+              PropT,
+              Scaling,
+              ShiftFromSource,
+              Shout,
+              StepFromSource,
+              SumT,
+              TupP,
+              TupT,
+              UoO,
+              WrapO,
+              Wth
+            ]}
+
   alias Rian.Decl
   alias Rian.IR.{Clause, Const, Field, Func, Param, Struct, Type, Variant}
 

@@ -2,6 +2,10 @@ defmodule Rian.FeaturesTest do
   use ExUnit.Case, async: false
   alias Rian.Lower
 
+  # `Feat` is compiled into the VM at runtime by a test (Code.eval_string), so it is
+  # undefined at compile time — don't warn on the references to it.
+  @compile {:no_warn_undefined, [Feat]}
+
   setup_all do
     fns = [
       {"dbl_all", "xs", "Enum.map(xs, (x) -> x * 2)"},
