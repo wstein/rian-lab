@@ -94,29 +94,97 @@ defmodule Rian.Transpile do
                     Module Application Agent Task GenServer System Path Access
                     Function Range Date Time DateTime Calendar)
 
-  @doc "Transpile Elixir source text to a draft Rian skeleton string."
-  def transpile(source) when is_binary(source) do
-    source
-    |> Code.string_to_quoted!()
-    |> toplevel()
+  @doc """
+  Transpile Elixir source text to a draft Rian skeleton string.
+
+  With `infer: true`, runs whole-program type inference (`Rian.Transpile.Infer`)
+  to fill the `_Ty`/`_Ret` holes with concrete types where provable, leaving a
+  hole otherwise.
+  """
+  def transpile(source, opts \\ []) when is_binary(source) do
+    ast = Code.string_to_quoted!(source)
+    sigmap = if opts[:infer], do: infer_sigs(ast), else: %{}
+
+    ast
+    |> toplevel(sigmap)
     |> Enum.join("\n")
     |> Kernel.<>("\n")
   end
 
   @doc """
-  Transpile and report `{text, %{ports: n, defs: n}}` — `ports` counts unresolved
-  markers (the remaining hand-work), `defs` counts emitted function groups.
+  Transpile and report `{text, stats}` — `ports` counts unresolved markers,
+  `defs` counts emitted function groups, `mapped` counts auto-mapped stdlib
+  calls, and (with `infer: true`) `holes`/`filled` count remaining vs filled
+  type slots.
   """
-  def transpile_with_stats(source) when is_binary(source) do
-    text = transpile(source)
+  def transpile_with_stats(source, opts \\ []) when is_binary(source) do
+    text = transpile(source, opts)
     lines = String.split(text, "\n")
     ports = Enum.count(lines, &(String.contains?(&1, "TODO_PORT") or String.contains?(&1, "TODO[port]")))
-    defs = Enum.count(lines, &Regex.match?(~r/^\s+(pub )?def \w+\(.*\) _Ret/, &1))
+    defs = Enum.count(lines, &Regex.match?(~r/^\s+(pub )?def \w+\(/, &1))
     # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics
     # check; counted (occurrences, not lines) so the report can surface them.
-    mapped = (Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, text) |> length())
-    {text, %{ports: ports, defs: defs, mapped: mapped}}
+    mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, text) |> length()
+    holes = Regex.scan(~r/\b_(?:Ty|Ret)\b/, text) |> length()
+    {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes}}
   end
+
+  # ── whole-program type inference (ADR-0034-aligned hole filling) ────────────
+  # Two passes: pass 1 infers each def group in isolation; pass 2 re-infers with
+  # the fully-resolved sigs as an intra-module sibling table (so a local call can
+  # adopt a callee's inferred type). Returns `{name, arity} => %{params, ret, tvars}`.
+  defp infer_sigs({:defmodule, _, [_, [do: body]]}) do
+    groups = body |> block_stmts() |> def_groups()
+    key = fn g -> {to_string(hd(g.clauses).name), hd(g.clauses).arity} end
+
+    # build the context (parses the prelude) ONCE per pass, not per group.
+    ctx1 = Rian.Transpile.Infer.build_ctx(@stdlib)
+    pass1 = Map.new(groups, fn g -> {key.(g), Rian.Transpile.Infer.infer_group(g, ctx1)} end)
+
+    siblings =
+      for {k, v} <- pass1, not hole_sig?(v), into: %{} do
+        {k, %{params: v.params, ret: v.ret, tvars: v.tvars}}
+      end
+
+    ctx2 = %{ctx1 | siblings: siblings}
+    Map.new(groups, fn g -> {key.(g), Rian.Transpile.Infer.infer_group(g, ctx2)} end)
+  end
+
+  defp infer_sigs(_), do: %{}
+
+  @doc """
+  Per-def inference ledger for `--infer-report`: `[{ {name, arity}, ledger }]`
+  where each ledger lists the remaining holes and why (`:unresolved`, …).
+  """
+  def infer_report(source) when is_binary(source) do
+    ast = Code.string_to_quoted!(source)
+    for {k, v} <- infer_sigs(ast), v.ledger != [], do: {k, v.ledger}
+  end
+
+  defp hole_sig?(%{params: ps, ret: r}), do: r == "_Ret" or Enum.any?(ps, &(&1 == "_Ty"))
+
+  # Collect just the def groups (reusing the clause grouping), no rendering.
+  defp def_groups(stmts) do
+    {groups, open} =
+      Enum.reduce(stmts, {[], nil}, fn stmt, {acc, open} ->
+        case classify(stmt) do
+          {:clause, vis, head, kw} ->
+            clause = build_clause(head, kw)
+
+            if open && same_group?(open, vis, clause),
+              do: {acc, add_clause(open, clause)},
+              else: {close_group(acc, open), new_group(vis, clause, nil)}
+
+          _ ->
+            {close_group(acc, open), nil}
+        end
+      end)
+
+    close_group(groups, open)
+  end
+
+  defp close_group(acc, nil), do: acc
+  defp close_group(acc, g), do: acc ++ [g]
 
   @doc """
   Rank transpiled modules by port difficulty for folder-mode triage. Takes
@@ -146,13 +214,13 @@ defmodule Rian.Transpile do
 
   # ── module ────────────────────────────────────────────────────────────────
 
-  defp toplevel({:defmodule, _, [aliases, [do: body]]}) do
+  defp toplevel({:defmodule, _, [aliases, [do: body]]}, sigmap) do
     name = short_name(aliases)
-    inner = body |> block_stmts() |> render_items() |> Enum.map(&indent/1)
+    inner = body |> block_stmts() |> render_items(sigmap) |> Enum.map(&indent/1)
     @header ++ ["mod #{name} do" | inner] ++ ["end"]
   end
 
-  defp toplevel(other) do
+  defp toplevel(other, _sigmap) do
     @header ++ ["# TODO[port]: top-level is not a single `defmodule`", "# #{snippet(other)}"]
   end
 
@@ -167,20 +235,20 @@ defmodule Rian.Transpile do
   # Walk the statement list, attaching a pending `@doc` to the next def, and
   # merging consecutive same-name/arity clauses into one rendered group.
 
-  defp render_items(stmts) do
+  defp render_items(stmts, sigmap) do
     {lines, _pending_doc, open} =
       Enum.reduce(stmts, {[], nil, nil}, fn stmt, {acc, doc, open} ->
         case classify(stmt) do
           {:moduledoc, text} ->
-            {acc ++ flush(open) ++ [""] ++ moduledoc_lines(text), doc, nil}
+            {acc ++ flush(open, sigmap) ++ [""] ++ moduledoc_lines(text), doc, nil}
 
           {:doc, text} ->
-            {acc ++ flush(open), text, nil}
+            {acc ++ flush(open, sigmap), text, nil}
 
           {:drop, what, node} ->
             # alias/import/require are intentionally dropped (Rian resolves modules
             # differently) — a plain note, NOT a porting marker.
-            {acc ++ flush(open) ++ ["# (dropped Elixir `#{what}`: #{snippet(node)})"], doc, nil}
+            {acc ++ flush(open, sigmap) ++ ["# (dropped Elixir `#{what}`: #{snippet(node)})"], doc, nil}
 
           {:clause, vis, head, kw} ->
             clause = build_clause(head, kw)
@@ -190,15 +258,15 @@ defmodule Rian.Transpile do
                 {acc, doc, add_clause(open, clause)}
 
               true ->
-                {acc ++ flush(open), nil, new_group(vis, clause, doc)}
+                {acc ++ flush(open, sigmap), nil, new_group(vis, clause, doc)}
             end
 
           {:other, node} ->
-            {acc ++ flush(open) ++ ["# TODO[port]: #{snippet(node)}"], doc, nil}
+            {acc ++ flush(open, sigmap) ++ ["# TODO[port]: #{snippet(node)}"], doc, nil}
         end
       end)
 
-    lines ++ flush(open)
+    lines ++ flush(open, sigmap)
   end
 
   defp classify({:@, _, [{:moduledoc, _, [text]}]}) when is_binary(text), do: {:moduledoc, text}
@@ -242,26 +310,33 @@ defmodule Rian.Transpile do
 
   # ── rendering a def group ───────────────────────────────────────────────────
 
-  defp flush(nil), do: []
+  defp flush(nil, _sigmap), do: []
 
-  defp flush(%{vis: vis, doc: doc, clauses: clauses}) do
+  defp flush(%{vis: vis, doc: doc, clauses: clauses}, sigmap) do
     kw = if vis == :pub, do: "pub def", else: "def"
     doc_lines = if doc, do: [~s(@doc "#{escape(one_line(doc))}")], else: []
     name = hd(clauses).name
     arity = hd(clauses).arity
 
+    # inferred sig (or all-holes when inference is off / the slot is unresolved).
+    sig = Map.get(sigmap, {to_string(name), arity})
+    ptypes = if sig, do: sig.params, else: List.duplicate("_Ty", arity)
+    ret = if sig, do: sig.ret, else: "_Ret"
+    forall = if sig && sig.tvars != [], do: " forall #{Enum.join(sig.tvars, ", ")}", else: ""
+
     body_lines =
       if simple?(clauses) do
         [c] = clauses
-        params = c.args |> Enum.map(&"#{var_name(&1)} _Ty") |> Enum.join(", ")
-        # The `_Ty`/`_Ret` holes are themselves the type-filling signal (tracked by
-        # the `defs` stat); no redundant per-line marker — types are erased in BEAM
-        # forms and don't affect equiv-locking.
-        ["#{kw} #{name}(#{params}) _Ret := #{render_body(c.body)}"]
+
+        params =
+          c.args
+          |> Enum.zip(ptypes)
+          |> Enum.map_join(", ", fn {a, t} -> "#{var_name(a)} #{t}" end)
+
+        ["#{kw} #{name}(#{params}) #{ret}#{forall} := #{render_body(c.body)}"]
       else
-        holes = List.duplicate("_Ty", arity) |> Enum.join(", ")
-        sig = "#{kw} #{name}(#{holes}) _Ret"
-        [sig | Enum.map(clauses, &render_clause(kw, &1))]
+        sig_line = "#{kw} #{name}(#{Enum.join(ptypes, ", ")}) #{ret}#{forall}"
+        [sig_line | Enum.map(clauses, &render_clause(kw, &1))]
       end
 
     [""] ++ doc_lines ++ body_lines

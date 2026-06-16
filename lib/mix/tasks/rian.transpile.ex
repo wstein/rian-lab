@@ -33,27 +33,35 @@ defmodule Mix.Tasks.Rian.Transpile do
   @impl Mix.Task
   def run(args) do
     {opts, argv, _invalid} =
-      OptionParser.parse(args, strict: [output: :string], aliases: [o: :output])
+      OptionParser.parse(args,
+        strict: [output: :string, infer: :boolean, infer_report: :boolean],
+        aliases: [o: :output, i: :infer]
+      )
 
     path =
       case argv do
         [p | _] -> p
-        [] -> Mix.raise("usage: mix rian.transpile FILE.ex|DIR/ [-o OUT]")
+        [] -> Mix.raise("usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report]")
       end
 
+    # --infer-report implies --infer
+    infer? = !!opts[:infer] or !!opts[:infer_report]
+    o = %{out: opts[:output], infer: infer?, report: !!opts[:infer_report]}
+
     cond do
-      File.dir?(path) -> run_dir(path, opts[:output])
-      File.regular?(path) -> run_file(path, opts[:output])
+      File.dir?(path) -> run_dir(path, o)
+      File.regular?(path) -> run_file(path, o)
       true -> Mix.raise("no such file or directory: #{path}")
     end
   end
 
   # ── single file ─────────────────────────────────────────────────────────────
 
-  defp run_file(file, out) do
-    {text, stats} = file |> File.read!() |> Rian.Transpile.transpile_with_stats()
+  defp run_file(file, o) do
+    src = File.read!(file)
+    {text, stats} = Rian.Transpile.transpile_with_stats(src, infer: o.infer)
 
-    case out do
+    case o.out do
       nil ->
         IO.puts(text)
 
@@ -65,24 +73,56 @@ defmodule Mix.Tasks.Rian.Transpile do
     IO.puts(
       :stderr,
       "TODO summary: #{stats.defs} def group(s), #{stats.ports} marker(s) to resolve by hand, " <>
-        "#{stats.mapped} stdlib call(s) auto-mapped (verify semantics)"
+        "#{stats.mapped} stdlib call(s) auto-mapped (verify semantics)" <> infer_suffix(src, stats, o)
     )
+
+    if o.report, do: print_infer_report(src)
+  end
+
+  # remaining/filled type-hole counts when inference ran.
+  defp infer_suffix(_src, _stats, %{infer: false}), do: ""
+
+  defp infer_suffix(src, stats, %{infer: true}) do
+    {_, base} = Rian.Transpile.transpile_with_stats(src, infer: false)
+    filled = base.holes - stats.holes
+    ", inferred #{filled}/#{base.holes} type hole(s) (#{stats.holes} remain)"
+  end
+
+  defp print_infer_report(src) do
+    IO.puts(:stderr, "\ninference report (remaining holes):")
+
+    case Rian.Transpile.infer_report(src) do
+      [] ->
+        IO.puts(:stderr, "  (all type holes filled)")
+
+      reports ->
+        for {{name, arity}, ledger} <- reports do
+          slots = Enum.map_join(ledger, ", ", fn {slot, reason} -> "#{slot} #{reason}" end)
+          IO.puts(:stderr, "  #{name}/#{arity}: #{slots}")
+        end
+    end
   end
 
   # ── folder ──────────────────────────────────────────────────────────────────
 
-  defp run_dir(dir, out) do
+  defp run_dir(dir, o) do
     files = Path.wildcard(Path.join(dir, "**/*.ex"))
     if files == [], do: Mix.raise("no .ex files under #{dir}")
 
     entries =
       Enum.map(files, fn file ->
-        {text, stats} = file |> File.read!() |> Rian.Transpile.transpile_with_stats()
-        if out, do: write_draft(text, dir, file, out)
+        {text, stats} = Rian.Transpile.transpile_with_stats(File.read!(file), infer: o.infer)
+        if o.out, do: write_draft(text, dir, file, o.out)
         {Path.relative_to(file, dir), stats}
       end)
 
-    print_report(Rian.Transpile.rank(entries), out)
+    print_report(Rian.Transpile.rank(entries), o.out)
+    if o.infer, do: print_hole_total(entries)
+  end
+
+  defp print_hole_total(entries) do
+    total = entries |> Enum.map(fn {_, s} -> Map.get(s, :holes, 0) end) |> Enum.sum()
+    IO.puts(:stderr, "  #{pad("TYPE HOLES REMAINING", 40)} #{total}")
   end
 
   defp write_draft(text, dir, file, out) do
