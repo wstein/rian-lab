@@ -271,13 +271,19 @@ defmodule Rian.Transpile do
 
   defp render_body(:__no_body__), do: ~s|TODO_PORT("bodyless clause")|
 
+  # multi-statement body → Rian `;`-separated block: `x := e; …; final` (Pratt
+  # parses a function body as a block of statements with a final expression).
   defp render_body({:__block__, _, stmts}) when length(stmts) > 1 do
-    rendered = stmts |> Enum.map(&expr/1) |> Enum.join("; ")
-    ~s|TODO_PORT("multi-statement body: #{escape(rendered)}")|
+    Enum.map_join(stmts, "; ", &stmt/1)
   end
 
   defp render_body({:__block__, _, [one]}), do: expr(one)
   defp render_body(node), do: expr(node)
+
+  # a block statement: an Elixir bind `x = e` → Rian bind `x := e`; anything else
+  # (incl. the final return expression) is a bare expression.
+  defp stmt({:=, _, [lhs, rhs]}), do: "#{pat(lhs)} := #{expr(rhs)}"
+  defp stmt(other), do: expr(other)
 
   # ── expressions ─────────────────────────────────────────────────────────────
 

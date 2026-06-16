@@ -80,6 +80,11 @@ end|) =~ ~S|"v=${x}!"|
       assert rian("defmodule M do\n  def m, do: %{lo: 1, hi: 2}\nend") =~ "%{lo: 1, hi: 2}"
     end
 
+    test "multi-statement body → Rian `;`-separated block with binds" do
+      out = rian("defmodule M do\n  def g(x) do\n    y = x + 1\n    z = y + 1\n    z\n  end\nend")
+      assert out =~ "y := x + 1; z := y + 1; z"
+    end
+
     test "a call to a sibling Rian module is emitted inline, not flagged" do
       out = rian("defmodule M do\n  def g(x), do: Core.from_expr(x)\nend")
       assert out =~ "pub def g(x _Ty) _Ret := Core.from_expr(x)"
