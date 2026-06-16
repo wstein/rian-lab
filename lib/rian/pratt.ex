@@ -22,6 +22,7 @@ defmodule Rian.Pratt do
   # e.g. a clause guard parsed in Rian — so they can re-`parse` it idempotently.
   # Still run `Prim.normalize` (idempotent): a front-end-built AST may carry raw
   # `Prim.*` calls that must be rewritten to `__prim_*`, exactly as the string path.
+  @spec parse(String.t() | tuple()) :: tuple()
   def parse(ast) when is_tuple(ast), do: Rian.Prim.normalize(ast)
 
   def parse(str) when is_binary(str) do
@@ -30,6 +31,7 @@ defmodule Rian.Pratt do
     Rian.Prim.normalize(ast)
   end
 
+  @spec parse_sexpr(String.t()) :: String.t()
   def parse_sexpr(str), do: sexpr(parse(str))
 
   @doc """
@@ -37,6 +39,7 @@ defmodule Rian.Pratt do
   patterns. The single pattern parser (`parse_pat`) — shared with `case` arms —
   is the one place patterns are parsed (ADR-0050 §2: one parser).
   """
+  @spec parse_pats(String.t()) :: [tuple()]
   def parse_pats(str) do
     case Rian.Lexer.expr_tokens(str) do
       [] -> []
@@ -64,6 +67,7 @@ defmodule Rian.Pratt do
   # `body`, so every consumer that re-parses a body transparently sees expanded,
   # normalized code without threading a macro env (the body was normalized when it
   # was first parsed here).
+  @spec parse_body(String.t() | tuple()) :: tuple()
   def parse_body(ast) when is_tuple(ast), do: ast
 
   def parse_body(str) when is_binary(str) do
@@ -697,8 +701,9 @@ defmodule Rian.Pratt do
   defp tok_desc({:kw, k}), do: "keyword `#{k}`"
   # (no `{:atom, _}` token: the lexer emits `:` + `id`, and `{:atom, _}` is built at
   # parse time — so an atom never appears in a raw token stream here.)
-  defp tok_desc(t) when is_tuple(t), do: "`#{elem(t, 0)}`"
-  defp tok_desc(t), do: inspect(t)
+  # any other token (brackets, `{:nl}`, `{:comment, _}`, …) — a token is always a
+  # tuple, so this is the total fallback (`Rian.Lexer.token/0`).
+  defp tok_desc(t), do: "`#{elem(t, 0)}`"
 
   defp sexpr({:num, n}), do: n
   defp sexpr({:str, s}), do: "\"#{s}\""

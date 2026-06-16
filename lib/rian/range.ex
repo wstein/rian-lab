@@ -22,10 +22,12 @@ defmodule Rian.Range do
   alias Rian.Core.{EAtom, EBin, ECall, EDot, EId, EIf, ENum, ETuple}
 
   @doc "Build the `name -> %{lo, hi, base}` table from a list of `%Rian.IR.Range{}`."
+  @spec table([map()]) :: map()
   def table(ranges),
     do: Map.new(ranges, fn r -> {r.name, %{lo: r.lo, hi: r.hi, base: r.base}} end)
 
   @doc "Rewrite every `Name.of(n)` (for a `Name` in `table`) in a core AST; identity when the table is empty."
+  @spec expand_of(term(), map()) :: term()
   def expand_of(node, table) when map_size(table) == 0, do: node
 
   def expand_of(%ECall{fun: %EDot{head: %EId{name: n}, name: "of"}, args: [a]} = node, table) do

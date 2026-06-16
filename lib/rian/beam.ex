@@ -104,6 +104,7 @@ defmodule Rian.Beam do
   and load it. Returns `{:ok, module}` (the loaded module atom) or raises
   `Rian.Beam.Unsupported` for a construct outside this increment's core.
   """
+  @spec load(String.t(), module()) :: {:ok, module()}
   def load(src, module) when is_atom(module) do
     prog = Decl.parse(src)
     :ok = Rian.Reach.gate!(prog)
@@ -144,6 +145,7 @@ defmodule Rian.Beam do
   end
 
   @doc "Compile `src`'s functions to `{:ok, module, beam_binary}` via `:compile.forms`."
+  @spec compile(String.t(), module()) :: {:ok, module(), binary()}
   def compile(src, module) when is_atom(module) do
     # `struct` declarations contribute no forms — a struct value is a tagged map
     # (built by named construction `Name(f: v)`, read by field access), so the
@@ -160,6 +162,7 @@ defmodule Rian.Beam do
   (`Name.fun(…)` — a Pascal-qualified call) resolves to it. Returns
   `[{module_atom, beam_binary}]`, one per `mod`, in source order.
   """
+  @spec compile_program(String.t()) :: [{module(), binary()}]
   def compile_program(src) do
     prog = Decl.parse(src)
     :ok = Rian.Reach.gate!(prog)
@@ -187,6 +190,7 @@ defmodule Rian.Beam do
   the loaded module atoms; cross-`mod` calls between them resolve because each is
   named `Elixir.<Mod>` — the same atom a Pascal-qualified call lowers to.
   """
+  @spec load_program(String.t()) :: [module()]
   def load_program(src) do
     src
     |> compile_program()
@@ -205,6 +209,7 @@ defmodule Rian.Beam do
   loop. Clause bodies may be source strings *or* already-parsed `{:block,…}` ASTs
   — `Pratt.parse_body/1` accepts either (the macro-pipeline passthrough).
   """
+  @spec compile_ir(map(), module()) :: {:ok, module(), binary()}
   def compile_ir(prog, module) when is_atom(module) do
     :ok = Rian.Reach.gate!(prog)
     prog = Rian.Opaque.erase(prog)
@@ -212,6 +217,7 @@ defmodule Rian.Beam do
   end
 
   @doc "Compile and load a pre-built program IR (see `compile_ir/2`)."
+  @spec load_ir(map(), module()) :: {:ok, module()}
   def load_ir(prog, module) when is_atom(module) do
     {:ok, ^module, bin} = compile_ir(prog, module)
     {:module, ^module} = :code.load_binary(module, ~c"#{module}.beam", bin)
@@ -223,6 +229,7 @@ defmodule Rian.Beam do
   `Elixir.<Mod>` BEAM module) — the Stage-2 seam for a Rian front-end that parses
   `mod` declarations (see `compile_program/1`, IR form).
   """
+  @spec compile_program_ir(map()) :: [{module(), binary()}]
   def compile_program_ir(prog) do
     prog = Rian.Opaque.erase(prog)
     top = Map.get(prog, :ranges, [])
@@ -244,6 +251,7 @@ defmodule Rian.Beam do
   end
 
   @doc "Compile and load a multi-module program IR (see `compile_program_ir/1`)."
+  @spec load_program_ir(map()) :: [module()]
   def load_program_ir(prog) do
     prog
     |> compile_program_ir()

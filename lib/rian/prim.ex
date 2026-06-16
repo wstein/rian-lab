@@ -39,9 +39,11 @@ defmodule Rian.Prim do
   @overflow_ops Enum.map(~w(wrapping_add saturating_add checked_add), &("__prim_" <> &1))
 
   @doc "The intrinsic names the reserved `Prim.*` surface exposes."
+  @spec names() :: [String.t()]
   def names, do: @prims
 
   @doc "The canonical `__prim_*` 64-bit-overflow ops (JS-unsupported; off `:js`)."
+  @spec overflow_ops() :: [String.t()]
   def overflow_ops, do: @overflow_ops
 
   @doc """
@@ -49,6 +51,7 @@ defmodule Rian.Prim do
   `__prim_<name>(args)`. Idempotent; non-`Prim` calls pass through unchanged; an
   unknown `Prim.<name>` raises (the namespace is reserved, ADR-0047 §2).
   """
+  @spec normalize(term()) :: term()
   def normalize({:call, {:dot, {:id, "Prim"}, name}, args}) when name in @prims,
     do: {:call, {:id, "__prim_" <> name}, Enum.map(args, &normalize/1)}
 

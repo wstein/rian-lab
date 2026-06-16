@@ -248,6 +248,7 @@ defmodule Rian.Core do
   end
 
   @doc "Translate a surface expression (the `Rian.Pratt` tuple AST) into the typed core."
+  @spec from_expr(tuple()) :: struct()
   def from_expr({:num, n}), do: %ENum{text: n}
   def from_expr({:str, s}), do: %EStr{value: s}
 
@@ -325,6 +326,7 @@ defmodule Rian.Core do
   @doc "Translate a surface pattern (the `Rian.Pratt` tuple AST) into the typed core."
   # `{:rpat, str}` is a pre-rendered Rust pattern baked by `Rian.Lower`'s
   # Rust-only pass (it carries the type meta); pass it through unchanged.
+  @spec from_pat(tuple() | :wild) :: struct() | tuple()
   def from_pat({:rpat, _} = baked), do: baked
   def from_pat(:wild), do: %PWild{}
   def from_pat({:var, name}), do: %PVar{name: name}
@@ -355,6 +357,7 @@ defmodule Rian.Core do
   `nil`. Each emitter supplies its own struct→label map and raises its own
   `Unsupported` from the result. (Mirrors `Rian.Reach.scan/3`'s shape.)
   """
+  @spec first_unsupported(term(), map()) :: term()
   def first_unsupported(node, unsup) when is_struct(node) do
     case Map.get(unsup, node.__struct__) do
       nil ->
@@ -383,6 +386,7 @@ defmodule Rian.Core do
   construct, and `target`. Shared by `Rian.JS` and `Rian.JVM`; each passes its own
   struct→label map, target atom, and module-local `Unsupported` exception.
   """
+  @spec reject_unsupported!([map()], map(), atom(), module()) :: :ok
   def reject_unsupported!(funcs, unsup, target, exception) do
     Enum.each(funcs, fn f ->
       Enum.each(f.clauses, fn c ->

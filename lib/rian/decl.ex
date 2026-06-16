@@ -94,6 +94,7 @@ defmodule Rian.Decl do
 
   # ── Public API ─────────────────────────────────────────────────────────
   @doc "Parse source into `%{types: [...], structs: [...], funcs: [...], mods: [...]}` (pipeline IR)."
+  @spec parse(String.t()) :: map()
   def parse(src) do
     decls = src |> Lexer.tokenize() |> split_decls()
     aliases = collect_aliases(decls)
@@ -572,6 +573,7 @@ defmodule Rian.Decl do
   functions lower one entry each; a `mod` lowers to one entry (its module text)
   keyed by the module name.
   """
+  @spec compile(String.t()) :: [{String.t(), term()}]
   def compile(src) do
     prog = parse(src)
     :ok = Check.gate!(prog)
@@ -625,6 +627,7 @@ defmodule Rian.Decl do
   end
 
   @doc "Parse and lower to the BEAM target only (FFI / BEAM-only bodies)."
+  @spec compile_beam(String.t()) :: [{String.t(), term()}]
   def compile_beam(src) do
     prog = parse(src)
     :ok = Check.gate!(prog)
@@ -1225,6 +1228,7 @@ defmodule Rian.Decl do
 
   # multi-clause: bodiless signature followed by >=1 pattern clauses. `pub` (if
   # any) sits on the signature; the clause defs that follow are not re-marked.
+  @spec build_func([map()]) :: map()
   def build_func([%{body: nil} = sig | [_ | _] = clauses]) do
     params = parse_params(sig.params)
 

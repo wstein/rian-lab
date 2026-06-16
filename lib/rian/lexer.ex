@@ -39,10 +39,35 @@ defmodule Rian.Lexer do
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/
   @id_re ~r/^[A-Za-z_]\w*/
 
+  @typedoc "A lexer token (see the `## Tokens` section above)."
+  @type token ::
+          {:nl}
+          | {:lparen}
+          | {:rparen}
+          | {:lbracket}
+          | {:rbracket}
+          | {:lbrace}
+          | {:rbrace}
+          | {:mapopen}
+          | {:comma}
+          | {:semi}
+          | {:str, String.t()}
+          | {:char, non_neg_integer()}
+          | {:num, String.t()}
+          | {:op, String.t()}
+          | {:kw, String.t()}
+          | {:id, String.t()}
+          | {:annot, String.t()}
+          | {:comment, String.t()}
+          | {:heredoc, String.t()}
+          | {:istr, [{:lit, String.t()} | {:hole, String.t()}]}
+
   @doc "Full token stream, with collapsed `{:nl}` separators (comments stripped)."
+  @spec tokenize(String.t()) :: [token()]
   def tokenize(src), do: src |> lex([]) |> strip_trivia() |> collapse_nl()
 
   @doc "Newline-free token stream for the expression grammar (`Rian.Pratt`)."
+  @spec expr_tokens(String.t()) :: [token()]
   def expr_tokens(src),
     do: src |> lex([]) |> strip_trivia() |> Enum.reject(&(&1 == {:nl}))
 
@@ -68,6 +93,7 @@ defmodule Rian.Lexer do
   line, recoverable by the formatter. Nothing downstream consumes this; it exists
   solely so `Rian.Format` can re-print without losing comments or paragraphing.
   """
+  @spec tokenize_trivia(String.t()) :: [token()]
   def tokenize_trivia(src), do: lex(src, [])
 
   @doc """
@@ -77,6 +103,7 @@ defmodule Rian.Lexer do
   statement-separators into the `;` the block grammar expects, `" "` joins a
   continued declaration onto one line.
   """
+  @spec detokenize([token()], String.t()) :: String.t()
   def detokenize(tokens, nl_as \\ " ") do
     tokens |> Enum.map_join(" ", &tok_str(&1, nl_as))
   end

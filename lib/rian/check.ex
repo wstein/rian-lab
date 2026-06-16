@@ -87,6 +87,10 @@ defmodule Rian.Check do
   componentwise-unifiable args+return — so an inferred lambda type with unknown
   argument slots (`Fn(_, Int64)`) still unifies against a declared `Fn(Int64, Int64)`.
   """
+  @typedoc "An inferred type: a type-name string (`\"Int53\"`, `\"Fn(...)\"`) or a sentinel atom (`:unknown`/`:mismatch`/`:bottom`)."
+  @type ty :: String.t() | atom()
+
+  @spec unify(ty(), ty()) :: ty()
   def unify(t, t), do: t
   def unify(:unknown, t), do: t
   def unify(t, :unknown), do: t
@@ -147,6 +151,7 @@ defmodule Rian.Check do
   accepted too and translated, so existing callers keep working (ADR-0050 — the
   checker consumes the core, one inference, no second representation).
   """
+  @spec infer(term(), map(), map()) :: ty()
   def infer(ast, env \\ %{}, ic \\ %{})
   def infer(ast, env, ic) when is_tuple(ast), do: infer(Core.from_expr(ast), env, ic)
 
@@ -337,6 +342,7 @@ defmodule Rian.Check do
   of type rules), so an emitter can read representation choices off `node.type`
   (ADR-0041/0043/0046). Nodes inference can't pin down keep `type: nil`.
   """
+  @spec annotate(term(), map(), map()) :: term()
   def annotate(ast, env \\ %{}, ic \\ %{})
   def annotate(ast, env, ic) when is_tuple(ast), do: annotate(Core.from_expr(ast), env, ic)
 
@@ -650,6 +656,7 @@ defmodule Rian.Check do
       set — directly-built `{:error, Tag}` ∪ propagated callee sets — must be a
       subset of `E` (over-declaration allowed; ADR-0040 §4).
   """
+  @spec check_func(struct(), map(), map()) :: term()
   def check_func(func, ic \\ %{}, eset \\ %{tsets: %{}, table: %{}})
 
   def check_func(%Func{} = f, ic, eset) do
@@ -1103,6 +1110,7 @@ defmodule Rian.Check do
   # poisons the join and `node.type` never over-claims. `:bottom` is the fold
   # identity (the empty set of branches). Commutative and associative.
   @doc false
+  @spec join(ty(), ty()) :: ty()
   def join(t, t), do: t
   def join(:bottom, t), do: t
   def join(t, :bottom), do: t
@@ -1389,12 +1397,14 @@ defmodule Rian.Check do
   end
 
   @doc "Parse source and check every function; returns `:ok` or the first `{:error, message}`."
+  @spec check(String.t()) :: term()
   def check(src), do: src |> Rian.Decl.parse() |> check_program()
 
   @doc """
   Check every function in a parsed program — top-level and inside every module.
   Returns `:ok` or the first `{:error, message}`.
   """
+  @spec check_program(map()) :: term()
   def check_program(%{funcs: funcs} = prog) do
     ic = program_ic(prog)
     all_funcs = funcs ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
@@ -1420,6 +1430,7 @@ defmodule Rian.Check do
           impls: map(),
           fbounds: map()
         }
+  @spec program_ic(map()) :: map()
   def program_ic(%{} = prog) do
     types = all_types(prog)
 
@@ -1574,6 +1585,7 @@ defmodule Rian.Check do
   end
 
   @doc "The compile-time type gate: raise `Rian.Check.Error` on a proven mismatch, else `:ok`."
+  @spec gate!(map()) :: :ok
   def gate!(prog) do
     case check_program(prog) do
       :ok -> :ok

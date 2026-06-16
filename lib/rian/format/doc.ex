@@ -31,17 +31,38 @@ defmodule Rian.Format.Doc do
   iff it has no propagated hard break *and* `fits?` the columns remaining on the line.
   """
 
+  @typedoc "A pretty-printing document."
+  @type t ::
+          :empty
+          | :hardline
+          | {:text, String.t()}
+          | {:line, String.t()}
+          | {:concat, [t()]}
+          | {:nest, integer(), t()}
+          | {:group, boolean(), t()}
+          | {:line_suffix, t()}
+          | {:if_break, t(), t()}
+
   # ── constructors ──────────────────────────────────────────────────────────
+  @spec empty() :: t()
   def empty, do: :empty
+  @spec text(String.t()) :: t()
   def text(s) when is_binary(s), do: {:text, s}
+  @spec nest(integer(), t()) :: t()
   def nest(n, doc) when is_integer(n), do: {:nest, n, doc}
+  @spec line() :: t()
   def line, do: {:line, " "}
+  @spec softline() :: t()
   def softline, do: {:line, ""}
+  @spec hardline() :: t()
   def hardline, do: :hardline
+  @spec line_suffix(t()) :: t()
   def line_suffix(doc), do: {:line_suffix, doc}
+  @spec if_break(t(), t()) :: t()
   def if_break(broken, flat), do: {:if_break, broken, flat}
 
   @doc "Concatenate a list of docs (flattening `empty`)."
+  @spec concat([t()]) :: t()
   def concat(docs) when is_list(docs) do
     case Enum.reject(docs, &(&1 == :empty)) do
       [] -> :empty
@@ -50,9 +71,11 @@ defmodule Rian.Format.Doc do
     end
   end
 
+  @spec concat(t(), t()) :: t()
   def concat(a, b), do: concat([a, b])
 
   @doc "Join `docs` with `sep` between each."
+  @spec join(t(), [t()]) :: t()
   def join(_sep, []), do: :empty
   def join(sep, docs), do: concat(Enum.intersperse(docs, sep))
 
@@ -63,6 +86,7 @@ defmodule Rian.Format.Doc do
   magic trailing comma: a source trailing comma keeps a group expanded even if it
   would fit).
   """
+  @spec group(t(), boolean()) :: t()
   def group(doc, force \\ false), do: {:group, force or must_break?(doc), doc}
 
   # ── break propagation (Prettier's propagateBreaks) ────────────────────────
@@ -101,6 +125,7 @@ defmodule Rian.Format.Doc do
 
   # ── render ────────────────────────────────────────────────────────────────
   @doc "Render `doc` to a string within a soft `width` column budget."
+  @spec render(t(), integer()) :: String.t()
   def render(doc, width) when is_integer(width) do
     # state: worklist, current column `k`, buffered line-suffix docs (reversed)
     do_render(width, 0, [{0, :break, doc}], [], [])

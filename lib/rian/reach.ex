@@ -56,6 +56,7 @@ defmodule Rian.Reach do
   @conc_ex ~w(GenServer Task Process Agent Supervisor DynamicSupervisor Registry GenStage GenEvent Node)
 
   @doc "The closed target vocabulary (emitter-backed). Extends only when an emitter lands."
+  @spec targets() :: [atom()]
   def targets, do: @targets
 
   @doc """
@@ -64,6 +65,7 @@ defmodule Rian.Reach do
   Returns `%{fun_name => %{reach: MapSet.t(target), blockers: [blocker]}}` where a
   `blocker` is `%{construct: String.t(), kind: :ffi | :concurrency, kills: [target]}`.
   """
+  @spec analyze(map()) :: map()
   def analyze(prog) do
     funs = all_funcs(prog)
     modnames = MapSet.new(Enum.map(Map.get(prog, :mods, []), & &1.name))
@@ -105,6 +107,7 @@ defmodule Rian.Reach do
   nil the module is not gated — constraints are selected by need. Returns `:ok`
   or `{:error, message}`.
   """
+  @spec check_contracts(map(), term()) :: :ok | {:error, String.t()}
   def check_contracts(prog, default \\ nil) do
     reach = analyze(prog)
 
@@ -126,9 +129,11 @@ defmodule Rian.Reach do
   end
 
   @doc "Raise `Rian.Reach.Error` on any unmet `@targets(…)` contract, else `:ok`."
+  @spec gate!(map()) :: :ok
   def gate!(prog), do: gate!(prog, build_default())
 
   @doc "Gate against an explicit build-default target set (`nil` = none)."
+  @spec gate!(map(), term()) :: :ok
   def gate!(prog, default) do
     :ok = symbol_lint!(prog)
 
@@ -148,6 +153,7 @@ defmodule Rian.Reach do
   Ordering an atom literal is a cross-target divergence, so it is a compile error
   here rather than a silent per-target difference. Returns `:ok` or raises.
   """
+  @spec symbol_lint!(map()) :: :ok
   def symbol_lint!(prog) do
     case Enum.flat_map(all_funcs(prog), &func_symbol_violations/1) do
       [] ->
