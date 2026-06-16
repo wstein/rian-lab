@@ -99,16 +99,39 @@ defmodule Rian.Transpile do
 
   With `infer: true`, runs whole-program type inference (`Rian.Transpile.Infer`)
   to fill the `_Ty`/`_Ret` holes with concrete types where provable, leaving a
-  hole otherwise.
+  hole otherwise. With `open: true` (implies `infer`), residual holes become the
+  gradual `__Unknown` type (ADR-0076) so the draft **compiles and runs on Ex/JS** —
+  pinned off `:rs`/`:jvm` by `Rian.Reach`, the residual unknowns as honest gradual
+  debt rather than non-compiling markers.
   """
   def transpile(source, opts \\ []) when is_binary(source) do
+    infer? = opts[:infer] || opts[:open]
     ast = Code.string_to_quoted!(source)
-    {sigmap, types} = if opts[:infer], do: infer_program(ast), else: {%{}, []}
+    {sigmap, types} = if infer?, do: infer_program(ast), else: {%{}, []}
 
-    ast
-    |> toplevel(sigmap, types)
-    |> Enum.join("\n")
-    |> Kernel.<>("\n")
+    text =
+      ast
+      |> toplevel(sigmap, types)
+      |> Enum.join("\n")
+      |> Kernel.<>("\n")
+
+    if opts[:open], do: open_holes(text), else: text
+  end
+
+  # `open: true` — residual `_Ty`/`_Ret` holes (in def signatures, never the header
+  # comment) become `__Unknown`, the sound gradual open type (ADR-0076).
+  defp open_holes(text) do
+    text
+    |> String.split("\n")
+    |> Enum.map_join("\n", fn line ->
+      if String.starts_with?(String.trim_leading(line), "#") do
+        line
+      else
+        line
+        |> String.replace(~r/\b_Ty\b/, "__Unknown")
+        |> String.replace(~r/\b_Ret\b/, "__Unknown")
+      end
+    end)
   end
 
   # Phase B: assemble Result returns (`Payload | Errors`) and synthesize the
@@ -156,8 +179,15 @@ defmodule Rian.Transpile do
     # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics
     # check; counted (occurrences, not lines) so the report can surface them.
     mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, text) |> length()
-    holes = Regex.scan(~r/\b_(?:Ty|Ret)\b/, text) |> length()
-    {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes}}
+    # holes/open are counted over the code only — the header comment illustrates
+    # `_Ty`/`_Ret` and must not inflate the count.
+    code =
+      lines |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#")) |> Enum.join("\n")
+
+    holes = Regex.scan(~r/\b_(?:Ty|Ret)\b/, code) |> length()
+    # with `open: true` the residual holes are `__Unknown` (gradual debt, ADR-0076).
+    open = Regex.scan(~r/\b__Unknown\b/, code) |> length()
+    {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes, open: open}}
   end
 
   # ── whole-program type inference (ADR-0034-aligned hole filling) ────────────

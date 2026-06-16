@@ -1,9 +1,9 @@
 # ADR-0076 — `__Unknown`: sound gradual typing for the dynamic targets
 
 **Status:** Accepted (direction)
-**Implemented:** partial — Phase 1 (the checker rule) shipped (`Rian.Check`,
-`test/rian/gradual_test.exs`); Reach-pinning, emitter `any()` lowering, transpiler
-integration, and the Dialyzer cross-check are staged below.
+**Implemented:** Phases 1–4 shipped (`Rian.Check`, `Rian.Reach`, BEAM/JS lowering,
+`mix rian.transpile --open`; `test/rian/gradual_test.exs`). The Dialyzer cross-check
+(Phase 5) is staged below.
 **Refs:** ADR-0034 (type-system foundations / `:unknown`), ADR-0040 (`T | E` / error
 sets), ADR-0042 (`Fn(…)`), ADR-0057/0058 (target reachability), ADR-0064 (portable
 numerics), ADR-0026 (Dialyzer `-spec` emission), ADR-0075 (transpiler inference)
@@ -70,8 +70,11 @@ the correct long-term answer for multi-clause false positives, out of scope here
 - **Phase 2:** `Rian.Reach` — `__Unknown` in a signature adds a blocker killing
   `[:rs, :jvm]`; `@targets(:rs|:jvm)` modules touching `__Unknown` are rejected.
 - **Phase 3:** confirm/seal BEAM + JS lowering for `__Unknown`-rich code; JS emitter test.
-- **Phase 4:** the transpiler emits `__Unknown` for residual `Unk`/`_Ty` so drafts
-  compile-and-run on Ex/JS; `mix rian.transpile` counts `__Unknown` as visible debt.
+- **Phase 4 (shipped):** `mix rian.transpile --open` (implies `--infer`) replaces
+  residual `_Ty`/`_Ret` holes with `__Unknown` (`Rian.Transpile.open_holes/1`), so a
+  fully-translated draft **compiles and runs on Ex/JS** instead of needing every type
+  hand-filled; `transpile_with_stats` counts the opened `__Unknown` as gradual debt and
+  the task prints it (":ex/:js only"). Verified: an opened draft `Decl.compile`s.
 - **Phase 5:** `mix rian.dialyze` — compile to BEAM and shell out to Dialyzer as an
   external cross-check (the self-host bootstrap oracle).
 

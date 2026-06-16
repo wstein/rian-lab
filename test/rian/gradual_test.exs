@@ -136,6 +136,37 @@ defmodule Rian.GradualTest do
     end
   end
 
+  describe "transpiler --open — residual holes become __Unknown (ADR-0076 Phase 4)" do
+    test "an opened draft replaces residual _Ty/_Ret with __Unknown and compiles" do
+      ex = "defmodule M do\n  def both(a, b), do: a\n  def wrap(x), do: x\nend"
+
+      body =
+        Rian.Transpile.transpile(ex, open: true)
+        |> String.split("\n")
+        |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#"))
+        |> Enum.join("\n")
+
+      # the code (not the illustrative header) has no residual holes
+      refute body =~ ~r/\b_Ty\b/
+      refute body =~ ~r/\b_Ret\b/
+      assert body =~ "__Unknown"
+      assert :ok = check(body)
+    end
+
+    test "stats count the opened holes as gradual __Unknown debt" do
+      ex = "defmodule M do\n  def f(x), do: {:a, x}\nend"
+      {_text, stats} = Rian.Transpile.transpile_with_stats(ex, open: true)
+      assert stats.open >= 1
+      assert stats.holes == 0
+    end
+
+    test "--open implies --infer: inference still fills what it can (numeric stays Int53)" do
+      ex = "defmodule M do\n  def inc(x), do: x + 1\nend"
+      draft = Rian.Transpile.transpile(ex, open: true)
+      assert draft =~ "Int53"
+    end
+  end
+
   describe "the gradual guarantee — fully-typed code is untouched" do
     test "a module with ZERO __Unknown still type-checks exactly as before" do
       assert :ok = check("mod M do\n  pub def add(a Int53, b Int53) Int53 := a + b\nend")
