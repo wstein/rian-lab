@@ -1,7 +1,7 @@
 # ADR-0047 — Portable Prelude & Stdlib: three tiers, hybrid implementation, `Option` not `nil`
 
 **Status:** Accepted (direction) · the *contents* fill incrementally; this ADR fixes the *model*
-**Implemented:** partial — primitive layer (`Rian.Prim`, `test/rian/prim_test.exs`) + portable prelude written in Rian (`examples/rian/prelude_{int,str,dict}.rian`); contents fill incrementally
+**Implemented:** partial — primitive layer (`Rian.Prim`, `test/rian/prim_test.exs`) + portable prelude written in Rian (`examples/rian/prelude_{int,str,dict}.rian`); contents fill incrementally. The `Prim.* → __prim_*` normalization (§2) is itself **self-hosted** — `compiler/prim.rian` (`PrimNorm.normalize`) reproduces `Rian.Prim.normalize`, fixpoint-locked in `test/rian/prim_fixpoint_test.exs` (ADR-0063 #2)
 **Refs:** ADR-0027 (free BEAM FFI; self-hosting), ADR-0029 (dot qualifier), ADR-0034 (nominal sums; `Option`), ADR-0035 (no hidden control flow), ADR-0040 (`Result`), ADR-0041 (target model — "Rian prelude provided on every target"; module resolution), ADR-0042 (protocols), ADR-0046 (compile-time by default)
 **Owners:** Chloe Bennett (prelude) · Arthur Pendelton (stdlib-in-Rian) · Elena Rostova (primitives/perf) · Maya Lin (tiers/multi-target) · Kira Neri (determinism) · Samir Patel (conformance) · Marcus Chen (effect boundary) · Liam Davis (namespacing) · Rachel Okafor (PM)
 
