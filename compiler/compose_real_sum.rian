@@ -255,7 +255,11 @@ mod ComposeRealSum do
             case first_ret_error(decls) do
               "" ->
                 case first_bind_bad(decls) do
-                  "" -> assemble(modname, funcs(grps))
+                  "" ->
+                    case first_bound_bad(decls) do
+                      "" -> assemble(modname, funcs(grps))
+                      bad -> refuse_type(bad)
+                    end
                   bad -> refuse_type(bad)
                 end
               bad -> refuse_type(bad)
@@ -1174,6 +1178,97 @@ mod ComposeRealSum do
 
   def block_stmts_chk(Block) Vec(Stmt)
   def block_stmts_chk(Block(stmts)) := to_chk_stmts(stmts)
+
+  # ── the FOURTH type gate: protocol-bound violation (Checker.bounds_bad, ADR-0042 §2) ──
+  # the self-built compiler REFUSES a call to a bounded generic `forall T: P` whose `T`
+  # instantiates to a concrete type with no `impl P for it` ({:type_error, name}). Builds
+  # the `fbounds` (bounded function -> tvars/param-types/bounds) and `impls` (protocol ->
+  # implementing types) tables from the decls once, then walks each body with `bounds_bad`.
+  def first_bound_bad(decls Vec(Tuple)) String := fbnd(sig_index(decls), fbound_tab(decls), impl_tab(decls), decls)
+
+  def fbnd(Vec(Tuple), Dict(String, Tuple), Dict(String, Vec(String)), Vec(Tuple)) String
+  def fbnd(_, _, _, []) := ""
+  def fbnd(sigs, fb, im, [{:d_func, _, name, params, _, _, body} | rest])
+    if func_bound_bad(params, body, fb, im) do
+      name
+    else
+      fbnd(sigs, fb, im, rest)
+    end
+  end
+  def fbnd(sigs, fb, im, [{:d_clause, name, pats, expr} | rest]) := clause_bound_or(sigs, fb, im, name, pats, expr, rest)
+  def fbnd(sigs, fb, im, [{:d_clause_g, name, pats, _, expr} | rest]) := clause_bound_or(sigs, fb, im, name, pats, expr, rest)
+  def fbnd(sigs, fb, im, [{:d_mod, _, inner} | rest]) := combine_bound(first_bound_bad(inner), sigs, fb, im, rest)
+  def fbnd(sigs, fb, im, [_ | rest]) := fbnd(sigs, fb, im, rest)
+
+  # NB: each gets a type SIG + an UNTYPED clause head. A named param whose type carries an
+  # internal comma (`Dict(String, Tuple)`) mis-splits the self-hosted param parser (it drops
+  # the params after it); a type-only sig splits correctly, and the untyped clause head is
+  # then unambiguous. `clause_env`/`param_tenv` are pure, so computing them twice is fine.
+  def combine_bound(String, Vec(Tuple), Dict(String, Tuple), Dict(String, Vec(String)), Vec(Tuple)) String
+  def combine_bound(inner, sigs, fb, im, rest) := if inner == "" do fbnd(sigs, fb, im, rest) else inner end
+
+  def clause_bound_or(Vec(Tuple), Dict(String, Tuple), Dict(String, Vec(String)), String, Vec(Tuple), Tuple, Vec(Tuple)) String
+  def clause_bound_or(sigs, fb, im, name, pats, expr, rest) :=
+    case sig_lookup(sigs, name) do
+      SSome(params, _) -> bound_decide(clause_bound_bad(params, pats, expr, fb, im), name, sigs, fb, im, rest)
+      SNone -> fbnd(sigs, fb, im, rest)
+    end
+
+  def bound_decide(Bool, String, Vec(Tuple), Dict(String, Tuple), Dict(String, Vec(String)), Vec(Tuple)) String
+  def bound_decide(bad, name, sigs, fb, im, rest) := if bad do name else fbnd(sigs, fb, im, rest) end
+
+  def clause_bound_bad(Vec(Tuple), Vec(Tuple), Tuple, Dict(String, Tuple), Dict(String, Vec(String))) Bool
+  def clause_bound_bad(sigParams, pats, expr, fb, im) :=
+    Checker.bounds_bad(to_chk_block(lower_body(desugar_interp(clause_env(pats, sigParams), expr))), tenv_dict(clause_env(pats, sigParams)), Prim.map_new(), fb, im)
+
+  def func_bound_bad(Vec(Tuple), Tuple, Dict(String, Tuple), Dict(String, Vec(String))) Bool
+  def func_bound_bad(params, body, fb, im) :=
+    Checker.bounds_bad(to_chk_block(lower_body(desugar_interp(param_tenv(params), body))), tenv_dict(param_tenv(params)), Prim.map_new(), fb, im)
+
+  # fbounds: every bounded generic (a `forall` tvar carrying protocol bounds) -> the
+  # checker's `FBnd` tuple `{:fb, tvar-names, param-types, [{:p_bound, tvar, protos}]}`.
+  def fbound_tab(Vec(Tuple)) Dict(String, Tuple)
+  def fbound_tab(decls) := ftab(decls, Prim.map_new())
+
+  def ftab(Vec(Tuple), Dict(String, Tuple)) Dict(String, Tuple)
+  def ftab([], acc) := acc
+  def ftab([{:d_func, _, name, params, _, tvars, _} | rest], acc) := ftab(rest, add_fbound(name, params, tvars, acc))
+  def ftab([{:d_sig, _, name, params, _, tvars} | rest], acc) := ftab(rest, add_fbound(name, params, tvars, acc))
+  def ftab([{:d_mod, _, inner} | rest], acc) := ftab(rest, ftab(inner, acc))
+  def ftab([_ | rest], acc) := ftab(rest, acc)
+
+  def add_fbound(String, Vec(Tuple), Vec(Tuple), Dict(String, Tuple)) Dict(String, Tuple)
+  def add_fbound(name, params, tvars, acc) := add_fb(name, params, tvars, tv_bounds(tvars), acc)
+
+  def add_fb(String, Vec(Tuple), Vec(Tuple), Vec(Tuple), Dict(String, Tuple)) Dict(String, Tuple)
+  def add_fb(_, _, _, [], acc) := acc
+  def add_fb(name, params, tvars, bounds, acc) := Prim.map_put(acc, name, {:fb, tv_names(tvars), param_types(params), bounds})
+
+  def tv_bounds(Vec(Tuple)) Vec(Tuple)
+  def tv_bounds([]) := []
+  def tv_bounds([{:tv, _, []} | rest]) := tv_bounds(rest)
+  def tv_bounds([{:tv, tn, protos} | rest]) := [{:p_bound, tn, protos} | tv_bounds(rest)]
+
+  def tv_names(Vec(Tuple)) Vec(String)
+  def tv_names([]) := []
+  def tv_names([{:tv, tn, _} | rest]) := [tn | tv_names(rest)]
+
+  def param_types(Vec(Tuple)) Vec(String)
+  def param_types([]) := []
+  def param_types([{:par, _, _, ty} | rest]) := [ty | param_types(rest)]
+
+  # impls: protocol -> the list of types that `impl` it (from the `d_impl` facts).
+  def impl_tab(Vec(Tuple)) Dict(String, Vec(String))
+  def impl_tab(decls) := itab(decls, Prim.map_new())
+
+  def itab(Vec(Tuple), Dict(String, Vec(String))) Dict(String, Vec(String))
+  def itab([], acc) := acc
+  def itab([{:d_impl, proto, ty, _} | rest], acc) := itab(rest, add_impl(proto, ty, acc))
+  def itab([{:d_mod, _, inner} | rest], acc) := itab(rest, itab(inner, acc))
+  def itab([_ | rest], acc) := itab(rest, acc)
+
+  def add_impl(String, String, Dict(String, Vec(String))) Dict(String, Vec(String))
+  def add_impl(proto, ty, acc) := if Prim.map_has(acc, proto) do Prim.map_put(acc, proto, [ty | Prim.map_get(acc, proto)]) else Prim.map_put(acc, proto, [ty]) end
 
   # an UNTYPED param carries type "" — omit it so the checker infers `unknown` for it
   # (conservative) rather than treating "" as a concrete type that unifies with nothing.
