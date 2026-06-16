@@ -953,12 +953,12 @@ defmodule Rian.Lower do
 
   # project each associated-type name to its `Self::Name` use inside a trait sig.
   defp assoc_proj(s, assoc),
-    do: Enum.reduce(assoc, s, &Regex.replace(~r/\b#{&1}\b/, &2, "Self::#{&1}"))
+    do: Enum.reduce(assoc, s, fn a, acc -> word_replace(acc, a, "Self::#{a}") end)
 
   # substitute each associated-type name with its concrete Rust type (the impl side):
   # `%{"Elem" => "i64"}` turns `Vec<Elem>` into `Vec<i64>`.
   defp subst_assoc(t, assoc_rust),
-    do: Enum.reduce(assoc_rust, t, fn {a, r}, acc -> Regex.replace(~r/\b#{a}\b/, acc, r) end)
+    do: Enum.reduce(assoc_rust, t, fn {a, r}, acc -> word_replace(acc, a, r) end)
 
   defp rust_impl(%{proto: proto, type: type, methods: methods} = impl, protocols, c) do
     # associated-type bindings (ADR-0074 Stage 3): `type Elem := Int53` emits
@@ -1097,7 +1097,7 @@ defmodule Rian.Lower do
     end
   end
 
-  defp self_subst(t, repr), do: Regex.replace(~r/\bSelf\b/, t, repr)
+  defp self_subst(t, repr), do: word_replace(t, "Self", repr)
 
   # the protocol-method -> trait-name map for the current compile (UFCS rewrite),
   # carried in the process dict (a single sequential emitter pass, like js int53).
@@ -1302,7 +1302,7 @@ defmodule Rian.Lower do
   # does a parametric type `name` appear (as a whole word) in the function's signature?
   defp parametric_used?(func, name) do
     sig = Enum.map(func.params, & &1.type) ++ [func.ret]
-    Enum.any?(sig, fn t -> is_binary(t) and String.match?(t, ~r/\b#{Regex.escape(name)}\b/) end)
+    Enum.any?(sig, fn t -> is_binary(t) and word_member?(t, name) end)
   end
 
   # all generic params for a parametric-using generic function: its own tvars plus any
@@ -1323,9 +1323,53 @@ defmodule Rian.Lower do
   # `&[Pair]` + `%{"Pair" => "<K, V>"}` -> `&[Pair<K, V>]`.
   defp rustify_parametric(rust_type, pinst) do
     Enum.reduce(pinst, rust_type, fn {name, args}, acc ->
-      Regex.replace(~r/\b#{Regex.escape(name)}\b/, acc, "#{name}#{args}")
+      word_replace(acc, name, "#{name}#{args}")
     end)
   end
+
+  # Whole-word string substitution — the char-scan port of `~r/\bname\b/` from the
+  # self-hosted compiler/rust.rian (`splice_one`/`splice_scan`). No regex engine, no
+  # `Regex.escape` foot-gun: a match fires only when the chars bracketing `name` are
+  # non-word (word chars are `[A-Za-z0-9_]`, matching `\w`). `prev` carries whether
+  # the char just emitted was a word char (the left boundary).
+  defp word_replace(str, name, repl),
+    do: word_scan(String.to_charlist(str), String.to_charlist(name), repl, false)
+
+  defp word_scan([], _name, _repl, _prev), do: ""
+
+  defp word_scan([c | cs] = chars, name, repl, prev) do
+    case strip_prefix(chars, name) do
+      {:ok, rest} when not prev ->
+        if head_word?(rest),
+          do: <<c::utf8>> <> word_scan(cs, name, repl, word_char?(c)),
+          else: repl <> word_scan(rest, name, repl, true)
+
+      _ ->
+        <<c::utf8>> <> word_scan(cs, name, repl, word_char?(c))
+    end
+  end
+
+  # does `name` occur as a whole word in `str`? (the predicate side of `word_replace`)
+  defp word_member?(str, name),
+    do: member_scan(String.to_charlist(str), String.to_charlist(name), false)
+
+  defp member_scan([], _name, _prev), do: false
+
+  defp member_scan([c | cs] = chars, name, prev) do
+    case strip_prefix(chars, name) do
+      {:ok, rest} when not prev -> not head_word?(rest) or member_scan(cs, name, word_char?(c))
+      _ -> member_scan(cs, name, word_char?(c))
+    end
+  end
+
+  defp strip_prefix(rest, []), do: {:ok, rest}
+  defp strip_prefix([c | cs], [c | ps]), do: strip_prefix(cs, ps)
+  defp strip_prefix(_chars, _name), do: :nomatch
+
+  defp head_word?([c | _]), do: word_char?(c)
+  defp head_word?([]), do: false
+
+  defp word_char?(c), do: c in ?a..?z or c in ?A..?Z or c in ?0..?9 or c == ?_
 
   # concrete instantiation for a non-generic builder (`sample`/`names`): infer the
   # parametric type's args from the body's tail — a call to a generic constructor
