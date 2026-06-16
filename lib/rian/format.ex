@@ -75,8 +75,11 @@ defmodule Rian.Format do
     if blank?(row) do
       indent_rows(rest, stack, cont, ["" | acc])
     else
+      # resolve unary `-`/`+` and key/atom colons up front, so the indent rules
+      # see a leading unary minus (`-1`) as a value, not a continuation operator.
+      row = mark(row)
       level = max(0, hd(stack) + cont + lead_adjust(row))
-      line = String.duplicate("  ", level) <> render(mark(row))
+      line = String.duplicate("  ", level) <> render(row)
       stack = update_stack(row, rest, level, stack)
       cont = if trailing_op?(row), do: 1, else: 0
       indent_rows(rest, stack, cont, [line | acc])
@@ -169,10 +172,14 @@ defmodule Rian.Format do
   defp boundary?(_), do: false
 
   # ── intra-line rendering with context-sensitive spacing ───────────────────
-  defp render([]), do: ""
+  # only called on non-empty rows (blank rows short-circuit in `indent_rows`)
   defp render([t | rest]), do: leaf(t) <> render_rest(rest, t)
 
   defp render_rest([], _prev), do: ""
+
+  # a trailing comment (always the row's last token) sits two spaces off the code
+  defp render_rest([{:comment, _} = t | rest], _prev),
+    do: "  " <> leaf(t) <> render_rest(rest, t)
 
   defp render_rest([t | rest], prev) do
     sep = if space?(prev, t), do: " ", else: ""
