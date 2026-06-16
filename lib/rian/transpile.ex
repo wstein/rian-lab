@@ -108,16 +108,71 @@ defmodule Rian.Transpile do
   to fill the `_Unk` holes with concrete types where provable (harvesting any
   `@spec` as a cross-checked hint), leaving an honest `_Unk` hole otherwise —
   a hole signals "a human must supply this type", never an auto-filled placeholder.
+
+  **`@rian` annotations** (always honoured, with or without `infer`) are the
+  authoritative escape hatch (`Rian.Ann`): a `@rian` module attribute carrying a native
+  Rian `def`/`struct`/`type` declaration supplies the exact types inference can't
+  recover. A `def` annotation overrides the function's signature; a `struct`/`type`
+  annotation replaces the holes the `defstruct`/`@type` emission leaves. A heredoc gives
+  multi-line struct/type decls; `use Rian.Ann` keeps the `.ex` warning-free.
   """
   @spec transpile(String.t(), keyword()) :: term()
   def transpile(source, opts \\ []) when is_binary(source) do
     ast = Code.string_to_quoted!(source)
     {sigmap, types} = if opts[:infer], do: infer_program(ast), else: {%{}, []}
 
+    # `@rian` annotations are authoritative — merge `def` sigs OVER inference, hand the
+    # `struct`/`type` decls to the renderer.
+    {def_anns, struct_anns, type_anns} = classify_annotations(Rian.Ann.from_source(source))
+
     ast
-    |> toplevel(sigmap, types)
+    |> toplevel(Map.merge(sigmap, def_anns), types ++ type_anns, struct_anns)
     |> Enum.join("\n")
     |> Kernel.<>("\n")
+  end
+
+  # split `@rian` annotation strings into `{def sigmap, struct-by-name, [type decl]}`.
+  # Whitespace is collapsed so a heredoc multi-line decl parses/emits as one line.
+  defp classify_annotations(strings) do
+    Enum.reduce(strings, {%{}, %{}, []}, fn raw, {defs, structs, types} ->
+      str = raw |> String.replace(~r/\s+/, " ") |> String.trim()
+
+      cond do
+        Regex.match?(~r/^(pub\s+)?struct\s/, str) ->
+          {defs, Map.put(structs, struct_ann_name(str), str), types}
+
+        Regex.match?(~r/^(pub\s+)?type\s/, str) ->
+          {defs, structs, types ++ [str]}
+
+        true ->
+          case parse_rian_sig(str) do
+            {k, sig} -> {Map.put(defs, k, sig), structs, types}
+            nil -> {defs, structs, types}
+          end
+      end
+    end)
+  end
+
+  defp struct_ann_name(str) do
+    case Regex.run(~r/struct\s+(\w+)/, str) do
+      [_, name] -> name
+      _ -> nil
+    end
+  end
+
+  # parse a Rian def signature into a sigmap entry, keyed by its own {name, arity}.
+  # A dummy body makes the bodiless head a complete, parseable clause.
+  defp parse_rian_sig(sig) do
+    case Rian.Decl.parse(sig <> " := nil") do
+      %{funcs: [f | _]} ->
+        {{to_string(f.name), length(f.params)},
+         %{params: Enum.map(f.params, & &1.type), ret: f.ret, tvars: f.tvars}}
+
+      _ ->
+        nil
+    end
+  rescue
+    _ -> nil
   end
 
   # Phase B: assemble Result returns (`Payload | Errors`) and synthesize the
@@ -380,15 +435,18 @@ defmodule Rian.Transpile do
 
   # ── module ────────────────────────────────────────────────────────────────
 
-  defp toplevel({:defmodule, _, [aliases, [do: body]]}, sigmap, types) do
+  defp toplevel({:defmodule, _, [aliases, [do: body]]}, sigmap, types, struct_anns) do
     name = short_name(aliases)
-    inner = body |> block_stmts() |> render_items(sigmap, name) |> Enum.map(&indent/1)
-    # synthesized `type …` declarations (Phase B error sets) go after `mod … do`.
+
+    inner =
+      body |> block_stmts() |> render_items(sigmap, name, struct_anns) |> Enum.map(&indent/1)
+
+    # synthesized `type …` declarations (Phase B error sets, `@rian type`) after `mod … do`.
     type_lines = if types == [], do: [], else: Enum.map(types, &("  " <> &1)) ++ [""]
     @header ++ ["mod #{name} do" | type_lines ++ inner] ++ ["end"]
   end
 
-  defp toplevel(other, _sigmap, _types) do
+  defp toplevel(other, _sigmap, _types, _struct_anns) do
     @header ++ ["# TODO[port]: top-level is not a single `defmodule`", "# #{snippet(other)}"]
   end
 
@@ -403,7 +461,7 @@ defmodule Rian.Transpile do
   # Walk the statement list, attaching a pending `@doc` to the next def, and
   # merging consecutive same-name/arity clauses into one rendered group.
 
-  defp render_items(stmts, sigmap, mod_name) do
+  defp render_items(stmts, sigmap, mod_name, struct_anns) do
     {lines, _pending_doc, open} =
       Enum.reduce(stmts, {[], nil, nil}, fn stmt, {acc, doc, open} ->
         case classify(stmt) do
@@ -415,12 +473,14 @@ defmodule Rian.Transpile do
             # Elixir nests struct/util modules; recurse. A struct-only wrapper flattens
             # to its `struct …` decl (the module is just a namespace for the struct);
             # a submodule with other content nests as `mod Name do … end`.
-            {acc ++ flush(open, sigmap) ++ render_submodule(name, body, sigmap), doc, nil}
+            {acc ++ flush(open, sigmap) ++ render_submodule(name, body, sigmap, struct_anns), doc,
+             nil}
 
           {:defstruct, fields} ->
-            # an Elixir `defstruct` IS the module's record type → a Rian `struct`
-            # decl named for the module, fields as `_Unk` holes for a human to type.
-            {acc ++ flush(open, sigmap) ++ [struct_decl(mod_name, fields)], doc, nil}
+            # an Elixir `defstruct` IS the module's record type → a Rian `struct` decl
+            # named for the module; a `@rian struct …` annotation supplies the field
+            # types, else they are `_Unk` holes for a human to type.
+            {acc ++ flush(open, sigmap) ++ [struct_decl(mod_name, fields, struct_anns)], doc, nil}
 
           {:moduledoc, text} ->
             {acc ++ flush(open, sigmap) ++ [""] ++ moduledoc_lines(text), doc, nil}
@@ -474,6 +534,10 @@ defmodule Rian.Transpile do
   defp classify({:@, _, [{:type, _, _}]} = n), do: {:type_decl, n}
   # `@enforce_keys` is an Elixir runtime concern subsumed by Rian's typed fields.
   defp classify({:@, _, [{:enforce_keys, _, _}]}), do: :skip
+  # `@rian` annotations are HARVESTED into the signatures/struct/type decls; the
+  # `use Rian.Ann` directive is annotation support — both are consumed, not ported.
+  defp classify({:@, _, [{:rian, _, _}]}), do: :skip
+  defp classify({:use, _, [{:__aliases__, _, [:Rian, :Ann]}]}), do: :skip
 
   defp classify({:defmodule, _, [{:__aliases__, _, _} = al, [do: body]]}),
     do: {:submodule, short_name(al), body}
@@ -488,9 +552,9 @@ defmodule Rian.Transpile do
 
   # render a nested `defmodule`: flatten a struct-only wrapper to its `struct` decl
   # (Elixir's one-struct-per-module idiom), else nest it as a `mod … do … end`.
-  defp render_submodule(name, body, sigmap) do
+  defp render_submodule(name, body, sigmap, struct_anns) do
     stmts = block_stmts(body)
-    inner = render_items(stmts, sigmap, name)
+    inner = render_items(stmts, sigmap, name, struct_anns)
 
     if struct_only_module?(stmts) do
       inner
@@ -516,16 +580,23 @@ defmodule Rian.Transpile do
   defp struct_field?({a, _default}) when is_atom(a), do: true
   defp struct_field?(_), do: false
 
-  # `defstruct [:x, y: 0]` → `struct Mod(x _Unk, y _Unk)` (defaults dropped — the
-  # field NAMES port; their types and any default are for the human to fill).
-  defp struct_decl(mod_name, fields) do
-    names =
-      Enum.map(fields, fn
-        {k, _default} -> k
-        k -> k
-      end)
+  # `defstruct [:x, y: 0]` → `struct Mod(x _Unk, y _Unk)` (defaults dropped — the field
+  # NAMES port; their types and any default are for the human to fill). A `@rian struct
+  # Mod(…)` annotation (by name) supplies the field types verbatim instead.
+  defp struct_decl(mod_name, fields, struct_anns) do
+    case Map.get(struct_anns, mod_name) do
+      nil ->
+        names =
+          Enum.map(fields, fn
+            {k, _default} -> k
+            k -> k
+          end)
 
-    "struct #{mod_name}(#{Enum.map_join(names, ", ", &"#{&1} _Unk")})"
+        "struct #{mod_name}(#{Enum.map_join(names, ", ", &"#{&1} _Unk")})"
+
+      decl ->
+        decl
+    end
   end
 
   # A clause: name, arity, parameter/pattern nodes, optional guard, body AST.

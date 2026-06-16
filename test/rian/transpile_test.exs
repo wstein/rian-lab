@@ -53,6 +53,83 @@ defmodule Rian.TranspileTest do
     end
   end
 
+  describe "@rian attribute annotations — author the type inference can't recover" do
+    test "a `@rian` def attribute supplies the signature (no --infer needed)" do
+      src = ~S'''
+      defmodule M do
+        use Rian.Ann
+        @rian "pub def rust_param(Symbol, String) String"
+        def rust_param(name, val), do: val
+      end
+      '''
+
+      out = rian(src)
+      assert out =~ "pub def rust_param(name Symbol, val String) String := val"
+      # the @rian attribute + use Rian.Ann are consumed, not re-emitted as markers
+      refute out =~ "TODO[port]: @rian"
+      refute out =~ "use Rian.Ann"
+    end
+
+    test "an annotation overrides what inference would otherwise hole/guess" do
+      src = ~S'''
+      defmodule M do
+        use Rian.Ann
+        @rian "def tag(Symbol) Bool"
+        defp tag(x), do: process(x)
+      end
+      '''
+
+      assert Transpile.transpile(src, infer: true) =~ "def tag(x Symbol) Bool := process(x)"
+    end
+
+    test "a `@rian` struct attribute supplies the field types (heredoc multiline)" do
+      src = ~S'''
+      defmodule Func do
+        use Rian.Ann
+        @rian """
+        struct Func(name String, params Vec(Param),
+                    ret String, pub? Bool)
+        """
+        defstruct [:name, :params, :ret, :pub?]
+      end
+      '''
+
+      assert rian(src) =~ "struct Func(name String, params Vec(Param), ret String, pub? Bool)"
+      # the annotation OVERRODE the holes — no `_Unk` field in the struct decl
+      refute rian(src) =~ ~r/struct Func\([^)]*_Unk/
+    end
+
+    test "a `@rian` type attribute emits the type declaration" do
+      src = ~S'''
+      defmodule M do
+        use Rian.Ann
+        @rian "type Expr := ENum | ECall | EIf"
+        def f(x), do: x
+      end
+      '''
+
+      assert rian(src) =~ "type Expr := ENum | ECall | EIf"
+    end
+
+    test "an annotation whose head matches no def is ignored (typo-safe)" do
+      src = ~S'''
+      defmodule M do
+        use Rian.Ann
+        @rian "pub def wrong_name(Int53) Int53"
+        def f(x), do: x + 1
+      end
+      '''
+
+      out = Transpile.transpile(src, infer: true)
+      assert out =~ "pub def f(x Int53) Int53 := x + 1"
+      refute out =~ "wrong_name"
+    end
+
+    test "no annotation → unchanged behaviour" do
+      assert rian("defmodule M do\n  def f(x), do: x\nend") =~ "pub def f(x _Unk) _Unk := x"
+    end
+  end
+
   describe "structure that has a clear Rian image" do
     test "module + simple def → `mod`/`pub def` with type holes" do
       out = rian("defmodule M do\n  def double(x), do: x + x\nend")
