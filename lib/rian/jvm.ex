@@ -82,6 +82,23 @@ defmodule Rian.JVM do
     defexception [:message]
   end
 
+  # Fast-fail diagnostic (parity with `Rian.JS`): before emitting, scan each
+  # function body for a construct the Tier-2 JVM emitter does not yet implement and
+  # raise ONE clear error naming the function and construct, rather than a deep
+  # `inspect`-dump mid-emission. Reach stays *architectural* (ADR-0041); this is an
+  # *implementation-status* check over the constructs the emitter handles in NO
+  # context. (Type-level gaps — `Vec`/`Map` params, etc. — are left to `kt_type`.)
+  # `Core.reject_unsupported!` runs the shared walk; this map is the JVM-specific set.
+  @jvm_unsupported %{
+    Core.EWith => "a `with` expression",
+    Core.ELambda => "a lambda",
+    Core.ECapture => "a function capture (`&(…)`)",
+    Core.ECaptureNamed => "a function capture (`&name/arity`)",
+    Core.ETuple => "a tuple",
+    Core.EMap => "a map",
+    Core.EStruct => "a struct construction"
+  }
+
   @doc "Compile `src`'s types + functions to a single Kotlin source module (a string)."
   def compile(src) do
     prog = Decl.parse(src)
@@ -94,7 +111,7 @@ defmodule Rian.JVM do
     # the BEAM `:dispatcher` is a guarded runtime type-test, not the Kotlin shape;
     # protocol lowering for the JVM is a later increment.
     funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
-    reject_unsupported!(funcs)
+    Core.reject_unsupported!(funcs, @jvm_unsupported, :jvm, Unsupported)
     type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt/1)
     # inject the float-repr helper only when the program lowers `__prim_float_repr`.
@@ -125,34 +142,6 @@ defmodule Rian.JVM do
       return if (x < 0) "-" + rep else rep
     }\
     """
-  end
-
-  # Fast-fail diagnostic (parity with `Rian.JS`): before emitting, scan each
-  # function body for a construct the Tier-2 JVM emitter does not yet implement and
-  # raise ONE clear error naming the function and construct, rather than a deep
-  # `inspect`-dump mid-emission. Reach stays *architectural* (ADR-0041); this is an
-  # *implementation-status* check over the constructs the emitter handles in NO
-  # context. (Type-level gaps — `Vec`/`Map` params, etc. — are left to `kt_type`.)
-  @jvm_unsupported %{
-    Core.EWith => "a `with` expression",
-    Core.ELambda => "a lambda",
-    Core.ECapture => "a function capture (`&(…)`)",
-    Core.ECaptureNamed => "a function capture (`&name/arity`)",
-    Core.ETuple => "a tuple",
-    Core.EMap => "a map",
-    Core.EStruct => "a struct construction"
-  }
-  defp reject_unsupported!(funcs) do
-    Enum.each(funcs, fn f ->
-      Enum.each(f.clauses, fn c ->
-        body = c.body |> Pratt.parse_body() |> Core.from_expr()
-
-        case Core.first_unsupported(body, @jvm_unsupported) do
-          nil -> :ok
-          label -> raise Unsupported, "`#{f.name}`: #{label} is not yet supported on :jvm"
-        end
-      end)
-    end)
   end
 
   @doc """

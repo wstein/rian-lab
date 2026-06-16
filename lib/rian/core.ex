@@ -375,4 +375,24 @@ defmodule Rian.Core do
     do: t |> Tuple.to_list() |> Enum.find_value(&first_unsupported(&1, unsup))
 
   def first_unsupported(_node, _unsup), do: nil
+
+  @doc """
+  Reject any function whose body uses a construct a partial emitter cannot lower.
+  For each clause, parse the body, find the first node whose struct is in `unsup`
+  (`first_unsupported/2`), and `raise exception` naming the function, the
+  construct, and `target`. Shared by `Rian.JS` and `Rian.JVM`; each passes its own
+  struct→label map, target atom, and module-local `Unsupported` exception.
+  """
+  def reject_unsupported!(funcs, unsup, target, exception) do
+    Enum.each(funcs, fn f ->
+      Enum.each(f.clauses, fn c ->
+        body = c.body |> Rian.Pratt.parse_body() |> from_expr()
+
+        case first_unsupported(body, unsup) do
+          nil -> :ok
+          label -> raise exception, "`#{f.name}`: #{label} is not yet supported on :#{target}"
+        end
+      end)
+    end)
+  end
 end
