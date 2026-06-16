@@ -22,16 +22,19 @@ defmodule Rian.Capability do
           ~w(Int53 Float32 Float64 Bool Char)
 
   # ── Rust parameter-type lowering ───────────────────────────────────────
+  @spec rust_param(atom(), String.t()) :: String.t()
   def rust_param(:iso, t), do: owned(t)
   def rust_param(:val, t), do: if(copy?(t), do: rust_name(t), else: borrowed(t))
   def rust_param(:ref, t), do: "&mut " <> owned(t)
   def rust_param(:tag, t), do: "&" <> owned(t)
 
+  @spec copy?(String.t()) :: boolean()
   def copy?(t), do: t in @copy
 
   # Source primitive -> Rust spelling (`Int64` -> `i64`, …). Nominal types and
   # `Vec(...)` pass through unchanged. Only exact `@copy` members are remapped,
   # so a nominal type that happens to start with `Int` is untouched.
+  @spec rust_name(String.t()) :: String.t()
   def rust_name(t), do: if(t in @copy, do: rust_scalar(t), else: t)
 
   # `Int53` is the ECMAScript-safe integer (a native JS `number` is exact only to
@@ -43,6 +46,7 @@ defmodule Rian.Capability do
   defp rust_scalar("Bool"), do: "bool"
   defp rust_scalar("Char"), do: "char"
 
+  @spec owned(String.t()) :: String.t()
   def owned("String"), do: "String"
 
   # `Int` is arbitrary precision (ADR-0064) — it needs a bignum on Rust (`i128` is
@@ -86,6 +90,7 @@ defmodule Rian.Capability do
 
   defp split_top_level(s), do: Rian.TypeStr.split_top_commas(s)
 
+  @spec borrowed(String.t()) :: String.t()
   def borrowed("String"), do: "&str"
 
   def borrowed("Vec(" <> rest) do
@@ -98,6 +103,7 @@ defmodule Rian.Capability do
   def borrowed(t), do: "&" <> rust_name(t)
 
   # ── BEAM-side legality ─────────────────────────────────────────────────
+  @spec beam_legal!(atom()) :: :ok
   def beam_legal!(:ref),
     do: raise("`ref` is not permitted on the BEAM target (no process-local proof in PoC)")
 
@@ -105,12 +111,14 @@ defmodule Rian.Capability do
 
   # ── Linearity (use-once) check ─────────────────────────────────────────
   @doc "Check a single expression: iso/ref vars in `env` must be used at most once."
+  @spec lin_check(map(), term()) :: :ok | {:error, list()}
   def lin_check(env, ast), do: verdict(env, count_uses(ast))
 
   @doc """
   Check a straight-line block. `bindings` is [{name, capability, rhs_ast}];
   each binding name enters scope (with its capability) for later bindings/final.
   """
+  @spec lin_check_block(map(), list(), term()) :: :ok | {:error, list()}
   def lin_check_block(env, bindings, final) do
     {total, env2} =
       Enum.reduce(bindings, {%{}, env}, fn {name, cap, ast}, {acc, e} ->
@@ -134,6 +142,7 @@ defmodule Rian.Capability do
   arms is consumed once (`max` over arms), so a value moved once per branch is
   legal. Counting is otherwise additive along a path.
   """
+  @spec count_uses(term()) :: map()
   def count_uses(ast), do: count_uses(ast, MapSet.new())
 
   # `bound` holds names bound locally; they shadow the outer linear environment.

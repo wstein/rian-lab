@@ -100,6 +100,7 @@ defmodule Rian.JVM do
   }
 
   @doc "Compile `src`'s types + functions to a single Kotlin source module (a string)."
+  @spec compile(String.t()) :: String.t()
   def compile(src) do
     prog = Decl.parse(src)
     # Run the full type gate first — parity with the BEAM path (`Decl.compile`); a
@@ -157,6 +158,7 @@ defmodule Rian.JVM do
   `kotlinc` is absent or the emitted Kotlin does not compile (and the emitter
   itself raises `Rian.JVM.Unsupported` for a not-yet-lowered construct).
   """
+  @spec to_jar(String.t(), String.t(), keyword()) :: {:ok, String.t()}
   def to_jar(src, jar_path, opts \\ []) do
     kotlinc =
       System.find_executable("kotlinc") ||

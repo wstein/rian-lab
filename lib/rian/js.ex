@@ -116,6 +116,7 @@ defmodule Rian.JS do
   }
 
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
+  @spec compile(String.t()) :: String.t()
   def compile(src) do
     prog = Decl.parse(src)
     # Run the full type gate first — parity with the BEAM path (`Decl.compile`),

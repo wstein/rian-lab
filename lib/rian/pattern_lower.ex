@@ -23,6 +23,7 @@ defmodule Rian.PatternLower do
   alias Rian.Core
 
   # Register a product type (struct) so struct patterns can be ordered + decomposed.
+  @spec add_struct(map(), term(), list()) :: map()
   def add_struct(env, name, fields) when is_list(fields) do
     s = to_snake(name)
     env = Map.put_new(env, :structs, %{})
@@ -37,6 +38,7 @@ defmodule Rian.PatternLower do
   end
 
   @doc "Lower one clause: %{pats: [surface], guard: boolean} -> %{pat: [checker], guard: boolean}."
+  @spec lower_clause(map(), map()) :: map()
   def lower_clause(%{pats: surface, guard: explicit?}, env) do
     {pats, introduced?} = lower_many(surface, env)
     %{pat: pats, guard: explicit? or introduced?}
@@ -54,6 +56,7 @@ defmodule Rian.PatternLower do
   core IR (`Rian.Core`); a surface pattern is translated via `Core.from_pat`, so
   callers and the direct tests can still pass surface tuples (ADR-0050).
   """
+  @spec lower(term(), map()) :: {term(), boolean()}
   def lower(pat, env) when not is_struct(pat), do: lower(Core.from_pat(pat), env)
   def lower(%Core.PWild{}, _env), do: {:wild, false}
   def lower(%Core.PVar{}, _env), do: {:wild, false}
@@ -107,6 +110,7 @@ defmodule Rian.PatternLower do
   end
 
   # PascalCase / "JNum" -> snake atom ; pre-snaked atoms pass through.
+  @spec to_snake(atom() | String.t()) :: atom()
   def to_snake(name) when is_atom(name), do: name
 
   def to_snake(name) when is_binary(name) do
