@@ -104,6 +104,7 @@ defmodule Rian.Transpile do
   pinned off `:rs`/`:jvm` by `Rian.Reach`, the residual unknowns as honest gradual
   debt rather than non-compiling markers.
   """
+  @spec transpile(String.t(), keyword()) :: term()
   def transpile(source, opts \\ []) when is_binary(source) do
     infer? = opts[:infer] || opts[:open]
     ast = Code.string_to_quoted!(source)
@@ -165,6 +166,7 @@ defmodule Rian.Transpile do
   calls, and (with `infer: true`) `holes`/`filled` count remaining vs filled
   type slots.
   """
+  @spec transpile_with_stats(String.t(), keyword()) :: term()
   def transpile_with_stats(source, opts \\ []) when is_binary(source) do
     text = transpile(source, opts)
     lines = String.split(text, "\n")
@@ -217,17 +219,20 @@ defmodule Rian.Transpile do
   The inferred signature map `{name, arity} => sig` plus synthesized type decls
   for a source — the raw inference result the port-analysis report consumes.
   """
+  @spec inferred(String.t()) :: term()
   def inferred(source) when is_binary(source) do
     infer_program(Code.string_to_quoted!(source))
   end
 
   @doc "The Elixir→Rian stdlib call-mapping table (for whole-program inference)."
+  @spec stdlib_map() :: map()
   def stdlib_map, do: @stdlib
 
   @doc """
   Per-def inference ledger for `--infer-report`: `[{ {name, arity}, ledger }]`
   where each ledger lists the remaining holes and why (`:unresolved`, …).
   """
+  @spec infer_report(String.t()) :: term()
   def infer_report(source) when is_binary(source) do
     ast = Code.string_to_quoted!(source)
     for {k, v} <- infer_sigs(ast), v.ledger != [], do: {k, v.ledger}
@@ -238,6 +243,7 @@ defmodule Rian.Transpile do
   Elixir sources, so a subsequent `transpile(_, infer: true)` resolves
   cross-module calls (`OtherMod.fun(…)`). Call once before folder-mode rendering.
   """
+  @spec prime_xmod(list()) :: term()
   def prime_xmod(sources) when is_list(sources) do
     sources
     |> Enum.map(&module_groups/1)
@@ -287,6 +293,7 @@ defmodule Rian.Transpile do
   (no defs). The ratio is the honest cost signal: a struct-reflection module
   (many markers per def) sorts last; a near-portable one sorts first.
   """
+  @spec rank(list()) :: term()
   def rank(entries) do
     entries
     |> Enum.map(fn {name, stats} ->

@@ -34,6 +34,7 @@ defmodule Rian.Transpile.Infer do
   `examples/rian/prelude_*.rian`), plus the transpiler's stdlib mapping and an
   optional sibling-signature table for intra-module calls.
   """
+  @spec build_ctx(map(), map()) :: term()
   def build_ctx(stdlib_map, siblings \\ %{}) do
     %{prelude: prelude_sigs(), stdlib: stdlib_map, siblings: siblings, xmod: xmod_cache()}
   end
@@ -45,6 +46,7 @@ defmodule Rian.Transpile.Infer do
   is simply not recorded, and recorded sigs are anchor-derived. `modules` is a list
   of `{short_module_name, [group]}`.
   """
+  @spec prime_xmod(list(), map()) :: term()
   def prime_xmod(modules, stdlib_map) do
     base = %{prelude: prelude_sigs(), stdlib: stdlib_map, siblings: %{}, xmod: %{}}
 
@@ -60,6 +62,7 @@ defmodule Rian.Transpile.Infer do
     table
   end
 
+  @spec clear_xmod() :: boolean()
   def clear_xmod, do: :persistent_term.erase({__MODULE__, :xmod})
 
   defp xmod_cache, do: :persistent_term.get({__MODULE__, :xmod}, %{})
@@ -107,6 +110,7 @@ defmodule Rian.Transpile.Infer do
   where an unresolved slot is the literal hole `"_Ty"`/`"_Ret"` and `ledger`
   records why each hole was left (for `--infer-report`).
   """
+  @spec infer_group(map(), term()) :: term()
   def infer_group(%{clauses: clauses}, ctx) do
     arity = hd(clauses).arity
     s0 = store_new()
@@ -172,6 +176,7 @@ defmodule Rian.Transpile.Infer do
 
   Returns `%{sigs: %{{mod,fn,arity} => %{params, ret}}, unks: %{name => [sites]}}`.
   """
+  @spec whole_program(list(), term(), list()) :: term()
   def whole_program(modules, stdlib, clusters \\ []) do
     s0 = store_new()
 
@@ -998,6 +1003,7 @@ defmodule Rian.Transpile.Infer do
   # ── type-string → term (for prelude sig instantiation) ────────────────────
 
   @doc false
+  @spec parse_type(String.t(), map()) :: term()
   def parse_type(str, fmap) when is_binary(str) do
     str = String.trim(str)
 

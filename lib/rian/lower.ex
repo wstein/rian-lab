@@ -69,6 +69,7 @@ defmodule Rian.Lower do
   # `proto` is the protocol-method -> trait-name map for the Rust UFCS call-site
   # rewrite (ADR-0061 §2). `Decl.compile` passes it (a function unit's body may
   # call a protocol method); a direct caller that uses no protocols omits it.
+  @spec compile(list(), map(), list(), list(), map()) :: map()
   def compile(types, func, structs \\ [], ranges \\ [], proto \\ %{}) do
     env = build_env(types, structs, ranges)
     :ok = check!(func, env)
@@ -87,6 +88,7 @@ defmodule Rian.Lower do
   BEAM-only, and Rust gets traits instead (ADR-0061), so emitting their Rust is
   both wrong and a hard error.
   """
+  @spec compile_elixir(list(), map(), list(), list()) :: map()
   def compile_elixir(types, func, structs \\ [], ranges \\ []) do
     env = build_env(types, structs, ranges)
     :ok = check!(func, env)
@@ -98,6 +100,7 @@ defmodule Rian.Lower do
   The BEAM text view is exactly the Elixir one, so this delegates to
   `compile_elixir/4` — a distinct entry point kept for call-site intent.
   """
+  @spec compile_beam(list(), map(), list(), list()) :: map()
   def compile_beam(types, func, structs \\ [], ranges \\ []),
     do: compile_elixir(types, func, structs, ranges)
 
@@ -106,11 +109,13 @@ defmodule Rian.Lower do
   `mod` (Rust), with its types/structs emitted once and each function wrapped at
   its declared visibility (`pub?` -> `def`/`pub fn`, else `defp`/private `fn`).
   """
+  @spec compile_module(struct()) :: map()
   def compile_module(%Rian.IR.Mod{} = m) do
     %{elixir: module_elixir(m), rust: module_rust(m)}
   end
 
   @doc "Compile a module to the BEAM target only."
+  @spec compile_module_beam(struct()) :: map()
   def compile_module_beam(%Rian.IR.Mod{} = m), do: %{elixir: module_elixir(m)}
 
   defp module_elixir(%{name: name, types: types, structs: structs, funcs: funcs} = m) do
@@ -292,6 +297,7 @@ defmodule Rian.Lower do
   end
 
   # ── Elixir backend ─────────────────────────────────────────────────────
+  @spec to_elixir(map(), list(), list(), map()) :: term()
   def to_elixir(func, types, structs \\ [], smeta \\ %{}) do
     typespecs = Enum.map_join(types, "\n", &ex_typespec/1)
     struct_defs = Enum.map_join(structs, "\n", &ex_struct/1)
@@ -884,6 +890,7 @@ defmodule Rian.Lower do
     do: "{:#{PL.to_snake(name)}, #{Enum.map_join(args, ", ", &pat_ex/1)}}"
 
   # ── Rust backend ───────────────────────────────────────────────────────
+  @spec to_rust(map(), list(), term(), list(), map(), map()) :: term()
   def to_rust(func, types, meta, structs \\ [], smeta \\ %{}, proto \\ %{}) do
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
     struct_defs = Enum.map_join(structs, "\n\n", &rust_struct/1)
@@ -904,6 +911,7 @@ defmodule Rian.Lower do
   Rust traits + impls from the protocol IR (ADR-0061 §2), as a self-contained
   unit: the `enum`/`struct` defs the impls reference are emitted alongside.
   """
+  @spec rust_protocols(list(), list(), list(), list()) :: term()
   def rust_protocols(protocols, impl_decls, types, structs) do
     c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new())
     impl_types = MapSet.new(impl_decls, & &1.type)
@@ -942,6 +950,7 @@ defmodule Rian.Lower do
   traits). This composes the stdlib + protocols + generics that the per-unit
   `to_rust` cannot (it repeats type defs per unit).
   """
+  @spec rust_program(map()) :: term()
   def rust_program(prog) do
     # Erase abstract types to their base (ADR-0067) — a whole-program Rust emit
     # entry reached directly (e.g. tests), so it must erase like `Decl.compile`.
@@ -1146,6 +1155,7 @@ defmodule Rian.Lower do
   # `Trait::m(recv, …)`) auto-refs the receiver, so it works whether `recv` is a
   # `&T` parameter or an owned `T` (a cloned slice-element binder) — both reach
   # the `&self` method. Non-protocol calls pass through.
+  @spec rewrite_proto_calls(term(), term()) :: term()
   def rewrite_proto_calls({:call, {:id, m}, [recv | rest]}, methods)
       when is_map_key(methods, m) do
     recv = rewrite_proto_calls(recv, methods)
@@ -1758,10 +1768,12 @@ defmodule Rian.Lower do
 
   # ── Expression emission (precedence-aware, target-specific) ────────────
   @doc "Emit a single Rian expression string to :elixir or :rust."
+  @spec emit_expr(String.t(), atom()) :: term()
   def emit_expr(src, target),
     do: emit(Core.from_expr(Rian.Pratt.parse(src)), target, emit_ctx()) |> elem(0)
 
   @doc "Emit an already-built AST (e.g. after macro expansion / comptime folding)."
+  @spec emit_ast(term(), atom()) :: term()
   def emit_ast(ast, target), do: emit(Core.from_expr(ast), target, emit_ctx()) |> elem(0)
 
   # emit/3 -> {string, prec}; p/4 wraps in parens when prec < ctx.
