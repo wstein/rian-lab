@@ -44,15 +44,37 @@ defmodule Rian.Format do
 
   @width 98
 
-  @doc "Format Rian source. Total on valid `.rian`; returns a string."
+  @doc """
+  Format Rian source. **Total** — never raises: source that cannot even be lexed
+  (an unterminated string/char/heredoc) is returned **unchanged**, so a
+  format-on-save can never corrupt a buffer mid-edit. Use `format_result/1` when
+  you need to distinguish "already formatted" from "could not be formatted".
+  """
   def format(src) when is_binary(src) do
-    src
-    |> Lexer.tokenize_trivia()
-    |> Cst.build()
-    |> logical_lines()
-    |> indent_and_render([0], 0, [])
-    |> squeeze_blanks()
-    |> Enum.map_join("", &(&1 <> "\n"))
+    case format_result(src) do
+      {:ok, out} -> out
+      {:error, _reason} -> src
+    end
+  end
+
+  @doc """
+  Like `format/1` but returns `{:ok, formatted}` or `{:error, message}` (the latter
+  when the source cannot be lexed). Lets the CLI report unformattable files instead
+  of silently passing them.
+  """
+  def format_result(src) when is_binary(src) do
+    out =
+      src
+      |> Lexer.tokenize_trivia()
+      |> Cst.build()
+      |> logical_lines()
+      |> indent_and_render([0], 0, [])
+      |> squeeze_blanks()
+      |> Enum.map_join("", &(&1 <> "\n"))
+
+    {:ok, out}
+  rescue
+    e in [ArgumentError, RuntimeError] -> {:error, Exception.message(e)}
   end
 
   # ── split the CST into logical lines on top-level newlines ────────────────
