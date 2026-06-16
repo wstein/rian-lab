@@ -363,9 +363,10 @@ over time. The proof is a four-stage ladder:
   gen1, gen1 recompiles them → gen2, assert **gen1 == gen2** (identical canonical forms
   AND bit-identical `.beam` under `:deterministic`). The honest claim is **self-COMPILING
   (BEAM, forms-level)**, *not* bare "self-hosting": the loop is only **partially**
-  self-CHECKING (the structural exhaustiveness + capability gates, plus the first
-  `Rian.Check` error set — numeric mix, ADR-0035/P3 — are in `build`; the rest of the
-  error sets are not), it is BEAM-only (the portable Rust/JS terminus is unstarted), and
+  self-CHECKING (the structural exhaustiveness + capability gates, plus the first two
+  `Rian.Check` error sets — numeric mix and return-type mismatch, ADR-0035/0064/P3 — are
+  in `build`; the rest are not), it is BEAM-only (the portable Rust/JS terminus is
+  unstarted), and
   it compiles the compiler's own *subset* of Rian, not arbitrary Rian. Three real gaps,
   none hidden. See [`test/rian/selfhost_v1_v2_fixpoint_test.exs`](test/rian/selfhost_v1_v2_fixpoint_test.exs).
   The canonical BEAM terminus; the portable one is further still.

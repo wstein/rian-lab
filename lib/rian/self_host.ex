@@ -83,7 +83,7 @@ defmodule Rian.SelfHost do
       source: "checker.rian",
       test: "test/rian/checker_infer_fixpoint_test.exs",
       note:
-        "type inference agrees with the REAL Rian.Check.infer over ALL 12 Core nodes AND the FULL inference context `ic` — literals incl. float/char, ids in a typing env, unary/binary with operand-directed arithmetic + cross-width widening, prim calls, `if`/`case` (with flow narrowing), lists, lambdas (`Fn(...)`), higher-order calls, constructor sum types + non-generic function returns, GENERIC-return instantiation (`ic.fsigs` + type variables — unify params with arg types, substitute bound tvars in the return) and constructor-pattern field narrowing (`ic.tdefs`). Inference is complete, and the FIRST error set — numeric mix (`num_mix`, ADR-0035: a `+`/`-`/`*` mixing int and float), locked by `checker_nummix_fixpoint_test` — is now ported AND wired into `build`, so the self-built compiler REJECTS an int↔float program (`compose_type_gate_fixpoint_test`); the remaining error sets (return/binding/bounds/error-set) and d_clause coverage are the tail (check.rian is a separate TOY-language spike)"
+        "type inference agrees with the REAL Rian.Check.infer over ALL 12 Core nodes AND the FULL inference context `ic` — literals incl. float/char, ids in a typing env, unary/binary with operand-directed arithmetic + cross-width widening, prim calls, `if`/`case` (with flow narrowing), lists, lambdas (`Fn(...)`), higher-order calls, constructor sum types + non-generic function returns, GENERIC-return instantiation (`ic.fsigs` + type variables — unify params with arg types, substitute bound tvars in the return) and constructor-pattern field narrowing (`ic.tdefs`). Inference is complete, and the first TWO error sets — numeric mix (`num_mix`, ADR-0035: a `+`/`-`/`*` mixing int and float) and return-type mismatch (`ret_bad`, ADR-0064: a body whose inferred type contradicts the declared return), locked by `checker_nummix_fixpoint_test`/`checker_rettype_fixpoint_test` — are now ported AND wired into `build`, so the self-built compiler REJECTS an int↔float or return-mismatched program (`compose_type_gate_fixpoint_test`); the remaining error sets (binding/bounds/error-set) and d_clause coverage are the tail (check.rian is a separate TOY-language spike)"
     },
     %{
       id: :exhaustiveness,
@@ -202,12 +202,13 @@ defmodule Rian.SelfHost do
     # lex→parse→lower→emit→load). It is now PARTIALLY self-CHECKING: the two STRUCTURAL
     # gates — EXHAUSTIVENESS (`build` REFUSES a non-exhaustive sum dispatch, via Exhaust)
     # and CAPABILITY (refuses a BEAM-illegal `ref` param, via Cap.beam_legal) — PLUS the
-    # FIRST TYPE-checker error set: NUMERIC MIX (refuses an int↔float `+`/`-`/`*` in a
-    # `d_func`, via the locked Checker.num_mix, ADR-0035/P3). FULL self-checking is NOT
-    # reached — the rest of Rian.Check's error sets (return/binding/bounds/error-set) and
-    # d_clause coverage are still out of the loop, so `build` rejects only this one class
-    # of ill-typed program. Tracked granularly so partial gates cannot masquerade as the
-    # whole checker.
+    # first TWO TYPE-checker error sets: NUMERIC MIX (an int↔float `+`/`-`/`*`) and
+    # RETURN-TYPE mismatch (a body whose type contradicts the declared return), in a
+    # `d_func`, via the locked Checker.num_mix/ret_bad (ADR-0035/0064, P3). FULL
+    # self-checking is NOT reached — the rest of Rian.Check's error sets
+    # (binding/bounds/error-set) and d_clause coverage are still out of the loop, so
+    # `build` rejects only those two classes of ill-typed program. Tracked granularly so
+    # partial gates cannot masquerade as the whole checker.
     self_compiling: true,
     self_checking: false,
     exhaustiveness_gated: true,
@@ -224,7 +225,7 @@ defmodule Rian.SelfHost do
     bootstrap_v1_v2: true,
     bootstrap_test: "test/rian/selfhost_v1_v2_fixpoint_test.exs",
     note:
-      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.*\" atoms (Pascal calls, ADR-0041). `LexerV2.tokenize` feeds `Decl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING and PARTIALLY self-CHECKING: three gates are wired into the build loop — the two STRUCTURAL ones (`build` refuses a non-exhaustive sum dispatch via Exhaust, and a BEAM-illegal `ref` parameter via Cap.beam_legal) PLUS the first TYPE-checker error set, NUMERIC MIX (refuses an int↔float `+`/`-`/`*` in a `d_func`, via the equivalence-locked `Checker.num_mix`, ADR-0035) — all via `:erlang.error` (`compose_exhaust_gate_fixpoint_test`, `compose_type_gate_fixpoint_test`). FULL self-CHECKING remains the next terminus: the checker port (checker.rian) covers 12/12 Core nodes WITH a typing env and now its first error set, but the remaining error sets (return/binding/bounds/error-set) and d_clause coverage are still out of the loop, so `build` rejects only this one class of ill-typed program. Host FFI in the loop: :compile.forms/:code.load_binary/:erlang.error."
+      "The driver owns NO lexing or parsing — the whole front-end AND the back-end are equivalence-locked ports (`selfhost_lexer_v2` → `selfhost_decl` → `selfhost_beam`), composed cross-module under :\"Elixir.*\" atoms (Pascal calls, ADR-0041). `LexerV2.tokenize` feeds `Decl.parse_program` with NO projection (same token tags). The only driver-local glue reimplements no stage: the surface→Core lowering (selfhost_decl's Expr/Pat IR → selfhost_beam Core/Pat) and the Form inflater. The composed build's surface now spans the whole compiler-stage vocabulary — multi-clause patterns incl. cons-lists and tuples, sum-type/struct declarations + ctor dispatch, `if`, `case` with guards, strings/chars, atoms, struct field access (`maps:get`), cross-module remote calls, `@external` FFI bodies (parsed-and-spliced per ADR-0068), and `forall` generics. Whole-file self-compile locks cover lexer/decl/beam/driver (`compose_*_whole`) plus cap/core/exhaust (`compose_selfcompile`/`compose_stage_whole`). The bootstrap fixed point `v1 == v2` is CLOSED for the Rian compiler (`selfhost_v1_v2_fixpoint_test`): gen0 (Elixir-host-compiled) compiles the four compiler sources → gen1; gen1 recompiles them → gen2; gen1 == gen2 in canonical forms AND bit-identical `.beam` (`:deterministic`). This is self-COMPILING and PARTIALLY self-CHECKING: four gates are wired into the build loop — the two STRUCTURAL ones (`build` refuses a non-exhaustive sum dispatch via Exhaust, and a BEAM-illegal `ref` parameter via Cap.beam_legal) PLUS the first two TYPE-checker error sets, NUMERIC MIX (an int↔float `+`/`-`/`*`) and RETURN-TYPE mismatch (a body whose inferred type contradicts the declared return), in a `d_func`, via the equivalence-locked `Checker.num_mix`/`Checker.ret_bad` (ADR-0035/0064) — all via `:erlang.error` (`compose_exhaust_gate_fixpoint_test`, `compose_type_gate_fixpoint_test`). FULL self-CHECKING remains the next terminus: the checker port (checker.rian) covers 12/12 Core nodes WITH a typing env and now its first two error sets, but the remaining error sets (binding/bounds/error-set) and d_clause coverage are still out of the loop, so `build` rejects only those two classes of ill-typed program. Host FFI in the loop: :compile.forms/:code.load_binary/:erlang.error."
   }
 
   @doc """
@@ -303,8 +304,8 @@ defmodule Rian.SelfHost do
       projection glue per fixpoint). This is NOT a loop number.
     * **Bootstrap loop: CLOSED** — `v1 == v2` over #{@composition.stages} compiler
       modules, **self-compiling** (forms-level, BEAM); **partially self-checking** — the
-      first type-checker error set (numeric mix) is now in the loop, the rest are not.
-      Evidence: `#{@composition.bootstrap_test}`.
+      first two type-checker error sets (numeric mix + return-type) are now in the loop,
+      the rest are not. Evidence: `#{@composition.bootstrap_test}`.
 
     **Composition (ADR-0063 Step 3) — a separate axis.** The percentage above counts
     stages verified against the reference *in isolation* (each fixpoint uses Elixir
@@ -319,13 +320,14 @@ defmodule Rian.SelfHost do
     **What `v1 == v2` does NOT mean.** The closed loop is a genuine bootstrap fixed point,
     but it is deliberately scoped — three real gaps, none hidden:
 
-    * **Only the first error set** — the loop is self-*compiling* and only *partially*
-      self-*checking*. Three gates run in `build`: the two **structural** ones
-      (exhaustiveness, capability) **and** the first TYPE-checker error set — **numeric
-      mix** (`build` refuses an int↔float `+`/`-`/`*` in a `d_func`, via the locked
-      `Checker.num_mix`, ADR-0035). The rest of `Rian.Check`'s error sets
-      (return/binding/bounds/error-set) and d_clause coverage are **not** yet in the loop,
-      so `build` still compiles most ill-typed programs it should reject.
+    * **Only the first two error sets** — the loop is self-*compiling* and only *partially*
+      self-*checking*. Four gates run in `build`: the two **structural** ones
+      (exhaustiveness, capability) **and** the first two TYPE-checker error sets — **numeric
+      mix** (an int↔float `+`/`-`/`*`) and **return-type mismatch** (a body whose inferred
+      type contradicts the declared return), in a `d_func`, via the locked
+      `Checker.num_mix`/`ret_bad` (ADR-0035/0064). The rest of `Rian.Check`'s error sets
+      (binding/bounds/error-set) and d_clause coverage are **not** yet in the loop, so
+      `build` still compiles most ill-typed programs it should reject.
     * **BEAM-only** — the fixed point is forms-level `.beam`. Compiling the compiler to
       Rust/JS (the *portable* terminus) is unstarted.
     * **A subset of Rian** — `build` compiles the compiler's own source shape, not
