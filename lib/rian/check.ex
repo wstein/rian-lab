@@ -1389,6 +1389,33 @@ defmodule Rian.Check do
     end)
   end
 
+  @doc """
+  Infer a private function's RETURN type from its clause bodies — the join of each
+  clause's inferred body type, given the inference context `ic` (`program_ic/1`).
+
+  Returns a concrete type string, or `:unknown` when no clause pins it (a clause
+  inferring `:unknown`/`:mismatch`, or branches that don't join). Sound by
+  construction: a concrete result means *every* clause inferred concretely and they
+  agree under `join`. This is the engine behind `Rian.InferLocal` filling the return
+  of an untyped private function (infer-local / declare-public, ADR-0034).
+  """
+  @spec infer_return_type(Rian.IR.Func.t(), map()) :: String.t() | :unknown
+  def infer_return_type(%Func{params: ps, clauses: clauses}, ic) do
+    types =
+      Enum.map(clauses, fn c ->
+        infer(Pratt.parse_body(c.body), clause_env(c.pats, ps, ic), ic)
+      end)
+
+    if Enum.any?(types, &(&1 in [:unknown, :mismatch, :bottom])) do
+      :unknown
+    else
+      case join_all(types) do
+        t when is_binary(t) -> t
+        _ -> :unknown
+      end
+    end
+  end
+
   @doc "Parse source and check every function; returns `:ok` or the first `{:error, message}`."
   @spec check(String.t()) :: term()
   def check(src), do: src |> Rian.Decl.parse() |> check_program()
