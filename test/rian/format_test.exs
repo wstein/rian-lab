@@ -250,6 +250,32 @@ defmodule Rian.FormatTest do
       assert Format.format(once) == once
     end
 
+    test "an arithmetic chain breaks at the loosest operator (+), keeping * terms together" do
+      src =
+        "def total() Int53 := base_amount * quantity_count + shipping_cost * weight_kg + handling_fee + insurance\n"
+
+      out = Format.format(src)
+      assert out =~ "\n  + "
+      # the tighter `*` is not a break point — its operands stay on one line
+      refute out =~ "\n  * "
+      assert out =~ "base_amount * quantity_count"
+      assert Rian.Decl.parse(out)
+    end
+
+    test "a mixed and/or chain breaks only at the loosest operator (or)" do
+      src =
+        "def ok() Bool := check_one(value) and check_two(value) or fallback(value) and final_check(value, scope)\n"
+
+      out = Format.format(src)
+      assert out =~ "\n  or "
+      refute out =~ "\n  and "
+      assert Rian.Decl.parse(out)
+    end
+
+    test "a short arithmetic body stays inline" do
+      assert Format.format("def f() := a + b * c\n") == "def f() := a + b * c\n"
+    end
+
     test "a long boolean chain wraps and still parses" do
       src =
         "def ok() Bool := is_valid(value) and within_range(value) and not blocked(value) and allowed(value, scope)\n"

@@ -55,10 +55,33 @@ defmodule Rian.Format do
 
   # Operators whose chains wrap one-per-line (leading-operator style) when a
   # top-level `:=` body overflows. These are exactly the `Rian.Decl` `@cont_ops`
-  # subset that the parser treats as **newline-insignificant in a `:=` body**
-  # (P1, [decl.ex](decl.ex)) — so breaking before one is meaning-preserving. `|`
+  # the parser treats as **newline-insignificant in a `:=` body** (P1,
+  # [decl.ex](decl.ex)) — so breaking before one is meaning-preserving. `|`
   # (cons/sum) is deliberately excluded (see the cons-tail trailing-comma fix).
-  @wrap_ops ~w(|> and or <>)
+  @wrap_ops ~w(+ - * / < > <= >= == != <> |> and or in rem div)
+
+  # Binding-power *level* per operator (mirrors `Rian.Pratt.opinfo`; higher = binds
+  # looser). A chain breaks at the **loosest** operators present at the top level, so
+  # `a * b + c` breaks at `+` (keeping `a * b` together) — the Prettier convention.
+  @op_level %{
+    "*" => 3,
+    "/" => 3,
+    "rem" => 3,
+    "div" => 3,
+    "+" => 4,
+    "-" => 4,
+    "<>" => 5,
+    "in" => 6,
+    "|>" => 7,
+    "<" => 8,
+    "<=" => 8,
+    ">" => 8,
+    ">=" => 8,
+    "==" => 9,
+    "!=" => 9,
+    "and" => 10,
+    "or" => 11
+  }
 
   @doc """
   Format Rian source. **Total** — never raises: source that cannot even be lexed
@@ -287,11 +310,11 @@ defmodule Rian.Format do
   defp node_doc({:group, open, inner, close}, rf), do: group_doc(open, inner, close, rf)
 
   # ── depth-0 operator-chain wrapping (leading-operator style) ──────────────
-  # A `:=` body that is a flat chain of `|>`/`and`/`or`/`<>` (no inline `do`-block)
-  # is rendered as a group: one line if it fits, else broken before each operator
+  # A `:=` body that is a flat `@cont_ops` chain (no inline `do`-block) is rendered
+  # as a group: one line if it fits, else broken before each loosest-level operator
   # with a one-level hanging indent. Breaking before a leading `@cont_ops` operator
-  # in a `:=` body is meaning-safe (P1). Bodies containing a `do` are left alone
-  # (a wrap-op there may sit inside the block — not a top-level chain split point).
+  # in a `:=` body is meaning-safe (P1). Bodies containing a `do` are left alone (a
+  # cont-op there may sit inside the block — not a top-level chain split point).
   defp chain?(nodes) do
     not Enum.any?(nodes, &match?({:tok, {:kw, "do"}}, &1)) and Enum.any?(nodes, &wrap_op_node?/1)
   end
@@ -304,24 +327,44 @@ defmodule Rian.Format do
   end
 
   defp chain_doc(nodes) do
-    {seg0, rest} = take_until_wrap(nodes, [])
-    Doc.group(Doc.concat([bd(seg0, nil, true), Doc.nest(2, chain_tail(rest))]))
+    level = split_level(nodes)
+    {seg0, rest} = take_until_level(nodes, level, [])
+    Doc.group(Doc.concat([bd(seg0, nil, true), Doc.nest(2, chain_tail(rest, level))]))
   end
 
-  defp chain_tail([]), do: Doc.empty()
-
-  defp chain_tail([{:tok, {:op, o}} | rest]) do
-    {seg, rest2} = take_until_wrap(rest, [])
-    Doc.concat([Doc.line(), Doc.text(o), Doc.text(" "), bd(seg, nil, true), chain_tail(rest2)])
+  # the loosest binding-power level among the top-level cont-ops — where we break
+  defp split_level(nodes) do
+    nodes
+    |> Enum.filter(&wrap_op_node?/1)
+    |> Enum.map(fn {:tok, {:op, o}} -> Map.fetch!(@op_level, o) end)
+    |> Enum.max()
   end
 
-  defp take_until_wrap([], acc), do: {Enum.reverse(acc), []}
+  defp chain_tail([], _level), do: Doc.empty()
 
-  defp take_until_wrap([n | rest], acc) do
-    if wrap_op_node?(n),
+  defp chain_tail([{:tok, {:op, o}} | rest], level) do
+    {seg, rest2} = take_until_level(rest, level, [])
+
+    Doc.concat([
+      Doc.line(),
+      Doc.text(o),
+      Doc.text(" "),
+      bd(seg, nil, true),
+      chain_tail(rest2, level)
+    ])
+  end
+
+  defp take_until_level([], _level, acc), do: {Enum.reverse(acc), []}
+
+  defp take_until_level([n | rest], level, acc) do
+    if split_node?(n, level),
       do: {Enum.reverse(acc), [n | rest]},
-      else: take_until_wrap(rest, [n | acc])
+      else: take_until_level(rest, level, [n | acc])
   end
+
+  # a top-level operator at exactly the chain's split level (a break point)
+  defp split_node?({:tok, {:op, o}}, level), do: Map.get(@op_level, o) == level
+  defp split_node?(_node, _level), do: false
 
   defp wrap_op_node?({:tok, t}), do: wrap_op_tok?(t)
   defp wrap_op_node?(_), do: false
