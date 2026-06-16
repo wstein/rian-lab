@@ -31,6 +31,7 @@ mix compile --warnings-as-errors          # warnings are errors; run before ever
 
 mix rian.compile FILE [--beam|--rust|--js|--jvm] [--show-elixir]  # BEAM bytecode (Rian.Beam) + Rust/JS/Kotlin source; --show-elixir = text debug view
 mix rian.jar FILE [-o OUT.jar] [--main FUNC]      # runnable JVM .jar via Kotlin+kotlinc (ADR-0049/0062 rung B)
+mix rian.format FILE… [--check|--stdout]          # canonical zero-config formatter (Rian.Format, ADR-0045); --check = CI gate; `-` = stdin
 mix rian.repl                                     # compiling REPL (parse→check→abstract-forms→load→run)
 mix rian.targets FILE [--require ex,rs,js]        # per-function target-reachability report / gate
 mix rian.tour [--check]                           # regenerate site/src/data/tour.json (the by-example dataset) from the real emitters
@@ -59,7 +60,9 @@ mix examples                                      # end-to-end lowering demo
 Source flows through these stages; the **typed Core IR is the spine** that decouples them (ADR-0050):
 
 1. **`Rian.Lexer`** — shared tokenizer. `tokenize/1` (declaration stream, newline-significant) and
-   `expr_tokens/1` (expression stream).
+   `expr_tokens/1` (expression stream); both strip comments and collapse blank lines. A third,
+   formatter-only `tokenize_trivia/1` keeps `{:comment}`/`{:heredoc}` tokens and uncollapsed `{:nl}`
+   so `Rian.Format` can re-print without losing comments or paragraphing (ADR-0045).
 2. **`Rian.Decl`** (declarations) + **`Rian.Pratt`** (expressions & patterns). There is exactly **one
    pattern parser** (`Pratt.parse_pat`, shared by clause heads and `case` arms — ADR-0050 §2).
    `Decl` splits declarations on significant newlines, but a `def … :=` body is **newline-tolerant**
