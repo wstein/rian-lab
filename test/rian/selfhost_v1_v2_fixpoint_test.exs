@@ -60,6 +60,8 @@ defmodule Rian.V1V2FixpointTest do
       Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
     {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
+
+    {:ok, _} = Beam.load(File.read!("compiler/checker.rian"), :"Elixir.Checker")
     {:ok, gen0_driver} = Beam.load(@driver, :rian_gen0_driver)
 
     # gen1 — gen0 compiles each compiler source (canonical forms).

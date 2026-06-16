@@ -36,6 +36,8 @@ defmodule Rian.ComposeDriverWholeFixpointTest do
 
     {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
+    {:ok, _} = Beam.load(File.read!("compiler/checker.rian"), :"Elixir.Checker")
+
     {:ok, v1} = Beam.load(@driver_src, :rian_driver_v1)
 
     # v1 compiles its OWN whole source into v2 — the build compiling the build.

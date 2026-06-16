@@ -47,6 +47,8 @@ defmodule Rian.ComposeBenchTest do
       Beam.load(File.read!("compiler/exhaust.rian"), :"Elixir.Exhaust")
 
     {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
+
+    {:ok, _} = Beam.load(File.read!("compiler/checker.rian"), :"Elixir.Checker")
     {:ok, gen0} = Beam.load(@driver, :rian_bench_gen0)
 
     # gen1 — gen0 compiles the compiler's own sources; load them as the live compiler.

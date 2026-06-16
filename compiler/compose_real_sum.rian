@@ -233,7 +233,11 @@ mod ComposeRealSum do
   def emit_checked(decls Vec(Tuple), grps Vec(Grp), modname Symbol) Vec(Tuple)
   def emit_checked(decls, grps, modname)
     case first_illegal_cap(decls) do
-      "" -> assemble(modname, funcs(grps))
+      "" ->
+        case first_num_mix(decls) do
+          "" -> assemble(modname, funcs(grps))
+          bad -> refuse_type(bad)
+        end
       bad -> refuse_cap(bad)
     end
   end
@@ -245,6 +249,12 @@ mod ComposeRealSum do
 
   @external(:ex, ":erlang.error({:not_beam_legal, name})")
   def refuse_cap(name String) Vec(Tuple)
+
+  # the type checker (Checker.num_mix, ADR-0035/P3) proved an int↔float mix in a `d_func`
+  # body — the self-built compiler REFUSES it rather than emitting it. `name` is the
+  # offending function.
+  @external(:ex, ":erlang.error({:type_error, name})")
+  def refuse_type(name String) Vec(Tuple)
 
   # the BEAM toolchain rejected the emitted forms (`:compile.forms` returned a
   # non-`{:ok, _, _}` result — e.g. `{:error, errors, warnings}`). A compile failure
@@ -919,4 +929,105 @@ mod ComposeRealSum do
   def to_cap("ref") := Ref
   def to_cap("tag") := Tag
   def to_cap(_) := Val
+
+  # ── self-CHECKING gate: numeric mix (ADR-0035, P3) ─────────────────────────────
+  # The THIRD build-loop gate (after exhaustiveness + capability) — the one that turns
+  # the self-built compiler from self-COMPILING into self-CHECKING. It reuses the
+  # equivalence-locked `Checker.num_mix` (checker.rian, locked by
+  # checker_nummix_fixpoint_test): a `d_func` whose body provably mixes int and float in
+  # a `+`/`-`/`*` is REFUSED with `{:type_error, name}` — a value never silently becomes
+  # a float. Scoped to `d_func` (the inline `def f(p T) R := body` form); separate-clause
+  # functions carry their param types in a sibling `d_sig` and are conservatively skipped
+  # (a documented tail — the gate never false-rejects them, so v1==v2 is unaffected).
+  def first_num_mix(decls Vec(Tuple)) String
+  def first_num_mix([]) := ""
+  def first_num_mix([{:d_func, _, name, params, _, _, body} | rest])
+    if func_mixes(params, body) do
+      name
+    else
+      first_num_mix(rest)
+    end
+  end
+  def first_num_mix([{:d_mod, _, inner} | rest]) := mod_mix(first_num_mix(inner), rest)
+  def first_num_mix([_ | rest]) := first_num_mix(rest)
+
+  def mod_mix(inner String, rest Vec(Tuple)) String
+    if inner == "" do
+      first_num_mix(rest)
+    else
+      inner
+    end
+  end
+
+  # lower the body to driver Core, project it onto checker.rian's Core, and ask the
+  # locked `Checker.num_mix` under the clause's typed-param env (an empty `ic`: a mix
+  # whose operand is a call to a float-returning function is the documented `ic` tail).
+  def func_mixes(params Vec(Tuple), body Tuple) Bool
+    tenv := param_tenv(params)
+    Checker.num_mix(to_chk_block(lower_body(desugar_interp(tenv, body))), tenv_dict(tenv), Prim.map_new())
+  end
+
+  def tenv_dict(Vec(Tuple)) Dict(String, String)
+  def tenv_dict([]) := Prim.map_new()
+  def tenv_dict([{n, t} | rest]) := Prim.map_put(tenv_dict(rest), n, t)
+
+  # ── driver Core → checker.rian Core projection (for `Checker.num_mix`) ──────────
+  # The driver's Core has 18 constructors and shapes (CIf over Blocks, Arm with a guard,
+  # CDot/CRemote/CStruct/CMap, …) that checker.rian's leaner Core lacks. `num_mix` only
+  # needs to (a) FIND `+`/`-`/`*` nodes and (b) infer their DIRECT operand types — so the
+  # mix-bearing nodes (CBin/CUnary, the leaves, real `__prim_*` CCalls) are preserved with
+  # checker's shape, while every structural node is collapsed to a `CCall("__x",
+  # children)` that `num_mix` still walks. The collapse uses only the driver's OWN Core
+  # constructors (whose runtime tags coincide with checker's for the preserved nodes), so
+  # the result types as `Core` AND never invents a CBin — it can therefore never cause a
+  # false rejection (v1==v2-safe). An operand that is itself an `if`/`case`/block infers
+  # `unknown` under the collapse — the gate is merely more conservative there, never wrong.
+  def to_chk(Core) Core
+  def to_chk(CNum(s)) := CNum(s)
+  def to_chk(CStr(s)) := CStr(s)
+  def to_chk(CChar(c)) := CChar(c)
+  def to_chk(CId(x)) := CId(x)
+  def to_chk(CAtom(_)) := CStr("")
+  def to_chk(CUnary(op, x)) := CUnary(op, to_chk(x))
+  def to_chk(CBin(op, l, r)) := CBin(op, to_chk(l), to_chk(r))
+  def to_chk(CCall(f, args)) := CCall(f, to_chk_all(args))
+  def to_chk(CLambda(_, body)) := CCall("__lam", [to_chk(body)])
+  def to_chk(CApply(callee, args)) := CCall("__apply", [to_chk(callee) | to_chk_all(args)])
+  def to_chk(CTuple(es)) := CCall("__tuple", to_chk_all(es))
+  def to_chk(CList(es, tail)) := CCall("__list", cat_core(to_chk_all(es), to_chk_tail(tail)))
+  def to_chk(CIf(c, t, e)) := CCall("__if", [to_chk(c), to_chk_block(t), to_chk_block(e)])
+  def to_chk(CCase(scrut, arms)) := CCall("__case", [to_chk(scrut) | to_chk_arms(arms)])
+  def to_chk(CDot(obj, _)) := to_chk(obj)
+  def to_chk(CRemote(_, _, args)) := CCall("__remote", to_chk_all(args))
+  def to_chk(CStruct(_, flds)) := CCall("__struct", to_chk_flds(flds))
+  def to_chk(CMap(flds)) := CCall("__map", to_chk_flds(flds))
+
+  def to_chk_all(Vec(Core)) Vec(Core)
+  def to_chk_all([]) := []
+  def to_chk_all([e | rest]) := [to_chk(e) | to_chk_all(rest)]
+
+  def to_chk_block(Block) Core
+  def to_chk_block(Block(stmts)) := CCall("__blk", to_chk_stmt_exprs(stmts))
+
+  def to_chk_stmt_exprs(Vec(Stmt)) Vec(Core)
+  def to_chk_stmt_exprs([]) := []
+  def to_chk_stmt_exprs([SBind(_, e) | rest]) := [to_chk(e) | to_chk_stmt_exprs(rest)]
+  def to_chk_stmt_exprs([STypedBind(_, _, e) | rest]) := [to_chk(e) | to_chk_stmt_exprs(rest)]
+  def to_chk_stmt_exprs([SExpr(e) | rest]) := [to_chk(e) | to_chk_stmt_exprs(rest)]
+
+  def to_chk_arms(Vec(Arm)) Vec(Core)
+  def to_chk_arms([]) := []
+  def to_chk_arms([Arm(_, _, blk) | rest]) := [to_chk_block(blk) | to_chk_arms(rest)]
+
+  def to_chk_tail(Tail) Vec(Core)
+  def to_chk_tail(TClose) := []
+  def to_chk_tail(TTail(e)) := [to_chk(e)]
+
+  def to_chk_flds(Vec(SFld)) Vec(Core)
+  def to_chk_flds([]) := []
+  def to_chk_flds([SFld(_, v) | rest]) := [to_chk(v) | to_chk_flds(rest)]
+
+  def cat_core(Vec(Core), Vec(Core)) Vec(Core)
+  def cat_core([], ys) := ys
+  def cat_core([x | xs], ys) := [x | cat_core(xs, ys)]
 end

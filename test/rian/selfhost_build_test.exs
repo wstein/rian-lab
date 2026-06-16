@@ -24,7 +24,8 @@ defmodule Rian.BuildTest do
           {"Decl", "decl"},
           {"Beam", "beam"},
           {"Exhaust", "exhaust"},
-          {"Cap", "cap"}
+          {"Cap", "cap"},
+          {"Checker", "checker"}
         ] do
       {:ok, _} = Beam.load(File.read!("compiler/#{file}.rian"), :"Elixir.#{mod}")
     end

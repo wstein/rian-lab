@@ -37,6 +37,8 @@ defmodule Rian.ComposeBeamWholeFixpointTest do
 
     {:ok, _} = Beam.load(File.read!("compiler/cap.rian"), :"Elixir.Cap")
 
+    {:ok, _} = Beam.load(File.read!("compiler/checker.rian"), :"Elixir.Checker")
+
     {:ok, drv} =
       Beam.load(
         File.read!("compiler/compose_real_sum.rian"),
