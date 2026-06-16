@@ -40,12 +40,23 @@ defmodule Rian.Lexer do
   @id_re ~r/^[A-Za-z_]\w*/
 
   @doc "Full token stream, with collapsed `{:nl}` separators (comments stripped)."
-  def tokenize(src),
-    do: src |> lex([]) |> Enum.reject(&match?({:comment, _}, &1)) |> collapse_nl()
+  def tokenize(src), do: src |> lex([]) |> strip_trivia() |> collapse_nl()
 
   @doc "Newline-free token stream for the expression grammar (`Rian.Pratt`)."
   def expr_tokens(src),
-    do: src |> lex([]) |> Enum.reject(&(&1 == {:nl} or match?({:comment, _}, &1)))
+    do: src |> lex([]) |> strip_trivia() |> Enum.reject(&(&1 == {:nl}))
+
+  # The compiler pipeline never sees formatter-only trivia: comment tokens are
+  # dropped and a raw `{:heredoc, c}` collapses to the trimmed `{:str, …}` the
+  # grammar expects (the heredoc is kept verbatim only for `Rian.Format`).
+  defp strip_trivia(tokens) do
+    tokens
+    |> Enum.reject(&match?({:comment, _}, &1))
+    |> Enum.map(fn
+      {:heredoc, content} -> {:str, String.trim(content)}
+      t -> t
+    end)
+  end
 
   @doc """
   Trivia-preserving token stream for the source **formatter** (`Rian.Format`).
@@ -101,6 +112,7 @@ defmodule Rian.Lexer do
   defp tok_str({:comma}, _), do: ","
   defp tok_str({:semi}, _), do: ";"
   defp tok_str({:comment, text}, _), do: text
+  defp tok_str({:heredoc, content}, _), do: ~s(""") <> content <> ~s(""")
 
   defp advance(s, n), do: elem(String.split_at(s, n), 1)
 
@@ -325,10 +337,13 @@ defmodule Rian.Lexer do
       (punct = punct(str)) != nil ->
         lex(advance(str, 1), [punct | acc])
 
-      # heredoc `"""…"""` — multi-line string (doc content, ADR-0051); must precede `"`
+      # heredoc `"""…"""` — multi-line string (doc content, ADR-0051); must precede `"`.
+      # The raw (untrimmed) content is kept in a `{:heredoc, c}` token so the formatter
+      # can reproduce the block verbatim; `strip_trivia/1` trims it to `{:str, …}` for
+      # the compiler.
       String.starts_with?(str, ~s(""")) ->
         case String.split(advance(str, 3), ~s("""), parts: 2) do
-          [content, rest] -> lex(rest, [{:str, String.trim(content)} | acc])
+          [content, rest] -> lex(rest, [{:heredoc, content} | acc])
           [_] -> raise ArgumentError, "unterminated heredoc string"
         end
 
