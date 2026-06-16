@@ -59,6 +59,8 @@ mod Checker do
              | CCase(Core, Vec(Arm))
              | CList(Vec(Core), Tail)
              | CLambda(Vec(Param), Core)
+             | CAtom(String)
+             | CTuple(Vec(Core))
 
   # a list literal's tail: closed (`[a, b]`) or a cons tail expression (`[h | t]`).
   type Tail := TClose | TCons(Core)
@@ -85,6 +87,9 @@ mod Checker do
   type FBnd := FB(Vec(String), Vec(String), Vec(ProtoBound))
   type ProtoBound := PBound(String, Vec(String))
   type TyLk := TyHit(String) | TyMiss
+  # error set #5 (`T | E` error-set check, ADR-0040 §4): the declared error-tag set of a
+  # `T | E` return, or none when the return is not a `T | E`.
+  type EsOpt := EsNone | EsSome(Vec(String))
   # collecting a maximal word-run while tokenizing a type string.
   type WordTake := WT(String, Vec(Int53))
   # a branch/arm with its inferred type, for the LUB join (branch_join).
@@ -272,6 +277,8 @@ mod Checker do
   pub def infer_ic(CCase(scrut, arms), env, ic) := branch_join(arm_pairs(arms, infer_ic(scrut, env, ic), env, ic))
   pub def infer_ic(CList(elems, tail), env, ic) := list_ty(join_all(infer_all(elems, env, ic)), list_elem(infer_tail(tail, env, ic)))
   pub def infer_ic(CLambda(params, body), env, ic) := build_fn(param_types(params), infer_ic(body, extend_lenv(params, env), ic))
+  pub def infer_ic(CAtom(_), _, _) := "Symbol"
+  pub def infer_ic(CTuple(_), _, _) := "unknown"
 
   # a bare identifier: its env type if bound, else a nullary constructor's sum type
   # (`ic.ctors`), else `unknown` (Rian.Check's `Map.get(env,x) || ctor_type(ic,x)`).
@@ -975,6 +982,8 @@ mod Checker do
   pub def num_mix(CCase(scrut, arms), env, ic) := num_mix(scrut, env, ic) or num_mix_arms(arms, env, ic)
   pub def num_mix(CList(elems, tail), env, ic) := num_mix_any(elems, env, ic) or num_mix_tail(tail, env, ic)
   pub def num_mix(CLambda(_, body), env, ic) := num_mix(body, env, ic)
+  pub def num_mix(CAtom(_), _, _) := false
+  pub def num_mix(CTuple(es), env, ic) := num_mix_any(es, env, ic)
 
   # the mix arithmetic ops are EXACTLY Rian.Check's @arith = `+ - *` (NOT div/rem, which
   # are integer-only; `arith_op`'s wider set is for inference, not this gate).
@@ -1148,6 +1157,98 @@ mod Checker do
   def bind_lookup(Vec(Bind), String) TyLk
   def bind_lookup([], _) := TyMiss
   def bind_lookup([Bnd(tv, ty) | rest], x) := if tv == x do TyHit(ty) else bind_lookup(rest, x) end
+
+  # ── error set #5: `T | E` error-set check (Rian.Check.check_error_set, ADR-0040 §4) ──
+  # a function declared `T | E` must not RETURN an `{:error, Tag}` whose `Tag` (a PascalCase
+  # constructor) is not in `E`'s set. `tsets` maps a named error type `E` to its variant
+  # tags (a bare `E` -> `[E]`). CONSERVATIVE Phase-1 slice: only the tags DIRECTLY built in
+  # the body are checked — callee-propagated error sets (`with`-without-`else`, the whole-
+  # program call-graph fixpoint) are the tail; the corpus avoids propagation.
+  pub def error_set_bad(body Core, ret String, tsets Dict(String, Vec(String))) Bool
+  pub def error_set_bad(body, ret, tsets)
+    case declared_set(ret, tsets) do
+      EsNone -> false
+      EsSome(declared) -> any_extra_tag(direct_tags(body), declared)
+    end
+  end
+
+  # `T | E` -> the declared error-tag set (`tsets[E]`, else `[E]`); else `EsNone`. The OK
+  # type must be non-empty (a leading `| E` is malformed -> EsNone).
+  def declared_set(ret String, tsets Dict(String, Vec(String))) EsOpt
+  def declared_set(ret, tsets) := decl_parts(split_pipe(ret), tsets)
+
+  def decl_parts(Vec(String), Dict(String, Vec(String))) EsOpt
+  def decl_parts([ok_str, err_str], tsets) := decl_when(first_tok(ok_str), first_tok(err_str), tsets)
+  def decl_parts(_, _) := EsNone
+
+  def decl_when(String, String, Dict(String, Vec(String))) EsOpt
+  def decl_when("", _, _) := EsNone
+  def decl_when(_, "", _) := EsNone
+  def decl_when(_, err, tsets) := EsSome(tags_of(err, tsets))
+
+  def tags_of(err String, tsets Dict(String, Vec(String))) Vec(String) := if Prim.map_has(tsets, err) do Prim.map_get(tsets, err) else [err] end
+
+  # the type string with surrounding spaces stripped (mirrors the reference's `String.trim`
+  # of each `|`-split part) — `" DivErr"` -> `"DivErr"`, a leading `| E`'s ok part -> `""`.
+  def first_tok(s String) String := Prim.str_from_chars(trim_sp(Prim.str_chars(s)))
+  def trim_sp(cs Vec(Int53)) Vec(Int53) := rev_i(strip_sp(rev_i(strip_sp(cs), [])), [])
+  def strip_sp(Vec(Int53)) Vec(Int53)
+  def strip_sp([32 | rest]) := strip_sp(rest)
+  def strip_sp(cs) := cs
+
+  # every PascalCase tag DIRECTLY built as `{:error, Tag}` anywhere in the body (mirrors
+  # Rian.Check.error_tags): a lowercase id in error position is a bound var re-propagating
+  # an existing error (`{:error, e} -> {:error, e}`), NOT a newly-built tag, so it is skipped.
+  def direct_tags(Core) Vec(String)
+  def direct_tags(CTuple([CAtom("error"), tag])) := es_cat(tag_name(tag), direct_tags(tag))
+  def direct_tags(CTuple(es)) := dt_any(es)
+  def direct_tags(CUnary(_, a)) := direct_tags(a)
+  def direct_tags(CBin(_, l, r)) := es_cat(direct_tags(l), direct_tags(r))
+  def direct_tags(CCall(_, args)) := dt_any(args)
+  def direct_tags(CIf(c, t, e)) := es_cat(direct_tags(c), es_cat(direct_tags(t), direct_tags(e)))
+  def direct_tags(CBlock(stmts)) := dt_stmts(stmts)
+  def direct_tags(CCase(s, arms)) := es_cat(direct_tags(s), dt_arms(arms))
+  def direct_tags(CList(es, tail)) := es_cat(dt_any(es), dt_tail(tail))
+  def direct_tags(CLambda(_, body)) := direct_tags(body)
+  def direct_tags(_) := []
+
+  def dt_any(Vec(Core)) Vec(String)
+  def dt_any([]) := []
+  def dt_any([c | rest]) := es_cat(direct_tags(c), dt_any(rest))
+
+  def dt_stmts(Vec(Stmt)) Vec(String)
+  def dt_stmts([]) := []
+  def dt_stmts([SBind(_, e) | rest]) := es_cat(direct_tags(e), dt_stmts(rest))
+  def dt_stmts([STypedBind(_, _, e) | rest]) := es_cat(direct_tags(e), dt_stmts(rest))
+  def dt_stmts([SExpr(e) | rest]) := es_cat(direct_tags(e), dt_stmts(rest))
+
+  def dt_arms(Vec(Arm)) Vec(String)
+  def dt_arms([]) := []
+  def dt_arms([CArm(_, body) | rest]) := es_cat(direct_tags(body), dt_arms(rest))
+
+  def dt_tail(Tail) Vec(String)
+  def dt_tail(TClose) := []
+  def dt_tail(TCons(e)) := direct_tags(e)
+
+  # a PascalCase constructor in error position is a tag; a lowercase bound var is not.
+  def tag_name(Core) Vec(String)
+  def tag_name(CId(n)) := if pascal_name(n) do [n] else [] end
+  def tag_name(CCall(n, _)) := if pascal_name(n) do [n] else [] end
+  def tag_name(_) := []
+
+  def pascal_name(n String) Bool := pascal_first(Prim.str_chars(n))
+  def pascal_first(Vec(Int53)) Bool
+  def pascal_first([c | _]) := c >= 65 and c <= 90
+  def pascal_first([]) := false
+
+  def es_cat(Vec(String), Vec(String)) Vec(String)
+  def es_cat([], b) := b
+  def es_cat([x | xs], b) := [x | es_cat(xs, b)]
+
+  # true iff some produced tag is NOT in the declared set (over-declaration is allowed).
+  def any_extra_tag(Vec(String), Vec(String)) Bool
+  def any_extra_tag([], _) := false
+  def any_extra_tag([t | rest], declared) := if member_str(t, declared) do any_extra_tag(rest, declared) else true end
 
   # `from` is assignable to `to` (Rian.Check.assignable?): identical, either unknown, or an
   # `Fn(...)` on either side (skipped, see above); else for two numerics a lossless WIDENING;
