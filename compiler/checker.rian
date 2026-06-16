@@ -87,6 +87,11 @@ mod Checker do
   type NumKind := NkNone | Nk(String, Int53)
   # a parametric type `Name(arg, …)` decomposed into its name + argument types, or none.
   type PpRes := PpNone | Pp(String, Vec(String))
+  # error-set #2 (return type) helpers: an optional constant-integer value, an optional
+  # `Vec(_)` element type, and a fixed-width integer's two's-complement bounds.
+  type IntOpt := INone | ISome(Int53)
+  type VecOpt := VNone | VSome(String)
+  type BoundOpt := BNone | B(Int53, Int53)
 
   # A binary op's result type, keyed by the operator (the integer slice):
   # comparisons/`and`/`or`/`in` -> Bool, `<>` -> String, `/` -> Float64, the
@@ -993,4 +998,181 @@ mod Checker do
   def num_mix_tail(Tail, Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
   def num_mix_tail(TClose, _, _) := false
   def num_mix_tail(TCons(e), env, ic) := num_mix(e, env, ic)
+
+  # ── error set #2: return-type mismatch (ADR-0064/0034) — the canonical type error ──
+  # Rian.Check.check_return: a clause body whose inferred type contradicts the declared
+  # return is REJECTED. `ret_bad` returns true iff the body is a PROVABLE mismatch, in the
+  # same three-way order as the reference: a GENERIC return (mentions a `forall` tvar) is
+  # skipped; a constant-of-literals body that ADOPTS the declared width must FIT its range
+  # (out-of-range is bad); otherwise the inferred body type must be ASSIGNABLE (directional
+  # widening) to the return. CONSERVATIVE: an `unknown` body is assignable to anything (so
+  # it never rejects), and an `Fn(...)` return is skipped (this `unify` has no Fn-structural
+  # rule — a documented tail rather than a false reject).
+  pub def ret_bad(body Core, ret String, env Dict(String, String), ic Dict(Symbol, Dict(String, String))) Bool
+  pub def ret_bad(body, ret, env, ic)
+    if has_tvar(ret) do
+      false
+    else
+      ret_bad_concrete(body, ret, env, ic)
+    end
+  end
+
+  def ret_bad_concrete(body Core, ret String, env Dict(String, String), ic Dict(Symbol, Dict(String, String))) Bool
+  def ret_bad_concrete(body, ret, env, ic)
+    if lit_adopts(body, ret) do
+      lit_range_bad(body, ret)
+    else
+      assignable(infer_ic(body, env, ic), ret) == false
+    end
+  end
+
+  # `from` is assignable to `to` (Rian.Check.assignable?): identical, either unknown, or an
+  # `Fn(...)` on either side (skipped, see above); else for two numerics a lossless WIDENING;
+  # else exact unification must not mismatch.
+  def assignable(from String, to String) Bool
+  def assignable(from, to)
+    if from == to or from == "unknown" or to == "unknown" or is_fn(from) or is_fn(to) do
+      true
+    else
+      assignable_num(num_kind(from), num_kind(to), from, to)
+    end
+  end
+
+  def assignable_num(NumKind, NumKind, String, String) Bool
+  def assignable_num(Nk(fk, fw), Nk(tk, tw), _, _) := num_widens(Nk(fk, fw), Nk(tk, tw))
+  def assignable_num(_, _, from, to) := unify(from, to) != "mismatch"
+
+  # the lossless numeric widening lattice (Rian.Check.num_widens?): `from ⊑ to`. Same-kind
+  # int/uint/float widen to an equal-or-wider width; `uint ⊑ int` needs a strictly wider
+  # signed width; `int/uint ⊑ float` only when exactly representable in the mantissa.
+  def num_widens(NumKind, NumKind) Bool
+  def num_widens(Nk(fk, fa), Nk(tk, tb)) := widen(fk, fa, tk, tb)
+  def num_widens(_, _) := false
+
+  def widen(String, Int53, String, Int53) Bool
+  def widen("int", a, "int", b) := a <= b
+  def widen("uint", a, "uint", b) := a <= b
+  def widen("uint", a, "int", b) := a < b
+  def widen("int", a, "float", b) := a - 1 <= mantissa(b)
+  def widen("uint", a, "float", b) := a <= mantissa(b)
+  def widen("float", a, "float", b) := a <= b
+  def widen(_, _, _, _) := false
+
+  def mantissa(Int53) Int53
+  def mantissa(64) := 53
+  def mantissa(32) := 24
+  def mantissa(_) := 0
+
+  # Rian.Check.body_literal_adopts?: a constant-of-literals body adopts the declared width
+  # — an INTEGER literal adopts any `Int*`/`UInt*`, a FLOAT literal any `Float*` (cross-kind
+  # does NOT adopt). Recurses through arithmetic, `if`/`case` branches, single-expr blocks,
+  # and a closed list literal into `Vec(ElemT)`.
+  def lit_adopts(Core, String) Bool
+  def lit_adopts(CNum(t), ret) := lit_scalar_adopts(t, ret)
+  def lit_adopts(CUnary("-", a), ret) := lit_adopts(a, ret)
+  def lit_adopts(CBin(op, l, r), ret) := arith_op(op) and lit_adopts(l, ret) and lit_adopts(r, ret)
+  def lit_adopts(CIf(_, t, e), ret) := lit_adopts(t, ret) and lit_adopts(e, ret)
+  def lit_adopts(CCase(_, arms), ret) := arms_adopt(arms, ret)
+  def lit_adopts(CBlock([SExpr(e)]), ret) := lit_adopts(e, ret)
+  def lit_adopts(CList(elems, TClose), ret) := list_adopts(elems, ret)
+  def lit_adopts(_, _) := false
+
+  def lit_scalar_adopts(t String, ret String) Bool := if int_literal(t) do int_type(ret) else float_type(ret) end
+
+  def arms_adopt(Vec(Arm), String) Bool
+  def arms_adopt([], _) := false
+  def arms_adopt([CArm(_, b) | rest], ret) := lit_adopts(b, ret) and rest_arms_adopt(rest, ret)
+
+  def rest_arms_adopt(Vec(Arm), String) Bool
+  def rest_arms_adopt([], _) := true
+  def rest_arms_adopt([CArm(_, b) | rest], ret) := lit_adopts(b, ret) and rest_arms_adopt(rest, ret)
+
+  def list_adopts(elems Vec(Core), ret String) Bool := list_adopts_v(elems, vec_elem_opt(ret))
+
+  def list_adopts_v(Vec(Core), VecOpt) Bool
+  def list_adopts_v(_, VNone) := false
+  def list_adopts_v([], VSome(_)) := true
+  def list_adopts_v([e | rest], VSome(et)) := lit_adopts(e, et) and list_adopts_v(rest, VSome(et))
+
+  def float_type(t String) Bool := float_word(Prim.str_chars(t))
+
+  def float_word(Vec(Int53)) Bool
+  def float_word(['F', 'l', 'o', 'a', 't' | rest]) := all_digits(rest)
+  def float_word(_) := false
+
+  # Rian.Check.lit_range_error/oor_scan: a constant integer in the (literal) body that falls
+  # outside the declared fixed-width range is bad. A `Vec(ElemT)` checks each element vs
+  # `ElemT`; the `>Int53` widths (Int64/Int128/UInt64/UInt128) have no port range check yet
+  # (`BNone`, a documented tail — their bounds would be bignums).
+  def lit_range_bad(body Core, ret String) Bool
+  def lit_range_bad(body, ret)
+    case vec_elem_opt(ret) do
+      VSome(et) -> lrb_list(list_elems(body), et)
+      VNone -> lrb_scalar(body, ret)
+    end
+  end
+
+  def lrb_list(Vec(Core), String) Bool
+  def lrb_list([], _) := false
+  def lrb_list([e | rest], et) := lit_range_bad(e, et) or lrb_list(rest, et)
+
+  def lrb_scalar(body Core, ret String) Bool := lrb_bounds(body, width_bounds(ret))
+
+  def lrb_bounds(Core, BoundOpt) Bool
+  def lrb_bounds(_, BNone) := false
+  def lrb_bounds(body, B(lo, hi)) := oor_scan(body, lo, hi)
+
+  def oor_scan(Core, Int53, Int53) Bool
+  def oor_scan(CIf(_, t, e), lo, hi) := oor_scan(t, lo, hi) or oor_scan(e, lo, hi)
+  def oor_scan(CCase(_, arms), lo, hi) := oor_arms(arms, lo, hi)
+  def oor_scan(CBlock([SExpr(e)]), lo, hi) := oor_scan(e, lo, hi)
+  def oor_scan(e, lo, hi) := oor_leaf(const_int_opt(e), lo, hi)
+
+  def oor_arms(Vec(Arm), Int53, Int53) Bool
+  def oor_arms([], _, _) := false
+  def oor_arms([CArm(_, b) | rest], lo, hi) := oor_scan(b, lo, hi) or oor_arms(rest, lo, hi)
+
+  def oor_leaf(IntOpt, Int53, Int53) Bool
+  def oor_leaf(ISome(v), lo, hi) := v < lo or v > hi
+  def oor_leaf(INone, _, _) := false
+
+  def const_int_opt(Core) IntOpt
+  def const_int_opt(CNum(t)) := if int_literal(t) do ISome(int_value(t)) else INone end
+  def const_int_opt(CUnary("-", a)) := neg_int(const_int_opt(a))
+  def const_int_opt(_) := INone
+
+  def neg_int(IntOpt) IntOpt
+  def neg_int(ISome(v)) := ISome(0 - v)
+  def neg_int(INone) := INone
+
+  def int_value(t String) Int53 := parse_digits(only_digits(Prim.str_chars(t)), 0)
+
+  def only_digits(Vec(Int53)) Vec(Int53)
+  def only_digits([]) := []
+  def only_digits([c | rest]) := if c >= 48 and c <= 57 do [c | only_digits(rest)] else only_digits(rest) end
+
+  def list_elems(Core) Vec(Core)
+  def list_elems(CList(elems, _)) := elems
+  def list_elems(CBlock([SExpr(e)])) := list_elems(e)
+  def list_elems(_) := []
+
+  def vec_elem_opt(ret String) VecOpt := vopt(parse_parametric(ret))
+
+  def vopt(PpRes) VecOpt
+  def vopt(Pp(name, args)) := if name == "Vec" do vfirst(args) else VNone end
+  def vopt(PpNone) := VNone
+
+  def vfirst(Vec(String)) VecOpt
+  def vfirst([]) := VNone
+  def vfirst([x | _]) := VSome(x)
+
+  def width_bounds(String) BoundOpt
+  def width_bounds("Int8") := B(0 - 128, 127)
+  def width_bounds("Int16") := B(0 - 32768, 32767)
+  def width_bounds("Int32") := B(0 - 2147483648, 2147483647)
+  def width_bounds("Int53") := B(0 - 9007199254740991, 9007199254740991)
+  def width_bounds("UInt8") := B(0, 255)
+  def width_bounds("UInt16") := B(0, 65535)
+  def width_bounds("UInt32") := B(0, 4294967295)
+  def width_bounds(_) := BNone
 end

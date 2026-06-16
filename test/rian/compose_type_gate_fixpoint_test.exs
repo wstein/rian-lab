@@ -71,6 +71,42 @@ defmodule Rian.ComposeTypeGateFixpointTest do
     end
   end
 
+  describe "the return-type gate is WIRED into build — a return mismatch is REJECTED" do
+    @mismatches [
+      "def f(a Int64) Float64 := a",
+      ~S|def f() Int64 := "hi"|,
+      "def f(a Int16) Int8 := a",
+      "def f() Int8 := 9999"
+    ]
+
+    test "compile_module and build REFUSE every return-type-mismatch d_func", %{drv: drv} do
+      for src <- @mismatches do
+        assert catch_error(drv.compile_module(src, uniq(:RetBad))) == {:type_error, "f"},
+               "the return gate did not refuse: #{inspect(src)}"
+
+        assert catch_error(drv.build(src, uniq(:RetBad))) == {:type_error, "f"},
+               "build did not refuse: #{inspect(src)}"
+      end
+    end
+
+    test "an identity / integer-widening return compiles + runs", %{drv: drv} do
+      m = drv.build("def f(a Int64) Int64 := a", uniq(:RetId))
+      assert m.f(5) == 5
+      w = drv.build("def f(a Int8) Int64 := a", uniq(:RetWiden))
+      assert w.f(9) == 9
+    end
+
+    test "an in-range literal adopting the declared width compiles + runs", %{drv: drv} do
+      m = drv.build("def f() Int8 := 5", uniq(:RetAdopt))
+      assert m.f() == 5
+    end
+
+    test "an int literal widening to a float return compiles + runs", %{drv: drv} do
+      m = drv.build("def f() Float64 := 66", uniq(:RetIntFloat))
+      assert m.f() == 66
+    end
+  end
+
   describe "documented boundary — the gate is scoped to d_func" do
     test "a SEPARATE-CLAUSE function with a mix is NOT caught (the d_sig/d_clause tail)",
          %{drv: drv} do
