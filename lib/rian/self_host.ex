@@ -149,6 +149,23 @@ defmodule Rian.SelfHost do
 
   @weights %{self_hosted: 1.0, partial: 0.5, not_started: 0.0}
 
+  # AUXILIARY PASSES (ADR-0063 #2) — compiler passes that are NOT one of the 11 pipeline
+  # @stages: they run at the parse boundary (Prim normalization, interpolation,
+  # comptime-fold), pre-emit (opaque erasure), or as analysis (reachability). Each is
+  # drained from Elixir into a Rian port equivalence-locked against its oracle. Tracked
+  # SEPARATELY so they neither inflate the stage count nor distort `percent/0`.
+  @passes [
+    %{
+      id: :prim_norm,
+      name: "Prim normalization (`Prim.* → __prim_*`)",
+      oracle: "Rian.Prim.normalize",
+      source: "prim.rian",
+      test: "test/rian/prim_fixpoint_test.exs",
+      note:
+        "PrimNorm.normalize rewrites `Prim.<name>(args)` → `__prim_<name>(args)` for the closed prim set, recursing through every expression position; equivalence-locked vs Rian.Prim.normalize over hand-built raw surface trees (ADR-0047 §2). Tail: the oracle RAISES on an unknown `Prim.x`; the port leaves it (no host raise)."
+    }
+  ]
+
   # COMPOSITION axis (ADR-0063 Step 3) — measured SEPARATELY from per-stage
   # equivalence. `percent/0` above counts how many stages match the reference in
   # ISOLATION (each fixpoint uses Elixir projection glue). That can reach 100% and
@@ -205,6 +222,10 @@ defmodule Rian.SelfHost do
   @spec stages() :: [map()]
   def stages, do: @stages
 
+  @doc "The auxiliary self-hosted passes (not pipeline stages; excluded from `percent/0`)."
+  @spec passes() :: [map()]
+  def passes, do: @passes
+
   @doc """
   The self-hosted fraction of the BEAM front-end→backend pipeline, as a 0–100
   integer percent. `:self_hosted` counts 1.0, `:partial` 0.5, `:not_started` 0.0.
@@ -237,6 +258,11 @@ defmodule Rian.SelfHost do
     rows =
       Enum.map_join(stages, "\n", fn s ->
         "| #{s.name} | #{s.role} | #{badge(s.status)} | #{evidence(s)} | #{s.note} |"
+      end)
+
+    pass_rows =
+      Enum.map_join(@passes, "\n", fn p ->
+        "| #{p.name} | `#{p.oracle}` | `compiler/#{p.source}` · `#{p.test}` | #{p.note} |"
       end)
 
     """
@@ -302,6 +328,16 @@ defmodule Rian.SelfHost do
     A stage is `self-hosted` only when a Rian port is **equivalence-locked** against the
     reference (the fixpoint method); `partial` is a verified slice with remaining
     vocabulary; `not-started` has no Rian port (a toy-language spike does not count).
+
+    ## Auxiliary passes (self-hosted; not pipeline stages)
+
+    Compiler passes drained from Elixir into Rian that are not one of the 11 pipeline
+    stages above (they run at the parse boundary / pre-emit / as analysis), so they are
+    tracked here and excluded from the per-stage `%` (ADR-0063 #2).
+
+    | Pass | Oracle | Evidence | Notes |
+    | --- | --- | --- | --- |
+    #{pass_rows}
     """
   end
 

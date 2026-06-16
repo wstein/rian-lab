@@ -70,3 +70,13 @@ remaining work is self-CHECKING (the checker port) and *arbitrary*-Rian breadth.
 A stage is `self-hosted` only when a Rian port is **equivalence-locked** against the
 reference (the fixpoint method); `partial` is a verified slice with remaining
 vocabulary; `not-started` has no Rian port (a toy-language spike does not count).
+
+## Auxiliary passes (self-hosted; not pipeline stages)
+
+Compiler passes drained from Elixir into Rian that are not one of the 11 pipeline
+stages above (they run at the parse boundary / pre-emit / as analysis), so they are
+tracked here and excluded from the per-stage `%` (ADR-0063 #2).
+
+| Pass | Oracle | Evidence | Notes |
+| --- | --- | --- | --- |
+| Prim normalization (`Prim.* → __prim_*`) | `Rian.Prim.normalize` | `compiler/prim.rian` · `test/rian/prim_fixpoint_test.exs` | PrimNorm.normalize rewrites `Prim.<name>(args)` → `__prim_<name>(args)` for the closed prim set, recursing through every expression position; equivalence-locked vs Rian.Prim.normalize over hand-built raw surface trees (ADR-0047 §2). Tail: the oracle RAISES on an unknown `Prim.x`; the port leaves it (no host raise). |
