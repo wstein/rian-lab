@@ -16,6 +16,7 @@ defmodule RianLab.MixProject do
       # undefined struct). Docs build in `:dev` (`mix docs`); the suite is `:test`.
       elixirc_paths: elixirc_paths(Mix.env()),
       test_coverage: test_coverage(),
+      escript: escript(),
       deps: deps(),
       name: "RianLab",
       description:
@@ -45,6 +46,12 @@ defmodule RianLab.MixProject do
   # only in `:dev`/`:test`, where ExDoc is a dependency. `:prod` builds `lib/` alone.
   defp elixirc_paths(:prod), do: ["lib"]
   defp elixirc_paths(_), do: ["lib", "dev"]
+
+  # `mix escript.build` → a self-contained `rian` binary (ADR-0031/0045 Tier 3):
+  # `rian fmt …` runs the formatter with no Mix/Elixir toolchain on the host.
+  defp escript do
+    [main_module: Rian.CLI, name: "rian"]
+  end
 
   # `mix test --cover` (built-in) gate. Excluded from the denominator:
   #   * `Rian.DocFormatter*` — the dev-only ExDoc/Starlight doc formatter (it

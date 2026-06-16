@@ -45,3 +45,6 @@ bun.lock
 /site/src/content/docs/
 /site/src/generated/
 
+
+# escript build artifact (mix escript.build)
+/rian

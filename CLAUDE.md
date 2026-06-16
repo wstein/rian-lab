@@ -32,6 +32,7 @@ mix compile --warnings-as-errors          # warnings are errors; run before ever
 mix rian.compile FILE [--beam|--rust|--js|--jvm] [--show-elixir]  # BEAM bytecode (Rian.Beam) + Rust/JS/Kotlin source; --show-elixir = text debug view
 mix rian.jar FILE [-o OUT.jar] [--main FUNC]      # runnable JVM .jar via Kotlin+kotlinc (ADR-0049/0062 rung B)
 mix rian.format FILE… [--check|--diff|--stdout]   # canonical zero-config formatter (Rian.Format, ADR-0045); wraps to 98 cols; --check = CI gate; `-` = stdin
+mix escript.build                                 # build the toolchain-free `rian` binary; `./rian fmt …` = the formatter (ADR-0031 Tier 3)
 mix rian.repl                                     # compiling REPL (parse→check→abstract-forms→load→run)
 mix rian.targets FILE [--require ex,rs,js]        # per-function target-reachability report / gate
 mix rian.tour [--check]                           # regenerate site/src/data/tour.json (the by-example dataset) from the real emitters
