@@ -163,74 +163,26 @@ compile + run on real BEAM bytecode:
   against `Rian.Check.infer` (`test/rian/checker_infer_fixpoint_test.exs`). It is
   conservative — an unbound identifier is `unknown`, not a guess. Env, floats,
   calls, lambdas, and `case` remain.
-- [compose_real_beam.rian](../compiler/compose_real_beam.rian) — **COMPOSITION
-  rung 7** (ADR-0063 Step 3/§4): the first cut connecting the two disconnected
-  successes — per-stage equivalence and the composition loop. Rungs 1-6 used a *toy*
-  backend (the driver's own `forms`); this rung's backend **is** the
-  equivalence-locked [beam.rian](../compiler/beam.rian), called **across
-  modules**: the driver builds beam's `Func` IR and invokes
-  `Beam.compile_forms` (loaded under its `:"Elixir.Beam"` atom — a
-  Pascal-qualified call, ADR-0041), so stage N's Rian output is stage N+1's Rian
-  input with no projection glue. The `Form`→abstract-form inflation the beam fixpoint
-  test did in Elixir (`erl_op`/`var_atom`) is ported into the driver. The cross-module
-  call is **composition, not a host crutch** — excluded from the FFI ledger (see
-  `Rian.SelfHost.ffi_in_file/1`); the only host FFI is still
-  `:compile.forms`/`:code.load_binary`. `test/rian/compose_real_beam_fixpoint_test.exs`
-  calls only `build/2` and runs the result, identical to `Rian.Beam`. Widening the
-  *front-end* to the real parser/core ports is the next cut.
-- [compose_real_front.rian](../compiler/compose_real_front.rian) — **COMPOSITION
-  rung 8** (ADR-0063 Step 3): extends rung 7 to the **front-end**. Each clause body is
-  now parsed by the equivalence-locked [parse.rian](../compiler/parse.rian) (the
-  full Rian.Pratt grammar) via a cross-module `Parse.parse`, its raw surface
-  tuple (`{:bin,op,l,r}`, `{:if,c,{:block,_},{:block,_}}`, …) lowered to `beam`
-  Core, then compiled by the cross-module `Beam.compile_forms` (rung 7). **Two
-  verified stages composed end to end** — connected only by driver-local lexing,
-  declaration-splitting, and a raw-surface→Core lowering (none reimplementing either
-  port). Both load under `:"Elixir.*"` atoms (ADR-0041); both are sibling
-  ports, so the calls are composition, not host crutches (excluded from the FFI
-  ledger). `test/rian/compose_real_front_fixpoint_test.exs` runs `fib`/`max`/`gcd`/
-  `poly` — with the **real** Pratt precedence and surface — identical to `Rian.Beam`.
-  The remaining toy piece is the declaration layer (`decl` is `:partial`).
-- [compose_real_decl.rian](../compiler/compose_real_decl.rian) — **COMPOSITION
-  rung 9** (ADR-0063 Step 3): replaces the front-end's last toy piece — declaration
-  splitting — with the equivalence-locked [decl.rian](../compiler/decl.rian).
-  The whole program is parsed by a cross-module `Decl.parse_program`, its
-  `Decl`/`Expr`/`Pat` IR lowered to `beam` Core/Pat (the **surface→Core
-  lowering** — incl. cons-list patterns → `PList`), then compiled by the cross-module
-  `Beam.compile_forms`. **Both front-end (lex→Decl) and back-end
-  (Beam) are now verified ports**; the only driver-local glue is the lexer,
-  the lowering, and the Form inflater — none reimplementing a verified stage.
-  `decl`'s surface has no `if` (that was rung 8) but **does** have cons-list
-  patterns, so this rung compiles list-pattern recursion —
-  `test/rian/compose_real_decl_fixpoint_test.exs` runs `fib`/`fact`/`even`/`odd`/
-  **`sum`**/**`len`** (over lists), identical to `Rian.Beam`. Both ports load under
-  `:"Elixir.*"` atoms (ADR-0041); sibling-port calls are composition, not
-  host crutches. Path to `v1==v2`: widen `decl` past its `:partial` slice.
-- [compose_real_lex.rian](../compiler/compose_real_lex.rian) — **COMPOSITION
-  rung 10** (ADR-0063 Step 3): wires the verified lexer too, so the driver owns **no
-  lexing or parsing** — the whole front-end is verified ports. The
-  [lexer_v2.rian](../compiler/lexer_v2.rian) port (`LexerV2.tokenize`)
-  feeds [decl.rian](../compiler/decl.rian) directly (its token tags are a
-  superset of the parser's — **no projection**), whose IR is lowered to
-  `beam` Core and compiled by `Beam.compile_forms`. **Three verified
-  ports** (lexer, declaration parser, backend) composed cross-module; the only
-  driver-local code is the surface→Core lowering and the Form inflater.
-  `test/rian/compose_real_lex_fixpoint_test.exs` runs `fib`/`fact`/`even`/`odd`/`sum`/
-  `len` — incl. a source with `#` comments and blank lines that only the real lexer
-  handles — identical to `Rian.Beam`. Path to `v1==v2`: widen `decl` off
-  `:partial` (it lacks `if`/`case`/strings/sum-types) and the lowering to match.
-- [compose_real_sum.rian](../compiler/compose_real_sum.rian) — **COMPOSITION
-  rung 11** (ADR-0063 Step 3): widens the composed build's **surface** to **sum types
-  + constructor-pattern dispatch**, using `decl`'s already-locked `type`/ctor
-  capability — **no verified-port change**. Only the driver glue grows: the `type`
-  declaration is *erased* (variants are atoms / tagged tuples on the BEAM), and the
-  `Form` inflater learns `FCtorN`/`FCtor` (nullary ctor → snake atom `Red`→`:red`;
-  applied ctor → tagged tuple `Pair(a,b)`→`{:pair,a,b}`) via a `to_snake` matching
-  `Rian.PatternLower.to_snake` (`SNum`→`:s_num`, `SP`→`:sp`).
+- [compose_real_sum.rian](../compiler/compose_real_sum.rian) — **the composed
+  `build` driver** (ADR-0063 Step 3): the whole front-end and back-end are verified
+  ports, composed cross-module with no glue that reimplements a stage. The
+  [lexer_v2.rian](../compiler/lexer_v2.rian) port (`LexerV2.tokenize`) feeds
+  [decl.rian](../compiler/decl.rian) directly (token tags a superset of the
+  parser's — **no projection**), whose `Decl`/`Expr`/`Pat` IR is lowered to `beam`
+  Core/Pat and compiled by the cross-module `Beam.compile_forms` — all loaded under
+  `:"Elixir.*"` atoms (ADR-0041), so each stage's Rian output is the next stage's
+  Rian input. The only driver-local code is the surface→Core lowering and the
+  `Form`→abstract-form inflater (incl. `type`-erasure: nullary ctor `Red`→`:red`,
+  applied ctor `Pair(a,b)`→`{:pair,a,b}` via a `to_snake` matching
+  `Rian.PatternLower.to_snake`). The surface spans sum types + constructor-pattern
+  dispatch, and the build runs the exhaustiveness + capability gates.
   `test/rian/compose_real_sum_fixpoint_test.exs` compiles `Color`/`Shape`/`Box`
-  programs — nullary dispatch, payload destructuring, and ctor-value construction —
-  identical to `Rian.Beam`. Same three verified ports as rung 10; only host FFI:
-  `:compile.forms`/`:code.load_binary`.
+  programs identical to `Rian.Beam`; host FFI: `:compile.forms`/`:code.load_binary`
+  (+ `:erlang.binary_to_list` for string-literal byte segments, `:erlang.error` for
+  gate refusal). *(The earlier graduated rungs 7–10 — `compose_real_beam`/`front`/
+  `decl`/`lex`, which wired one verified port at a time over toy parsers for the
+  others — were retired once this driver superseded them; none was depended on by the
+  bootstrap loop.)*
 
 **The loop closes on real source** — [test/rian/compose_selfcompile_fixpoint_test.exs](../../test/rian/compose_selfcompile_fixpoint_test.exs)
 feeds the composed `build` a **verbatim slice of a real compiler stage** —

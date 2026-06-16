@@ -322,27 +322,16 @@ defmodule Rian.SelfHost do
   # MUST delete its line here (the test fails on a stale entry), and any NEW host FFI
   # MUST be added here (the test fails on an unlisted crutch). Sorted, deduped.
   @ffi_ledger %{
-    # rung 7 wires the VERIFIED beam backend into the driver via a cross-module call
-    # to Beam.compile_forms (composition — excluded from this count, see
-    # ffi_in_file/1). Its only host FFI is still the two BEAM toolchain calls.
-    "compose_real_beam.rian" => [":code.load_binary", ":compile.forms"],
-    # rung 8 adds the verified FRONT-END: bodies parsed by Parse.parse, then
-    # the Beam backend (both cross-module composition, excluded). Same two
-    # BEAM toolchain calls as the only host FFI.
-    "compose_real_front.rian" => [":code.load_binary", ":compile.forms"],
-    # rung 9 replaces the last toy front-end piece: the whole program is parsed by
-    # Decl.parse_program, then compiled by Beam (both cross-module
-    # composition, excluded). Same two BEAM toolchain calls as the only host FFI.
-    "compose_real_decl.rian" => [":code.load_binary", ":compile.forms"],
-    # rung 10 wires the verified LEXER too: LexerV2.tokenize → Decl →
-    # Beam (all cross-module composition, excluded). The whole front-end is
-    # now verified ports. Same two BEAM toolchain calls as the only host FFI.
-    "compose_real_lex.rian" => [":code.load_binary", ":compile.forms"],
-    # rung 11 widens the SURFACE to sum types + ctor dispatch (selfhost_decl's
-    # existing type/ctor capability); same three verified ports. The strings/chars
-    # widening (Phase A/B/C) adds `:erlang.binary_to_list` — a String's BYTES for the
-    # `{:string, L, Cs}` bin-segment of a string literal's form (matching
-    # Rian.Beam.str_form; codepoints would truncate >255 in an 8-bit segment).
+    # `compose_real_sum.rian` is the ACTIVE driver: it wires the verified ports
+    # (LexerV2.tokenize → Decl.parse_program → Beam.compile_forms, all cross-module
+    # composition, excluded from the FFI count — see ffi_in_file/1) over a surface
+    # spanning sum types + ctor dispatch, and runs the exhaustiveness + capability
+    # gates. Its host FFI: the two BEAM toolchain calls, plus `:erlang.binary_to_list`
+    # (a String's BYTES for the `{:string, L, Cs}` bin-segment of a string literal's
+    # form — matching Rian.Beam.str_form; codepoints would truncate >255 in an 8-bit
+    # segment) and `:erlang.error` (the gate-refusal raise). The earlier graduated
+    # rungs (compose_real_beam/front/decl/lex) were retired — superseded by this
+    # driver + the verified ports, none depended on by the bootstrap loop.
     "compose_real_sum.rian" => [
       ":code.load_binary",
       ":compile.forms",
