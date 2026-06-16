@@ -5,20 +5,38 @@ defmodule Rian.TranspileTest do
 
   defp rian(src), do: Transpile.transpile(src)
 
+  describe "defstruct → a Rian `struct` record (named for the module)" do
+    test "an atom-list defstruct becomes `struct Mod(field _Unk, …)`" do
+      out = rian("defmodule Point do\n  defstruct [:x, :y]\nend")
+      assert out =~ "struct Point(x _Unk, y _Unk)"
+      refute out =~ "TODO[port]: defstruct"
+    end
+
+    test "keyword defaults port the names; defaults are dropped (human types them)" do
+      out = rian("defmodule Cfg do\n  defstruct host: \"localhost\", port: 0\nend")
+      assert out =~ "struct Cfg(host _Unk, port _Unk)"
+    end
+
+    test "a dynamic defstruct (non-literal) falls back to a marker, not a wrong decl" do
+      out = rian("defmodule D do\n  @fields [:a]\n  defstruct @fields\nend")
+      assert out =~ "# TODO[port]: defstruct @fields"
+    end
+  end
+
   describe "structure that has a clear Rian image" do
     test "module + simple def → `mod`/`pub def` with type holes" do
       out = rian("defmodule M do\n  def double(x), do: x + x\nend")
       assert out =~ "mod M do"
-      assert out =~ "pub def double(x _Ty) _Ret := x + x"
+      assert out =~ "pub def double(x _Unk) _Unk := x + x"
     end
 
     test "defp is private (`def`, no `pub`)" do
-      assert rian("defmodule M do\n  defp f(x), do: x\nend") =~ ~r/\n  def f\(x _Ty\) _Ret :=/
+      assert rian("defmodule M do\n  defp f(x), do: x\nend") =~ ~r/\n  def f\(x _Unk\) _Unk :=/
     end
 
     test "multi-clause def emits one sig + per-clause bodies" do
       out = rian("defmodule M do\n  def f(0), do: :z\n  def f(n), do: n\nend")
-      assert out =~ "pub def f(_Ty) _Ret"
+      assert out =~ "pub def f(_Unk) _Unk"
       assert out =~ "pub def f(0) := :z"
       assert out =~ "pub def f(n) := n"
     end
@@ -83,7 +101,7 @@ end|) =~ ~S|"v=${x}!"|
 
     test "a call to a sibling Rian module is emitted inline, not flagged" do
       out = rian("defmodule M do\n  def g(x), do: Core.from_expr(x)\nend")
-      assert out =~ "pub def g(x _Ty) _Ret := Core.from_expr(x)"
+      assert out =~ "pub def g(x _Unk) _Unk := Core.from_expr(x)"
       refute out =~ "remote/stdlib call: Core"
     end
   end

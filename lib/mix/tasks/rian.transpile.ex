@@ -20,7 +20,7 @@ defmodule Mix.Tasks.Rian.Transpile do
   are cheap to port and which are struct-reflection-heavy before committing.
 
   This is **not** a one-shot port: the output will not compile until a human fills
-  the `_Ty`/`_Ret` holes, resolves every marker, makes matches exhaustive, and
+  the `_Unk` holes, resolves every marker, makes matches exhaustive, and
   adds a fixpoint test. See `Rian.Transpile` for the translated-vs-flagged split.
 
       mix rian.transpile lib/rian/range.ex

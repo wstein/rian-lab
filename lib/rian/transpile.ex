@@ -11,17 +11,17 @@ defmodule Rian.Transpile do
   skeleton** a human then finishes and equiv-locks against the oracle:
 
     * forms with a clear Rian image are translated — `def`/`defp` clauses,
-      `if`/`case` (incl. `when` arms), binary/unary operators, ctor & struct
-      patterns (`%ECall{fun: f}` → `ECall(fun: f)`), tuples, lists/cons, atoms,
-      string/number literals, local calls;
+      `defstruct` (→ a `struct Mod(…)` record skeleton), `if`/`case` (incl. `when`
+      arms), binary/unary operators, ctor & struct patterns (`%ECall{fun: f}` →
+      `ECall(fun: f)`), tuples, lists/cons, atoms, string/number literals, local calls;
     * everything else is left **in place** as a greppable `TODO_PORT("…")`
       sentinel (carrying the original Elixir) or a `# TODO[port]: …` line comment,
       so nothing untranslated can masquerade as done;
-    * **types are holes** (`_Ty`, `_Ret`) by default — Elixir is untyped, so the human
+    * **types are holes** (`_Unk`) by default — Elixir is untyped, so the human
       supplies the sums and signatures. With `--infer` (ADR-0075) the engine fills
       every *provable* slot, **harvesting any `@spec`** as a cross-checked hint (a
       consumed `@spec` becomes a passive `# spec:` provenance line, not a TODO);
-      whatever stays unproven remains an honest `_Ty`/`_Ret` hole for the human.
+      whatever stays unproven remains an honest `_Unk` hole for the human.
 
   Usage: `mix rian.transpile lib/rian/range.ex [-o out.rian]`.
 
@@ -34,10 +34,10 @@ defmodule Rian.Transpile do
   @header [
     "# ─────────────────────────────────────────────────────────────────────────",
     "# DRAFT skeleton — transpiled from Elixir by `mix rian.transpile`. NOT done.",
-    "# Translated: defs/clauses (+guards), if/case, operators, ctor/struct patterns,",
-    "#   tuples, lists, maps, atoms, literals, local & sibling-module calls,",
+    "# Translated: defs/clauses (+guards), defstruct→struct, if/case, operators,",
+    "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
     "#   string interpolation (${e}), nil→None.",
-    "# You must still: (1) fill type holes `_Ty`/`_Ret`, (2) resolve every",
+    "# You must still: (1) fill type holes `_Unk`, (2) resolve every",
     "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
     "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
     "# Auto-mapped stdlib calls (List./Dict./Str.) are spelled inline but NOT",
@@ -101,8 +101,8 @@ defmodule Rian.Transpile do
   Transpile Elixir source text to a draft Rian skeleton string.
 
   With `infer: true`, runs whole-program type inference (`Rian.Transpile.Infer`)
-  to fill the `_Ty`/`_Ret` holes with concrete types where provable (harvesting any
-  `@spec` as a cross-checked hint), leaving an honest `_Ty`/`_Ret` hole otherwise —
+  to fill the `_Unk` holes with concrete types where provable (harvesting any
+  `@spec` as a cross-checked hint), leaving an honest `_Unk` hole otherwise —
   a hole signals "a human must supply this type", never an auto-filled placeholder.
   """
   @spec transpile(String.t(), keyword()) :: term()
@@ -163,11 +163,11 @@ defmodule Rian.Transpile do
     # check; counted (occurrences, not lines) so the report can surface them.
     mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, text) |> length()
     # holes/open are counted over the code only — the header comment illustrates
-    # `_Ty`/`_Ret` and must not inflate the count.
+    # `_Unk` and must not inflate the count.
     code =
       lines |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#")) |> Enum.join("\n")
 
-    holes = Regex.scan(~r/\b_(?:Ty|Ret)\b/, code) |> length()
+    holes = Regex.scan(~r/\b_Unk\b/, code) |> length()
     {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes}}
   end
 
@@ -244,7 +244,7 @@ defmodule Rian.Transpile do
     end
   end
 
-  defp hole_sig?(%{params: ps, ret: r}), do: r == "_Ret" or Enum.any?(ps, &(&1 == "_Ty"))
+  defp hole_sig?(%{params: ps, ret: r}), do: r == "_Unk" or Enum.any?(ps, &(&1 == "_Unk"))
 
   # Collect just the def groups (reusing the clause grouping), no rendering.
   defp def_groups(stmts) do
@@ -307,7 +307,7 @@ defmodule Rian.Transpile do
 
   defp toplevel({:defmodule, _, [aliases, [do: body]]}, sigmap, types) do
     name = short_name(aliases)
-    inner = body |> block_stmts() |> render_items(sigmap) |> Enum.map(&indent/1)
+    inner = body |> block_stmts() |> render_items(sigmap, name) |> Enum.map(&indent/1)
     # synthesized `type …` declarations (Phase B error sets) go after `mod … do`.
     type_lines = if types == [], do: [], else: Enum.map(types, &("  " <> &1)) ++ [""]
     @header ++ ["mod #{name} do" | type_lines ++ inner] ++ ["end"]
@@ -328,10 +328,15 @@ defmodule Rian.Transpile do
   # Walk the statement list, attaching a pending `@doc` to the next def, and
   # merging consecutive same-name/arity clauses into one rendered group.
 
-  defp render_items(stmts, sigmap) do
+  defp render_items(stmts, sigmap, mod_name) do
     {lines, _pending_doc, open} =
       Enum.reduce(stmts, {[], nil, nil}, fn stmt, {acc, doc, open} ->
         case classify(stmt) do
+          {:defstruct, fields} ->
+            # an Elixir `defstruct` IS the module's record type → a Rian `struct`
+            # decl named for the module, fields as `_Unk` holes for a human to type.
+            {acc ++ flush(open, sigmap) ++ [struct_decl(mod_name, fields)], doc, nil}
+
           {:moduledoc, text} ->
             {acc ++ flush(open, sigmap) ++ [""] ++ moduledoc_lines(text), doc, nil}
 
@@ -376,9 +381,31 @@ defmodule Rian.Transpile do
   defp classify({:import, _, _} = n), do: {:drop, "import", n}
   defp classify({:require, _, _} = n), do: {:drop, "require", n}
   defp classify({:@, _, [{:spec, _, _}]} = n), do: {:spec, n}
+
+  defp classify({:defstruct, _, [fields]} = n) when is_list(fields) do
+    if Enum.all?(fields, &struct_field?/1), do: {:defstruct, fields}, else: {:other, n}
+  end
+
   defp classify({:def, _, [head, kw]}), do: {:clause, :pub, head, kw}
   defp classify({:defp, _, [head, kw]}), do: {:clause, :priv, head, kw}
   defp classify(other), do: {:other, other}
+
+  # a `defstruct` field: a bare atom (`:x`) or a `{atom, default}` keyword pair.
+  defp struct_field?(a) when is_atom(a), do: true
+  defp struct_field?({a, _default}) when is_atom(a), do: true
+  defp struct_field?(_), do: false
+
+  # `defstruct [:x, y: 0]` → `struct Mod(x _Unk, y _Unk)` (defaults dropped — the
+  # field NAMES port; their types and any default are for the human to fill).
+  defp struct_decl(mod_name, fields) do
+    names =
+      Enum.map(fields, fn
+        {k, _default} -> k
+        k -> k
+      end)
+
+    "struct #{mod_name}(#{Enum.map_join(names, ", ", &"#{&1} _Unk")})"
+  end
 
   # A clause: name, arity, parameter/pattern nodes, optional guard, body AST.
   defp build_clause(head, kw) do
@@ -421,8 +448,8 @@ defmodule Rian.Transpile do
 
     # inferred sig (or all-holes when inference is off / the slot is unresolved).
     sig = Map.get(sigmap, {to_string(name), arity})
-    ptypes = if sig, do: sig.params, else: List.duplicate("_Ty", arity)
-    ret = if sig, do: sig.ret, else: "_Ret"
+    ptypes = if sig, do: sig.params, else: List.duplicate("_Unk", arity)
+    ret = if sig, do: sig.ret, else: "_Unk"
     forall = if sig && sig.tvars != [], do: " forall #{Enum.join(sig.tvars, ", ")}", else: ""
 
     body_lines =
@@ -444,7 +471,7 @@ defmodule Rian.Transpile do
   end
 
   # "Simple" = a single clause whose params are all plain variables and no guard;
-  # render inline `def f(a _Ty) _Ret := body`. Anything else gets a sig + clauses.
+  # render inline `def f(a _Unk) _Unk := body`. Anything else gets a sig + clauses.
   defp simple?([%{args: args, guard: nil}]), do: Enum.all?(args, &var?/1)
   defp simple?(_), do: false
 

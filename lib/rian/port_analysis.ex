@@ -275,7 +275,7 @@ defmodule Rian.PortAnalysis do
       Regex.match?(~r/\bFn\(/, type) -> "off :rs (closure)"
       Regex.match?(~r/\b(Int64|Int128|UInt64|UInt128)\b/, type) -> "off :js (>2^53)"
       Regex.match?(~r/\bInt\b(?![0-9])/, type) -> "off :rs/:jvm (bignum)"
-      type in ["_Ty", "_Ret"] -> "—"
+      type == "_Unk" -> "—"
       true -> "✓ all 4"
     end
   end

@@ -1,4 +1,4 @@
-# ADR-0075 — Transpiler type inference: filling `_Ty`/`_Ret` holes
+# ADR-0075 — Transpiler type inference: filling `_Unk` holes
 
 **Status:** Accepted (direction) · implemented (MVP: `Rian.Transpile.Infer`, `--infer`)
 **Implemented:** Algorithm-J whole-program inference over the Elixir AST with occurs-check, `[Gen]`
@@ -16,7 +16,7 @@ handling / `T | E`), ADR-0042 (`Fn(…)`), ADR-0064 (portable numerics / `Int53`
 ## Context
 
 The Elixir→Rian transpiler (`Rian.Transpile`) emits draft Rian where every function carries
-placeholder type holes — `_Ty` per parameter, `_Ret` per return — because Elixir is untyped.
+a `_Unk` placeholder hole per parameter and per return, because Elixir is untyped.
 A human then fills them. This ADR governs the pass that fills them **automatically where
 provable**, *producing the explicit signatures the language requires* — it does **not** reverse
 ADR-0034's infer-local/declare-public boundary (the compiler still declares `pub` sigs; the pass
@@ -105,6 +105,13 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
   - **Sum-type reconstruction** (the IR): collecting `%Mod{…}` and synthesizing `type` decls hits
     the same wall — field types are themselves nested structs/tuples, so synthesizing them safely is
     effectively reconstructing the whole type system (the human-judgment "which sum" part).
+  - **`defstruct` skeleton (IMPLEMENTED).** A `defstruct [:x, y: 0]` no longer drops to a
+    `TODO[port]` marker — the transpiler emits the **record skeleton** `struct Mod(x _Unk, y _Unk)`
+    (named for the enclosing module, field names recovered, defaults dropped). This is the *safe*
+    half of struct reconstruction: the field **names** port mechanically; only the field **types**
+    stay `_Unk` holes (the IR wall above). A non-literal `defstruct @fields` still falls back to a
+    marker rather than emit a wrong decl. `port_analysis` already inventoried struct fields (the §3
+    proposed-sum clusters); this closes the matching gap on the transpiler side.
 - **Phase C — `@spec` harvesting (IMPLEMENTED, cross-checked).** Elixir is untyped, so inference can
   only *reconstruct* types from usage — but a large fraction of real Elixir carries `@spec`, which
   **is** the human-written type the engine was reconstructing. `Rian.Transpile.Infer.collect_specs/1`
@@ -112,7 +119,7 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
   inverse of ADR-0026's `-spec` *emission*: `integer()`→`Int53`, `String.t()`/`binary()`→`String`,
   `[t]`→`Vec(t)`, `t1 | t2`→union, `atom()`/`module()`→`Symbol`, `%Mod{}`→the sum name). Types with
   no clean Rian image — `any()`/`term()`, tuples, maps, pids, local `t()` refs — yield **no hint** (a
-  `nil` slot), so the slot stays an honest `_Ty`/`_Ret` hole for a human. The seed is
+  `nil` slot), so the slot stays an honest `_Unk` hole for a human. The seed is
   **cross-checked, never authoritative** (`seed_spec/6`): each sig var is unified with its spec term
   *after* the body pass, so a body-**hole** var **adopts** the spec (the fill) while a body-**concrete**
   var that **conflicts** keeps its proven type (unify reports `:conflict` and leaves it) — a stale or

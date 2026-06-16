@@ -1,6 +1,6 @@
 defmodule Rian.Transpile.Infer do
   @moduledoc """
-  Whole-program type inference that fills the transpiler's `_Ty`/`_Ret` holes
+  Whole-program type inference that fills the transpiler's `_Unk` holes
   (ADR-0034-aligned: it *produces* explicit signatures rather than relaxing the
   declare-public boundary).
 
@@ -25,7 +25,7 @@ defmodule Rian.Transpile.Infer do
   its spec term *after* the body pass — a body-hole var ADOPTS the spec, a conflicting
   body-concrete var keeps its proven type. Hints, cross-checked: a stale/wrong `@spec`
   never forces an accidental fill. Untranslatable spec types (`any()`/`term()`, tuples,
-  maps) yield no hint — the slot stays an honest `_Ty`/`_Ret` hole for a human to fill.
+  maps) yield no hint — the slot stays an honest `_Unk` hole for a human to fill.
   """
 
   alias Rian.Decl
@@ -75,7 +75,7 @@ defmodule Rian.Transpile.Infer do
 
   defp xmod_cache, do: :persistent_term.get({__MODULE__, :xmod}, %{})
 
-  defp hole_sig?(%{params: ps, ret: r}), do: r == "_Ret" or Enum.any?(ps, &(&1 == "_Ty"))
+  defp hole_sig?(%{params: ps, ret: r}), do: r == "_Unk" or Enum.any?(ps, &(&1 == "_Unk"))
 
   # parse the prelude `fsigs` once and cache (the perf-sensitive path when
   # transpiling all of `lib/rian`; re-run the OS process to pick up prelude edits).
@@ -115,7 +115,7 @@ defmodule Rian.Transpile.Infer do
   @doc """
   Infer a def group (all clauses of one name/arity). Returns
   `%{params: [type_string], ret: type_string, tvars: [name], ledger: [{slot, reason}]}`
-  where an unresolved slot is the literal hole `"_Ty"`/`"_Ret"` and `ledger`
+  where an unresolved slot is the literal hole `"_Unk"` and `ledger`
   records why each hole was left (for `--infer-report`).
   """
   @spec infer_group(map(), term()) :: term()
@@ -145,7 +145,7 @@ defmodule Rian.Transpile.Infer do
     store = seed_spec(ctx, to_string(hd(clauses).name), arity, pvars, rvar, store)
 
     gmap = generalize_map(pvars, rvar, store)
-    params = pvars |> Enum.map(&(render(store, gmap, &1) |> hole_or("_Ty")))
+    params = pvars |> Enum.map(&(render(store, gmap, &1) |> hole_or("_Unk")))
     tvars = gmap |> Map.values() |> Enum.uniq() |> Enum.sort()
 
     # a Result (all tails `{:ok, _}`/`{:error, Tag}`) types as `Payload | <error set>`;
@@ -154,12 +154,12 @@ defmodule Rian.Transpile.Infer do
       case res do
         {:result, payload_term, tg} ->
           case render(store, gmap, payload_term) do
-            :hole -> {render(store, gmap, rvar) |> hole_or("_Ret"), [], false}
+            :hole -> {render(store, gmap, rvar) |> hole_or("_Unk"), [], false}
             p -> {p, tg, true}
           end
 
         :no ->
-          {render(store, gmap, rvar) |> hole_or("_Ret"), [], false}
+          {render(store, gmap, rvar) |> hole_or("_Unk"), [], false}
       end
 
     %{
@@ -222,7 +222,7 @@ defmodule Rian.Transpile.Infer do
     do: con("String")
 
   defp translate_spec({t, _, _}) when t in [:atom, :module, :node], do: con("Symbol")
-  # `any()`/`term()` carries no concrete type -> leave the slot a `_Ty`/`_Ret` hole
+  # `any()`/`term()` carries no concrete type -> leave the slot a `_Unk` hole
   # (an honest "human must type this" marker, not an auto-filled placeholder).
   defp translate_spec({t, _, _}) when t in [:any, :term], do: nil
   defp translate_spec({{:., _, [{:__aliases__, _, [:String]}, :t]}, _, _}), do: con("String")
@@ -1097,15 +1097,15 @@ defmodule Rian.Transpile.Infer do
   defp hole_or(:hole, h), do: h
   defp hole_or(t, _h), do: t
 
-  # operates on the FINAL rendered slot strings (`"_Ty"`/`"_Ret"` are the holes).
+  # operates on the FINAL rendered slot strings (`"_Unk"` are the holes).
   defp build_ledger(params, ret) do
     param_entries =
       params
       |> Enum.with_index()
-      |> Enum.filter(fn {t, _} -> t == "_Ty" end)
+      |> Enum.filter(fn {t, _} -> t == "_Unk" end)
       |> Enum.map(fn {_, i} -> {"param##{i}", :unresolved} end)
 
-    ret_entry = if ret == "_Ret", do: [{"ret", :unresolved}], else: []
+    ret_entry = if ret == "_Unk", do: [{"ret", :unresolved}], else: []
     param_entries ++ ret_entry
   end
 

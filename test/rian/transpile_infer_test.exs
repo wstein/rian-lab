@@ -121,7 +121,7 @@ defmodule Rian.TranspileInferTest do
 
       out = Transpile.transpile(src, infer: true)
       refute out =~ "| Errors"
-      assert out =~ "def f(x Int53) _Ret"
+      assert out =~ "def f(x Int53) _Unk"
     end
 
     test "honesty: a non-Capitalized error tag (Elixir idiom) is NOT made a Result" do
@@ -130,7 +130,7 @@ defmodule Rian.TranspileInferTest do
         Transpile.transpile("defmodule M do\n  def f(x), do: {:error, :nope}\nend", infer: true)
 
       refute out =~ "Errors"
-      assert out =~ "_Ret"
+      assert out =~ "_Unk"
     end
   end
 
@@ -154,13 +154,13 @@ defmodule Rian.TranspileInferTest do
   end
 
   describe "honesty — leave a hole when nothing pins it" do
-    test "an unknown callee leaves _Ty/_Ret" do
+    test "an unknown callee leaves _Unk" do
       assert sig("  def h(x), do: unknown_fn(x)", "h") ==
-               "  pub def h(x _Ty) _Ret := unknown_fn(x)"
+               "  pub def h(x _Unk) _Unk := unknown_fn(x)"
     end
 
     test "a tuple return is left a hole in the MVP" do
-      assert sig("  def t(x), do: {:ok, x}", "t") =~ "_Ret"
+      assert sig("  def t(x), do: {:ok, x}", "t") =~ "_Unk"
     end
 
     test "infer_report names the remaining holes with reasons" do
@@ -182,9 +182,9 @@ defmodule Rian.TranspileInferTest do
   end
 
   describe "inference is off by default (existing behavior preserved)" do
-    test "without :infer, holes remain _Ty/_Ret" do
+    test "without :infer, holes remain _Unk" do
       out = Transpile.transpile("defmodule M do\n  def f(x), do: x + 1\nend")
-      assert out =~ "pub def f(x _Ty) _Ret := x + 1"
+      assert out =~ "pub def f(x _Unk) _Unk := x + 1"
     end
   end
 
@@ -216,9 +216,9 @@ defmodule Rian.TranspileInferTest do
       assert sig(body, "wrap") =~ "forall T"
     end
 
-    test "an untranslatable any() return leaves a _Ret hole, not a guess" do
+    test "an untranslatable any() return leaves a _Unk hole, not a guess" do
       body = "  @spec opaque(integer()) :: any()\n  def opaque(n), do: Tuple.to_list(n)"
-      assert sig(body, "opaque") =~ "_Ret"
+      assert sig(body, "opaque") =~ "_Unk"
     end
 
     test "a proven body type WINS over a contradictory spec (the cross-check)" do
@@ -250,7 +250,7 @@ defmodule Rian.TranspileInferTest do
           "defmodule M do\n  @spec g(String.t()) :: String.t()\n  def g(s), do: s\nend"
         )
 
-      assert out =~ "pub def g(s _Ty) _Ret := s"
+      assert out =~ "pub def g(s _Unk) _Unk := s"
       # but the spec is still surfaced as provenance, never lost
       assert out =~ "# spec: @spec g"
     end
