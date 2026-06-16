@@ -114,6 +114,28 @@ defmodule Rian.GradualTest do
     end
   end
 
+  describe "lowering on the dynamic targets (ADR-0076 Phase 3)" do
+    test "__Unknown erases to any() in the BEAM -spec" do
+      {:ok, _, bin} =
+        Rian.Beam.compile(
+          "mod GradSpec do\n  pub def id(x __Unknown) __Unknown := x\nend",
+          :"Elixir.GradSpec"
+        )
+
+      {:ok, {_, [{:abstract_code, {_, ac}}]}} = :beam_lib.chunks(bin, [:abstract_code])
+      spec = Enum.find(ac, &match?({:attribute, _, :spec, _}, &1))
+      # the -spec exists and its types are `any()` (a `__Unknown` param + return)
+      assert {:attribute, _, :spec, {{:id, 1}, [_]}} = spec
+      assert ac |> :erlang.term_to_binary() |> :erlang.binary_to_term() |> inspect() =~ "any"
+    end
+
+    test "a __Unknown function emits ECMAScript without error" do
+      js = Rian.JS.compile("def id(x __Unknown) __Unknown := x\ndef box(x Int53) __Unknown := x")
+      assert js =~ "function id("
+      assert js =~ "function box("
+    end
+  end
+
   describe "the gradual guarantee — fully-typed code is untouched" do
     test "a module with ZERO __Unknown still type-checks exactly as before" do
       assert :ok = check("mod M do\n  pub def add(a Int53, b Int53) Int53 := a + b\nend")
