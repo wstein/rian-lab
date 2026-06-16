@@ -933,4 +933,64 @@ mod Checker do
   def cat_str(Vec(String), Vec(String)) Vec(String)
   def cat_str([], ys) := ys
   def cat_str([x | xs], ys) := [x | cat_str(xs, ys)]
+
+  # ── error set #1: numeric mix (ADR-0035) — the first SELF-CHECKING gate ──────────
+  # The inference above never rejects; it infers `unknown` and moves on. This is the
+  # first port of a Rian.Check ERROR SET — the boundary check that turns the compiler
+  # from self-COMPILING into (partially) self-CHECKING. `Rian.Check.check_numeric_mix`:
+  # a `+`/`-`/`*` whose two operands are concretely a different numeric KIND (one
+  # int/uint, the other float) is REJECTED — a value never silently becomes a float.
+  # `num_mix` walks one clause body's Core and returns true iff such a mix exists.
+  # CONSERVATIVE: an operand inferred `unknown` (or non-numeric) never triggers — only a
+  # PROVABLE int↔float mix. The env is FIXED across the walk (no case-narrow / block-bind
+  # / lambda-extend as we descend), mirroring the reference's `scan_num_mix`.
+  pub def num_mix(Core, Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
+  pub def num_mix(CNum(_), _, _) := false
+  pub def num_mix(CStr(_), _, _) := false
+  pub def num_mix(CChar(_), _, _) := false
+  pub def num_mix(CId(_), _, _) := false
+  pub def num_mix(CUnary(_, a), env, ic) := num_mix(a, env, ic)
+  pub def num_mix(CBin(op, l, r), env, ic)
+    if mix_op(op) and mixed_kind(ordinal_base(infer_ic(l, env, ic)), ordinal_base(infer_ic(r, env, ic))) do
+      true
+    else
+      num_mix(l, env, ic) or num_mix(r, env, ic)
+    end
+  end
+  pub def num_mix(CCall(_, args), env, ic) := num_mix_any(args, env, ic)
+  pub def num_mix(CIf(c, t, e), env, ic) := num_mix(c, env, ic) or num_mix(t, env, ic) or num_mix(e, env, ic)
+  pub def num_mix(CBlock(stmts), env, ic) := num_mix_stmts(stmts, env, ic)
+  pub def num_mix(CCase(scrut, arms), env, ic) := num_mix(scrut, env, ic) or num_mix_arms(arms, env, ic)
+  pub def num_mix(CList(elems, tail), env, ic) := num_mix_any(elems, env, ic) or num_mix_tail(tail, env, ic)
+  pub def num_mix(CLambda(_, body), env, ic) := num_mix(body, env, ic)
+
+  # the mix arithmetic ops are EXACTLY Rian.Check's @arith = `+ - *` (NOT div/rem, which
+  # are integer-only; `arith_op`'s wider set is for inference, not this gate).
+  def mix_op(op String) Bool := op == "+" or op == "-" or op == "*"
+
+  # one operand int/uint-kind, the other float-kind, both concrete (Rian.Check.mixed_num?
+  # / num_mix?). NkNone (a non-numeric type, or `unknown`) never mixes.
+  def mixed_kind(lt String, rt String) Bool := km(num_kind(lt), num_kind(rt))
+  def km(NumKind, NumKind) Bool
+  def km(Nk(lk, _), Nk(rk, _)) := kind_mix(lk, rk)
+  def km(_, _) := false
+  def kind_mix(lk String, rk String) Bool := (lk == "float" and int_kind(rk)) or (rk == "float" and int_kind(lk))
+  def int_kind(k String) Bool := k == "int" or k == "uint"
+
+  def num_mix_any(Vec(Core), Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
+  def num_mix_any([], _, _) := false
+  def num_mix_any([c | rest], env, ic) := num_mix(c, env, ic) or num_mix_any(rest, env, ic)
+
+  def num_mix_stmts(Vec(Stmt), Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
+  def num_mix_stmts([], _, _) := false
+  def num_mix_stmts([SBind(_, e) | rest], env, ic) := num_mix(e, env, ic) or num_mix_stmts(rest, env, ic)
+  def num_mix_stmts([SExpr(e) | rest], env, ic) := num_mix(e, env, ic) or num_mix_stmts(rest, env, ic)
+
+  def num_mix_arms(Vec(Arm), Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
+  def num_mix_arms([], _, _) := false
+  def num_mix_arms([CArm(_, body) | rest], env, ic) := num_mix(body, env, ic) or num_mix_arms(rest, env, ic)
+
+  def num_mix_tail(Tail, Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
+  def num_mix_tail(TClose, _, _) := false
+  def num_mix_tail(TCons(e), env, ic) := num_mix(e, env, ic)
 end
