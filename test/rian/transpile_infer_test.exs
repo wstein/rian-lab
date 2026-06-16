@@ -352,6 +352,25 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "spec_type_to_rian/2 — render an Elixir @spec type as a Rian type string" do
+    defp rian_t(spec_str) do
+      {:ok, {:"::", _, [_, ret]}} = Code.string_to_quoted("#{spec_str}")
+      Rian.Transpile.Infer.spec_type_to_rian(ret)
+    end
+
+    test "clean Elixir types map to Rian" do
+      assert rian_t("f() :: integer()") == "Int53"
+      assert rian_t("f() :: String.t()") == "String"
+      assert rian_t("f() :: [String.t()]") == "Vec(String)"
+      assert rian_t("f() :: boolean()") == "Bool"
+    end
+
+    test "an Elixir type with no clean Rian image renders `_Unk`" do
+      assert rian_t("f() :: {:ok, integer()}") == "_Unk"
+      assert rian_t("f() :: map()") == "_Unk"
+    end
+  end
+
   describe "whole-program + port.spec drafts (ADR-0075)" do
     test "a named sum flows from the port.spec into the emitted draft signature" do
       src = """

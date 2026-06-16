@@ -1,4 +1,6 @@
 defmodule Rian.SelfHost do
+  use Rian.Ann
+
   @moduledoc """
   Self-hosting instrumentation (ADR-0063 §4) — turns "we ported some files" into a
   **measured boundary** and a **counted** FFI-crutch ledger, so the marching front
@@ -249,7 +251,7 @@ defmodule Rian.SelfHost do
   The self-hosted fraction of the BEAM front-end→backend pipeline, as a 0–100
   integer percent. `:self_hosted` counts 1.0, `:partial` 0.5, `:not_started` 0.0.
   """
-  @spec percent() :: integer()
+  @rian "pub def percent() Int53"
   def percent do
     total = length(@stages)
     sum = Enum.reduce(@stages, 0.0, fn s, acc -> acc + Map.fetch!(@weights, s.status) end)
@@ -264,7 +266,7 @@ defmodule Rian.SelfHost do
   Render the stage-status report `docs/self-host-status.md` is a snapshot of: a
   `% self-hosted` headline plus a per-stage table. Generated, never hand-edited.
   """
-  @spec status_markdown() :: String.t()
+  @rian "pub def status_markdown() String"
   def status_markdown, do: status_markdown(@stages)
 
   @doc """
@@ -371,7 +373,7 @@ defmodule Rian.SelfHost do
     do: "`compiler/#{src}`" <> if(test, do: " · `#{test}`", else: "")
 
   @doc "The self-host Rian sources cited as evidence (absolute paths)."
-  @spec evidence_files() :: [String.t()]
+  @rian "pub def evidence_files() Vec(String)"
   def evidence_files do
     for s <- @stages, s.source, do: Path.join(@compiler_dir, s.source)
   end
@@ -407,7 +409,7 @@ defmodule Rian.SelfHost do
   def ffi_ledger, do: @ffi_ledger
 
   @doc "All `compiler/*.rian` source paths."
-  @spec selfhost_files() :: [String.t()]
+  @rian "pub def selfhost_files() Vec(String)"
   def selfhost_files, do: Path.wildcard(Path.join(@compiler_dir, "*.rian"))
 
   @doc """
@@ -418,7 +420,7 @@ defmodule Rian.SelfHost do
   tracked by the composition axis — counting it would perversely make composing more
   verified stages look like more host dependency).
   """
-  @spec selfhost_module_names() :: [String.t()]
+  @rian "pub def selfhost_module_names() Vec(String)"
   def selfhost_module_names do
     for path <- selfhost_files(),
         [_, name] <- Regex.scan(~r/^\s*mod\s+(\w+)\s+do/m, File.read!(path)) do
@@ -446,7 +448,7 @@ defmodule Rian.SelfHost do
   crutch (see `selfhost_module_names/0`). Genuine host `Mod.fun` calls (`String.to_atom`)
   stay counted — their module head is not a self-host port.
   """
-  @spec ffi_in_file(String.t()) :: [String.t()]
+  @rian "pub def ffi_in_file(String) Vec(String)"
   def ffi_in_file(path) do
     prog = path |> File.read!() |> Rian.Decl.parse()
 

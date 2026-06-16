@@ -324,6 +324,20 @@ defmodule Rian.Transpile.Infer do
   defp spec_str({:con, n}), do: n
   defp spec_str({:app, h, parts}), do: "#{h}(#{Enum.map_join(parts, ", ", &spec_str/1)})"
 
+  @doc """
+  Render an Elixir `@spec` type AST as a **Rian type string** — the converse of the
+  harvest (ADR-0026 inverse). `_Unk` when the Elixir type has no clean Rian image
+  (a tuple/map/atom-literal — a porting decision a human must make). `type_env` resolves
+  local `@type` refs. Used to convert `@spec` into a native `@rian` annotation.
+  """
+  @spec spec_type_to_rian(Macro.t(), map()) :: String.t()
+  def spec_type_to_rian(ast, type_env \\ %{}) do
+    case translate_spec(ast, type_env) do
+      nil -> "_Unk"
+      term -> spec_str(term)
+    end
+  end
+
   # Cross-checked `@spec` seeding: unify each sig var with its declared spec term
   # AFTER the body pass. A free (body-hole) var ADOPTS the spec; a body-concrete var
   # that conflicts keeps its proven type (unify reports `:conflict` and leaves it),
