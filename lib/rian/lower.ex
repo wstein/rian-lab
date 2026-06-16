@@ -174,6 +174,7 @@ defmodule Rian.Lower do
     "mod #{PL.to_snake(name)} {\n#{body}\n}"
   end
 
+  @spec const_set(list()) :: MapSet.t()
   defp const_set(consts), do: MapSet.new(consts, & &1.name)
 
   # type/struct names mentioned in any `pub` function's param or return types
@@ -302,7 +303,12 @@ defmodule Rian.Lower do
   end
 
   # The resolution context threaded into every body: `meta` (sum-variant table),
-  # `smeta` (struct table), `cset` (in-scope constant names).
+  # `smeta` (struct table), `cset` (in-scope constant names). `cset`'s `MapSet.t()`
+  # is declared explicitly so it stays opaque through the field access in
+  # `resolve_consts/2` (otherwise its element type is inferred structurally).
+  @typep rctx :: %{meta: map(), smeta: map(), cset: MapSet.t(), funs: map()}
+  @spec ctx(map(), map(), MapSet.t()) :: rctx()
+  @spec ctx(map(), map(), MapSet.t(), map()) :: rctx()
   defp ctx(meta, smeta, cset, funs \\ %{}),
     do: %{meta: meta, smeta: smeta, cset: cset, funs: funs}
 
@@ -430,6 +436,7 @@ defmodule Rian.Lower do
   # Rewrite a reference to an in-scope constant (`{:id, NAME}`) into a
   # `{:const_ref, NAME}` node, so the emitter spells it per target (a BEAM
   # accessor call vs. a Rust `const` name) without needing ambient context.
+  @spec resolve_consts(term(), MapSet.t()) :: term()
   defp resolve_consts({:id, name} = node, cset) do
     if MapSet.member?(cset, name), do: {:const_ref, name}, else: node
   end
