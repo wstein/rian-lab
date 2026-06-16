@@ -97,8 +97,11 @@ defmodule Rian.InterpFixpointTest do
   defp norm(:unknown), do: "unknown"
   defp norm(t), do: t
 
-  defp ported(mod, node, env, ic, show), do: mod.desugar(inj_parts(node), hole_types(node, env, ic), show)
-  defp reference(node, env, ic, show), do: inj(Rian.Interp.resolve(node, env, ic, MapSet.new(show)))
+  defp ported(mod, node, env, ic, show),
+    do: mod.desugar(inj_parts(node), hole_types(node, env, ic), show)
+
+  defp reference(node, env, ic, show),
+    do: inj(Rian.Interp.resolve(node, env, ic, MapSet.new(show)))
 
   # {str_interp node, env (param -> type), show type-name list}
   defp corpus do
@@ -140,7 +143,11 @@ defmodule Rian.InterpFixpointTest do
 
       assert ported(mod, node, %{"x" => "Int53"}, %{}, []) ==
                {:s_call, {:s_id, "__prim_str_concat_all"},
-                [{:s_str, "a"}, {:s_call, {:s_id, "__prim_int_to_string"}, [{:s_id, "x"}]}, {:s_str, "b"}]}
+                [
+                  {:s_str, "a"},
+                  {:s_call, {:s_id, "__prim_int_to_string"}, [{:s_id, "x"}]},
+                  {:s_str, "b"}
+                ]}
     end
   end
 end

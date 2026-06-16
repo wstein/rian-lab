@@ -86,28 +86,30 @@ defmodule Rian.PrimFixpointTest do
 
   # HAND-BUILT raw surface trees exercising the rewrite in every expression position.
   # (a function, not a @attr — it calls the `prim/2` helper.)
-  defp corpus, do: [
-    # the bare rewrite
-    prim("str_concat", [{:id, "a"}, {:id, "b"}]),
-    prim("map_new", []),
-    # nested Prim inside Prim args
-    prim("str_concat", [prim("char_to_string", [{:id, "c"}]), {:str, "x"}]),
-    # inside unary / binary
-    {:unary, "-", prim("char_code", [{:id, "c"}])},
-    {:bin, "+", prim("char_code", [{:id, "c"}]), {:num, "1"}},
-    # a NON-Prim dot-call passes through (head not "Prim")
-    {:call, {:dot, {:id, "Foo"}, "bar"}, [prim("char_code", [{:id, "a"}])]},
-    # inside if / tuple / list / label
-    {:if, {:id, "c"}, prim("int_to_string", [{:num, "1"}]), {:str, "z"}},
-    {:tuple, [prim("char_code", [{:id, "a"}]), {:num, "2"}]},
-    {:list_lit, [prim("char_code", [{:id, "a"}]), {:id, "b"}], nil},
-    {:call, {:id, "f"}, [{:label, "k", prim("str_concat", [{:str, "a"}, {:str, "b"}])}]},
-    # inside a block (bind + expr) and a case arm (guard + body)
-    {:block, [{:bind, "x", prim("map_new", [])}, {:expr, prim("map_get", [{:id, "x"}, {:str, "k"}])}]},
-    {:case, {:id, "x"}, [{{:var, "n"}, nil, prim("int_to_string", [{:id, "n"}])}]},
-    # a tree with NO Prim calls is unchanged
-    {:bin, "*", {:num, "3"}, {:bin, "+", {:num, "1"}, {:num, "2"}}}
-  ]
+  defp corpus,
+    do: [
+      # the bare rewrite
+      prim("str_concat", [{:id, "a"}, {:id, "b"}]),
+      prim("map_new", []),
+      # nested Prim inside Prim args
+      prim("str_concat", [prim("char_to_string", [{:id, "c"}]), {:str, "x"}]),
+      # inside unary / binary
+      {:unary, "-", prim("char_code", [{:id, "c"}])},
+      {:bin, "+", prim("char_code", [{:id, "c"}]), {:num, "1"}},
+      # a NON-Prim dot-call passes through (head not "Prim")
+      {:call, {:dot, {:id, "Foo"}, "bar"}, [prim("char_code", [{:id, "a"}])]},
+      # inside if / tuple / list / label
+      {:if, {:id, "c"}, prim("int_to_string", [{:num, "1"}]), {:str, "z"}},
+      {:tuple, [prim("char_code", [{:id, "a"}]), {:num, "2"}]},
+      {:list_lit, [prim("char_code", [{:id, "a"}]), {:id, "b"}], nil},
+      {:call, {:id, "f"}, [{:label, "k", prim("str_concat", [{:str, "a"}, {:str, "b"}])}]},
+      # inside a block (bind + expr) and a case arm (guard + body)
+      {:block,
+       [{:bind, "x", prim("map_new", [])}, {:expr, prim("map_get", [{:id, "x"}, {:str, "k"}])}]},
+      {:case, {:id, "x"}, [{{:var, "n"}, nil, prim("int_to_string", [{:id, "n"}])}]},
+      # a tree with NO Prim calls is unchanged
+      {:bin, "*", {:num, "3"}, {:bin, "+", {:num, "1"}, {:num, "2"}}}
+    ]
 
   defp ported(mod, raw), do: mod.normalize(inj(raw))
   defp reference(raw), do: inj(Rian.Prim.normalize(raw))
