@@ -70,8 +70,32 @@ fidelity + fuzz totality are the corpus-wide contract.
   trailing comma. A group whose content contains a line comment is forced to break (a `#` comment can't
   sit mid-line).
 - **The statement/block skeleton keeps the source's newline placement** (hardline where the source had
-  a newline), exactly like the formatter MVP. We do **not** collapse or expand `do…end` blocks, and we
-  do **not** reflow pipe/operator chains yet — those need continuation-newline reasoning and are the
-  next increment. Documented, not silently skipped.
+  a newline), exactly like the formatter MVP. We do **not** collapse or expand `do…end` blocks.
 
 Width: **98 columns** (ADR-0045 §5).
+
+## Depth-0 operator-chain wrapping (the continuation extension — shipped)
+
+Reflow also covers a **top-level `:=` body that is a flat `|>`/`and`/`or`/`<>` chain**: it collapses
+when it fits and otherwise breaks **leading-operator, one stage per line** with a one-level hanging
+indent.
+
+This extends the newline-safety argument from inside-brackets to **depth 0**. `Rian.Decl.take_line`
+(P1) treats a bracket-depth-0 newline in a `:=` body as a *continuation* (insignificant) exactly when
+the token before or after it is one of `@cont_ops = + - * / < > <= >= == != <> |> and or in rem div`
+(`line_continues?`). So breaking before such an operator is parse-insignificant — but only in a `:=`
+body. Two consequences:
+
+- **Declaration bodies only.** A block-internal bind's newline is turned into a `;` statement separator
+  by `detok_block`, so breaking a block-internal chain would corrupt it. The wrap is gated to the
+  declaration-body zone (the `:=` reached while still in the head zone), never a block statement.
+  (Bracket reflow inside block statements stays safe: `block_seps` tracks bracket depth and never
+  `;`-splits inside `()`/`[]`/`{}`.)
+- **Merge before deciding (idempotence).** A source chain already split across lines is rejoined into
+  one logical unit (`merge_chains`) before the collapse-vs-break decision — so a one-line chain and the
+  same chain pre-broken format identically, and re-formatting broken output remerges and reproduces it.
+
+The `sig/1` oracle is extended to drop depth-0 newlines adjacent to a `@cont_ops` operator (faithful to
+`line_continues?` — grounded in the parser, not the formatter), and the parse-still-valid corpus guard
+independently confirms every formatted file still parses. `|` (cons/sum) is excluded, consistent with
+the cons-tail trailing-comma fix.

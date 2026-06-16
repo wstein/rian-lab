@@ -1,7 +1,7 @@
 # ADR-0045 — Formatter: one canonical zero-config style, comment-preserving, deterministic
 
 **Status:** Accepted · **implemented incl. line wrapping** — a bracket-structured lossless CST + a Wadler/Lindig pretty-printer over [`Rian.Lexer`](../../lib/rian/lexer.ex) (no second parser, no reparse)
-**Implemented:** yes — [`Rian.Format`](../../lib/rian/format.ex) (engine [`Rian.Format.Doc`](../../lib/rian/format/doc.ex), tree [`Rian.Format.Cst`](../../lib/rian/format/cst.ex)) + [`mix rian.format`](../../lib/mix/tasks/rian.format.ex) (in-place · `--check` · `--diff` · `--stdout`/stdin). **Line wrapping (Tier 2) ships**: bracket interiors reflow to a 98-column budget. `format/1` is total (never corrupts on malformed input). Invariants — significant-token equivalence (meaning), idempotence, comment fidelity — are asserted over the whole corpus and in a seeded property/fuzz suite ([`format_test.exs`](../../test/rian/format_test.exs), [`format_property_test.exs`](../../test/rian/format_property_test.exs), [`doc_test.exs`](../../test/rian/format/doc_test.exs)). Deferred: pipe/operator-chain wrapping, the LSP backend (ADR-0038), the `rian fmt` escript (ADR-0031). Design note: [`docs/notes/formatter-tier2-design.md`](../notes/formatter-tier2-design.md)
+**Implemented:** yes — [`Rian.Format`](../../lib/rian/format.ex) (engine [`Rian.Format.Doc`](../../lib/rian/format/doc.ex), tree [`Rian.Format.Cst`](../../lib/rian/format/cst.ex)) + [`mix rian.format`](../../lib/mix/tasks/rian.format.ex) (in-place · `--check` · `--diff` · `--stdout`/stdin). **Line wrapping ships**: bracket interiors reflow to a 98-column budget, and a top-level `:=` body that is a flat `|>`/`and`/`or`/`<>` chain wraps leading-operator one-stage-per-line. `format/1` is total (never corrupts on malformed input). Invariants — significant-token equivalence (meaning), parse-still-valid, idempotence, comment fidelity — are asserted over the whole corpus and in a seeded property/fuzz suite ([`format_test.exs`](../../test/rian/format_test.exs), [`format_property_test.exs`](../../test/rian/format_property_test.exs), [`doc_test.exs`](../../test/rian/format/doc_test.exs)). Deferred: magic trailing comma, the LSP backend (ADR-0038), the `rian fmt` escript (ADR-0031). Design note: [`docs/notes/formatter-tier2-design.md`](../notes/formatter-tier2-design.md)
 **Refs:** ADR-0035 (one obvious way; no hidden control flow as a *discipline*), ADR-0038 (LSP — closes its formatter-ownership open item), ADR-0026 (toolchain / CI parity), ADR-0032/0033 (family surface)
 **Owners:** Liam Davis (conventions) · Kira Neri (CI/determinism) · Julian Vance (style rules / CST) · Chloe Bennett (parser) · Samir Patel (invariants) · Maya Lin (LSP integration) · Rachel Okafor (PM)
 
@@ -81,13 +81,19 @@ formatter's correctness specification.
   inside a bracket forces a full break. **Declaration heads never reflow** (`def` params / `when`
   guards) — `Rian.Decl`'s head parser is not newline-tolerant inside its parens — so wrapping is
   confined to the body zone (after the top-level `:=`, or in non-declaration lines).
+- **Operator-chain wrapping (depth-0 continuation):** a top-level `:=` body that is a flat
+  `|>`/`and`/`or`/`<>` chain **collapses when it fits**, else breaks **leading-operator, one stage per
+  line** with a one-level hanging indent. These are exactly the `Rian.Decl` `@cont_ops` the parser
+  treats as newline-insignificant in a `:=` body (`take_line`, P1), so breaking before one is
+  meaning-safe. Confined to **declaration bodies** — a block-internal bind's newline becomes a `;`
+  (`detok_block`), so those chains are left intact. A merge pass rejoins a source-multiline chain into
+  one unit before deciding, which makes wrapping idempotent. `|` (cons/sum) is excluded.
 - **At most one blank line** anywhere; no leading/trailing blanks; file ends in one newline. Trailing
   comments sit two spaces off the code; own-line comments keep their place at context indent.
 - snake_case values / PascalCase types are *lexical* (ADR-0033), not the formatter's job.
 
-Deferred to a later increment: **pipe/operator-chain wrapping** (breaking `a |> b |> c` one-per-line)
-needs the continuation-newline safety reasoning extended past brackets; and **magic trailing comma**
-(a source trailing comma *forcing* multiline). Both are tracked in Open items.
+Deferred to a later increment: **magic trailing comma** (a source trailing comma *forcing* multiline),
+tracked in Open items.
 
 ## Ratings
 
@@ -97,8 +103,8 @@ needs the continuation-newline safety reasoning extended past brackets; and **ma
 | `mix rian.format` + `--check`/`--diff` CI gate; LSP delegates | 5/5 |
 | Bracket CST + Wadler/Lindig pretty-printer (no reparse; meaning-safe by construction) | 5/5 — shipped |
 | Idempotence + significant-token-equivalence + comment-fidelity + totality (corpus + fuzz) | 5/5 |
-| Style rules (2-space, spacing, blank-line, comment placement, 98-col bracket wrap, trailing comma) | 5/5 — shipped |
-| Pipe/operator-chain wrapping; magic trailing comma | deferred (next increment) |
+| Style rules (2-space, spacing, blank-line, comments, 98-col bracket wrap + trailing comma, pipe/boolean/concat chain wrap) | 5/5 — shipped |
+| Magic trailing comma | deferred (next increment) |
 | Configurable style (`rustfmt` model) | 1/5 (rejected — fragmentation) |
 
 ## Consequences
@@ -114,9 +120,9 @@ needs the continuation-newline safety reasoning extended past brackets; and **ma
 
 ## Open items
 
-- **Pipe/operator-chain wrapping** — breaking `a |> b |> c` and long `and`/`or`/`<>` chains one-per-line.
-  Needs the bracket-only newline-safety argument (§4) extended to depth-0 continuation breaks (after a
-  trailing binary op / before a leading one), so it stays meaning-preserving.
+- **Wider operator-chain wrapping** — the depth-0 wrap covers `|>`/`and`/`or`/`<>`; the rest of
+  `@cont_ops` (arithmetic `+ - * /`, comparisons) is parser-safe to wrap too but intentionally left
+  inline for now (less churn). Revisit if the corpus wants it.
 - **Magic trailing comma** (Black/Prettier-style: a source trailing comma *forces* multiline). Today a
   trailing comma is purely cosmetic (collapsed when the group fits); adopting magic-comma would make it
   load-bearing layout — decide deliberately.
