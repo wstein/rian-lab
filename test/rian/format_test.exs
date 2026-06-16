@@ -1,6 +1,7 @@
 defmodule Rian.FormatTest do
   use ExUnit.Case, async: true
 
+  alias Rian.Decl
   alias Rian.Format
   alias Rian.Lexer
 
@@ -171,6 +172,16 @@ defmodule Rian.FormatTest do
     test "a trailing comment does not force a fitting list to break" do
       assert Format.format("def xs() := [a, b]  # tail\n") == "def xs() := [a, b]  # tail\n"
     end
+
+    test "a cons list that overflows breaks WITHOUT a trailing comma (parser rejects one)" do
+      heads = Enum.map_join(1..6, ", ", &"element_number_#{&1}")
+      out = Format.format("def xs(rest Vec(Int53)) Vec(Int53) := [#{heads} | rest]\n")
+      # one item per line, the cons tail kept with the last head, no trailing comma
+      assert out =~ "element_number_6 | rest\n"
+      refute out =~ "rest,\n"
+      # and the result still parses — the whole point of suppressing the comma
+      assert Decl.parse(out)
+    end
   end
 
   describe "correctness bars over the real corpus" do
@@ -196,6 +207,36 @@ defmodule Rian.FormatTest do
       test "comment fidelity: #{file}" do
         src = File.read!(@path)
         assert comments(Format.format(src)) == comments(src)
+      end
+    end
+  end
+
+  describe "formatted output stays parseable (no corruption)" do
+    # `sig/1` proves the *significant tokens* are preserved, but it strips the
+    # trailing comma a reflow may add — so it cannot see a reflow that emits
+    # *non-parsing* source (e.g. a comma after a cons tail, `[a | xs,]`). This bar
+    # closes that gap: format a real file and assert the result still parses. It
+    # covers only files the core parser fully models — a few examples exercise
+    # constructs it does not (FFI `extern`, custom `@`-annotations) and do not parse
+    # at all, so they are excluded; `sig/1` above still covers them.
+    @parseable Enum.filter(@corpus, fn f ->
+                 try do
+                   Decl.parse(File.read!(f))
+                   true
+                 rescue
+                   _ -> false
+                 end
+               end)
+
+    test "a healthy majority of the corpus parses (guards a parser regression)" do
+      assert length(@parseable) >= 30
+    end
+
+    for file <- @parseable do
+      @path file
+
+      test "format/1 output parses: #{file}" do
+        assert @path |> File.read!() |> Format.format() |> Decl.parse()
       end
     end
   end

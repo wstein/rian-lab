@@ -264,8 +264,12 @@ defmodule Rian.Format do
         body =
           Doc.join(Doc.concat([Doc.text(","), Doc.line()]), Enum.map(items, &bd(&1, nil, true)))
 
+        # a trailing comma is safe before `)` / `]` / `}` (`f(a,) ≡ f(a)`), but NOT
+        # after a cons tail — `[a, b | tail,]` is a syntax error — so a cons group
+        # never gets one. A trailing comma is never *required*, so suppressing it is
+        # always meaning-safe.
         trailing =
-          if trailing_comma?(inner),
+          if trailing_comma?(inner) and not cons_group?(inner),
             do: Doc.if_break(Doc.text(","), Doc.empty()),
             else: Doc.empty()
 
@@ -307,6 +311,10 @@ defmodule Rian.Format do
 
   defp has_comment?(nodes), do: Enum.any?(nodes, &match?({:tok, {:comment, _}}, &1))
   defp trailing_comma?(inner), do: Enum.any?(inner, &match?({:tok, {:comma}}, &1))
+
+  # a cons list (`[a, b | tail]`) — a top-level `|` inside the group. The parser
+  # closes the list immediately after the cons tail, so no trailing comma may follow.
+  defp cons_group?(inner), do: Enum.any?(inner, &match?({:tok, {:op, "|"}}, &1))
 
   # ── leaf token text + node head/tail tokens ───────────────────────────────
   defp leaf({:uop, o}), do: o

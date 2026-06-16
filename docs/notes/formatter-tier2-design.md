@@ -33,11 +33,34 @@ Two facts, both verified against the compiler:
 2. The parser is **newline-tolerant inside unbalanced brackets** (P1), and trailing commas parse to
    the identical AST (`f(a,) ≡ f(a)`, `[1,2,] ≡ [1,2]` — checked in `Rian.Pratt`).
 
-⇒ **`Rian.Decl.parse(format(src)) == Rian.Decl.parse(src)`** for any change that (a) only touches
-whitespace/newlines and (b) at most adds/removes a trailing comma before a closer. This full-AST
-equality is the **semantic-preservation oracle**, asserted over the whole corpus and in property tests.
-It is strictly stronger than the MVP's re-lex equivalence for everything except the deliberate
-trailing-comma token (handled by stripping `comma-before-closer` on both sides before comparing).
+⇒ for any change that (a) only touches whitespace/newlines and (b) at most adds/removes a trailing
+comma before a closer, the **significant token stream is unchanged**. That is the
+**semantic-preservation oracle** (`sig/1` in `Rian.FormatTest`, ADR-0045): tokenize, drop what reflow
+is *allowed* to move — comments, newlines inside brackets, blank-line runs, a trailing comma before a
+closer — and assert the rest is identical on both sides. Equal significant streams ⇒ same parse. It
+supersedes the MVP's raw re-lex equivalence, which a reflowing formatter cannot satisfy (it moves
+newlines), while still ruling out any reflow that reorders or drops a meaningful token.
+
+### Why significant-token equivalence, not full-AST equality
+
+The tempting stronger bar is `Rian.Decl.parse(format(src)) == Rian.Decl.parse(src)`. It is **rejected**
+for two concrete reasons:
+
+1. **Parse is not deterministic.** Macro expansion mints a fresh `__h<n>` hygiene counter on each call
+   (`tmp__h4228`; see `06_macros_comptime.rian`), so two parses of *identical* source already differ.
+   A full-AST oracle would need alpha-renaming of every hygienic name to be even *well-defined* — an
+   awkward, ongoing canonicalization tax for no extra safety over the token bar.
+2. **Tokens already pin reassociation.** A whitespace-only reflow that kept every significant token in
+   order, separated by the same significant newlines, but parsed differently, does not exist — `sig/1`
+   already catches token reordering and movement across significant newlines.
+
+The token bar's one blind spot is the trailing comma it *strips*: it cannot see a reflow that emits
+**non-parsing** source (e.g. a comma after a cons tail, `[a | xs,]`, which the parser rejects). That
+gap is closed by a separate, lighter guard — **format every parseable corpus file and assert the
+result still parses** (`Rian.FormatTest`, "formatted output stays parseable"). Files the core parser
+does not fully model (FFI `extern`, custom `@`-annotations) are excluded there; `sig/1` still covers
+them. Together: `sig/1` (tokens preserved) + parseability (output is valid) + idempotence + comment
+fidelity + fuzz totality are the corpus-wide contract.
 
 ## Scope boundary (v1 of Tier 2)
 
