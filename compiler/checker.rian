@@ -68,7 +68,7 @@ mod Checker do
 
   # a block statement: a `name := e` bind (extends the env) or a bare expression;
   # the block's type is its last expression's (Rian.Check.infer_block).
-  type Stmt := SBind(String, Core) | SExpr(Core)
+  type Stmt := SBind(String, Core) | SExpr(Core) | STypedBind(String, String, Core)
   # a `case` arm: a pattern + a single-expression body (the guard is type-irrelevant).
   # The pattern flow-NARROWS the env: a variable binds the scrutinee's type.
   type Arm := CArm(Pat, Core)
@@ -501,6 +501,7 @@ mod Checker do
   def infer_block([SExpr(e)], env, ic) := infer_ic(e, env, ic)
   def infer_block([SExpr(_) | rest], env, ic) := infer_block(rest, env, ic)
   def infer_block([SBind(n, e) | rest], env, ic) := infer_block(rest, Prim.map_put(env, n, infer_ic(e, env, ic)), ic)
+  def infer_block([STypedBind(n, ann, e) | rest], env, ic) := infer_block(rest, Prim.map_put(env, n, ann), ic)
 
   # LUB-join of branch/arm types (ADR-0059). An integer-LITERAL branch is
   # width-flexible: when at least one branch is a non-literal, the literals adopt the
@@ -989,6 +990,7 @@ mod Checker do
   def num_mix_stmts(Vec(Stmt), Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
   def num_mix_stmts([], _, _) := false
   def num_mix_stmts([SBind(_, e) | rest], env, ic) := num_mix(e, env, ic) or num_mix_stmts(rest, env, ic)
+  def num_mix_stmts([STypedBind(_, _, e) | rest], env, ic) := num_mix(e, env, ic) or num_mix_stmts(rest, env, ic)
   def num_mix_stmts([SExpr(e) | rest], env, ic) := num_mix(e, env, ic) or num_mix_stmts(rest, env, ic)
 
   def num_mix_arms(Vec(Arm), Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
@@ -1023,6 +1025,36 @@ mod Checker do
       lit_range_bad(body, ret)
     else
       assignable(infer_ic(body, env, ic), ret) == false
+    end
+  end
+
+  # ── error set #3: typed-bind mismatch (Rian.Check.check_binds, ADR-0034/0064) ──
+  # A clause's `name Ann := value` whose value provably contradicts `Ann`. Walks the
+  # CBlock statements threading the growing env (a bind enters scope for the ones that
+  # follow). With an empty `ic` (no `range` table) the oracle's `range` case never fires
+  # — the conservative slice this port and its fixpoint cover. Reuses lit_adopts /
+  # lit_range_bad / int_lit_expr / float_type / assignable from error set #2.
+  pub def binds_bad(Vec(Stmt), Dict(String, String), Dict(Symbol, Dict(String, String))) Bool
+  pub def binds_bad([], _, _) := false
+  pub def binds_bad([STypedBind(n, ann, e) | rest], env, ic) :=
+    if bind_bad(ann, e, env, ic) do true else binds_bad(rest, Prim.map_put(env, n, ann), ic) end
+  pub def binds_bad([SBind(n, e) | rest], env, ic) :=
+    binds_bad(rest, Prim.map_put(env, n, infer_ic(e, env, ic)), ic)
+  pub def binds_bad([SExpr(_) | rest], env, ic) := binds_bad(rest, env, ic)
+
+  # one typed bind's verdict (Rian.Check.bind_mismatch, empty-ic slice): a constant-of-
+  # literals value must FIT the declared width (lit_range_bad); an integer literal never
+  # adopts a float annotation; otherwise the inferred value type must be ASSIGNABLE to it.
+  def bind_bad(ann String, e Core, env Dict(String, String), ic Dict(Symbol, Dict(String, String))) Bool
+  def bind_bad(ann, e, env, ic)
+    if lit_adopts(e, ann) do
+      lit_range_bad(e, ann)
+    else
+      if int_lit_expr(e) and float_type(ann) do
+        true
+      else
+        assignable(infer_ic(e, env, ic), ann) == false
+      end
     end
   end
 
