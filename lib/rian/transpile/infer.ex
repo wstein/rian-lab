@@ -113,15 +113,45 @@ defmodule Rian.Transpile.Infer do
     {pvars, s1} = fresh_n(s0, arity)
     {rvar, s2} = fresh(s1)
 
-    store =
-      Enum.reduce(clauses, s2, fn clause, s ->
+    # build the store; keep each clause's body + bound env for Result analysis.
+    {store, clause_envs} =
+      Enum.reduce(clauses, {s2, []}, fn clause, {s, envs} ->
         {env, s} = bind_params(clause.args, pvars, s)
         {bt, s} = gen(clause.body, env, ctx, s)
         {s, _} = unify(s, rvar, bt)
-        s
+        {s, envs ++ [{clause.body, env}]}
       end)
 
-    render_sig(pvars, rvar, store)
+    # Phase B Result analysis runs BEFORE rendering — it adds payload constraints
+    # (e.g. a `{:ok, div(a,b)}` pins `a`/`b`) that the param types must reflect.
+    {res, store} = result_analysis(clause_envs, ctx, store)
+
+    gmap = generalize_map(pvars, rvar, store)
+    params = pvars |> Enum.map(&(render(store, gmap, &1) |> hole_or("_Ty")))
+    tvars = gmap |> Map.values() |> Enum.uniq() |> Enum.sort()
+
+    # a Result (all tails `{:ok, _}`/`{:error, Tag}`) types as `Payload | <error set>`;
+    # the caller synthesizes the `type … := Tag | …` declaration (ADR-0040).
+    {ret, tags, result} =
+      case res do
+        {:result, payload_term, tg} ->
+          case render(store, gmap, payload_term) do
+            :hole -> {render(store, gmap, rvar) |> hole_or("_Ret"), [], false}
+            p -> {p, tg, true}
+          end
+
+        :no ->
+          {render(store, gmap, rvar) |> hole_or("_Ret"), [], false}
+      end
+
+    %{
+      params: params,
+      ret: ret,
+      tvars: tvars,
+      ledger: build_ledger(params, ret),
+      error_tags: tags,
+      result: result
+    }
   end
 
   # bind each clause's parameter pattern against the shared param var
@@ -576,25 +606,65 @@ defmodule Rian.Transpile.Infer do
     %{s | binds: Map.put(s.binds, id, t)}
   end
 
-  # ── rendering: terms → Rian type strings, with defaulting + generalization ─
+  # ── Result analysis (Phase B): {:ok,_}/{:error,Tag} → `Payload | <error set>` ─
+  # A group is a Result iff every tail expression is `{:ok, v}` or `{:error, Tag}`,
+  # with at least one of each, and every error tag is a Capitalized ctor (a bare
+  # atom / variable tag can't be a synthesized sum variant → bail, leave a hole).
+  defp result_analysis(clause_envs, ctx, store) do
+    tail_pairs =
+      Enum.flat_map(clause_envs, fn {body, env} ->
+        tails(body) |> Enum.map(&{&1, env})
+      end)
 
-  defp render_sig(pvars, rvar, store) do
-    slots = pvars ++ [rvar]
-    gmap = generalize_map(pvars, rvar, store)
+    shapes = Enum.map(tail_pairs, fn {t, _} -> result_tag(t) end)
 
-    rendered = Enum.map(slots, fn v -> render(store, gmap, v) end)
-    {params, [ret]} = Enum.split(rendered, length(pvars))
-
-    ledger = build_ledger(params, ret)
-    tvars = gmap |> Map.values() |> Enum.uniq() |> Enum.sort()
-
-    %{
-      params: Enum.map(params, &hole_or(&1, "_Ty")),
-      ret: hole_or(ret, "_Ret"),
-      tvars: tvars,
-      ledger: ledger
-    }
+    cond do
+      shapes == [] -> {:no, store}
+      Enum.any?(shapes, &(&1 == :other)) -> {:no, store}
+      Enum.any?(shapes, &(&1 == :bad_tag)) -> {:no, store}
+      not Enum.any?(shapes, &match?({:ok, _}, &1)) -> {:no, store}
+      not Enum.any?(shapes, &match?({:error, _}, &1)) -> {:no, store}
+      true ->
+        {payload_term, store} = ok_payload(tail_pairs, ctx, store)
+        tags = for {:error, tag} <- shapes, uniq: true, do: tag
+        if payload_term, do: {{:result, payload_term, tags}, store}, else: {:no, store}
+    end
   end
+
+  # unify the types of every `{:ok, v}` payload; return the shared term (or nil).
+  defp ok_payload(tail_pairs, ctx, store) do
+    Enum.reduce(tail_pairs, {nil, store}, fn {t, env}, {acc, s} ->
+      case result_tag(t) do
+        {:ok, v} ->
+          {vt, s} = gen(v, env, ctx, s)
+          s = if acc, do: elem(unify(s, acc, vt), 0), else: s
+          {acc || vt, s}
+
+        _ ->
+          {acc, s}
+      end
+    end)
+  end
+
+  defp result_tag({:ok, v}), do: {:ok, v}
+  defp result_tag({:error, {:__aliases__, _, parts}}), do: {:error, parts |> List.last() |> to_string()}
+  defp result_tag({:error, _}), do: :bad_tag
+  defp result_tag(_), do: :other
+
+  # tail expressions of a body (the values it can evaluate to), recursing into
+  # `if`/`case`/blocks. Anything else is its own single tail.
+  defp tails({:__block__, _, stmts}) when is_list(stmts) and stmts != [], do: tails(List.last(stmts))
+
+  defp tails({:if, _, [_, kw]}) do
+    tails(body_of(Keyword.get(kw, :do))) ++
+      if Keyword.has_key?(kw, :else), do: tails(body_of(Keyword.get(kw, :else))), else: []
+  end
+
+  defp tails({:case, _, [_, [do: arms]]}) do
+    Enum.flat_map(arms, fn arm -> {_, body} = case_arm(arm); tails(body) end)
+  end
+
+  defp tails(node), do: [node]
 
   # Generalization (the Damas–Milner [Gen] rule, adapted for an INCOMPLETE inferer).
   # In a complete HM checker a free signature variable is, by definition,
@@ -655,14 +725,15 @@ defmodule Rian.Transpile.Infer do
   defp hole_or(:hole, h), do: h
   defp hole_or(t, _h), do: t
 
+  # operates on the FINAL rendered slot strings (`"_Ty"`/`"_Ret"` are the holes).
   defp build_ledger(params, ret) do
     param_entries =
       params
       |> Enum.with_index()
-      |> Enum.filter(fn {t, _} -> t == :hole end)
+      |> Enum.filter(fn {t, _} -> t == "_Ty" end)
       |> Enum.map(fn {_, i} -> {"param##{i}", :unresolved} end)
 
-    ret_entry = if ret == :hole, do: [{"ret", :unresolved}], else: []
+    ret_entry = if ret == "_Ret", do: [{"ret", :unresolved}], else: []
     param_entries ++ ret_entry
   end
 

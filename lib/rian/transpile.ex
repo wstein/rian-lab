@@ -103,12 +103,31 @@ defmodule Rian.Transpile do
   """
   def transpile(source, opts \\ []) when is_binary(source) do
     ast = Code.string_to_quoted!(source)
-    sigmap = if opts[:infer], do: infer_sigs(ast), else: %{}
+    {sigmap, types} = if opts[:infer], do: infer_program(ast), else: {%{}, []}
 
     ast
-    |> toplevel(sigmap)
+    |> toplevel(sigmap, types)
     |> Enum.join("\n")
     |> Kernel.<>("\n")
+  end
+
+  # Phase B: assemble Result returns (`Payload | Errors`) and synthesize the
+  # `type Errors := Tag | …` declaration from the error tags the inferer collected.
+  defp infer_program(ast) do
+    sigmap = infer_sigs(ast)
+    tags = sigmap |> Map.values() |> Enum.flat_map(&Map.get(&1, :error_tags, [])) |> Enum.uniq() |> Enum.sort()
+
+    sigmap =
+      if tags == [] do
+        sigmap
+      else
+        Map.new(sigmap, fn {k, v} ->
+          if Map.get(v, :result, false), do: {k, %{v | ret: "#{v.ret} | Errors"}}, else: {k, v}
+        end)
+      end
+
+    types = if tags == [], do: [], else: ["type Errors := #{Enum.join(tags, " | ")}"]
+    {sigmap, types}
   end
 
   @doc """
@@ -236,13 +255,15 @@ defmodule Rian.Transpile do
 
   # ── module ────────────────────────────────────────────────────────────────
 
-  defp toplevel({:defmodule, _, [aliases, [do: body]]}, sigmap) do
+  defp toplevel({:defmodule, _, [aliases, [do: body]]}, sigmap, types) do
     name = short_name(aliases)
     inner = body |> block_stmts() |> render_items(sigmap) |> Enum.map(&indent/1)
-    @header ++ ["mod #{name} do" | inner] ++ ["end"]
+    # synthesized `type …` declarations (Phase B error sets) go after `mod … do`.
+    type_lines = if types == [], do: [], else: Enum.map(types, &("  " <> &1)) ++ [""]
+    @header ++ ["mod #{name} do" | type_lines ++ inner] ++ ["end"]
   end
 
-  defp toplevel(other, _sigmap) do
+  defp toplevel(other, _sigmap, _types) do
     @header ++ ["# TODO[port]: top-level is not a single `defmodule`", "# #{snippet(other)}"]
   end
 
@@ -410,6 +431,10 @@ defmodule Rian.Transpile do
   # type gate — that is the right place, not a transpile-time marker.)
   defp expr(nil), do: "None"
   defp expr(a) when is_atom(a), do: ":#{a}"
+
+  # a bare Capitalized identifier `Foo` (a nullary ctor / sum variant, e.g. an
+  # error tag `{:error, DivByZero}`) → its name, not `__aliases__(:Foo)`.
+  defp expr({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
 
   # string interpolation `"a#{e}b"` — an Elixir `<<>>` binary of literal parts and
   # `Kernel.to_string`/`::binary` segments → Rian interpolated string `"a${e}b"`

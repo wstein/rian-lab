@@ -1,9 +1,11 @@
 # ADR-0075 — Transpiler type inference: filling `_Ty`/`_Ret` holes
 
 **Status:** Accepted (direction) · implemented (MVP: `Rian.Transpile.Infer`, `--infer`)
-**Implemented:** partial — Algorithm-J whole-program inference over the Elixir AST with
-occurs-check, `[Gen]` generalization, `Int53` cross-target defaulting, two-pass intra-module
-sibling propagation; cross-module + error-set/sum-type synthesis (Phase B) deferred
+**Implemented:** Algorithm-J whole-program inference over the Elixir AST with occurs-check, `[Gen]`
+generalization, `Int53` cross-target defaulting, two-pass intra-module sibling propagation,
+Phase A cross-module sigs, and Phase B Result/error-set inference + synthesis — all accident-free
+(type-check-gated). Measured ceiling on the Elixir compiler corpus is ~31% (corpus-bound; see below);
+sum-type reconstruction for struct IR remains the open lever
 **Refs:** ADR-0034 (type-system foundations / infer-local·declare-public), ADR-0040 (error
 handling / `T | E`), ADR-0042 (`Fn(…)`), ADR-0064 (portable numerics / `Int53`), ADR-0063
 (self-host porting track)
@@ -87,17 +89,27 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
   `lib/rian`: ~0** (1792 → 1790 holes) — empirically confirming the root cause: cross-module callees
   in a compiler return structs/tuples (themselves unfillable), so resolving the calls fills nothing.
   Phase A is correct, safe, and additive; the IR floor, not call resolution, is the limit.
-- **Phase B — the path to 80% on IR code (the hard part).**
-  - **Result/error-set inference** (ADR-0040): a function returning `{:ok, x}` / `{:error, tag}`
-    across branches infers `X | tag…`. The single biggest lever (tuple+atom ≈ the same idiom).
-  - **Sum-type reconstruction**: collect `%Mod{…}` constructions/patterns program-wide, infer
-    field types, and **synthesize the `type` declarations** so a struct return is a *valid* fill.
-    The genuinely hard, human-judgment piece (which variants belong to which sum); automating it
-    safely is its own ADR.
-- **Honest ceiling:** 80% is corpus-dependent. Algorithmic code already approaches it; the
-  compiler corpus needs Phase B. We will **not** hit 80% by relaxing rule 2 (no guessed structs/
-  tuples) — the fill rate is reported alongside a "must type-check" gate so a higher number can
-  never come from accidental fills.
+- **Phase B — Result/error-set inference (IMPLEMENTED) + the IR wall.**
+  - **Result/error-set inference** (ADR-0040): a function whose tails are all `{:ok, v}` /
+    `{:error, Tag}` (Capitalized ctor tags, ≥1 of each) infers `Payload | Errors`, **synthesizing**
+    the `type Errors := Tag | …` declaration. Verified correct and **accident-free** — the
+    `checked_div` example type-checks under `Rian.Decl.compile`. Bare-atom / string / variable
+    error tags **bail to a hole** (rule 2). **Measured coverage on `lib/rian`: 0 functions.**
+    The reason is fundamental and worth stating: `lib/rian` is *Elixir* source using *Elixir* error
+    idioms (`{:error, :atom}`, `{:error, "msg"}`, `{:error, %Struct{}}`), whereas a Rian `Result`
+    requires a Capitalized **sum variant**. Bridging them is a **porting transformation**
+    (atom→`PascalCase` variant + a body rewrite; atoms are BEAM-only anyway), **not type
+    inference**, and it carries real accident risk — so it is out of scope under rule 2.
+  - **Sum-type reconstruction** (the IR): collecting `%Mod{…}` and synthesizing `type` decls hits
+    the same wall — field types are themselves nested structs/tuples, so synthesizing them safely is
+    effectively reconstructing the whole type system (the human-judgment "which sum" part).
+- **Honest, measured ceiling.** Across `lib/rian`, per-file fill spans 0–60% and aggregates ~31%;
+  Phase A (cross-module) and Phase B (Result) each add ~0 *on this corpus* because it is a compiler
+  written in Elixir-idiomatic structs + atom/string errors. **80% on this corpus is not safely
+  reachable by type inference** — it would require porting transformations that violate rule 2.
+  The engine and both phases are *sound and accident-free*; they fill well on **algorithmic /
+  Rian-idiom code** and quarantine the rest as honest holes. We will **not** manufacture a higher
+  number by relaxing rule 2; the fill rate is always paired with the "must type-check" gate.
 
 ## Consequences
 

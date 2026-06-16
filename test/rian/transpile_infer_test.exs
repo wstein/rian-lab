@@ -66,6 +66,53 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "Phase B — Result/error-set inference (`{:ok,_}`/`{:error,Tag}`)" do
+    test "synthesizes the error set and types the function as `Payload | Errors`" do
+      src = """
+      defmodule Math do
+        def checked_div(a, b) do
+          case b do
+            0 -> {:error, DivByZero}
+            _ -> {:ok, div(a, b)}
+          end
+        end
+      end
+      """
+
+      out = Transpile.transpile(src, infer: true)
+      assert out =~ "type Errors := DivByZero"
+      assert out =~ "pub def checked_div(a Int53, b Int53) Int53 | Errors :="
+    end
+
+    test "the inferred Result draft type-checks (accident-free)" do
+      src = """
+      defmodule Math do
+        def checked_div(a, b) do
+          case b do
+            0 -> {:error, DivByZero}
+            _ -> {:ok, div(a, b)}
+          end
+        end
+      end
+      """
+
+      body =
+        Transpile.transpile(src, infer: true)
+        |> String.split("\n")
+        |> Enum.reject(&String.starts_with?(&1, "#"))
+        |> Enum.join("\n")
+
+      assert {:ok, _} = safe_compile(body)
+    end
+
+    test "honesty: a non-Capitalized error tag (Elixir idiom) is NOT made a Result" do
+      # {:error, :atom} / {:error, "msg"} can't be a synthesized variant → leave holes.
+      out = Transpile.transpile("defmodule M do\n  def f(x), do: {:error, :nope}\nend", infer: true)
+      refute out =~ "Errors"
+      assert out =~ "_Ret"
+    end
+  end
+
   describe "Phase A — whole-program cross-module signatures" do
     test "a cross-module call adopts the callee's inferred signature" do
       a = "defmodule A do\n  def foo(x), do: x + 1\nend"
