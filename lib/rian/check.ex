@@ -1053,13 +1053,6 @@ defmodule Rian.Check do
   defp assignable?(t, t), do: true
   defp assignable?(:unknown, _to), do: true
   defp assignable?(_from, :unknown), do: true
-  # `__Unknown` (ADR-0076) — the SOUND gradual "open" type. Any value flows *into*
-  # `__Unknown` (it is the top for assignment), but a `__Unknown` value standing
-  # where a concrete type is required falls through to the mismatch path below: it
-  # must be NARROWED first (`case`/pattern). This is what keeps fully-typed Rian
-  # sound — the unknown cannot leak unchecked into a typed position. Distinct from
-  # the internal `:unknown` (inference uncertainty), which is silent and absorbing.
-  defp assignable?(_from, "__Unknown"), do: true
 
   defp assignable?(from, to) do
     case {num_kind(from), num_kind(to)} do

@@ -209,9 +209,16 @@ defmodule Rian.TranspileInferTest do
       assert sig(body, "half") =~ "pub def half(x Float64) Float64"
     end
 
-    test "any()/term() is the user's openness -> __Unknown (the gradual open type)" do
+    test "any()/term() carries no concrete type -> no hint (slot left to inference)" do
+      # `any()` gives no hint; the body here is identity, so inference generalizes the
+      # unpinned slot to a tvar — a human still owns any genuinely-open type.
       body = "  @spec wrap(any()) :: any()\n  def wrap(x), do: x"
-      assert sig(body, "wrap") == "  pub def wrap(x __Unknown) __Unknown := x"
+      assert sig(body, "wrap") =~ "forall T"
+    end
+
+    test "an untranslatable any() return leaves a _Ret hole, not a guess" do
+      body = "  @spec opaque(integer()) :: any()\n  def opaque(n), do: Tuple.to_list(n)"
+      assert sig(body, "opaque") =~ "_Ret"
     end
 
     test "a proven body type WINS over a contradictory spec (the cross-check)" do

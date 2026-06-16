@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Rian.DialyzeTest do
   use ExUnit.Case, async: false
 
   @moduledoc """
-  `mix rian.dialyze` — the external Dialyzer oracle (ADR-0076 §5). The full analysis
+  `mix rian.dialyze` — the external Dialyzer oracle (ADR-0026). The full analysis
   needs the `dialyzer` OTP app + a PLT, so it is `@tag :dialyzer` (out of the default
   loop). The availability guard is verified everywhere.
   """

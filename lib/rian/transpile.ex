@@ -20,8 +20,8 @@ defmodule Rian.Transpile do
     * **types are holes** (`_Ty`, `_Ret`) by default — Elixir is untyped, so the human
       supplies the sums and signatures. With `--infer` (ADR-0075) the engine fills
       every *provable* slot, **harvesting any `@spec`** as a cross-checked hint (a
-      consumed `@spec` becomes a passive `# spec:` provenance line, not a TODO); with
-      `--open` (ADR-0076) residual holes become `__Unknown` so the draft runs on Ex/JS.
+      consumed `@spec` becomes a passive `# spec:` provenance line, not a TODO);
+      whatever stays unproven remains an honest `_Ty`/`_Ret` hole for the human.
 
   Usage: `mix rian.transpile lib/rian/range.ex [-o out.rian]`.
 
@@ -101,41 +101,19 @@ defmodule Rian.Transpile do
   Transpile Elixir source text to a draft Rian skeleton string.
 
   With `infer: true`, runs whole-program type inference (`Rian.Transpile.Infer`)
-  to fill the `_Ty`/`_Ret` holes with concrete types where provable, leaving a
-  hole otherwise. With `open: true` (implies `infer`), residual holes become the
-  gradual `__Unknown` type (ADR-0076) so the draft **compiles and runs on Ex/JS** —
-  pinned off `:rs`/`:jvm` by `Rian.Reach`, the residual unknowns as honest gradual
-  debt rather than non-compiling markers.
+  to fill the `_Ty`/`_Ret` holes with concrete types where provable (harvesting any
+  `@spec` as a cross-checked hint), leaving an honest `_Ty`/`_Ret` hole otherwise —
+  a hole signals "a human must supply this type", never an auto-filled placeholder.
   """
   @spec transpile(String.t(), keyword()) :: term()
   def transpile(source, opts \\ []) when is_binary(source) do
-    infer? = opts[:infer] || opts[:open]
     ast = Code.string_to_quoted!(source)
-    {sigmap, types} = if infer?, do: infer_program(ast), else: {%{}, []}
+    {sigmap, types} = if opts[:infer], do: infer_program(ast), else: {%{}, []}
 
-    text =
-      ast
-      |> toplevel(sigmap, types)
-      |> Enum.join("\n")
-      |> Kernel.<>("\n")
-
-    if opts[:open], do: open_holes(text), else: text
-  end
-
-  # `open: true` — residual `_Ty`/`_Ret` holes (in def signatures, never the header
-  # comment) become `__Unknown`, the sound gradual open type (ADR-0076).
-  defp open_holes(text) do
-    text
-    |> String.split("\n")
-    |> Enum.map_join("\n", fn line ->
-      if String.starts_with?(String.trim_leading(line), "#") do
-        line
-      else
-        line
-        |> String.replace(~r/\b_Ty\b/, "__Unknown")
-        |> String.replace(~r/\b_Ret\b/, "__Unknown")
-      end
-    end)
+    ast
+    |> toplevel(sigmap, types)
+    |> Enum.join("\n")
+    |> Kernel.<>("\n")
   end
 
   # Phase B: assemble Result returns (`Payload | Errors`) and synthesize the
@@ -190,9 +168,7 @@ defmodule Rian.Transpile do
       lines |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#")) |> Enum.join("\n")
 
     holes = Regex.scan(~r/\b_(?:Ty|Ret)\b/, code) |> length()
-    # with `open: true` the residual holes are `__Unknown` (gradual debt, ADR-0076).
-    open = Regex.scan(~r/\b__Unknown\b/, code) |> length()
-    {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes, open: open}}
+    {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes}}
   end
 
   # ── whole-program type inference (ADR-0034-aligned hole filling) ────────────

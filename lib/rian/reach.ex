@@ -30,8 +30,7 @@ defmodule Rian.Reach do
     * Clause-head patterns are not scanned (FFI lives in bodies/guards).
 
   Reach models **architectural** reachability (what a target *can* run — `ref` off
-  the BEAM, `Int64` off JS, `__Unknown` off Rust/JVM (ADR-0076, no runtime cast),
-  FFI off non-BEAM). It deliberately does NOT track an
+  the BEAM, `Int64` off JS, FFI off non-BEAM). It deliberately does NOT track an
   emitter's **implementation status** (atoms/`with`/lambdas not *yet* lowered on JS;
   tuples/lists/maps not *yet* on the Tier-2 JVM) — those are portable by
   design (ADR-0041/0040/0049) and will land. That gap is reported by a per-emitter
@@ -294,16 +293,8 @@ defmodule Rian.Reach do
     # undeclared generics or the wrong `i64` instantiation, so it pins off `:rs` —
     # the matrix stays honest rather than green-lighting code rustc rejects (ADR-0061).
     param = if parametric_rs_ok?(f, pctx), do: [], else: [parametric_blocker()]
-    # `__Unknown` (ADR-0076) — the sound gradual open type. Consuming it soundly needs
-    # a runtime cast (a narrowing `case`), which the BEAM/JS targets support but Rust/JVM
-    # do not (you'd box into `dyn Any`, defeating the static backend). So a signature
-    # mentioning `__Unknown` is dynamic-target-only — pinned off `:rs`/`:jvm`, exactly
-    # like `Int`. This makes "JS or Ex only" mechanical and bars `__Unknown` from
-    # `@targets`-portable code.
-    unk = if Enum.any?(sig_types, &mentions_unknown?/1), do: [unknown_blocker()], else: []
 
-    Enum.reduce(f.clauses, {ref ++ int ++ width ++ owned_gen ++ param ++ unk, MapSet.new()}, fn c,
-                                                                                                acc ->
+    Enum.reduce(f.clauses, {ref ++ int ++ width ++ owned_gen ++ param, MapSet.new()}, fn c, acc ->
       acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
       if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
     end)
@@ -313,17 +304,6 @@ defmodule Rian.Reach do
 
   defp int_blocker,
     do: %{construct: "Int (arbitrary precision)", kind: :numeric, kills: [:rs, :jvm]}
-
-  defp unknown_blocker,
-    do: %{
-      construct: "__Unknown (gradual open type, no Rust/JVM runtime cast)",
-      kind: :gradual,
-      kills: [:rs, :jvm]
-    }
-
-  # a signature type that mentions `__Unknown` anywhere (`__Unknown`, `Vec(__Unknown)`,
-  # `Fn(__Unknown, …)`) — ADR-0076.
-  defp mentions_unknown?(t), do: is_binary(t) and String.contains?(t, "__Unknown")
 
   defp width_blocker,
     do: %{

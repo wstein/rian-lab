@@ -16,7 +16,7 @@
 # twice. It is excluded from BOTH the default loop AND `mix test.all`, and runs only
 # on demand:  mix test --include bench
 #
-# `@tag :dialyzer` runs the external Dialyzer oracle (`mix rian.dialyze`, ADR-0076 §5):
+# `@tag :dialyzer` runs the external Dialyzer oracle (`mix rian.dialyze`, ADR-0026):
 # it needs the `dialyzer` OTP app and a one-time PLT build (slow), so — like the other
 # external-toolchain tags — it stays out of the default loop and back in `mix test.all`.
 exclude =

@@ -34,7 +34,7 @@ defmodule Mix.Tasks.Rian.Transpile do
   def run(args) do
     {opts, argv, _invalid} =
       OptionParser.parse(args,
-        strict: [output: :string, infer: :boolean, infer_report: :boolean, open: :boolean],
+        strict: [output: :string, infer: :boolean, infer_report: :boolean],
         aliases: [o: :output, i: :infer]
       )
 
@@ -44,14 +44,12 @@ defmodule Mix.Tasks.Rian.Transpile do
           p
 
         [] ->
-          Mix.raise(
-            "usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report] [--open]"
-          )
+          Mix.raise("usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report]")
       end
 
-    # --infer-report and --open both imply --infer
-    infer? = !!opts[:infer] or !!opts[:infer_report] or !!opts[:open]
-    o = %{out: opts[:output], infer: infer?, open: !!opts[:open], report: !!opts[:infer_report]}
+    # --infer-report implies --infer
+    infer? = !!opts[:infer] or !!opts[:infer_report]
+    o = %{out: opts[:output], infer: infer?, report: !!opts[:infer_report]}
 
     cond do
       File.dir?(path) -> run_dir(path, o)
@@ -64,7 +62,7 @@ defmodule Mix.Tasks.Rian.Transpile do
 
   defp run_file(file, o) do
     src = File.read!(file)
-    {text, stats} = Rian.Transpile.transpile_with_stats(src, infer: o.infer, open: o.open)
+    {text, stats} = Rian.Transpile.transpile_with_stats(src, infer: o.infer)
 
     case o.out do
       nil ->
@@ -88,16 +86,10 @@ defmodule Mix.Tasks.Rian.Transpile do
   # remaining/filled type-hole counts when inference ran.
   defp infer_suffix(_src, _stats, %{infer: false}), do: ""
 
-  defp infer_suffix(src, stats, %{infer: true} = o) do
+  defp infer_suffix(src, stats, %{infer: true}) do
     {_, base} = Rian.Transpile.transpile_with_stats(src, infer: false)
     filled = base.holes - stats.holes
-
-    open =
-      if o.open,
-        do: ", #{stats.open} `__Unknown` (gradual debt — :ex/:js only, ADR-0076)",
-        else: ""
-
-    ", inferred #{filled}/#{base.holes} type hole(s) (#{stats.holes} remain)" <> open
+    ", inferred #{filled}/#{base.holes} type hole(s) (#{stats.holes} remain)"
   end
 
   defp print_infer_report(src) do
@@ -128,7 +120,7 @@ defmodule Mix.Tasks.Rian.Transpile do
     entries =
       Enum.map(files, fn file ->
         {text, stats} =
-          Rian.Transpile.transpile_with_stats(File.read!(file), infer: o.infer, open: o.open)
+          Rian.Transpile.transpile_with_stats(File.read!(file), infer: o.infer)
 
         if o.out, do: write_draft(text, dir, file, o.out)
         {Path.relative_to(file, dir), stats}

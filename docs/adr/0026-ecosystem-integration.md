@@ -48,6 +48,13 @@ Three concerns were conflated and must be separated:
    - **EEP-48 doc chunks** — `h` in IEx/erl shell, ExDoc, `code:get_doc/1` work on Rian modules. The
      *input surface* (`@moduledoc`/`@doc`/`@typedoc`) is defined in [ADR-0051](0051-doc-comments.md).
    - **Dialyzer-compatible `-spec`/`-type`** — Rian is typed, so emit precise specs.
+     `mix rian.dialyze FILE.rian` (implemented) compiles to BEAM with these `-spec`s
+     (`debug_info`) and runs **Dialyzer** as an external **second-opinion oracle**:
+     success typings never false-positive, so any warning is a real bug in Rian's
+     checker or codegen — the same discipline as the equiv-lock harness. Dialyzer is
+     dispatched dynamically (`apply(:dialyzer, :run, …)`) so it stays an optional dev
+     dependency; absent, the task fails with a clear Mix error. Tests:
+     `test/rian/dialyze_test.exs` (guard everywhere; full analysis `@tag :dialyzer`).
    - **OTP releases** via relx / `mix release` (later).
    - **Upstream small hooks** if a build/packaging gap blocks us, rather than forking.
 

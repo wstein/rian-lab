@@ -24,7 +24,8 @@ defmodule Rian.Transpile.Infer do
   `translate_spec/1` map them into terms and `seed_spec/6` unifies each sig var with
   its spec term *after* the body pass — a body-hole var ADOPTS the spec, a conflicting
   body-concrete var keeps its proven type. Hints, cross-checked: a stale/wrong `@spec`
-  never forces an accidental fill. `any()`/`term()` map to `__Unknown` (ADR-0076).
+  never forces an accidental fill. Untranslatable spec types (`any()`/`term()`, tuples,
+  maps) yield no hint — the slot stays an honest `_Ty`/`_Ret` hole for a human to fill.
   """
 
   alias Rian.Decl
@@ -221,8 +222,9 @@ defmodule Rian.Transpile.Infer do
     do: con("String")
 
   defp translate_spec({t, _, _}) when t in [:atom, :module, :node], do: con("Symbol")
-  # `any()`/`term()` is the user's stated openness -> the gradual open type (ADR-0076).
-  defp translate_spec({t, _, _}) when t in [:any, :term], do: con("__Unknown")
+  # `any()`/`term()` carries no concrete type -> leave the slot a `_Ty`/`_Ret` hole
+  # (an honest "human must type this" marker, not an auto-filled placeholder).
+  defp translate_spec({t, _, _}) when t in [:any, :term], do: nil
   defp translate_spec({{:., _, [{:__aliases__, _, [:String]}, :t]}, _, _}), do: con("String")
   defp translate_spec([elem]), do: vec_spec(elem)
   defp translate_spec({:list, _, [elem]}), do: vec_spec(elem)
@@ -259,17 +261,19 @@ defmodule Rian.Transpile.Infer do
   # that conflicts keeps its proven type (unify reports `:conflict` and leaves it),
   # so a stale/wrong `@spec` never forces an accidental fill.
   defp seed_spec(ctx, name, arity, pvars, rvar, store) do
-    case Map.get(Map.get(ctx, :specs, %{}), {name, arity}) do
-      nil ->
-        store
+    apply_spec_terms(Map.get(Map.get(ctx, :specs, %{}), {name, arity}), pvars, rvar, store)
+  end
 
-      %{params: ps, ret: r} ->
-        store =
-          Enum.zip(pvars, ps)
-          |> Enum.reduce(store, fn {pv, t}, s -> if t, do: elem(unify(s, pv, t), 0), else: s end)
+  # unify each sig var with its spec term (used by both the per-group and the
+  # whole-program paths). A free var ADOPTS the spec; a conflict leaves the var.
+  defp apply_spec_terms(nil, _pvars, _rvar, store), do: store
 
-        if r, do: elem(unify(store, rvar, r), 0), else: store
-    end
+  defp apply_spec_terms(%{params: ps, ret: r}, pvars, rvar, store) do
+    store =
+      Enum.zip(pvars, ps)
+      |> Enum.reduce(store, fn {pv, t}, s -> if t, do: elem(unify(s, pv, t), 0), else: s end)
+
+    if r, do: elem(unify(store, rvar, r), 0), else: store
   end
 
   # bind each clause's parameter pattern against the shared param var
@@ -287,6 +291,10 @@ defmodule Rian.Transpile.Infer do
   monomorphically, struct construction/patterns resolve to their proposed sum
   (`clusters`), and the residual free variables become stable, SHARED `Unk####`
   names — the same logical unknown carries one identity across the program.
+
+  `specs` (optional) maps `{mod, fn, arity} => %{params, ret}` of spec TERMS (from
+  `collect_specs/1` + a re-key by module) — harvested `@spec` hints, seeded per
+  function after its body pass and cross-checked (a conflict keeps the proven type).
 
   Returns `%{sigs: %{{mod,fn,arity} => %{params, ret}}, unks: %{name => [sites]}}`.
   """
@@ -318,16 +326,22 @@ defmodule Rian.Transpile.Infer do
     store =
       for {mod, groups} <- modules, g <- groups, reduce: s1 do
         s ->
-          {pvars, rvar} = sigvars[{mod, to_string(hd(g.clauses).name), hd(g.clauses).arity}]
+          key = {mod, to_string(hd(g.clauses).name), hd(g.clauses).arity}
+          {pvars, rvar} = sigvars[key]
           cm = Map.put(ctx, :cur_mod, mod)
 
-          Enum.reduce(g.clauses, s, fn clause, s ->
-            s = resolve_struct_params(clause.args, pvars, cm, s)
-            {env, s} = bind_params(clause.args, pvars, s)
-            {bt, s} = gen(clause.body, env, cm, s)
-            {s, _} = unify(s, rvar, bt)
-            s
-          end)
+          s =
+            Enum.reduce(g.clauses, s, fn clause, s ->
+              s = resolve_struct_params(clause.args, pvars, cm, s)
+              {env, s} = bind_params(clause.args, pvars, s)
+              {bt, s} = gen(clause.body, env, cm, s)
+              {s, _} = unify(s, rvar, bt)
+              s
+            end)
+
+          # cross-checked `@spec` seeding (ADR-0075 Phase C): a residual-free slot
+          # adopts its declared spec type; a conflict keeps the proven body type.
+          apply_spec_terms(Map.get(specs, key), pvars, rvar, s)
       end
 
     resolve_program(sigvars, store)

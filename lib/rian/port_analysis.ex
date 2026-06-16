@@ -31,16 +31,31 @@ defmodule Rian.PortAnalysis do
     # structs resolved to their proposed sum, residual unknowns named `Unk####`.
     mods_groups = Enum.map(asts, fn {_, ast} -> {module_name(ast), collect_groups(ast)} end)
 
+    # harvested `@spec` hints, re-keyed by {mod, fn, arity} for the whole-program path.
+    specs =
+      Enum.reduce(asts, %{}, fn {_, ast}, acc ->
+        mod = module_name(ast)
+
+        Rian.Transpile.Infer.collect_specs(module_stmts(ast))
+        |> Enum.reduce(acc, fn {{fn_, ar}, sig}, acc -> Map.put(acc, {mod, fn_, ar}, sig) end)
+      end)
+
     %{
       modules:
         Enum.map(asts, fn {file, ast} -> module_report(file, ast, src_of(sources, file)) end),
       sums: sums,
       structs: Enum.reduce(asts, %{}, fn {_, ast}, acc -> collect_structs(ast, acc) end),
       errors: Enum.reduce(asts, %{}, fn {_, ast}, acc -> collect_errors(ast, acc) end),
-      wp: Rian.Transpile.Infer.whole_program(mods_groups, Rian.Transpile.stdlib_map(), sums),
+      wp:
+        Rian.Transpile.Infer.whole_program(mods_groups, Rian.Transpile.stdlib_map(), sums, specs),
       names: param_name_index(mods_groups)
     }
   end
+
+  # a module's top-level statements (for spec harvesting); non-`defmodule` → [].
+  defp module_stmts({:defmodule, _, [_, [do: {:__block__, _, stmts}]]}), do: stmts
+  defp module_stmts({:defmodule, _, [_, [do: single]]}), do: [single]
+  defp module_stmts(_), do: []
 
   # def groups per module (for whole-program inference). Non-`defmodule` or
   # unusual top-levels (defprotocol/defimpl/multi-module) contribute no groups.

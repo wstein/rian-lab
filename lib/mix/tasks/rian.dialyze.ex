@@ -3,7 +3,7 @@ defmodule Mix.Tasks.Rian.Dialyze do
 
   @moduledoc """
   Compile a Rian source to BEAM (with the Dialyzer `-spec`s of ADR-0026) and run
-  **Dialyzer** on it as an independent second-opinion type-checker (ADR-0076 §5).
+  **Dialyzer** on it as an independent second-opinion type-checker (ADR-0026).
 
       mix rian.dialyze FILE.rian
 

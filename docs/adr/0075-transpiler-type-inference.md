@@ -9,7 +9,7 @@ compiler corpus is ~31% (corpus-bound; see below); `@spec` harvest adds 51 spec-
 0 regressions; sum-type reconstruction for struct IR remains the open lever
 **Refs:** ADR-0034 (type-system foundations / infer-local·declare-public), ADR-0040 (error
 handling / `T | E`), ADR-0042 (`Fn(…)`), ADR-0064 (portable numerics / `Int53`), ADR-0026
-(Dialyzer `-spec` *emission* — the inverse map), ADR-0076 (`__Unknown` ← `any()`/`term()`), ADR-0063
+(Dialyzer `-spec` *emission* — the inverse map), ADR-0063
 (self-host porting track)
 **Owners:** inference · multi-target · rigor (PM)
 
@@ -110,9 +110,9 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
   **is** the human-written type the engine was reconstructing. `Rian.Transpile.Infer.collect_specs/1`
   harvests every `@spec`, `translate_spec/1` maps the Erlang/Elixir spec-type AST → a Rian term (the
   inverse of ADR-0026's `-spec` *emission*: `integer()`→`Int53`, `String.t()`/`binary()`→`String`,
-  `[t]`→`Vec(t)`, `t1 | t2`→union, `atom()`/`module()`→`Symbol`, `%Mod{}`→the sum name, and —
-  deliberately — `any()`/`term()`→**`__Unknown`** the gradual open type, ADR-0076). Tuples, maps,
-  pids, and local `t()` refs have no clean Rian image → **no hint** (a `nil` slot). The seed is
+  `[t]`→`Vec(t)`, `t1 | t2`→union, `atom()`/`module()`→`Symbol`, `%Mod{}`→the sum name). Types with
+  no clean Rian image — `any()`/`term()`, tuples, maps, pids, local `t()` refs — yield **no hint** (a
+  `nil` slot), so the slot stays an honest `_Ty`/`_Ret` hole for a human. The seed is
   **cross-checked, never authoritative** (`seed_spec/6`): each sig var is unified with its spec term
   *after* the body pass, so a body-**hole** var **adopts** the spec (the fill) while a body-**concrete**
   var that **conflicts** keeps its proven type (unify reports `:conflict` and leaves it) — a stale or
