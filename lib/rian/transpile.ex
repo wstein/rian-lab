@@ -31,8 +31,9 @@ defmodule Rian.Transpile do
   @header [
     "# ─────────────────────────────────────────────────────────────────────────",
     "# DRAFT skeleton — transpiled from Elixir by `mix rian.transpile`. NOT done.",
-    "# Translated: defs/clauses, if/case, operators, ctor/struct patterns,",
-    "#   tuples, lists, atoms, literals, local calls.",
+    "# Translated: defs/clauses (+guards), if/case, operators, ctor/struct patterns,",
+    "#   tuples, lists, maps, atoms, literals, local & sibling-module calls,",
+    "#   string interpolation (${e}), nil→None.",
     "# You must still: (1) fill type holes `_Ty`/`_Ret`, (2) resolve every",
     "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
     "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
@@ -66,6 +67,15 @@ defmodule Rian.Transpile do
     {"Map", :has_key?, 2} => {"Dict", "has"},
     {"String", :length, 1} => {"Str", "length"}
   }
+
+  # Elixir-stdlib modules with no (or only partial) Rian image — calls to these
+  # stay markers unless individually `@stdlib`-mapped. Everything else capitalized
+  # is assumed a sibling Rian module, whose `Mod.fun(args)` call is valid Rian and
+  # is emitted inline (flagged for verification in the header, like `@stdlib`).
+  @elixir_stdlib ~w(Enum Map MapSet String Regex Process Tuple Integer Float List
+                    Keyword IO Kernel File Stream Atom Base Code Macro Exception
+                    Module Application Agent Task GenServer System Path Access
+                    Function Range Date Time DateTime Calendar)
 
   @doc "Transpile Elixir source text to a draft Rian skeleton string."
   def transpile(source) when is_binary(source) do
@@ -151,7 +161,9 @@ defmodule Rian.Transpile do
             {acc ++ flush(open), text, nil}
 
           {:drop, what, node} ->
-            {acc ++ flush(open) ++ ["# TODO[port]: dropped Elixir `#{what}` — #{snippet(node)}"], doc, nil}
+            # alias/import/require are intentionally dropped (Rian resolves modules
+            # differently) — a plain note, NOT a porting marker.
+            {acc ++ flush(open) ++ ["# (dropped Elixir `#{what}`: #{snippet(node)})"], doc, nil}
 
           {:clause, vis, head, kw} ->
             clause = build_clause(head, kw)
@@ -225,10 +237,13 @@ defmodule Rian.Transpile do
       if simple?(clauses) do
         [c] = clauses
         params = c.args |> Enum.map(&"#{var_name(&1)} _Ty") |> Enum.join(", ")
-        ["#{kw} #{name}(#{params}) _Ret := #{render_body(c.body)}  # TODO[port]: fill types"]
+        # The `_Ty`/`_Ret` holes are themselves the type-filling signal (tracked by
+        # the `defs` stat); no redundant per-line marker — types are erased in BEAM
+        # forms and don't affect equiv-locking.
+        ["#{kw} #{name}(#{params}) _Ret := #{render_body(c.body)}"]
       else
         holes = List.duplicate("_Ty", arity) |> Enum.join(", ")
-        sig = "#{kw} #{name}(#{holes}) _Ret  # TODO[port]: fill types"
+        sig = "#{kw} #{name}(#{holes}) _Ret"
         [sig | Enum.map(clauses, &render_clause(kw, &1))]
       end
 
@@ -242,8 +257,10 @@ defmodule Rian.Transpile do
 
   defp render_clause(kw, c) do
     pats = c.args |> Enum.map(&pat/1) |> Enum.join(", ")
-    guard_note = if c.guard, do: "  # TODO[port]: clause guard `when #{snippet(c.guard)}`", else: ""
-    "#{kw} #{name_str(c.name)}(#{pats}) := #{render_body(c.body)}#{guard_note}"
+    # Rian supports `when` guards in clause heads (proven equiv-lockable), so
+    # translate the guard rather than dropping it to a note.
+    guard = if c.guard, do: " when #{expr(c.guard)}", else: ""
+    "#{kw} #{name_str(c.name)}(#{pats})#{guard} := #{render_body(c.body)}"
   end
 
   defp name_str(n), do: to_string(n)
@@ -268,8 +285,22 @@ defmodule Rian.Transpile do
   defp expr(s) when is_binary(s), do: ~s|"#{escape(s)}"|
   defp expr(true), do: "true"
   defp expr(false), do: "false"
-  defp expr(nil), do: ~s|TODO_PORT("nil — Rian has no nil; use Option")|
+  # Rian has no `nil`; the canonical port of a nullable is `Option`, whose empty
+  # case is `None`. (A `nil` used as a non-Option sentinel will surface at the
+  # type gate — that is the right place, not a transpile-time marker.)
+  defp expr(nil), do: "None"
   defp expr(a) when is_atom(a), do: ":#{a}"
+
+  # string interpolation `"a#{e}b"` — an Elixir `<<>>` binary of literal parts and
+  # `Kernel.to_string`/`::binary` segments → Rian interpolated string `"a${e}b"`
+  # (ADR-0069). Only when every segment is string-shaped; a genuine binary
+  # construction (sizes/integer segments) is flagged instead.
+  defp expr({:<<>>, _, segments} = n) do
+    case string_parts(segments) do
+      {:ok, parts} -> ~s|"#{Enum.join(parts)}"|
+      :error -> ~s|TODO_PORT("binary construction #{escape(snippet(n))}")|
+    end
+  end
 
   # 2-tuples are genuine Elixir tuples in quoted form; n-tuples are {:{}, _, _}.
   defp expr({l, r}), do: "{#{expr(l)}, #{expr(r)}}"
@@ -290,7 +321,19 @@ defmodule Rian.Transpile do
     "#{short_name(aliases)}(#{fields})"
   end
 
-  defp expr({:%{}, _, _} = m), do: ~s|TODO_PORT("map literal #{escape(snippet(m))}")|
+  # map *update* `%{base | k: v}` has no Rian image (immutable) — flag it.
+  defp expr({:%{}, _, [{:|, _, _} | _]} = m),
+    do: ~s|TODO_PORT("map update #{escape(snippet(m))}")|
+
+  # atom-keyed map literal `%{k: v}` → Rian `%{k: v}` (Rian has map literals).
+  # Non-atom keys (`%{expr => v}`) have no `key: value` spelling here — flagged.
+  defp expr({:%{}, _, kvs} = m) do
+    if Enum.all?(kvs, &match?({k, _} when is_atom(k), &1)) do
+      "%{#{Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{expr(v)}" end)}}"
+    else
+      ~s|TODO_PORT("map literal #{escape(snippet(m))}")|
+    end
+  end
 
   defp expr({op, _, [l, r]}) when op in @binops,
     do: "#{expr(l)} #{op} #{expr(r)}"
@@ -320,17 +363,24 @@ defmodule Rian.Transpile do
   defp expr({op, _, [l, r]}) when is_map_key(@infix_calls, op),
     do: "#{expr(l)} #{@infix_calls[op]} #{expr(r)}"
 
-  # remote call `Mod.fun(args)` — auto-mapped to a Rian prelude call when the
-  # image exists (`@stdlib`), else surfaced as a marker for hand-porting.
+  # remote call `Mod.fun(args)`: (1) auto-map to a Rian prelude call when the
+  # image exists (`@stdlib`); (2) emit inline if `Mod` is a sibling Rian module
+  # (a valid Rian cross-module call); (3) else flag — Elixir stdlib / atom module
+  # / variable field-access (`r.name`) has no clean Rian image.
   defp expr({{:., _, [mod, fun]}, _, args}) when is_list(args) do
     arg_strs = Enum.map_join(args, ", ", &expr/1)
+    m = mod_str(mod)
 
-    case Map.get(@stdlib, {mod_str(mod), fun, length(args)}) do
-      {rmod, rfun} ->
+    cond do
+      Map.has_key?(@stdlib, {m, fun, length(args)}) ->
+        {rmod, rfun} = @stdlib[{m, fun, length(args)}]
         "#{rmod}.#{rfun}(#{arg_strs})"
 
-      nil ->
-        ~s|TODO_PORT("remote/stdlib call: #{escape("#{mod_str(mod)}.#{fun}(#{arg_strs})")}")|
+      sibling_module?(mod, m) ->
+        "#{m}.#{fun}(#{arg_strs})"
+
+      true ->
+        ~s|TODO_PORT("remote/stdlib call: #{escape("#{m}.#{fun}(#{arg_strs})")}")|
     end
   end
 
@@ -345,6 +395,39 @@ defmodule Rian.Transpile do
   defp mod_str({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
   defp mod_str(a) when is_atom(a), do: ":#{a}"
   defp mod_str(other), do: snippet(other)
+
+  # An `{:__aliases__, …}` capitalized module that isn't Elixir stdlib — treated
+  # as a sibling Rian module (its call has a direct Rian image).
+  defp sibling_module?({:__aliases__, _, _}, m), do: m not in @elixir_stdlib
+  defp sibling_module?(_, _), do: false
+
+  # ── string interpolation segments ─────────────────────────────────────────
+  # `{:ok, parts}` when every `<<>>` segment is a string literal or an interpolated
+  # `::binary` segment; `:error` for a real binary construction.
+  defp string_parts(segments) do
+    Enum.reduce_while(segments, {:ok, []}, fn seg, {:ok, acc} ->
+      case string_part(seg) do
+        {:ok, s} -> {:cont, {:ok, acc ++ [s]}}
+        :error -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp string_part(s) when is_binary(s), do: {:ok, escape_lit(s)}
+  defp string_part({:"::", _, [interp, {:binary, _, _}]}), do: {:ok, "${#{interp_inner(interp)}}"}
+  defp string_part(_), do: :error
+
+  # an interpolated hole is usually wrapped in `Kernel.to_string`/`to_string`; unwrap.
+  defp interp_inner({{:., _, [_mod, :to_string]}, _, [e]}), do: expr(e)
+  defp interp_inner({:to_string, _, [e]}), do: expr(e)
+  defp interp_inner(e), do: expr(e)
+
+  defp escape_lit(s) do
+    s
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
+    |> String.replace("\n", "\\n")
+  end
 
   # case arm: `pat -> body` or `pat when guard -> body`.
   defp case_arm({:->, _, [[{:when, _, [p, g]}], body]}),

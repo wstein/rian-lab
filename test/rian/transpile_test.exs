@@ -18,7 +18,7 @@ defmodule Rian.TranspileTest do
 
     test "multi-clause def emits one sig + per-clause bodies" do
       out = rian("defmodule M do\n  def f(0), do: :z\n  def f(n), do: n\nend")
-      assert out =~ "pub def f(_Ty) _Ret  # TODO[port]: fill types"
+      assert out =~ "pub def f(_Ty) _Ret"
       assert out =~ "pub def f(0) := :z"
       assert out =~ "pub def f(n) := n"
     end
@@ -54,14 +54,36 @@ defmodule Rian.TranspileTest do
       assert out =~ "TODO_PORT(\"remote/stdlib call:"
     end
 
-    test "nil has no Rian image → flagged (no silent translation)" do
-      assert rian("defmodule M do\n  def n, do: nil\nend") =~
-               ~s|TODO_PORT("nil|
+    test "an unmapped Elixir stdlib call (Enum.map) stays a marker" do
+      out = rian("defmodule M do\n  def t(xs), do: Enum.map(xs, fn x -> x end)\nend")
+      assert out =~ "TODO_PORT(\"remote/stdlib call: Enum.map"
+    end
+  end
+
+  describe "translations beyond the structural core" do
+    test "nil → Option's None (Rian's nullable model)" do
+      assert rian("defmodule M do\n  def n, do: nil\nend") =~ ":= None"
     end
 
-    test "clause guards are surfaced as notes, never silently dropped" do
+    test "clause guards are translated into the Rian clause head" do
       out = rian("defmodule M do\n  def f(n) when n > 0, do: n\n  def f(_), do: 0\nend")
-      assert out =~ "# TODO[port]: clause guard `when n > 0`"
+      assert out =~ "pub def f(n) when n > 0 := n"
+    end
+
+    test "string interpolation `\#{e}` → Rian `${e}`" do
+      assert rian(~S|defmodule M do
+  def g(x), do: "v=#{x}!"
+end|) =~ ~S|"v=${x}!"|
+    end
+
+    test "atom-keyed map literal → Rian %{k: v}" do
+      assert rian("defmodule M do\n  def m, do: %{lo: 1, hi: 2}\nend") =~ "%{lo: 1, hi: 2}"
+    end
+
+    test "a call to a sibling Rian module is emitted inline, not flagged" do
+      out = rian("defmodule M do\n  def g(x), do: Core.from_expr(x)\nend")
+      assert out =~ "pub def g(x _Ty) _Ret := Core.from_expr(x)"
+      refute out =~ "remote/stdlib call: Core"
     end
   end
 
