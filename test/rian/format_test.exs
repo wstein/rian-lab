@@ -16,6 +16,9 @@ defmodule Rian.FormatTest do
   # equivalence, which a reflowing formatter cannot satisfy (it moves newlines).
   @open [{:lparen}, {:lbracket}, {:lbrace}, {:mapopen}]
   @close [{:rparen}, {:rbracket}, {:rbrace}]
+  # the parser's `Rian.Decl` @cont_ops: a depth-0 newline in a `:=` body adjacent
+  # to one of these is a *continuation* (insignificant), so the oracle drops it.
+  @cont_ops ~w(+ - * / < > <= >= == != <> |> and or in rem div)
 
   defp sig(src) do
     src
@@ -26,9 +29,24 @@ defmodule Rian.FormatTest do
       t -> t
     end)
     |> drop_bracket_nl(0, [])
+    |> drop_cont_nl(nil, [])
     |> collapse_nl([])
     |> strip_tc()
   end
+
+  # drop a (depth-0) newline that sits next to a continuation operator
+  defp drop_cont_nl([], _prev, acc), do: Enum.reverse(acc)
+
+  defp drop_cont_nl([{:nl} | rest], prev, acc) do
+    if cont_op?(prev) or cont_op?(List.first(rest)),
+      do: drop_cont_nl(rest, prev, acc),
+      else: drop_cont_nl(rest, prev, [{:nl} | acc])
+  end
+
+  defp drop_cont_nl([t | rest], _prev, acc), do: drop_cont_nl(rest, t, [t | acc])
+
+  defp cont_op?({:op, o}), do: o in @cont_ops
+  defp cont_op?(_), do: false
 
   defp drop_bracket_nl([], _d, acc), do: Enum.reverse(acc)
   defp drop_bracket_nl([t | r], d, acc) when t in @open, do: drop_bracket_nl(r, d + 1, [t | acc])
@@ -181,6 +199,55 @@ defmodule Rian.FormatTest do
       refute out =~ "rest,\n"
       # and the result still parses — the whole point of suppressing the comma
       assert Decl.parse(out)
+    end
+  end
+
+  describe "Tier 2 — depth-0 operator-chain wrapping (|> and or <>)" do
+    test "a chain that fits stays on one line" do
+      assert Format.format("def f() := a |> b |> c\n") == "def f() := a |> b |> c\n"
+    end
+
+    test "a pipe chain that overflows breaks leading-operator with a hanging indent" do
+      src =
+        "def run() := input_data |> transform(options) |> validate_everything(strict_mode) |> persist(store)\n"
+
+      assert Format.format(src) == """
+             def run() := input_data
+               |> transform(options)
+               |> validate_everything(strict_mode)
+               |> persist(store)
+             """
+    end
+
+    test "a source-multiline chain that now fits is collapsed (idempotence basis)" do
+      assert Format.format("def f() := a\n  |> b\n  |> c\n") == "def f() := a |> b |> c\n"
+    end
+
+    test "wrapping is idempotent on an overflowing chain" do
+      src =
+        "def run() := step_one(x) |> step_two(y) |> step_three(z) |> step_four(w) |> step_five(v)\n"
+
+      once = Format.format(src)
+      assert Format.format(once) == once
+    end
+
+    test "a long boolean chain wraps and still parses" do
+      src =
+        "def ok() Bool := is_valid(value) and within_range(value) and not blocked(value) and allowed(value, scope)\n"
+
+      out = Format.format(src)
+      assert out =~ "\n  and "
+      assert Rian.Decl.parse(out)
+    end
+
+    test "a block-internal bind chain is NOT chain-wrapped (its newline would become a `;`)" do
+      src =
+        "def f(x Int53) Int53\nresult := source_data |> alpha_mapper(p) |> beta_validator(q) |> gamma_filter(r) |> sink_storage(x)\nresult\nend\n"
+
+      out = Format.format(src)
+      # no leading-`|>` continuation line — the chain is not broken across lines
+      refute out =~ ~r/\n\s*\|>/
+      assert Rian.Decl.parse(out)
     end
   end
 

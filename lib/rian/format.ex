@@ -20,29 +20,45 @@ defmodule Rian.Format do
       indent, one level per `do`-block / block-form `def` body).
     * **Bracket interiors reflow** (Tier 2): a call's arguments, a list/map/tuple,
       or a parenthesized expression collapse onto one line when they fit the
-      #{98}-column budget, and otherwise break **one item per line** with a
-      trailing comma. A bracket region containing a line comment is forced to break.
-    * **Statement / block newline placement is preserved** — the formatter does not
-      collapse or expand `do…end` blocks, nor reflow pipe/operator chains. Those
-      newlines are significant, so re-deriving them is deferred (see ADR-0045).
+      98-column budget, and otherwise break **one item per line** with a trailing
+      comma. A bracket region containing a line comment is forced to break.
+    * **Operator chains reflow** (depth-0 continuation): a top-level `:=` body that
+      is a flat `|>`/`and`/`or`/`<>` chain collapses when it fits and otherwise
+      breaks **leading-operator, one stage per line** with a one-level hanging
+      indent. Confined to declaration bodies — `Rian.Decl`'s `take_line` continues
+      across a newline adjacent to such an operator there (P1), but a block-internal
+      bind's newline becomes a `;`, so those are left intact.
+    * **Block newline placement is preserved** — the formatter does not collapse or
+      expand `do…end` blocks; those statement newlines are significant.
     * Blank-line runs collapse to one; comments and heredocs are kept verbatim at
       their authored position.
 
   ## Why it can't change meaning
 
-  `Rian.Decl.detokenize` is whitespace-invariant and the parser is newline-tolerant
-  inside brackets (and accepts a trailing comma identically), so **reflow that only
-  changes whitespace/newlines inside brackets — plus an optional trailing comma —
-  leaves `Rian.Decl.parse/1`'s AST unchanged**. That full-AST equality is the
-  semantic-preservation oracle, asserted over the whole corpus and in property tests
-  (the analog of `Rian.FormsEquiv` for the BEAM backend), alongside idempotence and
-  comment fidelity.
+  `Rian.Decl.detokenize` is whitespace-invariant, the parser is newline-tolerant
+  inside brackets and adjacent to a `@cont_ops` operator in a `:=` body, and it
+  accepts a trailing comma identically — so the formatter's edits (reflow
+  whitespace/newlines in those positions, plus an optional trailing comma before a
+  closer) are all parse-insignificant. The oracle is **significant-token
+  equivalence** (drop exactly those insignificant tokens, assert the rest is
+  identical — the analog of `Rian.FormsEquiv` for the BEAM backend), backed by a
+  **parse-still-valid** guard over the corpus, plus idempotence and comment
+  fidelity. (Full-AST equality is *not* used: `Rian.Decl.parse` is non-deterministic
+  under macro hygiene — fresh `__h<n>` gensyms — so it would need perpetual
+  alpha-renaming for no extra safety.)
   """
 
   alias Rian.Lexer
   alias Rian.Format.{Cst, Doc}
 
   @width 98
+
+  # Operators whose chains wrap one-per-line (leading-operator style) when a
+  # top-level `:=` body overflows. These are exactly the `Rian.Decl` `@cont_ops`
+  # subset that the parser treats as **newline-insignificant in a `:=` body**
+  # (P1, [decl.ex](decl.ex)) — so breaking before one is meaning-preserving. `|`
+  # (cons/sum) is deliberately excluded (see the cons-tail trailing-comma fix).
+  @wrap_ops ~w(|> and or <>)
 
   @doc """
   Format Rian source. **Total** — never raises: source that cannot even be lexed
@@ -68,6 +84,7 @@ defmodule Rian.Format do
       |> Lexer.tokenize_trivia()
       |> Cst.build()
       |> logical_lines()
+      |> merge_chains()
       |> indent_and_render([0], 0, [])
       |> squeeze_blanks()
       |> Enum.map_join("", &(&1 <> "\n"))
@@ -84,6 +101,36 @@ defmodule Rian.Format do
   defp ll([], cur, acc), do: Enum.reverse([Enum.reverse(cur) | acc])
   defp ll([{:tok, {:nl}} | rest], cur, acc), do: ll(rest, [], [Enum.reverse(cur) | acc])
   defp ll([n | rest], cur, acc), do: ll(rest, [n | cur], acc)
+
+  # ── merge operator-continuation lines into one logical unit ───────────────
+  # A `:=` body split across source lines by a wrap-operator continuation (a
+  # trailing `|>`/`and`/`or`/`<>`, or a leading one on the next line) is rejoined
+  # into a single logical line, so the wrap pass re-decides collapse-vs-break as a
+  # whole — which is what makes wrapping **idempotent** (a broken chain re-lexes to
+  # separate lines and must remerge to the same unit). Only a declaration line
+  # accumulates (a block-internal bind can't legally continue this way — its
+  # newline would become a `;`), and a line ending in a comment never merges
+  # forward (the comment would eat the next line).
+  defp merge_chains([a, b | rest]) do
+    if chain_link?(a, b),
+      do: merge_chains([a ++ b | rest]),
+      else: [a | merge_chains([b | rest])]
+  end
+
+  defp merge_chains(lines), do: lines
+
+  defp chain_link?(a, b) do
+    declaration_line?(a) and not ends_with_comment?(a) and not blank?(b) and
+      not comment_only?(b) and (trailing_wrap_op?(a) or leading_wrap_op?(b))
+  end
+
+  defp ends_with_comment?(line), do: match?({:tok, {:comment, _}}, List.last(line))
+
+  defp trailing_wrap_op?(line), do: wrap_op_tok?(tail_tok(List.last(line)))
+  defp leading_wrap_op?([first | _]), do: wrap_op_tok?(head_tok(first))
+
+  defp wrap_op_tok?({:op, o}), do: o in @wrap_ops
+  defp wrap_op_tok?(_), do: false
 
   # ── per-line indent (stack) + Doc render ──────────────────────────────────
   # `stack` holds the indent level for each open block; `cont` is 1 when the
@@ -214,12 +261,16 @@ defmodule Rian.Format do
   defp bd([{:tok, {:comment, c}} = node | rest], _prev, rf),
     do: Doc.concat([Doc.line_suffix(Doc.text("  " <> c)), bd(rest, node, rf)])
 
-  # the top-level `:=` opens the body (reflow) zone for the rest of the line
-  defp bd([{:tok, {:op, ":="}} = node | rest], prev, _rf) do
+  # the top-level `:=` opens the body (reflow) zone for the rest of the line.
+  # Reaching it with `rf == false` means this is a **declaration body** (only a
+  # declaration line starts in the head zone) — the one place a wrap-op chain may
+  # break across lines safely (P1 take_line continues; a block-internal bind can't).
+  defp bd([{:tok, {:op, ":="}} = node | rest], prev, rf) do
     sep =
       if prev != nil and space?(tail_tok(prev), {:op, ":="}), do: Doc.text(" "), else: Doc.empty()
 
-    Doc.concat([sep, Doc.text(":="), bd(rest, node, true)])
+    body = if not rf and chain?(rest), do: chain_body(rest, node), else: bd(rest, node, true)
+    Doc.concat([sep, Doc.text(":="), body])
   end
 
   defp bd([node | rest], prev, rf) do
@@ -234,6 +285,46 @@ defmodule Rian.Format do
   defp node_doc({:tok, {:comment, c}}, _rf), do: Doc.text(c)
   defp node_doc({:tok, t}, _rf), do: Doc.text(leaf(t))
   defp node_doc({:group, open, inner, close}, rf), do: group_doc(open, inner, close, rf)
+
+  # ── depth-0 operator-chain wrapping (leading-operator style) ──────────────
+  # A `:=` body that is a flat chain of `|>`/`and`/`or`/`<>` (no inline `do`-block)
+  # is rendered as a group: one line if it fits, else broken before each operator
+  # with a one-level hanging indent. Breaking before a leading `@cont_ops` operator
+  # in a `:=` body is meaning-safe (P1). Bodies containing a `do` are left alone
+  # (a wrap-op there may sit inside the block — not a top-level chain split point).
+  defp chain?(nodes) do
+    not Enum.any?(nodes, &match?({:tok, {:kw, "do"}}, &1)) and Enum.any?(nodes, &wrap_op_node?/1)
+  end
+
+  defp chain_body(nodes, prev) do
+    sep =
+      if space?(tail_tok(prev), head_tok(hd(nodes))), do: Doc.text(" "), else: Doc.empty()
+
+    Doc.concat([sep, chain_doc(nodes)])
+  end
+
+  defp chain_doc(nodes) do
+    {seg0, rest} = take_until_wrap(nodes, [])
+    Doc.group(Doc.concat([bd(seg0, nil, true), Doc.nest(2, chain_tail(rest))]))
+  end
+
+  defp chain_tail([]), do: Doc.empty()
+
+  defp chain_tail([{:tok, {:op, o}} | rest]) do
+    {seg, rest2} = take_until_wrap(rest, [])
+    Doc.concat([Doc.line(), Doc.text(o), Doc.text(" "), bd(seg, nil, true), chain_tail(rest2)])
+  end
+
+  defp take_until_wrap([], acc), do: {Enum.reverse(acc), []}
+
+  defp take_until_wrap([n | rest], acc) do
+    if wrap_op_node?(n),
+      do: {Enum.reverse(acc), [n | rest]},
+      else: take_until_wrap(rest, [n | acc])
+  end
+
+  defp wrap_op_node?({:tok, t}), do: wrap_op_tok?(t)
+  defp wrap_op_node?(_), do: false
 
   # the reflow core: in the body zone a bracket group collapses if it fits, else
   # breaks one item per line with a trailing comma; a comment inside forces a full

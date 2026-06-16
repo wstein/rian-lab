@@ -16,6 +16,7 @@ defmodule Rian.FormatPropertyTest do
   # ── the significant-token oracle (same as FormatTest) ─────────────────────
   @open [{:lparen}, {:lbracket}, {:lbrace}, {:mapopen}]
   @close [{:rparen}, {:rbracket}, {:rbrace}]
+  @cont_ops ~w(+ - * / < > <= >= == != <> |> and or in rem div)
 
   defp sig(src) do
     src
@@ -26,9 +27,23 @@ defmodule Rian.FormatPropertyTest do
       t -> t
     end)
     |> drop_bracket_nl(0, [])
+    |> drop_cont_nl(nil, [])
     |> collapse_nl([])
     |> strip_tc()
   end
+
+  defp drop_cont_nl([], _prev, acc), do: Enum.reverse(acc)
+
+  defp drop_cont_nl([{:nl} | rest], prev, acc) do
+    if cont_op?(prev) or cont_op?(List.first(rest)),
+      do: drop_cont_nl(rest, prev, acc),
+      else: drop_cont_nl(rest, prev, [{:nl} | acc])
+  end
+
+  defp drop_cont_nl([t | rest], _prev, acc), do: drop_cont_nl(rest, t, [t | acc])
+
+  defp cont_op?({:op, o}), do: o in @cont_ops
+  defp cont_op?(_), do: false
 
   defp drop_bracket_nl([], _d, acc), do: Enum.reverse(acc)
   defp drop_bracket_nl([t | r], d, acc) when t in @open, do: drop_bracket_nl(r, d + 1, [t | acc])
