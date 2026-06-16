@@ -646,23 +646,28 @@ defmodule Rian.Transpile.Infer do
         {:no, store}
 
       true ->
-        {payload_term, store} = ok_payload(tail_pairs, ctx, store)
+        {payload_term, store, bad} = ok_payload(tail_pairs, ctx, store)
         tags = for {:error, tag} <- shapes, uniq: true, do: tag
-        if payload_term, do: {{:result, payload_term, tags}, store}, else: {:no, store}
+
+        if payload_term && not bad,
+          do: {{:result, payload_term, tags}, store},
+          else: {:no, store}
     end
   end
 
-  # unify the types of every `{:ok, v}` payload; return the shared term (or nil).
+  # unify the types of every `{:ok, v}` payload; return `{term | nil, store, bad?}`.
+  # `bad?` is set when two ok-payloads conflict (e.g. `{:ok, 1}` and `{:ok, "s"}`) —
+  # the caller then leaves a hole rather than pick one (no accidental fill).
   defp ok_payload(tail_pairs, ctx, store) do
-    Enum.reduce(tail_pairs, {nil, store}, fn {t, env}, {acc, s} ->
+    Enum.reduce(tail_pairs, {nil, store, false}, fn {t, env}, {acc, s, bad} ->
       case result_tag(t) do
         {:ok, v} ->
           {vt, s} = gen(v, env, ctx, s)
-          s = if acc, do: elem(unify(s, acc, vt), 0), else: s
-          {acc || vt, s}
+          {s, r} = if acc, do: unify(s, acc, vt), else: {s, :ok}
+          {acc || vt, s, bad or r == :conflict}
 
         _ ->
-          {acc, s}
+          {acc, s, bad}
       end
     end)
   end

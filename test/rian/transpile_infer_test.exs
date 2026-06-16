@@ -106,6 +106,24 @@ defmodule Rian.TranspileInferTest do
       assert {:ok, _} = safe_compile(body)
     end
 
+    test "honesty: conflicting `{:ok, _}` payload types leave a hole, not a guess" do
+      src = """
+      defmodule M do
+        def f(x) do
+          case x do
+            0 -> {:ok, 1}
+            1 -> {:ok, "s"}
+            _ -> {:error, Bad}
+          end
+        end
+      end
+      """
+
+      out = Transpile.transpile(src, infer: true)
+      refute out =~ "| Errors"
+      assert out =~ "def f(x Int53) _Ret"
+    end
+
     test "honesty: a non-Capitalized error tag (Elixir idiom) is NOT made a Result" do
       # {:error, :atom} / {:error, "msg"} can't be a synthesized variant → leave holes.
       out =
