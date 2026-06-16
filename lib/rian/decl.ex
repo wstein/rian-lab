@@ -161,7 +161,7 @@ defmodule Rian.Decl do
   # process-dict flag set during desugar, so the interpolation pass stays pure.
   defp inject_stdlib(prog) do
     if needs_show_float?(prog) and not Enum.any?(prog.mods, &(&1.name == "Show")) do
-      %{prog | mods: [show_module() | prog.mods]}
+      %{prog | mods: [Rian.ShowStdlib.module() | prog.mods]}
     else
       prog
     end
@@ -178,24 +178,6 @@ defmodule Rian.Decl do
   defp calls_show_float?(t) when is_tuple(t), do: t |> Tuple.to_list() |> calls_show_float?()
   defp calls_show_float?(list) when is_list(list), do: Enum.any?(list, &calls_show_float?/1)
   defp calls_show_float?(_), do: false
-
-  # the canonical `Show` source, embedded at compile time (single source of truth
-  # with the documented/tested `examples/rian/stdlib_show.rian`); parsed once.
-  @show_src File.read!(Path.join([__DIR__, "..", "..", "examples", "rian", "stdlib_show.rian"]))
-
-  defp show_module do
-    case :persistent_term.get({__MODULE__, :show_module}, nil) do
-      nil ->
-        # `parse/1` on `Show` is safe (it defines `Show`, so `inject_stdlib` is a
-        # no-op there — no recursion).
-        m = @show_src |> parse() |> Map.fetch!(:mods) |> Enum.find(&(&1.name == "Show"))
-        :persistent_term.put({__MODULE__, :show_module}, m)
-        m
-
-      m ->
-        m
-    end
-  end
 
   # Structured `protocol`/`impl` IR preserved for the Rust/JS emitters (ADR-0061):
   # the BEAM desugar (`protocol_defs/3`) discards them, but Rust reads protocols as
