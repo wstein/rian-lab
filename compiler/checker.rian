@@ -79,6 +79,12 @@ mod Checker do
   type FsOpt := FsSome(FSig) | FsNone
   # one `tvar -> concrete type` binding accumulated while unifying params with args.
   type Bind := Bnd(String, String)
+  # error set #4 (protocol bounds, ADR-0042 §2): a bounded generic's signature — its
+  # `tvars`, declared param types, and `tvar: P + Q` bounds — keyed by function name in
+  # `fbounds`; `ProtoBound` is one `tvar -> protocols` pair; `TyLk` is a bind-lookup result.
+  type FBnd := FB(Vec(String), Vec(String), Vec(ProtoBound))
+  type ProtoBound := PBound(String, Vec(String))
+  type TyLk := TyHit(String) | TyMiss
   # collecting a maximal word-run while tokenizing a type string.
   type WordTake := WT(String, Vec(Int53))
   # a branch/arm with its inferred type, for the LUB join (branch_join).
@@ -1057,6 +1063,91 @@ mod Checker do
       end
     end
   end
+
+  # ── error set #4: protocol-bound violation (Rian.Check.check_bounds, ADR-0042 §2) ──
+  # at each call to a bounded generic (`def g(x T) … forall T: P`), instantiate the
+  # callee's tvars from the argument types (`bind_all`, reused from generic-return
+  # inference) and check each bound `T: P`: a tvar pinned to a CONCRETE type with no
+  # `impl P for that-type` is a proven violation. `fbounds` maps a bounded function to
+  # its (tvars, param types, bounds); `impls` maps a protocol to its implementing types.
+  # CONSERVATIVE: an `unknown`/still-generic instantiation never rejects. `bounds_bad`
+  # walks one clause body for such a call, mirroring `num_mix`'s shape.
+  pub def bounds_bad(Core, Dict(String, String), Dict(Symbol, Dict(String, String)), Dict(String, FBnd), Dict(String, Vec(String))) Bool
+  pub def bounds_bad(CNum(_), _, _, _, _) := false
+  pub def bounds_bad(CStr(_), _, _, _, _) := false
+  pub def bounds_bad(CChar(_), _, _, _, _) := false
+  pub def bounds_bad(CId(_), _, _, _, _) := false
+  pub def bounds_bad(CUnary(_, a), env, ic, fb, im) := bounds_bad(a, env, ic, fb, im)
+  pub def bounds_bad(CBin(_, l, r), env, ic, fb, im) := bounds_bad(l, env, ic, fb, im) or bounds_bad(r, env, ic, fb, im)
+  pub def bounds_bad(CCall(g, args), env, ic, fb, im) := call_bound_bad(g, args, env, ic, fb, im) or bounds_any(args, env, ic, fb, im)
+  pub def bounds_bad(CIf(c, t, e), env, ic, fb, im) := bounds_bad(c, env, ic, fb, im) or bounds_bad(t, env, ic, fb, im) or bounds_bad(e, env, ic, fb, im)
+  pub def bounds_bad(CBlock(stmts), env, ic, fb, im) := bounds_stmts(stmts, env, ic, fb, im)
+  pub def bounds_bad(CCase(s, arms), env, ic, fb, im) := bounds_bad(s, env, ic, fb, im) or bounds_arms(arms, env, ic, fb, im)
+  pub def bounds_bad(CList(es, tail), env, ic, fb, im) := bounds_any(es, env, ic, fb, im) or bounds_tail(tail, env, ic, fb, im)
+  pub def bounds_bad(CLambda(_, body), env, ic, fb, im) := bounds_bad(body, env, ic, fb, im)
+  pub def bounds_bad(_, _, _, _, _) := false
+
+  def bounds_any(Vec(Core), Dict(String, String), Dict(Symbol, Dict(String, String)), Dict(String, FBnd), Dict(String, Vec(String))) Bool
+  def bounds_any([], _, _, _, _) := false
+  def bounds_any([c | rest], env, ic, fb, im) := bounds_bad(c, env, ic, fb, im) or bounds_any(rest, env, ic, fb, im)
+
+  def bounds_stmts(Vec(Stmt), Dict(String, String), Dict(Symbol, Dict(String, String)), Dict(String, FBnd), Dict(String, Vec(String))) Bool
+  def bounds_stmts([], _, _, _, _) := false
+  def bounds_stmts([SBind(_, e) | rest], env, ic, fb, im) := bounds_bad(e, env, ic, fb, im) or bounds_stmts(rest, env, ic, fb, im)
+  def bounds_stmts([STypedBind(_, _, e) | rest], env, ic, fb, im) := bounds_bad(e, env, ic, fb, im) or bounds_stmts(rest, env, ic, fb, im)
+  def bounds_stmts([SExpr(e) | rest], env, ic, fb, im) := bounds_bad(e, env, ic, fb, im) or bounds_stmts(rest, env, ic, fb, im)
+
+  def bounds_arms(Vec(Arm), Dict(String, String), Dict(Symbol, Dict(String, String)), Dict(String, FBnd), Dict(String, Vec(String))) Bool
+  def bounds_arms([], _, _, _, _) := false
+  def bounds_arms([CArm(_, body) | rest], env, ic, fb, im) := bounds_bad(body, env, ic, fb, im) or bounds_arms(rest, env, ic, fb, im)
+
+  def bounds_tail(Tail, Dict(String, String), Dict(Symbol, Dict(String, String)), Dict(String, FBnd), Dict(String, Vec(String))) Bool
+  def bounds_tail(TClose, _, _, _, _) := false
+  def bounds_tail(TCons(e), env, ic, fb, im) := bounds_bad(e, env, ic, fb, im)
+
+  # check one call against the callee's bounds, if it targets a bounded generic.
+  def call_bound_bad(g String, args Vec(Core), env Dict(String, String), ic Dict(Symbol, Dict(String, String)), fb Dict(String, FBnd), im Dict(String, Vec(String))) Bool
+  def call_bound_bad(g, args, env, ic, fb, im)
+    if Prim.map_has(fb, g) do
+      fbound_violated(Prim.map_get(fb, g), infer_args(args, env, ic), im)
+    else
+      false
+    end
+  end
+
+  def fbound_violated(FBnd, Vec(String), Dict(String, Vec(String))) Bool
+  def fbound_violated(FB(tvars, params, bounds), arg_types, im) := violated(bounds, bind_all(params, arg_types, tvars, []), im)
+
+  def infer_args(Vec(Core), Dict(String, String), Dict(Symbol, Dict(String, String))) Vec(String)
+  def infer_args([], _, _) := []
+  def infer_args([a | rest], env, ic) := [infer_ic(a, env, ic) | infer_args(rest, env, ic)]
+
+  # each bound `tvar: P + Q`: if the tvar is pinned to a concrete type, every protocol
+  # must have an impl for it; a missing one is a violation.
+  def violated(Vec(ProtoBound), Vec(Bind), Dict(String, Vec(String))) Bool
+  def violated([], _, _) := false
+  def violated([PBound(tvar, protos) | rest], binds, im) := pbound_violated(tvar, protos, binds, im) or violated(rest, binds, im)
+
+  def pbound_violated(tvar String, protos Vec(String), binds Vec(Bind), im Dict(String, Vec(String))) Bool
+  def pbound_violated(tvar, protos, binds, im)
+    case bind_lookup(binds, tvar) do
+      TyHit(ty) -> if concrete_ty(ty) do missing_impl(protos, ty, im) else false end
+      TyMiss -> false
+    end
+  end
+
+  def concrete_ty(ty String) Bool := if ty == "unknown" do false else not has_tvar(ty) end
+
+  def missing_impl(Vec(String), String, Dict(String, Vec(String))) Bool
+  def missing_impl([], _, _) := false
+  def missing_impl([p | rest], ty, im) := not impl_has(im, p, ty) or missing_impl(rest, ty, im)
+
+  def impl_has(im Dict(String, Vec(String)), proto String, ty String) Bool
+  def impl_has(im, proto, ty) := if Prim.map_has(im, proto) do member_str(ty, Prim.map_get(im, proto)) else false end
+
+  def bind_lookup(Vec(Bind), String) TyLk
+  def bind_lookup([], _) := TyMiss
+  def bind_lookup([Bnd(tv, ty) | rest], x) := if tv == x do TyHit(ty) else bind_lookup(rest, x) end
 
   # `from` is assignable to `to` (Rian.Check.assignable?): identical, either unknown, or an
   # `Fn(...)` on either side (skipped, see above); else for two numerics a lossless WIDENING;
