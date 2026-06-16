@@ -66,6 +66,31 @@ defmodule Rian.Transpile do
     {text, %{ports: ports, defs: defs}}
   end
 
+  @doc """
+  Rank transpiled modules by port difficulty for folder-mode triage. Takes
+  `[{name, %{defs:, ports:}}]` and returns rows sorted easiest-first by
+  markers-per-def, each tagged `"easy"` (<3), `"med"`, `"hard"` (≥6), or `"—"`
+  (no defs). The ratio is the honest cost signal: a struct-reflection module
+  (many markers per def) sorts last; a near-portable one sorts first.
+  """
+  def rank(entries) do
+    entries
+    |> Enum.map(fn {name, %{defs: defs, ports: ports}} ->
+      ratio = if defs > 0, do: ports / defs, else: ports * 1.0
+
+      tag =
+        cond do
+          defs == 0 -> "—"
+          ratio < 3.0 -> "easy"
+          ratio >= 6.0 -> "hard"
+          true -> "med"
+        end
+
+      %{name: name, defs: defs, ports: ports, ratio: ratio, tag: tag}
+    end)
+    |> Enum.sort_by(& &1.ratio)
+  end
+
   # ── module ────────────────────────────────────────────────────────────────
 
   defp toplevel({:defmodule, _, [aliases, [do: body]]}) do
@@ -228,6 +253,12 @@ defmodule Rian.Transpile do
   # expression-side dual of the struct *pattern* clause below). Must precede the
   # generic local-call clause, else `{:%, _, [aliases, map]}` is mistaken for a
   # 2-arg call named `:%` and emits a malformed `%(__aliases__(...), …)`.
+  # struct/map *update* `%Mod{base | f: v}` carries a leading `{:|, …}` element —
+  # Rian sums are immutable tagged tuples, so there is no direct image; flag it
+  # rather than crash trying to destructure the cons as a `{k, v}` pair.
+  defp expr({:%, _, [_aliases, {:%{}, _, [{:|, _, _} | _]}]} = n),
+    do: ~s|TODO_PORT("struct update #{escape(snippet(n))}")|
+
   defp expr({:%, _, [aliases, {:%{}, _, kvs}]}) do
     fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{expr(v)}" end)
     "#{short_name(aliases)}(#{fields})"

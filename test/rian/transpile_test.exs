@@ -65,6 +65,36 @@ defmodule Rian.TranspileTest do
     end
   end
 
+  describe "struct/map updates don't crash the total walk" do
+    test "struct update `%M{base | f: v}` is flagged, not a FunctionClauseError" do
+      out = rian("defmodule M do\n  def u(p), do: %P{p | type: p.t}\nend")
+      assert out =~ ~s|TODO_PORT("struct update|
+    end
+
+    test "map update `%{base | k: v}` is flagged too" do
+      out = rian("defmodule M do\n  def u(m), do: %{m | k: 1}\nend")
+      assert out =~ "TODO_PORT"
+    end
+  end
+
+  describe "rank/1 — folder-mode port-difficulty triage" do
+    test "sorts easiest-first by markers/def and tags difficulty" do
+      rows =
+        Transpile.rank([
+          {"hard.ex", %{defs: 2, ports: 14}},
+          {"easy.ex", %{defs: 5, ports: 5}},
+          {"med.ex", %{defs: 4, ports: 16}}
+        ])
+
+      assert Enum.map(rows, & &1.name) == ["easy.ex", "med.ex", "hard.ex"]
+      assert Enum.map(rows, & &1.tag) == ["easy", "med", "hard"]
+    end
+
+    test "a module with no def groups is tagged `—`" do
+      assert [%{tag: "—"}] = Transpile.rank([{"x.ex", %{defs: 0, ports: 3}}])
+    end
+  end
+
   describe "transpile_with_stats" do
     test "counts def groups and unresolved markers" do
       {_text, stats} =
