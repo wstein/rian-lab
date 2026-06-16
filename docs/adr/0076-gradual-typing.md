@@ -1,9 +1,10 @@
 # ADR-0076 — `__Unknown`: sound gradual typing for the dynamic targets
 
 **Status:** Accepted (direction)
-**Implemented:** Phases 1–4 shipped (`Rian.Check`, `Rian.Reach`, BEAM/JS lowering,
-`mix rian.transpile --open`; `test/rian/gradual_test.exs`). The Dialyzer cross-check
-(Phase 5) is staged below.
+**Implemented:** all five phases shipped — `Rian.Check` (the sound rule), `Rian.Reach`
+(dynamic-target pinning), BEAM/JS lowering, `mix rian.transpile --open`, and
+`mix rian.dialyze` (the external oracle). Tests: `test/rian/gradual_test.exs`,
+`test/rian/dialyze_test.exs`. Open items below.
 **Refs:** ADR-0034 (type-system foundations / `:unknown`), ADR-0040 (`T | E` / error
 sets), ADR-0042 (`Fn(…)`), ADR-0057/0058 (target reachability), ADR-0064 (portable
 numerics), ADR-0026 (Dialyzer `-spec` emission), ADR-0075 (transpiler inference)
@@ -75,8 +76,12 @@ the correct long-term answer for multi-clause false positives, out of scope here
   fully-translated draft **compiles and runs on Ex/JS** instead of needing every type
   hand-filled; `transpile_with_stats` counts the opened `__Unknown` as gradual debt and
   the task prints it (":ex/:js only"). Verified: an opened draft `Decl.compile`s.
-- **Phase 5:** `mix rian.dialyze` — compile to BEAM and shell out to Dialyzer as an
-  external cross-check (the self-host bootstrap oracle).
+- **Phase 5 (shipped):** `mix rian.dialyze FILE.rian` compiles to BEAM (debug_info +
+  the ADR-0026 `-spec`s) and runs Dialyzer (`:dialyzer.run/1`, dynamic dispatch so it
+  stays an optional dev dependency) against a cached OTP PLT — a sound external
+  second-opinion (success typings never false-positive). Robust when `dialyzer` is
+  absent (clear Mix error, not a crash). Tests: the availability guard runs everywhere;
+  the full analysis is `@tag :dialyzer` (out of the default loop, in `mix test.all`).
 
 ## Consequences
 

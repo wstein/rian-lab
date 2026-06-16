@@ -15,7 +15,13 @@
 # times), not a correctness gate — its timings are noisy and it builds the compiler
 # twice. It is excluded from BOTH the default loop AND `mix test.all`, and runs only
 # on demand:  mix test --include bench
+#
+# `@tag :dialyzer` runs the external Dialyzer oracle (`mix rian.dialyze`, ADR-0076 §5):
+# it needs the `dialyzer` OTP app and a one-time PLT build (slow), so — like the other
+# external-toolchain tags — it stays out of the default loop and back in `mix test.all`.
 exclude =
-  if System.get_env("RIAN_TEST_ALL") == "1", do: [:bench], else: [:rust, :js, :jvm, :bench]
+  if System.get_env("RIAN_TEST_ALL") == "1",
+    do: [:bench],
+    else: [:rust, :js, :jvm, :dialyzer, :bench]
 
 ExUnit.start(exclude: exclude)
