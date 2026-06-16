@@ -91,6 +91,29 @@ defmodule Rian.GradualTest do
     end
   end
 
+  describe "Reach — __Unknown is dynamic-target-only (ADR-0076 Phase 2)" do
+    defp reach(src, name) do
+      Rian.Decl.parse(src)
+      |> Rian.Reach.analyze()
+      |> Map.fetch!(name)
+      |> Map.fetch!(:reach)
+      |> MapSet.to_list()
+      |> Enum.sort()
+    end
+
+    test "a __Unknown signature reaches only {:ex, :js}, never :rs/:jvm" do
+      assert reach("def u(x __Unknown) __Unknown := x", "u") == [:ex, :js]
+    end
+
+    test "a nested __Unknown (Vec(__Unknown)) also pins off the static targets" do
+      assert reach("def w(xs Vec(__Unknown)) Int53 := 0", "w") == [:ex, :js]
+    end
+
+    test "a fully-typed control reaches all four targets" do
+      assert reach("def pure(a Int53) Int53 := a + 1", "pure") == [:ex, :js, :jvm, :rs]
+    end
+  end
+
   describe "the gradual guarantee — fully-typed code is untouched" do
     test "a module with ZERO __Unknown still type-checks exactly as before" do
       assert :ok = check("mod M do\n  pub def add(a Int53, b Int53) Int53 := a + b\nend")
