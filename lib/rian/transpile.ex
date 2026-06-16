@@ -191,6 +191,9 @@ defmodule Rian.Transpile do
     infer_program(Code.string_to_quoted!(source))
   end
 
+  @doc "The Elixir→Rian stdlib call-mapping table (for whole-program inference)."
+  def stdlib_map, do: @stdlib
+
   @doc """
   Per-def inference ledger for `--infer-report`: `[{ {name, arity}, ledger }]`
   where each ledger lists the remaining holes and why (`:unresolved`, …).

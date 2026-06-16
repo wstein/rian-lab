@@ -24,13 +24,81 @@ defmodule Rian.PortAnalysis do
     asts =
       for {file, src} <- sources, ast = parse(src), ast != nil, do: {file, ast}
 
+    sums = cluster_sums(Enum.flat_map(asts, fn {_, ast} -> dispatch_sets(ast) end))
+
+    # whole-program inference: shared sig variables linked across the call graph,
+    # structs resolved to their proposed sum, residual unknowns named `Unk####`.
+    mods_groups = Enum.map(asts, fn {_, ast} -> {module_name(ast), collect_groups(ast)} end)
+
     %{
       modules:
         Enum.map(asts, fn {file, ast} -> module_report(file, ast, src_of(sources, file)) end),
-      sums: cluster_sums(Enum.flat_map(asts, fn {_, ast} -> dispatch_sets(ast) end)),
+      sums: sums,
       structs: Enum.reduce(asts, %{}, fn {_, ast}, acc -> collect_structs(ast, acc) end),
-      errors: Enum.reduce(asts, %{}, fn {_, ast}, acc -> collect_errors(ast, acc) end)
+      errors: Enum.reduce(asts, %{}, fn {_, ast}, acc -> collect_errors(ast, acc) end),
+      wp: Rian.Transpile.Infer.whole_program(mods_groups, Rian.Transpile.stdlib_map(), sums),
+      names: param_name_index(mods_groups)
     }
+  end
+
+  # def groups per module (for whole-program inference). Non-`defmodule` or
+  # unusual top-levels (defprotocol/defimpl/multi-module) contribute no groups.
+  defp collect_groups({:defmodule, _, [_, [do: body]]}) do
+    stmts =
+      case body do
+        {:__block__, _, s} -> s
+        s -> [s]
+      end
+
+    stmts
+    |> Enum.flat_map(fn
+      {d, _, [head, kw]} when d in [:def, :defp] ->
+        call =
+          case head do
+            {:when, _, [c, _]} -> c
+            c -> c
+          end
+
+        {name, args} =
+          case call do
+            {n, _, a} when is_atom(n) and is_list(a) -> {n, a}
+            {n, _, _} when is_atom(n) -> {n, []}
+          end
+
+        [
+          %{
+            name: name,
+            arity: length(args),
+            args: args,
+            guard: nil,
+            body: kw && Keyword.get(kw, :do)
+          }
+        ]
+
+      _ ->
+        []
+    end)
+    |> Enum.group_by(&{&1.name, &1.arity})
+    |> Enum.map(fn {_, clauses} -> %{clauses: clauses} end)
+  end
+
+  defp collect_groups(_), do: []
+
+  # `{module, fn, arity} => [param name]` (first clause's heads, for the decl).
+  defp param_name_index(mods_groups) do
+    for {mod, groups} <- mods_groups, g <- groups, into: %{} do
+      c = hd(g.clauses)
+
+      names =
+        c.args
+        |> Enum.with_index()
+        |> Enum.map(fn
+          {{n, _, ctx}, _} when is_atom(n) and is_atom(ctx) -> to_string(n)
+          {_, i} -> "p#{i}"
+        end)
+
+      {{mod, to_string(c.name), c.arity}, names}
+    end
   end
 
   defp src_of(sources, file), do: Enum.find_value(sources, fn {f, s} -> if f == file, do: s end)
@@ -251,19 +319,54 @@ defmodule Rian.PortAnalysis do
     """
   end
 
+  # whole-program declarations: each function with a residual unknown rendered as
+  # an editable Rian signature — concrete types resolved by inference, structs as
+  # their proposed `SumN`, and genuine unknowns as SHARED `Unk####` (the same
+  # logical type carries one name everywhere). Replace each `Unk####` once.
   defp holes_section(data) do
-    rows =
-      for m <- data.modules, {n, ar, ledger} <- m.holes, {slot, reason} <- ledger do
-        "| `#{n}/#{ar}` | #{slot} | #{reason} |"
-      end
+    decls =
+      data.wp.sigs
+      |> Enum.filter(fn {_k, sig} -> needs_review?(sig) end)
+      |> Enum.sort()
+      |> Enum.map(fn {{mod, fn_, ar}, sig} ->
+        names = Map.get(data.names, {mod, fn_, ar}, Enum.map(0..max(ar - 1, 0), &"p#{&1}"))
+        params = Enum.zip(names, sig.params) |> Enum.map_join(", ", fn {n, t} -> "#{n} #{t}" end)
+        "  # #{mod}.#{fn_}/#{ar}\n  pub def #{fn_}(#{params}) #{sig.ret} := …"
+      end)
+
+    index =
+      data.wp.unks
+      |> Enum.sort()
+      |> Enum.map(fn {name, sites} ->
+        refs = Enum.map_join(sites, ", ", fn {{m, f, a}, slot} -> "`#{m}.#{f}/#{a}:#{slot}`" end)
+        "| `#{name}` | #{length(sites)} | #{refs} |"
+      end)
 
     """
-    ## 2. Type holes — needs human types (reason from the inference ledger)
+    ## 2. Declarations to complete — REVIEW (whole-program inferred)
 
-    | function | slot | why left a hole |
+    Each function with a residual unknown, as an **editable Rian signature**:
+    concrete types are inferred, structs resolve to their proposed `SumN` (§3), and
+    a genuine unknown is a **shared `Unk####`** — the *same* logical type carries one
+    name across the whole program (linked through the call graph), so you replace
+    each `Unk####` **once** and it propagates to every site in the index below.
+
+    ```rian
+    #{Enum.join(decls, "\n\n")}
+    ```
+
+    ### Placeholder index (replace once → applies to all sites)
+
+    | placeholder | sites | references |
     |---|---|---|
-    #{Enum.join(rows, "\n")}
+    #{Enum.join(index, "\n")}
     """
+  end
+
+  defp needs_review?(%{params: ps, ret: r}) do
+    Enum.any?([r | ps], fn t ->
+      is_binary(t) and (String.contains?(t, "Unk") or String.contains?(t, "Sum"))
+    end)
   end
 
   defp sums_section(data) do

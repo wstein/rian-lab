@@ -69,13 +69,33 @@ defmodule Rian.PortAnalysisTest do
     end
   end
 
-  describe "inference summary surfaces auto-fills + holes" do
-    test "an inferred numeric function appears under section 1, a tuple under holes" do
+  describe "whole-program section 2 — declarations with shared Unk + struct sums" do
+    test "fully-resolved fn → section 1; an unknown-return fn → an editable decl" do
       src = "defmodule M do\n  def f(x), do: x + 1\n  def g(x), do: {:a, x}\nend"
       out = md([{"m.ex", src}])
+      # f/1 resolves to Int53 (section 1); g/1 returns a tuple → a decl with an Unk
       assert out =~ "`f/1`"
       assert out =~ "Int53"
-      assert out =~ "`g/1`"
+      assert out =~ "pub def g(x "
+      assert out =~ "Unk"
+    end
+
+    test "a struct-returning fn resolves its return to the proposed sum; Unk is shared" do
+      core = "defmodule Core do\n  def lit(n), do: %ENum{v: n}\nend"
+      check = "defmodule Check do\n  def i(%ENum{}), do: 1\n  def i(%EIf{}), do: 2\nend"
+      out = md([{"core.ex", core}, {"check.ex", check}])
+      # ENum dispatched in Check → a sum; lit returns %ENum{} → that sum
+      assert out =~ ~r/pub def lit\(n Unk\d+\) Sum1/
+      assert out =~ ~r/pub def i\(p0 Sum1\)/
+      assert out =~ "Placeholder index"
+    end
+
+    test "a cross-function unknown shares one Unk name across both sites" do
+      a = "defmodule A do\n  def f(x), do: g(x)\n  def g(y), do: h(y)\nend"
+      b = "defmodule B do\n  def h(z), do: z\nend"
+      out = md([{"a.ex", a}, {"b.ex", b}])
+      # x → g's param → h's param → h's return → g/f returns: one shared Unk, many sites
+      assert out =~ ~r/`Unk0001` \| [2-9] \|/
     end
   end
 end
