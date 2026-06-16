@@ -99,16 +99,32 @@ defmodule Rian.TranspileTest do
       refute rian(src) =~ ~r/struct Func\([^)]*_Unk/
     end
 
-    test "a `@rian` type attribute emits the type declaration" do
+    test "a `@rian` type attribute emits the type DEFINITION (at its central home)" do
+      # the type is defined ONCE, where it lives (e.g. the IR module).
       src = ~S'''
-      defmodule M do
+      defmodule IR do
         use Rian.Ann
         @rian "type Expr := ENum | ECall | EIf"
-        def f(x), do: x
       end
       '''
 
       assert rian(src) =~ "type Expr := ENum | ECall | EIf"
+    end
+
+    test "a def annotation REFERENCES a type by name — no per-use redefinition" do
+      # `Expr` is defined centrally (above); a *using* module just refers to it.
+      src = ~S'''
+      defmodule M do
+        use Rian.Ann
+        @rian "pub def f(x Expr) Int53"
+        def f(x), do: g(x)
+      end
+      '''
+
+      out = rian(src)
+      assert out =~ "pub def f(x Expr) Int53"
+      # the using module does NOT redeclare `type Expr` — it only refers to the name
+      refute out =~ "type Expr"
     end
 
     test "an annotation whose head matches no def is ignored (typo-safe)" do
