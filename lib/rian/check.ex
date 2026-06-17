@@ -17,11 +17,15 @@ defmodule Rian.Check do
   `:unknown`.
 
   **Error sets (ADR-0034 pillar 2 / ADR-0040 §4)** are checked at the declared
-  boundary: a `T | E` return type declares the error set `E`; the body's
-  constructed error tags (`{:error, Tag}`) must be a *subset* of `E`
-  (over-declaration is allowed). A named `E` expands to its variant tags.
-  *Not yet:* inferring a private function's set from its propagated callees (the
-  `with`-composition half of §4).
+  boundary: a `T | E` return type declares the error set `E`; the function's
+  *produced* set — directly-built `{:error, Tag}` tags **plus** the sets it
+  propagates from callees (a `with`-clause source whose error isn't handled by an
+  `else`) — must be a *subset* of `E` (over-declaration is allowed). A named `E`
+  expands to its variant tags. The propagated part comes from a whole-program
+  call-graph fixpoint (`solve_error_sets/2`) that infers each unannotated
+  function's set as `direct ∪ ⋃ callee-sets`; it is deliberately conservative —
+  any `else` is taken to handle its clause errors, and a callee's set name-folds
+  over its arities (over-approximating, never fewer).
 
   **Concrete generics (ADR-0042, BEAM-first)** are inferred: a list literal is
   `Vec(T)`, a variant value/constructor-call carries its sum type, and a call
