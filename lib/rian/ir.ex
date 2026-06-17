@@ -211,5 +211,7 @@ defmodule Rian.IR do
               test?: false,
               dispatch: nil,
               externals: %{}
+
+    @type t :: %__MODULE__{}
   end
 end

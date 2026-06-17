@@ -341,6 +341,7 @@ defmodule Rian.Core do
     end
   end
 
+  @spec raise_trailing_bind(String.t()) :: no_return()
   defp raise_trailing_bind(name) do
     raise ArgumentError,
           "a block body must end in an expression, not the binding `#{name} := …` " <>
