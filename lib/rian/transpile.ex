@@ -181,6 +181,7 @@ defmodule Rian.Transpile do
     inner =
       body
       |> block_stmts()
+      |> Enum.flat_map(&expand_defaults/1)
       |> render_items(sigmap, name, struct_anns, referenced)
       |> Enum.map(&indent/1)
 
@@ -188,6 +189,43 @@ defmodule Rian.Transpile do
     type_lines = if types == [], do: [], else: Enum.map(types, &("  " <> &1)) ++ [""]
     ["mod #{name} do" | type_lines ++ inner] ++ ["end"]
   end
+
+  # Rian has no default arguments, so a `def f(a, opts \\ [])` expands into a real
+  # clause `def f(a, opts) := body` plus one delegating clause per trailing default
+  # (`def f(a) := f(a, [])`) — the same desugaring Elixir performs. Only expanded
+  # when every parameter is a plain variable (so forwarding by name is sound);
+  # otherwise the defaults are stripped to a single clause.
+  defp expand_defaults({df, m, [{name, hm, params}, kw]})
+       when df in [:def, :defp] and is_atom(name) and is_list(params) and
+              kw != [] do
+    defaulted = Enum.count(params, &match?({:\\, _, _}, &1))
+    plain = Enum.map(params, &strip_default/1)
+
+    cond do
+      defaulted == 0 ->
+        [{df, m, [{name, hm, params}, kw]}]
+
+      Enum.all?(plain, &var?/1) ->
+        n = length(params)
+
+        delegators =
+          for keep <- (n - defaulted)..(n - 1) do
+            taken = Enum.take(plain, keep)
+            call_args = taken ++ Enum.map(Enum.drop(params, keep), fn {:\\, _, [_, d]} -> d end)
+            {df, m, [{name, hm, taken}, [do: {name, [], call_args}]]}
+          end
+
+        delegators ++ [{df, m, [{name, hm, plain}, kw]}]
+
+      true ->
+        [{df, m, [{name, hm, plain}, kw]}]
+    end
+  end
+
+  defp expand_defaults(stmt), do: [stmt]
+
+  defp strip_default({:\\, _, [p, _]}), do: p
+  defp strip_default(p), do: p
 
   # split `@rian` annotation strings into `{def sigmap, struct-by-name, [type decl]}`.
   # Whitespace is collapsed so a heredoc multi-line decl parses/emits as one line.

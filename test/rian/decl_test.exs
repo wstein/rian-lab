@@ -719,6 +719,43 @@ defmodule Rian.DeclTest do
         """)
       end
     end
+
+    test "same-name different-arity overloads load and dispatch as distinct functions" do
+      {:ok, m} =
+        Rian.Beam.load(
+          """
+          mod Ov do
+            pub def f(x Int53) Int53 := x
+            pub def f(x Int53, y Int53) Int53 := x + y
+          end
+          """,
+          :rian_decl_overload
+        )
+
+      assert m.f(7) == 7
+      assert m.f(10, 20) == 30
+    end
+
+    test "delegating clauses run (the shape default-args desugar to: f/1 -> f/2 -> f/3)" do
+      # `def f(a, opts \\ [], n \\ 0)` lowers to one full clause plus a delegating
+      # clause per default; arity overloading makes all three distinct and the
+      # by-name forwarding resolves at the call site.
+      {:ok, m} =
+        Rian.Beam.load(
+          """
+          mod Dlg do
+            pub def f(a Int53) Tuple := f(a, [], 0)
+            pub def f(a Int53, opts Vec(Int53)) Tuple := f(a, opts, 0)
+            pub def f(a Int53, opts Vec(Int53), n Int53) Tuple := {a, opts, n}
+          end
+          """,
+          :rian_decl_delegate
+        )
+
+      assert m.f(1) == {1, [], 0}
+      assert m.f(1, [2]) == {1, [2], 0}
+      assert m.f(1, [2], 3) == {1, [2], 3}
+    end
   end
 
   describe "struct declarations (product types)" do

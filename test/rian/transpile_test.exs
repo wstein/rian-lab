@@ -445,6 +445,64 @@ end|) =~ ~S|"v=${x}!"|
     end
   end
 
+  describe "default arguments desugar into delegating clauses (arity overloading)" do
+    test "a `\\\\`-default function expands to one delegating clause per default" do
+      out =
+        rian("""
+        defmodule M do
+          def f(a, opts \\\\ [], n \\\\ 0) do
+            {a, opts, n}
+          end
+        end
+        """)
+
+      # the full clause plus one delegating clause per trailing default, exactly
+      # like Elixir's desugaring — f/1 -> f/2 -> f/3
+      assert out =~ "pub def f(a _Unk) _Unk := f(a, [], 0)"
+      assert out =~ "pub def f(a _Unk, opts _Unk) _Unk := f(a, opts, 0)"
+      assert out =~ "pub def f(a _Unk, opts _Unk, n _Unk) _Unk := {a, opts, n}"
+      # no leftover `\\` and no port marker on the emitted body (the header always
+      # mentions TODO_PORT generically — check the code after `mod M do`)
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "\\\\"
+      refute body =~ "TODO"
+    end
+
+    test "a single trailing default yields exactly one delegator" do
+      out =
+        rian("""
+        defmodule M do
+          def greet(name, greeting \\\\ "hi") do
+            greeting
+          end
+        end
+        """)
+
+      assert out =~ ~S|pub def greet(name _Unk) _Unk := greet(name, "hi")|
+      assert out =~ "pub def greet(name _Unk, greeting _Unk) _Unk := greeting"
+    end
+
+    test "a non-variable parameter alongside a default strips defaults to one clause" do
+      # forwarding by name is unsound when a param is a pattern (not a plain var),
+      # so the defaults are dropped to a single clause rather than mis-delegated.
+      out =
+        rian("""
+        defmodule M do
+          def f({x, y}, opts \\\\ []) do
+            {x, y, opts}
+          end
+        end
+        """)
+
+      body = out |> String.split("mod M do") |> List.last()
+      assert body =~ "pub def f("
+      refute body =~ "\\\\"
+      # no delegating clause was synthesised (a pattern param can't be forwarded by
+      # name) — there is no `:= f(` self-call
+      refute body =~ ":= f("
+    end
+  end
+
   describe "transpile_with_stats" do
     test "counts def groups and unresolved markers" do
       {_text, stats} =
