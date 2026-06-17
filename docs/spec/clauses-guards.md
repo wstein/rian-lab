@@ -35,6 +35,15 @@ All clauses of a multi-clause function share `name`/arity, are **contiguous**, a
 the signature immediately. One-token lookahead (`fn` + same name on the next logical line)
 distinguishes a signature from a single-clause block body.
 
+**Arity overloading.** Clauses group by `{name, arity}`, not name alone (like Elixir/Erlang):
+two heads with the **same name but different arity** (`fn f(x)` and `fn f(x, y)`) are **distinct
+functions** — `f/1` and `f/2` — each with its own signature and clauses, exported and reached
+independently. The whole compiler keys functions by `{name, arity}`: the checker's
+return/generic-signature tables, the error-set fixpoint, the `Rian.Reach` matrix (reported as
+`"name/arity"`), the Rust call-site borrow pass, and the per-function compile units. Arity is
+counted from the parameter list's depth-0 commas (robust to nested types and `[',' | rest]`
+literals).
+
 **Signature param names are optional documentation:** `fn area(s Shape) f64` ≡ `fn area(Shape) f64`.
 
 **A block body ends in an expression, never a binding (ADR-0035).** The implicit return is the
