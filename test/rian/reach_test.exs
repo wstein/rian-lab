@@ -260,6 +260,26 @@ defmodule Rian.ReachTest do
              )
     end
 
+    test "the `into: %{}` comprehension desugar inherits the map blocker (ADR-0079/ADR-0000)" do
+      # `for …, into: %{}` lowers (transpiler-side) to `List.reduce(…, %{}, … Dict.put …)`.
+      # Reach sees the `%{}` map literal and pins the function off `:rs`/`:jvm` automatically
+      # — the honesty guarantee: the blocker comes from the real insert op, not the `for`.
+      rep =
+        reach(~S'''
+        mod M do
+          pub def build(ps Vec(Map)) Map :=
+            List.reduce(ps, %{}, (__e, __acc) -> case __e do {__k, __v} -> Dict.put(__acc, __k, __v) end)
+        end
+        ''')
+
+      assert Enum.any?(
+               entry(rep, "build").blockers,
+               &(&1.kind == :map and &1.kills == [:rs, :jvm])
+             )
+
+      refute :rs in targets(rep, "build")
+    end
+
     test "a bitstring is BEAM-only — off `:rs`/`:js`/`:jvm` (ADR-0078; the emitters raise)" do
       rep = reach("mod M do\n  pub def enc(cp Int53) String := <<cp::utf8>>\nend")
 

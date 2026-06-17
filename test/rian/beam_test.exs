@@ -59,6 +59,22 @@ defmodule Rian.BeamTest do
       assert mod.grid([1, 2], [10, 20]) == [11, 21, 12, 22]
     end
 
+    test "the `into:`/`reduce:` desugars (fold over the prelude) compile and run (ADR-0079)" do
+      # these are the shapes `Rian.Transpile` emits for Elixir `for … into:/reduce:` —
+      # verify the desugared Rian actually compiles and matches the Elixir result.
+      {:ok, mod} =
+        Beam.load(
+          "def sum(xs Vec(Int53)) Int53 := List.reduce(xs, 0, (x, __a) -> case __a do acc -> acc + x end)\n" <>
+            "def cat(xs Vec(String)) String := List.reduce(xs, \"\", (__e, __acc) -> __acc <> __e)",
+          :rian_beam_into_reduce
+        )
+
+      # `for x <- xs, reduce: 0 do acc -> acc + x end`
+      assert mod.sum([1, 2, 3, 4]) == 10
+      # `for s <- xs, into: "", do: s`
+      assert mod.cat(["a", "b", "c"]) == "abc"
+    end
+
     test "a destructuring/pattern generator binds *and* filters non-matches (ADR-0079)" do
       {:ok, mod} =
         Beam.load(

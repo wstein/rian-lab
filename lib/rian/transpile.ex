@@ -925,19 +925,36 @@ defmodule Rian.Transpile do
     "case #{expr(subj)} do\n#{rendered}\nend"
   end
 
-  # a comprehension `for p <- src, filter, …, do: body` → Rian `for … do … end`
-  # (ADR-0079). Generators bind a full pattern (a non-match skips the element); a
-  # trailing `into:`/`:reduce` keyword (the last arg is then *not* a bare `[do: …]`)
-  # is list-building, out of MVP scope, and stays a marker.
+  # a comprehension `for clauses…, <tail>` (ADR-0079). Generators bind a full pattern
+  # (a non-match skips the element). The trailing keyword selects the shape:
+  #   `do:`            → a list comprehension (the surface `for … do … end`);
+  #   `into:` + `do:`  → fold the list into a collection (`List.reduce` + insert);
+  #   `reduce:` + `do:`→ fold the loop into an accumulator (nested `List.reduce`).
+  # `into:`/`:reduce` desugar to **portable prelude folds** — no Rian surface, and
+  # Reach inherits any blocker from the insert op (`Dict.put` pins a map off `:rs`/`:jvm`).
+  # A binary generator (`<<b <- bin>>`), an unrecognized `into:` target, or any extra
+  # option (`uniq:`, …) stays an honest marker.
   defp expr({:for, _, args} = n) when is_list(args) and args != [] do
-    clauses = Enum.drop(args, -1)
+    # options (`do:`/`into:`/`reduce:`/…) are keyword-list args — separate them from the
+    # generator/filter clauses (`do … end` vs `, do:` splits `reduce:` into its own arg).
+    {opt_args, clauses} = Enum.split_with(args, &(is_list(&1) and Keyword.keyword?(&1)))
+    opts = Enum.concat(opt_args)
 
-    case List.last(args) do
-      [do: body] when clauses != [] ->
-        "for #{Enum.map_join(clauses, ", ", &for_clause_rian/1)} do #{render_body(body)} end"
+    cond do
+      clauses == [] or has_binary_generator?(clauses) ->
+        for_marker(n)
 
-      _ ->
-        ~s|TODO_PORT("for comprehension #{escape(snippet(n))}")|
+      Enum.sort(Keyword.keys(opts)) == [:do] ->
+        "for #{for_clauses_text(clauses)} do #{render_body(opts[:do])} end"
+
+      Enum.sort(Keyword.keys(opts)) == [:do, :into] ->
+        into_fold(clauses, opts[:into], opts[:do], n)
+
+      Enum.sort(Keyword.keys(opts)) == [:do, :reduce] ->
+        reduce_for(clauses, expr(opts[:reduce]), opts[:do], 0)
+
+      true ->
+        for_marker(n)
     end
   end
 
@@ -1234,6 +1251,58 @@ defmodule Rian.Transpile do
   # non-match skips the element) or a boolean filter.
   defp for_clause_rian({:<-, _, [lhs, src]}), do: "#{pat(lhs)} <- #{expr(src)}"
   defp for_clause_rian(filter), do: expr(filter)
+
+  defp for_clauses_text(clauses), do: Enum.map_join(clauses, ", ", &for_clause_rian/1)
+
+  defp for_marker(n), do: ~s|TODO_PORT("for comprehension #{escape(snippet(n))}")|
+
+  # a binary generator `<<b <- bin>>` (Elixir `{:<<>>, _, …}`) has no list-comprehension
+  # image yet (ADR-0079) — it stays a marker rather than mis-rendering as a filter.
+  defp has_binary_generator?(clauses), do: Enum.any?(clauses, &match?({:<<>>, _, _}, &1))
+
+  # `for …, into: c, do: body` → build the list comprehension, then fold it into the
+  # target with a *named prelude op* so Reach inherits the blocker (ADR-0079/ADR-0000):
+  #   into: ""  → left-fold with `<>`        (String — portable, all targets)
+  #   into: %{} → fold with `Dict.put`       (Map — pins off `:rs`/`:jvm`)
+  #   into: []  → identity (the list itself)
+  # Any other collectable (a struct, `Map.new`, a variable) stays a marker.
+  defp into_fold(clauses, into_ast, body, n) do
+    listcomp = "for #{for_clauses_text(clauses)} do #{render_body(body)} end"
+
+    case into_ast do
+      "" ->
+        # NOTE: a left-fold `<>` is O(n²) on immutable strings — acceptable for a
+        # reviewed migration draft; a future builder/iolist prelude is the fast path.
+        "List.reduce(#{listcomp}, \"\", (__e, __acc) -> __acc <> __e)"
+
+      {:%{}, _, []} ->
+        "List.reduce(#{listcomp}, %{}, (__e, __acc) -> case __e do {__k, __v} -> Dict.put(__acc, __k, __v) end)"
+
+      [] ->
+        listcomp
+
+      _ ->
+        for_marker(n)
+    end
+  end
+
+  # `for …, reduce: acc do acc_pat -> e … end` → a *nested* `List.reduce` that threads
+  # the accumulator through each generator (filters pass it through unchanged), with the
+  # reduce-arms applied at the leaf. `__accᵢ` is depth-fresh to avoid shadowing.
+  defp reduce_for([], acc_text, arms, _depth) when is_list(arms) do
+    rendered = Enum.map_join(arms, "\n", &indent(case_arm(&1)))
+    "case #{acc_text} do\n#{rendered}\nend"
+  end
+
+  defp reduce_for([{:<-, _, [pat, src]} | rest], acc_text, arms, depth) do
+    a = "__acc#{depth}"
+
+    "List.reduce(#{expr(src)}, #{acc_text}, (#{pat(pat)}, #{a}) -> #{reduce_for(rest, a, arms, depth + 1)})"
+  end
+
+  defp reduce_for([filter | rest], acc_text, arms, depth) do
+    "if #{expr(filter)} do #{reduce_for(rest, acc_text, arms, depth)} else #{acc_text} end"
+  end
 
   # `"a" <> "b" <> rest` → `["a"`, `"b"`, `rest::binary"]` segment texts; nil if the
   # tail isn't a literal or a bare binder.

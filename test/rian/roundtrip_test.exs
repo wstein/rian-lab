@@ -27,13 +27,13 @@ defmodule Rian.RoundtripTest do
     end
 
     test "a draft that still carries a marker fails the BEAM stages (does not lie green)" do
-      # a `for … into: …` comprehension builds a string/collection — out of the ADR-0079
-      # MVP (list-producing only) → a TODO_PORT marker → the draft cannot compile either
-      # way. (Plain `for`, field access, stdlib calls, atom- and non-atom-key maps, pins,
-      # bitstrings, and default args now lower; `into:`/`:reduce` is the residual class.)
+      # a *binary* generator `<<b <- bin>>` has no list-comprehension image (ADR-0079) →
+      # a TODO_PORT marker → the draft cannot compile either way. (Plain/destructuring
+      # `for`, `into:`/`reduce:` folds, field access, stdlib calls, maps, pins, bitstring
+      # *expressions*, and default args now lower; the binary *generator* is the residual.)
       src = ~S'''
       defmodule R do
-        def join(cs), do: for c <- cs, into: "", do: c
+        def bytes(s), do: for <<b <- s>>, do: b
       end
       '''
 

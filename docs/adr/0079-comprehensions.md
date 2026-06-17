@@ -6,9 +6,11 @@
 iff a top-level `<-` precedes the clause boundary), `Core.from_expr` desugars it to nested
 `List.flat_map`/`if`/`case`/`[body]` over the portable prelude (ADR-0047), so **every emitter, the
 checker, and exhaustiveness consume it for free** (no new Core node, no emitter clause). Generators
-bind a **full pattern** (a non-match *skips* the element). `Rian.Transpile` lowers an Elixir `for` into
-the surface. Verified on the BEAM (`test/rian/beam_test.exs`: map/filter/nested + destructuring +
-pattern-filtering) and at the parse/desugar/transpile boundaries.
+bind a **full pattern** (a non-match *skips* the element). `Rian.Transpile` lowers an Elixir `for` into the surface,
+and desugars the Elixir-only `into:`/`reduce:` forms to portable `List.reduce` folds (see *Non-goals* —
+no Rian surface for those). Verified on the BEAM (`test/rian/beam_test.exs`: map/filter/nested +
+destructuring + pattern-filtering + the `into:`/`reduce:` fold shapes) and at the
+parse/desugar/transpile/Reach boundaries.
 
 **Refs:** ADR-0039 (`<-` is the generator/failable-bind arrow — this ADR is its named consumer),
 ADR-0047 (portable prelude — `List.map`/`filter`/`flat_map` are the desugar target), ADR-0061 (`Fn`
@@ -42,9 +44,9 @@ for p <- src, cond, q <- src2 do … end    # filters apply to the generators be
 * `<-` is the generator arrow (ADR-0039's `:bind_arrow`), reused verbatim.
 * A `,`-separated clause is a **generator** (`p <- src`) or a **boolean filter** (any other expr).
 * `do … end` delimits the body (the same block lexeme as `if`/`with`/`case`).
-* The result is always a **list**. `into:` (build a string/map) and `:reduce` are **out of scope** —
-  they stay `TODO_PORT` markers (a string-building `for … into: ""` is a different, target-specific
-  shape; see ADR-0057 on native-per-target).
+* The Rian **surface** result is always a **list**. The Elixir `into:` (build a collection) and
+  `reduce:` (fold to an accumulator) forms are **not Rian surface** — `Rian.Transpile` desugars them
+  to portable prelude folds (see *Non-goals* below); they are never parsed by `Rian.Pratt`.
 * A generator binds a **full pattern** (`{:mod, name, inner} <- decls`, `Ok(v) <- rs`, `[k, _] <- ps`).
   Per the Elixir comprehension contract, an element that **does not match** the pattern is *skipped*,
   not an error — implemented via a `case`-wrapped callback whose wildcard arm yields `[]`.
@@ -79,4 +81,29 @@ lower it as calls, and `Rian.Reach` needs no comprehension blocker: a `for` is e
 * The transpiler stops flagging `for` (incl. `lib/rian`'s destructuring `{:tag, …} <- decls` form,
   the dominant residual); idiomatic Rian (and `compiler/*.rian`) can use comprehensions.
 * **Not** a laziness or stream surface — eager, list-producing only (ADR-0057 keeps laziness
-  native-per-target). `into:`/`:reduce` (collection-building) are the honest, documented follow-ons.
+  native-per-target).
+
+## Non-goals: `into:` / `reduce:` are transpiler lowerings, not Rian surface
+
+The Elixir `into:` and `reduce:` comprehension forms are **deliberately not** added to the Rian
+grammar. There is no `into:`/`reduce:` token, no `Core` node, no parser clause. Instead
+`Rian.Transpile` desugars them to the **portable `List` prelude** (the forms are already expressible —
+adding surface would only import an Elixir-ism we don't want, and `reduce:`'s accumulator-clause body
+is a parser hazard):
+
+* `for clauses, into: c, do: body` → `List.reduce(<list-comprehension>, <empty c>, (e, acc) -> insert)`
+  where `insert` is `acc <> e` for `into: ""` (String — portable) and `Dict.put` (via a `{k,v}` `case`)
+  for `into: %{}` (Map — **`Rian.Reach` inherits the map blocker**, pinning the function off
+  `:rs`/`:jvm`, because the desugar routes through the *real* prelude op — the honesty guarantee,
+  ADR-0000). `into: []` is the identity (the list comprehension itself).
+* `for clauses, reduce: acc do acc_pat -> e … end` → a **nested** `List.reduce` threading the
+  accumulator through each generator (filters pass it through; reduce-arms apply at the leaf via a
+  `case` on the accumulator).
+* **Still markers** (honest, no faithful lowering): a **binary generator** `<<b <- bin>>`, an
+  unrecognized `into:` target (a struct, `MapSet.new()`, a variable), or any extra option (`uniq:`).
+* The `into: ""` left-fold is O(n²) on immutable strings — acceptable for a reviewed migration draft;
+  a future builder/iolist prelude type is the fast path.
+
+**Escalation path (deferred):** if a Rian author ever needs `into:` over their *own* types, the
+sanctioned mechanism is a **`Collectable` protocol** (ADR-0042/0061 machinery), not a hardcoded
+collection switch. No demand today; revisit when it appears.

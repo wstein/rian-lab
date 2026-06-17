@@ -636,12 +636,59 @@ end|) =~ ~S|"v=${x}!"|
       refute body =~ "TODO"
     end
 
-    test "`for … into: …` (and `:reduce`) stays an honest marker — out of MVP scope" do
-      out = rian(~S|defmodule M do
-  def s(cs), do: for c <- cs, into: "", do: c
-end|)
+    test "`into:` folds the list comprehension into a collection via prelude ops (ADR-0079)" do
+      out =
+        rian("""
+        defmodule M do
+          def s(cs), do: for c <- cs, into: "", do: c
+          def m(ps), do: for {k, v} <- ps, into: %{}, do: {k, v}
+        end
+        """)
 
-      assert out =~ ~s|TODO_PORT("for comprehension|
+      # into: "" → a left-fold with `<>`; into: %{} → a fold with `Dict.put` (so Reach
+      # inherits the map blocker). No new Rian surface — pure `List.reduce` desugar.
+      assert out =~ ~s|List.reduce(for c <- cs do c end, "", (__e, __acc) -> __acc <> __e)|
+
+      assert out =~
+               "List.reduce(for {k, v} <- ps do {k, v} end, %{}, (__e, __acc) -> case __e do {__k, __v} -> Dict.put(__acc, __k, __v) end)"
+
+      refute out =~ ~s|TODO_PORT("for comprehension|
+    end
+
+    test "`reduce:` folds the loop into an accumulator via nested `List.reduce` (ADR-0079)" do
+      out =
+        rian("""
+        defmodule M do
+          def sum(xs) do
+            for x <- xs, reduce: 0 do
+              acc -> acc + x
+            end
+          end
+
+          def collect(ps) do
+            for p <- ps, m <- p.methods, reduce: [] do
+              acc -> [m | acc]
+            end
+          end
+        end
+        """)
+
+      assert out =~ "List.reduce(xs, 0, (x, __acc0) ->"
+      # multiple generators nest, threading the same accumulator
+      assert out =~
+               "List.reduce(ps, [], (p, __acc0) -> List.reduce(p.methods, __acc0, (m, __acc1) ->"
+
+      refute out =~ ~s|TODO_PORT("for comprehension|
+    end
+
+    test "a binary generator / unknown `into:` target stays an honest marker (ADR-0079)" do
+      # `<<b <- bin>>` (binary comprehension) has no list image; `into: MapSet.new()` is
+      # an unrecognized collectable — both stay markers rather than mis-render.
+      bin = rian("defmodule M do\n  def bytes(s), do: for <<b <- s>>, do: b\nend")
+      assert bin =~ ~s|TODO_PORT("for comprehension|
+
+      other = rian("defmodule M do\n  def u(xs), do: for x <- xs, into: MapSet.new(), do: x\nend")
+      assert other =~ ~s|TODO_PORT("for comprehension|
     end
 
     test "a destructuring / pattern-filtering generator → Rian `pat <- src` (no marker)" do
