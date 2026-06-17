@@ -26,10 +26,32 @@ defmodule Rian.Capability do
   # ── Rust parameter-type lowering ───────────────────────────────────────
   @rian "pub def rust_param(a Symbol, t String) String"
   @spec rust_param(atom(), String.t()) :: String.t()
+  # A `Fn(args.., ret)` callback parameter lowers to argument-position `&impl Fn(args) -> ret`
+  # (zero-cost, monomorphized) regardless of capability — a closure is passed BY REFERENCE
+  # (ADR-0061, closure-as-value). The `&` matters: a recursive higher-order fn (`map`/`filter`/
+  # `reduce`) calls `f(x)` AND re-passes `f` to itself; a by-value `impl Fn` would be moved on
+  # the recursive call (use-after-move), whereas `&impl Fn` is `Copy`, so both uses are fine.
+  def rust_param(_cap, "Fn(" <> _ = t), do: "&impl " <> fn_trait(t)
   def rust_param(:iso, t), do: owned(t)
   def rust_param(:val, t), do: if(copy?(t), do: rust_name(t), else: borrowed(t))
   def rust_param(:ref, t), do: "&mut " <> owned(t)
   def rust_param(:tag, t), do: "&" <> owned(t)
+
+  # `Fn(A.., R)` (last component is the return, ADR-0042) -> the Rust `Fn(A..) -> R` trait
+  # spelling, every inner type lowered via `owned/1`. The caller prefixes `impl ` (a parameter)
+  # or wraps `Box<dyn …>` (an owned/return position — see `owned/1`).
+  defp fn_trait("Fn(" <> rest) do
+    inner = String.replace_suffix(rest, ")", "")
+
+    case Rian.TypeStr.split_top_commas(inner) do
+      [] ->
+        "Fn()"
+
+      parts ->
+        {args, [ret]} = Enum.split(parts, length(parts) - 1)
+        "Fn(" <> Enum.map_join(args, ", ", &owned/1) <> ") -> " <> owned(ret)
+    end
+  end
 
   @rian "pub def copy?(t String) Bool"
   @spec copy?(String.t()) :: boolean()

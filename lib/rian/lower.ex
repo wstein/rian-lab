@@ -654,6 +654,10 @@ defmodule Rian.Lower do
   defp borrow_arg(a, pt, funs, borrowed, ec) do
     cond do
       not borrow_type?(pt) -> a
+      # a `&impl Fn(...)` callback param (ADR-0061): a closure/expression argument is referenced
+      # (`&|x| …`), but a bare variable is already a `&impl Fn` — a caller's own param or the
+      # recursive `map(t, f)` — so it is left alone (referencing it again would be `&&`).
+      fn_borrow?(pt) -> if match?({:id, _}, a), do: a, else: {:unary, "&", a}
       # a string literal fed to a *generic* `&K` param (`K` resolves to owned `String`,
       # which has the `Clone`/`impl`s a tvar needs — `str` does not): `&"a".to_string()`.
       generic_tvar_borrow?(pt) and match?({:str, _}, a) -> owned_str_arg(elem(a, 1))
@@ -818,6 +822,15 @@ defmodule Rian.Lower do
 
   defp borrow_type?("&" <> _), do: true
   defp borrow_type?(_), do: false
+
+  # a `&impl Fn(...)` callback param — the by-reference closure lowering (ADR-0061).
+  defp fn_borrow?("&impl Fn(" <> _), do: true
+  defp fn_borrow?(_), do: false
+
+  # an owned bare variable cloned into a by-value closure-call argument (the `&impl Fn`
+  # callback takes its args by value); a computed expression or literal is already owned.
+  defp closure_arg(%Core.EId{} = a, ec), do: p(a, 12, :rust, ec) <> ".clone()"
+  defp closure_arg(a, ec), do: p(a, 0, :rust, ec)
 
   # does this argument expression produce an owned `Vec`/`String`?
   defp owned_arg?({:list_lit, _, _}, _funs), do: true
@@ -1990,6 +2003,14 @@ defmodule Rian.Lower do
       do: {"#{f}.(#{inner})", 12},
       else: {"#{f}(#{inner})", 12}
   end
+
+  # a closure-PARAMETER call `f(args)` on Rust: the `&impl Fn(...)` callback takes its args
+  # by VALUE (ADR-0061), so clone a bare-variable argument — the binding stays usable for a
+  # later use (e.g. `filter`'s `insert(0, h)`) and a borrowed param (`&U`) coerces to owned `U`.
+  # A function NAME is `:unknown`-typed (not bound in the clause env), so only true closure
+  # variables (whose type is the `Fn(...)` string) take this path.
+  defp emit(%ECall{fun: %Core.EId{type: "Fn(" <> _} = f, args: args}, :rust, ec),
+    do: {p(f, 12, :rust, ec) <> "(" <> Enum.map_join(args, ", ", &closure_arg(&1, ec)) <> ")", 12}
 
   defp emit(%ECall{fun: f, args: args}, t, ec),
     do: {p(f, 12, t, ec) <> "(" <> Enum.map_join(args, ", ", &p(&1, 0, t, ec)) <> ")", 12}
