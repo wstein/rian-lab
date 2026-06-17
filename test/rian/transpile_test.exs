@@ -159,6 +159,24 @@ defmodule Rian.TranspileTest do
       assert out =~ "assert_raise"
     end
 
+    test "a match assertion `assert pat = e` → a case-based Bool, not a bind" do
+      out = test_mod(~S|  test "matches ok" do
+    assert {:ok, _} = parse("x")
+  end
+
+  test "refutes a match" do
+    refute {:error, _} = parse("x")
+  end|)
+
+      # the Bool of "did it match" — never the old `assert(pat := expr)` (a bind).
+      refute out =~ "assert({:ok"
+      assert out =~ "@test def matches_ok() Bool := case parse(\"x\") do"
+      assert out =~ "{:ok, _} -> true"
+      assert out =~ "_ -> false"
+      # refute flips the arms
+      assert out =~ "{:error, _} -> false"
+    end
+
     test "the test name slugifies to a valid Rian identifier" do
       out = test_mod(~S|  test "1 plus 1 (sanity!)" do
     assert one() == 1

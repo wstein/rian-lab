@@ -147,9 +147,12 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
     `@test def`s** — not wrapped in a `mod`, because a `mod` hides `@test def`s from `Rian.Test`'s
     discovery and the injected assertion macros from scope (ADR-0060). Each `test "name" do body end`
     becomes `@test def slug() Bool := …`; `assert`/`refute` rewrite to the assertion-macro vocabulary
-    (`assert_eq`/`assert_neq` for `==`/`!=`, ADR-0060/ADR-0030), and because ExUnit runs *every*
-    assertion while a `@test def` returns one `Bool`, a multi-assertion body is **`and`-combined** with
-    any non-assertion statements (binds, setup) as the block preamble. `use ExUnit.Case` is dropped
+    (`assert_eq`/`assert_neq` for `==`/`!=`, ADR-0060/ADR-0030); a *match* assertion `assert pat =
+    expr` becomes a `case` on the truth of the match (`case expr do pat -> true; _ -> false end`,
+    `refute` flips the arms) rather than the old `assert(pat := expr)` bind — the pattern's bindings
+    are arm-scoped, not threaded to sibling assertions (Rian has no refutable block bind). Because
+    ExUnit runs *every* assertion while a `@test def` returns one `Bool`, a multi-assertion body is
+    **`and`-combined** with any non-assertion statements (binds, setup) as the block preamble. `use ExUnit.Case` is dropped
     (pure scaffolding); `assert_raise` and kin have no Rian image (no exceptions, ADR-0035) and stay
     greppable markers. A `describe "group" do … end` flattens to its inner `@test def`s with a
     `group_`-prefixed name (Rian tests don't nest), and a `setup`/`setup_all` block (no Rian fixture

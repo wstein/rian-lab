@@ -935,6 +935,14 @@ defmodule Rian.Transpile do
   defp assertion?({:refute, _, _}), do: true
   defp assertion?(_), do: false
 
+  # A match assertion `assert pat = rhs` → `case rhs do pat -> <on_match>; _ ->
+  # <on_miss> end`, the Bool of "did `rhs` match `pat`?" (refute flips the arms).
+  defp match_check(lhs, rhs, on_match, on_miss) do
+    "case #{expr(rhs)} do\n" <>
+      indent("#{pat(lhs)} -> #{on_match}") <>
+      "\n" <> indent("_ -> #{on_miss}") <> "\nend"
+  end
+
   # A test name → a valid Rian identifier: lowercase, non-alphanumerics collapsed to
   # `_`, and a leading non-letter prefixed (Rian identifiers start with a letter).
   defp test_slug(name) do
@@ -1191,6 +1199,15 @@ defmodule Rian.Transpile do
   # Bool test model can't carry it until `Test.Outcome` lands (ADR-0060 §2); the
   # assertion itself ports. `assert_raise` and kin are exception-based (ADR-0035 has
   # no exceptions), so they have no Rian image and stay a greppable marker.
+  #
+  # A MATCH assertion `assert pat = expr` (and `refute pat = expr`) ports to a
+  # `case` on the truth of the match — the Bool the test model wants. Variables the
+  # pattern binds are scoped to the arm, so they are NOT threaded to sibling
+  # assertions (Rian has no refutable block bind); a test that reuses a matched
+  # binding is a draft the human finishes. This is far better than the old
+  # `assert(pat := expr)` (a bind, not a `Bool`).
+  defp expr({:assert, _, [{:=, _, [lhs, rhs]} | _]}), do: match_check(lhs, rhs, "true", "false")
+  defp expr({:refute, _, [{:=, _, [lhs, rhs]} | _]}), do: match_check(lhs, rhs, "false", "true")
   defp expr({:assert, _, [{:==, _, [l, r]} | _]}), do: "assert_eq(#{expr(l)}, #{expr(r)})"
   defp expr({:assert, _, [{:!=, _, [l, r]} | _]}), do: "assert_neq(#{expr(l)}, #{expr(r)})"
   defp expr({:assert, _, [e | _]}), do: "assert(#{expr(e)})"
