@@ -7,7 +7,11 @@ defmodule Rian.TypeStrTest do
   describe "split_top_commas/1 — top-level (paren-depth-0) comma split" do
     test "nested generics stay intact" do
       assert TypeStr.split_top_commas("Map(K, V), Bool") == ["Map(K, V)", "Bool"]
-      assert TypeStr.split_top_commas("Dict(String, Vec(Int64)), T") == ["Dict(String, Vec(Int64))", "T"]
+
+      assert TypeStr.split_top_commas("Dict(String, Vec(Int64)), T") == [
+               "Dict(String, Vec(Int64))",
+               "T"
+             ]
     end
 
     test "components are trimmed and empties dropped (trailing comma, blanks)" do
@@ -45,7 +49,7 @@ defmodule Rian.TypeStrTest do
 
     test "agrees with the reference over a corpus of real and edge-case type strings" do
       from_sources =
-        Path.wildcard("examples/rian/*.rian") ++ Path.wildcard("compiler/*.rian")
+        (Path.wildcard("examples/rian/*.rian") ++ Path.wildcard("compiler/*.rian"))
         |> Enum.flat_map(&Regex.scan(~r/\(([A-Za-z_][A-Za-z0-9_, ()|]*)\)/, File.read!(&1)))
         |> Enum.map(fn [_, inner] -> inner end)
 
