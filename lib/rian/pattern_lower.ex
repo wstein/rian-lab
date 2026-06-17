@@ -101,6 +101,9 @@ defmodule Rian.PatternLower do
   # Open maps are refutable (unless empty): treat like a guarded clause for coverage.
   def lower(%Core.PMap{pairs: []}, _env), do: {:wild, false}
   def lower(%Core.PMap{}, _env), do: {:wild, true}
+  # a bitstring pattern is refutable (matches only binaries of the right shape) — like
+  # a non-empty map / pin, it never "covers everything" (ADR-0078).
+  def lower(%Core.PBitstr{}, _env), do: {:wild, true}
 
   defp lower_list([], :close, _env), do: {{:ctor, nil, []}, false}
   defp lower_list([], tail, env), do: lower(tail, env)

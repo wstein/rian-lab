@@ -260,6 +260,22 @@ defmodule Rian.ReachTest do
              )
     end
 
+    test "a bitstring PATTERN in a clause head is BEAM-only (ADR-0078; head is inspected)" do
+      # the construction blocker scans bodies; a pattern-only bitstring function has no
+      # `EBitstr` in its body, so Reach must inspect the clause head (as for as-patterns).
+      rep =
+        reach("""
+        mod M do
+          pub def first(s String) Int53
+          pub def first(<<c::utf8, _r::binary>>) := c
+          pub def first(_) := 0
+        end
+        """)
+
+      assert targets(rep, "first") == [:ex]
+      assert Enum.any?(entry(rep, "first").blockers, &(&1.kind == :bitstring))
+    end
+
     test "an as-pattern reaches `:ex`+`:rs` but is off `:js`/`:jvm` (the emitters raise)" do
       rep =
         reach("""

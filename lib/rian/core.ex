@@ -101,6 +101,15 @@ defmodule Rian.Core do
     defstruct pairs: [], type: nil
   end
 
+  defmodule PBitstr do
+    @moduledoc """
+    A bitstring pattern `<<seg::spec, …>>` (ADR-0078); `segments` are `{value, specs}`
+    where `value` is a sub-pattern (binder/literal) and `specs` is the type/size list
+    (as in `EBitstr`). Refutable; BEAM-native (off `:rs`/`:js`/`:jvm` via `Rian.Reach`).
+    """
+    defstruct segments: [], type: nil
+  end
+
   # ── expression nodes ───────────────────────────────────────────────────
   defmodule ENum do
     @moduledoc "A numeric literal (the source text; `Int64` or `Float64` by form)."
@@ -406,6 +415,9 @@ defmodule Rian.Core do
 
   def from_pat({:map, kvs}),
     do: %PMap{pairs: Enum.map(kvs, fn {k, p} -> {k, from_pat(p)} end)}
+
+  def from_pat({:bitstr_pat, segs}),
+    do: %PBitstr{segments: Enum.map(segs, fn {:bitseg, v, specs} -> {from_pat(v), specs} end)}
 
   @doc """
   Generic typed-core walk used by the partial emitters (`Rian.JS`, `Rian.JVM`):

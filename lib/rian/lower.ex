@@ -934,6 +934,16 @@ defmodule Rian.Lower do
   defp pat_ex(%PCtor{ctor: name, args: args}),
     do: "{:#{PL.to_snake(name)}, #{Enum.map_join(args, ", ", &pat_ex/1)}}"
 
+  # bitstring pattern (ADR-0078) — the `:elixir` text path is a BEAM verification
+  # backend, so it emits real `<<seg::spec>>`; each segment value is itself a pattern.
+  defp pat_ex(%Core.PBitstr{segments: segs}),
+    do: "<<#{Enum.map_join(segs, ", ", fn {v, specs} -> bitseg_pat_ex(v, specs) end)}>>"
+
+  defp bitseg_pat_ex(value, specs) do
+    v = pat_ex(value)
+    if specs == [], do: v, else: "#{v}::#{Enum.map_join(specs, "-", &bitspec_elixir/1)}"
+  end
+
   # ── Rust backend ───────────────────────────────────────────────────────
   @spec to_rust(map(), list(), term(), list(), map(), map(), map()) :: term()
   def to_rust(func, types, meta, structs \\ [], smeta \\ %{}, proto \\ %{}, ic \\ %{}) do
@@ -1778,6 +1788,7 @@ defmodule Rian.Lower do
   defp pat_rs(%PTuple{elems: [%PAtom{name: "error"}, p]}, m), do: "Err(#{pat_rs(p, m)})"
   defp pat_rs(%PTuple{elems: ps}, m), do: "(#{Enum.map_join(ps, ", ", &pat_rs(&1, m))})"
   defp pat_rs(%PAtom{name: a}, _), do: raise("Erlang atom pattern is BEAM-only: :#{a}")
+  defp pat_rs(%Core.PBitstr{}, _), do: raise("bitstring patterns are BEAM-only (ADR-0078)")
 
   defp pat_rs(%PList{elems: ps, tail: :close}, m),
     do: "[#{Enum.map_join(ps, ", ", &pat_rs(&1, m))}]"

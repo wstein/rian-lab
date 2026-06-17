@@ -187,6 +187,17 @@ defmodule Rian.PrattTest do
 
       assert Pratt.parse("a < b") == {:bin, "<", {:id, "a"}, {:id, "b"}}
     end
+
+    test "a bitstring PATTERN binds segment values (clause head)" do
+      assert Pratt.parse_pats("<<c::utf8, rest::binary>>") ==
+               [
+                 {:bitstr_pat,
+                  [
+                    {:bitseg, {:var, "c"}, [type: "utf8"]},
+                    {:bitseg, {:var, "rest"}, [type: "binary"]}
+                  ]}
+               ]
+    end
   end
 
   describe "parse_body (function bodies: block-or-expression)" do

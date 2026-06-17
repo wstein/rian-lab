@@ -22,6 +22,17 @@ defmodule Rian.BeamTest do
       assert mod.enc(104) == "h"
     end
 
+    test "a bitstring PATTERN matches segments and binds them (ADR-0078)" do
+      {:ok, mod} =
+        Beam.load(
+          "def first(s String) Int53\ndef first(<<c::utf8, _r::binary>>) := c\ndef first(_) := 0",
+          :rian_beam_bitpat
+        )
+
+      assert mod.first("hi") == ?h
+      assert mod.first("") == 0
+    end
+
     test "a map update `%{m | k: v}` replaces present keys and runs (ADR-0032)" do
       {:ok, mod} =
         Beam.load(

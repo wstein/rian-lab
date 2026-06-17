@@ -1,10 +1,18 @@
 # ADR-0078 — Bitstrings/binaries: a BEAM-first surface for `<<seg::spec, …>>`
 
 **Status:** Accepted (direction)
-**Implemented:** partial — **Stage 1 (construction)** shipped: lexer (`<<`/`>>`/`::`), `Rian.Pratt`,
-`Core.EBitstr`, `Rian.Check` (typed `String`), `Rian.Beam` native bitstring forms + `Rian.Lower`'s
-Elixir-text path; Rust/JS/JVM raise `Unsupported` and `Rian.Reach` pins bitstring functions BEAM-only.
-**Stage 2 (patterns)** and **Stage 3 (transpiler emit)** are not yet done.
+**Implemented:** partial — **Stage 1 (construction)** and **Stage 2 (patterns)** shipped: lexer
+(`<<`/`>>`/`::`), `Rian.Pratt` (expr + `parse_pat`), `Core.EBitstr`/`PBitstr`, `Rian.Check`,
+`Rian.PatternLower` (refutable), `Rian.Beam` native bitstring construction + pattern forms +
+`Rian.Lower`'s Elixir-text path; `Rian.Decl` arity/clause splitters count `<<>>` depth; Rust/JS/JVM
+raise `Unsupported` and `Rian.Reach` pins bitstring functions (body **or** clause-head) BEAM-only.
+**Stage 3 (transpiler emit)** is not yet done.
+
+> **Exhaustiveness is conservative (Stage 2).** A bitstring pattern is refutable to the Maranget gate
+> (`{:wild, true}`), so `<<c, rest::binary>>` + `<<>>` is **not** recognized as covering all binaries —
+> a bitstring-matching function needs an explicit `_`/catch-all clause (or `@partial`). Sound (no
+> silent partiality, ADR-0035) but less ergonomic than Erlang; binary-aware coverage is a Stage-3/
+> future refinement, relevant because the lexer idiom often omits the catch-all.
 **Refs:** ADR-0041 (`String` is a UTF-8 binary — bitstrings are the general form), ADR-0075/0076
 (transpiler/roundtrip — the motivating consumer), ADR-0035 (no hidden control flow), ADR-0050 (typed
 Core IR), ADR-0000/0058 (reach honesty: the matrix matches the emitters).

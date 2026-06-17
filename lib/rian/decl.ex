@@ -1041,11 +1041,12 @@ defmodule Rian.Decl do
   end
 
   defp take_line([{open} = t | rest], acc, depth)
-       when open in [:lparen, :lbracket, :lbrace, :mapopen],
+       when open in [:lparen, :lbracket, :lbrace, :mapopen, :bitopen],
        do: take_line(rest, [t | acc], depth + 1)
 
-  defp take_line([{close} = t | rest], acc, depth) when close in [:rparen, :rbracket, :rbrace],
-    do: take_line(rest, [t | acc], max(depth - 1, 0))
+  defp take_line([{close} = t | rest], acc, depth)
+       when close in [:rparen, :rbracket, :rbrace, :bitclose],
+       do: take_line(rest, [t | acc], max(depth - 1, 0))
 
   # a `do … end` block inside a `:=` body (a multi-line `case`/`if`/`with`) deepens
   # like a bracket, so its arm/branch newlines continue the body to the matching
@@ -1114,11 +1115,12 @@ defmodule Rian.Decl do
   defp block_seps([{:kw, "end"} = t | r], d, w, p, acc), do: block_seps(r, d - 1, w, p, [t | acc])
 
   defp block_seps([{open} = t | r], d, w, p, acc)
-       when open in [:lparen, :lbracket, :lbrace, :mapopen],
+       when open in [:lparen, :lbracket, :lbrace, :mapopen, :bitopen],
        do: block_seps(r, d, w, p + 1, [t | acc])
 
-  defp block_seps([{close} = t | r], d, w, p, acc) when close in [:rparen, :rbracket, :rbrace],
-    do: block_seps(r, d, w, max(p - 1, 0), [t | acc])
+  defp block_seps([{close} = t | r], d, w, p, acc)
+       when close in [:rparen, :rbracket, :rbrace, :bitclose],
+       do: block_seps(r, d, w, max(p - 1, 0), [t | acc])
 
   defp block_seps([{:nl} | r], 0, 0, 0, acc), do: block_seps(r, 0, 0, 0, [{:semi} | acc])
   defp block_seps([{:nl} | r], d, w, p, acc), do: block_seps(r, d, w, p, acc)
@@ -1292,10 +1294,17 @@ defmodule Rian.Decl do
           s
           |> Lexer.expr_tokens()
           |> Enum.reduce({0, 0}, fn
-            {:comma}, {c, 0} -> {c + 1, 0}
-            t, {c, d} when t in [{:lparen}, {:lbracket}, {:lbrace}, {:mapopen}] -> {c, d + 1}
-            t, {c, d} when t in [{:rparen}, {:rbracket}, {:rbrace}] -> {c, d - 1}
-            _t, acc -> acc
+            {:comma}, {c, 0} ->
+              {c + 1, 0}
+
+            t, {c, d} when t in [{:lparen}, {:lbracket}, {:lbrace}, {:mapopen}, {:bitopen}] ->
+              {c, d + 1}
+
+            t, {c, d} when t in [{:rparen}, {:rbracket}, {:rbrace}, {:bitclose}] ->
+              {c, d - 1}
+
+            _t, acc ->
+              acc
           end)
 
         commas + 1

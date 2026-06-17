@@ -925,6 +925,9 @@ defmodule Rian.Beam do
   defp pat_vars(%Core.PStruct{fields: fs}, acc),
     do: Enum.reduce(fs, acc, fn {_l, p}, a -> pat_vars(p, a) end)
 
+  defp pat_vars(%Core.PBitstr{segments: segs}, acc),
+    do: Enum.reduce(segs, acc, fn {v, _specs}, a -> pat_vars(v, a) end)
+
   defp pat_vars(%Core.PMap{pairs: ps}, acc),
     do: Enum.reduce(ps, acc, fn {_k, p}, a -> pat_vars(p, a) end)
 
@@ -958,6 +961,11 @@ defmodule Rian.Beam do
     do: cons(ps, core_list_tail(tail), &pat_form/1)
 
   # sum-variant patterns mirror construction: nullary -> tag atom, else tagged tuple
+  # a bitstring pattern `<<seg::spec, …>>` (ADR-0078) -> the Erlang `{:bin, …}` pattern
+  # form; each segment's value is itself a pattern (a binder/literal).
+  defp pat_form(%Core.PBitstr{segments: segs}),
+    do: {:bin, @ln, Enum.map(segs, fn {v, specs} -> bitseg_pat_form(v, specs) end)}
+
   defp pat_form(%Core.PCtor{ctor: name, args: []}), do: {:atom, @ln, tag(name)}
 
   defp pat_form(%Core.PCtor{ctor: name, args: args}),
@@ -1014,6 +1022,19 @@ defmodule Rian.Beam do
   # each `:default` when unspecified. A `{:size, n}` spec is the segment size; the
   # other specs form the type list (`utf8`/`binary`/…).
   defp bitseg_form({value, specs}, s) do
+    {size, tsl} = bit_size_tsl(specs)
+    {:bin_element, @ln, expr_form(value, s), size, tsl}
+  end
+
+  # the pattern form of a segment: the value is itself a pattern (binder/literal).
+  defp bitseg_pat_form(value, specs) do
+    {size, tsl} = bit_size_tsl(specs)
+    {:bin_element, @ln, pat_form(value), size, tsl}
+  end
+
+  # map the parsed specifiers to the Erlang `{Size, TypeSpecifierList}` pair, each
+  # `:default` when unspecified (shared by construction and pattern segments).
+  defp bit_size_tsl(specs) do
     size =
       case Enum.find(specs, &match?({:size, _}, &1)) do
         {:size, n} -> {:integer, @ln, n}
@@ -1021,7 +1042,7 @@ defmodule Rian.Beam do
       end
 
     tsl = for spec <- specs, t = bitspec_atom(spec), do: t
-    {:bin_element, @ln, expr_form(value, s), size, if(tsl == [], do: :default, else: tsl)}
+    {size, if(tsl == [], do: :default, else: tsl)}
   end
 
   # the Erlang type specifiers we accept (ADR-0078). An unknown one is a clear error,

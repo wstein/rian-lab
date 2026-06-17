@@ -406,6 +406,7 @@ defmodule Rian.Pratt do
   defp parse_pat([{:lbracket} | rest]), do: parse_pat_list(rest, [])
   # map pattern `%{k: p, …}` — matches any map carrying those keys (ADR-0043)
   defp parse_pat([{:mapopen} | rest]), do: parse_pat_map(rest, [])
+  defp parse_pat([{:bitopen} | rest]), do: parse_bitstr_pat(rest, [])
 
   # as-pattern `name @ pat` — bind the whole value to `name` while also matching
   # `pat` (Core `PAs`). `@ ` must be spaced so it is not the `@name` annotation.
@@ -769,6 +770,48 @@ defmodule Rian.Pratt do
 
   defp parse_bitspec_item(other),
     do: raise(ArgumentError, "bad bitstring specifier: #{here(other)}")
+
+  # a bitstring *pattern* `<<seg::spec, …>>` (ADR-0078) — each segment's value is a
+  # simple sub-pattern (binder / literal / `_`); specs reuse `parse_bitspec`.
+  defp parse_bitstr_pat([{:bitclose} | rest], acc), do: {{:bitstr_pat, Enum.reverse(acc)}, rest}
+
+  defp parse_bitstr_pat(tokens, acc) do
+    {seg, rest} = parse_bitpat_seg(tokens)
+
+    case rest do
+      [{:comma} | r] ->
+        parse_bitstr_pat(r, [seg | acc])
+
+      [{:bitclose} | r] ->
+        {{:bitstr_pat, Enum.reverse([seg | acc])}, r}
+
+      other ->
+        raise ArgumentError, "expected `,` or `>>` in bitstring pattern, got #{here(other)}"
+    end
+  end
+
+  defp parse_bitpat_seg(tokens) do
+    {value, rest} = parse_bitpat_value(tokens)
+
+    case rest do
+      [{:op, "::"} | r] ->
+        {specs, r2} = parse_bitspec(r)
+        {{:bitseg, value, specs}, r2}
+
+      _ ->
+        {{:bitseg, value, []}, rest}
+    end
+  end
+
+  defp parse_bitpat_value([{:id, "_"} | rest]), do: {:wild, rest}
+  defp parse_bitpat_value([{:id, name} | rest]), do: {{:var, name}, rest}
+  defp parse_bitpat_value([{:op, "-"}, {:num, n} | rest]), do: {{:lit, -int_of(n)}, rest}
+  defp parse_bitpat_value([{:num, n} | rest]), do: {{:lit, int_of(n)}, rest}
+  defp parse_bitpat_value([{:char, cp} | rest]), do: {{:char_lit, cp}, rest}
+  defp parse_bitpat_value([{:str, s} | rest]), do: {{:lit, s}, rest}
+
+  defp parse_bitpat_value(other),
+    do: raise(ArgumentError, "bad bitstring-pattern segment: #{here(other)}")
 
   defp expect_kw([{:kw, k} | rest], k), do: rest
   defp expect_kw(toks, k), do: raise(ArgumentError, "expected `#{k}`, got #{here(toks)}")
