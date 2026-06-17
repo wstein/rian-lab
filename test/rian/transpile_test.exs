@@ -942,12 +942,13 @@ end|) =~ ~S|"v=${x}!"|
 
   describe "transpile_with_stats" do
     test "counts def groups and unresolved markers (header not self-counted)" do
-      # `@impl true` has no Rian image → a real `# TODO[port]` marker; `Enum.x/1`
-      # is BEAM FFI (not a marker). The DRAFT header documents `TODO_PORT`/`_Unk`
-      # by name but must NOT inflate the tally — so ports is exactly the 1 marker.
+      # a custom `@cfg` attribute has no Rian image → a real `# TODO[port]` marker
+      # (doc/metadata attributes like `@impl` are dropped, ADR-0075); `Enum.x/1` is
+      # BEAM FFI (not a marker). The DRAFT header documents `TODO_PORT`/`_Unk` by name
+      # but must NOT inflate the tally — so ports is exactly the 1 marker.
       {_text, stats} =
         Transpile.transpile_with_stats(
-          "defmodule M do\n  @impl true\n  def a, do: Enum.x(1)\n  def b(z), do: z\nend"
+          "defmodule M do\n  @cfg :raw\n  def a, do: Enum.x(1)\n  def b(z), do: z\nend"
         )
 
       assert stats.defs == 2
