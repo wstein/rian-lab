@@ -1,7 +1,11 @@
 # ADR-0050 — One Typed Core IR: single contract, sealed-sum nodes, emitters as pure consumers
 
 **Status:** Accepted (direction) · **Refines:** the `ir.ex` "expr/pattern stay tuples" pragma (overturned, with evidence)
-**Implemented:** yes — `Rian.Core` typed sealed-sum IR (`test/rian/core_test.exs`); all emitters consume Core
+**Implemented:** §1/§2/§4 yes — `Rian.Core` typed sealed-sum IR (`test/rian/core_test.exs`); all emitters
+(Beam/Lower/JS/JVM) consume Core. §3 *infrastructure* yes — every emitter now builds its Core via
+`Check.annotate/3`, so each node carries its inferred `type` (`Check.clause_env/3` supplies the
+per-clause typing env). §3 *consumption* pending — no emitter yet reads `node.type` for its representation
+choice (ADR-0041/0043/0046 still derive types the old way); reading it off the node is the remaining step.
 **Refs:** ADR-0027 (self-hosting), ADR-0031 (abstract-forms backend; Stage 0.1), ADR-0034 (types; exhaustiveness over sums), ADR-0041 (representation needs types at emission), ADR-0043 (opaque erasure), ADR-0046 (monomorphization), ADR-0049 (three new emitters incoming)
 **Owners:** Maya Lin (pipeline/emitters) · Arthur Pendelton (typed IR) · Chloe Bennett (parser unification) · Elena Rostova (migration) · Samir Patel (metric/dogfood) · Kira Neri (backend swap) · Rachel Okafor (PM)
 **Evidence:** [SELFHOST.md](../../SELFHOST.md) verdict #3 (B1 fixed in *three* places — "the fork a self-hosted front end would inherit"); README "known gaps" #1.
@@ -46,6 +50,14 @@ cosmetic: the emitter's representation choices need it —
 
 An untyped emitter literally cannot make these decisions. The checker produces the typed core IR; the
 emitter reads the types off it.
+
+**Implementation note (2026-06-17).** The encoding is resolved (see Open items): each `Rian.Core` node
+carries an inline `type` field, filled by `Check.annotate/3`. Every emitter (`Beam`, `Lower`, `JS`,
+`JVM`) now annotates each clause body — `Check.annotate(ast, Check.clause_env(pats, params, ic), ic)`
+with `ic = Check.program_ic(prog)` — instead of calling the bare `Core.from_expr/1`. So the *typed* core
+flows into all four emitters today; what remains is to have the representation decisions (ADR-0041/0043/
+0046) read `node.type` rather than re-derive it. That step is now a pure emitter-local change, not a
+pipeline change.
 
 ### 4. The core IR is sealed sums / typed structs (expr + pattern, not just declarations)
 
@@ -97,8 +109,9 @@ B1 (list patterns), done again under this IR, must touch one place.
 
 ## Open items
 
-- **Encoding of the inferred type on a node** — inline field on each node vs a side-table keyed by node
-  identity. Impl detail; the contract (emitter reads types off the core) is fixed here.
+- ~~**Encoding of the inferred type on a node**~~ — *resolved:* an inline `type` field on each `Rian.Core`
+  node (not a side-table), filled by `Check.annotate/3`. All four emitters now build their Core through
+  `annotate`, so the typed node is what flows downstream.
 - **How much normalization the core keeps** — does the core pattern stay the Maranget `{:ctor, tag,
   args}` form (good for the checker) while the emitter de-normalizes for idiomatic output, or do both
   read the normalized form? Resolve during migration.

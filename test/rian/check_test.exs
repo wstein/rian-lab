@@ -584,6 +584,35 @@ defmodule Rian.CheckTest do
     test "a node inference cannot pin down is `:unknown`, not crashing" do
       assert %Core.ECall{type: :unknown} = Check.annotate(Pratt.parse("g(x)"))
     end
+
+    # Locks the composition every emitter now performs (ADR-0050 §3): build the
+    # program inference context, derive a clause's typing env from its head
+    # patterns + declared params, and annotate the clause body under it. If an
+    # emitter were reverted to the bare untyped `Core.from_expr`, this contract
+    # — a declared param type reaching the body's Core nodes — is what it loses.
+    test "program_ic + clause_env + annotate type a clause body the way emitters call it" do
+      prog = Rian.Decl.parse("def dbl(n Int64) Int64 := n + n")
+      ic = Check.program_ic(prog)
+      func = hd(prog.funcs)
+      clause = hd(func.clauses)
+
+      tenv = Check.clause_env(clause.pats, func.params, ic)
+      assert tenv["n"] == "Int64"
+
+      # the emitters annotate `parse_body`, which wraps the expr in an EBlock
+      typed = Check.annotate(Pratt.parse_body(clause.body), tenv, ic)
+
+      assert %Core.EBlock{
+               type: "Int64",
+               stmts: [
+                 expr: %Core.EBin{
+                   type: "Int64",
+                   left: %Core.EId{name: "n", type: "Int64"},
+                   right: %Core.EId{name: "n", type: "Int64"}
+                 }
+               ]
+             } = typed
+    end
   end
 
   describe "the type gate fires at compile time" do

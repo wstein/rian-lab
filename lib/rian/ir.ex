@@ -3,24 +3,26 @@ defmodule Rian.IR do
   The core intermediate representation — the typed structs the declaration
   parser (`Rian.Decl`) emits and the lowering backend (`Rian.Lower`) consumes.
 
-  > **Superseded direction — ADR-0050.** The "expr/pattern stay tuples" stance below is
-  > overturned (with evidence: the B1 triplication in `SELFHOST.md`, plus three incoming
-  > emitters in ADR-0049). The target is **one typed sealed-sum core IR** that the checker and
-  > *all* emitters consume, migrated incrementally. The description below reflects the
-  > *current* (pre-migration) state.
+  > **ADR-0050 (migrated).** The old "expr/pattern stay tuples as the IR" stance was overturned
+  > (evidence: the B1 triplication in `SELFHOST.md`, three incoming emitters in ADR-0049). The
+  > typed sealed-sum core IR is now `Rian.Core`, and **all four emitters (`Beam`/`Lower`/`JS`/`JVM`)
+  > consume it** — each builds its Core via `Rian.Check.annotate/3`, so every node carries its
+  > inferred `type` (§3 infrastructure). The expr/pattern tuples below are now the **transient
+  > surface AST** that `Rian.Pratt` produces and `Rian.Core.from_expr`/`from_pat` immediately lower
+  > into Core; no downstream pass walks them. (§3's remaining step: have the representation choices
+  > in ADR-0041/0043/0046 *read* `node.type` instead of re-deriving it.)
 
-  Declaration-level nodes are structs (below). **Expression and pattern** nodes
-  remain the tuple AST that `Rian.Pratt` produces and the emitter/checker walk —
-  that *is* the Expr/Pattern IR, kept as tuples because struct-ifying every
-  arithmetic node would be churn without payoff:
+  Declaration-level nodes are structs (below). The **surface** expression and
+  pattern shapes that `Rian.Pratt` produces — lowered into `Rian.Core` before any
+  emitter or the checker sees them — are:
 
-      # Expr (Rian.Pratt output)
+      # Surface Expr (Rian.Pratt output → Core.from_expr)
       {:num, "42"} · {:str, s} · {:id, x} · {:atom, a} · {:bin, op, l, r}
       {:unary, op, x} · {:call, f, args} · {:dot, head, name} · {:lambda, ps, body}
       {:if, c, t, e} · {:case, scrut, arms} · {:block, stmts}
       {:list_lit, elems, tail} · {:map_lit, pairs} · {:capture, _} · {:cap_arg, _}
 
-      # Pattern (clause heads & case arms)
+      # Surface Pattern (clause heads & case arms → Core.from_pat)
       :wild · {:var, name} · {:lit, value} · {:ctor, name, [pattern]} · {:tuple, [pattern]}
   """
 
