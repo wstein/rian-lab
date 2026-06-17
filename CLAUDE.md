@@ -160,6 +160,25 @@ architectural cost.
 - **`mix compile --warnings-as-errors` is enforced.** The most common self-inflicted failure: Elixir
   requires same-name/arity function clauses to be **grouped contiguously** — inserting a helper
   between two `infer`/`emit`/`pat_rs` clauses breaks the build. Keep clause groups together.
+- **`mix format` before every commit — CI fails the build *fast* on the format gate** (`mix format
+  --check-formatted`), skipping every later check, so an unformatted file masks the real run. A
+  **pre-commit hook** enforces this locally; `.git/hooks/` is not version-controlled, so install it in
+  a fresh clone:
+
+  ```sh
+  cat > .git/hooks/pre-commit <<'EOF'
+  #!/bin/sh
+  command -v mix >/dev/null 2>&1 || exit 0
+  files=$(git diff --cached --name-only --diff-filter=ACMR | grep -E '\.(ex|exs)$' || true)
+  [ -z "$files" ] && exit 0
+  mix format --check-formatted $files || { echo "✗ run: mix format $files"; exit 1; }
+  EOF
+  chmod +x .git/hooks/pre-commit
+  ```
+
+  It blocks a commit whose staged `.ex`/`.exs` files aren't formatted (bypass once with
+  `git commit --no-verify`). Watch for **long string literals** in particular: the formatter wraps
+  past 98 cols, and a message/`construct:` string that just exceeds it is the usual culprit.
 - Tests that load modules into the VM (`Rian.Beam`, REPL) use `async: false`.
 - **Commit after each stage/phase**, not as one big drop. Use Conventional Commits and cite the
   governing ADR in the body (e.g. `feat(types): … (ADR-0036)`).
