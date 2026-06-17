@@ -89,6 +89,20 @@ defmodule Rian.BeamTest do
       assert mod.singles([[1], [2, 3], [4]]) == [1, 4]
     end
 
+    test "a pattern generator's synthetic var is gensym'd — no capture of a user `__g0` (ADR-0079)" do
+      # the pattern-generator desugar mints a callback param; it must NOT capture a
+      # variable named `__g0` already in scope (here, a function parameter the body uses).
+      {:ok, mod} =
+        Beam.load(
+          "def bump(xs Vec(Vec(Int53)), __g0 Int53) Vec(Int53) := for [a] <- xs do a + __g0 end",
+          :rian_beam_for_hygiene
+        )
+
+      # if `__g0` were captured by the synthetic param, `a + __g0` would add the *element*
+      # to itself; correct hygiene adds the parameter (10) to each matched head.
+      assert mod.bump([[1], [2], [3]], 10) == [11, 12, 13]
+    end
+
     test "a non-atom-key map `%{\"k\" => v}` builds and pattern-matches and runs (ADR-0033)" do
       {:ok, mod} =
         Beam.load(

@@ -1507,7 +1507,9 @@ defmodule Rian.Transpile do
 
   # `for …, reduce: acc do acc_pat -> e … end` → a *nested* `List.reduce` that threads
   # the accumulator through each generator (filters pass it through unchanged), with the
-  # reduce-arms applied at the leaf. `__accᵢ` is depth-fresh to avoid shadowing.
+  # reduce-arms applied at the leaf. `__accᵢ` is depth-fresh so nested accumulators don't
+  # shadow; it can't collide with a generator loop var because `pat/1` renders any
+  # `__`-prefixed user binder as the anonymous `_`.
   defp reduce_for([], acc_text, arms, _depth) when is_list(arms) do
     rendered = Enum.map_join(arms, "\n", &indent(case_arm(&1)))
     "case #{acc_text} do\n#{rendered}\nend"

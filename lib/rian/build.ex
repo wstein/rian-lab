@@ -120,9 +120,15 @@ defmodule Rian.Build do
           do: {name, gap}
 
     case {required, missing} do
-      {[], _} -> 0
-      {_, []} -> IO.puts("\nall functions reach #{inspect(required)} ✓") && 0
-      {_, gaps} -> report_missing(gaps, required)
+      {[], _} ->
+        0
+
+      {_, []} ->
+        IO.puts("\nall functions reach #{inspect(required)} ✓")
+        0
+
+      {_, gaps} ->
+        report_missing(gaps, required)
     end
   end
 

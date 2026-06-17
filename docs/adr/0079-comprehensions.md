@@ -58,14 +58,16 @@ Right-to-left over the clause list, with the body as a singleton list at the lea
 ```
 ⟦ [] , body ⟧                =  [body]
 ⟦ (var <- src) :: rest ⟧     =  List.flat_map(src, (var) -> ⟦ rest ⟧)
-⟦ (pat <- src) :: rest ⟧     =  List.flat_map(src, (__gᵢ) -> case __gᵢ do
-                                  pat -> ⟦ rest ⟧ ; _ -> [] end)     # non-match SKIPS
+⟦ (pat <- src) :: rest ⟧     =  List.flat_map(src, (g) -> case g do
+                                  pat -> ⟦ rest ⟧ ; _ -> [] end)     # non-match SKIPS; g fresh
 ⟦ (filter)     :: rest ⟧     =  if filter do ⟦ rest ⟧ else [] end
 ```
 
-A **plain-variable** generator always matches, so it lowers to a direct lambda binding; any other
-pattern wraps the continuation in a `case` whose wildcard arm yields `[]`, dropping non-matching
-elements (`__gᵢ` is index-fresh so nested pattern generators don't shadow). `flat_map` + a singleton
+A **plain-variable** generator always matches, so it lowers to a direct lambda binding on the user's
+own name; any other pattern wraps the continuation in a `case` whose wildcard arm yields `[]`, dropping
+non-matching elements. The scrutinee var `g` is **gensym'd against every identifier in the
+comprehension** (`__g`, then `__g0`, `__g1`, …), so it can never capture a user variable (a body
+referencing `__g0`, a nested pattern generator) — verified by `test/rian/beam_test.exs`. `flat_map` + a singleton
 leaf gives the uniform, correct semantics for any mix of generators and filters (a
 single-generator/no-filter comprehension is `flat_map(xs, (x) -> [body])`, equivalent to `map`).
 Because the desugar emits only ordinary Core nodes (`ECall`/`EDot`/`ELambda`/`EIf`/`ECase`/`EList`),

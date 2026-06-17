@@ -328,7 +328,8 @@ defmodule Rian.Core do
   # a comprehension `for p <- src, filter, … do body end` (ADR-0079) desugars to
   # nested `List.flat_map`/`if`/`[body]` over the portable prelude (ADR-0047), so it
   # is just ordinary Core nodes downstream — no emitter/checker/exhaustiveness clause.
-  def from_expr({:comprehension, clauses, body}), do: desugar_for(clauses, body, 0)
+  def from_expr({:comprehension, clauses, body}),
+    do: desugar_for(clauses, body, comp_ids({clauses, body}))
 
   # resolved construction nodes (Rian.Lower's resolve_* passes produce these)
   def from_expr({:variant_lit, enum, ctor, named, pairs}),
@@ -435,42 +436,31 @@ defmodule Rian.Core do
   defp map_pat_pair({{:key, k}, p}), do: {{:key, from_expr(k)}, from_pat(p)}
   defp map_pat_pair({k, p}), do: {k, from_pat(p)}
 
-  # comprehension desugar (ADR-0079), right-to-left over the clause list. `i` indexes
-  # the synthetic generator-callback parameter so nested pattern generators don't
-  # shadow each other's `__gᵢ`.
+  # comprehension desugar (ADR-0079), right-to-left over the clause list. `used` is the
+  # set of identifier names appearing anywhere in the comprehension; a pattern
+  # generator's synthetic callback parameter is **gensym'd against it** so it can never
+  # capture a user variable (a body referencing `__g0`, a nested pattern generator, …).
   #   ⟦ [], body ⟧               = [body]                       (singleton list leaf)
   #   ⟦ (var <- src)  :: r ⟧     = List.flat_map(src, (var) -> ⟦ r ⟧)
-  #   ⟦ (pat <- src)  :: r ⟧     = List.flat_map(src, (__gᵢ) -> case __gᵢ do
-  #                                  pat -> ⟦ r ⟧ ; _ -> [] end)   (non-match SKIPS — Elixir)
+  #   ⟦ (pat <- src)  :: r ⟧     = List.flat_map(src, (g) -> case g do
+  #                                  pat -> ⟦ r ⟧ ; _ -> [] end)   (g fresh; non-match SKIPS)
   #   ⟦ (filter)      :: r ⟧     = if filter do ⟦ r ⟧ else [] end
-  defp desugar_for([], body, _i), do: %EList{elems: [from_expr(body)], tail: :close}
+  defp desugar_for([], body, _used), do: %EList{elems: [from_expr(body)], tail: :close}
 
-  defp desugar_for([{:gen, pat, src} | rest], body, i) do
-    inner = desugar_for(rest, body, i + 1)
-
-    %ECall{
-      fun: %EDot{head: %EId{name: "List"}, name: "flat_map"},
-      args: [from_expr(src), gen_callback(pat, inner, i)]
-    }
+  # a plain-variable generator always matches → a direct lambda binding on the user's
+  # own name (intentional shadowing, no fresh name needed).
+  defp desugar_for([{:gen, {:var, name}, src} | rest], body, used) do
+    flat_map(src, %ELambda{params: [{name, nil}], body: desugar_for(rest, body, used)})
   end
 
-  defp desugar_for([{:filter, cond} | rest], body, i) do
-    %EIf{
-      cond: from_expr(cond),
-      then: desugar_for(rest, body, i),
-      else: %EList{elems: [], tail: :close}
-    }
-  end
+  # any other generator pattern wraps the continuation in a `case` whose wildcard arm
+  # yields `[]`, dropping non-matching elements. The scrutinee var is gensym'd and added
+  # to `used` so a deeper pattern generator picks a *different* fresh name.
+  defp desugar_for([{:gen, pat, src} | rest], body, used) do
+    g = fresh_id("__g", used)
+    inner = desugar_for(rest, body, MapSet.put(used, g))
 
-  # a plain variable generator always matches → a direct lambda binding; any other
-  # pattern wraps the body in a `case` whose wildcard arm yields `[]`, so a
-  # non-matching element is dropped (the Elixir comprehension contract).
-  defp gen_callback({:var, name}, inner, _i), do: %ELambda{params: [{name, nil}], body: inner}
-
-  defp gen_callback(pat, inner, i) do
-    g = "__g#{i}"
-
-    %ELambda{
+    callback = %ELambda{
       params: [{g, nil}],
       body: %ECase{
         scrut: %EId{name: g},
@@ -480,6 +470,41 @@ defmodule Rian.Core do
         ]
       }
     }
+
+    flat_map(src, callback)
+  end
+
+  defp desugar_for([{:filter, cond} | rest], body, used) do
+    %EIf{
+      cond: from_expr(cond),
+      then: desugar_for(rest, body, used),
+      else: %EList{elems: [], tail: :close}
+    }
+  end
+
+  defp flat_map(src, callback) do
+    %ECall{
+      fun: %EDot{head: %EId{name: "List"}, name: "flat_map"},
+      args: [from_expr(src), callback]
+    }
+  end
+
+  # every identifier name (`{:id, n}` / `{:var, n}`) anywhere in a surface term — the
+  # avoid-set for comprehension gensym (over-approximates; that is safe).
+  defp comp_ids(term), do: comp_ids(term, MapSet.new())
+  defp comp_ids({tag, n}, acc) when tag in [:id, :var] and is_binary(n), do: MapSet.put(acc, n)
+  defp comp_ids(t, acc) when is_tuple(t), do: comp_ids(Tuple.to_list(t), acc)
+  defp comp_ids(l, acc) when is_list(l), do: Enum.reduce(l, acc, &comp_ids/2)
+  defp comp_ids(_, acc), do: acc
+
+  # `base`, else `base0`, `base1`, … — the first not present in `used`.
+  defp fresh_id(base, used) do
+    if MapSet.member?(used, base), do: fresh_id_n(base, 0, used), else: base
+  end
+
+  defp fresh_id_n(base, n, used) do
+    cand = base <> Integer.to_string(n)
+    if MapSet.member?(used, cand), do: fresh_id_n(base, n + 1, used), else: cand
   end
 
   @doc """
