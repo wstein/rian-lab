@@ -699,6 +699,14 @@ defmodule Rian.Check do
   # a `<~` mutation yields unit (expressions spec), so it has no value to use here
   defp pos_walk({:bin, "<~", _lhs, _rhs}, :value), do: {:error, mutation_value_msg()}
 
+  # A lambda body's value-position is unknowable here: lambdas are frequently
+  # unit-returning effect callbacks (passed to host FFI), so an `else`-less `if` in
+  # the body is not *provably* in value position. Walk the body as `:effect` — the
+  # gate stays conservative (it only rejects a provable value-position unit), so a
+  # genuine value-position misuse inside the body (e.g. a call argument) is still
+  # caught, but the lambda's own tail is not force-rejected.
+  defp pos_walk({:lambda, _params, body}, _pos), do: pos_walk(body, :effect)
+
   defp pos_walk({:block, stmts}, pos), do: block_walk(stmts, pos)
 
   defp pos_walk({:case, scrut, arms}, pos),

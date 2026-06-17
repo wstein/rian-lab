@@ -703,6 +703,19 @@ defmodule Rian.CheckTest do
              end
              """) == :ok
     end
+
+    test "an else-less `if` inside an effect-position lambda body is allowed" do
+      # the lambda is a non-final statement (its value is discarded; the block
+      # returns 5), and a lambda body is not *provably* value position — so the gate
+      # must not reject the else-less `if` in it.
+      assert Check.check("""
+             def g() Int64
+             def g()
+               (x) -> if x > 0 do 1 end
+               5
+             end
+             """) == :ok
+    end
   end
 
   describe "join lattice — least-upper-bound (ADR-0059)" do
