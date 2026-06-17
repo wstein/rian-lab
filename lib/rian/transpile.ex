@@ -69,6 +69,14 @@ defmodule Rian.Transpile do
     ""
   ]
 
+  # `@test def` slug length budget (ExUnit `test`/`describe` → `@test def`, ADR-0060):
+  # the whole identifier stays ≤ `@max_slug`, but a `describe` group prefix is capped
+  # *separately* at `@max_prefix` so a long group name can't eat the whole budget and
+  # erase the test-specific part — each component keeps its meaning; the test name then
+  # gets whatever remains. `uniquify_test_defs/1` resolves any collision a cap introduces.
+  @max_slug 64
+  @max_prefix 28
+
   # Elixir binary operators that map to a Rian infix spelling unchanged. `++`
   # (list concat) is NOT here — Rian has no `++`; it lowers to `List.concat/2`.
   @binops ~w(+ - * / <> <= >= < > == != and or)a
@@ -885,7 +893,10 @@ defmodule Rian.Transpile do
   # any non-assertion statements (binds, setup calls) become the block preamble —
   # sound because assertions are side-effect-free values that don't feed the binds.
   defp test_def(name, body, prefix) do
-    slug = cap_slug(prefix <> test_slug(name))
+    # the test name takes whatever the (already-capped) group prefix leaves of the
+    # total budget, so prefix and test name are each meaningful (not one swallowing
+    # the other).
+    slug = prefix <> cap_part(test_slug(name), @max_slug - byte_size(prefix))
 
     case render_test_body(body) do
       {:inline, expr} ->
@@ -900,7 +911,7 @@ defmodule Rian.Transpile do
   # the group (Rian has no test nesting, ADR-0060). A `setup`/`setup_all` block (or
   # any other non-test statement) has no Rian image and stays a greppable marker.
   defp render_describe(name, body) do
-    prefix = test_slug(name) <> "_"
+    prefix = cap_part(test_slug(name), @max_prefix) <> "_"
 
     body
     |> block_stmts()
@@ -955,17 +966,12 @@ defmodule Rian.Transpile do
     end
   end
 
-  # Cap an over-long slug (the verbose `describe` + `test` concatenations) at a word
-  # boundary so the identifier stays readable; `uniquify_test_defs/1` then resolves
-  # any collision a cap introduces (tests in one group share a long prefix).
-  @max_slug 64
-  defp cap_slug(slug) when byte_size(slug) <= @max_slug, do: slug
+  # Cap one slug component at a word boundary to `max` chars (keeps it readable).
+  defp cap_part(slug, max) when byte_size(slug) <= max, do: slug
 
-  defp cap_slug(slug) do
-    capped =
-      slug |> binary_part(0, @max_slug) |> String.replace(~r/_[^_]*$/, "") |> String.trim("_")
-
-    if capped == "", do: binary_part(slug, 0, @max_slug), else: capped
+  defp cap_part(slug, max) do
+    capped = slug |> binary_part(0, max) |> String.replace(~r/_[^_]*$/, "") |> String.trim("_")
+    if capped == "", do: binary_part(slug, 0, max), else: capped
   end
 
   # Two tests can slug to the same name (a cap, or just near-identical descriptions).

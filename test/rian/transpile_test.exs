@@ -233,6 +233,31 @@ defmodule Rian.TranspileTest do
       assert out =~ "@test def #{slug}() Bool := assert(ok?())"
     end
 
+    test "a long `describe` prefix is capped separately, so test names stay distinct" do
+      # under a long group, the test-specific part must survive (not be eaten by the
+      # prefix and collapse two tests to the same capped slug + a `_2` suffix).
+      out =
+        test_mod(~S|  describe "finite signature exhaustiveness (the load-bearing decision)" do
+    test "clause heads covering the whole interval are total, no catch-all" do
+      assert ok?()
+    end
+
+    test "missing a member is non-exhaustive so the gate refuses to emit" do
+      assert blocked?()
+    end
+  end|)
+
+      slugs = Regex.scan(~r/@test def (\w+)\(\)/, out, capture: :all_but_first) |> List.flatten()
+      assert length(slugs) == 2
+      # the group prefix is shared and bounded…
+      assert Enum.all?(slugs, &String.starts_with?(&1, "finite_signature"))
+      # …but each test keeps a distinguishing tail (no `_2` collision suffix)
+      assert Enum.uniq(slugs) == slugs
+      refute Enum.any?(slugs, &String.ends_with?(&1, "_2"))
+      assert Enum.any?(slugs, &String.contains?(&1, "interval"))
+      assert Enum.any?(slugs, &String.contains?(&1, "gate"))
+    end
+
     test "colliding slugs get a numeric suffix (never silently merged into one def)" do
       # two identical names — Rian would treat same-name @test defs as one function.
       out = test_mod(~S|  test "same name" do

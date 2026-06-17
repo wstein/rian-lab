@@ -156,10 +156,12 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
     (pure scaffolding); `assert_raise` and kin have no Rian image (no exceptions, ADR-0035) and stay
     greppable markers. A `describe "group" do … end` flattens to its inner `@test def`s with a
     `group_`-prefixed name (Rian tests don't nest), and a `setup`/`setup_all` block (no Rian fixture
-    model) stays a marker. A verbose `describe`+`test` slug is capped at a word boundary (≤ 64 chars)
-    for readability, and any resulting collision (or two identically-named tests) gets a numeric suffix
-    so same-name `@test def`s are never silently merged into one function. The result runs end-to-end
-    via `Rian.Test` — closing the port loop the assertion macros opened.
+    model) stays a marker. A verbose slug is capped at a word boundary for readability — the `describe`
+    group prefix *separately* (≤ 28 chars) so a long group name can't eat the budget and erase the
+    test-specific part, the test name taking whatever of the ≤ 64-char total remains — and any
+    resulting collision (or two identically-named tests) gets a numeric suffix so same-name
+    `@test def`s are never silently merged into one function. The result runs end-to-end via
+    `Rian.Test` — closing the port loop the assertion macros opened.
   - **`@type` harvesting (IMPLEMENTED).** `Rian.Transpile.Infer.collect_types/2` reads every `@type`
     into a **type-env** (local name → Rian term) and a list of synthesized decls. A *union* `@type`
     (`@type ty :: String.t() | atom()`) synthesizes a named `type Ty := String | Symbol` decl; a
