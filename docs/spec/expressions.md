@@ -66,7 +66,7 @@ grade :=
 | 9 | `==` `!=` | **non-assoc** | |
 | 10 | `and` | left | short-circuit, boolean operands |
 | 11 | `or` | left | short-circuit |
-| 12 | `<~` | right | mutation; yields unit |
+| 12 | `<~` | right | mutation; yields unit — statement-only, rejected in value position (ADR-0035 §6) |
 
 Worked consequences: `a + b \|> f` = `(a + b) \|> f`; `x \|> f < y` = `(x \|> f) < y`;
 `not a and b` = `(not a) and b`; `x <~ a or b` = `x <~ (a or b)`.

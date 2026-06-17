@@ -637,7 +637,7 @@ defmodule Rian.CheckTest do
     end
   end
 
-  describe "`if` requires `else` in value position (ADR-0035 §6)" do
+  describe "a unit-yielding expression is rejected in value position (ADR-0035 §6)" do
     test "an else-less `if` as the returned value is rejected" do
       assert_raise Check.Error, ~r/value position must have an `else`/, fn ->
         Rian.Decl.compile("def f(n Int64) Int64 := if n > 0 do 1 end")
@@ -678,6 +678,30 @@ defmodule Rian.CheckTest do
 
     test "a value-position `if` with both branches compiles" do
       assert [{"f", _}] = Rian.Decl.compile("def f(n Int64) Int64 := if n > 0 do 1 else 0 end")
+    end
+
+    test "a `<~` mutation as the returned value is rejected — it yields unit" do
+      assert {:error, msg} =
+               Check.check("""
+               def f(n Int64) Int64
+               def f(n)
+                 total := 0
+                 total <~ total + n
+               end
+               """)
+
+      assert msg =~ "mutation yields unit"
+    end
+
+    test "a `<~` mutation as a non-final effect statement is allowed" do
+      assert Check.check("""
+             def f(n Int64) Int64
+             def f(n)
+               total := 0
+               total <~ total + n
+               total
+             end
+             """) == :ok
     end
   end
 
