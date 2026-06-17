@@ -38,35 +38,34 @@ defmodule Rian.Run do
   # errors are rescued to `{:error, message}`; `apply/3` runs in `eval/2` (outside
   # this rescue) so a runtime crash keeps its stacktrace.
   defp resolve(src, main) do
-    prog = Rian.Decl.parse(src)
-    :ok = Rian.Check.gate!(prog)
-    fun = String.to_atom(main)
+    with {:ok, prog} <- Rian.Decl.parse_result(src),
+         :ok <- Rian.Check.check_program(prog),
+         {:ok, mods} <- load_mods(prog, src) do
+      fun = String.to_atom(main)
 
-    # mirror `mix rian.compile`'s BEAM path: a file of `mod`s loads each by its
-    # `Elixir.<Mod>` atom; a flat file of top-level `def`s loads as one module.
-    mods =
-      case prog do
-        %{mods: [_ | _]} ->
-          Rian.Beam.load_program(src)
+      case Enum.filter(mods, &function_exported?(&1, fun, 0)) do
+        [mod] ->
+          {:ok, mod, fun}
 
-        _ ->
-          {:ok, mod} = Rian.Beam.load(src, :"Elixir.RianCompiled")
-          [mod]
+        [] ->
+          {:error,
+           "no zero-arg entry `#{main}` (loaded: #{mods_str(mods)}) — define `def #{main}() …`"}
+
+        many ->
+          {:error, "entry `#{main}` is defined in more than one module (#{mods_str(many)})"}
       end
-
-    case Enum.filter(mods, &function_exported?(&1, fun, 0)) do
-      [mod] ->
-        {:ok, mod, fun}
-
-      [] ->
-        {:error,
-         "no zero-arg entry `#{main}` (loaded: #{mods_str(mods)}) — define `def #{main}() …`"}
-
-      many ->
-        {:error, "entry `#{main}` is defined in more than one module (#{mods_str(many)})"}
     end
-  rescue
-    e -> {:error, Exception.message(e)}
+  end
+
+  # mirror `mix rian.compile`'s BEAM path: a file of `mod`s loads each by its
+  # `Elixir.<Mod>` atom; a flat file of top-level `def`s loads as one module.
+  defp load_mods(%{mods: [_ | _]}, src), do: Rian.Beam.load_program_result(src)
+
+  defp load_mods(_prog, src) do
+    case Rian.Beam.load_result(src, :"Elixir.RianCompiled") do
+      {:ok, mod} -> {:ok, [mod]}
+      {:error, _} = err -> err
+    end
   end
 
   defp mods_str([]), do: "no modules"

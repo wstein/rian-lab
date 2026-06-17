@@ -319,10 +319,10 @@ defmodule Rian.Repl do
       Enum.reject(s.units, fn {ns, _} -> Enum.any?(ns, &(&1 in names)) end) ++
         [{names, String.trim(input)}]
 
-    _module = reload(s, units_src(units))
-    {{:defined, names}, %{s | units: units}}
-  rescue
-    e -> {{:error, Exception.message(e)}, s}
+    case reload(s, units_src(units)) do
+      {:ok, _module} -> {{:defined, names}, %{s | units: units}}
+      {:error, msg} -> {{:error, msg}, s}
+    end
   end
 
   # ── statements: a top-level bind, or an expression ──────────────────────
@@ -395,7 +395,17 @@ defmodule Rian.Repl do
   # ── the compile + eval core ─────────────────────────────────────────────
 
   defp run(s, binds, units, expr_src) do
-    module = reload(s, program(units, binds, expr_src))
+    case reload(s, program(units, binds, expr_src)) do
+      {:ok, module} -> eval_loaded(module)
+      {:error, _} = err -> err
+    end
+  end
+
+  # Compilation is errors-as-values (`reload`), but *evaluating* gated code can still
+  # hit a genuine runtime fault (host FFI, a partial prim) — the one irreducible
+  # boundary where the REPL turns a BEAM exception into an `{:error, _}` value rather
+  # than crashing the session.
+  defp eval_loaded(module) do
     {:ok, apply(module, :__repl__, [])}
   rescue
     e -> {:error, Exception.message(e)}
@@ -412,16 +422,17 @@ defmodule Rian.Repl do
   # `{:error, _}` result without advancing the session.
   defp reload(s, src) do
     module = module_name(s)
-    # Gate BEFORE purging the prior version: a rejected entry must raise here
-    # without first unloading the session's currently-good module. Purging up front
-    # meant a type error left the session with no loaded module until the next valid
-    # eval rebuilt it (ADR-0053 "no REPL/compile divergence", no advancing the
+    # Gate BEFORE purging the prior version: a rejected entry returns `{:error, _}`
+    # here without first unloading the session's currently-good module. Purging up
+    # front meant a type error left the session with no loaded module until the next
+    # valid eval rebuilt it (ADR-0053 "no REPL/compile divergence", no advancing the
     # session on failure).
-    :ok = Check.gate!(Decl.parse(src))
-    _ = :code.purge(module)
-    _ = :code.delete(module)
-    {:ok, ^module} = Beam.load(src, module)
-    module
+    with {:ok, prog} <- Decl.parse_result(src),
+         :ok <- Check.check_program(prog) do
+      _ = :code.purge(module)
+      _ = :code.delete(module)
+      Beam.load_result(src, module)
+    end
   end
 
   # Wrap `expr_src` as a polymorphic 0-arity function over the session's

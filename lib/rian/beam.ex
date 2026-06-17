@@ -136,6 +136,26 @@ defmodule Rian.Beam do
     {:ok, module}
   end
 
+  @doc """
+  Errors-as-values twin of `load/2` (ADR-0035/0040): `{:ok, module} | {:error,
+  message}` instead of raising on a parse/gate/codegen failure — the boundary
+  callers (`Rian.Run`, `Rian.REPL`) pattern-match rather than `try/rescue`.
+  """
+  @spec load_result(String.t(), module()) :: {:ok, module()} | {:error, String.t()}
+  def load_result(src, module) when is_atom(module) do
+    load(src, module)
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  @doc "Errors-as-values twin of `load_program/1`: `{:ok, [module]} | {:error, message}`."
+  @spec load_program_result(String.t()) :: {:ok, [module()]} | {:error, String.t()}
+  def load_program_result(src) do
+    {:ok, load_program(src)}
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
   # load any sibling `mod`s (e.g. the `Show` module injected for `${float}`
   # interpolation, ADR-0069) into their own `Elixir.<Name>` modules, so a
   # cross-module call from the main module resolves. Skipped when there are no
