@@ -203,6 +203,16 @@ defmodule Rian.Core do
     defstruct base: nil, pairs: [], type: nil
   end
 
+  defmodule EBitstr do
+    @moduledoc """
+    A bitstring `<<seg::spec, …>>` (ADR-0078). `segments` are `{value, specs}` where
+    `specs` is a list of `{:type, name} | {:size, n} | {:unit, n}` (empty = default).
+    BEAM-native; non-BEAM emitters raise `Unsupported` and `Rian.Reach` pins it off
+    `:rs`/`:js`/`:jvm`.
+    """
+    defstruct segments: [], type: nil
+  end
+
   defmodule ETuple do
     @moduledoc "A tuple literal."
     defstruct elems: [], type: nil
@@ -290,6 +300,9 @@ defmodule Rian.Core do
 
   def from_expr({:map_lit, ps}),
     do: %EMap{pairs: Enum.map(ps, fn {k, v} -> {k, from_expr(v)} end)}
+
+  def from_expr({:bitstr, segs}),
+    do: %EBitstr{segments: Enum.map(segs, fn {:bitseg, v, specs} -> {from_expr(v), specs} end)}
 
   def from_expr({:map_update, base, ps}),
     do: %EMapUpdate{

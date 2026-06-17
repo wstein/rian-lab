@@ -33,7 +33,7 @@ defmodule Rian.Lexer do
   # declaration/`case` keywords for the token-driven declaration parser.
   @keywords ~w(if do else end def type range case when struct alias mod pub const macro use with protocol impl opaque abstract)
 
-  @multi ["->", "..", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!="]
+  @multi ["->", "..", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!=", "::"]
   # `@` is the as-pattern operator (`name @ pat`); the annotation lane (`@name`,
   # checked first) still wins when `@` is immediately followed by an identifier.
   @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&", "@"]
@@ -142,6 +142,8 @@ defmodule Rian.Lexer do
   defp tok_str({:lbrace}, _), do: "{"
   defp tok_str({:rbrace}, _), do: "}"
   defp tok_str({:mapopen}, _), do: "%{"
+  defp tok_str({:bitopen}, _), do: "<<"
+  defp tok_str({:bitclose}, _), do: ">>"
   defp tok_str({:comma}, _), do: ","
   defp tok_str({:semi}, _), do: ";"
   defp tok_str({:comment, text}, _), do: text
@@ -361,6 +363,13 @@ defmodule Rian.Lexer do
 
       String.starts_with?(str, "%{") ->
         lex(advance(str, 2), [{:mapopen} | acc])
+
+      # bitstring delimiters (ADR-0078) — must precede the `<`/`>` single ops.
+      String.starts_with?(str, "<<") ->
+        lex(advance(str, 2), [{:bitopen} | acc])
+
+      String.starts_with?(str, ">>") ->
+        lex(advance(str, 2), [{:bitclose} | acc])
 
       # `@name` — the annotation lane (`@doc`/`@moduledoc`/`@typedoc`, `@wire`, …)
       m = Regex.run(~r/^@([A-Za-z_]\w*)/, str) ->

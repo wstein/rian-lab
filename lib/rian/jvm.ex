@@ -100,6 +100,7 @@ defmodule Rian.JVM do
     Core.ETuple => "a tuple",
     Core.EMap => "a map",
     Core.EMapUpdate => "a map update",
+    Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)",
     Core.EStruct => "a struct construction"
   }
 

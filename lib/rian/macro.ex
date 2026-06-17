@@ -132,6 +132,10 @@ defmodule Rian.Macro do
 
   def map_node({:label, n, e}, f), do: {:label, n, f.(e)}
 
+  # bitstring (ADR-0078): recurse into each segment's *value* (the spec is metadata).
+  def map_node({:bitstr, segs}, f),
+    do: {:bitstr, Enum.map(segs, fn {:bitseg, v, specs} -> {:bitseg, f.(v), specs} end)}
+
   def map_node(leaf, _f), do: leaf
 
   # ── substitution: replace {:id, param} with the argument AST ───────────

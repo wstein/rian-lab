@@ -170,6 +170,25 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "bitstrings `<<seg::spec, …>>` (ADR-0078)" do
+    test "segments parse with type/size specifiers" do
+      assert Pratt.parse("<<c::utf8, rest::binary, x::8>>") ==
+               {:bitstr,
+                [
+                  {:bitseg, {:id, "c"}, [type: "utf8"]},
+                  {:bitseg, {:id, "rest"}, [type: "binary"]},
+                  {:bitseg, {:id, "x"}, [size: 8]}
+                ]}
+    end
+
+    test "a bare segment has no specs; `<<>>` need not collide with `<`/`>`" do
+      assert Pratt.parse("<<104, 105>>") ==
+               {:bitstr, [{:bitseg, {:num, "104"}, []}, {:bitseg, {:num, "105"}, []}]}
+
+      assert Pratt.parse("a < b") == {:bin, "<", {:id, "a"}, {:id, "b"}}
+    end
+  end
+
   describe "parse_body (function bodies: block-or-expression)" do
     test "a single expression becomes a one-statement block" do
       assert Pratt.parse_body("a + b") == {:block, [{:expr, {:bin, "+", {:id, "a"}, {:id, "b"}}}]}

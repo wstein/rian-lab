@@ -676,6 +676,11 @@ defmodule Rian.Beam do
      end)}
   end
 
+  # a bitstring `<<seg::spec, …>>` (ADR-0078) -> the Erlang `{:bin, …}` form; each
+  # segment is `{:bin_element, value, size, type-specifier-list}`.
+  defp expr_form(%Core.EBitstr{segments: segs}, s),
+    do: {:bin, @ln, Enum.map(segs, &bitseg_form(&1, s))}
+
   defp expr_form(%EList{elems: es, tail: tail}, s),
     do: cons(es, core_list_tail(tail), &expr_form(&1, s))
 
@@ -1004,6 +1009,32 @@ defmodule Rian.Beam do
 
   # a whole-binary segment for `<>` concatenation (`X::binary`)
   defp bin_seg(form), do: {:bin_element, @ln, form, :default, [:binary]}
+
+  # one bitstring segment (ADR-0078): `{:bin_element, value, Size, TypeSpecifierList}`,
+  # each `:default` when unspecified. A `{:size, n}` spec is the segment size; the
+  # other specs form the type list (`utf8`/`binary`/…).
+  defp bitseg_form({value, specs}, s) do
+    size =
+      case Enum.find(specs, &match?({:size, _}, &1)) do
+        {:size, n} -> {:integer, @ln, n}
+        nil -> :default
+      end
+
+    tsl = for spec <- specs, t = bitspec_atom(spec), do: t
+    {:bin_element, @ln, expr_form(value, s), size, if(tsl == [], do: :default, else: tsl)}
+  end
+
+  # the Erlang type specifiers we accept (ADR-0078). An unknown one is a clear error,
+  # never a mis-lowering. `{:size, _}` is consumed as Size above, not a type spec.
+  @bit_specs ~w(integer float binary bytes bitstring bits utf8 utf16 utf32 signed unsigned big little native)
+
+  defp bitspec_atom({:type, name}) when name in @bit_specs, do: String.to_atom(name)
+
+  defp bitspec_atom({:type, name}),
+    do: raise(ArgumentError, "unsupported bitstring specifier `#{name}` (ADR-0078)")
+
+  defp bitspec_atom({:unit, n}), do: {:unit, n}
+  defp bitspec_atom({:size, _}), do: nil
 
   # Rian's snake_case binding -> a legal Erlang variable (leading-cap, `_` kept).
   defp var_form(x), do: {:var, @ln, var_atom(x)}

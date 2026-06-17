@@ -432,6 +432,13 @@ defmodule Rian.Reach do
   defp map_blocker,
     do: %{construct: "map literal (`%{…}`)", kind: :map, kills: [:rs, :jvm]}
 
+  # A bitstring `<<seg::spec, …>>` (ADR-0078): lowered natively on the BEAM (Erlang
+  # bitstring forms) and via `Rian.Lower`'s Elixir text, but **not** on Rust/JS/JVM
+  # (no faithful bit-level lowering yet — those emitters raise `Unsupported`). So a
+  # bitstring pins the function BEAM-only — the matrix matches the emitters (ADR-0000).
+  defp bitstr_blocker,
+    do: %{construct: "bitstring (`<<…>>`)", kind: :bitstring, kills: [:rs, :js, :jvm]}
+
   defp map_update_blocker,
     do: %{construct: "map update (`%{base | …}`)", kind: :map, kills: [:rs, :jvm]}
 
@@ -708,6 +715,9 @@ defmodule Rian.Reach do
 
   # a map literal `%{…}` — lowered on BEAM/JS, but not on Rust/JVM (see `map_blocker/0`).
   defp classify(%Core.EMap{}, _modnames, {bl, ca}), do: {[map_blocker() | bl], ca}
+
+  # a bitstring `<<…>>` — BEAM-native only (ADR-0078), off Rust/JS/JVM.
+  defp classify(%Core.EBitstr{}, _modnames, {bl, ca}), do: {[bitstr_blocker() | bl], ca}
 
   # a map update `%{base | …}` — same BEAM/JS-only story (see `map_update_blocker/0`).
   defp classify(%Core.EMapUpdate{}, _modnames, {bl, ca}), do: {[map_update_blocker() | bl], ca}

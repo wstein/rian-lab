@@ -1,7 +1,10 @@
 # ADR-0078 — Bitstrings/binaries: a BEAM-first surface for `<<seg::spec, …>>`
 
-**Status:** Accepted (direction) · implemented incrementally — **Stage 1 (construction)** then **Stage 2
-(patterns)**; BEAM-native, other targets honestly gated off.
+**Status:** Accepted (direction)
+**Implemented:** partial — **Stage 1 (construction)** shipped: lexer (`<<`/`>>`/`::`), `Rian.Pratt`,
+`Core.EBitstr`, `Rian.Check` (typed `String`), `Rian.Beam` native bitstring forms + `Rian.Lower`'s
+Elixir-text path; Rust/JS/JVM raise `Unsupported` and `Rian.Reach` pins bitstring functions BEAM-only.
+**Stage 2 (patterns)** and **Stage 3 (transpiler emit)** are not yet done.
 **Refs:** ADR-0041 (`String` is a UTF-8 binary — bitstrings are the general form), ADR-0075/0076
 (transpiler/roundtrip — the motivating consumer), ADR-0035 (no hidden control flow), ADR-0050 (typed
 Core IR), ADR-0000/0058 (reach honesty: the matrix matches the emitters).

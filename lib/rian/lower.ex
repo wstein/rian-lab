@@ -2152,6 +2152,14 @@ defmodule Rian.Lower do
 
   defp emit(%EMap{}, :rust, _ec), do: raise("map literals are BEAM-only in PoC")
 
+  # bitstring (ADR-0078): the `:elixir` text path is a BEAM verification backend
+  # (Elixir has native `<<>>`), so it emits real bitstring syntax; Rust has no
+  # bit-level lowering yet (Reach pins bitstring functions off `:rs`).
+  defp emit(%Core.EBitstr{segments: segs}, :elixir, ec),
+    do: {"<<#{Enum.map_join(segs, ", ", &bitseg_elixir(&1, ec))}>>", 12}
+
+  defp emit(%Core.EBitstr{}, :rust, _ec), do: raise("bitstrings are BEAM-only (ADR-0078)")
+
   defp emit(%EMapUpdate{base: base, pairs: pairs}, :elixir, ec) do
     fields = Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir, ec)}" end)
     {"%{#{p(base, 0, :elixir, ec)} | #{fields}}", 12}
@@ -2262,6 +2270,16 @@ defmodule Rian.Lower do
 
     {p(l, lc, t, ec) <> " " <> disp(op, t) <> " " <> p(r, rc, t, ec), pr}
   end
+
+  # one bitstring segment as Elixir text (ADR-0078): `value` or `value::spec-spec`.
+  defp bitseg_elixir({value, specs}, ec) do
+    v = p(value, 0, :elixir, ec)
+    if specs == [], do: v, else: "#{v}::#{Enum.map_join(specs, "-", &bitspec_elixir/1)}"
+  end
+
+  defp bitspec_elixir({:type, name}), do: name
+  defp bitspec_elixir({:size, n}), do: Integer.to_string(n)
+  defp bitspec_elixir({:unit, n}), do: "unit(#{n})"
 
   # an element stored into an owned `Vec<T>` must be owned `T`; a borrowed `&T`
   # element (a var bound to a `&`-param, in a generic function — `ec.borrowed`)

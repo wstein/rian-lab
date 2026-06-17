@@ -159,6 +159,8 @@ defmodule Rian.Check do
     do: if(String.contains?(n, ".") or String.match?(n, ~r/[eE]/), do: "Float64", else: "Int53")
 
   def infer(%EStr{}, _env, _ic), do: "String"
+  # a bitstring is a binary (ADR-0078); `String` is its UTF-8 special case (ADR-0041).
+  def infer(%Core.EBitstr{}, _env, _ic), do: "String"
   # a `Char` literal is the `Char` primitive (ADR-0036); ordinal arithmetic on it
   # widens to the `Int64` base (see `ordinal_base/1`)
   def infer(%EChar{}, _env, _ic), do: "Char"

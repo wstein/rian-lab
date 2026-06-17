@@ -247,6 +247,19 @@ defmodule Rian.ReachTest do
              )
     end
 
+    test "a bitstring is BEAM-only — off `:rs`/`:js`/`:jvm` (ADR-0078; the emitters raise)" do
+      rep = reach("mod M do\n  pub def enc(cp Int53) String := <<cp::utf8>>\nend")
+
+      # `Rian.Beam` lowers Erlang bitstring forms natively; Rust/JS/JVM have no
+      # faithful bit-level lowering yet and raise `Unsupported`.
+      assert targets(rep, "enc") == [:ex]
+
+      assert Enum.any?(
+               entry(rep, "enc").blockers,
+               &(&1.kind == :bitstring and &1.kills == [:rs, :js, :jvm])
+             )
+    end
+
     test "an as-pattern reaches `:ex`+`:rs` but is off `:js`/`:jvm` (the emitters raise)" do
       rep =
         reach("""

@@ -186,6 +186,7 @@ defmodule Rian.Pratt do
   defp parse_primary([{:kw, "with"} | rest]), do: parse_with(rest)
   defp parse_primary([{:lbracket} | rest]), do: parse_list(rest, [])
   defp parse_primary([{:mapopen} | rest]), do: parse_map_start(rest)
+  defp parse_primary([{:bitopen} | rest]), do: parse_bitstr(rest, [])
   defp parse_primary([{:lbrace} | rest]), do: parse_tuple(rest, [])
 
   defp parse_primary([{:lparen} | _] = tokens) do
@@ -715,6 +716,60 @@ defmodule Rian.Pratt do
     end
   end
 
+  # bitstring `<<seg, …>>` (ADR-0078): each segment is `value` or `value :: spec`,
+  # spec a `-`-joined list of `{:type, name}` / `{:size, n}` / `{:unit, n}`. The value
+  # stops at `::`/`,`/`>>` (none are infix), so `parse_expr` cleanly bounds it.
+  defp parse_bitstr([{:bitclose} | rest], acc), do: {{:bitstr, Enum.reverse(acc)}, rest}
+
+  defp parse_bitstr(tokens, acc) do
+    {seg, rest} = parse_bitseg(tokens)
+
+    case rest do
+      [{:comma} | r] -> parse_bitstr(r, [seg | acc])
+      [{:bitclose} | r] -> {{:bitstr, Enum.reverse([seg | acc])}, r}
+      other -> raise ArgumentError, "expected `,` or `>>` in bitstring, got #{here(other)}"
+    end
+  end
+
+  defp parse_bitseg(tokens) do
+    {value, rest} = parse_expr(tokens, 0)
+
+    case rest do
+      [{:op, "::"} | r] ->
+        {specs, r2} = parse_bitspec(r)
+        {{:bitseg, value, specs}, r2}
+
+      _ ->
+        {{:bitseg, value, []}, rest}
+    end
+  end
+
+  defp parse_bitspec(tokens) do
+    {item, rest} = parse_bitspec_item(tokens)
+
+    case rest do
+      [{:op, "-"} | r] ->
+        {more, r2} = parse_bitspec(r)
+        {[item | more], r2}
+
+      _ ->
+        {[item], rest}
+    end
+  end
+
+  defp parse_bitspec_item([{:num, n} | rest]), do: {{:size, int_of(n)}, rest}
+
+  defp parse_bitspec_item([{:id, "size"}, {:lparen}, {:num, n}, {:rparen} | rest]),
+    do: {{:size, int_of(n)}, rest}
+
+  defp parse_bitspec_item([{:id, "unit"}, {:lparen}, {:num, n}, {:rparen} | rest]),
+    do: {{:unit, int_of(n)}, rest}
+
+  defp parse_bitspec_item([{:id, name} | rest]), do: {{:type, name}, rest}
+
+  defp parse_bitspec_item(other),
+    do: raise(ArgumentError, "bad bitstring specifier: #{here(other)}")
+
   defp expect_kw([{:kw, k} | rest], k), do: rest
   defp expect_kw(toks, k), do: raise(ArgumentError, "expected `#{k}`, got #{here(toks)}")
   defp expect_op([{:op, o} | rest], o), do: rest
@@ -803,6 +858,9 @@ defmodule Rian.Pratt do
 
   defp sexpr({:map_lit, pairs}),
     do: "%{#{Enum.map_join(pairs, " ", fn {k, v} -> "#{k}: #{sexpr(v)}" end)}}"
+
+  defp sexpr({:bitstr, segs}),
+    do: "<<#{Enum.map_join(segs, ", ", fn {:bitseg, v, _specs} -> sexpr(v) end)}>>"
 
   defp sexpr_stmt({:bind, n, e}), do: "(:= #{n} #{sexpr(e)})"
   defp sexpr_stmt({:typed_bind, n, t, e}), do: "(:= #{n} #{t} #{sexpr(e)})"

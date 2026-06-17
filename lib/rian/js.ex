@@ -116,7 +116,8 @@ defmodule Rian.JS do
     Core.EWith => "a `with` expression",
     Core.ELambda => "a lambda",
     Core.ECapture => "a function capture (`&(…)`)",
-    Core.ECaptureNamed => "a function capture (`&name/arity`)"
+    Core.ECaptureNamed => "a function capture (`&name/arity`)",
+    Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)"
   }
 
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."

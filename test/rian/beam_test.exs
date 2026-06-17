@@ -11,6 +11,17 @@ defmodule Rian.BeamTest do
       assert {:file, _} = :code.is_loaded(:rian_beam_double)
     end
 
+    test "a bitstring `<<…>>` compiles to native binary forms and runs (ADR-0078)" do
+      {:ok, mod} =
+        Beam.load(
+          "def hi() String := <<104, 105>>\ndef enc(cp Int53) String := <<cp::utf8>>",
+          :rian_beam_bitstr
+        )
+
+      assert mod.hi() == "hi"
+      assert mod.enc(104) == "h"
+    end
+
     test "a map update `%{m | k: v}` replaces present keys and runs (ADR-0032)" do
       {:ok, mod} =
         Beam.load(
