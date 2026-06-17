@@ -74,13 +74,16 @@ defmodule Rian.Build do
   @doc "`rian check FILE` — run the gates; print `ok` (exit 0) or the error (exit 1)."
   @spec check([String.t()]) :: non_neg_integer()
   def check([file]) do
-    :ok = Rian.Check.gate!(Rian.Decl.parse(File.read!(file)))
-    IO.puts("#{file}: ok")
-    0
-  rescue
-    e ->
-      IO.puts(:stderr, "rian check: #{Exception.message(e)}")
-      1
+    with {:ok, src} <- File.read(file),
+         {:ok, prog} <- Rian.Decl.parse_result(src),
+         :ok <- Rian.Check.check_program(prog) do
+      IO.puts("#{file}: ok")
+      0
+    else
+      {:error, reason} ->
+        IO.puts(:stderr, "rian check: #{error_text(reason)}")
+        1
+    end
   end
 
   def check(_), do: err("usage: rian check FILE")
@@ -94,18 +97,24 @@ defmodule Rian.Build do
   def targets(argv) do
     case OptionParser.parse(argv, strict: [require: :string]) do
       {opts, [file], _} ->
-        targets_report(File.read!(file), parse_required(opts[:require]))
+        case File.read(file) do
+          {:ok, src} -> targets_report(src, parse_required(opts[:require]))
+          {:error, reason} -> err("targets: #{error_text(reason)}")
+        end
 
       _ ->
         err("usage: rian targets FILE [--require ex,rs,js]")
     end
-  rescue
-    e -> err(Exception.message(e))
   end
 
   defp targets_report(src, required) do
-    report = src |> Rian.Decl.parse() |> Rian.Reach.analyze()
+    case Rian.Decl.parse_result(src) do
+      {:error, msg} -> err("targets: #{msg}")
+      {:ok, prog} -> targets_report(prog, required, Rian.Reach.analyze(prog))
+    end
+  end
 
+  defp targets_report(_prog, required, report) do
     rows = Enum.sort_by(report, &elem(&1, 0))
 
     for {name, %{reach: reach}} <- rows do
@@ -152,4 +161,9 @@ defmodule Rian.Build do
     IO.puts(:stderr, "rian: #{msg}")
     2
   end
+
+  # render an error value for display: a gate/parse message is already a string; a
+  # `File.read/1` failure is a posix atom, formatted via `:file.format_error/1`.
+  defp error_text(msg) when is_binary(msg), do: msg
+  defp error_text(posix), do: posix |> :file.format_error() |> List.to_string()
 end
