@@ -155,9 +155,9 @@ defmodule Rian.Lower do
     env = build_env(types, structs, Map.get(m, :ranges, []))
     Enum.each(funcs, &(:ok = check!(&1, env)))
     consts = Map.get(m, :consts, [])
-    # a signature table (name -> func) lets the Rust call-site borrow pass see
-    # which params are `&[T]`/`&str` and which calls return owned values
-    sigs = Map.new(funcs, fn f -> {f.name, f} end)
+    # a signature table ({name, arity} -> func) lets the Rust call-site borrow pass
+    # see which params are `&[T]`/`&str` and which calls return owned values
+    sigs = Map.new(funcs, fn f -> {{f.name, length(f.params)}, f} end)
     ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts), sigs, ic)
 
     # a type/struct must be `pub` if it is exported (`pub type`) OR named in a
@@ -619,7 +619,7 @@ defmodule Rian.Lower do
   defp insert_borrows({:call, {:id, name} = fun, args}, funs, ec, borrowed) do
     args = Enum.map(args, &insert_borrows(&1, funs, ec, borrowed))
 
-    case param_rtypes(name, funs) do
+    case param_rtypes(name, length(args), funs) do
       nil ->
         {:call, fun, args}
 
@@ -744,8 +744,8 @@ defmodule Rian.Lower do
 
   defp owned_scrut?({:ctor, _, _}, _ctx), do: true
 
-  defp owned_scrut?({:call, {:id, f}, _}, ctx) do
-    case Map.get(ctx.funs, f) do
+  defp owned_scrut?({:call, {:id, f}, args}, ctx) do
+    case Map.get(ctx.funs, {f, length(args)}) do
       %{ret: ret} -> owned_value_type?(ret) or user_type?(ret, ctx)
       _ -> false
     end
@@ -813,8 +813,8 @@ defmodule Rian.Lower do
 
   # the callee's parameter Rust types, or nil when the callee is unknown (an
   # external/primitive call — leave its args untouched)
-  defp param_rtypes(name, funs) do
-    case Map.get(funs, name) do
+  defp param_rtypes(name, arity, funs) do
+    case Map.get(funs, {name, arity}) do
       %{params: ps} -> Enum.map(ps, fn p -> Rian.Capability.rust_param(p.cap, p.type) end)
       _ -> nil
     end
@@ -838,8 +838,8 @@ defmodule Rian.Lower do
   defp owned_arg?({:call, {:id, "__prim_str_from_chars"}, _}, _funs), do: true
   defp owned_arg?({:call, {:id, "__prim_str_concat"}, _}, _funs), do: true
 
-  defp owned_arg?({:call, {:id, name}, _}, funs) do
-    case Map.get(funs, name) do
+  defp owned_arg?({:call, {:id, name}, args}, funs) do
+    case Map.get(funs, {name, length(args)}) do
       %{ret: ret} -> owned_rtype?(ret)
       _ -> false
     end
@@ -1002,7 +1002,7 @@ defmodule Rian.Lower do
     protocols = Map.get(prog, :protocols, [])
     impl_decls = Map.get(prog, :impl_decls, [])
 
-    sigs = Map.new(Map.get(prog, :funcs, []), fn f -> {f.name, f} end)
+    sigs = Map.new(Map.get(prog, :funcs, []), fn f -> {{f.name, length(f.params)}, f} end)
     # parametric user types (ADR-0061): `type Pair := P(k K, v V)` -> %{"Pair" => ["K","V"]}.
     # Rian writes them bare (`Vec(Pair)`); Rust needs `Pair<K, V>`, so the enum is emitted
     # with `<…>` params and every signature/return mentioning `Pair` is rewritten to its
@@ -1510,7 +1510,7 @@ defmodule Rian.Lower do
   defp tail_expr(e), do: e
 
   defp infer_tvar_binding({:call, {:id, f}, args}, ec) do
-    case Map.get(ec.sigs, f) do
+    case Map.get(ec.sigs, {f, length(args)}) do
       %{params: ps, tvars: tvs} when tvs != [] ->
         Enum.zip(ps, args)
         |> Enum.reduce(%{}, fn {p, a}, acc ->
