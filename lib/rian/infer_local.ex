@@ -174,10 +174,24 @@ defmodule Rian.InferLocal do
 
   defp generalize_func(f), do: f
 
-  # the first single-letter type variable (T, U, … Z, A … S) not already in use.
+  # the first unused type-variable name. Single letters first (T, U, … Z, A … S),
+  # then letter+digit (`A0` … `Z9`) — the whole space `Rian.Check`'s `tvar?` accepts
+  # (`^[A-Z][0-9]?$`). Exhausting all 286 (286+ generalized params in one function)
+  # raises rather than reusing a name: a duplicate tvar would collapse two parameters'
+  # independent polymorphism into a spurious equality (sound partiality, never a guess).
   defp fresh_tvar(used) do
-    (Enum.map(?T..?Z, &<<&1>>) ++ Enum.map(?A..?S, &<<&1>>))
-    |> Enum.find("T", &(&1 not in used))
+    letters = Enum.map(?T..?Z, &<<&1>>) ++ Enum.map(?A..?S, &<<&1>>)
+    numbered = for l <- ?A..?Z, d <- ?0..?9, do: <<l, d>>
+
+    case Enum.find(letters ++ numbered, &(&1 not in used)) do
+      nil ->
+        raise Rian.Decl.Error,
+              "too many inferred type variables in one function (>#{length(letters ++ numbered)}) " <>
+                "— annotate some parameter types"
+
+      tv ->
+        tv
+    end
   end
 
   defp fill_funcs(funcs, ic) do

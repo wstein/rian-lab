@@ -147,5 +147,16 @@ defmodule Rian.InferLocalTest do
       assert %{name: "x", type: "Int53"} = param_of("def f(x, y) := x + y", "f", 0)
       assert %{name: "y", type: "Int53"} = param_of("def f(x, y) := x + y", "f", 1)
     end
+
+    test "generalizing past the 26-letter alphabet yields unique tvars (no collision)" do
+      # 27 unconstrained params force a 27th type variable; it must be a fresh name
+      # (`A0`), never a duplicate of the first param's `T`.
+      params = Enum.map_join(1..27, ", ", &"p#{&1}")
+      f = "def f(#{params}) := p1" |> Decl.parse() |> all_funcs() |> Enum.find(&(&1.name == "f"))
+      tvs = Enum.map(f.params, & &1.type)
+
+      assert length(tvs) == 27
+      assert length(Enum.uniq(tvs)) == 27
+    end
   end
 end
