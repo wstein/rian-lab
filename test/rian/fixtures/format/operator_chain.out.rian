@@ -1,0 +1,4 @@
+def pipeline(xs Vec(Int53)) Vec(Int53) := xs
+  |> List.map((x) -> x * 2)
+  |> List.filter((x) -> x > 0)
+  |> List.reverse()

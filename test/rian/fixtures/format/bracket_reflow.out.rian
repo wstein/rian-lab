@@ -1,0 +1,7 @@
+def big() := combine(
+  first_argument,
+  second_argument,
+  third_argument,
+  fourth_argument,
+  fifth_argument,
+)

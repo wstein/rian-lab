@@ -1,0 +1,9 @@
+mod M do
+  # the entry point
+  pub def run(n Int53) Int53 :=
+    if n > 0 do
+      n * 2  # double it
+    else
+      0
+    end
+end

@@ -1,0 +1,2 @@
+def add(a Int53, b Int53) Int53 := a + b
+def evens(xs Vec(Int53)) Vec(Int53) := List.filter(xs, (x) -> x rem 2 == 0)

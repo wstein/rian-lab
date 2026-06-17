@@ -1,0 +1,5 @@
+def collapses() := [1, 2, 3]
+def stays_vertical() := %{
+  host: "localhost",
+  port: 8080,
+}
