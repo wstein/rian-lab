@@ -215,6 +215,16 @@ defmodule Rian.Roundtrip do
   # A real marker is an emitted `TODO_PORT("…")` call or a `# TODO[port]: …` line —
   # NOT the draft header, which merely *names* both forms (`TODO_PORT(...)`,
   # `` `# TODO[port]` ``) in prose without the quote/colon.
+  #
+  # This is **deliberately text-based**, not a structural AST scan. It is a fail-safe
+  # gate, and the safe bias is to never report an unfinished draft as a finished port:
+  # a false negative is worse than a false positive here. A structural walk would have
+  # to enumerate *every* place a marker can appear (clause bodies, const values, the
+  # `# TODO[port]` comment — which is stripped from the AST entirely) and would silently
+  # miss any it didn't, passing a draft as a clean roundtrip. The text scan cannot miss
+  # one. Matching the call-open `TODO_PORT("` and the comment form `TODO[port]:` (not a
+  # bare mention) keeps the residual false-positive surface to source that literally
+  # contains the marker syntax in a comment/string — rare and harmlessly conservative.
   defp marker?(rian), do: String.contains?(rian, ["TODO_PORT(\"", "TODO[port]:"])
 
   # ── result plumbing ───────────────────────────────────────────────────────────
