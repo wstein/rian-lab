@@ -509,9 +509,9 @@ defmodule Rian.JS do
   # the declared type is erased at lowering (ADR-0034 §1); the value is unchanged.
   defp stmt_js({:typed_bind, n, _t, e}, i53), do: stmt_js({:bind, n, e}, i53)
   defp stmt_js({:expr, e}, i53), do: "#{expr_js(e, i53)};"
+  # The returned statement is always an expression — a trailing binding is
+  # rejected at `Rian.Core` (ADR-0035), so `stmt_return` only sees `:expr`.
   defp stmt_return({:expr, e}, i53), do: "return #{expr_js(e, i53)};"
-  defp stmt_return({:bind, _, e}, i53), do: "return #{expr_js(e, i53)};"
-  defp stmt_return({:typed_bind, _, _, e}, i53), do: "return #{expr_js(e, i53)};"
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_js(%ENum{text: n}, i53), do: num_js(n, i53)

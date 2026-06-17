@@ -404,9 +404,9 @@ defmodule Rian.JVM do
   defp stmt_kt({:bind, n, e}), do: "val #{n} = #{expr_kt(e)};"
   defp stmt_kt({:typed_bind, n, _t, e}), do: "val #{n} = #{expr_kt(e)};"
   defp stmt_kt({:expr, e}), do: "#{expr_kt(e)};"
+  # A block's value is its final statement, always an expression — a trailing
+  # binding is rejected at `Rian.Core` (ADR-0035), so `stmt_value` only sees `:expr`.
   defp stmt_value({:expr, e}), do: expr_kt(e)
-  defp stmt_value({:bind, _, e}), do: expr_kt(e)
-  defp stmt_value({:typed_bind, _, _, e}), do: expr_kt(e)
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_kt(%ENum{text: n}), do: num_kt(n)

@@ -297,7 +297,10 @@ defmodule Rian.Core do
   def from_expr({:list_lit, es, tail}),
     do: %EList{elems: Enum.map(es, &from_expr/1), tail: from_tail(tail)}
 
-  def from_expr({:block, stmts}), do: %EBlock{stmts: Enum.map(stmts, &from_stmt/1)}
+  def from_expr({:block, stmts}) do
+    block_terminal!(stmts)
+    %EBlock{stmts: Enum.map(stmts, &from_stmt/1)}
+  end
 
   def from_expr({:case, scrut, arms}),
     do: %ECase{scrut: from_expr(scrut), arms: Enum.map(arms, &from_arm/1)}
@@ -322,6 +325,29 @@ defmodule Rian.Core do
 
   defp from_arm({pat, guard, body}),
     do: {from_pat(pat), guard && from_expr(guard), from_expr(body)}
+
+  # ADR-0035 (No Hidden Control Flow): a block's value is its **final expression**
+  # (ML-family discipline — OCaml/Haskell/F#/Rust all require a trailing expression,
+  # never a bare `let`). A block whose last statement is a binding is rejected: it
+  # has no portable value. The BEAM would return the bound RHS (Elixir's `=` is an
+  # expression), but Rust lowers `let x = e;` to a `()`-typed block — a silent
+  # cross-target divergence (`rustc` rejects `().to_string()`). One chokepoint here
+  # covers function bodies, `if`/`case`/`with`/lambda arms, and macro-expanded blocks.
+  defp block_terminal!(stmts) do
+    case List.last(stmts) do
+      {:bind, name, _} -> raise_trailing_bind(name)
+      {:typed_bind, name, _, _} -> raise_trailing_bind(name)
+      _ -> :ok
+    end
+  end
+
+  defp raise_trailing_bind(name) do
+    raise ArgumentError,
+          "a block body must end in an expression, not the binding `#{name} := …` " <>
+            "(ADR-0035): a binding has no portable value. Make the value the final " <>
+            "line (e.g. add `#{name}`), or use a `:= expr` one-liner for a single-" <>
+            "expression body."
+  end
 
   @doc "Translate a surface pattern (the `Rian.Pratt` tuple AST) into the typed core."
   # `{:rpat, str}` is a pre-rendered Rust pattern baked by `Rian.Lower`'s

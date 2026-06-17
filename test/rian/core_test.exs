@@ -58,6 +58,23 @@ defmodule Rian.CoreTest do
     test "an expression node carries a nil `type` until the checker fills it" do
       assert %ENum{type: nil} = Core.from_expr({:num, "1"})
     end
+
+    test "a block ending in a binding is rejected — value must be an expression (ADR-0035)" do
+      # A binding has no portable value: the BEAM would return its rhs, but Rust
+      # lowers `let x = e;` to a `()`-typed block (a silent cross-target divergence).
+      for last <- [{:bind, "x", {:num, "1"}}, {:typed_bind, "x", "Int", {:num, "1"}}] do
+        err = assert_raise ArgumentError, fn -> Core.from_expr({:block, [last]}) end
+        assert err.message =~ "must end in an expression"
+        assert err.message =~ "ADR-0035"
+      end
+
+      # the same block with the value made explicit as the final line is accepted
+      assert %EBlock{} =
+               Core.from_expr({:block, [{:bind, "x", {:num, "1"}}, {:expr, {:id, "x"}}]})
+
+      # an empty block is unaffected (no terminal statement to constrain)
+      assert %EBlock{stmts: []} = Core.from_expr({:block, []})
+    end
   end
 
   describe "first_unsupported/2 — generic core walk for the partial emitters" do

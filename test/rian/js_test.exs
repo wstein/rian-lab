@@ -431,12 +431,17 @@ defmodule Rian.JSTest do
       assert js =~ "return (x * 2n);"
     end
 
-    test "a block whose last statement is a bind returns the bound value" do
-      # stmt_return({:bind, …}) — the final `x := …` yields its rhs as the return
-      js = JS.compile("def f(n Int) Int := y := n - 1; x := n + 1")
-      assert js =~ "let y = (n - 1n);"
-      assert js =~ "return (n + 1n);"
-      assert node_eval(js, "f(4n)") in [:no_node, "5"]
+    test "a block whose last statement is a bind is rejected (ADR-0035)" do
+      # A block's value is its final *expression*; a trailing binding has no
+      # portable value (BEAM returns the rhs, Rust lowers to `()`), so it is a
+      # compile error — Core refuses it before any emitter runs.
+      err =
+        assert_raise ArgumentError, fn ->
+          JS.compile("def f(n Int) Int := y := n - 1; x := n + 1")
+        end
+
+      assert err.message =~ "must end in an expression"
+      assert err.message =~ "ADR-0035"
     end
 
     test "a guarded `case` arm wraps the return in an `if`" do
@@ -569,11 +574,15 @@ defmodule Rian.JSTest do
       assert node_eval(js, "String(f(4n))") in [:no_node, "10"]
     end
 
-    test "a block whose last statement is a typed bind returns the bound value" do
-      # stmt_return({:typed_bind, …}) — the final `y Int := …` yields its rhs
-      js = JS.compile("def g(n Int) Int := y Int := n + 1")
-      assert js =~ "return (n + 1n);"
-      assert node_eval(js, "String(g(4n))") in [:no_node, "5"]
+    test "a block whose last statement is a typed bind is rejected (ADR-0035)" do
+      # Same rule for a typed trailing binding (`y Int := …`): rejected at Core.
+      err =
+        assert_raise ArgumentError, fn ->
+          JS.compile("def g(n Int) Int := y Int := n + 1")
+        end
+
+      assert err.message =~ "must end in an expression"
+      assert err.message =~ "ADR-0035"
     end
 
     test "a tuple clause pattern lowers to positional array matching and runs" do

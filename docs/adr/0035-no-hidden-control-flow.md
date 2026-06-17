@@ -31,6 +31,17 @@ Rian adopts **No Hidden Control Flow** as a standing design principle. Concretel
 5. **No implicit coercions.** `/` is float division, `div` is integer (expressions spec); promotion
    is explicit. Numeric widths convert only via an explicit cast/annotation.
 
+6. **A block's value is its final *expression* — never a trailing binding.** A block body
+   (function body, `if`/`case`/`with` arm, lambda body) whose last statement is a binding
+   (`x := e`) is a **compile error** (`Rian.Core.from_expr`), enforced at the one surface→Core
+   chokepoint so it also catches macro-expanded blocks. A binding has no portable value: the
+   BEAM would return the bound RHS (Elixir's `=` is an expression), but Rust lowers `let x = e;`
+   to a `()`-typed block — `rustc` rejects the resulting `().to_string()`. Allowing it would be a
+   **silent cross-target divergence** (the same failure mode as the Int↔Float widen above). The
+   fix is explicit: make the value the final line (add `x`), or use the `:= expr` one-liner for a
+   single-expression body. This is the ML-family discipline — OCaml/Haskell/F#/Rust all require a
+   trailing expression, never a bare `let`.
+
    > **Amended 2026-06-14 — enforced for Int↔Float arithmetic.** `+`/`-`/`*` whose two operands are
    > concretely one integer-kind and one float-kind is a **compile error** (`Rian.Check.check_numeric_mix`),
    > not a silent widen — e.g. `10.2 * a` with `a : Int64`. A value never silently becomes a float
@@ -88,6 +99,7 @@ ADR-0036 `unreachable!()` shim — is loud, not hidden, and is the sole sanction
 | No operator-overload surprises | 5/5 |
 | No silent partiality | 5/5 |
 | No implicit coercions | 4/5 |
+| Block value is the final expression, never a trailing binding | 5/5 |
 
 ## Consequences
 

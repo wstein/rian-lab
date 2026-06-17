@@ -37,6 +37,12 @@ distinguishes a signature from a single-clause block body.
 
 **Signature param names are optional documentation:** `fn area(s Shape) f64` ≡ `fn area(Shape) f64`.
 
+**A block body ends in an expression, never a binding (ADR-0035).** The implicit return is the
+final *expression* (`body = ":=" expr | NEWLINE { stmt } expr "end"`, §2). A block whose last
+statement is a binding (`label := "positive"`) is a compile error — a binding has no portable
+value (the BEAM returns its RHS; Rust lowers `let x = e;` to `()`, a silent divergence). Make the
+value the final line, or use the `:= expr` one-liner. This matches OCaml/Haskell/F#/Rust.
+
 ---
 
 ## 2. EBNF grammar

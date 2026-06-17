@@ -31,6 +31,11 @@ grade :=
 # match (see rian-spec-types-match.md)
 ```
 
+- A block's value is its **final expression**. A block whose last statement is a *binding*
+  (`x := e`) is a **compile error** (ADR-0035): a binding has no portable value — the BEAM
+  would return its RHS, but Rust lowers `let x = e;` to a `()`-typed block, a silent
+  cross-target divergence. Make the value the final line (add `x`), or use the `:= expr`
+  one-liner. (ML-family rule: OCaml/Haskell/F#/Rust all require a trailing expression.)
 - A value-position `if` **must** have `else`. An `else`-less `if` is a unit-typed effect
   statement (matches Rust's `if` typing).
 - `:=` bindings are **single-assignment** and **irrefutable** (tuple/struct destructuring is

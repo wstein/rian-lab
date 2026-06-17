@@ -87,16 +87,6 @@ defmodule Rian.JVMTest do
       probe: ~s|println(step(3L)); println(step(-1L))|
     },
     %{
-      id: :block_plain_bind,
-      src: "def g(n Int64) Int64 := if n > 0 do a := 5 else 0 end",
-      probe: ~s|println(g(1L)); println(g(-1L))|
-    },
-    %{
-      id: :block_typed_bind,
-      src: "def g(n Int64) Int64 := if n > 0 do a Int64 := 7 else 0 end",
-      probe: ~s|println(g(1L))|
-    },
-    %{
       id: :str_pat,
       src: """
       def tag(s String) Int64
@@ -602,24 +592,6 @@ defmodule Rian.JVMTest do
       assert_raise JVM.Unsupported, fn ->
         JVM.compile("def lc(n widget) widget := n")
       end
-    end
-  end
-
-  describe "blocks whose last statement is a bind (stmt_value)" do
-    @tag :jvm
-    test "a block ending in a plain bind yields that bind's value", %{jvm_batch: jvm} do
-      # the block's last statement is `a := 5` -> stmt_value({:bind, _, e}) (jvm.ex:238)
-      kt = jvm_kt(jvm, :block_plain_bind)
-      assert kt =~ "run {  5L }"
-      expect_jvm(jvm, :block_plain_bind, "5\n0")
-    end
-
-    @tag :jvm
-    test "a block ending in a typed bind yields that bind's value", %{jvm_batch: jvm} do
-      # last statement is `a Int64 := 7` -> stmt_value({:typed_bind, _, _, e}) (jvm.ex:239)
-      kt = jvm_kt(jvm, :block_typed_bind)
-      assert kt =~ "run {  7L }"
-      expect_jvm(jvm, :block_typed_bind, "7")
     end
   end
 
