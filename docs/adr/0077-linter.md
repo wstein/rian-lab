@@ -2,6 +2,7 @@
 
 **Status:** Proposed (direction) · not yet implemented — this ADR lines out the linter and, above
 all, fixes the **formatter↔linter boundary** so neither grows into the other.
+**Implemented:** no — direction only; `mix rian.lint` and the rule set are not yet built.
 **Refs:** ADR-0045 (formatter — the mechanical-layout half this complements), ADR-0034 (declare-public
 + the PascalCase-type / lowercase-value casing rule the linter enforces), ADR-0050 (typed Core IR —
 the linter's semantic substrate), ADR-0057/0058 (`Rian.Reach` — portability facts the linter surfaces),
