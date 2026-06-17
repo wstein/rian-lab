@@ -599,6 +599,9 @@ defmodule Rian.Transpile do
           {:test, name, body} ->
             {acc ++ flush(open, sigmap) ++ test_def(name, body, ""), doc, nil}
 
+          {:describe, name, body} ->
+            {acc ++ flush(open, sigmap) ++ render_describe(name, body), doc, nil}
+
           {:clause, vis, head, kw} ->
             clause = build_clause(head, kw)
 
@@ -705,6 +708,12 @@ defmodule Rian.Transpile do
 
   defp classify({:test, _, [name, _ctx, [do: body]]}) when is_binary(name),
     do: {:test, name, body}
+
+  # ExUnit `describe "group" do … end` — Rian tests are flat (no nesting), so the
+  # group flattens to its inner `@test def`s with a `group_`-prefixed name (avoiding
+  # collisions across groups). `setup` blocks inside have no Rian image (markers).
+  defp classify({:describe, _, [name, [do: body]]}) when is_binary(name),
+    do: {:describe, name, body}
 
   # Any remaining `@name <value>` (after the doc/spec/type/rian clauses above) is a
   # module attribute — a constant or a directive; `render_items` decides which.
@@ -885,6 +894,23 @@ defmodule Rian.Transpile do
       {:block, lines} ->
         ["", "@test def #{slug}() Bool do"] ++ Enum.map(lines, &("  " <> &1)) ++ ["end"]
     end
+  end
+
+  # `describe "group" do … end` → its inner `@test def`s, each slug prefixed with
+  # the group (Rian has no test nesting, ADR-0060). A `setup`/`setup_all` block (or
+  # any other non-test statement) has no Rian image and stays a greppable marker.
+  defp render_describe(name, body) do
+    prefix = test_slug(name) <> "_"
+
+    body
+    |> block_stmts()
+    |> Enum.flat_map(fn stmt ->
+      case classify(stmt) do
+        {:test, tname, tbody} -> test_def(tname, tbody, prefix)
+        :skip -> []
+        _ -> ["", "# TODO[port]: #{snippet(stmt)}"]
+      end
+    end)
   end
 
   defp render_test_body(body) do

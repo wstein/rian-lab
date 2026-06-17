@@ -176,6 +176,44 @@ defmodule Rian.TranspileTest do
       refute out =~ "\n@test def"
       assert out =~ "TODO[port]"
     end
+
+    test "a `describe` block flattens to group-prefixed `@test def`s (Rian is flat)" do
+      out = test_mod(~S|  describe "addition" do
+    test "adds" do
+      assert add(1, 2) == 3
+    end
+
+    test "commutes" do
+      assert add(1, 2) == add(2, 1)
+    end
+  end
+
+  describe "negation" do
+    test "negates" do
+      refute neg(1) == 1
+    end
+  end|)
+
+      assert out =~ "@test def addition_adds() Bool := assert_eq(add(1, 2), 3)"
+      assert out =~ "@test def addition_commutes() Bool := assert_eq(add(1, 2), add(2, 1))"
+      assert out =~ "@test def negation_negates() Bool := assert_neq(neg(1), 1)"
+      refute out =~ "describe"
+    end
+
+    test "a `setup`/`setup_all` block has no Rian image — a marker, not a `@test def`" do
+      out = test_mod(~S|  describe "with fixture" do
+    setup do
+      {:ok, x: 1}
+    end
+
+    test "uses it" do
+      assert ok?()
+    end
+  end|)
+
+      assert out =~ "# TODO[port]: setup do"
+      assert out =~ "@test def with_fixture_uses_it() Bool := assert(ok?())"
+    end
   end
 
   describe "@rian attribute annotations — author the type inference can't recover" do

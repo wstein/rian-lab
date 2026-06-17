@@ -151,7 +151,9 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
     assertion while a `@test def` returns one `Bool`, a multi-assertion body is **`and`-combined** with
     any non-assertion statements (binds, setup) as the block preamble. `use ExUnit.Case` is dropped
     (pure scaffolding); `assert_raise` and kin have no Rian image (no exceptions, ADR-0035) and stay
-    greppable markers. The result runs end-to-end via `Rian.Test` — closing the port loop the
+    greppable markers. A `describe "group" do … end` flattens to its inner `@test def`s with a
+    `group_`-prefixed name (Rian tests don't nest), and a `setup`/`setup_all` block (no Rian fixture
+    model) stays a marker. The result runs end-to-end via `Rian.Test` — closing the port loop the
     assertion macros opened.
   - **`@type` harvesting (IMPLEMENTED).** `Rian.Transpile.Infer.collect_types/2` reads every `@type`
     into a **type-env** (local name → Rian term) and a list of synthesized decls. A *union* `@type`
