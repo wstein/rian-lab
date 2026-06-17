@@ -73,12 +73,18 @@ defmodule Rian.Ann do
   """
   @spec from_beam(module() | String.t()) :: [String.t()]
   def from_beam(module) when is_atom(module) do
-    module.__info__(:attributes) |> Keyword.get_values(:rian) |> List.flatten()
-  rescue
-    _ -> []
+    # guard the reflective `__info__/1` with an explicit load check instead of
+    # rescuing UndefinedFunctionError (ADR-0035: no exception control flow).
+    if Code.ensure_loaded?(module) do
+      module.__info__(:attributes) |> Keyword.get_values(:rian) |> List.flatten()
+    else
+      []
+    end
   end
 
   def from_beam(path) when is_binary(path) do
+    # `:beam_lib.chunks/2` already reports failure as `{:error, …}`, caught by the
+    # catch-all arm — no `rescue` needed.
     case :beam_lib.chunks(String.to_charlist(path), [:attributes]) do
       {:ok, {_mod, [{:attributes, attrs}]}} ->
         attrs |> Keyword.get_values(:rian) |> List.flatten()
@@ -86,7 +92,5 @@ defmodule Rian.Ann do
       _ ->
         []
     end
-  rescue
-    _ -> []
   end
 end

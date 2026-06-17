@@ -71,15 +71,18 @@ defmodule Rian.Macro do
     end
   end
 
-  defp introduces_failable_bind?(node) do
-    walk_for_with(node)
-    false
-  catch
-    :__with__ -> true
-  end
+  # a failable bind (`<-`) parses to a `with` node; detect one anywhere in the
+  # template by a structural search — no throw/catch (ADR-0035: control is explicit,
+  # errors are values).
+  defp introduces_failable_bind?({:with, _clauses, _body, _els}), do: true
 
-  defp walk_for_with({:with, _clauses, _body, _els}), do: throw(:__with__)
-  defp walk_for_with(node), do: map_node(node, fn c -> walk_for_with(c) && c end)
+  defp introduces_failable_bind?(node) when is_tuple(node),
+    do: node |> Tuple.to_list() |> Enum.any?(&introduces_failable_bind?/1)
+
+  defp introduces_failable_bind?(node) when is_list(node),
+    do: Enum.any?(node, &introduces_failable_bind?/1)
+
+  defp introduces_failable_bind?(_), do: false
 
   # ── generic child mapping (also reused by Rian.Comptime) ───────────────
   @spec map_node(term(), (term() -> term())) :: term()
