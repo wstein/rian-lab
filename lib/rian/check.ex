@@ -669,7 +669,65 @@ defmodule Rian.Check do
          :ok <- check_binds(f, ic),
          :ok <- check_bounds(f, ic),
          :ok <- check_numeric_mix(f, ic),
+         :ok <- check_if_else(f),
          do: check_error_set(f, eset)
+  end
+
+  # ADR-0035 §6 — `if` is an expression; in **value position** (return / binding
+  # RHS / argument / a branch feeding a used value) it must yield a value, so `else`
+  # is mandatory there. An `else`-less `if` (empty else block) is legal only as an
+  # **effect statement**: a non-final statement of a block, whose value is discarded.
+  # The walk threads a position (`:value`/`:effect`) — a block's non-final statements
+  # are effects, its final statement inherits the block's position, and `if`/`case`/
+  # `with` branches inherit the position of the construct they belong to. (Guards
+  # cannot contain `if`, so they are not walked.)
+  defp check_if_else(%Func{clauses: clauses}) do
+    Enum.find_value(clauses, :ok, fn c ->
+      if_walk(Pratt.parse_body(c.body), :value)
+    end)
+  end
+
+  # value-position `if` with an empty else branch — the proven error
+  defp if_walk({:if, cnd, _then, {:block, []}}, :value),
+    do: if_walk(cnd, :value) || {:error, if_else_msg()}
+
+  defp if_walk({:if, cnd, then_b, else_b}, pos),
+    do: if_walk(cnd, :value) || if_walk(then_b, pos) || if_walk(else_b, pos)
+
+  defp if_walk({:block, stmts}, pos), do: block_walk(stmts, pos)
+
+  defp if_walk({:case, scrut, arms}, pos),
+    do: if_walk(scrut, :value) || Enum.find_value(arms, fn {_p, _g, b} -> if_walk(b, pos) end)
+
+  defp if_walk({:with, cls, body, els}, pos) do
+    Enum.find_value(cls, fn {_p, e} -> if_walk(e, :value) end) ||
+      if_walk(body, pos) ||
+      Enum.find_value(els, fn {_p, _g, b} -> if_walk(b, pos) end)
+  end
+
+  # any other node is a value-context container — its children are all used values
+  defp if_walk(node, _pos) when is_tuple(node),
+    do: node |> Tuple.to_list() |> Enum.find_value(&if_walk(&1, :value))
+
+  defp if_walk(list, _pos) when is_list(list),
+    do: Enum.find_value(list, &if_walk(&1, :value))
+
+  defp if_walk(_leaf, _pos), do: nil
+
+  # a block: non-final statements are effects; the final statement keeps the block's pos
+  defp block_walk([], _pos), do: nil
+  defp block_walk([last], pos), do: stmt_walk(last, pos)
+  defp block_walk([s | rest], pos), do: stmt_walk(s, :effect) || block_walk(rest, pos)
+
+  # a binding's RHS is always a used value; an `:expr` statement keeps the stmt's pos
+  defp stmt_walk({:bind, _n, e}, _pos), do: if_walk(e, :value)
+  defp stmt_walk({:typed_bind, _n, _t, e}, _pos), do: if_walk(e, :value)
+  defp stmt_walk({:expr, e}, pos), do: if_walk(e, pos)
+
+  defp if_else_msg do
+    "`if` in value position must have an `else` branch (ADR-0035): it is an expression " <>
+      "that yields a value. Add `else …` — or, if the value is unused, make the `if` a " <>
+      "statement (not the final/returned expression of the block)."
   end
 
   # ADR-0035 / ADR-0034 §1 — **no implicit Int↔Float coercion.** An arithmetic

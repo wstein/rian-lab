@@ -315,6 +315,11 @@ defmodule Rian.Pratt do
     tokens = expect_kw(tokens, "do")
     {then_b, tokens} = parse_block(tokens)
 
+    # An `else`-less `if` parses to an empty else block: it is a unit-typed *effect*
+    # statement (Rust's `if` typing). In **value** position (return / binding RHS /
+    # argument / a branch feeding a used value) `else` is mandatory — that is an
+    # expression that must yield a value — and is enforced by `Rian.Check`
+    # (`check_if_else`, ADR-0035 §6), not here, since the parser lacks position context.
     {else_b, tokens} =
       case tokens do
         [{:kw, "else"} | r] -> parse_block(r)

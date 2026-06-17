@@ -58,7 +58,8 @@ def max2(a, b)             := b
 # --- (3) lambdas / closures: `(x) -> e` -----------------------------------
 # Anonymous, single-expression. Passed to higher-order functions (usually via
 # FFI). For multi-step logic inside a lambda, the body can be a block
-# EXPRESSION (`if .. do a := ..; .. end`), or factor it into a named `def`.
+# EXPRESSION (`if .. do a := ..; .. else .. end` — a lambda body is value
+# position, so the `if` needs `else`), or factor it into a named `def`.
 def map_double(xs val Vec(Int53)) Vec(Int53) := Enum.map(xs, (x) -> x * 2)
 def clamp_each(xs val Vec(Int53)) Vec(Int53) :=
   Enum.map(xs, (x) -> if x < 0 do 0 else x end)   # block-expression lambda body

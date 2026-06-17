@@ -637,6 +637,50 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "`if` requires `else` in value position (ADR-0035 §6)" do
+    test "an else-less `if` as the returned value is rejected" do
+      assert_raise Check.Error, ~r/value position must have an `else`/, fn ->
+        Rian.Decl.compile("def f(n Int64) Int64 := if n > 0 do 1 end")
+      end
+    end
+
+    test "an else-less `if` on a binding's right-hand side is rejected" do
+      assert_raise Check.Error, ~r/value position must have an `else`/, fn ->
+        Rian.Decl.compile("""
+        def f(n Int64) Int64
+        def f(n)
+          x := if n > 0 do 1 end
+          x
+        end
+        """)
+      end
+    end
+
+    test "an else-less `if` as a function argument is rejected" do
+      assert_raise Check.Error, ~r/value position must have an `else`/, fn ->
+        Rian.Decl.compile("""
+        def g(x Int64) Int64 := x
+        def f(n Int64) Int64 := g(if n > 0 do 1 end)
+        """)
+      end
+    end
+
+    test "an else-less `if` as a non-final effect statement is allowed" do
+      assert [{"f", _}] =
+               Rian.Decl.compile("""
+               def f(n Int64) Int64
+               def f(n)
+                 if n > 0 do dbg(n) end
+                 n
+               end
+               """)
+    end
+
+    test "a value-position `if` with both branches compiles" do
+      assert [{"f", _}] = Rian.Decl.compile("def f(n Int64) Int64 := if n > 0 do 1 else 0 end")
+    end
+  end
+
   describe "join lattice — least-upper-bound (ADR-0059)" do
     test "numeric LUB: same kind widens; differing widths climb" do
       assert Check.join("Int32", "Int64") == "Int64"

@@ -42,6 +42,18 @@ Rian adopts **No Hidden Control Flow** as a standing design principle. Concretel
    single-expression body. This is the ML-family discipline — OCaml/Haskell/F#/Rust all require a
    trailing expression, never a bare `let`.
 
+   > **The same rule for `if` — `else` is mandatory in value position (enforced 2026-06-17).**
+   > `if` is an expression: where its **value is used** (return, binding RHS, function argument, or a
+   > branch that itself feeds a used value) it **must** have an `else`, and both branches must yield
+   > the same type. An `else`-less `if` is legal *only* as an **effect statement** — a non-final
+   > statement of a block whose value is discarded (unit-typed, as in Rust). A value-position
+   > `else`-less `if` is a **compile error** (`Rian.Check.check_if_else`), which threads a value/effect
+   > *position* through the body: a block's non-final statements are effects, its final statement
+   > inherits the block's position, and `if`/`case`/`with` branches inherit the position of the
+   > construct they belong to. The position context is why this is a `Check` gate, not a Core or
+   > parser rule. (OCaml/Haskell require `else` on *every* `if` because they have no statement
+   > position at all; Rian keeps the effect form, matching Rust.)
+
    > **Amended 2026-06-14 — enforced for Int↔Float arithmetic.** `+`/`-`/`*` whose two operands are
    > concretely one integer-kind and one float-kind is a **compile error** (`Rian.Check.check_numeric_mix`),
    > not a silent widen — e.g. `10.2 * a` with `a : Int64`. A value never silently becomes a float
@@ -100,6 +112,7 @@ ADR-0036 `unreachable!()` shim — is loud, not hidden, and is the sole sanction
 | No silent partiality | 5/5 |
 | No implicit coercions | 4/5 |
 | Block value is the final expression, never a trailing binding | 5/5 |
+| `if` is an expression; `else` is mandatory in value position | 5/5 |
 
 ## Consequences
 

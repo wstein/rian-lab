@@ -36,8 +36,10 @@ grade :=
   would return its RHS, but Rust lowers `let x = e;` to a `()`-typed block, a silent
   cross-target divergence. Make the value the final line (add `x`), or use the `:= expr`
   one-liner. (ML-family rule: OCaml/Haskell/F#/Rust all require a trailing expression.)
-- A value-position `if` **must** have `else`. An `else`-less `if` is a unit-typed effect
-  statement (matches Rust's `if` typing).
+- A value-position `if` **must** have `else` — **enforced** by `Rian.Check` (ADR-0035 §6): an
+  `if` whose value is used (return / binding RHS / argument / a branch feeding a used value) is a
+  compile error without `else`. An `else`-less `if` is legal only as a unit-typed effect statement
+  — a non-final statement of a block whose value is discarded (matches Rust's `if` typing).
 - `:=` bindings are **single-assignment** and **irrefutable** (tuple/struct destructuring is
   fine; `Some(x) := opt` is refutable → compile error, use `match`). Rebinding a name is
   shadowing, not mutation. Mutation is `<~` (capability-gated; BEAM-illegal unless local).
