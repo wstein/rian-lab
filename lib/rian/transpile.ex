@@ -497,11 +497,12 @@ defmodule Rian.Transpile do
 
           {:attr_def, name, value} ->
             # An Elixir module attribute. When it is referenced as a value it is a
-            # module constant → a Rian `const`; otherwise it is a directive (`@impl`,
+            # module constant → a Rian `const` (its type omitted — Rian infers it
+            # from the value, Crystal-style); otherwise it is a directive (`@impl`,
             # `@typep`) with no Rian image → a port marker.
             line =
               if MapSet.member?(referenced, name),
-                do: "const #{name} _Unk := #{render_body(value)}",
+                do: "const #{name} := #{render_body(value)}",
                 else: "# TODO[port]: @#{name} #{snippet(value)}"
 
             {acc ++ flush(open, sigmap) ++ [line], doc, nil}
@@ -663,15 +664,32 @@ defmodule Rian.Transpile do
         params =
           c.args
           |> Enum.zip(ptypes)
-          |> Enum.map_join(", ", fn {a, t} -> "#{var_name(a)} #{t}" end)
+          |> Enum.map_join(", ", fn {a, t} -> param(var_name(a), t, vis) end)
 
         ["#{kw} #{name}(#{params})#{ret_part}#{forall} := #{render_body(c.body)}"]
       else
-        sig_line = "#{kw} #{name}(#{Enum.join(ptypes, ", ")})#{ret_part}#{forall}"
+        sig_line = "#{kw} #{name}(#{sig_params(ptypes, vis)})#{ret_part}#{forall}"
         [sig_line | Enum.map(clauses, &render_clause(kw, &1))]
       end
 
     [""] ++ doc_lines ++ body_lines
+  end
+
+  # A PRIVATE parameter whose type is an unresolved hole omits the type — Rian
+  # infers it (infer-local, like the dropped private return), so the draft carries
+  # no `_Unk` noise. A `pub` parameter keeps its declared boundary (declare-public).
+  defp param(name, "_Unk", vis) when vis != :pub, do: name
+  defp param(name, type, _vis), do: "#{name} #{type}"
+
+  # The multi-clause signature line lists param TYPES (the clauses carry the
+  # patterns). For a private function with all-hole params, drop the `_Unk` types
+  # to inferred placeholder names — Rian still needs a head to group the clauses.
+  defp sig_params(ptypes, vis) do
+    if vis != :pub and Enum.all?(ptypes, &(&1 == "_Unk")) do
+      Enum.map_join(1..length(ptypes), ", ", &"p#{&1}")
+    else
+      Enum.join(ptypes, ", ")
+    end
   end
 
   # "Simple" = a single clause whose params are all plain variables and no guard;

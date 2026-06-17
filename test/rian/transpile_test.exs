@@ -169,11 +169,12 @@ defmodule Rian.TranspileTest do
       assert out =~ "pub def double(x _Unk) _Unk := x + x"
     end
 
-    test "defp is private (`def`, no `pub`) and OMITS the return (infer-local, ADR-0034)" do
-      # a private function needn't declare its return — `Rian.InferLocal` recovers it.
+    test "defp is private (`def`, no `pub`) and OMITS hole types — params and return (ADR-0034)" do
+      # a private function needn't declare its types — `Rian.InferLocal` recovers
+      # them, so an unresolved param/return is omitted rather than printed as `_Unk`.
       out = rian("defmodule M do\n  defp f(x), do: x\nend")
-      assert out =~ ~r/\n  def f\(x _Unk\) :=/
-      refute out =~ "def f(x _Unk) _Unk"
+      assert out =~ ~r/\n  def f\(x\) :=/
+      refute out =~ "def f(x _Unk)"
     end
 
     test "a `pub def` (from Elixir `def`) KEEPS its return hole (declare-public)" do
@@ -181,16 +182,17 @@ defmodule Rian.TranspileTest do
       assert out =~ "pub def f(x _Unk) _Unk := x"
     end
 
-    test "omitting the private return drops one hole per defp" do
+    test "a private def omits its hole types entirely (no `_Unk` to fill)" do
       {_pub, ps} =
         {nil, Rian.Transpile.transpile_with_stats("defmodule M do\n  def f(x), do: x\nend")}
 
       {_priv, qs} =
         {nil, Rian.Transpile.transpile_with_stats("defmodule M do\n  defp f(x), do: x\nend")}
 
-      # public f has 2 holes (param + return); private f has 1 (param only).
+      # public f keeps 2 holes (param + return, declare-public); private f omits
+      # both — Rian infers them, so there is nothing to fill.
       assert elem(ps, 1).holes == 2
-      assert elem(qs, 1).holes == 1
+      assert elem(qs, 1).holes == 0
     end
 
     test "multi-clause def emits one sig + per-clause bodies" do
@@ -306,7 +308,7 @@ end|) =~ ~S|"v=${x}!"|
       out =
         rian("defmodule M do\n  @prims ~w(a b c)\n  def names, do: @prims\nend")
 
-      assert out =~ ~s|const prims _Unk := ["a", "b", "c"]|
+      assert out =~ ~s|const prims := ["a", "b", "c"]|
       assert out =~ "pub def names() _Unk := prims"
       # the reference is the bare const name, never the unlexable `@(prims)`
       refute out =~ "@(prims"
@@ -314,7 +316,7 @@ end|) =~ ~S|"v=${x}!"|
 
     test "the `a` modifier of `~w` yields an atom list" do
       assert rian("defmodule M do\n  @ks ~w(a b)a\n  def k, do: @ks\nend") =~
-               "const ks _Unk := [:a, :b]"
+               "const ks := [:a, :b]"
     end
 
     test "a directive attribute (`@impl`, unreferenced) stays a marker, not a `const`" do

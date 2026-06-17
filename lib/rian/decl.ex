@@ -1159,15 +1159,46 @@ defmodule Rian.Decl do
   defp parse_const(text, pub?, doc) do
     case split_once(text, ":=") do
       {decl, value} ->
+        # The type is optional (`const NAME := value`): when omitted it is inferred
+        # from the value's literal shape, like Crystal. `nil` means "infer".
         case decl |> collapse_parens() |> String.split(~r/\s+/, trim: true) do
-          [name, type] -> %Const{name: name, type: type, value: value, pub?: pub?, doc: doc}
-          _ -> raise Error, "const needs `NAME Type := value`: #{text}"
+          [name, type] ->
+            %Const{name: name, type: type, value: value, pub?: pub?, doc: doc}
+
+          [name] ->
+            %Const{name: name, type: infer_const_type(value), value: value, pub?: pub?, doc: doc}
+
+          _ ->
+            raise Error, "const needs `NAME [Type] := value`: #{text}"
         end
 
       :none ->
         raise Error, "const needs `:=`: #{text}"
     end
   end
+
+  # Infer a const's type from its literal value (the value is always a literal,
+  # ADR-0009/IR.Const). Returns a type string, or `nil` when the shape is not a
+  # recognized literal — downstream then treats the type as unknown.
+  defp infer_const_type(value) do
+    case Pratt.parse_body(value) do
+      {:block, [expr: node]} -> literal_type(node)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  defp literal_type({:num, n}), do: if(String.contains?(n, "."), do: "Float64", else: "Int53")
+  defp literal_type({:str, _}), do: "String"
+  defp literal_type({:istr, _}), do: "String"
+  defp literal_type({:atom, _}), do: "Symbol"
+  defp literal_type({:id, b}) when b in ~w(true false), do: "Bool"
+
+  defp literal_type({:list_lit, [e | _], _}),
+    do: with(t when is_binary(t) <- literal_type(e), do: "Vec(#{t})")
+
+  defp literal_type(_), do: nil
 
   defp subst_const(%Const{type: t} = c, aliases), do: %Const{c | type: subst_type_str(t, aliases)}
 

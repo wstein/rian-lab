@@ -1059,10 +1059,17 @@ defmodule Rian.DeclTest do
       end
     end
 
-    test "a `const` whose declaration is not `NAME Type` is rejected" do
-      assert_raise Decl.Error, ~r/const needs `NAME Type := value`/, fn ->
-        Decl.parse("mod M do\n  const X := 1\nend")
+    test "a `const` whose declaration is neither `NAME` nor `NAME Type` is rejected" do
+      # the type is optional (`const X := 1` is valid, inferred), but extra tokens
+      # before `:=` are not.
+      assert_raise Decl.Error, ~r/const needs `NAME \[Type\] := value`/, fn ->
+        Decl.parse("mod M do\n  const X Int64 extra := 1\nend")
       end
+    end
+
+    test "a `const` with the type omitted infers it from the value (Crystal-style)" do
+      %{mods: [m]} = Decl.parse("mod M do\n  const Targets := [:ex, :rs, :js]\nend")
+      assert [%{name: "Targets", type: "Vec(Symbol)"}] = m.consts
     end
 
     test "a `const` with no `:=` is rejected" do
