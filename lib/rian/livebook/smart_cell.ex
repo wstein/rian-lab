@@ -19,7 +19,14 @@ if Code.ensure_loaded?(Kino.SmartCell) do
 
     @impl true
     def init(attrs, ctx) do
-      source = Map.get(attrs, "source", "")
+      # default to "" when absent OR explicitly nil (Livebook may store a null
+      # `source`); `Map.get/3`'s default only covers absence, so match nil too.
+      source =
+        case Map.get(attrs, "source") do
+          nil -> ""
+          s -> s
+        end
+
       {:ok, assign(ctx, source: source), editor: [source: source, placement: :top]}
     end
 

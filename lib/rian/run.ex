@@ -34,9 +34,10 @@ defmodule Rian.Run do
     end
   end
 
-  # gate + load, then find the single module exporting the zero-arg entry. Compile
-  # errors are rescued to `{:error, message}`; `apply/3` runs in `eval/2` (outside
-  # this rescue) so a runtime crash keeps its stacktrace.
+  # gate + load, then find the single module exporting the zero-arg entry. Parse,
+  # gate and codegen errors arrive as `{:error, message}` values (errors-as-values,
+  # ADR-0035/0040) and short-circuit the `with`; `apply/3` runs in `eval/2` (outside
+  # this chain) so a genuine runtime crash keeps its stacktrace.
   defp resolve(src, main) do
     with {:ok, prog} <- Rian.Decl.parse_result(src),
          :ok <- Rian.Check.check_program(prog),
