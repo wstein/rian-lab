@@ -68,4 +68,58 @@ defmodule Rian.InferLocalTest do
     out = InferLocal.fill_returns(prog)
     assert ret_of(out, "k") == "Int8"
   end
+
+  describe "private PARAMETER inference (ADR-0034 Phase 2, bidirectional)" do
+    # `Decl.parse` runs the InferLocal pass, so a parsed lowercase lone param is
+    # already resolved. `param_of/3` reads the resolved `{name, type}`.
+    defp param_of(src, name, i),
+      do:
+        src
+        |> Decl.parse()
+        |> all_funcs()
+        |> Enum.find(&(&1.name == name))
+        |> Map.get(:params)
+        |> Enum.at(i)
+
+    defp tvars_of(src, name),
+      do: src |> Decl.parse() |> all_funcs() |> Enum.find(&(&1.name == name)) |> Map.get(:tvars)
+
+    test "an arithmetic body pins a lone param to Int53" do
+      assert %{name: "x", type: "Int53"} = param_of("def inc(x) := x + 1", "inc", 0)
+    end
+
+    test "a string-concat body pins a lone param to String" do
+      assert %{name: "s", type: "String"} = param_of(~s|def cat(s) := s <> "!"|, "cat", 0)
+    end
+
+    test "a pure pass-through param auto-generalizes to a fresh `forall T`" do
+      assert %{name: "x", type: "T"} = param_of("def id(x) := x", "id", 0)
+      assert tvars_of("def id(x) := x", "id") == ["T"]
+    end
+
+    test "a clause-head literal pattern pins the param (multi-clause)" do
+      src = "def f(n)\n  case n do\n    0 -> 0\n    k -> k + 1\n  end\nend"
+      assert %{type: "Int53"} = param_of(src, "f", 0)
+    end
+
+    test "a typed callee pushes its expected param type inward (bidirectional)" do
+      src = "mod M do\n  pub def twice(y Int53) Int53 := y + y\n  def w(x) := twice(x)\nend"
+      assert %{name: "x", type: "Int53"} = param_of(src, "w", 0)
+    end
+
+    test "a `pub` lone lowercase param keeps the permissive anonymous reading (no infer, no raise)" do
+      # the self-hosted dispatchers rely on this: `pub def lower_pat(p) Pat` etc.
+      f = "pub def disp(p) Int53 := 0" |> Decl.parse() |> Map.get(:funcs) |> hd()
+      assert [%{type: "p"}] = f.params
+    end
+
+    test "a provable parameter-type conflict raises 'annotate it'" do
+      # `x` is matched as an Int literal in one clause and a String literal in another
+      src = "def bad(x)\n  case x do\n    0 -> 1\n    \"a\" -> 2\n  end\nend"
+
+      assert_raise Rian.Decl.Error, ~r/parameter `x` of private `bad`.*conflicting/, fn ->
+        Decl.parse(src)
+      end
+    end
+  end
 end

@@ -9,16 +9,24 @@ defmodule Rian.InferLocal do
   so everything downstream sees fully-typed functions exactly as if the human had written
   the sig.
 
-  **Scope: return types.** For every private function with `ret: nil` (params still
-  declared), infer the return from its clause bodies via `Check.infer_return_type/2` and
-  write it back. A **fixpoint** handles private→private call chains: a callee's return
-  fills first, then its callers see it on the next pass. A return that cannot be inferred
-  (a self-recursive function, an `@external` with no body, or a body touching something
-  unmodelled) raises a clear *"annotate it"* error rather than reaching the checker as
-  `nil` — sound partiality, never a guess.
+  **Scope: parameters and return types.** A lone lowercase parameter token (`def f(x)`,
+  ADR-0034 casing rule) parses with `type: :infer`; a private function with `ret: nil`
+  omits its return. Each fixpoint round fills **params first, then the return** (a return
+  needs its param types): `Check.infer_param_type/3` recovers a param's type
+  bidirectionally — an operator, a string concat, a typed callee, or a clause-head
+  pattern pushes its *expected* type onto the variable — and `Check.infer_return_type/2`
+  joins the clause bodies. A **fixpoint** handles private→private chains (a callee's
+  types fill first, then its callers see them). After the fixpoint, any param the body
+  left *unconstrained* (a pass-through like `def id(x) := x`) is **generalized to a fresh
+  `forall T`** type variable. A return that still cannot be inferred (self-recursion, an
+  `@external` with no body, an unmodelled body) — or a param used at *conflicting* types —
+  raises a clear *"annotate it"* error rather than reaching the checker unresolved: sound
+  partiality, never a guess.
 
-  Private *parameter* inference is not done here — see ADR-0034 (the `def f(x)` grammar
-  reads a bare token as the parameter's type, which conflicts with a name-based inference).
+  `pub`/`@external` boundaries are untouched: a lone lowercase token there keeps its
+  legacy permissive anonymous-typed reading (the token is the param's type) — the
+  self-hosted dispatchers (`pub def lower_pat(p) Pat`) rely on it. The invariant: no
+  `:infer` survives this pass.
   """
 
   alias Rian.{Check, IR}
@@ -32,8 +40,10 @@ defmodule Rian.InferLocal do
   """
   @spec fill_returns(map()) :: map()
   def fill_returns(prog) when is_map(prog) do
-    if Enum.any?(all_funcs(prog), &untyped_ret?/1) do
-      prog = fixpoint(prog)
+    if Enum.any?(all_funcs(prog), &(untyped_ret?(&1) or has_infer_param?(&1))) do
+      # 1. fix concrete params + returns; 2. generalize any param the body left
+      #    unconstrained to `forall T`; 3. fix returns that depended on that tvar.
+      prog = prog |> fixpoint() |> generalize_params() |> fixpoint()
 
       case Enum.filter(all_funcs(prog), &untyped_ret?/1) do
         [] ->
@@ -55,9 +65,14 @@ defmodule Rian.InferLocal do
   defp untyped_ret?(%IR.Func{pub?: false, ret: nil}), do: true
   defp untyped_ret?(_), do: false
 
-  # rebuild the inference context each round so a return filled this pass is visible
-  # to its callers next pass; stop when a pass fills nothing new (bounded by the
-  # number of undeclared returns).
+  defp has_infer_param?(%IR.Func{pub?: false, params: ps}),
+    do: Enum.any?(ps, &(&1.type == :infer))
+
+  defp has_infer_param?(_), do: false
+
+  # rebuild the inference context each round so a param/return filled this pass is
+  # visible to its callers next pass; stop when a pass fills nothing new (bounded by
+  # the number of undeclared params + returns).
   defp fixpoint(prog) do
     ic = Check.program_ic(prog)
     {prog, changed?} = pass(prog, ic)
@@ -65,15 +80,95 @@ defmodule Rian.InferLocal do
   end
 
   defp pass(prog, ic) do
-    {funcs, c1} = fill_funcs(Map.get(prog, :funcs, []), ic)
+    {funcs, c1} = fill_step(Map.get(prog, :funcs, []), ic)
 
     {mods, c2} =
       Enum.map_reduce(Map.get(prog, :mods, []), false, fn m, any ->
-        {mf, c} = fill_funcs(m.funcs, ic)
+        {mf, c} = fill_step(m.funcs, ic)
         {%{m | funcs: mf}, any or c}
       end)
 
     {%{prog | funcs: funcs, mods: mods}, c1 or c2}
+  end
+
+  # params first (a return needs its param types), then the return.
+  defp fill_step(funcs, ic) do
+    {funcs, cp} = fill_params(funcs, ic)
+    {funcs, cr} = fill_funcs(funcs, ic)
+    {funcs, cp or cr}
+  end
+
+  defp fill_params(funcs, ic) do
+    Enum.map_reduce(funcs, false, fn f, changed ->
+      if has_infer_param?(f) do
+        {f2, c} = solve_concrete_params(f, ic)
+        {f2, changed or c}
+      else
+        {f, changed}
+      end
+    end)
+  end
+
+  # fill only the params whose type is provable NOW (a concrete result). Leave an
+  # unconstrained `:infer` param for a later round (a callee may not be typed yet) or
+  # for generalization once the fixpoint settles. A provable conflict raises.
+  defp solve_concrete_params(%IR.Func{params: ps} = f, ic) do
+    {ps, changed} =
+      ps
+      |> Enum.with_index()
+      |> Enum.map_reduce(false, fn {p, i}, ch ->
+        case p.type == :infer && Check.infer_param_type(f, i, ic) do
+          t when is_binary(t) ->
+            {%{p | type: t}, true}
+
+          :mismatch ->
+            raise Rian.Decl.Error,
+                  "parameter `#{p.name}` of private `#{f.name}` is used at conflicting " <>
+                    "types — annotate it (`def #{f.name}(#{p.name} <Type>) …`)"
+
+          _ ->
+            {p, ch}
+        end
+      end)
+
+    {%{f | params: ps}, changed}
+  end
+
+  # any param the body left unconstrained is parametric: generalize it to a fresh
+  # `forall T` type variable (the user-chosen policy) so pass-through helpers like
+  # `def id(x) := x` work across types without an annotation.
+  defp generalize_params(prog) do
+    prog
+    |> Map.update(:funcs, [], fn fs -> Enum.map(fs, &generalize_func/1) end)
+    |> Map.update(:mods, [], fn ms ->
+      Enum.map(ms, fn m -> %{m | funcs: Enum.map(m.funcs, &generalize_func/1)} end)
+    end)
+  end
+
+  defp generalize_func(%IR.Func{pub?: false, params: ps, tvars: tvs} = f) do
+    if Enum.any?(ps, &(&1.type == :infer)) do
+      {ps, tvs} =
+        Enum.map_reduce(ps, tvs, fn p, used ->
+          if p.type == :infer do
+            tv = fresh_tvar(used)
+            {%{p | type: tv}, used ++ [tv]}
+          else
+            {p, used}
+          end
+        end)
+
+      %{f | params: ps, tvars: tvs}
+    else
+      f
+    end
+  end
+
+  defp generalize_func(f), do: f
+
+  # the first single-letter type variable (T, U, … Z, A … S) not already in use.
+  defp fresh_tvar(used) do
+    (Enum.map(?T..?Z, &<<&1>>) ++ Enum.map(?A..?S, &<<&1>>))
+    |> Enum.find("T", &(&1 not in used))
   end
 
   defp fill_funcs(funcs, ic) do

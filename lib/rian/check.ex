@@ -68,7 +68,7 @@ defmodule Rian.Check do
   }
 
   alias Rian.Core.{ECaptureNamed, ELambda}
-  alias Rian.Core.{PCtor, PVar}
+  alias Rian.Core.{PChar, PCtor, PLit, PVar}
   alias Rian.IR.Func
 
   defmodule Error do
@@ -565,6 +565,9 @@ defmodule Rian.Check do
   # a field type that is a type *variable* (a generic like `Option(T)`'s `T`)
   # narrows to `:unknown` — we don't instantiate generics yet (conservative)
   defp concretize(t) when is_binary(t), do: if(tvar?(t), do: :unknown, else: t)
+  # an `:infer` param (ADR-0034 infer-local) is treated as `:unknown` mid-fixpoint —
+  # it imposes no constraint until `Rian.InferLocal` replaces it with a concrete type.
+  defp concretize(:infer), do: :unknown
   defp concretize(t), do: t
   defp tvar?(t), do: String.match?(t, ~r/^[A-Z][0-9]?$/)
 
@@ -1407,10 +1410,11 @@ defmodule Rian.Check do
   of an untyped private function (infer-local / declare-public, ADR-0034).
   """
   @spec infer_return_type(Rian.IR.Func.t(), map()) :: String.t() | :unknown
-  def infer_return_type(%Func{params: ps, clauses: clauses}, ic) do
+  def infer_return_type(%Func{params: ps, clauses: clauses, tvars: tvs}, ic) do
     types =
       Enum.map(clauses, fn c ->
-        infer(Pratt.parse_body(c.body), clause_env(c.pats, ps, ic), ic)
+        env = c.pats |> clause_env(ps, ic) |> bind_tvar_params(c.pats, ps, tvs)
+        infer(Pratt.parse_body(c.body), env, ic)
       end)
 
     if Enum.any?(types, &(&1 in [:unknown, :mismatch, :bottom])) do
@@ -1422,6 +1426,173 @@ defmodule Rian.Check do
       end
     end
   end
+
+  # `clause_env` concretizes a generic param's tvar to `:unknown` (it doesn't
+  # instantiate generics). For a function's OWN type variables, though, the body must
+  # see the parameter AS its tvar so a pass-through (`def id(x) := x`, auto-generalized
+  # to `forall T`) can infer the return `T`. Re-bind each var-pattern param whose type
+  # is one of `tvs` to that tvar string.
+  defp bind_tvar_params(env, pats, ps, tvs) do
+    pats
+    |> Enum.zip(ps)
+    |> Enum.reduce(env, fn {pat, p}, env ->
+      case Core.from_pat(pat) do
+        %PVar{name: vn} -> if p.type in tvs, do: Map.put(env, vn, p.type), else: env
+        _ -> env
+      end
+    end)
+  end
+
+  @doc """
+  Infer a private function parameter's type at position `i`, bidirectionally
+  (Dunfield–Krishnaswami "checking", realized locally): an arithmetic/compare
+  operator, a string concat, or a typed callee parameter pushes its *expected* type
+  onto the variable flowing into it; a literal/ctor clause-head pattern constrains the
+  scrutinee directly. Returns a concrete type string; `:unknown` when nothing
+  constrains the parameter (a parametric/pass-through use — `Rian.InferLocal`
+  generalizes it to `forall T`); `:mismatch` on a provable conflict (the parameter
+  used at two incompatible types). The engine behind private *parameter* inference
+  (infer-local / declare-public, ADR-0034).
+  """
+  @spec infer_param_type(Rian.IR.Func.t(), non_neg_integer(), map()) :: ty()
+  def infer_param_type(%Func{params: ps, clauses: clauses}, i, ic) do
+    Enum.reduce(clauses, :unknown, fn c, acc ->
+      ct =
+        case c.pats |> Enum.at(i) |> Core.from_pat() do
+          %PVar{name: vn} ->
+            var_constraint(
+              vn,
+              Core.from_expr(Pratt.parse_body(c.body)),
+              clause_env(c.pats, ps, ic),
+              ic
+            )
+
+          other ->
+            pattern_type(other, ic)
+        end
+
+      fold_constraint(acc, ct)
+    end)
+  end
+
+  # the type a clause-head pattern requires of its scrutinee (the parameter).
+  defp pattern_type(%PLit{value: v}, _ic) when is_integer(v), do: "Int53"
+  defp pattern_type(%PLit{value: v}, _ic) when is_binary(v), do: "String"
+  defp pattern_type(%PChar{}, _ic), do: "Char"
+  defp pattern_type(%PCtor{ctor: c}, ic), do: ctor_type(ic, c) || :unknown
+  defp pattern_type(_pat, _ic), do: :unknown
+
+  # unify two parameter-type constraints: `:unknown` is the identity (no information),
+  # a concrete type wins, two differing concretes conflict (`:mismatch`).
+  defp fold_constraint(:unknown, t), do: t
+  defp fold_constraint(t, :unknown), do: t
+  defp fold_constraint(:mismatch, _), do: :mismatch
+  defp fold_constraint(_, :mismatch), do: :mismatch
+  defp fold_constraint(a, b), do: conservative(unify(a, b)) |> nilable_mismatch(a, b)
+
+  # `unify` returns `:mismatch` on a real clash, but `conservative` softens it to
+  # `:unknown`. For parameter inference a clash IS the signal, so restore it.
+  defp nilable_mismatch(:unknown, a, b) when a != b and is_binary(a) and is_binary(b),
+    do: :mismatch
+
+  defp nilable_mismatch(t, _a, _b), do: t
+
+  # Collect the type the body forces on variable `name` (bidirectional "expected type
+  # in"): an arithmetic/compare operator, a string concat, or a typed callee parameter
+  # constrains the variable flowing into it. Recurses through compound expressions.
+  defp var_constraint(name, %EBin{op: op, left: l, right: r}, env, ic) do
+    here =
+      cond do
+        op == "<>" and (var?(l, name) or var?(r, name)) -> "String"
+        (op in @arith or op in @int_ops) and var?(l, name) -> num_hint(infer(r, env, ic))
+        (op in @arith or op in @int_ops) and var?(r, name) -> num_hint(infer(l, env, ic))
+        op in @bool_ops and var?(l, name) -> concretize(infer(r, env, ic))
+        op in @bool_ops and var?(r, name) -> concretize(infer(l, env, ic))
+        true -> :unknown
+      end
+
+    [here, var_constraint(name, l, env, ic), var_constraint(name, r, env, ic)]
+    |> Enum.reduce(:unknown, fn c, acc -> fold_constraint(acc, c) end)
+  end
+
+  defp var_constraint(name, %ECall{fun: %EId{name: f}, args: as}, env, ic) do
+    sig = Map.get(Map.get(ic, :fsigs, %{}), f)
+
+    from_callee =
+      if sig do
+        as
+        |> Enum.with_index()
+        |> Enum.reduce(:unknown, fn {a, i}, acc ->
+          if var?(a, name),
+            do: fold_constraint(acc, concretize(Enum.at(sig.params, i, :unknown))),
+            else: acc
+        end)
+      else
+        :unknown
+      end
+
+    Enum.reduce(as, from_callee, fn a, acc ->
+      fold_constraint(acc, var_constraint(name, a, env, ic))
+    end)
+  end
+
+  defp var_constraint(name, %ECall{args: as}, env, ic),
+    do:
+      Enum.reduce(as, :unknown, fn a, acc ->
+        fold_constraint(acc, var_constraint(name, a, env, ic))
+      end)
+
+  defp var_constraint(name, %EUnary{arg: a}, env, ic), do: var_constraint(name, a, env, ic)
+
+  defp var_constraint(name, %EIf{cond: c, then: t, else: e}, env, ic),
+    do:
+      Enum.reduce([c, t, e], :unknown, fn n, acc ->
+        fold_constraint(acc, var_constraint(name, n, env, ic))
+      end)
+
+  defp var_constraint(name, %EBlock{stmts: ss}, env, ic) do
+    Enum.reduce(ss, :unknown, fn
+      {:expr, e}, acc -> fold_constraint(acc, var_constraint(name, e, env, ic))
+      {:bind, _n, e}, acc -> fold_constraint(acc, var_constraint(name, e, env, ic))
+      {:typed_bind, _n, _t, e}, acc -> fold_constraint(acc, var_constraint(name, e, env, ic))
+      _, acc -> acc
+    end)
+  end
+
+  defp var_constraint(name, %ECase{scrut: s, arms: arms}, env, ic) do
+    # `case x do <pat> -> …` — when the scrutinee IS the variable, each arm's head
+    # pattern constrains it (a literal/ctor arm pins the type; conflicting arms clash).
+    from_scrut =
+      if var?(s, name) do
+        Enum.reduce(arms, :unknown, fn {p, _g, _b}, acc ->
+          fold_constraint(acc, pattern_type(p, ic))
+        end)
+      else
+        :unknown
+      end
+
+    Enum.reduce(arms, fold_constraint(from_scrut, var_constraint(name, s, env, ic)), fn {_p, _g,
+                                                                                         body},
+                                                                                        acc ->
+      fold_constraint(acc, var_constraint(name, body, env, ic))
+    end)
+  end
+
+  defp var_constraint(name, %EList{elems: es}, env, ic),
+    do:
+      Enum.reduce(es, :unknown, fn e, acc ->
+        fold_constraint(acc, var_constraint(name, e, env, ic))
+      end)
+
+  defp var_constraint(_name, _leaf, _env, _ic), do: :unknown
+
+  # an arithmetic neighbour's type pins the variable when it is a concrete integer,
+  # else the portable default `Int53` (a bare `x + 1` makes `x : Int53`, ADR-0064).
+  defp num_hint(t) when is_binary(t), do: if(int_type?(t), do: ordinal_base(t), else: :unknown)
+  defp num_hint(_), do: "Int53"
+
+  defp var?(%EId{name: n}, n), do: true
+  defp var?(_, _), do: false
 
   @doc "Parse source and check every function; returns `:ok` or the first `{:error, message}`."
   @spec check(String.t()) :: term()

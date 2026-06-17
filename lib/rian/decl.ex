@@ -1242,6 +1242,7 @@ defmodule Rian.Decl do
   @spec build_func([map()]) :: map()
   def build_func([%{body: nil} = sig | [_ | _] = clauses]) do
     params = parse_params(sig.params)
+    params = if sig[:pub] == true, do: boundary_params(params), else: params
 
     %Func{
       name: sig.name,
@@ -1261,6 +1262,7 @@ defmodule Rian.Decl do
   # single typed clause — each parameter binds itself as the clause pattern
   def build_func([%{body: body} = d]) when not is_nil(body) do
     params = parse_params(d.params)
+    params = if d[:pub] == true, do: boundary_params(params), else: params
 
     %Func{
       name: d.name,
@@ -1281,9 +1283,11 @@ defmodule Rian.Decl do
   # per-target host bodies and NO portable clauses. The signature is checked once;
   # `Rian.Reach` reads `externals` for the target set; each emitter lowers its spec.
   def build_func([%{body: nil, externals: ext} = sig]) when map_size(ext) > 0 do
+    params = boundary_params(parse_params(sig.params))
+
     %Func{
       name: sig.name,
-      params: parse_params(sig.params),
+      params: params,
       ret: req_ret(sig),
       clauses: [],
       externals: ext,
@@ -1339,10 +1343,33 @@ defmodule Rian.Decl do
       end
 
     case rest do
-      [type] -> {nil, cap, type}
+      [tok] -> if type_token?(tok), do: {nil, cap, tok}, else: {tok, cap, :infer}
       [name, type] -> {name, cap, type}
       _ -> raise Error, "bad parameter `#{p}`"
     end
+  end
+
+  # A lone parameter token is a TYPE when it looks like one — type names and
+  # constructors are PascalCase (`Int53`, `Vec(Int)`, `Shape`), a type variable is
+  # an upper-case letter (`T`). A lowercase lone token is a VALUE name whose type is
+  # INFERRED (`:infer`, ADR-0034 infer-local params): `def f(x) := x + 1` binds `x`
+  # and `Rian.InferLocal` recovers its type. `pub`/`@external` boundaries reject
+  # `:infer` (a public boundary must be annotated — see `reject_infer_boundary/3`).
+  defp type_token?(<<c::utf8, _::binary>>) when c in ?A..?Z, do: true
+  defp type_token?(_), do: false
+
+  # infer-local applies to PRIVATE functions only (ADR-0034). On a `pub`/`@external`
+  # boundary a lowercase lone token keeps its legacy *permissive anonymous-typed*
+  # reading (the token is the param's type, name synthesized) — backward-compatible
+  # with the self-hosted dispatchers (`pub def lower_pat(p) Pat`) that take untyped
+  # surface AST with no nominal Rian type. So a boundary param is never `:infer`.
+  defp boundary_params(params) do
+    params
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {%Param{name: tok, type: :infer} = p, i} -> %{p | name: "arg#{i}", type: tok}
+      {p, _i} -> p
+    end)
   end
 
   # declare-public / infer-local (ADR-0034): a `pub` function MUST declare its return
