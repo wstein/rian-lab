@@ -62,18 +62,24 @@ defmodule Rian.IR do
     @moduledoc "A variant/struct field: an optional compile-time `label` and a `type`."
     @enforce_keys [:type]
     defstruct [:label, :type]
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Variant do
     @moduledoc "A sum-type variant: a constructor name and its (ordered) fields."
     @enforce_keys [:ctor]
     defstruct ctor: nil, fields: []
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Type do
     @moduledoc "A sum-type declaration (`type Name := …`). `pub?` marks it exported from a `mod`."
     @enforce_keys [:name]
     defstruct name: nil, variants: [], pub?: false, doc: nil
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Range do
@@ -86,6 +92,8 @@ defmodule Rian.IR do
     """
     @enforce_keys [:name, :base, :lo, :hi]
     defstruct name: nil, base: nil, lo: nil, hi: nil, pub?: false, doc: nil
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Opaque do
@@ -104,6 +112,8 @@ defmodule Rian.IR do
     """
     @enforce_keys [:name, :base]
     defstruct name: nil, base: nil, pub?: false, doc: nil, ops: [], casts: []
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Struct do
@@ -115,6 +125,8 @@ defmodule Rian.IR do
     """
     @enforce_keys [:name]
     defstruct name: nil, fields: [], pub?: false, doc: nil
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Const do
@@ -125,6 +137,8 @@ defmodule Rian.IR do
     """
     @enforce_keys [:name, :type, :value]
     defstruct name: nil, type: nil, value: nil, pub?: false, doc: nil
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Use do
@@ -136,6 +150,8 @@ defmodule Rian.IR do
     """
     @enforce_keys [:path]
     defstruct path: nil, names: []
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Mod do
@@ -159,18 +175,24 @@ defmodule Rian.IR do
               funcs: [],
               doc: nil,
               targets: nil
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Param do
     @moduledoc "A function parameter: `name`, `type`, reference `cap`ability."
     @enforce_keys [:name, :type]
     defstruct name: nil, type: nil, cap: :val
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Clause do
     @moduledoc "One function clause: argument `pats`, a `body` (source string — or the expanded `{:block, …}` AST after macro expansion, `Rian.Decl`), an optional `guard` (source string)."
     @enforce_keys [:pats, :body]
     defstruct pats: [], body: nil, guard: nil
+
+    @type t :: %__MODULE__{}
   end
 
   defmodule Func do
