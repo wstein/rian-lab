@@ -172,14 +172,22 @@ Consequences of target-relativity:
        binding** (`y := x; Some(y)`), where the rebind clones the borrowed `&T` to an owned `T`. Nested
        generic returns (`Vec(Option(T))` → `Vec<Option<T>>`) lower correctly too (`Rian.Capability.owned`
        strips exactly the one closing paren per layer). Verified on rustc (`reach_rust_honesty_test`).
-  The remaining Rust-generic residual is an **`Fn(...)` function type anywhere in a signature** — a
-  parameter *or* the return, concrete *or* generic. The emitter has no closure-as-value lowering (it
-  spells the bare trait `Fn<…>`, rustc E0782, and an `Fn` parameter mangles to an undeclared type,
-  E0425), so `sig_uses_fn_type?` pins any `Fn(`-bearing signature off `:rs` — a returned closure
-  (`adder() Fn(Int53, Int53)`), a higher-order parameter (`apply_twice(f Fn(Int53, Int53), …)`,
-  `map(f Fn(T, U), …)`), and a nested `Option(Fn(Int53, T))` alike. Plus every **parametric** shape
-  outside the monomorphic subset above. (A Copy-primitive *protocol-impl receiver* used as a value —
-  `Show for Bool`'s `if b` — now derefs correctly and reaches `:rs`; it was a silent over-claim.)
+  **Closure-as-value lowering landed (2026-06-17).** An `Fn(args.., ret)` callback **parameter** lowers
+  to argument-position `&impl Fn(<lowered args>) -> <lowered ret>` (`Rian.Capability.rust_param`) — by
+  *reference* so a recursive higher-order fn (`map`/`filter`/`reduce`) can both call it and re-pass it
+  without a use-after-move; a closure-call's bare-variable args are `.clone()`d (the callback takes its
+  args by value, so a reused element survives and a borrowed `&U` coerces to owned `U`). A **concrete**
+  returned closure lowers to `Box<dyn Fn(...)>` + `Box::new(move …)` (`Rian.Capability.owned` +
+  `Rian.Lower`). So `map(f Fn(T, U), …)`, `apply_twice(f Fn(Int53, Int53), …)`, and `adder(n Int53)
+  Fn(Int53, Int53)` all reach `:rs` (rustc-verified, `reach_rust_honesty_test`); the whole
+  `prelude_list.rian` is back on the full `ex,rs,js` CI gate.
+
+  The remaining `Fn` residual is **narrow**: a returned closure that mentions a **type variable**
+  (`mk(x T) Fn(Int53, T)`) or is **nested** in another type (`Option(Fn(Int53, T))`). The boxed
+  `dyn Fn` there needs owned capture of a borrowed param plus a `T: 'static` bound, not yet emitted, so
+  `sig_uses_fn_type?` still pins exactly those off `:rs` (and nothing else `Fn`-shaped). Plus every
+  **parametric** shape outside the monomorphic subset above. (A Copy-primitive *protocol-impl receiver*
+  used as a value — `Show for Bool`'s `if b` — now derefs correctly and reaches `:rs`.)
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
   `Self`-returning methods (`def add(a Self, b Self) Self`) and associated types are a further Rust
   mapping question (return-position `Self`, generic associated types).
