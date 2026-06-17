@@ -95,3 +95,12 @@ Elixir source, which targets the BEAM) needs exactly the BEAM path.
   later ADR; until then, BEAM-only and reach-pinned.
 - **Specifier coverage** — endianness/`float`/`utf16`/`utf32`/unit are parsed-but-deferred until a
   real consumer needs them; the checker rejects an unsupported specifier rather than mis-lowering.
+- **Sizes are LITERAL only** — `::n` / `::size(<int>)`. A *dynamic* size (`::size(len)` over a bound
+  variable, the `<<len::8, body::binary-size(len)>>` idiom) is **not yet parsed** — it raises a clear
+  parse error, not a mis-lowering. The round-trip target (`lib/rian`, e.g. the UTF-8 lexer) uses only
+  fixed specs, so this is unblocking for now; add variable sizes when a consumer needs them.
+- **Formatter: `-`-joined specs render loosely.** `Rian.Format` is token-stream + context-free, so the
+  spec separator `-` in `binary-size(4)` formats as `binary - size(4)` (re-lex- and parse-equivalent,
+  just not tight). The single-specifier forms (`::8`, `::utf8`, `::binary`, `::size(n)`) format tight
+  (`<<x::8, rest::binary>>`, snapshot-locked in `test/rian/fixtures/format/bitstrings.*`). Tightening
+  `-` lists needs `<<…>>` to become a CST group with a spec-aware renderer — a later refinement.

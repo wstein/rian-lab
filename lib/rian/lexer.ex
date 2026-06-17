@@ -33,6 +33,9 @@ defmodule Rian.Lexer do
   # declaration/`case` keywords for the token-driven declaration parser.
   @keywords ~w(if do else end def type range case when struct alias mod pub const macro use with protocol impl opaque abstract)
 
+  # multi-char operators, matched greedily before the single-char ops. `::` (the
+  # bitstring segment-spec separator, ADR-0078) was previously unused in Rian source —
+  # an atom is `:name` (single `:`), and type ascription is space-separated, not `::`.
   @multi ["->", "..", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!=", "::"]
   # `@` is the as-pattern operator (`name @ pat`); the annotation lane (`@name`,
   # checked first) still wins when `@` is immediately followed by an identifier.

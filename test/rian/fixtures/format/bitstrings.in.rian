@@ -1,0 +1,2 @@
+def header(x Int53) Binary := <<  1 , x :: 8 , rest :: binary >>
+def first_byte(<<t :: 8 , _ :: binary>>) := t

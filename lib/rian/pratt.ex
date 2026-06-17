@@ -766,6 +766,15 @@ defmodule Rian.Pratt do
   defp parse_bitspec_item([{:id, "unit"}, {:lparen}, {:num, n}, {:rparen} | rest]),
     do: {{:unit, int_of(n)}, rest}
 
+  # a *dynamic* size `size(var)` is not supported yet (ADR-0078: literal sizes only) —
+  # fail with a precise message instead of mis-parsing `size` as a type specifier.
+  defp parse_bitspec_item([{:id, "size"}, {:lparen}, {:id, v}, {:rparen} | _]),
+    do:
+      raise(
+        ArgumentError,
+        "dynamic bitstring size `size(#{v})` is not supported yet (ADR-0078) — use a literal, e.g. `size(8)`"
+      )
+
   defp parse_bitspec_item([{:id, name} | rest]), do: {{:type, name}, rest}
 
   defp parse_bitspec_item(other),

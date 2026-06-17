@@ -535,6 +535,13 @@ defmodule Rian.Format do
   defp space?({:uop, _}, _cur), do: false
   defp space?({:acolon}, _cur), do: false
   defp space?(_prev, {:kcolon}), do: false
+  # bitstrings (ADR-0078) are written tight: no padding just inside `<<`/`>>`, and the
+  # segment-spec separator `::` (and a `-`-joined spec list) hugs its operands —
+  # `<<x::8, rest::binary>>`, not `<< x :: 8 , rest :: binary >>`.
+  defp space?({:bitopen}, _cur), do: false
+  defp space?(_prev, {:bitclose}), do: false
+  defp space?({:op, "::"}, _cur), do: false
+  defp space?(_prev, {:op, "::"}), do: false
   # `f(` / `xs[` bind tightly (application/index); grouping `(`/literal `[` don't.
   defp space?(prev, {:lparen}), do: not value_end_tok?(prev)
   defp space?(prev, {:lbracket}), do: not value_end_tok?(prev)
