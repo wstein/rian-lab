@@ -227,6 +227,28 @@ defmodule Rian.Transpile do
     end
   end
 
+  # a *bodyless* default-declaring head `def f(a, b \\ d)` (Elixir requires the
+  # defaults to live on a bodyless head when the function has multiple clauses). It
+  # declares defaults for the real clauses that follow, so desugar to the delegating
+  # clauses only and DROP the head — the following clauses carry the top-arity body.
+  defp expand_defaults({df, m, [{name, hm, params}]})
+       when df in [:def, :defp] and is_atom(name) and is_list(params) do
+    defaulted = Enum.count(params, &match?({:\\, _, _}, &1))
+    plain = Enum.map(params, &strip_default/1)
+
+    if defaulted > 0 and Enum.all?(plain, &var?/1) do
+      n = length(params)
+
+      for keep <- (n - defaulted)..(n - 1) do
+        taken = Enum.take(plain, keep)
+        call_args = taken ++ Enum.map(Enum.drop(params, keep), fn {:\\, _, [_, d]} -> d end)
+        {df, m, [{name, hm, taken}, [do: {name, [], call_args}]]}
+      end
+    else
+      [{df, m, [{name, hm, params}]}]
+    end
+  end
+
   defp expand_defaults(stmt), do: [stmt]
 
   defp strip_default({:\\, _, [p, _]}), do: p

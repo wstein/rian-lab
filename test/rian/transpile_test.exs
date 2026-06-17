@@ -577,6 +577,26 @@ end|) =~ ~S|"v=${x}!"|
       assert out =~ "pub def greet(name _Unk, greeting _Unk) _Unk := greeting"
     end
 
+    test "a bodyless default-declaring head + real clauses expands to delegators (multi-clause form)" do
+      # Elixir requires defaults on a bodyless head when a function has multiple
+      # clauses: `def f(a, b \\ d)` (no body) followed by the real clauses. The head
+      # declares defaults for them; desugar to the delegators and drop the head.
+      out =
+        rian("""
+        defmodule M do
+          def check(func, ic \\\\ %{}, eset \\\\ %{tsets: %{}})
+          def check(f, ic, eset), do: {f, ic, eset}
+        end
+        """)
+
+      assert out =~ "pub def check(func _Unk) _Unk := check(func, %{}, %{tsets: %{}})"
+      assert out =~ "pub def check(func _Unk, ic _Unk) _Unk := check(func, ic, %{tsets: %{}})"
+      assert out =~ "pub def check(f _Unk, ic _Unk, eset _Unk) _Unk := {f, ic, eset}"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "\\\\"
+      refute body =~ "TODO"
+    end
+
     test "a non-variable parameter alongside a default strips defaults to one clause" do
       # forwarding by name is unsound when a param is a pattern (not a plain var),
       # so the defaults are dropped to a single clause rather than mis-delegated.
