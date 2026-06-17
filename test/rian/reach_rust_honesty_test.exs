@@ -172,6 +172,67 @@ defmodule Rian.ReachRustHonestyTest do
           end
       end
     end
+
+    # Closure-as-value lowering (ADR-0061): a `Fn(...)` parameter (`&impl Fn`, called +
+    # re-passed in recursion), a multi-use element (`filter`), a multi-arg + borrowed-acc
+    # closure call (`reduce`), and a concrete returned closure (`adder` → `Box::new(move …)`)
+    # must all compile AND run on rustc — the matrix now claims them `:rs`.
+    @tag :rust
+    test "Fn-param HOF and a concrete returned closure compile and run on rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          src = """
+          mod M do
+            pub def map(xs Vec(T), f Fn(T, U)) Vec(U) forall T, U
+            pub def map([], _) := []
+            pub def map([h | t], f) := [f(h) | map(t, f)]
+
+            pub def filter(xs Vec(T), f Fn(T, Bool)) Vec(T) forall T
+            pub def filter([], _) := []
+            pub def filter([h | t], f) := if f(h) do [h | filter(t, f)] else filter(t, f) end
+
+            pub def reduce(xs Vec(T), acc U, f Fn(T, U, U)) U forall T, U
+            pub def reduce([], acc, _) := acc
+            pub def reduce([h | t], acc, f) := reduce(t, f(h, acc), f)
+
+            pub def adder(n Int53) Fn(Int53, Int53) := (x) -> x + n
+          end
+          """
+
+          rust = Rian.Lower.rust_program(Decl.parse(src))
+
+          main = """
+          fn main() {
+            assert_eq!(m::map(&vec![1i64,2,3], &|x| x + 1), vec![2,3,4]);
+            assert_eq!(m::filter(&vec![1i64,2,3,4], &|x| x % 2 == 0), vec![2,4]);
+            assert_eq!(m::reduce(&vec![1i64,2,3], &0, &|x, acc| x + acc), 6);
+            assert_eq!(m::adder(10)(5), 15);
+            println!("ok");
+          }
+          """
+
+          base = Path.join(System.tmp_dir!(), "rian_fn_#{System.unique_integer([:positive])}")
+          f = base <> ".rs"
+          bin = base
+          File.write!(f, rust <> "\n" <> main)
+
+          try do
+            {out, code} =
+              System.cmd(rustc, ["-A", "warnings", "--edition", "2021", "-o", bin, f],
+                stderr_to_stdout: true
+              )
+
+            assert code == 0, "Fn lowering must compile on rustc:\n#{out}"
+            assert {"ok\n", 0} = System.cmd(bin, [])
+          after
+            File.rm(f)
+            File.rm(bin)
+          end
+      end
+    end
   end
 
   defp reach_src(src), do: Decl.parse(src) |> Reach.analyze()
