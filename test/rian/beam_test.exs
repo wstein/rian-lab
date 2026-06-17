@@ -11,6 +11,23 @@ defmodule Rian.BeamTest do
       assert {:file, _} = :code.is_loaded(:rian_beam_double)
     end
 
+    test "a map update `%{m | k: v}` replaces present keys and runs (ADR-0032)" do
+      {:ok, mod} =
+        Beam.load(
+          "mod M do\n" <>
+            "  pub def start() Map := %{k: 1, j: 2}\n" <>
+            "  pub def bump(m Map) Map := %{m | k: 9}\n" <>
+            "end",
+          :rian_beam_mapupdate
+        )
+
+      # the updated key changes; the untouched key is preserved
+      assert mod.bump(mod.start()) == %{k: 9, j: 2}
+      # the BEAM exact-assoc form requires the key present — updating an absent key
+      # raises, exactly like Elixir `%{m | absent: v}`
+      assert_raise KeyError, fn -> mod.bump(%{j: 0}) end
+    end
+
     test "a `const` lowers to a 0-arity accessor; references call it (incl. lowercase)" do
       {:ok, mod} =
         Beam.load(

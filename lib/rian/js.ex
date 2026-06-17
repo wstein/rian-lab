@@ -82,6 +82,7 @@ defmodule Rian.JS do
     EIf,
     EList,
     EMap,
+    EMapUpdate,
     ENum,
     EStr,
     EStruct,
@@ -618,6 +619,13 @@ defmodule Rian.JS do
   # a map literal `%{k: v, …}` is a JS object (identifier keys -> string keys)
   defp expr_js(%EMap{pairs: pairs}, i53),
     do: "{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{expr_js(v, i53)}" end)}}"
+
+  # a map update `%{base | k: v, …}` is a spread over the base object — the later
+  # keys override (`{...base, k: v}`), matching the BEAM exact-assoc replacement
+  defp expr_js(%EMapUpdate{base: base, pairs: pairs}, i53) do
+    fields = Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{expr_js(v, i53)}" end)
+    "{...#{expr_js(base, i53)}, #{fields}}"
+  end
 
   # portable-prelude primitives (ADR-0047 §2): each backend lowers `__prim_*` to
   # its native collection op; the portable `Map`/`String` ops are written in Rian

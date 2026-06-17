@@ -89,6 +89,7 @@ defmodule Rian.Beam do
     ELambda,
     EList,
     EMap,
+    EMapUpdate,
     ENum,
     EStr,
     ETuple,
@@ -662,6 +663,16 @@ defmodule Rian.Beam do
     {:map, @ln,
      Enum.map(pairs, fn {k, v} ->
        {:map_field_assoc, @ln, {:atom, @ln, String.to_atom(k)}, expr_form(v, s)}
+     end)}
+  end
+
+  # a map update `%{base | k: v, …}` -> the BEAM exact-assoc map form: each pair is
+  # `:map_field_exact` (`:=`), which requires the key to already be present (matches
+  # Elixir `%{m | k: v}` semantics — a missing key raises `BadMapError`)
+  defp expr_form(%EMapUpdate{base: base, pairs: pairs}, s) do
+    {:map, @ln, expr_form(base, s),
+     Enum.map(pairs, fn {k, v} ->
+       {:map_field_exact, @ln, {:atom, @ln, String.to_atom(k)}, expr_form(v, s)}
      end)}
   end
 

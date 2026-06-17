@@ -826,9 +826,17 @@ defmodule Rian.Transpile do
     "#{short_name(aliases)}(#{fields})"
   end
 
-  # map *update* `%{base | k: v}` has no Rian image (immutable) — flag it.
-  defp expr({:%{}, _, [{:|, _, _} | _]} = m),
-    do: ~s|TODO_PORT("map update #{escape(snippet(m))}")|
+  # map *update* `%{base | k: v}` → Rian `%{base | k: v}` (ADR-0033): same surface,
+  # the BEAM exact-assoc replacement of present keys. Atom keys only (a non-atom key
+  # has no `key: value` spelling); otherwise flag it.
+  defp expr({:%{}, _, [{:|, _, [base, kvs]}]} = m) when is_list(kvs) do
+    if Enum.all?(kvs, &match?({k, _} when is_atom(k), &1)) do
+      fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{expr(v)}" end)
+      "%{#{expr(base)} | #{fields}}"
+    else
+      ~s|TODO_PORT("map update #{escape(snippet(m))}")|
+    end
+  end
 
   # atom-keyed map literal `%{k: v}` → Rian `%{k: v}` (Rian has map literals).
   # Non-atom keys (`%{expr => v}`) have no `key: value` spelling here — flagged.

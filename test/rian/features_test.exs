@@ -81,6 +81,15 @@ defmodule Rian.FeaturesTest do
       assert Lower.emit_expr("%{a: 1, b: 2}", :elixir) == "%{a: 1, b: 2}"
       assert_raise RuntimeError, ~r/BEAM-only/, fn -> Lower.emit_expr("%{a: 1, b: 2}", :rust) end
     end
+
+    test "map update `%{base | k: v}` (parse → Core → Elixir text / Rust BEAM-only)" do
+      assert Rian.Pratt.parse("%{m | k: 9}") == {:map_update, {:id, "m"}, [{"k", {:num, "9"}}]}
+      assert Lower.emit_expr("%{m | k: 9, n: 0}", :elixir) == "%{m | k: 9, n: 0}"
+
+      assert_raise RuntimeError, ~r/BEAM-only/, fn ->
+        Lower.emit_expr("%{m | k: 9}", :rust)
+      end
+    end
   end
 
   describe "cons-recursion lowers to Rust slice patterns (ADR-0047)" do

@@ -235,10 +235,10 @@ defmodule Rian.TranspileTest do
       refute out =~ ~s|TODO_PORT("as-pattern|
     end
 
-    test "a construct with no Rian image (map update) stays a greppable marker" do
-      # field access and stdlib calls now lower (see below); a map *update* still
-      # has no Rian surface, so it stays an honest marker.
-      out = rian("defmodule M do\n  def t(m), do: %{m | k: 1}\nend")
+    test "a construct with no Rian image (non-atom-key map literal) stays a greppable marker" do
+      # field access, stdlib calls, and atom-key map *update* now lower; a non-atom
+      # key (`%{expr => v}`) has no `key: value` spelling, so it stays a marker.
+      out = rian("defmodule M do\n  def t(k), do: %{k => 1}\nend")
       assert out =~ "TODO_PORT"
     end
   end
@@ -261,6 +261,13 @@ end|) =~ ~S|"v=${x}!"|
 
     test "atom-keyed map literal → Rian %{k: v}" do
       assert rian("defmodule M do\n  def m, do: %{lo: 1, hi: 2}\nend") =~ "%{lo: 1, hi: 2}"
+    end
+
+    test "atom-keyed map update `%{base | k: v}` → Rian `%{base | k: v}` (no marker)" do
+      out = rian("defmodule M do\n  def bump(m), do: %{m | k: 9, n: 0}\nend")
+      assert out =~ "%{m | k: 9, n: 0}"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO"
     end
 
     test "multi-statement clause body → a block clause (`head` … `end`), not a one-liner" do

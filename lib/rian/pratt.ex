@@ -185,7 +185,7 @@ defmodule Rian.Pratt do
   defp parse_primary([{:kw, "case"} | rest]), do: parse_case(rest)
   defp parse_primary([{:kw, "with"} | rest]), do: parse_with(rest)
   defp parse_primary([{:lbracket} | rest]), do: parse_list(rest, [])
-  defp parse_primary([{:mapopen} | rest]), do: parse_map(rest, [])
+  defp parse_primary([{:mapopen} | rest]), do: parse_map_start(rest)
   defp parse_primary([{:lbrace} | rest]), do: parse_tuple(rest, [])
 
   defp parse_primary([{:lparen} | _] = tokens) do
@@ -682,15 +682,35 @@ defmodule Rian.Pratt do
     end
   end
 
-  defp parse_map([{:rbrace} | rest], acc), do: {{:map_lit, Enum.reverse(acc)}, rest}
+  # `%{}` and `%{k: v, …}` are map literals; `%{base | k: v, …}` is a map *update*
+  # (ADR-0033) — replace the named keys on an existing map, every key required to be
+  # present (the BEAM `:=` exact-assoc, Rust struct-update, JS spread). The first
+  # form after `%{` disambiguates: a key (`id`/`kw`) immediately followed by `:` is a
+  # literal; anything else is an update base expression, which parses up to the `|`
+  # (`|` is not an infix expression operator, so it stops the base cleanly).
+  defp parse_map_start([{:rbrace} | rest]), do: {{:map_lit, []}, rest}
 
-  defp parse_map([{tag, k}, {:op, ":"} | rest], acc) when tag in [:id, :kw] do
+  defp parse_map_start([{tag, _}, {:op, ":"} | _] = toks) when tag in [:id, :kw] do
+    {pairs, rest} = parse_map_pairs(toks, [])
+    {{:map_lit, pairs}, rest}
+  end
+
+  defp parse_map_start(toks) do
+    {base, rest} = parse_expr(toks, 0)
+    rest = expect_op(rest, "|")
+    {pairs, rest} = parse_map_pairs(rest, [])
+    {{:map_update, base, pairs}, rest}
+  end
+
+  defp parse_map_pairs([{:rbrace} | rest], acc), do: {Enum.reverse(acc), rest}
+
+  defp parse_map_pairs([{tag, k}, {:op, ":"} | rest], acc) when tag in [:id, :kw] do
     {v, rest} = parse_expr(rest, 0)
     acc = [{k, v} | acc]
 
     case rest do
-      [{:comma} | r] -> parse_map(r, acc)
-      [{:rbrace} | r] -> {{:map_lit, Enum.reverse(acc)}, r}
+      [{:comma} | r] -> parse_map_pairs(r, acc)
+      [{:rbrace} | r] -> {Enum.reverse(acc), r}
       other -> raise ArgumentError, "bad map: #{inspect(other)}"
     end
   end

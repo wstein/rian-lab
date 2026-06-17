@@ -193,6 +193,16 @@ defmodule Rian.Core do
     defstruct pairs: [], type: nil
   end
 
+  defmodule EMapUpdate do
+    @moduledoc """
+    A map update `%{base | k: v, …}` (ADR-0033): the `base` map with each named
+    key replaced by a new value. Every updated key must already be present (BEAM
+    `:=` exact-assoc / Elixir `%{m | k: v}`). `pairs` are `{key, expr}`.
+    """
+    @enforce_keys [:base]
+    defstruct base: nil, pairs: [], type: nil
+  end
+
   defmodule ETuple do
     @moduledoc "A tuple literal."
     defstruct elems: [], type: nil
@@ -280,6 +290,12 @@ defmodule Rian.Core do
 
   def from_expr({:map_lit, ps}),
     do: %EMap{pairs: Enum.map(ps, fn {k, v} -> {k, from_expr(v)} end)}
+
+  def from_expr({:map_update, base, ps}),
+    do: %EMapUpdate{
+      base: from_expr(base),
+      pairs: Enum.map(ps, fn {k, v} -> {k, from_expr(v)} end)
+    }
 
   def from_expr({:cap_arg, n}), do: %ECapArg{n: n}
   def from_expr({:capture, b}), do: %ECapture{body: from_expr(b)}

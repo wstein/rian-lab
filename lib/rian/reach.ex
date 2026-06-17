@@ -388,10 +388,14 @@ defmodule Rian.Reach do
   # "map literals are BEAM-only in PoC") or JVM (`Core.EMap` is in `@jvm_unsupported`).
   # A constructed map therefore pins the function off `:rs`/`:jvm` — the matrix reports
   # what the emitters actually lower, not the aspiration (same principle as bare atoms,
-  # ADR-0000). (Rian has no map-*update* surface form — `%{m | …}` is an Elixir-only
-  # construct the transpiler flags as `TODO_PORT` — so only the literal is reachable here.)
+  # ADR-0000). The map *update* form `%{base | k: v}` (ADR-0033, `Core.EMapUpdate`) has
+  # the same target story — BEAM/JS lower it, Rust/JVM raise — so it carries its own
+  # blocker below; both surface as `kind: :map`.
   defp map_blocker,
     do: %{construct: "map literal (`%{…}`)", kind: :map, kills: [:rs, :jvm]}
+
+  defp map_update_blocker,
+    do: %{construct: "map update (`%{base | …}`)", kind: :map, kills: [:rs, :jvm]}
 
   # An as-pattern `name @ pat` (ADR-0050): lowered on the BEAM/Rust via
   # `Rian.PatternLower`, but the JS/JVM emitters raise `Unsupported`, so it pins the
@@ -665,6 +669,9 @@ defmodule Rian.Reach do
 
   # a map literal `%{…}` — lowered on BEAM/JS, but not on Rust/JVM (see `map_blocker/0`).
   defp classify(%Core.EMap{}, _modnames, {bl, ca}), do: {[map_blocker() | bl], ca}
+
+  # a map update `%{base | …}` — same BEAM/JS-only story (see `map_update_blocker/0`).
+  defp classify(%Core.EMapUpdate{}, _modnames, {bl, ca}), do: {[map_update_blocker() | bl], ca}
 
   defp classify(_node, _modnames, acc), do: acc
 

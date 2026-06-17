@@ -231,6 +231,15 @@ defmodule Rian.ReachTest do
       assert Enum.any?(entry(rep, "build").blockers, &(&1.kind == :map and &1.kills == [:rs, :jvm]))
     end
 
+    test "a map update `%{base | k: v}` reaches `:ex`+`:js` but is off `:rs`/`:jvm`" do
+      rep = reach("mod M do\n  pub def bump(m Map) Map := %{m | k: 9}\nend")
+
+      # the update form has the same target story as the literal — BEAM/JS lower it,
+      # Rust/JVM raise BEAM-only — so the matrix pins it off `:rs`/`:jvm` (no gate lie).
+      assert targets(rep, "bump") == [:ex, :js]
+      assert Enum.any?(entry(rep, "bump").blockers, &(&1.kind == :map and &1.kills == [:rs, :jvm]))
+    end
+
     test "an as-pattern reaches `:ex`+`:rs` but is off `:js`/`:jvm` (the emitters raise)" do
       rep =
         reach("""

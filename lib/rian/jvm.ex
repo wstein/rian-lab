@@ -99,6 +99,7 @@ defmodule Rian.JVM do
     Core.ECaptureNamed => "a function capture (`&name/arity`)",
     Core.ETuple => "a tuple",
     Core.EMap => "a map",
+    Core.EMapUpdate => "a map update",
     Core.EStruct => "a struct construction"
   }
 

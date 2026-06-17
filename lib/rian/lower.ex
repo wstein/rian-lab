@@ -53,6 +53,7 @@ defmodule Rian.Lower do
     ELambda,
     EList,
     EMap,
+    EMapUpdate,
     ENum,
     EStr,
     EStruct,
@@ -886,6 +887,9 @@ defmodule Rian.Lower do
 
   defp cap_arity(%EMap{pairs: ps}),
     do: Enum.reduce(ps, 0, fn {_, v}, acc -> max(cap_arity(v), acc) end)
+
+  defp cap_arity(%EMapUpdate{base: base, pairs: ps}),
+    do: Enum.reduce(ps, cap_arity(base), fn {_, v}, acc -> max(cap_arity(v), acc) end)
 
   defp cap_arity(_), do: 0
 
@@ -2147,6 +2151,13 @@ defmodule Rian.Lower do
     do: {"%{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir, ec)}" end)}}", 12}
 
   defp emit(%EMap{}, :rust, _ec), do: raise("map literals are BEAM-only in PoC")
+
+  defp emit(%EMapUpdate{base: base, pairs: pairs}, :elixir, ec) do
+    fields = Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir, ec)}" end)
+    {"%{#{p(base, 0, :elixir, ec)} | #{fields}}", 12}
+  end
+
+  defp emit(%EMapUpdate{}, :rust, _ec), do: raise("map updates are BEAM-only in PoC")
 
   # constant reference — a 0-arity accessor call on the BEAM, the `const` name on Rust
   defp emit(%EConstRef{name: name}, :elixir, _ec), do: {"#{PL.to_snake(name)}()", 12}
