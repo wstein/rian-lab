@@ -25,6 +25,15 @@ defmodule Rian.Roundtrip do
   resolved and its types are annotated — a `_Unk` hole compiles (it is an open
   type), but a marker or an unportable construct does not. So the report is the
   honest gate for "how far does this module roundtrip".
+
+  Both equivalence checks compare **function forms**. A declaration-only module
+  (only `type`/`struct`, no functions) contributes no comparable forms — its
+  declarations erase to data on the BEAM (ADR-0043) — so the check is `:skipped`,
+  never `:equiv` (the oracle verified nothing; a trivial `[] == []` would be a
+  false green). And the two backends genuinely diverge on a `struct`: `Rian.Beam`
+  erases it to a tagged map (no accessor forms), while `Rian.Lower`'s Elixir text
+  emits a real `defstruct` (with `__struct__/0,1`) — surfaced honestly as a
+  `equiv_two_paths` divergence rather than hidden by dropping the nested module.
   """
 
   alias Rian.{Beam, Decl, Format, FormsEquiv, Lower, Transpile}
@@ -102,8 +111,20 @@ defmodule Rian.Roundtrip do
   # path 2 — each module through the canonical abstract-forms backend (`Rian.Beam`).
   defp beam_forms(mods), do: merged_forms(mods, &beam_one/1)
 
-  # path 3 — each module rendered to Elixir (`Rian.Lower`) and recompiled.
-  defp elixir_forms(mods), do: merged_forms(mods, fn m -> compile_elixir(rian_to_elixir(m)) end)
+  # path 3 — each module rendered to Elixir (`Rian.Lower`) and recompiled. The
+  # rendered Elixir can NEST modules (a `struct` lowers to `defmodule … defstruct`),
+  # so EVERY compiled module's forms are collected — exactly as `origin_forms/1`
+  # does for the original — or a struct-only module would silently contribute
+  # nothing and report a false `equiv` (the harness's "nothing silently dropped"
+  # contract). The two backends legitimately differ here: `Rian.Beam` erases a
+  # `struct` to a tagged map (no accessor forms, ADR-0043), while `Rian.Lower`'s
+  # Elixir text emits a real `defstruct` (with `__struct__/0,1`) — collecting all
+  # modules surfaces that difference honestly instead of masking it.
+  defp elixir_forms(mods),
+    do:
+      mods
+      |> Enum.flat_map(fn m -> m |> rian_to_elixir() |> compile_elixir_forms() end)
+      |> Enum.sort()
 
   defp merged_forms(mods, compile_one),
     do: mods |> Enum.flat_map(&FormsEquiv.normalize(compile_one.(&1))) |> Enum.sort()
@@ -172,18 +193,20 @@ defmodule Rian.Roundtrip do
     _ -> src
   end
 
-  # Compile Elixir source text into `@probe` (the top module renamed so nothing
-  # live is clobbered), returning the bytecode. `debug_info` is required so
-  # `Rian.FormsEquiv` can read the abstract code back; every defined module is
-  # purged after so the harness leaves nothing loaded in the VM.
-  defp compile_elixir(src) do
+  # Compile Elixir source text (the top module renamed to `@probe` so nothing live
+  # is clobbered) and return the normalized forms of **every** module it defines —
+  # not just the outer one, so a nested `defmodule … defstruct` is not silently
+  # dropped. `debug_info` is required so `Rian.FormsEquiv` can read the abstract
+  # code back; every defined module is purged after so the harness leaves nothing
+  # loaded in the VM.
+  defp compile_elixir_forms(src) do
     quoted = src |> Code.string_to_quoted!() |> rename_to_probe()
 
     with_debug_info(fn ->
       mods = Code.compile_quoted(quoted)
-      {@probe, bin} = List.keyfind(mods, @probe, 0)
+      forms = Enum.flat_map(mods, fn {_m, bin} -> FormsEquiv.normalize(bin) end)
       Enum.each(mods, fn {m, _} -> purge(m) end)
-      bin
+      forms
     end)
   end
 
@@ -236,7 +259,13 @@ defmodule Rian.Roundtrip do
   end
 
   # two programs are equivalent when their merged normalized forms match — compared
-  # only when both stages produced forms.
+  # only when both stages produced forms. Two *empty* form lists are NOT a verified
+  # equivalence: it means neither side contributed a comparable function (e.g. a
+  # struct-/type-only module, whose declarations erase to data on the BEAM, ADR-0043).
+  # Reporting `equiv` there would be a false green — the oracle verified nothing — so
+  # it is `:skipped` ("—"), reserving `equiv` for an actual matched function set.
+  defp equiv({:ok, []}, {:ok, []}), do: :skipped
+
   defp equiv({:ok, a}, {:ok, b}) when is_list(a) and is_list(b),
     do: if(a == b, do: :equiv, else: :diverges)
 

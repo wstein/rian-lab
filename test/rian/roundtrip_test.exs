@@ -117,16 +117,44 @@ defmodule Rian.RoundtripTest do
       end
     end
 
-    test "a real lib/rian module (ir.ex — the Core IR vocabulary) compiles on both backends" do
+    test "a real lib/rian module (ir.ex — a struct-only vocabulary) compiles, but structs don't roundtrip" do
       r = Roundtrip.run(File.read!("lib/rian/ir.ex"))
 
+      # ir.ex is pure data definition: 12 structs, no functions. Both backends
+      # compile the draft...
       assert r.beam_direct == :ok
       assert r.beam_via_elixir == :ok
-      # the two Rian backends agree; the roundtrip honestly diverges from the
-      # original Elixir because Rian lowers a struct to a tagged map, not an Elixir
-      # `%struct{}` with its injected `__struct__/0,1`.
-      assert r.equiv_two_paths == :equiv
+
+      # ...but the two backends DISAGREE on structs, honestly: `Rian.Beam` erases a
+      # `struct` to a tagged map (ADR-0043 — no `__struct__/0,1` accessor forms),
+      # while `Rian.Lower`'s Elixir text emits a real `defstruct` (which generates
+      # them). So the canonical path contributes 0 forms and the Elixir path the
+      # accessors — they diverge. (Previously this read a false `:equiv`: the
+      # harness dropped the nested struct modules on BOTH paths, comparing [] to [].)
+      assert r.equiv_two_paths == :diverges
+
+      # and vs the original it diverges too — Elixir's injected defstruct accessors
+      # have no image in Rian's erased-struct model (and the `@rian` annotations
+      # rename fields, e.g. `pub?` → `is_pub`).
       assert r.equiv_vs_origin == :diverges
+    end
+
+    test "a declaration-only module reports `:skipped`, not a false `:equiv` (no forms compared)" do
+      # a `type`-only module has no functions: it lowers to tagged tuples on the
+      # BEAM and to nothing comparable on the Elixir path. Both form lists are
+      # empty, so the oracle verified nothing — it must NOT claim equivalence.
+      src = ~S'''
+      defmodule M do
+        use Rian.Ann
+        @rian "type Color := Red | Green | Blue"
+      end
+      '''
+
+      r = Roundtrip.run(src)
+      assert r.beam_direct == :ok
+      assert r.beam_via_elixir == :ok
+      assert r.equiv_two_paths == :skipped
+      assert r.equiv_vs_origin == :skipped
     end
 
     test "a nested-module source roundtrips ALL modules (no silent drop)" do
