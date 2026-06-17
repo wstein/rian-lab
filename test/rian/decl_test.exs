@@ -708,8 +708,11 @@ defmodule Rian.DeclTest do
       assert Max2FromSource.max2(9, 2) == 9
     end
 
-    test "a clause whose arity differs from the signature is rejected" do
-      assert_raise Decl.Error, ~r/arity/, fn ->
+    test "a signature with no matching-arity clause is rejected (arities are distinct functions)" do
+      # With arity overloading, `f/2` (the signature) and `f/1` (the clause) are
+      # *different* functions — so the `f/2` signature is declared but never
+      # implemented, which is the error (rather than an arity mismatch within one).
+      assert_raise Decl.Error, ~r/signature but no clauses/, fn ->
         Decl.parse("""
         def f(a Int64, b Int64) Int64
         def f(a) := a

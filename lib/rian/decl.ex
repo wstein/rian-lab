@@ -298,7 +298,10 @@ defmodule Rian.Decl do
 
     funcs =
       (user_defs ++ protocol_defs(decls, types, structs, targets))
-      |> Enum.chunk_by(& &1.name)
+      # group by name AND arity, so same-name clauses of different arity form
+      # separate functions (`f/1` vs `f/2`, like Elixir/Erlang — exported per
+      # `{name, arity}` on the BEAM). Same-arity clauses stay one multi-clause group.
+      |> Enum.chunk_by(&{&1.name, raw_arity(&1)})
       |> Enum.map(&build_func/1)
       |> Enum.map(&subst_func(&1, aliases))
       |> lower_meta(decls, targets)
@@ -1271,6 +1274,32 @@ defmodule Rian.Decl do
   # multi-clause: bodiless signature followed by >=1 pattern clauses. `pub` (if
   # any) sits on the signature; the clause defs that follow are not re-marked.
   @spec build_func([map()]) :: map()
+  # arity for grouping — a top-level-comma count at the TOKEN level, so a char/string
+  # literal (a single token) never contributes a stray comma (`[',' | rest]`) and all
+  # bracket kinds nest. A signature's type params and its clauses' patterns yield the
+  # same count, so a sig stays grouped with its clauses; different arities split.
+  defp raw_arity(%{params: p}), do: count_params(to_string(p || ""))
+
+  defp count_params(p) do
+    case String.trim(p) do
+      "" ->
+        0
+
+      s ->
+        {commas, _depth} =
+          s
+          |> Lexer.expr_tokens()
+          |> Enum.reduce({0, 0}, fn
+            {:comma}, {c, 0} -> {c + 1, 0}
+            t, {c, d} when t in [{:lparen}, {:lbracket}, {:lbrace}, {:mapopen}] -> {c, d + 1}
+            t, {c, d} when t in [{:rparen}, {:rbracket}, {:rbrace}] -> {c, d - 1}
+            _t, acc -> acc
+          end)
+
+        commas + 1
+    end
+  end
+
   def build_func([%{body: nil} = sig | [_ | _] = clauses]) do
     params = parse_params(sig.params)
     params = if sig[:pub] == true, do: boundary_params(params), else: params
