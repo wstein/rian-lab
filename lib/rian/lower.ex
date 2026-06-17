@@ -1370,6 +1370,15 @@ defmodule Rian.Lower do
         # the arm already owns its `T`. `Vec(T)` returns are owned constructions already.
         arm = if generic? and func.ret in func.tvars, do: "(#{arm}).clone()", else: arm
 
+        # a closure-RETURNING function (`… Fn(args, ret) := (x) -> …`, ADR-0061): the
+        # return type lowered to `Box<dyn Fn…>` (see `Capability.owned`), so the returned
+        # closure is boxed and `move`-captures (it outlives the function frame). Applies
+        # when the arm is a bare closure (`|…| …`); a more complex tail stays off `:rs`.
+        arm =
+          if match?("Fn(" <> _, func.ret) and String.starts_with?(arm, "|"),
+            do: "Box::new(move #{arm})",
+            else: arm
+
         # binders bound inside a list/slice element are `&T` — a guard over them
         # must deref (`*c`); the arm body's arithmetic works on `&T` directly
         deref = Enum.flat_map(c.pats, fn p -> slice_elem_vars(Core.from_pat(p)) end)

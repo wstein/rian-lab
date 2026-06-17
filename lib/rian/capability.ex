@@ -89,6 +89,11 @@ defmodule Rian.Capability do
           "use a fixed width (`Int64`) on Rust, or target the BEAM/JS"
       )
 
+  # an owned/return-position closure (ADR-0061): `Box<dyn Fn(args) -> ret>` (the boxed,
+  # heap-allocated trait object that a returned closure needs — a `move` `Box::new(|…| …)`
+  # at the construction site). Covers a bare `Fn(...)` return and a nested `Option(Fn(...))`.
+  def owned("Fn(" <> _ = t), do: "Box<dyn " <> fn_trait(t) <> ">"
+
   def owned("Vec(" <> rest) do
     # strip exactly the one `)` that closes this `Vec(`, not every trailing paren —
     # `trim_trailing/2` would eat both in `Vec(Option(T))`, leaving `Option(T` and

@@ -110,8 +110,9 @@ mod List do
   pub def map_join(xs Vec(T), sep String, f Fn(T, String)) String forall T
   pub def map_join(xs, sep, f) := join(map(xs, f), sep)
 
-  # member — structural membership (`Enum.member?/2`), via generic `==`.
-  pub def member(xs Vec(T), x T) Bool forall T
+  # member — structural membership (`Enum.member?/2`), via generic `==`; `T: Eq` so the
+  # equality is a protocol bound (UFCS `RianEq::eq` on Rust), not BEAM-only universal `==`.
+  pub def member(xs Vec(T), x T) Bool forall T: Eq
   pub def member([], _) := false
   pub def member([h | t], x) := if h == x do true else member(t, x) end
 
