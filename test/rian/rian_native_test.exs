@@ -145,4 +145,69 @@ defmodule Rian.TestRunnerTest do
       end
     end
   end
+
+  describe "assertion macros lower per target (ADR-0060 §3 · ADR-0030)" do
+    # the source declares NO macros — the harness injects the lib before lowering.
+    @asserts_src """
+    def double(n Int53) Int53 := n * 2
+
+    @test def eq_passes() Bool := assert_eq(double(3), 6)
+    @test def refute_passes() Bool := refute(double(2) == 5)
+    """
+
+    test "Rust lowering expands the macros to plain Bool — no `macro` leaks" do
+      rust = RT.rust(@asserts_src)
+      assert rust =~ "double(3) == 6"
+      assert rust =~ "!(double(2) == 5)"
+      refute rust =~ "macro"
+      assert rust =~ "#[test]\nfn rian_test_eq_passes() { assert!(eq_passes()); }"
+    end
+
+    test "JS lowering expands the macros to plain Bool — no `macro` leaks" do
+      js = RT.js(@asserts_src)
+      assert js =~ "double(3) === 6"
+      assert js =~ "!(double(2) === 5)"
+      refute js =~ "macro"
+      assert js =~ ~s|test("eq_passes", () => assert.strictEqual(eq_passes(), true))|
+    end
+
+    @tag :rust
+    test "the expanded Rust test module compiles and passes under `rustc --test`" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_at_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+          File.write!(src, RT.rust(@asserts_src))
+
+          {_, 0} =
+            System.cmd(rustc, ["--test", "-A", "warnings", "--edition", "2021", src, "-o", bin])
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert out =~ "2 passed"
+      end
+    end
+
+    @tag :js
+    test "the expanded JS test module passes under `node --test`" do
+      case System.find_executable("node") do
+        nil ->
+          :ok
+
+        node ->
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_at_#{System.unique_integer([:positive])}.mjs")
+          File.write!(path, RT.js(@asserts_src))
+          {out, code} = System.cmd(node, ["--test", path])
+          File.rm(path)
+          assert code == 0
+          assert out =~ "pass 2"
+      end
+    end
+  end
 end
