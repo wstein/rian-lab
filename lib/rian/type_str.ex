@@ -26,16 +26,48 @@ defmodule Rian.TypeStr do
   def split_top_commas(""), do: []
 
   def split_top_commas(s) do
-    {parts, cur, _depth} =
-      s
-      |> String.graphemes()
-      |> Enum.reduce({[], "", 0}, fn
-        ",", {parts, cur, 0} -> {[cur | parts], "", 0}
-        "(", {parts, cur, d} -> {parts, cur <> "(", d + 1}
-        ")", {parts, cur, d} -> {parts, cur <> ")", d - 1}
-        ch, {parts, cur, d} -> {parts, cur <> ch, d}
+    s
+    |> top_comma_cuts()
+    |> slice(s)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  # Byte positions of the depth-0 commas. The Rian lexer (not a hand-rolled
+  # char loop) decides nesting: each `{:comma}` token at paren depth 0 is mapped
+  # back to its comma *character* — the Nth comma token is the Nth `,` byte,
+  # since a type string carries no string/char literal that could hide a comma —
+  # so the components are sliced verbatim from the source and keep their exact
+  # spelling (a token-reconstruction would normalize `Map(K,V)` → `Map(K, V)`).
+  defp top_comma_cuts(s) do
+    top = top_comma_ordinals(Rian.Lexer.expr_tokens(s))
+    commas = :binary.matches(s, ",") |> Enum.map(&elem(&1, 0))
+    Enum.map(top, &Enum.at(commas, &1))
+  end
+
+  # 0-based ordinal (among all commas) of each comma token sitting at paren
+  # depth 0. Only `(`/`)` nest — brackets/braces are content, as before.
+  defp top_comma_ordinals(tokens) do
+    {ords, _i, _d} =
+      Enum.reduce(tokens, {[], 0, 0}, fn
+        {:comma}, {ords, i, 0} -> {[i | ords], i + 1, 0}
+        {:comma}, {ords, i, d} -> {ords, i + 1, d}
+        {:lparen}, {ords, i, d} -> {ords, i, d + 1}
+        {:rparen}, {ords, i, d} -> {ords, i, d - 1}
+        _tok, {ords, i, d} -> {ords, i, d}
       end)
 
-    [cur | parts] |> Enum.reverse() |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+    Enum.reverse(ords)
+  end
+
+  # cut `s` into pieces at the given comma byte positions (the commas themselves
+  # are dropped).
+  defp slice(cuts, s) do
+    {pieces, last} =
+      Enum.reduce(cuts, {[], 0}, fn pos, {acc, start} ->
+        {[binary_part(s, start, pos - start) | acc], pos + 1}
+      end)
+
+    Enum.reverse([binary_part(s, last, byte_size(s) - last) | pieces])
   end
 end
