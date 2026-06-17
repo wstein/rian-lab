@@ -200,6 +200,16 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "pins `^expr` in patterns (ADR-0050)" do
+    test "a bare pinned var in a clause head parses to `{:pin, …}`" do
+      assert Pratt.parse_pats("^x") == [{:pin, {:id, "x"}}]
+    end
+
+    test "a pin nests inside a list pattern" do
+      assert Pratt.parse_pats("[^a, b]") == [{:list, [{:pin, {:id, "a"}}, {:var, "b"}], :close}]
+    end
+  end
+
   describe "parse_body (function bodies: block-or-expression)" do
     test "a single expression becomes a one-statement block" do
       assert Pratt.parse_body("a + b") == {:block, [{:expr, {:bin, "+", {:id, "a"}, {:id, "b"}}}]}

@@ -75,7 +75,11 @@ to the verified checker reproduce the same diagnostics as hand-built checker pat
 ---
 
 ## 4. Open items
-- Emit the concrete pin guards (`__pᵢ == e`) into the IR for the backends (the checker only
-  needs the boolean today; codegen needs the expression).
+- A surface pin `^x` is reachable (`Pratt.parse_pat` reads the `^` token → `{:pin, e}` →
+  `Core.PPin`) and the **BEAM** lowers it to repeated-var equality. The Rust/JS/JVM emitters
+  have **no** pin guard-transform yet, so `Rian.Reach` pins any clause with a `^x` head
+  BEAM-only (`:rs`/`:js`/`:jvm` blocked) — honest until the guard form below lands.
+- Emit the concrete pin guards (`__pᵢ == e`) into the IR for the non-BEAM backends (the checker
+  only needs the boolean today; codegen needs the expression) — then drop the Reach blocker.
 - Or-pattern row expansion, if/when or-patterns are un-deferred.
 - Struct field defaults / `@enforce_keys` interaction with missing-field → `:wild`.

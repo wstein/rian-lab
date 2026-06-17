@@ -39,7 +39,7 @@ defmodule Rian.Lexer do
   @multi ["->", "..", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!=", "::"]
   # `@` is the as-pattern operator (`name @ pat`); the annotation lane (`@name`,
   # checked first) still wins when `@` is immediately followed by an identifier.
-  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&", "@"]
+  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&", "@", "^"]
 
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/
   # Identifiers may carry a single trailing `?` or `!` — the Elixir/Ruby/Crystal

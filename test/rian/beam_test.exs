@@ -44,6 +44,17 @@ defmodule Rian.BeamTest do
       assert mod.kind("Vec(x)") == 0
     end
 
+    test "a pin `^x` in a clause head lowers to repeated-var equality and runs (ADR-0050)" do
+      {:ok, mod} =
+        Beam.load(
+          "def eq(a Int53, b Int53) Bool\ndef eq(x, ^x) := true\ndef eq(_, _) := false",
+          :rian_beam_pin
+        )
+
+      assert mod.eq(3, 3) == true
+      assert mod.eq(3, 4) == false
+    end
+
     test "a map update `%{m | k: v}` replaces present keys and runs (ADR-0032)" do
       {:ok, mod} =
         Beam.load(

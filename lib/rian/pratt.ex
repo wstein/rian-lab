@@ -408,6 +408,13 @@ defmodule Rian.Pratt do
   defp parse_pat([{:mapopen} | rest]), do: parse_pat_map(rest, [])
   defp parse_pat([{:bitopen} | rest]), do: parse_bitstr_pat(rest, [])
 
+  # a pin `^expr` (ADR-0036/0050): match the *value* of an already-bound expression
+  # (refutable), not a new binder. The pinned expression parses as an expression.
+  defp parse_pat([{:op, "^"} | rest]) do
+    {e, rest} = parse_expr(rest, 0)
+    {{:pin, e}, rest}
+  end
+
   # as-pattern `name @ pat` — bind the whole value to `name` while also matching
   # `pat` (Core `PAs`). `@ ` must be spaced so it is not the `@name` annotation.
   defp parse_pat([{:id, name}, {:op, "@"} | rest]) do
@@ -939,4 +946,6 @@ defmodule Rian.Pratt do
 
   defp sexpr_pat({:struct, n, fields}),
     do: "#{n}(#{Enum.map_join(fields, ", ", fn {k, p} -> "#{k}: #{sexpr_pat(p)}" end)})"
+
+  defp sexpr_pat({:pin, e}), do: "(^ #{sexpr(e)})"
 end

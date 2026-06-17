@@ -1172,6 +1172,10 @@ defmodule Rian.Transpile do
     end
   end
 
+  # a pin `^x` (Elixir `{:^, _, [expr]}`) → Rian `^expr` (ADR-0050): match the value
+  # of an already-bound expression rather than binding a fresh var.
+  defp pat({:^, _, [e]}), do: "^#{expr(e)}"
+
   defp pat(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
 
   # `"a" <> "b" <> rest` → `["a"`, `"b"`, `rest::binary"]` segment texts; nil if the

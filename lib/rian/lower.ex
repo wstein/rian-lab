@@ -934,6 +934,9 @@ defmodule Rian.Lower do
   defp pat_ex(%PCtor{ctor: name, args: args}),
     do: "{:#{PL.to_snake(name)}, #{Enum.map_join(args, ", ", &pat_ex/1)}}"
 
+  # a pin `^x` → Elixir `^x` (the `:elixir` text path is a BEAM verification backend).
+  defp pat_ex(%Core.PPin{expr: {:id, name}}), do: "^#{name}"
+
   # bitstring pattern (ADR-0078) — the `:elixir` text path is a BEAM verification
   # backend, so it emits real `<<seg::spec>>`; each segment value is itself a pattern.
   defp pat_ex(%Core.PBitstr{segments: segs}),
@@ -1789,6 +1792,7 @@ defmodule Rian.Lower do
   defp pat_rs(%PTuple{elems: ps}, m), do: "(#{Enum.map_join(ps, ", ", &pat_rs(&1, m))})"
   defp pat_rs(%PAtom{name: a}, _), do: raise("Erlang atom pattern is BEAM-only: :#{a}")
   defp pat_rs(%Core.PBitstr{}, _), do: raise("bitstring patterns are BEAM-only (ADR-0078)")
+  defp pat_rs(%Core.PPin{}, _), do: raise("pin patterns not yet lowered to Rust (guard form)")
 
   defp pat_rs(%PList{elems: ps, tail: :close}, m),
     do: "[#{Enum.map_join(ps, ", ", &pat_rs(&1, m))}]"

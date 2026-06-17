@@ -276,6 +276,24 @@ defmodule Rian.ReachTest do
       assert Enum.any?(entry(rep, "first").blockers, &(&1.kind == :bitstring))
     end
 
+    test "a pin `^x` in a clause head is BEAM-only (ADR-0050; head is inspected)" do
+      # the BEAM lowers a pin to repeated-var equality; the non-BEAM emitters have no
+      # guard-transform yet, so Reach inspects the clause head and pins it BEAM-only.
+      rep =
+        reach("""
+        def eq(a Int53, b Int53) Bool
+        def eq(x, ^x) := true
+        def eq(_, _) := false
+        """)
+
+      assert targets(rep, "eq") == [:ex]
+
+      assert Enum.any?(
+               entry(rep, "eq").blockers,
+               &(&1.kind == :pin and &1.kills == [:rs, :js, :jvm])
+             )
+    end
+
     test "an as-pattern reaches `:ex`+`:rs` but is off `:js`/`:jvm` (the emitters raise)" do
       rep =
         reach("""

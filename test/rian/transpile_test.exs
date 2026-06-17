@@ -199,6 +199,19 @@ defmodule Rian.TranspileTest do
       refute out =~ ~s|TODO_PORT("|
     end
 
+    test "a pin `^x` in a clause head → Rian `^x` (ADR-0050, no marker)" do
+      out =
+        rian("""
+        defmodule Px do
+          def eq(x, ^x), do: true
+          def eq(_, _), do: false
+        end
+        """)
+
+      assert out =~ "eq(x, ^x) := true"
+      refute out =~ ~s|TODO_PORT("|
+    end
+
     test "defp is private (`def`, no `pub`) and OMITS hole types — params and return (ADR-0034)" do
       # a private function needn't declare its types — `Rian.InferLocal` recovers
       # them, so an unresolved param/return is omitted rather than printed as `_Unk`.

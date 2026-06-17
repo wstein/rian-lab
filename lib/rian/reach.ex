@@ -27,9 +27,9 @@ defmodule Rian.Reach do
       hides behind a sibling module; never over-approximates a direct FFI).
     * Bare atom *literals* are not classified (they are Symbols/Result tags,
       portable per ADR-0041); only FFI *calls* are flagged.
-    * Clause-head patterns are scanned only for as-patterns (`name @ pat`) and
-      bitstring patterns (`<<…>>`) — emitter gaps off the typed/JVM targets; all other
-      blockers (FFI, atoms) live in bodies/guards.
+    * Clause-head patterns are scanned only for as-patterns (`name @ pat`),
+      bitstring patterns (`<<…>>`), and pins (`^x`) — emitter gaps off the typed/JVM
+      targets; all other blockers (FFI, atoms) live in bodies/guards.
 
   Reach models **architectural** reachability (what a target *can* run — `ref` off
   the BEAM, `Int64` off JS, FFI off non-BEAM). It deliberately does NOT track an
@@ -364,9 +364,16 @@ defmodule Rian.Reach do
         do: [bitstr_blocker()],
         else: []
 
+    # a pin `^x` in a clause head: lowered on BEAM (repeated-var equality), but the
+    # non-BEAM emitters have no guard-transform yet, so pin BEAM-only (honest).
+    pin =
+      if Enum.any?(f.clauses, fn c -> Enum.any?(c.pats, &pat_has_pin?/1) end),
+        do: [pin_blocker()],
+        else: []
+
     Enum.reduce(
       f.clauses,
-      {ref ++ int ++ width ++ owned_gen ++ param ++ as_pat ++ bit_pat, MapSet.new()},
+      {ref ++ int ++ width ++ owned_gen ++ param ++ as_pat ++ bit_pat ++ pin, MapSet.new()},
       fn c, acc ->
         acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
         if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
@@ -388,6 +395,15 @@ defmodule Rian.Reach do
 
   defp pat_has_bitstr?(l) when is_list(l), do: Enum.any?(l, &pat_has_bitstr?/1)
   defp pat_has_bitstr?(_), do: false
+
+  # a surface clause-head pattern contains a pin `{:pin, expr}`?
+  defp pat_has_pin?({:pin, _expr}), do: true
+
+  defp pat_has_pin?(t) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.any?(&pat_has_pin?/1)
+
+  defp pat_has_pin?(l) when is_list(l), do: Enum.any?(l, &pat_has_pin?/1)
+  defp pat_has_pin?(_), do: false
 
   defp ref_blocker, do: %{construct: "ref capability (&mut)", kind: :capability, kills: [:ex]}
 
@@ -455,6 +471,12 @@ defmodule Rian.Reach do
   # bitstring pins the function BEAM-only — the matrix matches the emitters (ADR-0000).
   defp bitstr_blocker,
     do: %{construct: "bitstring (`<<…>>`)", kind: :bitstring, kills: [:rs, :js, :jvm]}
+
+  # A pin `^x` (ADR-0050): the BEAM lowers it (repeated-var equality) and `Rian.Lower`'s
+  # Elixir text emits `^x`, but the Rust/JS/JVM emitters have no guard-transform yet, so
+  # a pin pins the function BEAM-only (honest until the guard form lands).
+  defp pin_blocker,
+    do: %{construct: "pin (`^x`)", kind: :pin, kills: [:rs, :js, :jvm]}
 
   defp map_update_blocker,
     do: %{construct: "map update (`%{base | …}`)", kind: :map, kills: [:rs, :jvm]}

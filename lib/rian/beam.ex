@@ -961,6 +961,13 @@ defmodule Rian.Beam do
     do: cons(ps, core_list_tail(tail), &pat_form/1)
 
   # sum-variant patterns mirror construction: nullary -> tag atom, else tagged tuple
+  # a pin `^x` matches the value of an already-bound variable; in Erlang a repeated
+  # pattern variable IS that equality, so a pinned var lowers to its bound var form.
+  defp pat_form(%Core.PPin{expr: {:id, name}}), do: var_form(name)
+
+  defp pat_form(%Core.PPin{expr: e}),
+    do: raise(Unsupported, "abstract-forms: pin `^#{inspect(e)}` (only `^var` is supported)")
+
   # a bitstring pattern `<<seg::spec, …>>` (ADR-0078) -> the Erlang `{:bin, …}` pattern
   # form; each segment's value is itself a pattern (a binder/literal).
   defp pat_form(%Core.PBitstr{segments: segs}),
