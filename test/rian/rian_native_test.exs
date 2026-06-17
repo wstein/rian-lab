@@ -49,6 +49,47 @@ defmodule Rian.TestRunnerTest do
     end
   end
 
+  describe "assertion macros (ADR-0060 · ADR-0030) — injected, no redeclaration" do
+    @asserts """
+    def double(n Int53) Int53 := n * 2
+
+    @test def with_assert() Bool := assert(double(21) == 42)
+    @test def with_refute() Bool := refute(double(2) == 5)
+    @test def with_assert_eq() Bool := assert_eq(double(3), 6)
+    @test def with_assert_neq() Bool := assert_neq(double(3), 7)
+    @test def combined() Bool := assert_eq(double(3), 6) and assert_eq(double(4), 8)
+    @test def honest_failure() Bool := assert(double(2) == 5)
+    """
+
+    test "expand to plain Bool and report pass/fail without the source defining them" do
+      # the macros are NOT declared in @asserts — `Rian.Test` prepends the lib.
+      assert RT.run(@asserts) == [
+               {"with_assert", :pass},
+               {"with_refute", :pass},
+               {"with_assert_eq", :pass},
+               {"with_assert_neq", :pass},
+               {"combined", :pass},
+               {"honest_failure", {:fail, false}}
+             ]
+    end
+
+    test "the prepended lib adds no tests of its own" do
+      assert RT.tests(@asserts) == [
+               "with_assert",
+               "with_refute",
+               "with_assert_eq",
+               "with_assert_neq",
+               "combined",
+               "honest_failure"
+             ]
+    end
+
+    test "assert_prelude/0 exposes the lib that gets injected" do
+      assert RT.assert_prelude() =~ "macro assert(cond)"
+      assert RT.assert_prelude() =~ "macro refute(cond)"
+    end
+  end
+
   describe "per-target test harness (ADR-0060 §3)" do
     @src File.read!("examples/rian/14_test_framework.rian")
 

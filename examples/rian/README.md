@@ -288,6 +288,14 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   ([show_float_test.exs](../../test/rian/show_float_test.exs)), the denormal extremes
   included (`__prim_float_repr` returns the *shortest* round-tripping decimal on each
   target — the JVM by a shortest-search, since `Double.toString` is not always shortest).
+- [prelude_test.rian](prelude_test.rian) — **the unit-test assertion vocabulary
+  (ADR-0060 · ADR-0030).** ExUnit-equivalent `assert`/`refute`/`assert_eq`/`assert_neq`
+  as hygienic Rian macros (no `quote`/`unquote`) that expand to a plain `Bool`, so a
+  `@test def` reads like ExUnit while staying a pure value-flow (ADR-0035: assertions
+  are values, not exceptions). `Rian.Test` prepends this lib to every test source it
+  compiles, so the vocabulary is available to every `@test def` on all three targets
+  with no boilerplate (macros are scope-local, so injection is how the lib is shared).
+  A richer matcher DSL with formatted diagnostics stays deferred behind `Show` (ADR-0042).
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

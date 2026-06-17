@@ -9,6 +9,21 @@ defmodule Rian.Test do
 
       @test def one_plus_one() Bool := 1 + 1 == 2
 
+  ## Assertion macros (ADR-0060 · ADR-0030)
+
+  Every test source is compiled with `examples/rian/prelude_test.rian` prepended,
+  so the ExUnit-style assertion vocabulary — `assert`/`refute`/`assert_eq`/
+  `assert_neq`, hygienic Rian macros that expand to a plain `Bool` — is available
+  to every `@test def` with no boilerplate (Rian macros are scope-local with no
+  cross-file import, so injection is how the lib is shared):
+
+      @test def doubles() Bool := assert_eq(double(21), 42)
+      @test def positive() Bool := refute(sign(3) == -1)
+
+  The macros emit no IR and need only built-in `==`/`!=`/`not`, so they lower
+  cleanly on all three targets and add no prelude dependency. A richer matcher DSL
+  with formatted diagnostics stays deferred behind the `Show` protocol (ADR-0042).
+
   This module is the **BEAM/ExUnit** lowering: it compiles a `.rian` test file to
   real bytecode and runs each `@test` function. `exunit/1` bridges them into the
   host's xUnit framework so each Rian test surfaces as its own ExUnit case (with
@@ -38,6 +53,22 @@ defmodule Rian.Test do
   """
   alias Rian.{Beam, Decl}
 
+  # The Rian-native assertion-macro lib (`assert`/`refute`/`assert_eq`/`assert_neq`,
+  # ADR-0060/ADR-0030). Rian macros are scope-local with no cross-file import, so we
+  # PREPEND this lib to every test source we compile — the macros then expand AST→AST
+  # in `Decl.parse`/`Beam.load` and emit no IR, so every `@test def` gets the
+  # ExUnit-style vocabulary for free, on all three targets. `@external_resource`
+  # recompiles this module when the lib changes.
+  @assert_prelude File.read!("examples/rian/prelude_test.rian")
+  @external_resource "examples/rian/prelude_test.rian"
+
+  @doc "The canonical assertion-macro lib prepended to every test source."
+  @spec assert_prelude() :: String.t()
+  def assert_prelude, do: @assert_prelude
+
+  # Make the assertion macros available to `src`'s `@test def`s.
+  defp with_assertions(src), do: @assert_prelude <> "\n" <> src
+
   @doc "The names of the `@test def`s declared in `src`, in source order."
   @rian "pub def tests(src String) Vec(String)"
   @spec tests(String.t()) :: [String.t()]
@@ -47,7 +78,7 @@ defmodule Rian.Test do
   @rian "pub def compile!(src String, mod Symbol) Symbol"
   @spec compile!(String.t(), module()) :: module()
   def compile!(src, mod) do
-    {:ok, ^mod} = Beam.load(src, mod)
+    {:ok, ^mod} = Beam.load(with_assertions(src), mod)
     mod
   end
 
@@ -90,7 +121,7 @@ defmodule Rian.Test do
     # `Decl.compile` path: it threads the cross-function signature table the call-site
     # borrow pass needs (ADR-0061), so generic functions that call one another
     # (`sort`→`insert`) lower with correct `&`/`.clone()` ownership coercion.
-    fns = Rian.Lower.rust_program(Decl.parse(src))
+    fns = Rian.Lower.rust_program(Decl.parse(with_assertions(src)))
 
     wrappers =
       Enum.map_join(tests(src), "\n", fn n ->
@@ -114,7 +145,7 @@ defmodule Rian.Test do
         ~s|test(#{inspect(n)}, () => assert.strictEqual(#{n}(), true));|
       end)
 
-    header <> "\n" <> Rian.JS.compile(src) <> "\n\n" <> wrappers
+    header <> "\n" <> Rian.JS.compile(with_assertions(src)) <> "\n\n" <> wrappers
   end
 
   @doc """

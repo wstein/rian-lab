@@ -1,0 +1,43 @@
+# ===========================================================================
+# UNIT-TEST ASSERTION MACROS (ADR-0060 · ADR-0030) — written in Rian
+# ===========================================================================
+# A Rian test is an ordinary `@test def name() Bool := <expr>` (ADR-0057): a
+# zero-arity `Bool` function, `true` = pass, run on every target it reaches.
+# These macros are the ExUnit-equivalent **assertion vocabulary** over that Bool
+# model — hygienic pattern→template macros (ADR-0030, no `quote`/`unquote`), so
+# they expand AST→AST before the checker and emit no IR of their own. Each
+# expands to a plain `Bool` expression, so a `@test def` reads like ExUnit while
+# staying a pure value-flow (ADR-0035: assertions are values, never exceptions).
+#
+#     @test def double_works() Bool := assert(double(21) == 42)
+#     @test def not_negative()  Bool := refute(sign(3) == -1)
+#     @test def adds()          Bool := assert_eq(double(3), 6)
+#
+# Combine several checks in one test with `and`:
+#
+#     @test def both() Bool := assert_eq(double(3), 6) and assert_eq(double(4), 8)
+#
+# Reuse: Rian macros are scope-local (ADR-0030) — there is no cross-file macro
+# import — so `Rian.Test` PREPENDS this lib to every test source it compiles
+# (BEAM/Rust/JS), making the vocabulary available to every `@test def` with no
+# boilerplate. The macros need only built-in `==`/`!=`/`not`, so they carry NO
+# prelude dependency and reach every target the function under test reaches.
+#
+# Deferred (ADR-0060 / ADR-0042): a richer MATCHER DSL with formatted failure
+# diagnostics (`eq`/`be`/`contain`) needs the `Show`/`Eq` protocols; and a
+# `describe`/`it` grouping layer is not expressible as an expression macro — the
+# `@test def` itself IS the unit, so grouping is by module/file, not a macro.
+# ---------------------------------------------------------------------------
+
+# `assert(cond)` — pass iff `cond` is true (ExUnit `assert`). Identity on the
+# Bool, but it names the intent and anchors the vocabulary.
+macro assert(cond) := cond
+
+# `refute(cond)` — pass iff `cond` is false (ExUnit `refute`).
+macro refute(cond) := not cond
+
+# `assert_eq(actual, expected)` — pass iff equal (ExUnit `assert a == b`).
+macro assert_eq(actual, expected) := actual == expected
+
+# `assert_neq(actual, expected)` — pass iff unequal (ExUnit `refute a == b`).
+macro assert_neq(actual, expected) := actual != expected

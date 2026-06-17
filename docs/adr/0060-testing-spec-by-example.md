@@ -1,7 +1,7 @@
 # ADR-0060 — Testing strategy: executable spec-by-example, value-returning assertions; Gherkin rejected
 
-**Status:** Accepted (direction) · **tier B doctest runner shipped (MVP)** — `Rian.Doctest` executes `expr #=> expected` examples in `@doc` heredocs on the BEAM (both sides real Rian; a drifted example fails the build), with `Rian.Doctest.exunit/1` surfacing each as an ExUnit case; the `describe`/`it` + matcher layer is **deferred behind protocol-bounded generics (ADR-0042 pt 2)**; the property/fixpoint tier is **partly shipped** (`Rian.Fixpoint`, the exhaustiveness gate)
-**Implemented:** partial — doctest runner + fixpoint tier shipped (`Rian.Doctest`, `Rian.Fixpoint`; `test/rian/doctest_test.exs`, `test/rian/fixpoint_test.exs`); `describe`/`it` + matcher layer deferred (ADR-0042)
+**Status:** Accepted (direction) · **tier B doctest runner shipped (MVP)** — `Rian.Doctest` executes `expr #=> expected` examples in `@doc` heredocs on the BEAM (both sides real Rian; a drifted example fails the build), with `Rian.Doctest.exunit/1` surfacing each as an ExUnit case; **tier C boolean assertion macros shipped** (`assert`/`refute`/`assert_eq`/`assert_neq` as hygienic Rian macros, `examples/rian/prelude_test.rian`, injected by `Rian.Test`); the **matcher DSL with formatted diagnostics** (`eq`/`be`/`contain`) is **deferred behind protocol-bounded generics (ADR-0042 pt 2)**; the property/fixpoint tier is **partly shipped** (`Rian.Fixpoint`, the exhaustiveness gate)
+**Implemented:** partial — doctest runner + fixpoint tier + boolean assertion macros shipped (`Rian.Doctest`, `Rian.Fixpoint`, `examples/rian/prelude_test.rian`; `test/rian/doctest_test.exs`, `test/rian/fixpoint_test.exs`, `test/rian/rian_native_test.exs`); the matcher DSL (`eq`/`be`/`contain`) + `describe`/`it` grouping deferred (ADR-0042)
 **Refs:** ADR-0035 (no hidden control flow — errors are values; assertions return outcomes, never throw), ADR-0032 (one surface family — no second grammar), ADR-0030 (declarative/hygienic macros — an internal spec DSL, not injection), ADR-0051 (doc comments / heredocs — the doctest host), ADR-0042 (protocol-bounded generics — matchers need `Eq`/`Show`/`Ord`), ADR-0047 (portable prelude — `Test` is portable Rian), ADR-0052 (documentation site — renders proven-current specs), ADR-0057 (portable sequential logic **and tests** across targets), ADR-0027/0031 (self-hosting; `Rian.Fixpoint`)
 **Owners:** Liam Davis (ergonomics/DX) · Samir Patel (rigor) · Maya Lin (multi-target/cost) · Kira Neri (honesty/determinism) · Arthur Pendelton (no-exceptions fit) · Elena Rostova (protocols) · Chloe Bennett (surface) · Rachel Okafor (PM)
 
@@ -36,7 +36,7 @@ Three facts about Rian shape the answer:
 |---|---|---|---|
 | **A — Properties / fixpoint / golden** | generative + reference-equivalence (`Rian.Fixpoint`), the exhaustiveness/error-set/linearity gates | **rigor / coverage** | partly shipped |
 | **B — Spec-by-example / doctests** | examples in `@doc`/`@moduledoc` heredocs (ADR-0051) and `docs/spec/*.md` fences, executed | **documentation that cannot drift** | **adopt first** |
-| **C — `describe`/`it` + matchers** | an ergonomic internal spec DSL over the test framework | **readable unit specs** | deferred (behind ADR-0042) |
+| **C — assertion macros + matchers** | boolean `assert`/`refute`/`assert_eq`/`assert_neq` (shipped); matcher DSL + `describe`/`it` (deferred) | **readable unit specs** | boolean macros shipped; matcher DSL behind ADR-0042 |
 
 Tier B is **documentation, not coverage** (Samir's constraint): a green doctest proves the shown
 input, nothing more. It must never be sold as, or substituted for, Tier A. Its value is killing the
@@ -62,8 +62,23 @@ ADR-0058) is not yet wired — the harness emits for the requested target.
 
 ### 4. Any spec DSL is **internal** — built from Rian's own surface (ADR-0030/0032)
 
-A `describe "…" do … end` / `it "…" do … end` layer, if built, is hygienic-macro sugar over
-ordinary `def`s — inside the one surface family (ADR-0032). It is **not** a separate grammar.
+The assertion layer is hygienic-macro sugar over ordinary `def`s — inside the one surface family
+(ADR-0032), **not** a separate grammar. **Shipped** (`examples/rian/prelude_test.rian`): the
+ExUnit-equivalent *boolean* assertion macros — `assert(cond)`, `refute(cond)`, `assert_eq(a, b)`,
+`assert_neq(a, b)` — declarative pattern→template macros (ADR-0030) that expand to a plain `Bool`,
+so a `@test def` reads like ExUnit while staying a pure value-flow (§2). They need only built-in
+`==`/`!=`/`not`, so they carry no protocol or prelude dependency and lower on all three targets.
+Rian macros are **scope-local** with no cross-file import (ADR-0030), so `Rian.Test` **prepends**
+the lib to every test source it compiles — that injection is how the vocabulary is shared.
+
+Two pieces stay deferred, for distinct reasons:
+
+- **The matcher DSL with formatted diagnostics** (`eq`/`be`/`contain`, "expected X got Y") is an
+  `Eq`/`Show`/`Ord` consumer — downstream of protocol-bounded generics (ADR-0042 pt 2). The boolean
+  macros above are its protocol-free floor: they say *whether* a check held, not *how it differed*.
+- **A `describe`/`it` grouping layer** is **not** expressible as a Rian macro: macros are
+  expression→expression substitutions (ADR-0030), not declaration generators, so they cannot emit
+  `def`s. The `@test def` itself **is** the unit; grouping is by module/file, not a macro.
 
 ### 5. Gherkin / external feature files are rejected
 
@@ -117,7 +132,11 @@ Recorded so the question stops recurring. A natural-language `.feature` layer is
   outputs in CI (the `Rian.Fixpoint` pattern, generalised).
 - **`@test` annotation** vs the `test_` prefix convention — needs the annotation parser extended
   beyond doc comments (decl.ex).
-- **Test framework + matcher surface** (`describe`/`it`, `Test.Outcome`, the matcher set) — specified
-  here only in outline; its own increment lands after protocols.
+- **Matcher surface + `Test.Outcome`** (`eq`/`be`/`contain`, formatted diagnostics, the
+  value-returning `Pass | Fail(String)` outcome) — the boolean assertion macros
+  (`assert`/`refute`/`assert_eq`/`assert_neq`, `examples/rian/prelude_test.rian`) shipped as the
+  protocol-free floor; the diagnostic matchers land after `Show`/`Eq` (ADR-0042). `describe`/`it`
+  grouping is not a macro (see §4) — it would need a declaration-generating facility Rian's macros
+  deliberately lack.
 - **Property/generative testing** for the compiler (generated corpora vs the reference lexer/parser)
   — the Tier-A expansion beyond today's fixed fixpoint corpus.
