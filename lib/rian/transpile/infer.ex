@@ -844,7 +844,7 @@ defmodule Rian.Transpile.Infer do
     MapSet.member?(s.num, i) and match?({:con, _}, t) and not numeric_con?(t)
   end
 
-  defp numeric_con?({:con, name}), do: Regex.match?(~r/^(Int|UInt|Float)/, name)
+  defp numeric_con?({:con, name}), do: String.starts_with?(name, ["Int", "UInt", "Float"])
 
   defp bind(s, id, t) do
     # if the var was numeric, propagate the constraint onto a var target
@@ -1034,19 +1034,36 @@ defmodule Rian.Transpile.Infer do
   def parse_type(str, fmap) when is_binary(str) do
     str = String.trim(str)
 
-    case Regex.run(~r/^([A-Za-z_][A-Za-z0-9_]*)\((.*)\)$/s, str) do
-      [_, head, inner] ->
+    case parametric_split(str) do
+      {head, inner} ->
         args = Rian.TypeStr.split_top_commas(inner) |> Enum.map(&parse_type(&1, fmap))
         {:app, head, args}
 
       nil ->
-        cond do
-          Map.has_key?(fmap, str) -> fmap[str]
-          tvar?(str) -> {:con, str}
-          true -> {:con, str}
-        end
+        Map.get(fmap, str, {:con, str})
     end
   end
 
-  defp tvar?(s), do: Regex.match?(~r/^[A-Z][0-9]?$/, s)
+  # Recognize a parametric type `Head(inner)` by *tokenizing with the Rian lexer*
+  # rather than sniffing it with a regex: the shape is a leading identifier, an
+  # opening paren, and a closing paren at the end. The inner substring is then
+  # sliced off literally and handed to the shared top-level-comma splitter.
+  defp parametric_split(str) do
+    case Rian.Lexer.expr_tokens(str) do
+      [{:id, head}, {:lparen} | _] = toks ->
+        if List.last(toks) == {:rparen} do
+          inner =
+            str
+            |> String.replace_prefix(head, "")
+            |> String.trim_leading()
+            |> String.replace_prefix("(", "")
+            |> String.replace_suffix(")", "")
+
+          {head, inner}
+        end
+
+      _ ->
+        nil
+    end
+  end
 end

@@ -82,19 +82,32 @@ defmodule Rian.TranspileTest do
       assert Transpile.transpile(src, infer: true) =~ "def tag(x Symbol) Bool := process(x)"
     end
 
+    test "an unparseable @rian annotation is warned about, not silently dropped" do
+      src = ~S'''
+      defmodule M do
+        use Rian.Ann
+        @rian "pub? not valid rian"
+        def f(x), do: x
+      end
+      '''
+
+      warning = ExUnit.CaptureIO.capture_io(:stderr, fn -> rian(src) end)
+      assert warning =~ "unparseable @rian annotation"
+    end
+
     test "a `@rian` struct attribute supplies the field types (heredoc multiline)" do
       src = ~S'''
       defmodule Func do
         use Rian.Ann
         @rian """
         struct Func(name String, params Vec(Param),
-                    ret String, pub? Bool)
+                    ret String, is_pub Bool)
         """
         defstruct [:name, :params, :ret, :pub?]
       end
       '''
 
-      assert rian(src) =~ "struct Func(name String, params Vec(Param), ret String, pub? Bool)"
+      assert rian(src) =~ "struct Func(name String, params Vec(Param), ret String, is_pub Bool)"
       # the annotation OVERRODE the holes — no `_Unk` field in the struct decl
       refute rian(src) =~ ~r/struct Func\([^)]*_Unk/
     end

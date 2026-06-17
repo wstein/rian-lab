@@ -139,27 +139,35 @@ defmodule Rian.Transpile do
     Enum.reduce(strings, {%{}, %{}, []}, fn raw, {defs, structs, types} ->
       str = raw |> String.replace(~r/\s+/, " ") |> String.trim()
 
-      cond do
-        Regex.match?(~r/^(pub\s+)?struct\s/, str) ->
-          {defs, Map.put(structs, struct_ann_name(str), str), types}
-
-        Regex.match?(~r/^(pub\s+)?type\s/, str) ->
-          {defs, structs, types ++ [str]}
-
-        true ->
+      # Classify by *parsing* the annotation with the real Rian declaration parser
+      # rather than sniffing it with regex: a `struct`/`type` decl parses directly;
+      # a bodiless `def` head does not (it raises "no clauses"), so it falls through
+      # to `parse_rian_sig`, which supplies the dummy body.
+      case safe_decl(str) do
+        %{structs: [s | _]} -> {defs, Map.put(structs, s.name, str), types}
+        %{types: [_ | _]} -> {defs, structs, types ++ [str]}
+        _ ->
           case parse_rian_sig(str) do
-            {k, sig} -> {Map.put(defs, k, sig), structs, types}
-            nil -> {defs, structs, types}
+            {k, sig} ->
+              {Map.put(defs, k, sig), structs, types}
+
+            # Not a struct/type decl and not a parseable def head — the annotation
+            # is unusable. Surface it instead of silently dropping it to `_Unk`
+            # (the old regex path swallowed such mistakes without a trace).
+            nil ->
+              IO.warn("ignoring unparseable @rian annotation: #{inspect(str)}", [])
+              {defs, structs, types}
           end
       end
     end)
   end
 
-  defp struct_ann_name(str) do
-    case Regex.run(~r/struct\s+(\w+)/, str) do
-      [_, name] -> name
-      _ -> nil
-    end
+  # Parse a declaration annotation, returning nil instead of raising when the
+  # string is not a complete declaration (e.g. a bodiless `def` head).
+  defp safe_decl(str) do
+    Rian.Decl.parse(str)
+  rescue
+    _ -> nil
   end
 
   # parse a Rian def signature into a sigmap entry, keyed by its own {name, arity}.
