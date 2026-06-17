@@ -1,0 +1,13 @@
+# Rian-incompatible-construct baseline for `mix rian.transpile --check` (ADR-0035/0040).
+# `count<TAB>path` — the per-file ceiling of truthy &&/|| + exception-flow markers.
+# CI fails if a file EXCEEDS its count; ratchet DOWN by resolving constructs then
+# re-running `--update-baseline`. Regenerated, do not hand-edit.
+2	lib/rian/beam.ex
+1	lib/rian/build.ex
+1	lib/rian/decl.ex
+1	lib/rian/format.ex
+1	lib/rian/pratt.ex
+1	lib/rian/protocol.ex
+2	lib/rian/repl.ex
+1	lib/rian/repl/history.ex
+2	lib/rian/roundtrip.ex

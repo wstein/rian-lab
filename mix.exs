@@ -157,7 +157,11 @@ defmodule RianLab.MixProject do
       # `mix test.all` runs EVERYTHING incl. the external-toolchain tests
       # (kotlinc/rustc/node) that the default `mix test` excludes for speed.
       # CI runs this — it is the enforced gate (see test/test_helper.exs).
-      "test.all": &test_all/1
+      "test.all": &test_all/1,
+      # `mix rian.check` gates `lib/rian` against newly-introduced Rian-incompatible
+      # constructs (truthy &&/|| or exception flow) via the transpiler's --check
+      # ratchet (ADR-0035/0040). Run in CI; re-baseline with --update-baseline.
+      "rian.check": "rian.transpile lib/rian --check"
     ]
   end
 

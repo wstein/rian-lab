@@ -484,6 +484,30 @@ defmodule Rian.Transpile do
     {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes}}
   end
 
+  # The markers for constructs that violate Rian's *concepts* (as opposed to merely
+  # being host-FFI / not-yet-typed): truthy `&&`/`||` (no truthy operators —
+  # ADR-0035) and exception flow (`def … rescue`/`catch`/`after` — errors are
+  # values, ADR-0040). These are the targets of the errors-as-values migration.
+  @incompatible_marker ~r/TODO_PORT\("(?:truthy (?:&&|\|\|)|def (?:rescue|catch|after)) /
+
+  @doc """
+  The Rian-model-**incompatible** constructs in `source` — truthy `&&`/`||` and
+  exception flow (see `@incompatible_marker`). Each is returned as the trimmed
+  emitted line (carrying the original Elixir snippet). Unlike `transpile_with_stats`'
+  `ports`, this excludes honest host-FFI markers and `_Unk` type holes: those are
+  non-portable-but-legitimate or fillable, not *conceptual* incompatibilities.
+  `Mix.Tasks.Rian.Transpile`'s `--check` gates a codebase against regressions here.
+  """
+  @spec incompatible(String.t()) :: [String.t()]
+  def incompatible(source) when is_binary(source) do
+    source
+    |> transpile()
+    |> String.split("\n")
+    |> Enum.drop(length(@header))
+    |> Enum.filter(&Regex.match?(@incompatible_marker, &1))
+    |> Enum.map(&String.trim/1)
+  end
+
   # ── type inference (ADR-0034-aligned hole filling) ─────────────────────────
   # Two passes: pass 1 infers each def group in isolation; pass 2 re-infers with
   # the fully-resolved sigs as an intra-module sibling table (so a local call can

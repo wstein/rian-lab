@@ -6,6 +6,50 @@ defmodule Rian.TranspileTest do
   defp rian(src), do: Transpile.transpile(src)
   defp test_mod(body), do: rian("defmodule MyTest do\n  use ExUnit.Case\n#{body}\nend")
 
+  describe "incompatible/1 — the Rian-model-incompatible-construct gate (--check)" do
+    test "flags a truthy `||` / `&&` (no truthy operators, ADR-0035)" do
+      assert [line] = Transpile.incompatible("defmodule M do\n  def f(x), do: x || :d\nend")
+      assert line =~ "truthy ||"
+      assert Transpile.incompatible("defmodule M do\n  def g(x), do: x && h(x)\nend") != []
+    end
+
+    test "flags exception flow (`def … rescue`, errors-as-values ADR-0040)" do
+      src = """
+      defmodule M do
+        def f(x) do
+          g(x)
+        rescue
+          _ -> nil
+        end
+      end
+      """
+
+      assert [line] = Transpile.incompatible(src)
+      assert line =~ "def rescue"
+    end
+
+    test "clean code (case / Map.get) is compatible — no markers" do
+      src = """
+      defmodule M do
+        def f(x), do: (case x do
+          nil -> :d
+          v -> v
+        end)
+        def g(m, k), do: Map.get(m, k, :d)
+      end
+      """
+
+      assert Transpile.incompatible(src) == []
+    end
+
+    test "host FFI is NOT an incompatibility — it is honest non-portability, not a concept clash" do
+      # an Erlang remote call is a TODO_PORT/FFI marker, but it is legitimately
+      # non-portable (Reach pins it off :rs/:js), not a Rian-*concept* violation.
+      assert Transpile.incompatible("defmodule M do\n  def f, do: :erlang.unique_integer()\nend") ==
+               []
+    end
+  end
+
   describe "defstruct → a Rian `struct` record (named for the module)" do
     test "an atom-list defstruct becomes `struct Mod(field _Unk, …)`" do
       out = rian("defmodule Point do\n  defstruct [:x, :y]\nend")

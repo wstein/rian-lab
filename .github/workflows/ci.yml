@@ -65,6 +65,15 @@ jobs:
             mix rian.targets "$f" --require "$req"
           done
 
+      # Construct-compatibility gate (ADR-0035/0040): the transpiler flags
+      # Rian-model-incompatible constructs — truthy `&&`/`||` (no truthy operators)
+      # and exception flow (`def … rescue`/`catch`/`after`; errors are values). Fails
+      # if any `lib/rian` file gains one beyond its ratchet baseline
+      # (priv/transpile_check_baseline.txt), keeping the source in the portable subset
+      # as the errors-as-values port proceeds. Re-baseline with `--update-baseline`.
+      - name: Gate Rian-incompatible constructs (errors-as-values ratchet)
+        run: mix rian.transpile lib/rian --check
+
       # `mix test.all` (not `mix test`) — the default loop excludes the
       # external-toolchain tests (`@tag :rust|:js|:jvm`) for inner-loop speed;
       # CI must run the full set or that coverage silently vanishes. The runner

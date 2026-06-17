@@ -25,6 +25,17 @@ defmodule Mix.Tasks.Rian.Transpile do
   draft signatures with the inferred types; an unpinned slot stays a `_Unk` hole.
   **`--infer-report`** additionally prints the per-function residual-hole ledger.
 
+  **`--check [DIR]`** — a CI/build **portability gate**: report every
+  Rian-model-*incompatible* construct (truthy `&&`/`||` and exception flow
+  `def … rescue`/`catch`/`after`, ADR-0035/0040 — see `Rian.Transpile.incompatible/1`)
+  and **fail** (non-zero exit) if any file exceeds its recorded count in the
+  baseline manifest (`priv/transpile_check_baseline.txt`, override with `--baseline`).
+  This keeps the source in the portable subset — a newly-introduced truthy operator
+  or `rescue` breaks the build. Host FFI and `_Unk` type holes are **not** flagged:
+  those are honestly non-portable / fillable, not concept clashes. Re-baseline after
+  intentionally resolving (or, rarely, adding) constructs with **`--update-baseline`**;
+  the baseline only ever ratchets down toward zero.
+
   This is **not** a one-shot port: the output will not compile until a human fills
   the `_Unk` holes, resolves every marker, makes matches exhaustive, and
   adds a fixpoint test. See `Rian.Transpile` for the translated-vs-flagged split.
@@ -33,15 +44,27 @@ defmodule Mix.Tasks.Rian.Transpile do
       mix rian.transpile lib/rian/range.ex -o compiler/range.rian
       mix rian.transpile lib/rian/ -o compiler/drafts
       mix rian.transpile lib/rian/ -o compiler/drafts --infer
+      mix rian.transpile lib/rian --check                  # CI gate (exit non-zero on regression)
+      mix rian.transpile lib/rian --check --update-baseline # re-record after resolving constructs
   """
 
   use Mix.Task
+
+  # Default baseline manifest for `--check` (per-file incompatible-construct counts).
+  @baseline_default "priv/transpile_check_baseline.txt"
 
   @impl Mix.Task
   def run(args) do
     {opts, argv, _invalid} =
       OptionParser.parse(args,
-        strict: [output: :string, infer: :boolean, infer_report: :boolean],
+        strict: [
+          output: :string,
+          infer: :boolean,
+          infer_report: :boolean,
+          check: :boolean,
+          update_baseline: :boolean,
+          baseline: :string
+        ],
         aliases: [o: :output, i: :infer]
       )
 
@@ -51,18 +74,124 @@ defmodule Mix.Tasks.Rian.Transpile do
           p
 
         [] ->
-          Mix.raise("usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report]")
+          Mix.raise(
+            "usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report] | --check [DIR]"
+          )
       end
 
-    # --infer-report implies --infer
-    infer? = !!opts[:infer] or !!opts[:infer_report]
-    o = %{out: opts[:output], infer: infer?, report: !!opts[:infer_report]}
-
     cond do
-      File.dir?(path) -> run_dir(path, o)
-      File.regular?(path) -> run_file(path, o)
-      true -> Mix.raise("no such file or directory: #{path}")
+      opts[:check] or opts[:update_baseline] ->
+        run_check(path, opts[:baseline] || @baseline_default, !!opts[:update_baseline])
+
+      true ->
+        # --infer-report implies --infer
+        infer? = !!opts[:infer] or !!opts[:infer_report]
+        o = %{out: opts[:output], infer: infer?, report: !!opts[:infer_report]}
+
+        cond do
+          File.dir?(path) -> run_dir(path, o)
+          File.regular?(path) -> run_file(path, o)
+          true -> Mix.raise("no such file or directory: #{path}")
+        end
     end
+  end
+
+  # ── --check: gate a tree against Rian-incompatible constructs ─────────────────
+
+  defp run_check(path, baseline_path, update?) do
+    files =
+      cond do
+        File.dir?(path) -> Path.wildcard(Path.join(path, "**/*.{ex,exs}"))
+        File.regular?(path) -> [path]
+        true -> Mix.raise("no such file or directory: #{path}")
+      end
+
+    if files == [], do: Mix.raise("no .ex/.exs files under #{path}")
+
+    # relpath => [incompatible construct lines], dropping the clean files.
+    found =
+      files
+      |> Enum.map(fn f -> {f, Rian.Transpile.incompatible(File.read!(f))} end)
+      |> Enum.reject(fn {_f, ms} -> ms == [] end)
+      |> Map.new()
+
+    if update? do
+      write_baseline(baseline_path, found)
+      IO.puts(:stderr, "wrote baseline → #{baseline_path} (#{map_size(found)} file(s))")
+    else
+      check_against_baseline(found, baseline_path)
+    end
+  end
+
+  defp check_against_baseline(found, baseline_path) do
+    baseline = read_baseline(baseline_path)
+
+    regressions =
+      for {file, markers} <- found,
+          allowed = Map.get(baseline, file, 0),
+          length(markers) > allowed,
+          do: {file, markers, allowed}
+
+    total = found |> Map.values() |> Enum.map(&length/1) |> Enum.sum()
+
+    case Enum.sort(regressions) do
+      [] ->
+        IO.puts(
+          :stderr,
+          "rian.transpile --check: ok — #{total} Rian-incompatible construct(s) across " <>
+            "#{map_size(found)} file(s), all within baseline (#{baseline_path})"
+        )
+
+      regs ->
+        for {file, markers, allowed} <- regs do
+          IO.puts(
+            :stderr,
+            "✗ #{file}: #{length(markers)} incompatible construct(s) (baseline #{allowed})"
+          )
+
+          for m <- markers, do: IO.puts(:stderr, "    #{m}")
+        end
+
+        Mix.raise(
+          "rian.transpile --check: #{length(regs)} file(s) introduced Rian-incompatible " <>
+            "constructs (truthy &&/|| or exception flow). Restructure to case/Option/Result " <>
+            "(ADR-0035/0040), or re-baseline with `--update-baseline` if intentional."
+        )
+    end
+  end
+
+  # baseline format: one `count\trelpath` per line; `#` comment lines ignored.
+  defp read_baseline(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        content
+        |> String.split("\n", trim: true)
+        |> Enum.reject(&String.starts_with?(&1, "#"))
+        |> Map.new(fn line ->
+          [count, file] = String.split(line, "\t", parts: 2)
+          {file, String.to_integer(count)}
+        end)
+
+      {:error, _} ->
+        %{}
+    end
+  end
+
+  defp write_baseline(path, found) do
+    rows =
+      found
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(fn {file, markers} -> "#{length(markers)}\t#{file}" end)
+
+    header = [
+      "# Rian-incompatible-construct baseline for `mix rian.transpile --check` (ADR-0035/0040).",
+      "# `count<TAB>path` — the per-file ceiling of truthy &&/|| + exception-flow markers.",
+      "# CI fails if a file EXCEEDS its count; ratchet DOWN by resolving constructs then",
+      "# re-running `--update-baseline`. Regenerated, do not hand-edit."
+    ]
+
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, Enum.join(header ++ rows, "\n") <> "\n")
   end
 
   # ── single file ─────────────────────────────────────────────────────────────
