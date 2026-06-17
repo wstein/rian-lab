@@ -1,4 +1,6 @@
 defmodule Rian.Test do
+  use Rian.Ann
+
   @moduledoc """
   Rian-native test framework (ADR-0057: "Rian source is sequential logic + tests").
 
@@ -37,10 +39,12 @@ defmodule Rian.Test do
   alias Rian.{Beam, Decl}
 
   @doc "The names of the `@test def`s declared in `src`, in source order."
+  @rian "pub def tests(src String) Vec(String)"
   @spec tests(String.t()) :: [String.t()]
   def tests(src), do: Decl.parse(src).funcs |> Enum.filter(& &1.test?) |> Enum.map(& &1.name)
 
   @doc "Compile `src` to bytecode under `mod` and load it (idempotent reload)."
+  @rian "pub def compile!(src String, mod Symbol) Symbol"
   @spec compile!(String.t(), module()) :: module()
   def compile!(src, mod) do
     {:ok, ^mod} = Beam.load(src, mod)
@@ -48,6 +52,7 @@ defmodule Rian.Test do
   end
 
   @doc "Invoke one compiled test by name; returns its `Bool` result."
+  @rian "pub def run_one(mod Symbol, name String) Bool"
   @spec run_one(module(), String.t()) :: boolean()
   def run_one(mod, name), do: apply(mod, String.to_atom(name), [])
 
@@ -69,6 +74,7 @@ defmodule Rian.Test do
   end
 
   @doc "A stable module atom derived from the source (for one-off runs)."
+  @rian "pub def default_mod(src String) Symbol"
   @spec default_mod(String.t()) :: module()
   def default_mod(src), do: :"rian_test_#{:erlang.phash2(src)}"
 
@@ -77,6 +83,7 @@ defmodule Rian.Test do
   `#[test]` wrapper per `@test` asserting it returns `true`. Compile/run with
   `rustc --test`.
   """
+  @rian "pub def rust(src String) String"
   @spec rust(String.t()) :: String.t()
   def rust(src) do
     # Use the **whole-program** Rust assembly (`rust_program`), not the per-function
@@ -97,6 +104,7 @@ defmodule Rian.Test do
   Lower `src` to a **JS** test module (ADR-0060 §3): the functions plus a
   `node:test` case per `@test` asserting it returns `true`. Run with `node --test`.
   """
+  @rian "pub def js(src String) String"
   @spec js(String.t()) :: String.t()
   def js(src) do
     header = ~s|import { test } from "node:test";\nimport assert from "node:assert";\n|

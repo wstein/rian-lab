@@ -1,4 +1,6 @@
 defmodule Rian.Pratt do
+  use Rian.Ann
+
   @moduledoc """
   Precedence-climbing parser for Rian expressions, extended with the three
   self-hosting constructs: lambdas `(x) -> e`, `if c do .. else .. end`,
@@ -31,6 +33,7 @@ defmodule Rian.Pratt do
     Rian.Prim.normalize(ast)
   end
 
+  @rian "pub def parse_sexpr(str String) String"
   @spec parse_sexpr(String.t()) :: String.t()
   def parse_sexpr(str), do: sexpr(parse(str))
 

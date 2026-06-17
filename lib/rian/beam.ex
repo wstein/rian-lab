@@ -1,4 +1,6 @@
 defmodule Rian.Beam do
+  use Rian.Ann
+
   @moduledoc """
   Erlang **abstract-forms** backend (ADR-0031 / ADR-0026) — the real-compilation
   path that replaces `Code.eval_string` of emitted source.
@@ -207,6 +209,7 @@ defmodule Rian.Beam do
   the loaded module atoms; cross-`mod` calls between them resolve because each is
   named `Elixir.<Mod>` — the same atom a Pascal-qualified call lowers to.
   """
+  @rian "pub def load_program(src String) Vec(Symbol)"
   @spec load_program(String.t()) :: [module()]
   def load_program(src) do
     src
@@ -506,7 +509,11 @@ defmodule Rian.Beam do
   # range construction (ADR-0036) is desugared here before lowering. The body is
   # lowered from the **typed** core IR (`Check.annotate` fills each node's type).
   defp body_forms(src, scope, rtable, tenv, ic),
-    do: block_forms(Rian.Range.expand_of(Rian.Check.annotate(Pratt.parse_body(src), tenv, ic), rtable), scope)
+    do:
+      block_forms(
+        Rian.Range.expand_of(Rian.Check.annotate(Pratt.parse_body(src), tenv, ic), rtable),
+        scope
+      )
 
   # A block statement lowers to one Erlang form *and* threads the block scope
   # (the `map_reduce` reducer in `block_forms`). A `:=` bind emits `Var = Expr`;

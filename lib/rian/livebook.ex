@@ -1,4 +1,6 @@
 defmodule Rian.Livebook do
+  use Rian.Ann
+
   @moduledoc """
   The Livebook surface for Rian (ADR-0053) — a thin driver over the shared
   `Rian.Repl` engine. It owns **no compiler logic**: the playground and Livebook
@@ -54,6 +56,7 @@ defmodule Rian.Livebook do
   end
 
   @doc "Reset the notebook's shared session to a fresh, empty one."
+  @rian "pub def reset() Symbol"
   @spec reset() :: :ok
   def reset do
     if pid = Process.whereis(@server), do: Agent.update(pid, fn _ -> Repl.new() end)

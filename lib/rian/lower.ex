@@ -210,6 +210,7 @@ defmodule Rian.Lower do
   # `const NAME Type := value` -> a 0-arity accessor on the BEAM (`def`/`defp`).
   defp ex_const(c, ctx) do
     def_kw = if c.pub?, do: "def", else: "defp"
+
     val =
       c.value
       |> body_ast(ctx)
@@ -369,7 +370,14 @@ defmodule Rian.Lower do
         # the per-clause typing env types the body's core IR (ADR-0050 §3).
         tenv = Rian.Check.clause_env(c.pats, func.params, ctx.ic)
         ec = emit_ctx(%{ex_scope: MapSet.new(vars), tenv: tenv, ic: ctx.ic})
-        body = c.body |> body_ast(ctx) |> Rian.Check.annotate(tenv, ctx.ic) |> emit(:elixir, ec) |> elem(0)
+
+        body =
+          c.body
+          |> body_ast(ctx)
+          |> Rian.Check.annotate(tenv, ctx.ic)
+          |> emit(:elixir, ec)
+          |> elem(0)
+
         "#{head}#{guard_str(c, :elixir, ec)} do #{body} end"
       end)
 
@@ -502,7 +510,9 @@ defmodule Rian.Lower do
         # `g` is a source string (Rian.Decl) or an already-parsed AST (Stage-2
         # front-end, ADR-0063) — `Pratt.parse/1` accepts either.
         ast = Pratt.parse(g) |> deref_ids(deref)
-        guard_kw(target) <> (emit(Rian.Check.annotate(ast, ec.tenv, ec.ic), target, ec) |> elem(0))
+
+        guard_kw(target) <>
+          (emit(Rian.Check.annotate(ast, ec.tenv, ec.ic), target, ec) |> elem(0))
     end
   end
 
@@ -1794,7 +1804,8 @@ defmodule Rian.Lower do
 
   @doc "Emit an already-built AST (e.g. after macro expansion / comptime folding)."
   @spec emit_ast(term(), atom()) :: term()
-  def emit_ast(ast, target), do: emit(Rian.Check.annotate(ast, %{}, %{}), target, emit_ctx()) |> elem(0)
+  def emit_ast(ast, target),
+    do: emit(Rian.Check.annotate(ast, %{}, %{}), target, emit_ctx()) |> elem(0)
 
   # emit/3 -> {string, prec}; p/4 wraps in parens when prec < ctx.
   defp p(node, ctx, t, ec) do

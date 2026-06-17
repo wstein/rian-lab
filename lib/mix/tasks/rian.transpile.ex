@@ -50,9 +50,7 @@ defmodule Mix.Tasks.Rian.Transpile do
           p
 
         [] ->
-          Mix.raise(
-            "usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report]"
-          )
+          Mix.raise("usage: mix rian.transpile FILE.ex|DIR/ [-o OUT] [--infer] [--infer-report]")
       end
 
     # --infer-report implies --infer

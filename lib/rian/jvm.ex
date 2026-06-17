@@ -1,4 +1,6 @@
 defmodule Rian.JVM do
+  use Rian.Ann
+
   @moduledoc """
   JVM emitter (ADR-0049 Tier 2) — a **direct Kotlin source emitter** built on the
   **typed core IR** (`Rian.Core`, ADR-0050): it consumes `Core.from_expr` /
@@ -100,6 +102,7 @@ defmodule Rian.JVM do
   }
 
   @doc "Compile `src`'s types + functions to a single Kotlin source module (a string)."
+  @rian "pub def compile(src String) String"
   @spec compile(String.t()) :: String.t()
   def compile(src) do
     prog = Decl.parse(src)
@@ -285,7 +288,9 @@ defmodule Rian.JVM do
 
   # no guard: empty tests -> unconditional (closes the function); else an `if`.
   defp closed_or_cond([], line, _rest, _params, _ic), do: {"  #{line}\n", true}
-  defp closed_or_cond(tests, line, rest, params, ic), do: prepend_if(tests, line, rest, params, ic)
+
+  defp closed_or_cond(tests, line, rest, params, ic),
+    do: prepend_if(tests, line, rest, params, ic)
 
   # guarded: a guard with no structural tests carries its condition in the inner
   # `if` that `guarded_return/3` emits; wrap it in a scoped `run { … }` (an empty
@@ -297,7 +302,8 @@ defmodule Rian.JVM do
   defp run_or_cond(tests, line, rest, params, ic), do: prepend_if(tests, line, rest, params, ic)
 
   defp prepend_if(tests, line, rest, params, ic),
-    do: prepend("  if (#{Enum.join(tests, " && ")}) { #{line} }\n", clause_lines(rest, params, ic))
+    do:
+      prepend("  if (#{Enum.join(tests, " && ")}) { #{line} }\n", clause_lines(rest, params, ic))
 
   defp prepend(s, {lines, closed?}), do: {s <> lines, closed?}
 

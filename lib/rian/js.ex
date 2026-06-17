@@ -1,4 +1,6 @@
 defmodule Rian.JS do
+  use Rian.Ann
+
   @moduledoc """
   ECMAScript emitter (ADR-0049 Tier 1) — a **direct** JS source emitter built on
   the **typed core IR** (`Rian.Core`, ADR-0050): it consumes `Core.from_expr` /
@@ -116,6 +118,7 @@ defmodule Rian.JS do
   }
 
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
+  @rian "pub def compile(src String) String"
   @spec compile(String.t()) :: String.t()
   def compile(src) do
     prog = Decl.parse(src)

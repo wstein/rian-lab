@@ -644,7 +644,10 @@ defmodule Rian.Decl do
       prog = Rian.Opaque.erase(prog)
 
     ic = Check.program_ic(prog)
-    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs, ranges, ic)} end)
+
+    funs =
+      Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs, ranges, ic)} end)
+
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m, ic)} end)
   end
 

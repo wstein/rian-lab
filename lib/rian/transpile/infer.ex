@@ -1,4 +1,6 @@
 defmodule Rian.Transpile.Infer do
+  use Rian.Ann
+
   @moduledoc """
   Type inference that fills the transpiler's `_Unk` holes — per def group, with a
   cross-module signature cache (`prime_xmod/2`) so calls into sibling modules
@@ -71,6 +73,7 @@ defmodule Rian.Transpile.Infer do
     table
   end
 
+  @rian "pub def clear_xmod() Bool"
   @spec clear_xmod() :: boolean()
   def clear_xmod, do: :persistent_term.erase({__MODULE__, :xmod})
 

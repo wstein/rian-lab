@@ -1,4 +1,6 @@
 defmodule Rian.PatternLower do
+  use Rian.Ann
+
   @moduledoc """
   Lowers patterns into the CHECKER patterns (the Maranget `{:ctor, tag, args}`
   form) consumed by `Rian.Exhaustiveness.analyze/3`, before exhaustiveness
@@ -110,6 +112,7 @@ defmodule Rian.PatternLower do
   end
 
   # PascalCase / "JNum" -> snake atom ; pre-snaked atoms pass through.
+  @rian "pub def to_snake(a Symbol | String) Symbol"
   @spec to_snake(atom() | String.t()) :: atom()
   def to_snake(name) when is_atom(name), do: name
 

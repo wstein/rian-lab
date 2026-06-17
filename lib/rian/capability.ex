@@ -1,4 +1,6 @@
 defmodule Rian.Capability do
+  use Rian.Ann
+
   @moduledoc """
   Lowers Rian reference capabilities to each target.
 
@@ -22,18 +24,21 @@ defmodule Rian.Capability do
           ~w(Int53 Float32 Float64 Bool Char)
 
   # ── Rust parameter-type lowering ───────────────────────────────────────
+  @rian "pub def rust_param(a Symbol, t String) String"
   @spec rust_param(atom(), String.t()) :: String.t()
   def rust_param(:iso, t), do: owned(t)
   def rust_param(:val, t), do: if(copy?(t), do: rust_name(t), else: borrowed(t))
   def rust_param(:ref, t), do: "&mut " <> owned(t)
   def rust_param(:tag, t), do: "&" <> owned(t)
 
+  @rian "pub def copy?(t String) Bool"
   @spec copy?(String.t()) :: boolean()
   def copy?(t), do: t in @copy
 
   # Source primitive -> Rust spelling (`Int64` -> `i64`, …). Nominal types and
   # `Vec(...)` pass through unchanged. Only exact `@copy` members are remapped,
   # so a nominal type that happens to start with `Int` is untouched.
+  @rian "pub def rust_name(t String) String"
   @spec rust_name(String.t()) :: String.t()
   def rust_name(t), do: if(t in @copy, do: rust_scalar(t), else: t)
 
@@ -46,6 +51,7 @@ defmodule Rian.Capability do
   defp rust_scalar("Bool"), do: "bool"
   defp rust_scalar("Char"), do: "char"
 
+  @rian "pub def owned(a String) String"
   @spec owned(String.t()) :: String.t()
   def owned("String"), do: "String"
 
@@ -90,6 +96,7 @@ defmodule Rian.Capability do
 
   defp split_top_level(s), do: Rian.TypeStr.split_top_commas(s)
 
+  @rian "pub def borrowed(a String) String"
   @spec borrowed(String.t()) :: String.t()
   def borrowed("String"), do: "&str"
 
@@ -103,6 +110,7 @@ defmodule Rian.Capability do
   def borrowed(t), do: "&" <> rust_name(t)
 
   # ── BEAM-side legality ─────────────────────────────────────────────────
+  @rian "pub def beam_legal!(a Symbol) Symbol"
   @spec beam_legal!(atom()) :: :ok
   def beam_legal!(:ref),
     do: raise("`ref` is not permitted on the BEAM target (no process-local proof in PoC)")
