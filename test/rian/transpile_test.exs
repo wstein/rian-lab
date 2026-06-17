@@ -247,6 +247,34 @@ end|) =~ ~S|"v=${x}!"|
       assert out =~ "pub def g(x _Unk) _Unk := Core.from_expr(x)"
       refute out =~ "remote/stdlib call: Core"
     end
+
+    test "the pipe `|>` renders infix, not as the prefix call `|>(l, r)`" do
+      out = rian("defmodule M do\n  def g(xs), do: xs |> foo() |> bar()\nend")
+      assert out =~ "xs |> foo() |> bar()"
+      refute out =~ "|>("
+    end
+
+    test "a stdlib call mapped inside a pipe accounts for the injected first arg" do
+      out = rian("defmodule M do\n  def g(xs), do: xs |> Enum.reverse()\nend")
+      assert out =~ "xs |> List.reverse()"
+      refute out =~ "remote/stdlib call"
+    end
+
+    test "a multi-clause `fn` lowers to a single-clause lambda over a `case`" do
+      out =
+        rian("defmodule M do\n  def g(xs), do: Enum.reduce(xs, 0, fn 0, a -> a; x, a -> x + a end)\nend")
+
+      assert out =~ "(p1, p2) -> case {p1, p2} do"
+      assert out =~ "{0, a} -> a"
+      assert out =~ "{x, a} -> x + a"
+      refute out =~ "multi-clause fn"
+    end
+
+    test "a bare map *pattern* key renders without a stray colon (`%{k: p}` not `%{:k: p}`)" do
+      out = rian("defmodule M do\n  def g(%{lo: a}), do: a\nend")
+      assert out =~ "%{lo: a}"
+      refute out =~ "%{:lo"
+    end
   end
 
   describe "struct/map updates don't crash the total walk" do

@@ -39,6 +39,7 @@ defmodule Rian.Transpile do
     "# ─────────────────────────────────────────────────────────────────────────",
     "# DRAFT skeleton — transpiled from Elixir by `mix rian.transpile`. NOT done.",
     "# Translated: defs/clauses (+guards), defstruct→struct, if/case, operators,",
+    "#   pipes (|>), single- & multi-clause lambdas (multi → `(p) -> case p do …`),",
     "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
     "#   string interpolation (${e}), nil→None.",
     "# You must still: (1) fill type holes `_Unk`, (2) resolve every",
@@ -697,6 +698,11 @@ defmodule Rian.Transpile do
   defp expr({op, _, [l, r]}) when op in @binops,
     do: "#{expr(l)} #{op} #{expr(r)}"
 
+  # The pipe is real Rian surface (`x |> f(y)` ≡ `f(x, y)`, ADR/01_basics) — render
+  # it infix. Without this it falls through to the generic local-call clause and
+  # mis-renders as the prefix `|>(l, r)`.
+  defp expr({:|>, _, [l, r]}), do: "#{expr(l)} |> #{pipe_rhs(r)}"
+
   defp expr({:-, _, [x]}), do: "-#{expr(x)}"
   defp expr({:not, _, [x]}), do: "not #{expr(x)}"
   defp expr({:!, _, [x]}), do: "not #{expr(x)}"
@@ -713,13 +719,22 @@ defmodule Rian.Transpile do
   end
 
   # single-clause anonymous fn `fn a, b -> body end` → Rian lambda `(a, b) -> body`
-  # (ADR-0042). Multi-clause `fn` has no single-expression Rian image — flagged.
+  # (ADR-0042).
   defp expr({:fn, _, [{:->, _, [args, body]}]}) do
     params = Enum.map_join(args, ", ", &pat/1)
     "(#{params}) -> #{render_body(body)}"
   end
 
-  defp expr({:fn, _, _} = n), do: ~s|TODO_PORT("multi-clause fn #{escape(snippet(n))}")|
+  # multi-clause `fn` → a single-clause lambda over fresh params that `case`-matches
+  # on them (Rian lambdas are single-clause, ADR-0042). Arity > 1 matches on the
+  # tuple of params; guards and per-clause patterns are preserved via `case_arm`.
+  defp expr({:fn, _, [_ | _] = clauses}) do
+    n = fn_arity(hd(clauses))
+    params = Enum.map(1..n, &"p#{&1}")
+    subject = if n == 1, do: hd(params), else: "{#{Enum.join(params, ", ")}}"
+    arms = Enum.map_join(clauses, "\n", &indent(case_arm(fn_clause_to_arm(&1, n))))
+    "(#{Enum.join(params, ", ")}) -> case #{subject} do\n#{arms}\nend"
+  end
 
   # function captures (ADR-0042) → eta-expanded Rian lambdas.
   # `&name/arity` → `(p1,…) -> name(p1,…)`
@@ -756,13 +771,37 @@ defmodule Rian.Transpile do
   # image exists (`@stdlib`); (2) emit inline if `Mod` is a sibling Rian module
   # (a valid Rian cross-module call); (3) else flag — Elixir stdlib / atom module
   # / variable field-access (`r.name`) has no clean Rian image.
-  defp expr({{:., _, [mod, fun]}, _, args}) when is_list(args) do
+  defp expr({{:., _, [mod, fun]}, _, args}) when is_list(args),
+    do: remote_call(mod, fun, args, 0)
+
+  # local call / nullary var reference.
+  defp expr({name, _, args}) when is_atom(name) and is_list(args),
+    do: "#{name}(#{Enum.map_join(args, ", ", &expr/1)})"
+
+  defp expr({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: to_string(name)
+
+  defp expr(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  # RHS of a pipe `l |> r`: the pipe injects `l` as the first arg, so a stdlib
+  # call written with N args is really arity N+1 for the `@stdlib` lookup —
+  # without the bump, `xs |> Enum.reverse()` (written arity 0) misses the mapped
+  # `{"Enum", :reverse, 1}` and wrongly stays a marker.
+  defp pipe_rhs({{:., _, [mod, fun]}, _, args}) when is_list(args),
+    do: remote_call(mod, fun, args, 1)
+
+  defp pipe_rhs(other), do: expr(other)
+
+  # remote call `Mod.fun(args)`: (1) auto-map to a Rian prelude call when the
+  # image exists (`@stdlib`); (2) emit inline if `Mod` is a sibling Rian module;
+  # (3) else flag — Elixir stdlib / atom module / variable field-access (`r.name`)
+  # has no clean Rian image. `pipe_arity` is 1 when this is a piped call head.
+  defp remote_call(mod, fun, args, pipe_arity) do
     arg_strs = Enum.map_join(args, ", ", &expr/1)
     m = mod_str(mod)
 
     cond do
-      Map.has_key?(@stdlib, {m, fun, length(args)}) ->
-        {rmod, rfun} = @stdlib[{m, fun, length(args)}]
+      Map.has_key?(@stdlib, {m, fun, length(args) + pipe_arity}) ->
+        {rmod, rfun} = @stdlib[{m, fun, length(args) + pipe_arity}]
         "#{rmod}.#{rfun}(#{arg_strs})"
 
       sibling_module?(mod, m) ->
@@ -772,14 +811,6 @@ defmodule Rian.Transpile do
         ~s|TODO_PORT("remote/stdlib call: #{escape("#{m}.#{fun}(#{arg_strs})")}")|
     end
   end
-
-  # local call / nullary var reference.
-  defp expr({name, _, args}) when is_atom(name) and is_list(args),
-    do: "#{name}(#{Enum.map_join(args, ", ", &expr/1)})"
-
-  defp expr({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: to_string(name)
-
-  defp expr(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
 
   defp mod_str({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
   defp mod_str(a) when is_atom(a), do: ":#{a}"
@@ -846,6 +877,23 @@ defmodule Rian.Transpile do
 
   defp case_arm(other), do: "# TODO[port]: case arm #{snippet(other)}"
 
+  # arity of one `fn` clause — a multi-arg guard is `[{:when, _, [p…, g]}]`, so the
+  # arg count is one less than the `when` group; otherwise it is the arg-list length.
+  defp fn_arity({:->, _, [[{:when, _, wargs}], _]}), do: length(wargs) - 1
+  defp fn_arity({:->, _, [args, _]}), do: length(args)
+
+  # rewrite a `fn` clause into an equivalent single-subject `case` arm: wrap the
+  # clause's patterns into a tuple (when arity > 1) so they match the tupled params.
+  defp fn_clause_to_arm({:->, m, [[{:when, wm, wargs}], body]}, n) do
+    {pats, [guard]} = Enum.split(wargs, n)
+    {:->, m, [[{:when, wm, [wrap_tuple(pats), guard]}], body]}
+  end
+
+  defp fn_clause_to_arm({:->, m, [pats, body]}, _n), do: {:->, m, [[wrap_tuple(pats)], body]}
+
+  defp wrap_tuple([p]), do: p
+  defp wrap_tuple(pats), do: {:{}, [], pats}
+
   # ── patterns ────────────────────────────────────────────────────────────────
 
   defp pat(n) when is_integer(n) or is_float(n), do: to_string(n)
@@ -864,10 +912,15 @@ defmodule Rian.Transpile do
     "#{short_name(aliases)}(#{fields})"
   end
 
-  # bare map pattern `%{k: p}` → Rian map pattern.
-  defp pat({:%{}, _, kvs}) do
-    fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{pat(k)}: #{pat(v)}" end)
-    "%{#{fields}}"
+  # bare map pattern `%{k: p}` → Rian map pattern. Atom keys render bare (`k: p`),
+  # mirroring the struct-pattern and `expr` map paths — `pat(:k)` would otherwise
+  # prefix a stray colon (`:k: p`). Non-atom keys have no `key: value` spelling.
+  defp pat({:%{}, _, kvs} = m) do
+    if Enum.all?(kvs, &match?({k, _} when is_atom(k), &1)) do
+      "%{#{Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{pat(v)}" end)}}"
+    else
+      ~s|TODO_PORT("map pattern #{escape(snippet(m))}")|
+    end
   end
 
   # binding `_` and vars.
