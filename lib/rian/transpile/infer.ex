@@ -133,6 +133,10 @@ defmodule Rian.Transpile.Infer do
     {store, clause_envs} =
       Enum.reduce(clauses, {s2, []}, fn clause, {s, envs} ->
         {env, s} = bind_params(clause.args, pvars, ctx, s)
+        # a `when` guard is type evidence too (`is_integer(n)`, `n > 0`): run it for
+        # its unification side-effects (the `Bool` result is discarded), so a param
+        # constrained only by its guard still infers — Phase B (ADR-0075).
+        s = if clause.guard, do: elem(gen(clause.guard, env, ctx, s), 1), else: s
         {bt, s} = gen(clause.body, env, ctx, s)
         {s, _} = unify(s, rvar, bt)
         {s, envs ++ [{clause.body, env}]}
@@ -578,6 +582,58 @@ defmodule Rian.Transpile.Infer do
     end
   end
 
+  # Type-test predicate evidence (Phase B): a `when is_integer(x)` guard — or the
+  # same predicate in a body (`if is_binary(x), …`) — determines its argument's type.
+  # Each returns `Bool` and constrains the arg; a conflict with other evidence
+  # collapses the var to a hole (existing occurs/conflict detection), never a wrong
+  # fill. These MUST precede the generic local-call clause below (`is_integer(x)` is
+  # `{:is_integer, _, [x]}`, which also matches `{name, _, args}`).
+  defp gen({:is_integer, _, [a]}, env, ctx, s), do: pred_num(a, env, ctx, s)
+  defp gen({:is_float, _, [a]}, env, ctx, s), do: pred_con(a, "Float64", env, ctx, s)
+  defp gen({:is_binary, _, [a]}, env, ctx, s), do: pred_con(a, "String", env, ctx, s)
+  defp gen({:is_boolean, _, [a]}, env, ctx, s), do: pred_con(a, "Bool", env, ctx, s)
+  defp gen({:is_atom, _, [a]}, env, ctx, s), do: pred_con(a, "Symbol", env, ctx, s)
+
+  defp gen({:is_list, _, [a]}, env, ctx, s) do
+    {at, s} = gen(a, env, ctx, s)
+    {ev, s} = fresh(s)
+    {s, _} = unify(s, at, app("Vec", [ev]))
+    {con("Bool"), s}
+  end
+
+  # Kernel accessor evidence (Phase B): a bare Kernel BIF whose argument type is
+  # determined. `byte_size`/`length` return a number; `hd`/`tl` decompose a `Vec`.
+  # (Skip `tuple_size`/`map_size` — tuple/map have no clean Rian signature type.)
+  # Same ordering requirement as the predicates above. A user fn shadowing these
+  # Kernel names is not expected in transpiled Elixir.
+  defp gen({:byte_size, _, [a]}, env, ctx, s) do
+    {at, s} = gen(a, env, ctx, s)
+    {s, _} = unify(s, at, con("String"))
+    fresh_num(s)
+  end
+
+  defp gen({:length, _, [a]}, env, ctx, s) do
+    {at, s} = gen(a, env, ctx, s)
+    {ev, s} = fresh(s)
+    {s, _} = unify(s, at, app("Vec", [ev]))
+    fresh_num(s)
+  end
+
+  defp gen({:hd, _, [a]}, env, ctx, s) do
+    {at, s} = gen(a, env, ctx, s)
+    {ev, s} = fresh(s)
+    {s, _} = unify(s, at, app("Vec", [ev]))
+    {ev, s}
+  end
+
+  defp gen({:tl, _, [a]}, env, ctx, s) do
+    {at, s} = gen(a, env, ctx, s)
+    {ev, s} = fresh(s)
+    vec = app("Vec", [ev])
+    {s, _} = unify(s, at, vec)
+    {vec, s}
+  end
+
   # local call `f(args)` — a same-file sibling sig, else free.
   defp gen({name, _, args}, env, ctx, s) when is_atom(name) and is_list(args) do
     case Map.get(ctx.siblings, {to_string(name), length(args)}) do
@@ -630,6 +686,20 @@ defmodule Rian.Transpile.Infer do
       end)
 
     fresh(s)
+  end
+
+  # a type-test predicate `is_T(arg)`: constrain `arg` to `type`, result is `Bool`.
+  defp pred_con(a, type, env, ctx, s) do
+    {at, s} = gen(a, env, ctx, s)
+    {s, _} = unify(s, at, con(type))
+    {con("Bool"), s}
+  end
+
+  # `is_integer(arg)`: mark `arg` numeric (defaults to the portable `Int53`), result `Bool`.
+  defp pred_num(a, env, ctx, s) do
+    {at, s} = gen(a, env, ctx, s)
+    {s, _} = mark_num(s, at)
+    {con("Bool"), s}
   end
 
   defp call_sig(ctx, key, args, env, _outer, s) do

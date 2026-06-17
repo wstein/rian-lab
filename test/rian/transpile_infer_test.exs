@@ -391,6 +391,48 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "guard, type-predicate, and Kernel-accessor evidence (Phase B)" do
+    # `gg(...)` is an unknown call, so the guard/body BIF is the ONLY type evidence.
+    # A guarded clause renders a type-only signature header (`pub def f(String) _Unk`),
+    # the param name living on the clause line below it.
+    test "is_binary guard → String" do
+      assert sig("  def f(s) when is_binary(s), do: gg(s)", "f") =~ "f(String)"
+    end
+
+    test "is_integer guard → Int53 (the portable default)" do
+      assert sig("  def f(n) when is_integer(n), do: gg(n)", "f") =~ "f(Int53)"
+    end
+
+    test "is_atom guard → Symbol" do
+      assert sig("  def f(a) when is_atom(a), do: gg(a)", "f") =~ "f(Symbol)"
+    end
+
+    test "a comparison guard pins the operand numeric (Int53)" do
+      assert sig("  def f(x) when x > 0, do: gg(x)", "f") =~ "f(Int53)"
+    end
+
+    test "a type-predicate in a body (not just a guard) is evidence too" do
+      assert sig("  def f(x), do: if(is_integer(x), do: gg(x), else: gg(x))", "f") =~ "f(x Int53)"
+    end
+
+    test "byte_size(arg) → String param, Int53 return" do
+      assert sig("  def f(s), do: byte_size(s)", "f") ==
+               "  pub def f(s String) Int53 := byte_size(s)"
+    end
+
+    test "length(arg) → Int53 return (the list element stays open)" do
+      assert sig("  def f(xs), do: length(xs)", "f") =~ ") Int53 := length(xs)"
+    end
+
+    test "a predicate without a clean single Rian type is NOT over-claimed (stays `_Unk`)" do
+      # `is_tuple`/`is_map`/`is_struct` have no single Rian signature type, so we
+      # deliberately do not map them — the param stays an honest hole rather than a
+      # guessed (and likely wrong) concrete type.
+      assert sig("  def f(t) when is_tuple(t), do: gg(t)", "f") =~ "f(_Unk)"
+      assert sig("  def f(m) when is_map(m), do: gg(m)", "f") =~ "f(_Unk)"
+    end
+  end
+
   defp safe_compile(src) do
     Rian.Decl.compile(src)
     {:ok, :compiled}
