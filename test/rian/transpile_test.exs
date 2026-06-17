@@ -703,6 +703,52 @@ end|) =~ ~S|"v=${x}!"|
     end
   end
 
+  describe "`nil` renders as `None` consistently in expression AND pattern position" do
+    test "a `nil` clause-head argument matches the `None` a producer emits" do
+      # `nil` is an atom; without a dedicated clause it rendered the empty atom `:`,
+      # which never matches the `None` of `expr(nil)` — silently breaking the match.
+      out = rian("defmodule M do\n  def f(nil), do: :close\nend")
+      assert out =~ "f(None) := :close"
+      refute out =~ "f(:)"
+    end
+
+    test "a `nil` map *value* in a pattern renders `None` (`%{body: None}`)" do
+      out = rian("defmodule M do\n  def f(%{body: nil} = s), do: s\nend")
+      assert out =~ "%{body: None}"
+      refute out =~ "%{body: :}"
+    end
+
+    test "a `nil` map *key* renders `None =>`, expression and pattern" do
+      out =
+        rian("""
+        defmodule M do
+          def t, do: %{nil => 0, cons: 2}
+          def p(%{nil => v}), do: v
+        end
+        """)
+
+      assert out =~ "%{None => 0, cons: 2}"
+      assert out =~ "p(%{None => v}) := v"
+    end
+
+    test "a `nil` case arm renders `None ->`" do
+      out =
+        rian("""
+        defmodule M do
+          def f(x) do
+            case x do
+              nil -> :miss
+              v -> v
+            end
+          end
+        end
+        """)
+
+      assert out =~ "None -> :miss"
+      refute out =~ ": -> :miss"
+    end
+  end
+
   describe "struct/map updates desugar to the Rian map-update form" do
     test "struct update `%Mod{base | f: v}` → Rian `%{base | f: v}` (struct is a tagged map)" do
       # a Rian struct value is a tagged map (ADR-0043), so a struct update is the

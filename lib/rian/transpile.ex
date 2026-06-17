@@ -1500,6 +1500,10 @@ defmodule Rian.Transpile do
   defp pat(s) when is_binary(s), do: ~s|"#{escape(s)}"|
   defp pat(true), do: "true"
   defp pat(false), do: "false"
+  # `nil` → `None`, same as `expr/1`. Without this clause `nil` (an atom) fell to the
+  # generic atom clause and rendered the empty atom `:`, which no longer matches the
+  # `None` a producer emits — silently breaking every guardless/`nil`-default match.
+  defp pat(nil), do: "None"
   defp pat(a) when is_atom(a), do: ":#{a}"
   defp pat({l, r}), do: "{#{pat(l)}, #{pat(r)}}"
   defp pat({:{}, _, elems}), do: "{#{Enum.map_join(elems, ", ", &pat/1)}}"
@@ -1554,12 +1558,16 @@ defmodule Rian.Transpile do
   defp pat(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
 
   # one Rian map pair (expression position): an atom Elixir key → the `k: v`
-  # shorthand; any other key (string/module/tuple/var) → `keyExpr => v` (ADR-0033).
+  # shorthand; any other key (string/module/tuple/var) → `keyExpr => v` (ADR-0033). A
+  # `nil` key is a value, not the `k:` shorthand — render it `None => v` (else the
+  # atom clause would emit the empty-atom key `:`).
+  defp map_pair_rian({nil, v}), do: "None => #{expr(v)}"
   defp map_pair_rian({k, v}) when is_atom(k), do: "#{k}: #{expr(v)}"
   defp map_pair_rian({k, v}), do: "#{expr(k)} => #{expr(v)}"
 
   # one Rian map *pattern* pair: the key is a value (lowered via `expr`), the value a
   # sub-pattern (via `pat`). Atom key → `k: p`; non-atom key → `keyExpr => p`.
+  defp map_pat_pair_rian({nil, p}), do: "None => #{pat(p)}"
   defp map_pat_pair_rian({k, p}) when is_atom(k), do: "#{k}: #{pat(p)}"
   defp map_pat_pair_rian({k, p}), do: "#{expr(k)} => #{pat(p)}"
 
