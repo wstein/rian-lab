@@ -89,6 +89,33 @@ defmodule Rian.TestRunnerTest do
       assert RT.assert_prelude() =~ "macro refute(cond)"
     end
 
+    test "matchers return `Outcome` and surface a diagnostic on failure (ADR-0060)" do
+      src = """
+      def double(n Int53) Int53 := n * 2
+
+      @test def eq_ok() Outcome := expect_eq(double(21), 42)
+      @test def eq_bad() Outcome := expect_eq(double(20), 42)
+      @test def true_ok() Outcome := expect_true(double(2) == 4)
+      @test def false_bad() Outcome := expect_false(double(1) == 2)
+      @test def still_bool() Bool := double(3) == 6
+      """
+
+      assert RT.run(src) == [
+               {"eq_ok", :pass},
+               # the failure message names the mismatch — the matcher DSL's whole point
+               {"eq_bad", {:fail, "expected 42, got 40"}},
+               {"true_ok", :pass},
+               {"false_bad", {:fail, "expected false, got true"}},
+               # a Bool `@test def` still works alongside matcher (Outcome) tests
+               {"still_bool", :pass}
+             ]
+    end
+
+    test "a matcher over a value with no `Show` is an honest compile error (ADR-0069)" do
+      src = "type Box := B(Int53)\n@test def t() Outcome := expect_eq(B(1), B(2))"
+      assert_raise ArgumentError, ~r/no `Show`/, fn -> RT.run(src) end
+    end
+
     test "the loop closes: an ExUnit module transpiles to a draft that runs as Rian" do
       ex = """
       defmodule DoubleTest do
@@ -239,6 +266,67 @@ defmodule Rian.TestRunnerTest do
           dir = System.tmp_dir!()
           path = Path.join(dir, "rian_at_#{System.unique_integer([:positive])}.mjs")
           File.write!(path, RT.js(@asserts_src))
+          {out, code} = System.cmd(node, ["--test", path])
+          File.rm(path)
+          assert code == 0
+          assert out =~ "pass 2"
+      end
+    end
+  end
+
+  describe "matchers (Outcome) lower per target (ADR-0060 §3)" do
+    # passing matchers, so the emitted per-target suites are green.
+    @matcher_src """
+    def double(n Int53) Int53 := n * 2
+
+    @test def eq_ok() Outcome := expect_eq(double(3), 6)
+    @test def true_ok() Outcome := expect_true(double(2) == 4)
+    """
+
+    test "Rust wraps an Outcome test in a Pass-or-panic check (surfaces the message)" do
+      rust = RT.rust(@matcher_src)
+      assert rust =~ "enum Outcome"
+      assert rust =~ "Outcome::Fail(m) => panic!(\"{}\", m)"
+      assert rust =~ "fn rian_test_eq_ok() { match eq_ok()"
+    end
+
+    test "JS asserts the Outcome is `Pass`, passing the Fail message to the assert" do
+      js = RT.js(@matcher_src)
+      assert js =~ ~s|const o = eq_ok(); assert.ok(o[0] === "Pass", o[1])|
+    end
+
+    @tag :rust
+    test "the Outcome Rust test module compiles and passes under `rustc --test`" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_mt_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+          File.write!(src, RT.rust(@matcher_src))
+
+          {_, 0} =
+            System.cmd(rustc, ["--test", "-A", "warnings", "--edition", "2021", src, "-o", bin])
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert out =~ "2 passed"
+      end
+    end
+
+    @tag :js
+    test "the Outcome JS test module passes under `node --test`" do
+      case System.find_executable("node") do
+        nil ->
+          :ok
+
+        node ->
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_mt_#{System.unique_integer([:positive])}.mjs")
+          File.write!(path, RT.js(@matcher_src))
           {out, code} = System.cmd(node, ["--test", path])
           File.rm(path)
           assert code == 0

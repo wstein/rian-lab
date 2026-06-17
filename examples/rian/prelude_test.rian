@@ -41,3 +41,34 @@ macro assert_eq(actual, expected) := actual == expected
 
 # `assert_neq(actual, expected)` — pass iff unequal (ExUnit `refute a == b`).
 macro assert_neq(actual, expected) := actual != expected
+
+# ── matchers: value-returning `Outcome` with diagnostics (ADR-0060 tier C) ──
+# Where the boolean macros above answer *whether* a check held, a matcher answers
+# *how it differed*: it returns `Outcome := Pass | Fail(String)` — the value-flow
+# assertion of ADR-0060 §2 (no exceptions, ADR-0035) — and on failure the message
+# names the mismatch, formatted via string interpolation (ADR-0069). The host
+# harness (`Rian.Test`) surfaces that message, so a red test says *why*.
+#
+#     @test def doubles() Outcome := eq(double(21), 42)
+#     #=> Fail("expected 42, got 41") when double misbehaves
+#
+# Operands must be interpolatable — a `Show` type (String / Int* / Bool / Float64 /
+# Char, or a type with `impl Show`); otherwise the hole is a compile error (honest,
+# ADR-0069), never a silent `inspect`. `contain` (membership) is deferred: it needs
+# the `List` prelude linked, like `assert_in`.
+#
+# The matchers are spelled `expect_*`, NOT the bare `eq`/`be` the ADR sketched:
+# this lib is PREPENDED to every test source, and a macro shadows a same-named
+# function, so a bare `eq`/`neq` would hijack calls to a user `eq`/`neq` (e.g. the
+# `Eq`/`Ord` stdlib). The `expect_` prefix keeps the vocabulary collision-safe.
+type Outcome := Pass | Fail(String)
+
+# `expect_eq(actual, expected)` — pass iff equal; on failure reports both sides.
+macro expect_eq(actual, expected) := if actual == expected do Pass else Fail("expected ${expected}, got ${actual}") end
+
+# `expect_neq(actual, expected)` — pass iff the two differ.
+macro expect_neq(actual, expected) := if actual != expected do Pass else Fail("expected ${actual} to differ from ${expected}") end
+
+# `expect_true(cond)` / `expect_false(cond)` — Bool matchers with a diagnostic.
+macro expect_true(cond) := if cond do Pass else Fail("expected true, got ${cond}") end
+macro expect_false(cond) := if cond do Fail("expected false, got ${cond}") else Pass end

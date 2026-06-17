@@ -295,7 +295,11 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   are values, not exceptions). `Rian.Test` prepends this lib to every test source it
   compiles, so the vocabulary is available to every `@test def` on all three targets
   with no boilerplate (macros are scope-local, so injection is how the lib is shared).
-  A richer matcher DSL with formatted diagnostics stays deferred behind `Show` (ADR-0042).
+  For diagnostics, the **matcher** family `expect_eq`/`expect_neq`/`expect_true`/`expect_false`
+  returns `Outcome := Pass | Fail(String)` and names the mismatch on failure (e.g.
+  `Fail("expected 42, got 41")`, formatted via interpolation, ADR-0069); `Rian.Test`
+  surfaces that message on every target. `contain` (membership) stays deferred — it needs
+  the `List` prelude linked, like `assert_in`.
 
 See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 

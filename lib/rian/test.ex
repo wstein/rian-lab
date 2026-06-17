@@ -21,8 +21,23 @@ defmodule Rian.Test do
       @test def positive() Bool := refute(sign(3) == -1)
 
   The macros emit no IR and need only built-in `==`/`!=`/`not`, so they lower
-  cleanly on all three targets and add no prelude dependency. A richer matcher DSL
-  with formatted diagnostics stays deferred behind the `Show` protocol (ADR-0042).
+  cleanly on all three targets and add no prelude dependency.
+
+  For richer **diagnostics**, the matcher family — `expect_eq`/`expect_neq`/
+  `expect_true`/`expect_false` — returns `Outcome := Pass | Fail(String)` (ADR-0060
+  §2: assertions are values, not exceptions) and names the mismatch on failure,
+  formatted via string interpolation (ADR-0069):
+
+      @test def doubles() Outcome := expect_eq(double(21), 42)
+      #=> Fail("expected 42, got 41") when double misbehaves
+
+  A `@test def` may return `Bool` or `Outcome`; `run`/`exunit` interpret both (a
+  matcher's `Fail` message flows through), and the Rust/JS harnesses wrap an
+  `Outcome` test to assert `Pass` and surface its message. The matchers are spelled
+  `expect_*`, not the bare `eq`/`be` the ADR sketched, because the lib is prepended
+  to every test source and a macro shadows a same-named function (a bare `eq` would
+  hijack the `Eq` stdlib). `contain` (membership) stays deferred — it needs the
+  `List` prelude linked, like `assert_in`.
 
   This module is the **BEAM/ExUnit** lowering: it compiles a `.rian` test file to
   real bytecode and runs each `@test` function. `exunit/1` bridges them into the
@@ -74,6 +89,11 @@ defmodule Rian.Test do
   @spec tests(String.t()) :: [String.t()]
   def tests(src), do: Decl.parse(src).funcs |> Enum.filter(& &1.test?) |> Enum.map(& &1.name)
 
+  # `@test def`s as `{name, return-type}`, so a per-target harness can branch on the
+  # `Bool` vs `Outcome` (matcher) surface when emitting its assertion wrapper.
+  defp test_specs(src),
+    do: Decl.parse(src).funcs |> Enum.filter(& &1.test?) |> Enum.map(&{&1.name, &1.ret})
+
   @doc "Compile `src` to bytecode under `mod` and load it (idempotent reload)."
   @rian "pub def compile!(src String, mod Symbol) Symbol"
   @spec compile!(String.t(), module()) :: module()
@@ -82,26 +102,36 @@ defmodule Rian.Test do
     mod
   end
 
-  @doc "Invoke one compiled test by name; returns its `Bool` result."
+  @doc "Invoke one compiled test by name; returns its raw `Bool` or `Outcome` result."
   @rian "pub def run_one(mod Symbol, name String) Bool"
-  @spec run_one(module(), String.t()) :: boolean()
+  @spec run_one(module(), String.t()) :: term()
   def run_one(mod, name), do: apply(mod, String.to_atom(name), [])
 
   @doc """
+  Interpret a test's raw return value as `:pass | {:fail, reason}`.
+
+  A `@test def` may return either a `Bool` (`true` = pass — the original surface)
+  or an `Outcome := Pass | Fail(String)` from a matcher (ADR-0060). Rian lowers the
+  variants to `:pass` and `{:fail, msg}` on the BEAM, so a matcher's failure message
+  flows straight through; a bare `false` becomes `{:fail, false}`.
+  """
+  @spec outcome(term()) :: :pass | {:fail, term()}
+  def outcome(true), do: :pass
+  def outcome(:pass), do: :pass
+  def outcome({:fail, reason}), do: {:fail, reason}
+  def outcome(other), do: {:fail, other}
+
+  @doc """
   Compile `src` and run every `@test`, returning `[{name, :pass | {:fail, value}}]`.
-  A test passes iff it returns `true`.
+  A test passes iff it returns `true` (Bool surface) or `Pass` (matcher `Outcome`);
+  a matcher's `Fail(msg)` surfaces as `{:fail, msg}`.
   """
   @spec run(String.t(), module() | nil) :: [{String.t(), :pass | {:fail, term()}}]
   def run(src, mod \\ nil) do
     mod = mod || default_mod(src)
     compile!(src, mod)
 
-    for n <- tests(src) do
-      case run_one(mod, n) do
-        true -> {n, :pass}
-        other -> {n, {:fail, other}}
-      end
-    end
+    for n <- tests(src), do: {n, outcome(run_one(mod, n))}
   end
 
   @doc "A stable module atom derived from the source (for one-off runs)."
@@ -111,8 +141,9 @@ defmodule Rian.Test do
 
   @doc """
   Lower `src` to a **Rust** test module (ADR-0060 §3): the functions plus a
-  `#[test]` wrapper per `@test` asserting it returns `true`. Compile/run with
-  `rustc --test`.
+  `#[test]` wrapper per `@test`. A `Bool` test asserts it returns `true`; an
+  `Outcome` (matcher) test panics with the `Fail(msg)` so `rustc --test` reports
+  *why* it failed. Compile/run with `rustc --test`.
   """
   @rian "pub def rust(src String) String"
   @spec rust(String.t()) :: String.t()
@@ -124,8 +155,13 @@ defmodule Rian.Test do
     fns = Rian.Lower.rust_program(Decl.parse(with_assertions(src)))
 
     wrappers =
-      Enum.map_join(tests(src), "\n", fn n ->
-        "#[test]\nfn rian_test_#{n}() { assert!(#{n}()); }"
+      Enum.map_join(test_specs(src), "\n", fn {n, ret} ->
+        check =
+          if ret == "Outcome",
+            do: "match #{n}() { Outcome::Pass => {}, Outcome::Fail(m) => panic!(\"{}\", m) }",
+            else: "assert!(#{n}());"
+
+        "#[test]\nfn rian_test_#{n}() { #{check} }"
       end)
 
     [fns, wrappers] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
@@ -133,7 +169,9 @@ defmodule Rian.Test do
 
   @doc """
   Lower `src` to a **JS** test module (ADR-0060 §3): the functions plus a
-  `node:test` case per `@test` asserting it returns `true`. Run with `node --test`.
+  `node:test` case per `@test`. A `Bool` test asserts it returns `true`; an
+  `Outcome` (matcher) test asserts `Pass`, surfacing the `Fail` message. Run with
+  `node --test`.
   """
   @rian "pub def js(src String) String"
   @spec js(String.t()) :: String.t()
@@ -141,8 +179,12 @@ defmodule Rian.Test do
     header = ~s|import { test } from "node:test";\nimport assert from "node:assert";\n|
 
     wrappers =
-      Enum.map_join(tests(src), "\n", fn n ->
-        ~s|test(#{inspect(n)}, () => assert.strictEqual(#{n}(), true));|
+      Enum.map_join(test_specs(src), "\n", fn {n, ret} ->
+        if ret == "Outcome" do
+          ~s|test(#{inspect(n)}, () => { const o = #{n}(); assert.ok(o[0] === "Pass", o[1]); });|
+        else
+          ~s|test(#{inspect(n)}, () => assert.strictEqual(#{n}(), true));|
+        end
       end)
 
     header <> "\n" <> Rian.JS.compile(with_assertions(src)) <> "\n\n" <> wrappers
@@ -161,8 +203,10 @@ defmodule Rian.Test do
       for n <- names do
         quote do
           test unquote("rian: " <> n) do
-            assert Rian.Test.run_one(unquote(mod), unquote(n)) == true,
-                   unquote("Rian @test `#{n}` did not return true")
+            case Rian.Test.outcome(Rian.Test.run_one(unquote(mod), unquote(n))) do
+              :pass -> :ok
+              {:fail, reason} -> flunk(unquote("Rian @test `#{n}` failed: ") <> inspect(reason))
+            end
           end
         end
       end

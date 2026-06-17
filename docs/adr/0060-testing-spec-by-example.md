@@ -1,7 +1,7 @@
 # ADR-0060 — Testing strategy: executable spec-by-example, value-returning assertions; Gherkin rejected
 
-**Status:** Accepted (direction) · **tier B doctest runner shipped (MVP)** — `Rian.Doctest` executes `expr #=> expected` examples in `@doc` heredocs on the BEAM (both sides real Rian; a drifted example fails the build), with `Rian.Doctest.exunit/1` surfacing each as an ExUnit case; **tier C boolean assertion macros shipped** (`assert`/`refute`/`assert_eq`/`assert_neq` as hygienic Rian macros, `examples/rian/prelude_test.rian`, injected by `Rian.Test`); the **matcher DSL with formatted diagnostics** (`eq`/`be`/`contain`) is **deferred behind protocol-bounded generics (ADR-0042 pt 2)**; the property/fixpoint tier is **partly shipped** (`Rian.Fixpoint`, the exhaustiveness gate)
-**Implemented:** partial — doctest runner + fixpoint tier + boolean assertion macros shipped (`Rian.Doctest`, `Rian.Fixpoint`, `examples/rian/prelude_test.rian`; `test/rian/doctest_test.exs`, `test/rian/fixpoint_test.exs`, `test/rian/rian_native_test.exs`); the matcher DSL (`eq`/`be`/`contain`) + `describe`/`it` grouping deferred (ADR-0042)
+**Status:** Accepted (direction) · **tier B doctest runner shipped (MVP)** — `Rian.Doctest` executes `expr #=> expected` examples in `@doc` heredocs on the BEAM (both sides real Rian; a drifted example fails the build), with `Rian.Doctest.exunit/1` surfacing each as an ExUnit case; **tier C shipped** — boolean assertion macros (`assert`/`refute`/`assert_eq`/`assert_neq`) **and** the value-returning matcher DSL with formatted diagnostics (`expect_eq`/`expect_neq`/`expect_true`/`expect_false` → `Outcome := Pass | Fail(String)`), both hygienic Rian macros in `examples/rian/prelude_test.rian`, injected by `Rian.Test` and lowering to all three targets; only `contain` (membership) stays deferred (needs the `List` prelude linked) and `describe`/`it` grouping is not a macro (§4); the property/fixpoint tier is **partly shipped** (`Rian.Fixpoint`, the exhaustiveness gate)
+**Implemented:** partial — doctest runner + fixpoint tier + the full assertion/matcher vocabulary shipped (`Rian.Doctest`, `Rian.Fixpoint`, `examples/rian/prelude_test.rian`; `test/rian/doctest_test.exs`, `test/rian/fixpoint_test.exs`, `test/rian/rian_native_test.exs`); `contain` + `describe`/`it` grouping deferred
 **Refs:** ADR-0035 (no hidden control flow — errors are values; assertions return outcomes, never throw), ADR-0032 (one surface family — no second grammar), ADR-0030 (declarative/hygienic macros — an internal spec DSL, not injection), ADR-0051 (doc comments / heredocs — the doctest host), ADR-0042 (protocol-bounded generics — matchers need `Eq`/`Show`/`Ord`), ADR-0047 (portable prelude — `Test` is portable Rian), ADR-0052 (documentation site — renders proven-current specs), ADR-0057 (portable sequential logic **and tests** across targets), ADR-0027/0031 (self-hosting; `Rian.Fixpoint`)
 **Owners:** Liam Davis (ergonomics/DX) · Samir Patel (rigor) · Maya Lin (multi-target/cost) · Kira Neri (honesty/determinism) · Arthur Pendelton (no-exceptions fit) · Elena Rostova (protocols) · Chloe Bennett (surface) · Rachel Okafor (PM)
 
@@ -36,7 +36,7 @@ Three facts about Rian shape the answer:
 |---|---|---|---|
 | **A — Properties / fixpoint / golden** | generative + reference-equivalence (`Rian.Fixpoint`), the exhaustiveness/error-set/linearity gates | **rigor / coverage** | partly shipped |
 | **B — Spec-by-example / doctests** | examples in `@doc`/`@moduledoc` heredocs (ADR-0051) and `docs/spec/*.md` fences, executed | **documentation that cannot drift** | **adopt first** |
-| **C — assertion macros + matchers** | boolean `assert`/`refute`/`assert_eq`/`assert_neq` (shipped); matcher DSL + `describe`/`it` (deferred) | **readable unit specs** | boolean macros shipped; matcher DSL behind ADR-0042 |
+| **C — assertion macros + matchers** | boolean `assert`/`refute`/`assert_eq`/`assert_neq` + diagnostic matchers `expect_eq`/`expect_neq`/`expect_true`/`expect_false` (→ `Outcome`); `contain` + `describe`/`it` deferred | **readable unit specs** | shipped (`prelude_test.rian`); `contain` needs `List`, `describe` isn't a macro |
 
 Tier B is **documentation, not coverage** (Samir's constraint): a green doctest proves the shown
 input, nothing more. It must never be sold as, or substituted for, Tier A. Its value is killing the
@@ -71,11 +71,21 @@ so a `@test def` reads like ExUnit while staying a pure value-flow (§2). They n
 Rian macros are **scope-local** with no cross-file import (ADR-0030), so `Rian.Test` **prepends**
 the lib to every test source it compiles — that injection is how the vocabulary is shared.
 
+The **diagnostic matcher DSL** also shipped, layered on the boolean floor: `expect_eq`/`expect_neq`/
+`expect_true`/`expect_false` return `Outcome := Pass | Fail(String)` (§2) and, on failure, name the
+mismatch via string interpolation (`Fail("expected ${expected}, got ${actual}")`, ADR-0069) — so a
+red test says *how it differed*, not just *that it did*. The operands must be interpolatable (a
+`Show` type, or `impl Show` — else an honest compile error, never a silent `inspect`). `Rian.Test`
+interprets a test's `Bool` **or** `Outcome` return uniformly, and the Rust/JS harnesses wrap an
+`Outcome` test to assert `Pass` and surface its message. The matchers are spelled `expect_*`, **not**
+the bare `eq`/`be` originally sketched: a prepended macro shadows a same-named function, so a bare
+`eq` would hijack the `Eq` stdlib's `eq`/`neq` — the `expect_` prefix keeps the vocabulary
+collision-safe.
+
 Two pieces stay deferred, for distinct reasons:
 
-- **The matcher DSL with formatted diagnostics** (`eq`/`be`/`contain`, "expected X got Y") is an
-  `Eq`/`Show`/`Ord` consumer — downstream of protocol-bounded generics (ADR-0042 pt 2). The boolean
-  macros above are its protocol-free floor: they say *whether* a check held, not *how it differed*.
+- **`contain` (membership matcher)** needs the `List` prelude linked into the test source (like
+  `assert_in`); it is the one matcher with a non-built-in dependency.
 - **A `describe`/`it` grouping layer** is **not** expressible as a Rian macro: macros are
   expression→expression substitutions (ADR-0030), not declaration generators, so they cannot emit
   `def`s. The `@test def` itself **is** the unit; grouping is by module/file, not a macro.
@@ -133,15 +143,15 @@ Recorded so the question stops recurring. A natural-language `.feature` layer is
 - **ExUnit → `@test def` transpilation.** *Shipped* (`Rian.Transpile`, ADR-0075): `mix rian.transpile`
   flattens an ExUnit test module to module-less `@test def`s and rewrites `assert`/`refute` to the
   assertion macros — so the test-porting track produces drafts that run end-to-end via `Rian.Test`,
-  closing the loop the assertion macros opened. `assert_raise`/`setup` (no Rian image) stay markers;
-  the value-returning matcher forms wait on `Test.Outcome` below.
+  closing the loop the assertion macros opened. `assert_raise`/`setup` (no Rian image) stay markers.
 - **`@test` annotation** vs the `test_` prefix convention — needs the annotation parser extended
   beyond doc comments (decl.ex).
-- **Matcher surface + `Test.Outcome`** (`eq`/`be`/`contain`, formatted diagnostics, the
-  value-returning `Pass | Fail(String)` outcome) — the boolean assertion macros
-  (`assert`/`refute`/`assert_eq`/`assert_neq`, `examples/rian/prelude_test.rian`) shipped as the
-  protocol-free floor; the diagnostic matchers land after `Show`/`Eq` (ADR-0042). `describe`/`it`
-  grouping is not a macro (see §4) — it would need a declaration-generating facility Rian's macros
-  deliberately lack.
+- **Matcher surface + `Test.Outcome`.** *Shipped* (`examples/rian/prelude_test.rian`): the
+  value-returning `Outcome := Pass | Fail(String)` and the diagnostic matchers
+  `expect_eq`/`expect_neq`/`expect_true`/`expect_false`, formatted via interpolation (ADR-0069 —
+  which now resolves a `${call()}` hole's type). *Still open:* `contain` (needs the `List` prelude
+  linked) and the `eq`/`be`-bounded matcher set over arbitrary `Ord`/`Show` types as protocols
+  mature (ADR-0042). `describe`/`it` grouping is not a macro (see §4) — it would need a
+  declaration-generating facility Rian's macros deliberately lack.
 - **Property/generative testing** for the compiler (generated corpora vs the reference lexer/parser)
   — the Tier-A expansion beyond today's fixed fixpoint corpus.

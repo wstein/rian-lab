@@ -148,6 +148,17 @@ defmodule Rian.Macro do
   def map_node({:bitstr, segs}, f),
     do: {:bitstr, Enum.map(segs, fn {:bitseg, v, specs} -> {:bitseg, f.(v), specs} end)}
 
+  # string interpolation (ADR-0069): recurse into each `${expr}` hole, so a macro
+  # template's interpolation gets its parameters substituted (and template-local
+  # binders renamed for hygiene). Literal parts carry no expression to map.
+  def map_node({:str_interp, parts}, f) do
+    {:str_interp,
+     Enum.map(parts, fn
+       {:hole, e} -> {:hole, f.(e)}
+       lit -> lit
+     end)}
+  end
+
   def map_node(leaf, _f), do: leaf
 
   # a map pair: recurse into the value, and — for a computed key `{:key, expr}` —
