@@ -63,7 +63,11 @@ tension** — they are different layers and are sequenced independently.
 - **Ecosystem:** Hex, Mix/rebar3 integration, EEP-48 docs, dialyzer specs (per ADR-0026).
 - **Stdlib via FFI:** `:lists`, `:maps`, `String`, `Enum`, … are callable for free (ADR-0027).
 - **Execution:** the default BEAM path lowers to **Erlang abstract forms** (`:compile.forms` →
-  loadable `.beam`); the Elixir-source emitter remains as a demo/inspection path.
+  loadable `.beam`); the Elixir-source emitter (`Rian.Lower`) is not a shippable backend (ADR-0026:
+  `'Elixir.Mod'` prefixing, no hashable `.beam`), but it is **not merely demo** — it is a second,
+  independent BEAM path used for verification: the Elixir→Rian→Elixir roundtrip
+  (`Rian.Roundtrip`) cross-checks `Rian.Beam`'s forms against the recompiled `Rian.Lower` source
+  (`equiv_two_paths`, ADR-0076). Two frontends from one Rian draft must agree.
 
 The kernel of the proposal — *lean on Elixir, get a full language working, iterate
 continuously* — is correct. The only correction is **which layer**: the runtime and ecosystem,
@@ -71,8 +75,10 @@ plus interim source emission — **not** the compiler source.
 
 ## Roadmap (refines ADR-0027)
 
-State legend: ✅ done · 🟡 in progress · ⬜ not started. State reflects the
-implementation as of 2026-06-13.
+State legend: ✅ done · 🟡 in progress · ⬜ not started. Stages 0–0.5 (the backend
+sequence this ADR decides) are stable. **Stage 1–2 self-host status is owned by
+[ADR-0063](0063-bootstrap-plan-and-fixed-point.md)** (the live authority) — the rows
+below summarize it; defer to ADR-0063 if they ever lag.
 
 | Stage | Deliverable | Backend | State |
 |---|---|---|---|
@@ -81,8 +87,8 @@ implementation as of 2026-06-13.
 | **0.2** | Module emitter + driver: parsed defs → one module → run | Elixir source / BEAM | ✅ **Done** — [`Decl.compile/1`](../../lib/rian/decl.ex) and [`Rian.Beam.load_program/1`](../../lib/rian/beam.ex) compile a `mod` (or several) to one module and run it |
 | **0.3** | **Functioning language**: compile & run real `.rian` files; iterate syntax/behavior freely | BEAM | ✅ **Done** — real files compile & run; surface now covers sums, `struct`, `range`/`Char`, generics (`Vec(T)`), `case`/`with`, capabilities, typed bindings; exhaustiveness/error-set/linearity gates fire |
 | **0.5** | Swap backend to Erlang **abstract forms** (`:compile.forms`); invisible to the language | Erlang-native (ADR-0026) | ✅ **Done** — [`Rian.Beam`](../../lib/rian/beam.ex) lowers to the Erlang abstract format + `:compile.forms` → loadable `.beam` (no `eval`, no Elixir-compiler dep, line-tracked). The default execution path for BEAM tests and the self-hosting spikes |
-| **1** | Self-host: rewrite the compiler in Rian, FFI to `:lists`/`:maps`/`:compile` | BEAM | 🟡 **Started** — a six-layer compiler pipeline (lexer→parser→optimizer→checker→codegen→VM) is written in Rian and compiles to real `.beam` ([examples/rian/](../../examples/rian/), SELFHOST.md); the **real** `Rian.Lexer` port is underway ([lexer_v2.rian](../../compiler/lexer_v2.rian)) and diffed against the reference by [`Rian.Fixpoint`](../../lib/rian/fixpoint.ex) |
-| **2** | Fixpoint: Stage1 compiles itself; compare artifacts | BEAM | ⬜ **Not started** — the per-component fixpoint *harness* exists (`Rian.Fixpoint`); a full Stage1-compiles-Stage1 reproducibility check does not |
+| **1** | Self-host: rewrite the compiler in Rian, FFI to `:lists`/`:maps`/`:compile` | BEAM | ✅ **Done** — the compiler is self-hosted in Rian (`compiler/*.rian`): lexer, decl parser, surface→Core lowering, capability + exhaustiveness gates, and all four backends (BEAM/Rust/JVM/JS), each diffed against its Elixir reference. **Authority: [ADR-0063](0063-bootstrap-plan-and-fixed-point.md)** (live status) |
+| **2** | Fixpoint: Stage1 compiles itself; compare artifacts | BEAM | ✅ **Done** — the bootstrap fixed point **`v1 == v2` is CLOSED**: gen1 (Elixir-host-compiled) recompiles the compiler sources to gen2, equal in canonical forms *and* bit-identical `.beam` under `:deterministic` (`selfhost_v1_v2_fixpoint_test.exs`). Scope (self-compiling + partially self-checking) is detailed in **[ADR-0063](0063-bootstrap-plan-and-fixed-point.md)** |
 
 The highest-leverage work now is **Stage 1**: porting the real compiler modules
 to Rian one at a time, each diffed against the Elixir reference by `Rian.Fixpoint`
