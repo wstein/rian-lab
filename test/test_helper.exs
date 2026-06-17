@@ -18,10 +18,18 @@
 #
 # `@tag :dialyzer` runs the external Dialyzer oracle (`mix rian.dialyze`, ADR-0026):
 # it needs the `dialyzer` OTP app and a one-time PLT build (slow), so — like the other
-# external-toolchain tags — it stays out of the default loop and back in `mix test.all`.
+# external-toolchain tags — it stays out of the default loop and back in `mix test.all`
+# (but only when the `dialyzer` app is installed; see below).
+# `:dialyzer` re-enters only when the `dialyzer` OTP app is actually installed
+# (some OTP builds omit it); otherwise it stays excluded so `mix test.all` is green
+# on that install. The availability guard itself is covered by untagged tests.
+dialyzer? = match?({:module, _}, Code.ensure_loaded(:dialyzer))
+
 exclude =
-  if System.get_env("RIAN_TEST_ALL") == "1",
-    do: [:bench],
-    else: [:rust, :js, :jvm, :dialyzer, :bench]
+  cond do
+    System.get_env("RIAN_TEST_ALL") != "1" -> [:rust, :js, :jvm, :dialyzer, :bench]
+    dialyzer? -> [:bench]
+    true -> [:bench, :dialyzer]
+  end
 
 ExUnit.start(exclude: exclude)
