@@ -1,0 +1,7 @@
+def sign(n Int53) Int53
+case n do
+0 -> 0
+m when m>0 -> 1
+_ -> -1
+end
+end

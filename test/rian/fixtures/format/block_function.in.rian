@@ -1,0 +1,5 @@
+def norm(v val Vec(Float64)) Float64
+total := v |> sum
+n := len(v)
+total / n
+end
