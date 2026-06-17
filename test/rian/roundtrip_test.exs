@@ -66,4 +66,47 @@ defmodule Rian.RoundtripTest do
       refute :code.is_loaded(:"Elixir.RoundtripProbe")
     end
   end
+
+  describe "end-to-end — a green roundtrip yields a working, test-passing module" do
+    test "the roundtripped BEAM loads and computes the same as the Elixir oracle" do
+      src = ~S'''
+      defmodule Arith do
+        use Rian.Ann
+        @rian "pub def double(x Int53) Int53"
+        def double(x), do: x + x
+        @rian "pub def sum_to(n Int53) Int53"
+        def sum_to(n), do: if(n <= 0, do: 0, else: n + sum_to(n - 1))
+      end
+      '''
+
+      # green through both backends, and equivalent to the original
+      r = Roundtrip.run(src)
+      assert r.beam_direct == :ok
+      assert r.beam_via_elixir == :ok
+      assert r.equiv_vs_origin == :equiv
+
+      # the Rian-compiled bytecode is not just compilable but *correct*: load it and
+      # run the functions against the values the Elixir oracle would produce.
+      rian = Rian.Transpile.transpile(src)
+      {:ok, mod, bin} = Rian.Beam.compile(rian, :"Elixir.ArithProbe")
+      :code.load_binary(mod, ~c"ArithProbe.beam", bin)
+
+      try do
+        assert mod.double(21) == 42
+        assert mod.sum_to(5) == 15
+      after
+        :code.purge(mod)
+        :code.delete(mod)
+      end
+    end
+
+    test "a real lib/rian module (ir.ex — the Core IR vocabulary) roundtrips equivalent" do
+      r = Roundtrip.run(File.read!("lib/rian/ir.ex"))
+
+      assert r.beam_direct == :ok
+      assert r.beam_via_elixir == :ok
+      assert r.equiv_two_paths == :equiv
+      assert r.equiv_vs_origin == :equiv
+    end
+  end
 end
