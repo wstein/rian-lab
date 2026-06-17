@@ -52,12 +52,16 @@ jobs:
       # BEAM-pinned application code stays opt-in (it declares `@targets`, or nothing).
       # `prelude_int.rian`'s explicit `Int64` overflow ops (`wrapping_add`/`saturating_add`/
       # `checked_add`) carry 64-bit overflow prims and so are honestly off `:js` (ADR-0064
-      # §2a) — they are gated against the targets they *can* reach, never silently dropped.
+      # §2a). `prelude_list.rian`'s higher-order combinators (`map`/`filter`/`reduce`/…) take
+      # an `Fn(...)` parameter, and Rust closure-as-value lowering is the open residual
+      # (ADR-0061), so they are honestly off `:rs`. Both files are gated against the targets
+      # they *can* reach, never silently dropped (the gate matches the honest reach report).
       - name: Gate shared-core portability (ex,rs,js)
         run: |
           for f in examples/rian/prelude_*.rian; do
             req=ex,rs,js
             [ "$f" = examples/rian/prelude_int.rian ] && req=ex,rs
+            [ "$f" = examples/rian/prelude_list.rian ] && req=ex,js
             echo "== $f (require $req) =="
             mix rian.targets "$f" --require "$req"
           done
