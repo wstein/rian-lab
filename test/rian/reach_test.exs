@@ -212,6 +212,15 @@ defmodule Rian.ReachTest do
       refute Enum.any?(rep["half"].blockers, &(&1.kind == :atom))
     end
 
+    test "a map literal reaches `:ex`+`:js` but is off `:rs`/`:jvm` (the emitters raise)" do
+      rep = reach("mod M do\n  pub def build() Map := %{a: 1}\nend")
+
+      # BEAM/JS lower a map (native map / JS object); Rust raises "map literals are
+      # BEAM-only" and JVM lists `EMap` unsupported.
+      assert targets(rep, "build") == [:ex, :js]
+      assert Enum.any?(rep["build"].blockers, &(&1.kind == :map and &1.kills == [:rs, :jvm]))
+    end
+
     test "an as-pattern reaches `:ex`+`:rs` but is off `:js`/`:jvm` (the emitters raise)" do
       rep =
         reach("""

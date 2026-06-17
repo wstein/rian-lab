@@ -368,6 +368,16 @@ defmodule Rian.Reach do
   defp bare_atom_blocker,
     do: %{construct: "bare atom literal (`:foo`)", kind: :atom, kills: [:rs, :jvm]}
 
+  # A map literal `%{…}` (ADR-0033): lowered on the BEAM (native map) and on JS (a
+  # plain object, `Rian.JS`'s `EMap` clause), but **not** on Rust (`Rian.Lower` raises
+  # "map literals are BEAM-only in PoC") or JVM (`Core.EMap` is in `@jvm_unsupported`).
+  # A constructed map therefore pins the function off `:rs`/`:jvm` — the matrix reports
+  # what the emitters actually lower, not the aspiration (same principle as bare atoms,
+  # ADR-0000). (Rian has no map-*update* surface form — `%{m | …}` is an Elixir-only
+  # construct the transpiler flags as `TODO_PORT` — so only the literal is reachable here.)
+  defp map_blocker,
+    do: %{construct: "map literal (`%{…}`)", kind: :map, kills: [:rs, :jvm]}
+
   # An as-pattern `name @ pat` (ADR-0050): lowered on the BEAM/Rust via
   # `Rian.PatternLower`, but the JS/JVM emitters raise `Unsupported`, so it pins the
   # function off `:js`/`:jvm` (honest against the emitters).
@@ -637,6 +647,9 @@ defmodule Rian.Reach do
   # a bare value atom that escaped the FFI-head and Result-tag `scan` clauses above —
   # off every non-BEAM target (no emitter lowers it).
   defp classify(%Core.EAtom{}, _modnames, {bl, ca}), do: {[bare_atom_blocker() | bl], ca}
+
+  # a map literal `%{…}` — lowered on BEAM/JS, but not on Rust/JVM (see `map_blocker/0`).
+  defp classify(%Core.EMap{}, _modnames, {bl, ca}), do: {[map_blocker() | bl], ca}
 
   defp classify(_node, _modnames, acc), do: acc
 
