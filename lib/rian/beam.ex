@@ -63,8 +63,8 @@ defmodule Rian.Beam do
 
   **Constants (ADR-0033).** A `const NAME := value` lowers to a 0-arity accessor
   function `name() -> value` (snake-cased), exported, and a reference to the const
-  calls it. Resolution is by the module's const-set (case-insensitive), so both
-  `const Targets` and `const targets` resolve to `targets()` — matching `Rian.Lower`.
+  calls it. Resolution is by exact name (the const-set is matched case-sensitively),
+  so a reference resolves only when it matches the declared name — matching `Rian.Lower`.
 
   **Not yet** (raise a clear error, never a silent miscompile): *positional*
   struct construction (named `Name(f: v)` works) and map *update* (`%{m | k: v}`).
@@ -564,7 +564,8 @@ defmodule Rian.Beam do
 
   # Rewrite a reference to a declared `const` (`{:id, NAME}` with NAME in the set)
   # into a `{:const_ref, NAME}` node, which lowers to a call to its accessor. The
-  # set is case-insensitive (membership), so lowercase consts resolve too.
+  # set is matched by exact name (case-sensitive membership): a reference resolves
+  # only when it matches the const's declared name.
   defp resolve_consts(node, cset) do
     if MapSet.size(cset) == 0 do
       node
