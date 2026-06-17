@@ -155,6 +155,20 @@ defmodule Rian.Decl do
     |> Rian.InferLocal.fill_returns()
   end
 
+  @doc """
+  Errors-as-values entry point (ADR-0035/0040): parse a program, returning
+  `{:ok, prog} | {:error, message}` instead of raising. The single boundary that
+  turns the parser's internal raise into a value, so callers that recover from a
+  malformed source (the REPL, `rian build`/`run`, the transpiler's `@rian`
+  annotation reader) pattern-match the result rather than `try/rescue`.
+  """
+  @spec parse_result(String.t()) :: {:ok, map()} | {:error, String.t()}
+  def parse_result(src) do
+    {:ok, parse(src)}
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
   # Prelude-function injection (ADR-0047 / ADR-0069 §6): a program that interpolates
   # a `Float64` calls `Show.float`, so supply the `Show` module unless the program
   # already defines one. Conditional — injected ONLY when used, so a non-float
@@ -1212,12 +1226,10 @@ defmodule Rian.Decl do
   # ADR-0009/IR.Const). Returns a type string, or `nil` when the shape is not a
   # recognized literal — downstream then treats the type as unknown.
   defp infer_const_type(value) do
-    case Pratt.parse_body(value) do
-      {:block, [expr: node]} -> literal_type(node)
+    case Pratt.parse_body_result(value) do
+      {:ok, {:block, [expr: node]}} -> literal_type(node)
       _ -> nil
     end
-  rescue
-    _ -> nil
   end
 
   defp literal_type({:num, n}), do: if(String.contains?(n, "."), do: "Float64", else: "Int53")

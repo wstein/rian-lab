@@ -180,9 +180,10 @@ defmodule Rian.Repl do
   end
 
   defp safe_decl(units) do
-    Decl.parse(units_src(units))
-  rescue
-    _ -> %{}
+    case Decl.parse_result(units_src(units)) do
+      {:ok, prog} -> prog
+      {:error, _} -> %{}
+    end
   end
 
   # The language's fixed completion vocabulary: keywords (mirrors `Rian.Lexer`),

@@ -79,6 +79,19 @@ defmodule Rian.Pratt do
     Rian.Prim.normalize(block)
   end
 
+  @doc """
+  Errors-as-values entry point (ADR-0035/0040): parse a body, returning
+  `{:ok, ast} | {:error, message}` instead of raising. The single boundary that
+  converts the parser's internal raise into a value; callers that recover from a
+  parse failure pattern-match this rather than `try/rescue`.
+  """
+  @spec parse_body_result(String.t() | tuple()) :: {:ok, tuple()} | {:error, String.t()}
+  def parse_body_result(src) do
+    {:ok, parse_body(src)}
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
   defp opinfo(op) do
     cond do
       op in ~w(* / rem div) -> {3, :left}

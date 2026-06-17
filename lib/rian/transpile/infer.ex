@@ -99,17 +99,19 @@ defmodule Rian.Transpile.Infer do
     "examples/rian/prelude_*.rian"
     |> Path.wildcard()
     |> Enum.flat_map(fn path ->
-      prog = path |> File.read!() |> Decl.parse()
+      # a prelude that fails to parse must not crash transpilation — degrade to "no
+      # prelude knowledge" for that file (everything stays a hole rather than mis-typed).
+      case path |> File.read!() |> Decl.parse_result() do
+        {:ok, prog} ->
+          for m <- Map.get(prog, :mods, []), f <- m.funcs do
+            {{m.name, to_string(f.name), length(f.params)}, sig_of(f)}
+          end
 
-      for m <- Map.get(prog, :mods, []), f <- m.funcs do
-        {{m.name, to_string(f.name), length(f.params)}, sig_of(f)}
+        {:error, _} ->
+          []
       end
     end)
     |> Map.new()
-  rescue
-    # a prelude that fails to parse must not crash transpilation — degrade to "no
-    # prelude knowledge" (everything stays a hole rather than mis-typed).
-    _ -> %{}
   end
 
   defp sig_of(f), do: %{params: Enum.map(f.params, & &1.type), ret: f.ret, tvars: f.tvars}

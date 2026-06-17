@@ -396,24 +396,23 @@ defmodule Rian.Transpile do
   # Parse a declaration annotation, returning nil instead of raising when the
   # string is not a complete declaration (e.g. a bodiless `def` head).
   defp safe_decl(str) do
-    Rian.Decl.parse(str)
-  rescue
-    _ -> nil
+    case Rian.Decl.parse_result(str) do
+      {:ok, prog} -> prog
+      {:error, _} -> nil
+    end
   end
 
   # parse a Rian def signature into a sigmap entry, keyed by its own {name, arity}.
   # A dummy body makes the bodiless head a complete, parseable clause.
   defp parse_rian_sig(sig) do
-    case Rian.Decl.parse(sig <> " := nil") do
-      %{funcs: [f | _]} ->
+    case Rian.Decl.parse_result(sig <> " := nil") do
+      {:ok, %{funcs: [f | _]}} ->
         {{to_string(f.name), length(f.params)},
          %{params: Enum.map(f.params, & &1.type), ret: f.ret, tvars: f.tvars}}
 
       _ ->
         nil
     end
-  rescue
-    _ -> nil
   end
 
   # Phase B: assemble Result returns (`Payload | Errors`) and synthesize the
