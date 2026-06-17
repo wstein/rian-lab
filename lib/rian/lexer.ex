@@ -73,12 +73,21 @@ defmodule Rian.Lexer do
 
   @doc "Full token stream, with collapsed `{:nl}` separators (comments stripped)."
   @spec tokenize(String.t()) :: [token()]
-  def tokenize(src), do: src |> lex([]) |> strip_trivia() |> collapse_nl()
+  def tokenize(src) do
+    case lex(src, []) do
+      {:ok, tokens} -> tokens |> strip_trivia() |> collapse_nl()
+      {:error, msg} -> raise(ArgumentError, msg)
+    end
+  end
 
   @doc "Newline-free token stream for the expression grammar (`Rian.Pratt`)."
   @spec expr_tokens(String.t()) :: [token()]
-  def expr_tokens(src),
-    do: src |> lex([]) |> strip_trivia() |> Enum.reject(&(&1 == {:nl}))
+  def expr_tokens(src) do
+    case lex(src, []) do
+      {:ok, tokens} -> tokens |> strip_trivia() |> Enum.reject(&(&1 == {:nl}))
+      {:error, msg} -> raise(ArgumentError, msg)
+    end
+  end
 
   # The compiler pipeline never sees formatter-only trivia: comment tokens are
   # dropped and a raw `{:heredoc, c}` collapses to the trimmed `{:str, …}` the
@@ -103,7 +112,12 @@ defmodule Rian.Lexer do
   solely so `Rian.Format` can re-print without losing comments or paragraphing.
   """
   @spec tokenize_trivia(String.t()) :: [token()]
-  def tokenize_trivia(src), do: lex(src, [])
+  def tokenize_trivia(src) do
+    case lex(src, []) do
+      {:ok, tokens} -> tokens
+      {:error, msg} -> raise(ArgumentError, msg)
+    end
+  end
 
   @doc """
   Render a token list back to a source string (space-joined; re-lexable).
@@ -159,58 +173,71 @@ defmodule Rian.Lexer do
   # one codepoint is allowed — `''` and multi-codepoint `'AB'` are lex errors
   # (Rian has no charlists; use a `"…"` string). Escapes are the full
   # Elixir/Gleam set, see `char_escape/1`.
+  # Errors-as-values internals (ADR-0035/0040): every lexer helper returns
+  # `{:ok, value} | {:error, message}` and threads errors with `with`; the public
+  # `tokenize/expr_tokens` re-raise at the boundary to preserve their contract until
+  # the parser callers consume the Result directly. `lex_char/1` → `{:ok, {cp, rest}}`.
   defp lex_char("\\" <> rest) do
-    {cp, after_escape} = char_escape(rest)
-    {cp, close_char(after_escape)}
+    with {:ok, {cp, after_escape}} <- char_escape(rest),
+         {:ok, after_close} <- close_char(after_escape) do
+      {:ok, {cp, after_close}}
+    end
   end
 
-  defp lex_char("'" <> _), do: raise(ArgumentError, "empty character literal '' — use a string")
-  defp lex_char(""), do: raise(ArgumentError, "unterminated character literal")
+  defp lex_char("'" <> _), do: {:error, "empty character literal '' — use a string"}
+  defp lex_char(""), do: {:error, "unterminated character literal"}
 
   defp lex_char(str) do
     {<<cp::utf8>>, rest} = String.next_codepoint(str)
-    {cp, close_char(rest)}
+    with {:ok, after_close} <- close_char(rest), do: {:ok, {cp, after_close}}
   end
 
   # consume the required closing quote; anything else means a multi-codepoint
-  # literal, which is rejected (no charlists).
-  defp close_char("'" <> rest), do: rest
-  defp close_char(""), do: raise(ArgumentError, "unterminated character literal")
+  # literal, which is rejected (no charlists). → `{:ok, rest} | {:error, message}`.
+  defp close_char("'" <> rest), do: {:ok, rest}
+  defp close_char(""), do: {:error, "unterminated character literal"}
 
   defp close_char(other),
-    do:
-      raise(ArgumentError, "character literal must be a single codepoint near: #{inspect(other)}")
+    do: {:error, "character literal must be a single codepoint near: #{inspect(other)}"}
 
-  # The escape vocabulary, shared by `Char` and `String` literals — the full
-  # Elixir set (a strict superset of Gleam's). Named single-character escapes:
-  defp char_escape("a" <> rest), do: {0x07, rest}
-  defp char_escape("b" <> rest), do: {0x08, rest}
-  defp char_escape("d" <> rest), do: {0x7F, rest}
-  defp char_escape("e" <> rest), do: {0x1B, rest}
-  defp char_escape("f" <> rest), do: {0x0C, rest}
-  defp char_escape("n" <> rest), do: {?\n, rest}
-  defp char_escape("r" <> rest), do: {?\r, rest}
-  defp char_escape("s" <> rest), do: {0x20, rest}
-  defp char_escape("t" <> rest), do: {?\t, rest}
-  defp char_escape("v" <> rest), do: {0x0B, rest}
-  defp char_escape("0" <> rest), do: {0, rest}
-  defp char_escape("\\" <> rest), do: {?\\, rest}
-  defp char_escape("'" <> rest), do: {?', rest}
-  defp char_escape("\"" <> rest), do: {?", rest}
+  # The escape vocabulary, shared by `Char` and `String` literals — the full Elixir
+  # set (a strict superset of Gleam's), as `{:ok, {codepoint, rest}}`. Named escapes:
+  defp char_escape("a" <> rest), do: {:ok, {0x07, rest}}
+  defp char_escape("b" <> rest), do: {:ok, {0x08, rest}}
+  defp char_escape("d" <> rest), do: {:ok, {0x7F, rest}}
+  defp char_escape("e" <> rest), do: {:ok, {0x1B, rest}}
+  defp char_escape("f" <> rest), do: {:ok, {0x0C, rest}}
+  defp char_escape("n" <> rest), do: {:ok, {?\n, rest}}
+  defp char_escape("r" <> rest), do: {:ok, {?\r, rest}}
+  defp char_escape("s" <> rest), do: {:ok, {0x20, rest}}
+  defp char_escape("t" <> rest), do: {:ok, {?\t, rest}}
+  defp char_escape("v" <> rest), do: {:ok, {0x0B, rest}}
+  defp char_escape("0" <> rest), do: {:ok, {0, rest}}
+  defp char_escape("\\" <> rest), do: {:ok, {?\\, rest}}
+  defp char_escape("'" <> rest), do: {:ok, {?', rest}}
+  defp char_escape("\"" <> rest), do: {:ok, {?", rest}}
 
   # `\xH`/`\xHH` — one or two hex digits (Elixir byte escape), read as a codepoint.
   defp char_escape("x" <> rest) do
     case take_hex(rest, 2) do
-      {"", _} -> raise ArgumentError, "`\\x` escape needs at least one hex digit"
-      {hex, after_hex} -> {cp!(String.to_integer(hex, 16)), after_hex}
+      {"", _} ->
+        {:error, "`\\x` escape needs at least one hex digit"}
+
+      {hex, after_hex} ->
+        with {:ok, cp} <- scalar_cp(String.to_integer(hex, 16)), do: {:ok, {cp, after_hex}}
     end
   end
 
   # `\u{HEX}` — braced Unicode codepoint (Elixir + Gleam), 1–6 hex digits.
   defp char_escape("u{" <> rest) do
     case String.split(rest, "}", parts: 2) do
-      [hex, after_brace] when hex != "" -> {cp!(parse_hex!(hex)), after_brace}
-      _ -> raise ArgumentError, "empty or unterminated `\\u{...}` escape"
+      [hex, after_brace] when hex != "" ->
+        with {:ok, n} <- hex_value(hex),
+             {:ok, cp} <- scalar_cp(n),
+             do: {:ok, {cp, after_brace}}
+
+      _ ->
+        {:error, "empty or unterminated `\\u{...}` escape"}
     end
   end
 
@@ -218,15 +245,14 @@ defmodule Rian.Lexer do
   defp char_escape("u" <> rest) do
     case take_hex(rest, 4) do
       {hex, after_hex} when byte_size(hex) == 4 ->
-        {cp!(String.to_integer(hex, 16)), after_hex}
+        with {:ok, cp} <- scalar_cp(String.to_integer(hex, 16)), do: {:ok, {cp, after_hex}}
 
       _ ->
-        raise ArgumentError, "`\\u` escape needs four hex digits — or use `\\u{...}`"
+        {:error, "`\\u` escape needs four hex digits — or use `\\u{...}`"}
     end
   end
 
-  defp char_escape(other),
-    do: raise(ArgumentError, "unknown character escape near: #{inspect(other)}")
+  defp char_escape(other), do: {:error, "unknown character escape near: #{inspect(other)}"}
 
   # take up to `max` leading hex digits; returns `{taken, rest}`.
   defp take_hex(str, max), do: take_hex(str, max, "")
@@ -238,17 +264,15 @@ defmodule Rian.Lexer do
 
   defp take_hex(str, _max, acc), do: {acc, str}
 
-  defp parse_hex!(hex) do
+  defp hex_value(hex) do
     if hex =~ ~r/\A[0-9a-fA-F]+\z/,
-      do: String.to_integer(hex, 16),
-      else: raise(ArgumentError, "invalid hex digits in escape: #{inspect(hex)}")
+      do: {:ok, String.to_integer(hex, 16)},
+      else: {:error, "invalid hex digits in escape: #{inspect(hex)}"}
   end
 
   # a valid scalar Unicode codepoint (no surrogates, ≤ U+10FFFF).
-  defp cp!(n) when n in 0..0xD7FF or n in 0xE000..0x10FFFF, do: n
-
-  defp cp!(n),
-    do: raise(ArgumentError, "codepoint out of range or a surrogate: #{inspect(n)}")
+  defp scalar_cp(n) when n in 0..0xD7FF or n in 0xE000..0x10FFFF, do: {:ok, n}
+  defp scalar_cp(n), do: {:error, "codepoint out of range or a surrogate: #{inspect(n)}"}
 
   # String literal body scanner (the text after the opening `"`). Returns
   # `{decoded, rest}` where `decoded` is the string value with escapes resolved
@@ -260,20 +284,22 @@ defmodule Rian.Lexer do
   # `parts` interleaves `{:lit, binary}` (escape-decoded) and `{:hole, source}`
   # (raw expression text, parsed later by `Rian.Pratt`).
   defp lex_string_token(str) do
-    {parts, rest} = lex_parts(str, [], [])
-    {string_token(parts), rest}
+    with {:ok, {parts, rest}} <- lex_parts(str, [], []) do
+      {:ok, {string_token(parts), rest}}
+    end
   end
 
-  defp lex_parts("", _lit, _parts), do: raise(ArgumentError, "unterminated string literal")
+  defp lex_parts("", _lit, _parts), do: {:error, "unterminated string literal"}
 
   defp lex_parts("\"" <> rest, lit, parts),
-    do: {Enum.reverse([{:lit, binify(lit)} | parts]), rest}
+    do: {:ok, {Enum.reverse([{:lit, binify(lit)} | parts]), rest}}
 
   # interpolation hole `${expr}` (ADR-0069) — a `$` is special only when followed by
   # `{`; a bare `$` (e.g. `"$5.00"`) is an ordinary character via the default clause.
   defp lex_parts("${" <> rest, lit, parts) do
-    {src, rest2} = capture_hole(rest, 0, [])
-    lex_parts(rest2, [], [{:hole, src}, {:lit, binify(lit)} | parts])
+    with {:ok, {src, rest2}} <- capture_hole(rest, 0, []) do
+      lex_parts(rest2, [], [{:hole, src}, {:lit, binify(lit)} | parts])
+    end
   end
 
   # `\$` is a literal `$` — the only escape `$` needs, so a literal `${` is `\${`.
@@ -281,8 +307,9 @@ defmodule Rian.Lexer do
   defp lex_parts("\\$" <> rest, lit, parts), do: lex_parts(rest, ["$" | lit], parts)
 
   defp lex_parts("\\" <> rest, lit, parts) do
-    {cp, after_escape} = char_escape(rest)
-    lex_parts(after_escape, [<<cp::utf8>> | lit], parts)
+    with {:ok, {cp, after_escape}} <- char_escape(rest) do
+      lex_parts(after_escape, [<<cp::utf8>> | lit], parts)
+    end
   end
 
   defp lex_parts(str, lit, parts) do
@@ -294,10 +321,11 @@ defmodule Rian.Lexer do
   # or struct literal inside a hole nests correctly). The source is parsed later by
   # `Rian.Pratt` (it re-enters the expression grammar); a string literal containing
   # `}` inside a hole is out of scope (ADR-0069 discourages nesting strings in holes).
+  # → `{:ok, {source, rest}} | {:error, message}`.
   defp capture_hole("", _d, _acc),
-    do: raise(ArgumentError, "unterminated interpolation hole `${` in string")
+    do: {:error, "unterminated interpolation hole `${` in string"}
 
-  defp capture_hole("}" <> rest, 0, acc), do: {binify(acc), rest}
+  defp capture_hole("}" <> rest, 0, acc), do: {:ok, {binify(acc), rest}}
   defp capture_hole("}" <> rest, d, acc), do: capture_hole(rest, d - 1, ["}" | acc])
   defp capture_hole("{" <> rest, d, acc), do: capture_hole(rest, d + 1, ["{" | acc])
 
@@ -349,10 +377,12 @@ defmodule Rian.Lexer do
 
   defp str_cp_source(cp), do: <<cp::utf8>>
 
+  # → `{:ok, [token]} | {:error, message}`; the recursive accumulator threads the
+  # error out of any sub-scanner (string/char/escape/hole) without raising.
   defp lex(str, acc) do
     cond do
       str == "" ->
-        Enum.reverse(acc)
+        {:ok, Enum.reverse(acc)}
 
       String.starts_with?(str, [" ", "\t", "\r"]) ->
         lex(advance(str, 1), acc)
@@ -389,18 +419,18 @@ defmodule Rian.Lexer do
       String.starts_with?(str, ~s(""")) ->
         case String.split(advance(str, 3), ~s("""), parts: 2) do
           [content, rest] -> lex(rest, [{:heredoc, content} | acc])
-          [_] -> raise ArgumentError, "unterminated heredoc string"
+          [_] -> {:error, "unterminated heredoc string"}
         end
 
       String.starts_with?(str, "\"") ->
-        {token, rest} = lex_string_token(advance(str, 1))
-        lex(rest, [token | acc])
+        with {:ok, {token, rest}} <- lex_string_token(advance(str, 1)),
+             do: lex(rest, [token | acc])
 
       # `Char` literal `'A'` (ADR-0036) — exactly one codepoint between single
       # quotes (Crystal-style); the parser desugars it to its codepoint integer.
       String.starts_with?(str, "'") ->
-        {cp, rest} = lex_char(advance(str, 1))
-        lex(rest, [{:char, cp} | acc])
+        with {:ok, {cp, rest}} <- lex_char(advance(str, 1)),
+             do: lex(rest, [{:char, cp} | acc])
 
       op = Enum.find(@multi, &String.starts_with?(str, &1)) ->
         lex(advance(str, String.length(op)), [{:op, op} | acc])
@@ -417,7 +447,7 @@ defmodule Rian.Lexer do
         lex(advance(str, String.length(w)), [word(w) | acc])
 
       true ->
-        raise ArgumentError, "cannot scan: #{inspect(str)}"
+        {:error, "cannot scan: #{inspect(str)}"}
     end
   end
 
