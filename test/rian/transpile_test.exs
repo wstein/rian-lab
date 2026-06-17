@@ -218,6 +218,35 @@ defmodule Rian.TranspileTest do
       refute out =~ "describe"
     end
 
+    test "a verbose test name is capped at a word boundary (≤ 64 chars)" do
+      out =
+        test_mod(
+          ~S|  test "this is a deliberately very long descriptive test name that exceeds the cap" do
+    assert ok?()
+  end|
+        )
+
+      [slug] = Regex.run(~r/@test def (\w+)\(\)/, out, capture: :all_but_first)
+      assert byte_size(slug) <= 64
+      # truncated at a `_` boundary — no dangling partial word, no trailing `_`
+      refute String.ends_with?(slug, "_")
+      assert out =~ "@test def #{slug}() Bool := assert(ok?())"
+    end
+
+    test "colliding slugs get a numeric suffix (never silently merged into one def)" do
+      # two identical names — Rian would treat same-name @test defs as one function.
+      out = test_mod(~S|  test "same name" do
+    assert a()
+  end
+
+  test "same name" do
+    assert b()
+  end|)
+
+      assert out =~ "@test def same_name() Bool := assert(a())"
+      assert out =~ "@test def same_name_2() Bool := assert(b())"
+    end
+
     test "a `setup`/`setup_all` block has no Rian image — a marker, not a `@test def`" do
       out = test_mod(~S|  describe "with fixture" do
     setup do

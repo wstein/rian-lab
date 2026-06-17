@@ -190,8 +190,8 @@ defmodule Rian.Transpile do
   defp flat_items(node, sigmap, types, struct_anns) do
     type_lines = if types == [], do: [], else: types ++ [""]
 
-    type_lines ++
-      render_items(block_stmts(node), sigmap, nil, struct_anns, referenced_attrs(node))
+    items = render_items(block_stmts(node), sigmap, nil, struct_anns, referenced_attrs(node))
+    type_lines ++ uniquify_test_defs(items)
   end
 
   # An ExUnit test module: `use ExUnit.Case`, or any `test`/`describe` block.
@@ -885,7 +885,7 @@ defmodule Rian.Transpile do
   # any non-assertion statements (binds, setup calls) become the block preamble —
   # sound because assertions are side-effect-free values that don't feed the binds.
   defp test_def(name, body, prefix) do
-    slug = prefix <> test_slug(name)
+    slug = cap_slug(prefix <> test_slug(name))
 
     case render_test_body(body) do
       {:inline, expr} ->
@@ -953,6 +953,39 @@ defmodule Rian.Transpile do
       String.match?(slug, ~r/^[a-z]/) -> slug
       true -> "t_" <> slug
     end
+  end
+
+  # Cap an over-long slug (the verbose `describe` + `test` concatenations) at a word
+  # boundary so the identifier stays readable; `uniquify_test_defs/1` then resolves
+  # any collision a cap introduces (tests in one group share a long prefix).
+  @max_slug 64
+  defp cap_slug(slug) when byte_size(slug) <= @max_slug, do: slug
+
+  defp cap_slug(slug) do
+    capped =
+      slug |> binary_part(0, @max_slug) |> String.replace(~r/_[^_]*$/, "") |> String.trim("_")
+
+    if capped == "", do: binary_part(slug, 0, @max_slug), else: capped
+  end
+
+  # Two tests can slug to the same name (a cap, or just near-identical descriptions).
+  # Rian treats same-name zero-arity `@test def`s as clauses of ONE function — silently
+  # merging tests — so disambiguate any later collision with a numeric suffix.
+  defp uniquify_test_defs(lines) do
+    {out, _seen} =
+      Enum.map_reduce(lines, %{}, fn line, seen ->
+        case Regex.run(~r/^@test def ([a-z][a-z0-9_]*)\(\)(.*)$/, line) do
+          [_, name, rest] ->
+            n = Map.get(seen, name, 0) + 1
+            slug = if n == 1, do: name, else: "#{name}_#{n}"
+            {"@test def #{slug}()#{rest}", Map.put(seen, name, n)}
+
+          nil ->
+            {line, seen}
+        end
+      end)
+
+    out
   end
 
   # ── bodies ──────────────────────────────────────────────────────────────────
