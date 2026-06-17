@@ -229,9 +229,11 @@ defmodule Rian.TranspileTest do
   end
 
   describe "honest quarantine — nothing untranslated masquerades as done" do
-    test "an unmapped stdlib call (no Rian image) stays a greppable marker" do
-      out = rian("defmodule M do\n  def t(s), do: String.split(s, \",\")\nend")
-      assert out =~ "TODO_PORT(\"remote/stdlib call: String.split"
+    test "a field access (lowercase receiver, no Rian image) stays a greppable marker" do
+      # `r.name` is struct-field reflection, not a call Rian can lower — it stays a
+      # marker (Elixir-stdlib *module* calls become FFI; see the FFI test below).
+      out = rian("defmodule M do\n  def t(r), do: r.name\nend")
+      assert out =~ "TODO_PORT(\"remote/stdlib call: r.name"
     end
   end
 
@@ -377,9 +379,12 @@ end|) =~ ~S|"v=${x}!"|
       assert out =~ "List.map(xs, (p1) -> p1 + 1)"
     end
 
-    test "honesty: a stdlib call with NO Rian image stays a marker, never faked" do
+    test "an Elixir-stdlib call with no portable image is emitted as BEAM FFI, not a marker" do
+      # `MapSet.new` has no portable prelude image, so it lowers to a native remote
+      # call (compiles/runs on BEAM, pinned off :rs/:js) rather than a TODO_PORT.
       out = rian("defmodule M do\n  def f(s), do: MapSet.new(s)\nend")
-      assert out =~ ~s|TODO_PORT("remote/stdlib call: MapSet.new|
+      assert out =~ "MapSet.new(s)"
+      refute out =~ ~s|TODO_PORT("remote/stdlib call: MapSet.new|
     end
 
     test "stats counts auto-mapped calls" do

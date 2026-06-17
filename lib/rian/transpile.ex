@@ -47,6 +47,8 @@ defmodule Rian.Transpile do
     "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
     "# Auto-mapped stdlib calls (List./Dict./Str.) are spelled inline but NOT",
     "#   semantics-verified — check arg-order/edge-cases against the Elixir source.",
+    "# Other Elixir-stdlib calls are emitted as BEAM FFI (native remote calls): they",
+    "#   compile/run on BEAM but are non-portable — Reach pins them off :rs/:js.",
     "# ─────────────────────────────────────────────────────────────────────────",
     ""
   ]
@@ -96,10 +98,12 @@ defmodule Rian.Transpile do
     {"Integer", :to_string, 1} => {"Str", "from_int"}
   }
 
-  # Elixir-stdlib modules with no (or only partial) Rian image — calls to these
-  # stay markers unless individually `@stdlib`-mapped. Everything else capitalized
-  # is assumed a sibling Rian module, whose `Mod.fun(args)` call is valid Rian and
-  # is emitted inline (flagged for verification in the header, like `@stdlib`).
+  # Elixir-stdlib modules. A call to one is emitted as a native BEAM FFI call
+  # (`Mod.fun(args)`) when it is not individually `@stdlib`-mapped to a portable
+  # prelude op — it compiles and runs on BEAM but is non-portable (Reach pins it
+  # off `:rs`/`:js`). Everything else capitalized is assumed a sibling Rian module
+  # and emitted inline; a lowercase receiver (`r.name`) is struct-field reflection
+  # with no Rian image and stays a `TODO_PORT` marker.
   @elixir_stdlib ~w(Enum Map MapSet String Regex Process Tuple Integer Float List
                     Keyword IO Kernel File Stream Atom Base Code Macro Exception
                     Module Application Agent Task GenServer System Path Access
@@ -923,10 +927,20 @@ defmodule Rian.Transpile do
       sibling_module?(mod, m) ->
         "#{m}.#{fun}(#{arg_strs})"
 
+      elixir_stdlib?(mod, m) ->
+        # A known Elixir-stdlib call with no portable prelude image — emit it as a
+        # native remote call (BEAM FFI). It compiles and runs on BEAM, so the draft
+        # is far less marker-ridden; it is *not* portable, so `Rian.Reach` pins the
+        # function off `:rs`/`:js` (honestly reported, not hidden).
+        "#{m}.#{fun}(#{arg_strs})"
+
       true ->
         ~s|TODO_PORT("remote/stdlib call: #{escape("#{m}.#{fun}(#{arg_strs})")}")|
     end
   end
+
+  defp elixir_stdlib?({:__aliases__, _, _}, m), do: m in @elixir_stdlib
+  defp elixir_stdlib?(_, _), do: false
 
   defp mod_str({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
   defp mod_str(a) when is_atom(a), do: ":#{a}"

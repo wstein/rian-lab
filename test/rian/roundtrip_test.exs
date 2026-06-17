@@ -27,11 +27,12 @@ defmodule Rian.RoundtripTest do
     end
 
     test "a draft that still carries a marker fails the BEAM stages (does not lie green)" do
-      # `Map.from_struct` reflection has no Rian image → a TODO_PORT marker → the
-      # draft cannot compile either way.
+      # struct-field reflection (`s.field`, lowercase receiver) has no Rian image →
+      # a TODO_PORT marker → the draft cannot compile either way. (Elixir-stdlib
+      # *module* calls now lower to BEAM FFI instead; this is the residual marker.)
       src = ~S'''
       defmodule R do
-        def fields(s), do: Map.from_struct(s)
+        def field(s), do: s.name
       end
       '''
 
