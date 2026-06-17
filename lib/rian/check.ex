@@ -1507,7 +1507,9 @@ defmodule Rian.Check do
   # instantiate generics). For a function's OWN type variables, though, the body must
   # see the parameter AS its tvar so a pass-through (`def id(x) := x`, auto-generalized
   # to `forall T`) can infer the return `T`. Re-bind each var-pattern param whose type
-  # is one of `tvs` to that tvar string.
+  # is one of `tvs` to that tvar string. Only bare-variable params are surfaced; a
+  # generic param introduced via a *destructuring* clause head is not (a deliberate
+  # conservative limitation — ADR-0034 "conservative limitations").
   defp bind_tvar_params(env, pats, ps, tvs) do
     pats
     |> Enum.zip(ps)

@@ -73,6 +73,25 @@ return `Int53` both recovered. `Rian.Decl.parse` runs the pass after assembly; a
 - **Inference widens portability**: a recovered concrete param type lets a private helper reach
   `:rs`/`:jvm` (`Rian.Reach` reads the now-concrete signature) instead of forcing an annotation.
 
+**Deliberate conservative limitations (decision-lock 2026-06-17).** Two gaps in parameter inference
+are intentionally left conservative rather than "fixed", because the sound fix needs machinery this
+ADR does not yet have (target-aware enforcement or union types):
+
+- **A structural clause-head pattern (`[h|t]`, `{a, b}`, `%{…}`) contributes no param-type
+  constraint** (`Rian.Check.pattern_type` returns `:unknown` for it). Making it contribute a
+  constraint — so a scalar-vs-list clause clash is a conflict — was implemented and **reverted**: it
+  rejected valid **dynamically-typed, BEAM-only self-host code** that legitimately matches one untyped
+  param at several shapes (a union), e.g. `compiler/compose_real_sum.rian`'s `lower_body(body)`. The
+  inference is conservative by design (it infers `:unknown` rather than guess), so it generalizes such
+  a param rather than inventing a false conflict. A sound version would enforce the conflict **only for
+  functions required to reach a statically-typed target** (`:rs`/`:js`/`:jvm` via an `@targets`
+  contract / `Rian.Reach`) and leave BEAM-only code alone, or introduce union types — either is a
+  larger design step, deferred.
+- **A generic param introduced via a *destructuring* clause head is not surfaced to return inference**
+  (`bind_tvar_params` re-binds only bare-variable params to their tvar). This is the same
+  incomplete-coverage family — its principled resolution depends on the structural-pattern typing
+  above — and is low-reachability (a destructured `forall T` param is itself near-incoherent).
+
 The Elixir→Rian transpiler emits private `defp`s without a return hole (one fewer `_Unk` per private
 function).
 
