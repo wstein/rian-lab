@@ -143,7 +143,10 @@ defmodule Rian.JS do
     # the dispatcher with JS-native guards (ADR-0061 §3).
     funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
     Core.reject_unsupported!(funcs, @js_unsupported, :js, Unsupported)
-    fn_js = Enum.map_join(funcs, "\n\n", &function_js(&1, i53))
+    # the program inference context lets each clause body emit from the TYPED core
+    # IR (`Check.annotate` fills every node's type, ADR-0050 §3).
+    ic = Check.program_ic(prog)
+    fn_js = Enum.map_join(funcs, "\n\n", &function_js(&1, i53, ic))
     disp_js = protocol_dispatchers_js(prog, i53)
 
     [fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
@@ -262,7 +265,7 @@ defmodule Rian.JS do
   # each Rian param to its positional argument by name so the spec can reference it.
   # No `:js` body -> the function is off `:js` (Reach pins it); reaching here means an
   # off-target compile, a clear error (ADR-0041 §2 — never a silent stub).
-  defp function_js(%{externals: ext} = f, _i53) when map_size(ext) > 0 do
+  defp function_js(%{externals: ext} = f, _i53, _ic) when map_size(ext) > 0 do
     case Map.get(ext, :js) do
       nil ->
         raise Unsupported, "`#{f.name}`: no `@external(:js, …)` body — not reachable on :js"
@@ -280,13 +283,13 @@ defmodule Rian.JS do
     end
   end
 
-  defp function_js(%{name: name, clauses: clauses, pub?: pub?} = f, i53) do
+  defp function_js(%{name: name, clauses: clauses, pub?: pub?} = f, i53, ic) do
     reject_wide_int!(name, f)
     arity = length(hd(clauses).pats)
     params = Enum.map_join(0..(arity - 1)//1, ", ", &"a#{&1}")
     # integer mode (`i53`) is computed once, program-wide, in `compile/1`.
     # Wide fixed-width (`Int64`+) is rejected above, never silently elevated.
-    body = Enum.map_join(clauses, "\n", &clause_js(&1, i53))
+    body = Enum.map_join(clauses, "\n", &clause_js(&1, i53, f.params, ic))
     export = if pub?, do: "export ", else: ""
 
     "#{export}function #{name}(#{params}) {\n#{body}\n  throw new Error(\"#{name}: no clause matched\");\n}"
@@ -364,7 +367,7 @@ defmodule Rian.JS do
   # `{ if (<structural tests>) { <binds> <guarded return> } }` — the binds live
   # *inside* the structural test so a nested field access (`a0[1][1]`) only runs
   # once the shape is known; a `when` guard, written in the bound names, follows.
-  defp clause_js(%{pats: pats, body: body, guard: guard}, i53) do
+  defp clause_js(%{pats: pats, body: body, guard: guard}, i53, params, ic) do
     {tests, binds} =
       pats
       |> Enum.map(&Core.from_pat/1)
@@ -374,10 +377,13 @@ defmodule Rian.JS do
         {ts ++ t, bs ++ b}
       end)
 
+    # the per-clause typing env (params narrowed by the head patterns) types the
+    # body's core IR (ADR-0050 §3).
+    tenv = Check.clause_env(pats, params, ic)
     # the clause's parameters are `const`-bound in this same JS scope, so a `:=`
     # that rebinds a parameter name shadows them — seed the rename with the params
     param_names = Enum.map(binds, fn {n, _} -> n end)
-    inner = bind_lines(binds) ++ [guarded_return(body, guard, param_names, i53)]
+    inner = bind_lines(binds) ++ [guarded_return(body, guard, param_names, i53, tenv, ic)]
     body_str = Enum.join(inner, " ")
 
     guarded =
@@ -389,11 +395,12 @@ defmodule Rian.JS do
     "  { #{guarded} }"
   end
 
-  defp guarded_return(body, nil, params, i53), do: clause_return(body, params, i53)
+  defp guarded_return(body, nil, params, i53, tenv, ic),
+    do: clause_return(body, params, i53, tenv, ic)
 
-  defp guarded_return(body, g, params, i53),
+  defp guarded_return(body, g, params, i53, tenv, ic),
     do:
-      "if (#{expr_js(Core.from_expr(Pratt.parse(g)), i53)}) { #{clause_return(body, params, i53)} }"
+      "if (#{expr_js(Check.annotate(Pratt.parse(g), tenv, ic), i53)}) { #{clause_return(body, params, i53, tenv, ic)} }"
 
   # Match `pat` against the JS access path `acc` -> `{tests, binds}`. A sum
   # variant is a tagged array `["Ctor", arg0, …]` (ADR-0049), so a constructor
@@ -480,8 +487,8 @@ defmodule Rian.JS do
   # `:=` shadowing is resolved on the Core IR by `Rian.Shadow` first (JS `let`/
   # `const` forbid same-scope re-declaration); `$` is JS-valid and never appears
   # in a Rian identifier, so a `$`-suffixed fresh name cannot collide.
-  defp clause_return(src, params, i53) do
-    %EBlock{stmts: stmts} = Core.from_expr(Pratt.parse_body(src))
+  defp clause_return(src, params, i53, tenv, ic) do
+    %EBlock{stmts: stmts} = Check.annotate(Pratt.parse_body(src), tenv, ic)
     block_return(Rian.Shadow.dedup(stmts, params, &js_fresh/2), i53)
   end
 

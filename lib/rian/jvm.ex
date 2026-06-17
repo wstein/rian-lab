@@ -114,7 +114,9 @@ defmodule Rian.JVM do
     funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
     Core.reject_unsupported!(funcs, @jvm_unsupported, :jvm, Unsupported)
     type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
-    fn_decls = Enum.map_join(funcs, "\n\n", &function_kt/1)
+    # the program inference context types each clause body's core IR (ADR-0050 §3).
+    ic = Rian.Check.program_ic(prog)
+    fn_decls = Enum.map_join(funcs, "\n\n", &function_kt(&1, ic))
     # inject the float-repr helper only when the program lowers `__prim_float_repr`.
     runtime =
       if String.contains?(fn_decls, "__rian_float_repr("), do: float_repr_helper(), else: ""
@@ -222,7 +224,7 @@ defmodule Rian.JVM do
   # ── function / clause dispatch ──────────────────────────────────────────
   # an `@external` function (ADR-0068): emit the `:jvm` host body verbatim, binding
   # each param to its positional argument by name. No `:jvm` body -> off `:jvm`.
-  defp function_kt(%{externals: ext} = f) when map_size(ext) > 0 do
+  defp function_kt(%{externals: ext} = f, _ic) when map_size(ext) > 0 do
     case Map.get(ext, :jvm) do
       nil ->
         raise Unsupported, "`#{f.name}`: no `@external(:jvm, …)` body — not reachable on :jvm"
@@ -243,13 +245,13 @@ defmodule Rian.JVM do
     end
   end
 
-  defp function_kt(%{name: name, clauses: clauses, ret: ret, params: params, pub?: pub?}) do
+  defp function_kt(%{name: name, clauses: clauses, ret: ret, params: params, pub?: pub?}, ic) do
     sig_params =
       params
       |> Enum.with_index()
       |> Enum.map_join(", ", fn {p, i} -> "a#{i}: #{kt_type(p.type)}" end)
 
-    {lines, closed?} = clause_lines(clauses)
+    {lines, closed?} = clause_lines(clauses, params, ic)
 
     tail =
       if closed?,
@@ -266,32 +268,36 @@ defmodule Rian.JVM do
   # (or the trailing throw, which Kotlin would flag as unreachable). Dispatching
   # on the guard and recursing — rather than threading a `{acc, closed?}` tuple
   # through `reduce_while` — lets "closes" be "don't recurse" instead of `:halt`.
-  defp clause_lines([]), do: {"", false}
+  defp clause_lines([], _params, _ic), do: {"", false}
 
-  defp clause_lines([c | rest]) do
+  defp clause_lines([c | rest], params, ic) do
     {tests, binds} = clause_match(c.pats)
     param_names = Enum.map(binds, fn {n, _} -> n end)
-    line = bind_str(binds) <> guarded_return(c.body, c.guard, param_names)
+    # the per-clause typing env types the body's core IR (ADR-0050 §3).
+    tenv = Rian.Check.clause_env(c.pats, params, ic)
+    line = bind_str(binds) <> guarded_return(c.body, c.guard, param_names, tenv, ic)
 
     case c.guard do
-      nil -> closed_or_cond(tests, line, rest)
-      _ -> run_or_cond(tests, line, rest)
+      nil -> closed_or_cond(tests, line, rest, params, ic)
+      _ -> run_or_cond(tests, line, rest, params, ic)
     end
   end
 
   # no guard: empty tests -> unconditional (closes the function); else an `if`.
-  defp closed_or_cond([], line, _rest), do: {"  #{line}\n", true}
-  defp closed_or_cond(tests, line, rest), do: prepend_if(tests, line, rest)
+  defp closed_or_cond([], line, _rest, _params, _ic), do: {"  #{line}\n", true}
+  defp closed_or_cond(tests, line, rest, params, ic), do: prepend_if(tests, line, rest, params, ic)
 
   # guarded: a guard with no structural tests carries its condition in the inner
   # `if` that `guarded_return/3` emits; wrap it in a scoped `run { … }` (an empty
   # `if () { … }` is not valid Kotlin) so the binds stay local and a matched guard
   # returns non-locally from the function. With tests, it's a plain conditional `if`.
-  defp run_or_cond([], line, rest), do: prepend("  run { #{line} }\n", clause_lines(rest))
-  defp run_or_cond(tests, line, rest), do: prepend_if(tests, line, rest)
+  defp run_or_cond([], line, rest, params, ic),
+    do: prepend("  run { #{line} }\n", clause_lines(rest, params, ic))
 
-  defp prepend_if(tests, line, rest),
-    do: prepend("  if (#{Enum.join(tests, " && ")}) { #{line} }\n", clause_lines(rest))
+  defp run_or_cond(tests, line, rest, params, ic), do: prepend_if(tests, line, rest, params, ic)
+
+  defp prepend_if(tests, line, rest, params, ic),
+    do: prepend("  if (#{Enum.join(tests, " && ")}) { #{line} }\n", clause_lines(rest, params, ic))
 
   defp prepend(s, {lines, closed?}), do: {s <> lines, closed?}
 
@@ -305,10 +311,12 @@ defmodule Rian.JVM do
     end)
   end
 
-  defp guarded_return(body, nil, params), do: "return #{clause_value(body, params)}"
+  defp guarded_return(body, nil, params, tenv, ic),
+    do: "return #{clause_value(body, params, tenv, ic)}"
 
-  defp guarded_return(body, g, params),
-    do: "if (#{expr_kt(Core.from_expr(Pratt.parse(g)))}) { return #{clause_value(body, params)} }"
+  defp guarded_return(body, g, params, tenv, ic),
+    do:
+      "if (#{expr_kt(Rian.Check.annotate(Pratt.parse(g), tenv, ic))}) { return #{clause_value(body, params, tenv, ic)} }"
 
   # Match `pat` against the Kotlin access path `acc` -> `{tests, binds}`. A sum
   # value is a `data class`, so a ctor pattern smart-casts (`acc is Ctor`) and
@@ -372,8 +380,8 @@ defmodule Rian.JVM do
   # `val`/`var` cannot be re-declared in a scope. Kotlin forbids `$`/`@` in a
   # plain identifier, so the fresh name is backtick-quoted (`` `x$1` ``): a valid
   # Kotlin identifier that a Rian source name can never collide with.
-  defp clause_value(src, params) do
-    %EBlock{stmts: stmts} = Core.from_expr(Pratt.parse_body(src))
+  defp clause_value(src, params, tenv, ic) do
+    %EBlock{stmts: stmts} = Rian.Check.annotate(Pratt.parse_body(src), tenv, ic)
     block_value(Rian.Shadow.dedup(stmts, params, &kt_fresh/2))
   end
 
