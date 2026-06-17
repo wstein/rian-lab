@@ -107,7 +107,10 @@ defmodule Rian.Roundtrip do
 
   defp rian_to_elixir(rian) do
     case Decl.parse(rian) do
-      %{mods: [m | _]} -> Lower.compile_module(m).elixir
+      # `compile_module_beam/1` renders only the Elixir text (path 3 target); the
+      # full `compile_module/1` would also eagerly emit Rust, which is irrelevant
+      # here and not defined for an undeclared cross-module construction.
+      %{mods: [m | _]} -> Lower.compile_module_beam(m).elixir
       _ -> raise "no module in Rian source"
     end
   end

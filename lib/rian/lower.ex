@@ -49,6 +49,7 @@ defmodule Rian.Lower do
     EDot,
     EId,
     EIf,
+    ELabel,
     ELambda,
     EList,
     EMap,
@@ -1962,6 +1963,19 @@ defmodule Rian.Lower do
 
   defp emit(%ECall{fun: %EId{name: "__prim_checked_add"}, args: [a, b]}, :rust, ec),
     do: {"#{p(a, 12, :rust, ec)}.checked_add(#{p(b, 0, :rust, ec)})", 12}
+
+  # A named construction `Name(field: v, …)` (labeled args) lowers to the same
+  # `__struct__`-tagged map `Rian.Beam` builds — `%{__struct__: :tag, field: v, …}`
+  # with `tag = to_snake(Name)` — so the two backends stay forms-equivalent even
+  # when `Name` is a struct not declared in this module.
+  defp emit(%ECall{fun: %EId{name: f}, args: [%ELabel{} | _] = labels}, :elixir, ec) do
+    fields =
+      Enum.map_join(labels, ", ", fn %ELabel{name: k, expr: v} ->
+        "#{k}: #{p(v, 0, :elixir, ec)}"
+      end)
+
+    {"%{__struct__: :#{PL.to_snake(f)}, #{fields}}", 12}
+  end
 
   # applying a function-valued variable on Elixir is `f.(x)`, a local call is
   # `f(x)` — decided by whether `f` is in scope (matches `Rian.Beam`)

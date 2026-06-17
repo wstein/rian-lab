@@ -108,5 +108,23 @@ defmodule Rian.RoundtripTest do
       assert r.equiv_two_paths == :equiv
       assert r.equiv_vs_origin == :equiv
     end
+
+    test "named construction agrees across backends (Rian.Lower ↔ Rian.Beam parity)" do
+      # `Pt(x: 1, y: 2)` is a struct construction; both backends must lower it to the
+      # same `__struct__`-tagged map, so the two BEAM binaries are forms-equivalent
+      # even though `Pt` is not declared in this module.
+      src = ~S'''
+      defmodule Mk do
+        use Rian.Ann
+        @rian "pub def origin() Pt"
+        def origin, do: %Pt{x: 0, y: 0}
+      end
+      '''
+
+      r = Roundtrip.run(src)
+      assert r.beam_direct == :ok
+      assert r.beam_via_elixir == :ok
+      assert r.equiv_two_paths == :equiv
+    end
   end
 end
