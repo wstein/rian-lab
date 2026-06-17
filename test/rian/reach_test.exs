@@ -26,6 +26,23 @@ defmodule Rian.ReachTest do
       assert rep["add"].blockers == []
     end
 
+    test "an inferred private helper reaches every target (inference widens portability)" do
+      # `inc`'s parameter has no written type; private parameter inference recovers
+      # `x : Int53` (ADR-0034 Phase 2), so Reach sees a concrete signature and the
+      # helper is portable to :rs/:jvm — inference removes the annotation tax without
+      # pinning the function off the typed targets.
+      rep =
+        reach("""
+        mod M do
+          pub def main(n Int53) Int53 := inc(n)
+          def inc(x) := x + 1
+        end
+        """)
+
+      assert targets(rep, "inc") == [:ex, :js, :jvm, :rs]
+      assert rep["inc"].blockers == []
+    end
+
     test "the 64-bit wrap prelude reaches every target EXCEPT :js (ADR-0064)" do
       # `Int.wrapping_add` & friends carry the fixed-width-64 two's-complement
       # contract — native on Rust/JVM, masked on the BEAM, and *not representable*

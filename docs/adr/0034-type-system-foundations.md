@@ -49,19 +49,32 @@ from the defaults and return-inference debates):
 - **Private functions, `:=` bindings, and lambda bodies: inferred.** A body edit can't change a
   caller because there is no exported inferred type.
 
-**Implementation status (infer-local).** A private function's **return type** is now inferred and
-need not be declared (`Rian.InferLocal` + `Rian.Check.infer_return_type/2`): `def f(x Int53) := x + 1`
-type-checks, lowers, and runs, with the return recovered as `Int53`. `Rian.Decl.parse` runs the pass
-after assembly (a no-op unless a private return was omitted); a fixpoint resolves private→private
-chains; `pub` still must declare its return; and a return that cannot be recovered (self-recursion, an
-`@external` with no body, an unmodelled body) raises a clear *"annotate it"* error rather than
-guessing. The Elixir→Rian transpiler emits private `defp`s **without** a return hole (one fewer `_Unk`
-per private function). **Private parameter inference is NOT yet implemented**: the surface
-`def f(x)` already reads a bare token as the parameter's *type* (anonymous-typed parameter), and the
-self-hosted compiler relies on this — `pub def lower_pat(p) Pat` carries a permissive bare-name param
-and dispatches on raw AST in its clauses. A strict inference that re-reads `x` as a *name* conflicts
-with that grammar and convention, so parameters keep their explicit/permissive surface for now; closing
-this needs a dedicated syntax or a non-breaking lenient pass (deferred).
+**Implementation status (infer-local).** A private function's **return type AND parameter types** are
+now inferred and need not be declared (`Rian.InferLocal` + `Rian.Check.infer_return_type/2` +
+`infer_param_type/3`). `def f(x) := x + 1` type-checks, lowers, and runs, with `x : Int53` and the
+return `Int53` both recovered. `Rian.Decl.parse` runs the pass after assembly; a fixpoint fills
+**params first, then returns** (a return needs its param types) and resolves private→private chains;
+`pub` still must declare its boundary; and a type that cannot be recovered (self-recursion, an
+`@external` with no body, an unmodelled body, or a param used at *conflicting* types) raises a clear
+*"annotate it"* error rather than guessing.
+
+- **Parameter inference is bidirectional** (Dunfield–Krishnaswami "checking", realized locally): an
+  arithmetic/compare operator, a string concat, a typed callee parameter, or a clause-head/`case`
+  pattern pushes its *expected* type onto the variable flowing into it. A parameter the body leaves
+  *unconstrained* (a pass-through, `def id(x) := x`) is **generalized to a fresh `forall T`**, so generic
+  helpers work without annotation.
+- **The grammar conflict is resolved by a casing rule, not new syntax.** A lone **lowercase** parameter
+  token (`def f(x)`) is a NAME whose type is inferred (`:infer`); a **PascalCase** token (`def flip(Bit)`)
+  stays an anonymous-typed param (a TYPE) — Rian's existing PascalCase-type / lowercase-value convention.
+  `pub`/`@external` boundaries keep the legacy permissive reading, so the self-hosted dispatchers
+  (`pub def lower_pat(p) Pat`, raw-AST params with no nominal type) are untouched; the prior "deferred,
+  needs dedicated syntax" blocker is closed. (Self-host *parity* — a `fill_params` in the Rian-written
+  `compiler/decl.rian` — is the tracked follow-up; the token-based `parse_program` is a separate parser.)
+- **Inference widens portability**: a recovered concrete param type lets a private helper reach
+  `:rs`/`:jvm` (`Rian.Reach` reads the now-concrete signature) instead of forcing an annotation.
+
+The Elixir→Rian transpiler emits private `defp`s without a return hole (one fewer `_Unk` per private
+function).
 
 **Integer-literal width:** a bare integer literal defaults to **`Int64`** (ADR-0033 vocabulary);
 other widths require an annotation (`n Int32`). **Overflow/precision is native-per-target**
