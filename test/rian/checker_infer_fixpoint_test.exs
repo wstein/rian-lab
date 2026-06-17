@@ -87,20 +87,25 @@ defmodule Rian.CheckerInferFixpointTest do
   # the port keeps `ic` a `Dict(String,String)`-valued map, so list/struct sub-values
   # are string-encoded (the same projection idea as `inj` for Core): `tdefs` field
   # lists -> ";"-joined, `fsigs` %{params,ret,tvars} -> "params|ret|tvars" (params and
-  # tvars comma-joined). `ctors`/`funs` (already String->String) pass through. The
-  # reference reads the native shapes; both are built from the same logical @ic.
+  # tvars comma-joined). The reference keys `funs`/`fsigs` by `{name, arity}` (arity
+  # overloading); the ported checker is not yet arity-aware and keys by bare name, so
+  # the tuple key is down-projected to its name here. Both are built from the same @ic.
   defp encode_ic(ic) do
     ic
-    |> encode_key(:tdefs, fn fields -> Enum.join(fields, ";") end)
-    |> encode_key(:fsigs, fn sig ->
+    |> encode_key(:tdefs, & &1, fn fields -> Enum.join(fields, ";") end)
+    |> encode_key(:funs, &name_key/1, & &1)
+    |> encode_key(:fsigs, &name_key/1, fn sig ->
       Enum.join(sig.params, ",") <> "|" <> sig.ret <> "|" <> Enum.join(sig.tvars, ",")
     end)
   end
 
-  defp encode_key(ic, key, f) do
+  defp name_key({name, _arity}), do: name
+  defp name_key(name), do: name
+
+  defp encode_key(ic, key, kf, vf) do
     case Map.get(ic, key) do
       nil -> ic
-      sub -> Map.put(ic, key, Map.new(sub, fn {k, v} -> {k, f.(v)} end))
+      sub -> Map.put(ic, key, Map.new(sub, fn {k, v} -> {kf.(k), vf.(v)} end))
     end
   end
 
@@ -298,7 +303,7 @@ end|,
       "None" => "Opt",
       "Some" => "Opt"
     },
-    funs: %{"area" => "Int64", "name_of" => "String", "mkvec" => "Vec(Int8)"},
+    funs: %{{"area", 1} => "Int64", {"name_of", 1} => "String", {"mkvec", 0} => "Vec(Int8)"},
     # ctor -> field types (for `case` flow narrowing): RGB carries three ints, Pair a
     # String + an Int64, Some a single generic field `T` (narrows to unknown).
     tdefs: %{
@@ -309,10 +314,10 @@ end|,
     },
     # generic function signatures (forall): instantiate the return from the args.
     fsigs: %{
-      "id" => %{params: ["T"], ret: "T", tvars: ["T"]},
-      "head" => %{params: ["Vec(T)"], ret: "T", tvars: ["T"]},
-      "length" => %{params: ["Vec(T)"], ret: "Int53", tvars: ["T"]},
-      "mkpair" => %{params: ["A", "B"], ret: "Pair(A, B)", tvars: ["A", "B"]}
+      {"id", 1} => %{params: ["T"], ret: "T", tvars: ["T"]},
+      {"head", 1} => %{params: ["Vec(T)"], ret: "T", tvars: ["T"]},
+      {"length", 1} => %{params: ["Vec(T)"], ret: "Int53", tvars: ["T"]},
+      {"mkpair", 2} => %{params: ["A", "B"], ret: "Pair(A, B)", tvars: ["A", "B"]}
     }
   }
   @ic_corpus [

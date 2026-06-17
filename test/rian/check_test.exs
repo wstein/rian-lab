@@ -532,7 +532,7 @@ defmodule Rian.CheckTest do
     end
 
     test "`&name/arity` captures a known function as `Fn(_ × arity, return)`" do
-      assert Check.infer(Pratt.parse("&dbl/1"), %{}, %{funs: %{"dbl" => "Int64"}}) ==
+      assert Check.infer(Pratt.parse("&dbl/1"), %{}, %{funs: %{{"dbl", 1} => "Int64"}}) ==
                "Fn(_,Int64)"
     end
 
@@ -845,8 +845,8 @@ defmodule Rian.CheckTest do
   describe "generic-return instantiation (ADR-0042)" do
     test "a fully-pinned generic return is substituted to the concrete arg type" do
       ic = %{
-        funs: %{"id" => "T"},
-        fsigs: %{"id" => %{params: ["T"], ret: "T", tvars: ["T"]}}
+        funs: %{{"id", 1} => "T"},
+        fsigs: %{{"id", 1} => %{params: ["T"], ret: "T", tvars: ["T"]}}
       }
 
       assert Check.infer(Pratt.parse("id(5)"), %{}, ic) == "Int53"
@@ -856,8 +856,8 @@ defmodule Rian.CheckTest do
 
     test "a `Vec(T)` parameter pins T from a list argument's element type" do
       ic = %{
-        funs: %{"head" => "T"},
-        fsigs: %{"head" => %{params: ["Vec(T)"], ret: "T", tvars: ["T"]}}
+        funs: %{{"head", 1} => "T"},
+        fsigs: %{{"head", 1} => %{params: ["Vec(T)"], ret: "T", tvars: ["T"]}}
       }
 
       assert Check.infer(Pratt.parse("head([1, 2, 3])"), %{}, ic) == "Int53"

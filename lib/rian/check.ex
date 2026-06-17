@@ -209,7 +209,7 @@ defmodule Rian.Check do
   # `&name/arity` captures a named function as a value: its type is
   # `Fn(_ × arity, declared-return)` when the target is a known local function
   def infer(%ECaptureNamed{path: %EId{name: n}, arity: a}, _env, ic) do
-    case Map.get(Map.get(ic, :funs, %{}), n) do
+    case Map.get(Map.get(ic, :funs, %{}), {n, a}) do
       nil -> :unknown
       ret -> build_fn(List.duplicate(:unknown, a), ret)
     end
@@ -425,18 +425,18 @@ defmodule Rian.Check do
   # `:unknown` because pinning it to the literal `Vec(U)` would wrongly
   # contradict a concrete caller.
   defp called_ret_with(ic, f, args_ast, env) do
-    case Map.get(Map.get(ic, :fsigs, %{}), f) do
+    case Map.get(Map.get(ic, :fsigs, %{}), {f, length(args_ast)}) do
       %{tvars: [_ | _]} = sig ->
         arg_types = Enum.map(args_ast, &infer(&1, env, ic))
         instantiate_ret(sig, arg_types)
 
       _ ->
-        called_ret(ic, f)
+        called_ret(ic, f, length(args_ast))
     end
   end
 
-  defp called_ret(ic, f) do
-    case Map.get(Map.get(ic, :funs, %{}), f) do
+  defp called_ret(ic, f, arity) do
+    case Map.get(Map.get(ic, :funs, %{}), {f, arity}) do
       nil -> :unknown
       ret -> if has_tvar?(ret), do: :unknown, else: ret
     end
@@ -1599,7 +1599,7 @@ defmodule Rian.Check do
   end
 
   defp var_constraint(name, %ECall{fun: %EId{name: f}, args: as}, env, ic) do
-    sig = Map.get(Map.get(ic, :fsigs, %{}), f)
+    sig = Map.get(Map.get(ic, :fsigs, %{}), {f, length(as)})
 
     from_callee =
       if sig do
@@ -1757,8 +1757,8 @@ defmodule Rian.Check do
 
     %{
       tdefs: type_table(types),
-      funs: Map.new(all_funcs, fn f -> {f.name, f.ret} end),
-      fsigs: Map.new(all_funcs, fn f -> {f.name, fsig(f)} end),
+      funs: Map.new(all_funcs, fn f -> {{f.name, length(f.params)}, f.ret} end),
+      fsigs: Map.new(all_funcs, fn f -> {{f.name, length(f.params)}, fsig(f)} end),
       ctors: ctor_types(types, prog),
       ranges: range_table(prog),
       opaques: opaque_table(prog),
