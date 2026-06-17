@@ -1,0 +1,4 @@
+mod Hello do
+  pub def greeting() String := "hello from rian, via rebar3"
+  pub def answer() Int53 := 6 * 7
+end

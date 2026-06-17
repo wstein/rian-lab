@@ -1,0 +1,8 @@
+# rebar3 build + local-plugin checkout artifacts
+_build/
+_checkouts/
+rebar.lock
+*.beam
+
+# rebar3 crash artifacts
+rebar3.crashdump

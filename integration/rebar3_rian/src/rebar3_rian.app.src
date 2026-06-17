@@ -1,0 +1,10 @@
+{application, rebar3_rian, [
+  {description, "rebar3 plugin: compile Rian (.rian) sources to BEAM via the `rian` escript"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env, []},
+  {modules, []},
+  {licenses, ["Apache-2.0"]},
+  {links, []}
+]}.

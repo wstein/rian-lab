@@ -1,0 +1,8 @@
+{application, hello, [
+  {description, "rebar3_rian demo app"},
+  {vsn, "0.1.0"},
+  {registered, []},
+  {applications, [kernel, stdlib]},
+  {env, []},
+  {modules, []}
+]}.
