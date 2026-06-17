@@ -416,6 +416,22 @@ end|) =~ ~S|"v=${x}!"|
       body = out |> String.split("mod M do") |> List.last()
       refute body =~ "TODO"
     end
+
+    test "non-atom map keys `%{key => v}` → Rian `=>` keys, literal + pattern (ADR-0033)" do
+      out =
+        rian("""
+        defmodule M do
+          def t, do: %{"a" => 1, b: 2}
+          def p(%{"k" => v}), do: v
+        end
+        """)
+
+      # a computed key renders `keyExpr => v`; a mixed atom key keeps the `k: v` shorthand.
+      assert out =~ ~s|%{"a" => 1, b: 2}|
+      assert out =~ ~s|p(%{"k" => v}) := v|
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO"
+    end
   end
 
   describe "stdlib auto-mapping (A1)" do

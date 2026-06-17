@@ -841,25 +841,16 @@ defmodule Rian.Transpile do
   end
 
   # map *update* `%{base | k: v}` → Rian `%{base | k: v}` (ADR-0033): same surface,
-  # the BEAM exact-assoc replacement of present keys. Atom keys only (a non-atom key
-  # has no `key: value` spelling); otherwise flag it.
-  defp expr({:%{}, _, [{:|, _, [base, kvs]}]} = m) when is_list(kvs) do
-    if Enum.all?(kvs, &match?({k, _} when is_atom(k), &1)) do
-      fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{expr(v)}" end)
-      "%{#{expr(base)} | #{fields}}"
-    else
-      ~s|TODO_PORT("map update #{escape(snippet(m))}")|
-    end
+  # the BEAM exact-assoc replacement of present keys. Atom keys render `k: v`; a
+  # non-atom key renders `keyExpr => v` (ADR-0033 non-atom keys).
+  defp expr({:%{}, _, [{:|, _, [base, kvs]}]}) when is_list(kvs) do
+    "%{#{expr(base)} | #{Enum.map_join(kvs, ", ", &map_pair_rian/1)}}"
   end
 
-  # atom-keyed map literal `%{k: v}` → Rian `%{k: v}` (Rian has map literals).
-  # Non-atom keys (`%{expr => v}`) have no `key: value` spelling here — flagged.
-  defp expr({:%{}, _, kvs} = m) do
-    if Enum.all?(kvs, &match?({k, _} when is_atom(k), &1)) do
-      "%{#{Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{expr(v)}" end)}}"
-    else
-      ~s|TODO_PORT("map literal #{escape(snippet(m))}")|
-    end
+  # map literal `%{k: v}` / `%{key => v}` → Rian map literal (ADR-0033): atom keys
+  # render `k: v`, non-atom keys render `keyExpr => v`.
+  defp expr({:%{}, _, kvs}) do
+    "%{#{Enum.map_join(kvs, ", ", &map_pair_rian/1)}}"
   end
 
   defp expr({op, _, [l, r]}) when op in @binops,
@@ -1133,15 +1124,11 @@ defmodule Rian.Transpile do
     "#{short_name(aliases)}(#{fields})"
   end
 
-  # bare map pattern `%{k: p}` → Rian map pattern. Atom keys render bare (`k: p`),
-  # mirroring the struct-pattern and `expr` map paths — `pat(:k)` would otherwise
-  # prefix a stray colon (`:k: p`). Non-atom keys have no `key: value` spelling.
-  defp pat({:%{}, _, kvs} = m) do
-    if Enum.all?(kvs, &match?({k, _} when is_atom(k), &1)) do
-      "%{#{Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{pat(v)}" end)}}"
-    else
-      ~s|TODO_PORT("map pattern #{escape(snippet(m))}")|
-    end
+  # bare map pattern `%{k: p}` / `%{key => p}` → Rian map pattern (ADR-0033). Atom
+  # keys render bare (`k: p`); a non-atom key renders `keyExpr => p` (the key is a
+  # *value* looked up in the map, so it lowers via `expr`, the value via `pat`).
+  defp pat({:%{}, _, kvs}) do
+    "%{#{Enum.map_join(kvs, ", ", &map_pat_pair_rian/1)}}"
   end
 
   # binding `_` and vars.
@@ -1177,6 +1164,16 @@ defmodule Rian.Transpile do
   defp pat({:^, _, [e]}), do: "^#{expr(e)}"
 
   defp pat(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  # one Rian map pair (expression position): an atom Elixir key → the `k: v`
+  # shorthand; any other key (string/module/tuple/var) → `keyExpr => v` (ADR-0033).
+  defp map_pair_rian({k, v}) when is_atom(k), do: "#{k}: #{expr(v)}"
+  defp map_pair_rian({k, v}), do: "#{expr(k)} => #{expr(v)}"
+
+  # one Rian map *pattern* pair: the key is a value (lowered via `expr`), the value a
+  # sub-pattern (via `pat`). Atom key → `k: p`; non-atom key → `keyExpr => p`.
+  defp map_pat_pair_rian({k, p}) when is_atom(k), do: "#{k}: #{pat(p)}"
+  defp map_pat_pair_rian({k, p}), do: "#{expr(k)} => #{pat(p)}"
 
   # `"a" <> "b" <> rest` → `["a"`, `"b"`, `rest::binary"]` segment texts; nil if the
   # tail isn't a literal or a bare binder.

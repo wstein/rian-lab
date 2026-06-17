@@ -617,14 +617,17 @@ defmodule Rian.JS do
   defp expr_js(%EList{elems: es, tail: tail}, i53),
     do: "[#{Enum.join(Enum.map(es, &expr_js(&1, i53)) ++ ["...#{expr_js(tail, i53)}"], ", ")}]"
 
-  # a map literal `%{k: v, …}` is a JS object (identifier keys -> string keys)
+  # a map literal `%{k: v, …}` is a JS object (identifier keys -> string keys).
+  # A non-atom (computed) key `%{expr => v}` (ADR-0033) has no faithful JS-object
+  # lowering — object keys coerce to strings, so a module/tuple key would silently
+  # collide — so it raises; `Rian.Reach` pins such a function off `:js` (BEAM-only).
   defp expr_js(%EMap{pairs: pairs}, i53),
-    do: "{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{expr_js(v, i53)}" end)}}"
+    do: "{#{Enum.map_join(pairs, ", ", &js_map_pair(&1, i53))}}"
 
   # a map update `%{base | k: v, …}` is a spread over the base object — the later
   # keys override (`{...base, k: v}`), matching the BEAM exact-assoc replacement
   defp expr_js(%EMapUpdate{base: base, pairs: pairs}, i53) do
-    fields = Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{expr_js(v, i53)}" end)
+    fields = Enum.map_join(pairs, ", ", &js_map_pair(&1, i53))
     "{...#{expr_js(base, i53)}, #{fields}}"
   end
 
@@ -768,6 +771,14 @@ defmodule Rian.JS do
   defp expr_js(%EDot{head: head, name: field}, i53), do: "#{expr_js(head, i53)}.#{field}"
 
   defp expr_js(other, _i53), do: raise(Unsupported, "ecmascript: expression #{inspect(other)}")
+
+  # one JS map pair. An atom-key shorthand → a JS object field; a non-atom (computed)
+  # key has no faithful JS-object lowering (object keys coerce to strings), so raise —
+  # `Rian.Reach` pins such a function off `:js`, BEAM-only (ADR-0033).
+  defp js_map_pair({{:key, _k}, _v}, _i53),
+    do: raise(Unsupported, "a non-atom map key (`%{expr => v}`) is BEAM-only (ADR-0033)")
+
+  defp js_map_pair({k, v}, i53), do: "#{k}: #{expr_js(v, i53)}"
 
   # an `if` branch is a block; a single-expression block is an expression, a
   # multi-statement block an IIFE

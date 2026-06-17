@@ -450,17 +450,29 @@ defmodule Rian.Pratt do
   # already consumed); keys are identifiers (atom-style, like map literals)
   defp parse_pat_map([{:rbrace} | rest], acc), do: {{:map, Enum.reverse(acc)}, rest}
 
+  # atom-key map pattern `%{k: p}` — `k` is the atom key, `p` the bound sub-pattern.
   defp parse_pat_map([{tag, k}, {:op, ":"} | rest], acc) when tag in [:id, :kw] do
     {p, rest} = parse_pat(rest)
+    pat_map_after(rest, [{k, p} | acc])
+  end
 
+  # non-atom key map pattern `%{keyExpr => p}` (ADR-0033): the key is a *value*
+  # (an expression, e.g. a string literal) looked up in the map, not a pattern;
+  # `p` is the bound sub-pattern. Wrap the key `{:key, expr}` like the literal form.
+  defp parse_pat_map(toks, acc) do
+    {k, rest} = parse_expr(toks, 0)
+    rest = expect_op(rest, "=>")
+    {p, rest} = parse_pat(rest)
+    pat_map_after(rest, [{{:key, k}, p} | acc])
+  end
+
+  defp pat_map_after(rest, acc) do
     case rest do
-      [{:comma} | r] -> parse_pat_map(r, [{k, p} | acc])
-      [{:rbrace} | r] -> {{:map, Enum.reverse([{k, p} | acc])}, r}
+      [{:comma} | r] -> parse_pat_map(r, acc)
+      [{:rbrace} | r] -> {{:map, Enum.reverse(acc)}, r}
       other -> raise ArgumentError, "bad map pattern: #{inspect(other)}"
     end
   end
-
-  defp parse_pat_map(other, _acc), do: raise(ArgumentError, "bad map pattern: #{inspect(other)}")
 
   # struct pattern fields: `field: p` pairs until the closing `)`
   defp parse_pat_fields([{:rparen} | rest], acc), do: {Enum.reverse(acc), rest}
@@ -704,19 +716,46 @@ defmodule Rian.Pratt do
     {{:map_lit, pairs}, rest}
   end
 
+  # the leading form is an arbitrary expression: either a map *update* base
+  # (`%{base | …}`) or the first key of a non-atom-key literal (`%{key => v, …}`,
+  # ADR-0033). Parse it, then the next token disambiguates (`|` vs `=>`).
   defp parse_map_start(toks) do
-    {base, rest} = parse_expr(toks, 0)
-    rest = expect_op(rest, "|")
-    {pairs, rest} = parse_map_pairs(rest, [])
-    {{:map_update, base, pairs}, rest}
+    {first, rest} = parse_expr(toks, 0)
+
+    case rest do
+      [{:op, "|"} | r] ->
+        {pairs, rest} = parse_map_pairs(r, [])
+        {{:map_update, first, pairs}, rest}
+
+      [{:op, "=>"} | r] ->
+        {v, r} = parse_expr(r, 0)
+        {pairs, rest} = map_pairs_after(r, [{{:key, first}, v}])
+        {{:map_lit, pairs}, rest}
+
+      other ->
+        raise ArgumentError, "bad map: #{inspect(other)}"
+    end
   end
 
   defp parse_map_pairs([{:rbrace} | rest], acc), do: {Enum.reverse(acc), rest}
 
+  # atom-key shorthand `k: v` (`k` a bare identifier/keyword key).
   defp parse_map_pairs([{tag, k}, {:op, ":"} | rest], acc) when tag in [:id, :kw] do
     {v, rest} = parse_expr(rest, 0)
-    acc = [{k, v} | acc]
+    map_pairs_after(rest, [{k, v} | acc])
+  end
 
+  # non-atom key `keyExpr => v` (ADR-0033): the key is an arbitrary expression,
+  # wrapped `{:key, expr}` so Core/emitters distinguish it from an atom key.
+  defp parse_map_pairs(toks, acc) do
+    {k, rest} = parse_expr(toks, 0)
+    rest = expect_op(rest, "=>")
+    {v, rest} = parse_expr(rest, 0)
+    map_pairs_after(rest, [{{:key, k}, v} | acc])
+  end
+
+  # shared pair separator: `,` continues, `}` closes.
+  defp map_pairs_after(rest, acc) do
     case rest do
       [{:comma} | r] -> parse_map_pairs(r, acc)
       [{:rbrace} | r] -> {Enum.reverse(acc), r}
@@ -916,10 +955,17 @@ defmodule Rian.Pratt do
     do: "[#{Enum.map_join(elems, " ", &sexpr/1)} | #{sexpr(t)}]"
 
   defp sexpr({:map_lit, pairs}),
-    do: "%{#{Enum.map_join(pairs, " ", fn {k, v} -> "#{k}: #{sexpr(v)}" end)}}"
+    do: "%{#{Enum.map_join(pairs, " ", &sexpr_map_pair/1)}}"
 
   defp sexpr({:bitstr, segs}),
     do: "<<#{Enum.map_join(segs, ", ", fn {:bitseg, v, _specs} -> sexpr(v) end)}>>"
+
+  # a map pair: atom-key shorthand `k: v` or a computed key `keyExpr => v`.
+  defp sexpr_map_pair({{:key, k}, v}), do: "#{sexpr(k)} => #{sexpr(v)}"
+  defp sexpr_map_pair({k, v}), do: "#{k}: #{sexpr(v)}"
+
+  defp sexpr_map_pat_pair({{:key, k}, p}), do: "#{sexpr(k)} => #{sexpr_pat(p)}"
+  defp sexpr_map_pat_pair({k, p}), do: "#{k}: #{sexpr_pat(p)}"
 
   defp sexpr_stmt({:bind, n, e}), do: "(:= #{n} #{sexpr(e)})"
   defp sexpr_stmt({:typed_bind, n, t, e}), do: "(:= #{n} #{t} #{sexpr(e)})"
@@ -942,7 +988,7 @@ defmodule Rian.Pratt do
   defp sexpr_pat({:ctor, n, args}), do: "#{n}(#{Enum.map_join(args, ", ", &sexpr_pat/1)})"
 
   defp sexpr_pat({:map, fields}),
-    do: "%{#{Enum.map_join(fields, ", ", fn {k, p} -> "#{k}: #{sexpr_pat(p)}" end)}}"
+    do: "%{#{Enum.map_join(fields, ", ", &sexpr_map_pat_pair/1)}}"
 
   defp sexpr_pat({:struct, n, fields}),
     do: "#{n}(#{Enum.map_join(fields, ", ", fn {k, p} -> "#{k}: #{sexpr_pat(p)}" end)})"

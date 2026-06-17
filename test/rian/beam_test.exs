@@ -44,6 +44,19 @@ defmodule Rian.BeamTest do
       assert mod.kind("Vec(x)") == 0
     end
 
+    test "a non-atom-key map `%{\"k\" => v}` builds and pattern-matches and runs (ADR-0033)" do
+      {:ok, mod} =
+        Beam.load(
+          ~s|def m() Map := %{"a" => 1, "b" => 2}\n| <>
+            ~s|def get(s Map) Int53\ndef get(%{"a" => x}) := x\ndef get(_) := 0|,
+          :rian_beam_mapnonatom
+        )
+
+      assert mod.m() == %{"a" => 1, "b" => 2}
+      assert mod.get(%{"a" => 7}) == 7
+      assert mod.get(%{"z" => 9}) == 0
+    end
+
     test "a pin `^x` in a clause head lowers to repeated-var equality and runs (ADR-0050)" do
       {:ok, mod} =
         Beam.load(

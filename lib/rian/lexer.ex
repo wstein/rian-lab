@@ -36,7 +36,7 @@ defmodule Rian.Lexer do
   # multi-char operators, matched greedily before the single-char ops. `::` (the
   # bitstring segment-spec separator, ADR-0078) was previously unused in Rian source —
   # an atom is `:name` (single `:`), and type ascription is space-separated, not `::`.
-  @multi ["->", "..", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!=", "::"]
+  @multi ["->", "..", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!=", "::", "=>"]
   # `@` is the as-pattern operator (`name @ pat`); the annotation lane (`@name`,
   # checked first) still wins when `@` is immediately followed by an identifier.
   @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&", "@", "^"]

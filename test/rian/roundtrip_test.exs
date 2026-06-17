@@ -27,12 +27,13 @@ defmodule Rian.RoundtripTest do
     end
 
     test "a draft that still carries a marker fails the BEAM stages (does not lie green)" do
-      # a non-atom-key map literal `%{k => v}` has no `key: value` Rian spelling → a
+      # a `for` comprehension has no Rian enumeration surface (no `EFor`) → a
       # TODO_PORT marker → the draft cannot compile either way. (Field access, stdlib
-      # calls, and atom-key map *update* now lower; this is a residual marker class.)
+      # calls, atom-key *and* non-atom-key maps, pins, and bitstrings now lower; this
+      # is a residual marker class explicitly out of scope, ADR-0075 plan.)
       src = ~S'''
       defmodule R do
-        def at(k), do: %{k => 1}
+        def doubled(xs), do: for x <- xs, do: x * 2
       end
       '''
 

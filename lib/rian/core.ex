@@ -308,7 +308,7 @@ defmodule Rian.Core do
   def from_expr({:tuple, es}), do: %ETuple{elems: Enum.map(es, &from_expr/1)}
 
   def from_expr({:map_lit, ps}),
-    do: %EMap{pairs: Enum.map(ps, fn {k, v} -> {k, from_expr(v)} end)}
+    do: %EMap{pairs: Enum.map(ps, &map_pair/1)}
 
   def from_expr({:bitstr, segs}),
     do: %EBitstr{segments: Enum.map(segs, fn {:bitseg, v, specs} -> {from_expr(v), specs} end)}
@@ -316,7 +316,7 @@ defmodule Rian.Core do
   def from_expr({:map_update, base, ps}),
     do: %EMapUpdate{
       base: from_expr(base),
-      pairs: Enum.map(ps, fn {k, v} -> {k, from_expr(v)} end)
+      pairs: Enum.map(ps, &map_pair/1)
     }
 
   def from_expr({:cap_arg, n}), do: %ECapArg{n: n}
@@ -414,10 +414,21 @@ defmodule Rian.Core do
     do: %PStruct{name: name, fields: Enum.map(fields, fn {f, p} -> {f, from_pat(p)} end)}
 
   def from_pat({:map, kvs}),
-    do: %PMap{pairs: Enum.map(kvs, fn {k, p} -> {k, from_pat(p)} end)}
+    do: %PMap{pairs: Enum.map(kvs, &map_pat_pair/1)}
 
   def from_pat({:bitstr_pat, segs}),
     do: %PBitstr{segments: Enum.map(segs, fn {:bitseg, v, specs} -> {from_pat(v), specs} end)}
+
+  # a map pair (literal/update): an atom key stays a bare key string `{k, value}`;
+  # a computed key `keyExpr => v` keeps the key as a wrapped Core *expression*
+  # `{{:key, expr}, value}` (ADR-0033 non-atom keys).
+  defp map_pair({{:key, k}, v}), do: {{:key, from_expr(k)}, from_expr(v)}
+  defp map_pair({k, v}), do: {k, from_expr(v)}
+
+  # a map *pattern* pair: the value is a sub-pattern, but the key is always a value
+  # (an expression looked up in the map), so a computed key lowers via `from_expr`.
+  defp map_pat_pair({{:key, k}, p}), do: {{:key, from_expr(k)}, from_pat(p)}
+  defp map_pat_pair({k, p}), do: {k, from_pat(p)}
 
   @doc """
   Generic typed-core walk used by the partial emitters (`Rian.JS`, `Rian.JVM`):

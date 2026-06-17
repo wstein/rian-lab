@@ -333,6 +333,28 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "non-atom map keys `%{key => v}` (ADR-0033)" do
+    test "a literal mixes computed (`=>`) and atom (`k:`) keys" do
+      assert Pratt.parse(~s|%{"a" => 1, b: 2}|) ==
+               {:map_lit, [{{:key, {:str, "a"}}, {:num, "1"}}, {"b", {:num, "2"}}]}
+    end
+
+    test "a module-valued key parses as a computed key" do
+      assert Pratt.parse("%{Foo => 1}") ==
+               {:map_lit, [{{:key, {:id, "Foo"}}, {:num, "1"}}]}
+    end
+
+    test "a map update may replace a computed key" do
+      assert Pratt.parse("%{m | k => v}") ==
+               {:map_update, {:id, "m"}, [{{:key, {:id, "k"}}, {:id, "v"}}]}
+    end
+
+    test "a map PATTERN binds the value at a computed (string) key" do
+      assert Pratt.parse_pats(~s|%{"k" => v}|) ==
+               [{:map, [{{:key, {:str, "k"}}, {:var, "v"}}]}]
+    end
+  end
+
   describe "malformed input raises (expression parser)" do
     test "trailing tokens after a parenthesized expression: missing `)`" do
       assert_raise ArgumentError, ~r/expected `\)`/, fn -> Pratt.parse("(a b") end
@@ -426,8 +448,9 @@ defmodule Rian.PrattTest do
       assert_raise ArgumentError, ~r/bad map pattern/, fn -> Pratt.parse_pats("%{a: 1 b: 2}") end
     end
 
-    test "a map pattern key must be an identifier followed by `:`" do
-      assert_raise ArgumentError, ~r/bad map pattern/, fn -> Pratt.parse_pats("%{1}") end
+    test "a non-`k:` map pattern key without `=>` is rejected (ADR-0033 computed keys)" do
+      # `%{1}` is read as a computed-key pattern whose key `1` is missing its `=>`.
+      assert_raise ArgumentError, ~r/expected `=>`/, fn -> Pratt.parse_pats("%{1}") end
     end
 
     test "a struct pattern field not followed by `,` or `)`" do

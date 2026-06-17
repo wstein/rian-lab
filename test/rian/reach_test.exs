@@ -247,6 +247,19 @@ defmodule Rian.ReachTest do
              )
     end
 
+    test "a non-atom-key map `%{expr => v}` is BEAM-only — also off `:js` (ADR-0033)" do
+      rep = reach(~s|mod M do\n  pub def build() Map := %{"a" => 1}\nend|)
+
+      # a computed key has no faithful JS-object lowering (`Rian.JS` raises), so unlike
+      # an atom-key map it pins off `:js` too — the matrix matches the emitters.
+      assert targets(rep, "build") == [:ex]
+
+      assert Enum.any?(
+               entry(rep, "build").blockers,
+               &(&1.kind == :map and &1.kills == [:rs, :js, :jvm])
+             )
+    end
+
     test "a bitstring is BEAM-only — off `:rs`/`:js`/`:jvm` (ADR-0078; the emitters raise)" do
       rep = reach("mod M do\n  pub def enc(cp Int53) String := <<cp::utf8>>\nend")
 

@@ -117,10 +117,10 @@ defmodule Rian.Macro do
      end}
   end
 
-  def map_node({:map_lit, ps}, f), do: {:map_lit, Enum.map(ps, fn {k, v} -> {k, f.(v)} end)}
+  def map_node({:map_lit, ps}, f), do: {:map_lit, Enum.map(ps, &map_pair_node(&1, f))}
 
   def map_node({:map_update, base, ps}, f),
-    do: {:map_update, f.(base), Enum.map(ps, fn {k, v} -> {k, f.(v)} end)}
+    do: {:map_update, f.(base), Enum.map(ps, &map_pair_node(&1, f))}
 
   def map_node({:tuple, es}, f), do: {:tuple, Enum.map(es, f)}
 
@@ -137,6 +137,11 @@ defmodule Rian.Macro do
     do: {:bitstr, Enum.map(segs, fn {:bitseg, v, specs} -> {:bitseg, f.(v), specs} end)}
 
   def map_node(leaf, _f), do: leaf
+
+  # a map pair: recurse into the value, and — for a computed key `{:key, expr}` —
+  # into the key expression too (an atom-key `k` is a bare leaf, left as-is).
+  defp map_pair_node({{:key, k}, v}, f), do: {{:key, f.(k)}, f.(v)}
+  defp map_pair_node({k, v}, f), do: {k, f.(v)}
 
   # ── substitution: replace {:id, param} with the argument AST ───────────
   defp substitute({:id, x} = node, subst), do: Map.get(subst, x, node)

@@ -662,7 +662,7 @@ defmodule Rian.Beam do
   defp expr_form(%EMap{pairs: pairs}, s) do
     {:map, @ln,
      Enum.map(pairs, fn {k, v} ->
-       {:map_field_assoc, @ln, {:atom, @ln, String.to_atom(k)}, expr_form(v, s)}
+       {:map_field_assoc, @ln, map_key_form(k, s), expr_form(v, s)}
      end)}
   end
 
@@ -672,7 +672,7 @@ defmodule Rian.Beam do
   defp expr_form(%EMapUpdate{base: base, pairs: pairs}, s) do
     {:map, @ln, expr_form(base, s),
      Enum.map(pairs, fn {k, v} ->
-       {:map_field_exact, @ln, {:atom, @ln, String.to_atom(k)}, expr_form(v, s)}
+       {:map_field_exact, @ln, map_key_form(k, s), expr_form(v, s)}
      end)}
   end
 
@@ -991,7 +991,18 @@ defmodule Rian.Beam do
 
   defp pat_form(other), do: raise(Unsupported, "abstract-forms: pattern #{inspect(other)}")
 
-  # one `key := pattern` field of a map/struct pattern (the key is an atom)
+  # a map key in expression position: an atom-key string `k` → the atom `:k`; a
+  # computed key `{:key, expr}` → the key expression's form (a literal/bound value —
+  # ADR-0033 non-atom keys).
+  defp map_key_form({:key, e}, s), do: expr_form(e, s)
+  defp map_key_form(k, _s) when is_binary(k), do: {:atom, @ln, String.to_atom(k)}
+
+  # one `key := pattern` field of a map/struct pattern. The key is a *value*: an
+  # atom-key string → the atom `:k`; a computed key `{:key, expr}` → the key
+  # expression's form (no scope is needed — a map-pattern key is a ground literal).
+  defp map_field_pat({{:key, e}, p}),
+    do: {:map_field_exact, @ln, expr_form(e, %{}), pat_form(p)}
+
   defp map_field_pat({k, p}),
     do: {:map_field_exact, @ln, {:atom, @ln, String.to_atom(k)}, pat_form(p)}
 

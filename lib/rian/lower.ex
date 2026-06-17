@@ -2163,7 +2163,7 @@ defmodule Rian.Lower do
   end
 
   defp emit(%EMap{pairs: pairs}, :elixir, ec),
-    do: {"%{#{Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir, ec)}" end)}}", 12}
+    do: {"%{#{Enum.map_join(pairs, ", ", &map_pair_elixir(&1, ec))}}", 12}
 
   defp emit(%EMap{}, :rust, _ec), do: raise("map literals are BEAM-only in PoC")
 
@@ -2176,7 +2176,7 @@ defmodule Rian.Lower do
   defp emit(%Core.EBitstr{}, :rust, _ec), do: raise("bitstrings are BEAM-only (ADR-0078)")
 
   defp emit(%EMapUpdate{base: base, pairs: pairs}, :elixir, ec) do
-    fields = Enum.map_join(pairs, ", ", fn {k, v} -> "#{k}: #{p(v, 0, :elixir, ec)}" end)
+    fields = Enum.map_join(pairs, ", ", &map_pair_elixir(&1, ec))
     {"%{#{p(base, 0, :elixir, ec)} | #{fields}}", 12}
   end
 
@@ -2285,6 +2285,13 @@ defmodule Rian.Lower do
 
     {p(l, lc, t, ec) <> " " <> disp(op, t) <> " " <> p(r, rc, t, ec), pr}
   end
+
+  # one Elixir-text map pair: atom-key shorthand `k: v`, or a computed key
+  # `keyExpr => v` (ADR-0033 non-atom keys).
+  defp map_pair_elixir({{:key, k}, v}, ec),
+    do: "#{p(k, 0, :elixir, ec)} => #{p(v, 0, :elixir, ec)}"
+
+  defp map_pair_elixir({k, v}, ec), do: "#{k}: #{p(v, 0, :elixir, ec)}"
 
   # one bitstring segment as Elixir text (ADR-0078): `value` or `value::spec-spec`.
   defp bitseg_elixir({value, specs}, ec) do
