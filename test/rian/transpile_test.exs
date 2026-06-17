@@ -644,9 +644,20 @@ end|)
       assert out =~ ~s|TODO_PORT("for comprehension|
     end
 
-    test "a destructuring generator stays a marker (MVP binds a plain variable)" do
-      out = rian("defmodule M do\n  def f(ps), do: for {a, _b} <- ps, do: a\nend")
-      assert out =~ ~s|TODO_PORT("for comprehension|
+    test "a destructuring / pattern-filtering generator → Rian `pat <- src` (no marker)" do
+      out =
+        rian("""
+        defmodule M do
+          def mods(decls), do: for {:mod, name, _inner} <- decls, do: name
+          def keys(ps), do: for {k, _v} <- ps, do: k
+        end
+        """)
+
+      # an underscore-prefixed binder renders as the anonymous `_`
+      assert out =~ "for {:mod, name, _} <- decls do name end"
+      assert out =~ "for {k, _} <- ps do k end"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO"
     end
   end
 

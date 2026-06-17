@@ -59,6 +59,20 @@ defmodule Rian.BeamTest do
       assert mod.grid([1, 2], [10, 20]) == [11, 21, 12, 22]
     end
 
+    test "a destructuring/pattern generator binds *and* filters non-matches (ADR-0079)" do
+      {:ok, mod} =
+        Beam.load(
+          "def keys(ps Vec(Vec(Int53))) Vec(Int53) := for [k, _v] <- ps do k end\n" <>
+            "def singles(ps Vec(Vec(Int53))) Vec(Int53) := for [k] <- ps do k end",
+          :rian_beam_for_pat
+        )
+
+      # list-pattern destructuring binds the head of each 2-element list
+      assert mod.keys([[1, 10], [2, 20]]) == [1, 2]
+      # `[k]` matches single-element lists only — `[2, 3]` is skipped (Elixir semantics)
+      assert mod.singles([[1], [2, 3], [4]]) == [1, 4]
+    end
+
     test "a non-atom-key map `%{\"k\" => v}` builds and pattern-matches and runs (ADR-0033)" do
       {:ok, mod} =
         Beam.load(

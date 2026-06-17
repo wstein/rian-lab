@@ -926,18 +926,15 @@ defmodule Rian.Transpile do
   end
 
   # a comprehension `for p <- src, filter, …, do: body` → Rian `for … do … end`
-  # (ADR-0079). MVP: list-producing only, plain-variable generators. A trailing
-  # `into:`/`:reduce` keyword (the last arg is then *not* a bare `[do: …]`) or a
-  # destructuring generator stays a marker — honestly out of scope.
+  # (ADR-0079). Generators bind a full pattern (a non-match skips the element); a
+  # trailing `into:`/`:reduce` keyword (the last arg is then *not* a bare `[do: …]`)
+  # is list-building, out of MVP scope, and stays a marker.
   defp expr({:for, _, args} = n) when is_list(args) and args != [] do
     clauses = Enum.drop(args, -1)
 
     case List.last(args) do
       [do: body] when clauses != [] ->
-        if Enum.all?(clauses, &for_clause_ok?/1),
-          do:
-            "for #{Enum.map_join(clauses, ", ", &for_clause_rian/1)} do #{render_body(body)} end",
-          else: ~s|TODO_PORT("for comprehension #{escape(snippet(n))}")|
+        "for #{Enum.map_join(clauses, ", ", &for_clause_rian/1)} do #{render_body(body)} end"
 
       _ ->
         ~s|TODO_PORT("for comprehension #{escape(snippet(n))}")|
@@ -1233,12 +1230,9 @@ defmodule Rian.Transpile do
   defp map_pat_pair_rian({k, p}) when is_atom(k), do: "#{k}: #{pat(p)}"
   defp map_pat_pair_rian({k, p}), do: "#{expr(k)} => #{pat(p)}"
 
-  # a comprehension clause (ADR-0079): a generator `p <- src` binding a plain var, or
-  # a boolean filter. The MVP rejects a destructuring generator (`{a,b} <- xs`).
-  defp for_clause_ok?({:<-, _, [lhs, _src]}), do: var?(lhs)
-  defp for_clause_ok?(_filter), do: true
-
-  defp for_clause_rian({:<-, _, [lhs, src]}), do: "#{var_name(lhs)} <- #{expr(src)}"
+  # a comprehension clause (ADR-0079): a generator `pat <- src` (any pattern — a
+  # non-match skips the element) or a boolean filter.
+  defp for_clause_rian({:<-, _, [lhs, src]}), do: "#{pat(lhs)} <- #{expr(src)}"
   defp for_clause_rian(filter), do: expr(filter)
 
   # `"a" <> "b" <> rest` → `["a"`, `"b"`, `rest::binary"]` segment texts; nil if the

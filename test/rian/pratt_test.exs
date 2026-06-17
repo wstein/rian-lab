@@ -637,10 +637,14 @@ defmodule Rian.PrattTest do
                "(for (<- x xs) (<- y ys) (block (+ x y)))"
     end
 
-    test "a destructuring generator is rejected (MVP binds a plain variable)" do
-      assert_raise ArgumentError, ~r/generator must bind a plain variable/, fn ->
-        Pratt.parse("for {a, b} <- ps do a end")
-      end
+    test "a destructuring generator binds a pattern (a non-match skips the element)" do
+      assert Pratt.parse_sexpr("for {k, v} <- ps do k end") ==
+               "(for (<- {k, v} ps) (block k))"
+    end
+
+    test "a tag-pattern generator with a filter" do
+      assert Pratt.parse_sexpr("for Ok(x) <- rs, x > 0 do x end") ==
+               "(for (<- Ok(x) rs) (? (> x 0)) (block x))"
     end
   end
 

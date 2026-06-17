@@ -384,26 +384,33 @@ defmodule Rian.Pratt do
     end
   end
 
-  # a generator binds a plain variable (MVP, ADR-0079) — `var <- src`.
-  defp parse_for_clause([{:id, name}, {:op, "<-"} | rest]) do
-    {src, rest} = parse_expr(rest, 0)
-    {{:gen, name, src}, rest}
-  end
-
-  # anything else is a boolean filter — unless it is a *pattern* generator
-  # (`{a, b} <- xs`), which the MVP rejects rather than mis-parsing as a filter.
+  # a clause is a **generator** (`pat <- src`, ADR-0079) iff a top-level `<-` precedes
+  # the clause boundary (a filter expression can never contain `<-`); the generator
+  # binds a full pattern (a non-match *skips* the element, Elixir semantics). Otherwise
+  # it is a boolean filter.
   defp parse_for_clause(tokens) do
-    {expr, rest} = parse_expr(tokens, 0)
-
-    case rest do
-      [{:op, "<-"} | _] ->
-        raise ArgumentError,
-              "for: a generator must bind a plain variable (ADR-0079 MVP); got a pattern"
-
-      _ ->
-        {{:filter, expr}, rest}
+    if for_generator?(tokens, 0) do
+      {pat, rest} = parse_pat(tokens)
+      rest = expect_op(rest, "<-")
+      {src, rest} = parse_expr(rest, 0)
+      {{:gen, pat, src}, rest}
+    else
+      {expr, rest} = parse_expr(tokens, 0)
+      {{:filter, expr}, rest}
     end
   end
+
+  # is there a top-level `<-` before the clause boundary (a `,` or `do` at bracket
+  # depth 0)? `<-` appears only in a generator header, never inside a filter.
+  defp for_generator?([{:op, "<-"} | _], 0), do: true
+  defp for_generator?([{:comma} | _], 0), do: false
+  defp for_generator?([{:kw, "do"} | _], 0), do: false
+  defp for_generator?([], _depth), do: false
+  defp for_generator?([t | rest], depth), do: for_generator?(rest, depth + for_depth(t))
+
+  defp for_depth({o}) when o in [:lparen, :lbracket, :lbrace, :mapopen, :bitopen], do: 1
+  defp for_depth({c}) when c in [:rparen, :rbracket, :rbrace, :bitclose], do: -1
+  defp for_depth(_), do: 0
 
   # `case scrut do pattern [when guard] -> body … end` (Elixir form, ADR-0033).
   defp parse_case(tokens) do
@@ -991,7 +998,7 @@ defmodule Rian.Pratt do
   defp sexpr({:comprehension, clauses, body}) do
     cs =
       Enum.map_join(clauses, " ", fn
-        {:gen, v, src} -> "(<- #{v} #{sexpr(src)})"
+        {:gen, p, src} -> "(<- #{sexpr_pat(p)} #{sexpr(src)})"
         {:filter, c} -> "(? #{sexpr(c)})"
       end)
 

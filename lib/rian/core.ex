@@ -328,7 +328,7 @@ defmodule Rian.Core do
   # a comprehension `for p <- src, filter, … do body end` (ADR-0079) desugars to
   # nested `List.flat_map`/`if`/`[body]` over the portable prelude (ADR-0047), so it
   # is just ordinary Core nodes downstream — no emitter/checker/exhaustiveness clause.
-  def from_expr({:comprehension, clauses, body}), do: desugar_for(clauses, body)
+  def from_expr({:comprehension, clauses, body}), do: desugar_for(clauses, body, 0)
 
   # resolved construction nodes (Rian.Lower's resolve_* passes produce these)
   def from_expr({:variant_lit, enum, ctor, named, pairs}),
@@ -435,24 +435,50 @@ defmodule Rian.Core do
   defp map_pat_pair({{:key, k}, p}), do: {{:key, from_expr(k)}, from_pat(p)}
   defp map_pat_pair({k, p}), do: {k, from_pat(p)}
 
-  # comprehension desugar (ADR-0079), right-to-left over the clause list:
-  #   ⟦ [], body ⟧          = [body]                        (singleton list at the leaf)
-  #   ⟦ (v <- src) :: r ⟧   = List.flat_map(src, (v) -> ⟦ r ⟧)
-  #   ⟦ (filter)   :: r ⟧   = if filter do ⟦ r ⟧ else [] end
-  defp desugar_for([], body), do: %EList{elems: [from_expr(body)], tail: :close}
+  # comprehension desugar (ADR-0079), right-to-left over the clause list. `i` indexes
+  # the synthetic generator-callback parameter so nested pattern generators don't
+  # shadow each other's `__gᵢ`.
+  #   ⟦ [], body ⟧               = [body]                       (singleton list leaf)
+  #   ⟦ (var <- src)  :: r ⟧     = List.flat_map(src, (var) -> ⟦ r ⟧)
+  #   ⟦ (pat <- src)  :: r ⟧     = List.flat_map(src, (__gᵢ) -> case __gᵢ do
+  #                                  pat -> ⟦ r ⟧ ; _ -> [] end)   (non-match SKIPS — Elixir)
+  #   ⟦ (filter)      :: r ⟧     = if filter do ⟦ r ⟧ else [] end
+  defp desugar_for([], body, _i), do: %EList{elems: [from_expr(body)], tail: :close}
 
-  defp desugar_for([{:gen, var, src} | rest], body) do
+  defp desugar_for([{:gen, pat, src} | rest], body, i) do
+    inner = desugar_for(rest, body, i + 1)
+
     %ECall{
       fun: %EDot{head: %EId{name: "List"}, name: "flat_map"},
-      args: [from_expr(src), %ELambda{params: [{var, nil}], body: desugar_for(rest, body)}]
+      args: [from_expr(src), gen_callback(pat, inner, i)]
     }
   end
 
-  defp desugar_for([{:filter, cond} | rest], body) do
+  defp desugar_for([{:filter, cond} | rest], body, i) do
     %EIf{
       cond: from_expr(cond),
-      then: desugar_for(rest, body),
+      then: desugar_for(rest, body, i),
       else: %EList{elems: [], tail: :close}
+    }
+  end
+
+  # a plain variable generator always matches → a direct lambda binding; any other
+  # pattern wraps the body in a `case` whose wildcard arm yields `[]`, so a
+  # non-matching element is dropped (the Elixir comprehension contract).
+  defp gen_callback({:var, name}, inner, _i), do: %ELambda{params: [{name, nil}], body: inner}
+
+  defp gen_callback(pat, inner, i) do
+    g = "__g#{i}"
+
+    %ELambda{
+      params: [{g, nil}],
+      body: %ECase{
+        scrut: %EId{name: g},
+        arms: [
+          {from_pat(pat), nil, inner},
+          {%PWild{}, nil, %EList{elems: [], tail: :close}}
+        ]
+      }
     }
   end
 
