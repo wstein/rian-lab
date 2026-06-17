@@ -321,6 +321,14 @@ end|) =~ ~S|"v=${x}!"|
     end
   end
 
+  describe "operators with no direct Rian spelling" do
+    test "Elixir list concat `++` lowers to the prelude `List.concat/2` (Rian has no `++`)" do
+      out = rian("defmodule M do\n  def j(a, b), do: a ++ b\nend")
+      assert out =~ "List.concat(a, b)"
+      refute out =~ "a ++ b"
+    end
+  end
+
   describe "struct/map updates don't crash the total walk" do
     test "struct update `%M{base | f: v}` is flagged, not a FunctionClauseError" do
       out = rian("defmodule M do\n  def u(p), do: %P{p | type: p.t}\nend")

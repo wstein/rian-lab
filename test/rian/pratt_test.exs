@@ -35,6 +35,16 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "reserved keywords are valid field labels (ADR-0033)" do
+    test "a keyword labels a construction field (`type:`, `def:`)" do
+      assert p("Foo(type: 1, def: 2)") == "(call Foo type: 1 def: 2)"
+    end
+
+    test "a keyword labels a map-literal key" do
+      assert p("%{type: 1}") == "%{type: 1}"
+    end
+  end
+
   describe "arithmetic precedence & associativity" do
     test "* binds tighter than +" do
       assert p("a + b * c") == "(+ a (* b c))"

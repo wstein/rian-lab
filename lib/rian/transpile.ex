@@ -51,8 +51,9 @@ defmodule Rian.Transpile do
     ""
   ]
 
-  # Elixir binary operators that map to a Rian infix spelling unchanged.
-  @binops ~w(+ - * / <> ++ <= >= < > == != and or)a
+  # Elixir binary operators that map to a Rian infix spelling unchanged. `++`
+  # (list concat) is NOT here — Rian has no `++`; it lowers to `List.concat/2`.
+  @binops ~w(+ - * / <> <= >= < > == != and or)a
   # Elixir local calls that Rian spells as infix operators.
   @infix_calls %{div: "div", rem: "rem"}
 
@@ -745,6 +746,10 @@ defmodule Rian.Transpile do
 
   defp expr({op, _, [l, r]}) when op in @binops,
     do: "#{expr(l)} #{op} #{expr(r)}"
+
+  # Elixir list concat `l ++ r` → the portable prelude `List.concat/2` (Rian has no
+  # `++` operator).
+  defp expr({:++, _, [l, r]}), do: "List.concat(#{expr(l)}, #{expr(r)})"
 
   # The pipe is real Rian surface (`x |> f(y)` ≡ `f(x, y)`, ADR/01_basics) — render
   # it infix. Without this it falls through to the generic local-call clause and

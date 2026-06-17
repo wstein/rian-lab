@@ -42,6 +42,7 @@ a <- 55
 | **Binding** | `name [Type] := expr` (type optional, juxtaposed) | `:=` retained — single-assignment is a real Rian distinction from `<-`. |
 | **Mutation** | `name <- expr` → **re-spelled, see ADR-0039** | The `<-` token is reassigned to the family failable-bind/generator (`with`/`for`); capability-gated mutation moves to a new spelling (semantics unchanged). Decision-lock 2026-06-12. |
 | **Predicate/bang names** | an identifier may carry a single trailing `?` or `!` — `empty?`, `gate!` | The family convention (Elixir/Ruby/Crystal): `?` reads "predicate", `!` "stricter/effecting variant". `?` is otherwise unused in the grammar (zero ambiguity); a trailing `!` is part of the name only when it does not begin the `!=` operator (`a!=b` ≡ `a != b`). The codepoint survives to each target's symbol table (BEAM `empty?/1`). |
+| **Keyword field labels** | a reserved keyword may label a field — `Field(type: t)`, `%{case: c}` | In label position (`word :`) the keyword cannot be a declaration, so it is unambiguously a field name. Matches Elixir (`%{type: 1}`) and avoids forcing renames of common Elixir/IR field names (`type`, `def`) on the way into Rian. Applies to named construction, map literals, and the symmetric patterns. |
 
 ### Guards keep `when` — resolved by the Elixir `case` form
 

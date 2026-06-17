@@ -252,8 +252,10 @@ defmodule Rian.Pratt do
   defp parse_args([{:rparen} | rest]), do: {[], rest}
 
   # `name: expr` — a labeled argument (named struct/variant construction). `id :`
-  # is unambiguous here (an atom is `: id`, colon first), so it cannot collide.
-  defp parse_args([{:id, name}, {:op, ":"} | rest]) do
+  # is unambiguous here (an atom is `: id`, colon first), so it cannot collide. A
+  # reserved keyword is a valid label too (`Field(type: t)`, like Elixir `%{type:
+  # 1}`) — in label position the `word :` shape is unambiguous.
+  defp parse_args([{tag, name}, {:op, ":"} | rest]) when tag in [:id, :kw] do
     {v, rest} = parse_expr(rest, 0)
     finish_arg({:label, name, v}, rest)
   end
@@ -404,7 +406,7 @@ defmodule Rian.Pratt do
       case rest do
         # named fields -> a struct pattern `Name(field: p, …)` (symmetric with
         # construction); positional args -> a sum-variant pattern `Name(p, …)`
-        [{:lparen}, {:id, _}, {:op, ":"} | _] ->
+        [{:lparen}, {tag, _}, {:op, ":"} | _] when tag in [:id, :kw] ->
           [{:lparen} | r] = rest
           {fields, r} = parse_pat_fields(r, [])
           {{:struct, name, fields}, r}
@@ -427,7 +429,7 @@ defmodule Rian.Pratt do
   # already consumed); keys are identifiers (atom-style, like map literals)
   defp parse_pat_map([{:rbrace} | rest], acc), do: {{:map, Enum.reverse(acc)}, rest}
 
-  defp parse_pat_map([{:id, k}, {:op, ":"} | rest], acc) do
+  defp parse_pat_map([{tag, k}, {:op, ":"} | rest], acc) when tag in [:id, :kw] do
     {p, rest} = parse_pat(rest)
 
     case rest do
@@ -442,7 +444,7 @@ defmodule Rian.Pratt do
   # struct pattern fields: `field: p` pairs until the closing `)`
   defp parse_pat_fields([{:rparen} | rest], acc), do: {Enum.reverse(acc), rest}
 
-  defp parse_pat_fields([{:id, k}, {:op, ":"} | rest], acc) do
+  defp parse_pat_fields([{tag, k}, {:op, ":"} | rest], acc) when tag in [:id, :kw] do
     {p, rest} = parse_pat(rest)
 
     case rest do
@@ -670,7 +672,7 @@ defmodule Rian.Pratt do
 
   defp parse_map([{:rbrace} | rest], acc), do: {{:map_lit, Enum.reverse(acc)}, rest}
 
-  defp parse_map([{:id, k}, {:op, ":"} | rest], acc) do
+  defp parse_map([{tag, k}, {:op, ":"} | rest], acc) when tag in [:id, :kw] do
     {v, rest} = parse_expr(rest, 0)
     acc = [{k, v} | acc]
 
