@@ -199,8 +199,11 @@ defmodule Rian.Tour do
   defp reach_map(prog) do
     prog
     |> Reach.analyze()
-    |> Map.new(fn {name, %{reach: reach}} ->
-      {name, reach |> MapSet.to_list() |> Enum.map(&to_string/1) |> Enum.sort()}
+    |> Map.new(fn {key, %{reach: reach}} ->
+      # the report keys by `"name/arity"` (arity overloading); the tour's single
+      # non-overloaded examples are looked up by bare name, so strip the arity.
+      {key |> String.split("/") |> hd(),
+       reach |> MapSet.to_list() |> Enum.map(&to_string/1) |> Enum.sort()}
     end)
   end
 

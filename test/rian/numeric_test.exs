@@ -36,8 +36,8 @@ defmodule Rian.NumericTest do
   describe "`Int` portability (ADR-0064): native on BEAM/JS, bignum-gap on Rust/JVM" do
     test "Int reaches [:ex, :js] but not [:rs, :jvm] — the bignum gap is honest" do
       rep = Reach.analyze(Decl.parse("def big(n Int) Int := n * n"))
-      assert rep["big"].reach |> MapSet.to_list() |> Enum.sort() == [:ex, :js]
-      assert [%{kind: :numeric, kills: [:rs, :jvm]}] = rep["big"].blockers
+      assert rep["big/1"].reach |> MapSet.to_list() |> Enum.sort() == [:ex, :js]
+      assert [%{kind: :numeric, kills: [:rs, :jvm]}] = rep["big/1"].blockers
     end
 
     test "Int lowers to BigInt on JS" do

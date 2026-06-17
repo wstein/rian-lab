@@ -3,6 +3,11 @@ defmodule Rian.PrimTest do
 
   alias Rian.{Beam, Pratt, Prim}
 
+  # the reach report keys by `"name/arity"` (arity overloading); these sources have
+  # no overloads, so match a reach entry by its bare name.
+  defp reach_entry(rep, name),
+    do: Enum.find_value(rep, fn {k, v} -> if(String.split(k, "/") |> hd() == name, do: v) end)
+
   describe "Prim.X(args) normalization (Rian.Prim)" do
     test "`Prim.str_chars(s)` rewrites to `__prim_str_chars(s)` at parse time" do
       ast = Pratt.parse("Prim.str_chars(s)")
@@ -108,7 +113,7 @@ defmodule Rian.PrimTest do
       rep = Rian.Reach.analyze(Rian.Decl.parse(src))
 
       for fname <- ~w(sum product any all length) do
-        assert Enum.sort(MapSet.to_list(rep[fname].reach)) == [:ex, :js, :jvm, :rs],
+        assert Enum.sort(MapSet.to_list(reach_entry(rep, fname).reach)) == [:ex, :js, :jvm, :rs],
                "#{fname} must reach all four targets (it is pure cons)"
       end
     end
@@ -126,9 +131,9 @@ defmodule Rian.PrimTest do
       # constructor-tag atom in the dispatcher pins off `:rs`/`:jvm`) — exactly the
       # reach of the shipped `Show`-over-`Expr`; associated types erase, no change.
       rep = Rian.Reach.analyze(Rian.Decl.parse(src))
-      assert Enum.sort(MapSet.to_list(rep["fcount"].reach)) == [:ex, :js]
+      assert Enum.sort(MapSet.to_list(reach_entry(rep, "fcount").reach)) == [:ex, :js]
       # the underlying concrete fold IS all-target — only the dispatcher gates it.
-      assert Enum.sort(MapSet.to_list(rep["len_l"].reach)) == [:ex, :js, :jvm, :rs]
+      assert Enum.sort(MapSet.to_list(reach_entry(rep, "len_l").reach)) == [:ex, :js, :jvm, :rs]
     end
 
     test "selfhost lexer using `Prim.char_code`/`Prim.str_chars` round-trips" do

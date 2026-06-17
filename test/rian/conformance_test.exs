@@ -48,7 +48,12 @@ defmodule Rian.ConformanceTest do
         assert names != [], "#{unquote(file)} has no @test defs to gate"
 
         for name <- names, target <- @tier1 do
-          reach = (rep[name][:reach] || MapSet.new()) |> MapSet.to_list()
+          # the report keys by `"name/arity"` (arity overloading); @test defs are
+          # arity-0 and unique, so match the entry by bare name.
+          info =
+            Enum.find_value(rep, fn {k, v} -> if(String.split(k, "/") |> hd() == name, do: v) end)
+
+          reach = ((info && info[:reach]) || MapSet.new()) |> MapSet.to_list()
 
           assert target in reach,
                  "portable-core regression: #{unquote(file)}.#{name} no longer reaches #{target} " <>

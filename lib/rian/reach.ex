@@ -91,14 +91,14 @@ defmodule Rian.Reach do
             _ -> {MapSet.difference(MapSet.new(@targets), killed), callees}
           end
 
-        {f.name,
+        {{f.name, length(f.params)},
          %{local: local, callees: MapSet.intersection(callees, local_names), blockers: blockers}}
       end)
 
     reach = fixpoint(facts, Map.new(facts, fn {n, fc} -> {n, fc.local} end))
 
-    Map.new(facts, fn {n, fc} ->
-      {n, %{reach: Map.fetch!(reach, n), blockers: Enum.reverse(fc.blockers)}}
+    Map.new(facts, fn {{name, arity} = n, fc} ->
+      {"#{name}/#{arity}", %{reach: Map.fetch!(reach, n), blockers: Enum.reverse(fc.blockers)}}
     end)
   end
 
@@ -120,7 +120,8 @@ defmodule Rian.Reach do
           required != nil,
           f <- mod.funcs,
           f.pub?,
-          missing = required -- MapSet.to_list(reach[f.name][:reach] || MapSet.new(@targets)),
+          key = "#{f.name}/#{length(f.params)}",
+          missing = required -- MapSet.to_list(reach[key][:reach] || MapSet.new(@targets)),
           missing != [] do
         {mod.name, f.name, Enum.sort(missing)}
       end
@@ -242,11 +243,25 @@ defmodule Rian.Reach do
       Map.new(facts, fn {n, %{local: local, callees: cs}} ->
         {n,
          Enum.reduce(cs, local, fn c, acc ->
-           MapSet.intersection(acc, Map.get(table, c, MapSet.new(@targets)))
+           MapSet.intersection(acc, reach_for(table, c))
          end)}
       end)
 
     if next == table, do: table, else: fixpoint(facts, next)
+  end
+
+  # The local call graph names callees by bare name (arity is not tracked on the
+  # edge), while the reach table is keyed by `{name, arity}` (arity overloading).
+  # A name-folded callee therefore contributes the *intersection* of its arities'
+  # reaches: a caller keeps a target only if every same-named definition reaches
+  # it. This is the conservative direction — it can under-claim an overloaded
+  # callee's reach but never over-claims (the honesty bar). No matching arity
+  # (an external/unknown name) imposes no constraint.
+  defp reach_for(table, name) do
+    case for {{^name, _arity}, r} <- table, do: r do
+      [] -> MapSet.new(@targets)
+      rs -> Enum.reduce(rs, &MapSet.intersection/2)
+    end
   end
 
   defp all_funcs(prog),

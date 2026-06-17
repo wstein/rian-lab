@@ -7,7 +7,13 @@ defmodule Rian.ReachTest do
   alias Rian.Reach
 
   defp reach(src), do: src |> Rian.Decl.parse() |> Reach.analyze()
-  defp targets(rep, fn_name), do: rep[fn_name].reach |> MapSet.to_list() |> Enum.sort()
+
+  # the report keys by `"name/arity"` (arity overloading); these sources have no
+  # overloads, so look an entry up by its bare name.
+  defp entry(rep, fn_name),
+    do: Enum.find_value(rep, fn {k, v} -> if(String.split(k, "/") |> hd() == fn_name, do: v) end)
+
+  defp targets(rep, fn_name), do: entry(rep, fn_name).reach |> MapSet.to_list() |> Enum.sort()
 
   describe "portable code reaches every target" do
     test "pure arithmetic / cons recursion / variants are portable" do
@@ -23,7 +29,7 @@ defmodule Rian.ReachTest do
 
       assert targets(rep, "add") == [:ex, :js, :jvm, :rs]
       assert targets(rep, "sum") == [:ex, :js, :jvm, :rs]
-      assert rep["add"].blockers == []
+      assert entry(rep, "add").blockers == []
     end
 
     test "a portable-prelude call (`List.map`) reaches every target; a stdlib FFI does not" do
@@ -55,7 +61,7 @@ defmodule Rian.ReachTest do
         """)
 
       assert targets(rep, "inc") == [:ex, :js, :jvm, :rs]
-      assert rep["inc"].blockers == []
+      assert entry(rep, "inc").blockers == []
     end
 
     test "the 64-bit wrap prelude reaches every target EXCEPT :js (ADR-0064)" do
@@ -68,7 +74,7 @@ defmodule Rian.ReachTest do
 
       for f <- ~w(wrapping_add saturating_add checked_add) do
         assert targets(rep, f) == [:ex, :jvm, :rs]
-        assert Enum.any?(rep[f].blockers, &(&1.kind == :numeric and &1.kills == [:js]))
+        assert Enum.any?(entry(rep, f).blockers, &(&1.kind == :numeric and &1.kills == [:js]))
       end
     end
 
@@ -80,7 +86,7 @@ defmodule Rian.ReachTest do
       rep = reach("def w(a Int53, b Int53) Int53 := Prim.wrapping_add(a, b)")
 
       assert targets(rep, "w") == [:ex, :jvm, :rs]
-      assert Enum.any?(rep["w"].blockers, &(&1.kind == :numeric and &1.kills == [:js]))
+      assert Enum.any?(entry(rep, "w").blockers, &(&1.kind == :numeric and &1.kills == [:js]))
     end
 
     test "a body that calls `Prim.str_to_atom` is BEAM-only (atoms have no Rust/JS/JVM value)" do
@@ -90,7 +96,11 @@ defmodule Rian.ReachTest do
       rep = reach("def s(x String) Symbol := Prim.str_to_atom(x)")
 
       assert targets(rep, "s") == [:ex]
-      assert Enum.any?(rep["s"].blockers, &(&1.kind == :atom and &1.kills == [:rs, :js, :jvm]))
+
+      assert Enum.any?(
+               entry(rep, "s").blockers,
+               &(&1.kind == :atom and &1.kills == [:rs, :js, :jvm])
+             )
     end
 
     test "a Rian cross-module call is portable (not host FFI)" do
@@ -118,7 +128,7 @@ defmodule Rian.ReachTest do
         """)
 
       assert targets(rep, "total") == [:ex]
-      assert [%{construct: ":lists.sum", kind: :ffi, kills: kills}] = rep["total"].blockers
+      assert [%{construct: ":lists.sum", kind: :ffi, kills: kills}] = entry(rep, "total").blockers
       assert Enum.sort(kills) == [:js, :jvm, :rs]
     end
 
@@ -128,7 +138,7 @@ defmodule Rian.ReachTest do
       # ref (&mut) is BEAM-rejected, so the function reaches everything BUT :ex —
       # the reachability report no longer oversells `ref` as portable (ADR-0055/P5).
       assert targets(rep, "bump") == [:js, :jvm, :rs]
-      assert [%{kind: :capability, kills: [:ex]}] = rep["bump"].blockers
+      assert [%{kind: :capability, kills: [:ex]}] = entry(rep, "bump").blockers
     end
 
     test "ordering a Symbol/atom is a compile error — equality-only boundary (P9, ADR-0041 §2)" do
@@ -152,7 +162,7 @@ defmodule Rian.ReachTest do
         """)
 
       assert targets(rep, "up") == [:ex]
-      assert [%{construct: "String.upcase"}] = rep["up"].blockers
+      assert [%{construct: "String.upcase"}] = entry(rep, "up").blockers
     end
   end
 
@@ -172,7 +182,7 @@ defmodule Rian.ReachTest do
         # a concurrency blocker is present (the load-bearing one); these bodies also
         # pass bare atoms (`:m`/`:tab`/`:v`), which now carry honest `:atom` blockers
         # too — both pin to `:ex`, so the function is ex-only either way.
-        assert Enum.any?(rep[f].blockers, &(&1.kind == :concurrency))
+        assert Enum.any?(entry(rep, f).blockers, &(&1.kind == :concurrency))
       end
     end
 
@@ -184,7 +194,7 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      assert [%{kind: :ffi}] = rep["a"].blockers
+      assert [%{kind: :ffi}] = entry(rep, "a").blockers
     end
   end
 
@@ -193,7 +203,7 @@ defmodule Rian.ReachTest do
       rep = reach("def f(s Symbol) Bool := s == :foo")
       # JS lowers an atom to a string; Rust raises BEAM-only, JVM has no atom lowering
       assert targets(rep, "f") == [:ex, :js]
-      assert [%{kind: :atom, kills: [:rs, :jvm]}] = rep["f"].blockers
+      assert [%{kind: :atom, kills: [:rs, :jvm]}] = entry(rep, "f").blockers
     end
 
     test "a constructed Result reaches `:ex`+`:rs`+`:js` but is off `:jvm`" do
@@ -206,10 +216,10 @@ defmodule Rian.ReachTest do
         """)
 
       assert targets(rep, "half") == [:ex, :js, :rs]
-      assert Enum.any?(rep["half"].blockers, &(&1.kind == :result and &1.kills == [:jvm]))
+      assert Enum.any?(entry(rep, "half").blockers, &(&1.kind == :result and &1.kills == [:jvm]))
       # the `:ok`/`:error` tag is NOT re-flagged as a bare value atom (that would
       # wrongly also kill `:rs`/`:js`, where the emitters lower the Result)
-      refute Enum.any?(rep["half"].blockers, &(&1.kind == :atom))
+      refute Enum.any?(entry(rep, "half").blockers, &(&1.kind == :atom))
     end
 
     test "a map literal reaches `:ex`+`:js` but is off `:rs`/`:jvm` (the emitters raise)" do
@@ -218,7 +228,7 @@ defmodule Rian.ReachTest do
       # BEAM/JS lower a map (native map / JS object); Rust raises "map literals are
       # BEAM-only" and JVM lists `EMap` unsupported.
       assert targets(rep, "build") == [:ex, :js]
-      assert Enum.any?(rep["build"].blockers, &(&1.kind == :map and &1.kills == [:rs, :jvm]))
+      assert Enum.any?(entry(rep, "build").blockers, &(&1.kind == :map and &1.kills == [:rs, :jvm]))
     end
 
     test "an as-pattern reaches `:ex`+`:rs` but is off `:js`/`:jvm` (the emitters raise)" do
@@ -231,7 +241,7 @@ defmodule Rian.ReachTest do
 
       # BEAM/Rust lower `name @ pat` via PatternLower; JS/JVM raise Unsupported.
       assert targets(rep, "f") == [:ex, :rs]
-      assert Enum.any?(rep["f"].blockers, &(&1.kind == :pattern and &1.kills == [:js, :jvm]))
+      assert Enum.any?(entry(rep, "f").blockers, &(&1.kind == :pattern and &1.kills == [:js, :jvm]))
     end
 
     test "an FFI module-head atom is not double-flagged as a bare atom" do
@@ -242,7 +252,7 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      assert [%{kind: :ffi}] = rep["total"].blockers
+      assert [%{kind: :ffi}] = entry(rep, "total").blockers
     end
   end
 
@@ -263,8 +273,8 @@ defmodule Rian.ReachTest do
       assert targets(rep, "mid") == [:ex]
       assert targets(rep, "caller") == [:ex]
       # the pin is propagated, so mid/caller carry no *local* blocker
-      assert rep["mid"].blockers == []
-      assert rep["caller"].blockers == []
+      assert entry(rep, "mid").blockers == []
+      assert entry(rep, "caller").blockers == []
     end
 
     test "a portable function calling only portable functions stays all-target" do

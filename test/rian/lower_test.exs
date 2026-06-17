@@ -613,7 +613,7 @@ end|
 
     test "Reach claims :rs and the emitter now produces it (matrix matches emitter)" do
       rep = @str_src |> Rian.Decl.parse() |> Rian.Reach.analyze()
-      for f <- ~w(s label greet), do: assert(:rs in MapSet.to_list(rep[f].reach))
+      for f <- ~w(s/0 label/1 greet/1), do: assert(:rs in MapSet.to_list(rep[f].reach))
     end
 
     @tag :rust

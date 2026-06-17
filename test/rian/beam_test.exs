@@ -50,7 +50,10 @@ defmodule Rian.BeamTest do
       rep = src |> Rian.Decl.parse() |> Rian.Reach.analyze()
 
       for f <- ~w(doubled evens total has sum_of_doubled_evens) do
-        assert :rs in (rep[f].reach |> MapSet.to_list()), "#{f} should reach :rs"
+        # the report keys by `"name/arity"` (arity overloading); this example has no
+        # overloads, so match the entry by bare name.
+        info = Enum.find_value(rep, fn {k, v} -> if(String.split(k, "/") |> hd() == f, do: v) end)
+        assert :rs in (info.reach |> MapSet.to_list()), "#{f} should reach :rs"
       end
     end
 

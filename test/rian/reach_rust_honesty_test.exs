@@ -23,8 +23,13 @@ defmodule Rian.ReachRustHonestyTest do
   defp reach(file),
     do: File.read!("examples/rian/#{file}.rian") |> Decl.parse() |> Reach.analyze()
 
-  defp targets(rep, name), do: rep[name].reach |> MapSet.to_list() |> Enum.sort()
-  defp blocker_kinds(rep, name), do: rep[name].blockers |> Enum.map(& &1.kind)
+  # the report keys by `"name/arity"` (arity overloading); these slices have no
+  # overloads, so look an entry up by its bare name.
+  defp entry(rep, name),
+    do: Enum.find_value(rep, fn {k, v} -> if(String.split(k, "/") |> hd() == name, do: v) end)
+
+  defp targets(rep, name), do: entry(rep, name).reach |> MapSet.to_list() |> Enum.sort()
+  defp blocker_kinds(rep, name), do: entry(rep, name).blockers |> Enum.map(& &1.kind)
 
   describe "17_stdlib_eq_ord — owned-generic return reaches :rs (ADR-0061)" do
     setup do: {:ok, rep: reach("17_stdlib_eq_ord")}
@@ -68,60 +73,60 @@ defmodule Rian.ReachRustHonestyTest do
           "def first(xs Vec(T)) Option(T) forall T\ndef first([]) := None\ndef first([h | t]) := Some(h)"
         )
 
-      assert :rs in (rep["first"].reach |> MapSet.to_list())
+      assert :rs in targets(rep, "first")
     end
 
     test "a `T | E`-returning generic reaches :rs (the Ok payload is cloned)" do
       rep =
         reach_src("type E := Bad\ndef ok1(x T) T | E forall T := {:ok, x}")
 
-      assert :rs in (rep["ok1"].reach |> MapSet.to_list())
+      assert :rs in targets(rep, "ok1")
     end
 
     test "a user sum over a tvar reaches :rs" do
       rep = reach_src("type Box := B(v T)\ndef boxit(x T) Box forall T := B(x)")
-      assert :rs in (rep["boxit"].reach |> MapSet.to_list())
+      assert :rs in targets(rep, "boxit")
     end
 
     test "an `Fn(...)`-returning generic (a closure over a tvar) is still off :rs" do
       rep = reach_src("def mk(x T) Fn(Int53, T) forall T := (n) -> x")
-      refute :rs in (rep["mk"].reach |> MapSet.to_list())
-      assert :generic in (rep["mk"].blockers |> Enum.map(& &1.kind))
+      refute :rs in targets(rep, "mk")
+      assert :generic in blocker_kinds(rep, "mk")
     end
 
     test "an `Fn(...)` *nested* in the return type is also off :rs (not just a prefix)" do
       rep = reach_src("def mk(x T) Option(Fn(Int53, T)) forall T := Some((n) -> x)")
-      refute :rs in (rep["mk"].reach |> MapSet.to_list())
-      assert :generic in (rep["mk"].blockers |> Enum.map(& &1.kind))
+      refute :rs in targets(rep, "mk")
+      assert :generic in blocker_kinds(rep, "mk")
     end
 
     test "a *concrete* `Fn(...)` return (no tvar) NOW reaches :rs — `Box<dyn Fn>` + `Box::new(move …)` (ADR-0061)" do
       rep = reach_src("def adder(n Int53) Fn(Int53, Int53) := (x) -> x + n")
-      assert :rs in (rep["adder"].reach |> MapSet.to_list())
+      assert :rs in targets(rep, "adder")
     end
 
     test "an `Fn(...)` *parameter* NOW reaches :rs (concrete and generic) — `&impl Fn` (ADR-0061)" do
       conc = reach_src("def apply_twice(f Fn(Int53, Int53), x Int53) Int53 := f(f(x))")
-      assert :rs in (conc["apply_twice"].reach |> MapSet.to_list())
+      assert :rs in targets(conc, "apply_twice")
 
       gen =
         reach_src(
           "def map(f Fn(T, U), xs Vec(T)) Vec(U) forall T, U\ndef map(_, []) := []\ndef map(f, [h | t]) := [f(h) | map(f, t)]"
         )
 
-      assert :rs in (gen["map"].reach |> MapSet.to_list())
+      assert :rs in targets(gen, "map")
     end
 
     test "an owned-tvar payload reached via a `:=` binding still reaches :rs (binder cloned)" do
       rep =
         reach_src("def wrap(x T) Option(T) forall T\n  y := x\n  Some(y)\nend")
 
-      assert :rs in (rep["wrap"].reach |> MapSet.to_list())
+      assert :rs in targets(rep, "wrap")
     end
 
     test "a nested-generic owned-tvar return (`Vec(Option(T))`) reaches :rs" do
       rep = reach_src("def wrap(x T) Vec(Option(T)) forall T := [Some(x)]")
-      assert :rs in (rep["wrap"].reach |> MapSet.to_list())
+      assert :rs in targets(rep, "wrap")
     end
 
     # The widened :rs claims are load-bearing: these shapes — a `:=`-indirected
