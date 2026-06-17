@@ -188,6 +188,42 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "module-less sources infer just like a module body (ADR-0075)" do
+    test "a bare `def` fills its holes from usage" do
+      out = Transpile.transpile("def double(n) do\n  n * 2\nend", infer: true)
+      assert out =~ "pub def double(n Int53) Int53 := n * 2"
+    end
+
+    test "multi-clause bare defs get one inferred signature" do
+      src =
+        "def sign(0) do\n  0\nend\n\ndef sign(n) when n > 0 do\n  1\nend\n\ndef sign(_) do\n  -1\nend"
+
+      out = Transpile.transpile(src, infer: true)
+      assert out =~ "pub def sign(Int53) Int53"
+    end
+
+    test "infer_report works on a module-less source" do
+      report = Transpile.infer_report("def t(x) do\n  Tuple.to_list(x)\nend")
+      assert {{"t", 1}, ledger} = List.keyfind(report, {"t", 1}, 0)
+      assert {"ret", :unresolved} in ledger
+    end
+  end
+
+  describe "triage stats are header-honest (no phantom markers, defs at any indent)" do
+    test "a clean module-less draft reports zero markers and counts its defs" do
+      {_, stats} = Transpile.transpile_with_stats("def double(n) do\n  n * 2\nend", infer: true)
+      assert stats.ports == 0
+      assert stats.defs == 1
+    end
+
+    test "a clean `defmodule` draft also reports zero markers (header not self-counted)" do
+      {_, stats} =
+        Transpile.transpile_with_stats("defmodule M do\n  def f(x), do: x + 1\nend", infer: true)
+
+      assert stats.ports == 0
+    end
+  end
+
   describe "`@spec` harvesting — declared types seed inference, cross-checked (ADR-0075)" do
     test "a String.t() spec fills the param and return holes" do
       body = "  @spec greet(String.t()) :: String.t()\n  def greet(name), do: name"

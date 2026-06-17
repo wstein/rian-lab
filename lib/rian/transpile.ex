@@ -327,13 +327,17 @@ defmodule Rian.Transpile do
   # `type Errors := Tag | …` declaration from the error tags the inferer collected.
   # Phase C+: harvest `@type` decls — synthesize `type Name := …` and resolve local
   # type refs in `@spec`s (`type_env`).
-  defp infer_program({:defmodule, _, [_, [do: _]]} = ast), do: infer_program_local(ast)
-  defp infer_program(_), do: {%{}, []}
+  defp infer_program({:defmodule, _, [aliases, [do: body]]}),
+    do: infer_program_stmts(block_stmts(body), short_name(aliases))
 
-  defp infer_program_local({:defmodule, _, [aliases, [do: body]]} = ast) do
-    stmts = block_stmts(body)
-    {type_env, type_decls} = Rian.Transpile.Infer.collect_types(stmts, short_name(aliases))
-    sigmap = infer_sigs(ast, type_env)
+  # Module-less source: infer over the bare top-level statement list. There is no
+  # enclosing module to qualify `t()`/`%__MODULE__{}` self-refs against, so the
+  # module name is `nil` (such self-refs cannot occur outside a `defmodule`).
+  defp infer_program(other), do: infer_program_stmts(block_stmts(other), nil)
+
+  defp infer_program_stmts(stmts, mod_name) do
+    {type_env, type_decls} = Rian.Transpile.Infer.collect_types(stmts, mod_name)
+    sigmap = infer_sigs(stmts, type_env)
 
     tags =
       sigmap
@@ -364,22 +368,25 @@ defmodule Rian.Transpile do
   @spec transpile_with_stats(String.t(), keyword()) :: term()
   def transpile_with_stats(source, opts \\ []) when is_binary(source) do
     text = transpile(source, opts)
-    lines = String.split(text, "\n")
+    # Count over the BODY, never the fixed DRAFT header: that header documents
+    # `TODO_PORT`/`# TODO[port]`/`_Unk` by name, so counting the whole text would
+    # inflate every module's marker and hole tally by the header's self-reference.
+    body = text |> String.split("\n") |> Enum.drop(length(@header))
 
     ports =
       Enum.count(
-        lines,
+        body,
         &(String.contains?(&1, "TODO_PORT") or String.contains?(&1, "TODO[port]"))
       )
 
-    defs = Enum.count(lines, &Regex.match?(~r/^\s+(pub )?def \w+\(/, &1))
+    # def heads — indented (inside a `mod`) or at column 0 (module-less source).
+    defs = Enum.count(body, &Regex.match?(~r/^\s*(pub )?def \w+\(/, &1))
     # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics
     # check; counted (occurrences, not lines) so the report can surface them.
-    mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, text) |> length()
-    # holes/open are counted over the code only — the header comment illustrates
-    # `_Unk` and must not inflate the count.
+    mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, Enum.join(body, "\n")) |> length()
+    # holes are counted over the code only — comment provenance lines are dropped.
     code =
-      lines |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#")) |> Enum.join("\n")
+      body |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#")) |> Enum.join("\n")
 
     holes = Regex.scan(~r/\b_Unk\b/, code) |> length()
     {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes}}
@@ -389,10 +396,9 @@ defmodule Rian.Transpile do
   # Two passes: pass 1 infers each def group in isolation; pass 2 re-infers with
   # the fully-resolved sigs as an intra-module sibling table (so a local call can
   # adopt a callee's inferred type). Returns `{name, arity} => %{params, ret, tvars}`.
-  defp infer_sigs(ast, type_env \\ %{})
+  defp infer_sigs(stmts, type_env \\ %{})
 
-  defp infer_sigs({:defmodule, _, [_, [do: body]]}, type_env) do
-    stmts = block_stmts(body)
+  defp infer_sigs(stmts, type_env) when is_list(stmts) do
     groups = def_groups(stmts)
     key = fn g -> {to_string(hd(g.clauses).name), hd(g.clauses).arity} end
 
@@ -425,9 +431,14 @@ defmodule Rian.Transpile do
   """
   @spec infer_report(String.t()) :: term()
   def infer_report(source) when is_binary(source) do
-    ast = Code.string_to_quoted!(source)
-    for {k, v} <- infer_sigs(ast), v.ledger != [], do: {k, v.ledger}
+    stmts = source |> Code.string_to_quoted!() |> toplevel_stmts()
+    for {k, v} <- infer_sigs(stmts), v.ledger != [], do: {k, v.ledger}
   end
+
+  # The top-level statement list, whether the source is a `defmodule` (its body) or
+  # a module-less bare-`def` sequence (the forms themselves).
+  defp toplevel_stmts({:defmodule, _, [_, [do: body]]}), do: block_stmts(body)
+  defp toplevel_stmts(other), do: block_stmts(other)
 
   @doc """
   Phase A: prime the whole-program cross-module signature table from a list of
