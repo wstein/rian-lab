@@ -32,7 +32,10 @@ defmodule Rian.Transpile do
       `# TODO[port]` for these would falsely imply lost behaviour;
     * everything else is left **in place** as a greppable `TODO_PORT("…")`
       sentinel (carrying the original Elixir) or a `# TODO[port]: …` line comment,
-      so nothing untranslated can masquerade as done;
+      so nothing untranslated can masquerade as done — notably the constructs with
+      **no Rian image**: exception flow (`def … rescue`/`catch`/`after`, ADR-0035/0040
+      — restructure to a `Result`/`Option`) and the truthy, value-returning `&&`/`||`
+      (Rian's `and`/`or` are boolean-only — restructure to `case`/`Option`);
     * **types are holes** (`_Unk`) by default — Elixir is untyped, so the human
       supplies the sums and signatures. With `--infer` (ADR-0075) the engine fills
       every *provable* slot, **harvesting any `@spec`** as a cross-checked hint (a
@@ -844,10 +847,28 @@ defmodule Rian.Transpile do
 
     # Distinguish a *present* `nil` body (`def f, do: nil`) from a truly bodyless
     # def (no `:do` key): both reduce to the atom `nil`, but only the former should
-    # route through the `nil → Option` marker. The sentinel marks genuine absence.
-    body = if kw && Keyword.has_key?(kw, :do), do: Keyword.get(kw, :do), else: :__no_body__
+    # route through the `nil → Option` marker. The sentinel marks genuine absence. A
+    # `def … rescue/catch/after …` (Elixir exception flow) keeps `:do` but its
+    # recovery clauses have no Rian image — wrap so they surface as a marker rather
+    # than silently emitting just the happy path.
+    body =
+      cond do
+        kw && Keyword.has_key?(kw, :do) && recovery_keys(kw) != [] ->
+          {:__recovery__, recovery_keys(kw), Keyword.get(kw, :do)}
+
+        kw && Keyword.has_key?(kw, :do) ->
+          Keyword.get(kw, :do)
+
+        true ->
+          :__no_body__
+      end
+
     %{name: name, arity: length(args), args: args, guard: guard, body: body}
   end
+
+  # Elixir exception-control keys on a `def`/`try` (`rescue`/`catch`/`after`) — Rian
+  # has none (ADR-0035/0040: errors are values), so they cannot be ported mechanically.
+  defp recovery_keys(kw), do: Enum.filter([:rescue, :catch, :after], &Keyword.has_key?(kw, &1))
 
   defp new_group(vis, clause, doc), do: %{vis: vis, doc: doc, clauses: [clause]}
   defp add_clause(open, clause), do: %{open | clauses: open.clauses ++ [clause]}
@@ -1052,6 +1073,15 @@ defmodule Rian.Transpile do
   # ── bodies ──────────────────────────────────────────────────────────────────
 
   defp render_body(:__no_body__), do: ~s|TODO_PORT("bodyless clause")|
+
+  # A def whose body carries `rescue`/`catch`/`after`: Rian has no exception flow, so
+  # the recovery cannot be emitted as-is — flag it (with the happy-path snippet) for
+  # restructuring to a Result/Option (ADR-0040) instead of dropping it silently.
+  defp render_body({:__recovery__, kinds, do_body}) do
+    ks = Enum.map_join(kinds, "/", &to_string/1)
+
+    ~s|TODO_PORT("def #{ks} (Elixir exception flow, no Rian image) — restructure to Result/Option; happy path: #{escape(snippet(do_body))}")|
+  end
 
   # multi-statement body → Rian `;`-separated block: `x := e; …; final` (Pratt
   # parses a function body as a block of statements with a final expression).

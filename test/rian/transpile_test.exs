@@ -788,6 +788,36 @@ end|) =~ ~S|"v=${x}!"|
     end
   end
 
+  describe "exception flow (rescue/catch/after) surfaces as a marker, never dropped" do
+    test "a `def … rescue …` becomes a TODO_PORT marker that keeps the happy path" do
+      # Rian has no exceptions (ADR-0035/0040); the recovery clause has no Rian image,
+      # so the def must be flagged for restructuring rather than emitting just `:do`.
+      out =
+        rian("""
+        defmodule M do
+          def f(v) do
+            g(v)
+          rescue
+            _ -> nil
+          end
+        end
+        """)
+
+      assert out =~ ~s|:= TODO_PORT("def rescue|
+      assert out =~ "restructure to Result/Option"
+      # the happy path is preserved in the marker, not lost
+      assert out =~ "happy path: g(v)"
+    end
+
+    test "a plain `def` (no recovery) is unaffected" do
+      out = rian("defmodule M do\n  def f(x), do: x + 1\nend")
+      assert out =~ ":= x + 1"
+      # refute against the body only — the emitted header legend mentions TODO_PORT.
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO_PORT"
+    end
+  end
+
   describe "struct/map updates desugar to the Rian map-update form" do
     test "struct update `%Mod{base | f: v}` → Rian `%{base | f: v}` (struct is a tagged map)" do
       # a Rian struct value is a tagged map (ADR-0043), so a struct update is the
