@@ -21,12 +21,8 @@ defmodule Rian.InterpTest do
   end
 
   defp reach(src, fn_name) do
-    # the report keys by `"name/arity"`; these single-function sources are looked
-    # up by bare name, so match the entry whose key has that name.
-    src
-    |> Decl.parse()
-    |> Reach.analyze()
-    |> Enum.find_value(fn {k, v} -> if(String.split(k, "/") |> hd() == fn_name, do: v) end)
+    # `Reach.entry/2` resolves the bare name against the `"name/arity"`-keyed report.
+    src |> Decl.parse() |> Reach.analyze() |> Reach.entry(fn_name)
   end
 
   describe "lexing & parsing `${expr}` holes (ADR-0069 §1)" do

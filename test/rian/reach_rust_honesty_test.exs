@@ -23,10 +23,9 @@ defmodule Rian.ReachRustHonestyTest do
   defp reach(file),
     do: File.read!("examples/rian/#{file}.rian") |> Decl.parse() |> Reach.analyze()
 
-  # the report keys by `"name/arity"` (arity overloading); these slices have no
-  # overloads, so look an entry up by its bare name.
-  defp entry(rep, name),
-    do: Enum.find_value(rep, fn {k, v} -> if(String.split(k, "/") |> hd() == name, do: v) end)
+  # `Reach.entry/2` resolves a bare name against the `"name/arity"`-keyed report
+  # (and raises clearly on a miss) — these slices have no overloads.
+  defp entry(rep, name), do: Reach.entry(rep, name)
 
   defp targets(rep, name), do: entry(rep, name).reach |> MapSet.to_list() |> Enum.sort()
   defp blocker_kinds(rep, name), do: entry(rep, name).blockers |> Enum.map(& &1.kind)

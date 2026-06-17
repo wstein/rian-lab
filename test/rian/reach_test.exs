@@ -8,10 +8,9 @@ defmodule Rian.ReachTest do
 
   defp reach(src), do: src |> Rian.Decl.parse() |> Reach.analyze()
 
-  # the report keys by `"name/arity"` (arity overloading); these sources have no
-  # overloads, so look an entry up by its bare name.
-  defp entry(rep, fn_name),
-    do: Enum.find_value(rep, fn {k, v} -> if(String.split(k, "/") |> hd() == fn_name, do: v) end)
+  # `Reach.entry/2` resolves a bare name against the `"name/arity"`-keyed report
+  # (and raises clearly on a miss) — these sources have no overloads.
+  defp entry(rep, fn_name), do: Reach.entry(rep, fn_name)
 
   defp targets(rep, fn_name), do: entry(rep, fn_name).reach |> MapSet.to_list() |> Enum.sort()
 

@@ -65,8 +65,11 @@ defmodule Rian.Reach do
   @doc """
   Analyze a parsed program (`Rian.Decl.parse/1` output).
 
-  Returns `%{fun_name => %{reach: MapSet.t(target), blockers: [blocker]}}` where a
-  `blocker` is `%{construct: String.t(), kind: :ffi | :concurrency, kills: [target]}`.
+  Returns `%{"name/arity" => %{reach: MapSet.t(target), blockers: [blocker]}}` where
+  a `blocker` is `%{construct: String.t(), kind: :ffi | :concurrency, kills: [target]}`.
+  The report is keyed by `"name/arity"` (arity overloading, ADR-0057) — **look an
+  entry up with `entry/2`**, not a raw `report[name]` index, which silently returns
+  `nil` for a bare name and crashes downstream.
   """
   @spec analyze(map()) :: map()
   def analyze(prog) do
@@ -101,6 +104,40 @@ defmodule Rian.Reach do
       {"#{name}/#{arity}", %{reach: Map.fetch!(reach, n), blockers: Enum.reverse(fc.blockers)}}
     end)
   end
+
+  @doc """
+  Look a function's entry up in an `analyze/1` report.
+
+  `key` is either the exact `"name/arity"` key or a **bare name** (the common case
+  for non-overloaded code). The report keys by `"name/arity"`, so a raw
+  `report[name]` index silently returns `nil` for a bare name and then crashes
+  downstream — this resolves the bare name and **raises a clear error** when the
+  name is absent or overloaded (ambiguous), naming the available keys. Pass the
+  full `"name/arity"` key to disambiguate an overload.
+  """
+  @spec entry(map(), String.t()) :: map()
+  def entry(report, key) when is_map_key(report, key), do: report[key]
+
+  def entry(report, name) do
+    case Enum.filter(report, fn {k, _v} -> bare_name(k) == name end) do
+      [{_k, v}] ->
+        v
+
+      [] ->
+        raise KeyError,
+          message:
+            "no function #{inspect(name)} in reach report (have: #{inspect(Map.keys(report) |> Enum.sort())})"
+
+      many ->
+        raise ArgumentError,
+              "#{inspect(name)} is overloaded (#{inspect(Enum.map(many, &elem(&1, 0)) |> Enum.sort())}); " <>
+                "pass the full \"name/arity\" key"
+    end
+  end
+
+  @doc "The bare function name of a `\"name/arity\"` report key (drops `/arity`)."
+  @spec bare_name(String.t()) :: String.t()
+  def bare_name(key), do: key |> String.split("/") |> hd()
 
   @doc """
   Check every `mod`'s `@targets(…)` contract (ADR-0058 §2): each `pub` function

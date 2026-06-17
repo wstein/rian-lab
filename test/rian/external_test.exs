@@ -90,12 +90,8 @@ defmodule Rian.ExternalTest do
     end
   end
 
-  # the report keys by `"name/arity"`; these single-function sources have no
-  # overloads, so match the entry by bare name.
-  defp targets(rep, name) do
-    {_k, info} = Enum.find(rep, fn {k, _} -> String.split(k, "/") |> hd() == name end)
-    info[:reach] |> MapSet.to_list() |> Enum.sort()
-  end
+  # `Reach.entry/2` resolves a bare name against the `"name/arity"`-keyed report.
+  defp targets(rep, name), do: Reach.entry(rep, name)[:reach] |> MapSet.to_list() |> Enum.sort()
 
   describe "check (ADR-0068 §3 — signature only, val/tag params)" do
     test "a `val`/`tag` external passes the type gate (the body is trusted FFI)" do

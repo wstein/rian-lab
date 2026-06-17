@@ -202,8 +202,7 @@ defmodule Rian.Tour do
     |> Map.new(fn {key, %{reach: reach}} ->
       # the report keys by `"name/arity"` (arity overloading); the tour's single
       # non-overloaded examples are looked up by bare name, so strip the arity.
-      {key |> String.split("/") |> hd(),
-       reach |> MapSet.to_list() |> Enum.map(&to_string/1) |> Enum.sort()}
+      {Reach.bare_name(key), reach |> MapSet.to_list() |> Enum.map(&to_string/1) |> Enum.sort()}
     end)
   end
 

@@ -3,10 +3,9 @@ defmodule Rian.PrimTest do
 
   alias Rian.{Beam, Pratt, Prim}
 
-  # the reach report keys by `"name/arity"` (arity overloading); these sources have
-  # no overloads, so match a reach entry by its bare name.
-  defp reach_entry(rep, name),
-    do: Enum.find_value(rep, fn {k, v} -> if(String.split(k, "/") |> hd() == name, do: v) end)
+  # `Reach.entry/2` resolves a bare name against the `"name/arity"`-keyed report
+  # (and raises clearly on a miss) — these sources have no overloads.
+  defp reach_entry(rep, name), do: Rian.Reach.entry(rep, name)
 
   describe "Prim.X(args) normalization (Rian.Prim)" do
     test "`Prim.str_chars(s)` rewrites to `__prim_str_chars(s)` at parse time" do
