@@ -212,6 +212,19 @@ defmodule Rian.ReachTest do
       refute Enum.any?(rep["half"].blockers, &(&1.kind == :atom))
     end
 
+    test "an as-pattern reaches `:ex`+`:rs` but is off `:js`/`:jvm` (the emitters raise)" do
+      rep =
+        reach("""
+        type T := C(x Int53)
+        def f(p T) Int53
+        def f(n @ C(x)) := x
+        """)
+
+      # BEAM/Rust lower `name @ pat` via PatternLower; JS/JVM raise Unsupported.
+      assert targets(rep, "f") == [:ex, :rs]
+      assert Enum.any?(rep["f"].blockers, &(&1.kind == :pattern and &1.kills == [:js, :jvm]))
+    end
+
     test "an FFI module-head atom is not double-flagged as a bare atom" do
       rep =
         reach("""

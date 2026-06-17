@@ -27,7 +27,8 @@ defmodule Rian.Reach do
       hides behind a sibling module; never over-approximates a direct FFI).
     * Bare atom *literals* are not classified (they are Symbols/Result tags,
       portable per ADR-0041); only FFI *calls* are flagged.
-    * Clause-head patterns are not scanned (FFI lives in bodies/guards).
+    * Clause-head patterns are scanned only for as-patterns (`name @ pat`, a JS/JVM
+      emitter gap); all other blockers (FFI, atoms) live in bodies/guards.
 
   Reach models **architectural** reachability (what a target *can* run — `ref` off
   the BEAM, `Int64` off JS, FFI off non-BEAM). It deliberately does NOT track an
@@ -293,12 +294,31 @@ defmodule Rian.Reach do
     # undeclared generics or the wrong `i64` instantiation, so it pins off `:rs` —
     # the matrix stays honest rather than green-lighting code rustc rejects (ADR-0061).
     param = if parametric_rs_ok?(f, pctx), do: [], else: [parametric_blocker()]
+    # an as-pattern (`name @ pat`, ADR-0050) in a clause head is lowered on BEAM/Rust
+    # (`Rian.PatternLower`) but the JS/JVM emitters raise `Unsupported` for it, so it
+    # pins the function off `:js`/`:jvm` — else the matrix shows a target whose emitter
+    # then raises (the gate lie `reach_test` guards against). This is the one place a
+    # clause-head pattern is inspected (FFI/atom blockers live in bodies/guards).
+    as_pat =
+      if Enum.any?(f.clauses, fn c -> Enum.any?(c.pats, &pat_has_as?/1) end),
+        do: [as_pat_blocker()],
+        else: []
 
-    Enum.reduce(f.clauses, {ref ++ int ++ width ++ owned_gen ++ param, MapSet.new()}, fn c, acc ->
-      acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
-      if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
-    end)
+    Enum.reduce(
+      f.clauses,
+      {ref ++ int ++ width ++ owned_gen ++ param ++ as_pat, MapSet.new()},
+      fn c, acc ->
+        acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
+        if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
+      end
+    )
   end
+
+  # a surface clause-head pattern contains an as-pattern `{:as, name, pat}` (anywhere)?
+  defp pat_has_as?({:as, _name, _pat}), do: true
+  defp pat_has_as?(t) when is_tuple(t), do: t |> Tuple.to_list() |> Enum.any?(&pat_has_as?/1)
+  defp pat_has_as?(l) when is_list(l), do: Enum.any?(l, &pat_has_as?/1)
+  defp pat_has_as?(_), do: false
 
   defp ref_blocker, do: %{construct: "ref capability (&mut)", kind: :capability, kills: [:ex]}
 
@@ -347,6 +367,12 @@ defmodule Rian.Reach do
   # Result tags are consumed by their own `scan` clauses, so this fires only on values.
   defp bare_atom_blocker,
     do: %{construct: "bare atom literal (`:foo`)", kind: :atom, kills: [:rs, :jvm]}
+
+  # An as-pattern `name @ pat` (ADR-0050): lowered on the BEAM/Rust via
+  # `Rian.PatternLower`, but the JS/JVM emitters raise `Unsupported`, so it pins the
+  # function off `:js`/`:jvm` (honest against the emitters).
+  defp as_pat_blocker,
+    do: %{construct: "as-pattern (`name @ pat`)", kind: :pattern, kills: [:js, :jvm]}
 
   # A `Result` value `{:ok, _}` / `{:error, _}` (ADR-0040): lowered on the BEAM (tagged
   # tuple), Rust (`Ok`/`Err`), and JS (`["ok", v]`, `Rian.JS`), but **not** on JVM (its
