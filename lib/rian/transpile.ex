@@ -1452,7 +1452,7 @@ defmodule Rian.Transpile do
     end)
   end
 
-  defp string_part(s) when is_binary(s), do: {:ok, escape_lit(s)}
+  defp string_part(s) when is_binary(s), do: {:ok, escape(s)}
   defp string_part({:"::", _, [interp, {:binary, _, _}]}), do: {:ok, "${#{interp_inner(interp)}}"}
   defp string_part(_), do: :error
 
@@ -1460,13 +1460,6 @@ defmodule Rian.Transpile do
   defp interp_inner({{:., _, [_mod, :to_string]}, _, [e]}), do: expr(e)
   defp interp_inner({:to_string, _, [e]}), do: expr(e)
   defp interp_inner(e), do: expr(e)
-
-  defp escape_lit(s) do
-    s
-    |> String.replace("\\", "\\\\")
-    |> String.replace("\"", "\\\"")
-    |> String.replace("\n", "\\n")
-  end
 
   # case arm: `pat -> body` or `pat when guard -> body`.
   defp case_arm({:->, _, [[{:when, _, [p, g]}], body]}),
@@ -1706,5 +1699,19 @@ defmodule Rian.Transpile do
 
   defp snippet(node), do: node |> Macro.to_string() |> one_line()
   defp one_line(s), do: s |> to_string() |> String.replace(~r/\s+/, " ") |> String.trim()
-  defp escape(s), do: s |> to_string() |> String.replace("\"", "\\\"")
+
+  # Escape a string for a Rian double-quoted literal. The backslash MUST be doubled
+  # first (else escaping the others would themselves be re-doubled); then the quote
+  # and the control chars Rian spells with an escape. Without backslash-doubling a
+  # source-text value like `"\n"` (the two chars `\` `n`, e.g. from `char_source`)
+  # was emitted verbatim and re-lexed as a newline.
+  defp escape(s) do
+    s
+    |> to_string()
+    |> String.replace("\\", "\\\\")
+    |> String.replace("\"", "\\\"")
+    |> String.replace("\n", "\\n")
+    |> String.replace("\t", "\\t")
+    |> String.replace("\r", "\\r")
+  end
 end

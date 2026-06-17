@@ -749,6 +749,44 @@ end|) =~ ~S|"v=${x}!"|
     end
   end
 
+  describe "string literals are escaped for a re-lexable Rian literal" do
+    test "a backslash in the value is doubled (was emitted raw, re-lexed as a control char)" do
+      # source value is `a\b`; the Rian literal must double the backslash so it
+      # re-lexes to the same value rather than to a `\b` escape.
+      out =
+        rian(~S'''
+        defmodule M do
+          def bs, do: "a\\b"
+        end
+        ''')
+
+      assert out =~ ~S|"a\\b"|
+      refute out =~ ~S|"a\b"|
+    end
+
+    test "a regex backreference `\\1` survives (collapse_parens-style replacement)" do
+      out =
+        rian(~S'''
+        defmodule M do
+          def c(s), do: Regex.replace(~r/x/, s, "\\1")
+        end
+        ''')
+
+      assert out =~ ~S|"\\1"|
+    end
+
+    test "a newline in the value renders as the `\\n` escape, not a raw newline" do
+      out =
+        rian(~S'''
+        defmodule M do
+          def nl, do: "x\ny"
+        end
+        ''')
+
+      assert out =~ ~S|"x\ny"|
+    end
+  end
+
   describe "struct/map updates desugar to the Rian map-update form" do
     test "struct update `%Mod{base | f: v}` → Rian `%{base | f: v}` (struct is a tagged map)" do
       # a Rian struct value is a tagged map (ADR-0043), so a struct update is the
