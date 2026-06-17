@@ -1544,6 +1544,11 @@ defmodule Rian.Check do
   end
 
   # the type a clause-head pattern requires of its scrutinee (the parameter).
+  # `PList`/`PTuple`/`PMap`/`PStruct`/`PAs` deliberately stay `:unknown`: a structural
+  # constraint can't be turned into a *conflict* without breaking the dynamically-typed
+  # (BEAM-only) self-host corpus, which legitimately matches one untyped param at
+  # several shapes (e.g. `compose_real_sum.rian`'s `lower_body`). Sound conflict
+  # detection there needs target-aware inference or union types — out of scope here.
   defp pattern_type(%PLit{value: v}, _ic) when is_integer(v), do: "Int53"
   defp pattern_type(%PLit{value: v}, _ic) when is_binary(v), do: "String"
   defp pattern_type(%PChar{}, _ic), do: "Char"
@@ -1650,6 +1655,34 @@ defmodule Rian.Check do
     do:
       Enum.reduce(es, :unknown, fn e, acc ->
         fold_constraint(acc, var_constraint(name, e, env, ic))
+      end)
+
+  # Any other Core node carries no constraint rule of its own, but a use of the
+  # variable may sit in a child — `g(x)` inside a `with`, a tuple, a struct, a lambda
+  # body, etc. Recurse structurally into every child so `:unknown` means the variable
+  # is *genuinely* unconstrained, not that an unhandled node was reached — the latter
+  # would auto-generalize the param to a silently-wrong `forall T`.
+  defp var_constraint(name, %_{} = node, env, ic) do
+    node
+    |> Map.from_struct()
+    |> Map.values()
+    |> Enum.reduce(:unknown, fn child, acc ->
+      fold_constraint(acc, var_constraint(name, child, env, ic))
+    end)
+  end
+
+  defp var_constraint(name, list, env, ic) when is_list(list),
+    do:
+      Enum.reduce(list, :unknown, fn c, acc ->
+        fold_constraint(acc, var_constraint(name, c, env, ic))
+      end)
+
+  defp var_constraint(name, tuple, env, ic) when is_tuple(tuple),
+    do:
+      tuple
+      |> Tuple.to_list()
+      |> Enum.reduce(:unknown, fn c, acc ->
+        fold_constraint(acc, var_constraint(name, c, env, ic))
       end)
 
   defp var_constraint(_name, _leaf, _env, _ic), do: :unknown

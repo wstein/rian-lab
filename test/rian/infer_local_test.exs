@@ -121,5 +121,16 @@ defmodule Rian.InferLocalTest do
         Decl.parse(src)
       end
     end
+
+    test "a param used only inside a `with` infers from the callee, not `forall T`" do
+      # `x` appears solely in `g(x)` *inside* the `with` clause — `var_constraint`
+      # must recurse into the `with` node to recover `g`'s parameter type (else it
+      # would auto-generalize `x` to a wrong `forall T`).
+      src =
+        "mod M do\n  pub def g(n Int64) Int64 := n\n  def f(x) Int64 := with y <- g(x) do y end\nend"
+
+      assert %{name: "x", type: "Int64"} = param_of(src, "f", 0)
+      assert tvars_of(src, "f") == []
+    end
   end
 end
