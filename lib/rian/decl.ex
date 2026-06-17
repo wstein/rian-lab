@@ -296,7 +296,7 @@ defmodule Rian.Decl do
         _ -> []
       end)
 
-    funcs =
+    assembled_funcs =
       (user_defs ++ protocol_defs(decls, types, structs, targets))
       # group by name AND arity, so same-name clauses of different arity form
       # separate functions (`f/1` vs `f/2`, like Elixir/Erlang — exported per
@@ -304,7 +304,24 @@ defmodule Rian.Decl do
       |> Enum.chunk_by(&{&1.name, raw_arity(&1)})
       |> Enum.map(&build_func/1)
       |> Enum.map(&subst_func(&1, aliases))
-      |> lower_meta(decls, targets)
+
+    # Inference context for the interpolation pass (ADR-0069): with the scope's
+    # function signatures in hand, a `${call()}` hole resolves the callee's declared
+    # return type, not just literals/params — so an interpolated call result (e.g. a
+    # matcher's `"expected ${want}, got ${got()}"`) stringifies instead of erroring.
+    # Built inline (not `Check.program_ic`, which pulls in `Rian.Prelude` and would
+    # cycle at compile time when the prelude module itself parses); `:funs`/`:fsigs`
+    # are all `Check.infer` needs to type a sibling call.
+    interp_ic = %{
+      funs: Map.new(assembled_funcs, fn f -> {{f.name, length(f.params)}, f.ret} end),
+      fsigs:
+        Map.new(assembled_funcs, fn f ->
+          {{f.name, length(f.params)},
+           %{params: Enum.map(f.params, & &1.type), ret: f.ret, tvars: f.tvars}}
+        end)
+    }
+
+    funcs = lower_meta(assembled_funcs, decls, targets, interp_ic)
 
     consts =
       for({:const, c, pub?, doc} <- decls, do: parse_const(c, pub?, doc))
@@ -333,7 +350,7 @@ defmodule Rian.Decl do
   # template introducing a failable bind is then rejected (ADR-0035). Synthetic
   # funcs (protocol dispatchers/impls) carry no user `macro`/`comptime`, so they
   # are skipped to keep their generated bodies as the emitters produced them.
-  defp lower_meta(funcs, decls, targets) do
+  defp lower_meta(funcs, decls, targets, ic) do
     env = collect_macros(decls)
     portable? = targets != nil
     # types with an `impl Show for T` (ADR-0069 §6, user `Show`) — a hole of such a
@@ -345,20 +362,22 @@ defmodule Rian.Decl do
         f
 
       %Func{clauses: cs, params: ps} = f ->
-        %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?, ps, show_types))}
+        %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?, ps, show_types, ic))}
     end)
   end
 
-  defp meta_clause(%Clause{body: nil} = c, _env, _p, _params, _show), do: c
+  defp meta_clause(%Clause{body: nil} = c, _env, _p, _params, _show, _ic), do: c
 
-  defp meta_clause(%Clause{body: body} = c, env, portable?, params, show) when is_binary(body) do
+  defp meta_clause(%Clause{body: body} = c, env, portable?, params, show, ic)
+       when is_binary(body) do
     ast = Pratt.parse_body(body)
     expanded = if env == %{}, do: ast, else: Rian.Macro.expand(env, ast, portable: portable?)
     folded = Rian.Comptime.fold(expanded)
     # ADR-0069: resolve `\(expr)` interpolation here, where the clause's parameter
-    # types are in scope, so each hole stringifies by its static type before the
-    # checker and emitters see a plain `<>`/stringify chain.
-    out = Rian.Interp.resolve(folded, clause_env(c, params), %{}, show)
+    # types AND the scope's function signatures (`ic`) are in scope, so each hole
+    # stringifies by its static type — incl. a `${call()}` hole — before the checker
+    # and emitters see a plain `<>`/stringify chain.
+    out = Rian.Interp.resolve(folded, clause_env(c, params), ic, show)
 
     # Only swap the source-string body for an AST when a transform actually fired;
     # bodies with no macro/`comptime`/interpolation keep their string form (and the

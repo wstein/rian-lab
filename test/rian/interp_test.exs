@@ -90,6 +90,29 @@ defmodule Rian.InterpTest do
       assert m.flag(true) == "flag=true"
       assert m.flag(false) == "flag=false"
     end
+
+    test "a `${call()}` hole stringifies via the callee's declared return type (ADR-0069)" do
+      # the interpolation pass now has the scope's function signatures in scope, so a
+      # call result resolves its type instead of erroring `no Show for unknown`.
+      src = ~S"""
+      def double(n Int53) Int53 := n * 2
+      def label(s String) String := s
+      def f() String := "got ${double(20)} / ${label("x")}"
+      """
+
+      {:ok, m} = Beam.load(src, :interp_call)
+      assert m.f() == "got 40 / x"
+    end
+
+    test "a generic `${call()}` resolves the instantiated return (forall T)" do
+      src = ~S"""
+      def id(x T) T forall T := x
+      def f() String := "id=${id(7)}"
+      """
+
+      {:ok, m} = Beam.load(src, :interp_generic_call)
+      assert m.f() == "id=7"
+    end
   end
 
   describe "the same source lowers to JS and Rust (ADR-0069 §3 — portable, no FFI)" do
