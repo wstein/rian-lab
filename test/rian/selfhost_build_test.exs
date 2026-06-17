@@ -1,4 +1,4 @@
-defmodule Rian.BuildTest do
+defmodule Rian.SelfhostBuildTest do
   # async: false — loads real modules into the VM via :code.load_binary.
   use ExUnit.Case, async: false
 
