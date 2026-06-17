@@ -15,9 +15,14 @@ defmodule Rian.Transpile do
       the inline `head := expr`), `defstruct` (→ a `struct Mod(…)` record skeleton),
       nested `defmodule`s (a struct-only wrapper flattens to its `struct`; a
       function-bearing one is hoisted to a sibling top-level `mod`, since Rian is
-      flat), `@type` (→ a synthesized `type …` decl and/or resolved into `@spec`s),
-      `if`/`case` (incl. `when` arms), binary/unary operators, ctor & struct patterns
-      (`%ECall{fun: f}` → `ECall(fun: f)`), tuples, lists/cons, atoms, literals, calls;
+      flat), `@type`/`@typep` (→ a synthesized `type …` decl and/or resolved into
+      `@spec`s), `if`/`case` (incl. `when` arms), binary/unary operators, ctor & struct
+      patterns (`%ECall{fun: f}` → `ECall(fun: f)`), tuples, lists/cons, maps (atom **and**
+      non-atom `=>` keys, ADR-0033), pins (`^x`), bitstrings, atoms, literals, calls;
+    * documentation / compile-metadata / conformance attributes with **no runtime
+      semantics** are *dropped* (not flagged): `@typedoc`, `@doc false`, `@impl`,
+      `@external_resource`, `@enforce_keys`, `@rian`/`use Rian.Ann` — emitting a
+      `# TODO[port]` for these would falsely imply lost behaviour;
     * everything else is left **in place** as a greppable `TODO_PORT("…")`
       sentinel (carrying the original Elixir) or a `# TODO[port]: …` line comment,
       so nothing untranslated can masquerade as done;
@@ -584,6 +589,18 @@ defmodule Rian.Transpile do
   defp classify({:require, _, _} = n), do: {:drop, "require", n}
   defp classify({:@, _, [{:spec, _, _}]} = n), do: {:spec, n}
   defp classify({:@, _, [{:type, _, _}]} = n), do: {:type_decl, n}
+  # `@typep` is a *private* `@type` — harvest it the same way (provenance + a type
+  # the inference can resolve in a local `@spec`), never a port marker.
+  defp classify({:@, _, [{:typep, _, _}]} = n), do: {:type_decl, n}
+  # Documentation / compile-metadata / behaviour-conformance attributes carry **no
+  # runtime semantics**, so they are dropped, not flagged: `@typedoc`/`@doc false`
+  # (doc strings; a *non-`false`* `@doc "…"` is attached to the next def above),
+  # `@impl` (a compile-time callback assertion), `@external_resource` (a recompile
+  # trigger). Flagging these as `# TODO[port]` would falsely imply lost behaviour.
+  defp classify({:@, _, [{:typedoc, _, _}]}), do: :skip
+  defp classify({:@, _, [{:doc, _, _}]}), do: :skip
+  defp classify({:@, _, [{:impl, _, _}]}), do: :skip
+  defp classify({:@, _, [{:external_resource, _, _}]}), do: :skip
   # `@enforce_keys` is an Elixir runtime concern subsumed by Rian's typed fields.
   defp classify({:@, _, [{:enforce_keys, _, _}]}), do: :skip
   # `@rian` annotations are HARVESTED into the signatures/struct/type decls; the

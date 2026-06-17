@@ -384,10 +384,32 @@ end|) =~ ~S|"v=${x}!"|
                "const ks := [:a, :b]"
     end
 
-    test "a directive attribute (`@impl`, unreferenced) stays a marker, not a `const`" do
-      out = rian("defmodule M do\n  @impl true\n  def c(x), do: x\nend")
-      assert out =~ "# TODO[port]: @impl true"
-      refute out =~ "const impl"
+    test "doc/metadata attributes (`@impl`, `@typedoc`, `@doc false`, `@external_resource`) are dropped, not flagged" do
+      # these carry no runtime semantics — a `# TODO[port]` would falsely imply lost
+      # behaviour, blocking the roundtrip over pure documentation/compile metadata.
+      out =
+        rian("""
+        defmodule M do
+          @typedoc "a token"
+          @type t :: integer()
+          @external_resource "priv/x"
+          @doc false
+          @impl true
+          def c(x), do: x
+        end
+        """)
+
+      refute out =~ "TODO[port]: @typedoc"
+      refute out =~ "TODO[port]: @impl"
+      refute out =~ "TODO[port]: @doc"
+      refute out =~ "TODO[port]: @external_resource"
+      assert out =~ "pub def c(x _Unk) _Unk := x"
+    end
+
+    test "a referenced directive-shaped attribute still lowers to a `const`" do
+      # the value-reference rule is unchanged: an attribute read as a value is a const.
+      out = rian("defmodule M do\n  @limit 10\n  def cap, do: @limit\nend")
+      assert out =~ "const limit := 10"
     end
   end
 
