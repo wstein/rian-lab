@@ -25,17 +25,26 @@ defmodule Rian.Build do
         err("build: unknown option #{inspect(Enum.map(bad, &elem(&1, 0)))}")
 
       {opts, [file], _} ->
-        src = File.read!(file)
-
-        cond do
-          opts[:rust] -> print(Rian.Lower.rust_program(Rian.Decl.parse(src)))
-          opts[:js] -> print(Rian.JS.compile(src))
-          opts[:jvm] -> print(Rian.JVM.compile(src))
-          true -> build_beam(src, Keyword.get(opts, :out, "."))
+        case File.read(file) do
+          {:ok, src} -> emit(opts, src)
+          {:error, reason} -> err(error_text(reason))
         end
 
       {_opts, _, _} ->
         err("usage: rian build FILE [-o DIR] [--rust|--js|--jvm]")
+    end
+  end
+
+  # The emit step is the one remaining boundary: a `--rust`/`--js`/`--jvm` lowering
+  # (or BEAM codegen) can still raise on an unsupported construct or a gate failure
+  # — converted to an exit code here rather than escaping the escript. Parse/IO
+  # errors above are already values; this isolates the genuine emitter boundary.
+  defp emit(opts, src) do
+    cond do
+      opts[:rust] -> print(Rian.Lower.rust_program(Rian.Decl.parse(src)))
+      opts[:js] -> print(Rian.JS.compile(src))
+      opts[:jvm] -> print(Rian.JVM.compile(src))
+      true -> build_beam(src, Keyword.get(opts, :out, "."))
     end
   rescue
     e -> err(Exception.message(e))
