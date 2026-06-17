@@ -815,11 +815,19 @@ defmodule Rian.Transpile do
   # expression-side dual of the struct *pattern* clause below). Must precede the
   # generic local-call clause, else `{:%, _, [aliases, map]}` is mistaken for a
   # 2-arg call named `:%` and emits a malformed `%(__aliases__(...), …)`.
-  # struct/map *update* `%Mod{base | f: v}` carries a leading `{:|, …}` element —
-  # Rian sums are immutable tagged tuples, so there is no direct image; flag it
-  # rather than crash trying to destructure the cons as a `{k, v}` pair.
-  defp expr({:%, _, [_aliases, {:%{}, _, [{:|, _, _} | _]}]} = n),
-    do: ~s|TODO_PORT("struct update #{escape(snippet(n))}")|
+  # struct update `%Mod{base | f: v}` → Rian map update `%{base | f: v}` (ADR-0033):
+  # a Rian struct value IS a tagged map (ADR-0043), so updating its fields is the
+  # BEAM exact-assoc — which preserves the value's `__struct__` tag. The nominal
+  # `%Mod{}` re-assertion is dropped (Rian has no struct-update surface; the tagged
+  # map carries the type). Atom keys only; otherwise flag it.
+  defp expr({:%, _, [_aliases, {:%{}, _, [{:|, _, [base, kvs]}]}]} = n) when is_list(kvs) do
+    if Enum.all?(kvs, &match?({k, _} when is_atom(k), &1)) do
+      fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{expr(v)}" end)
+      "%{#{expr(base)} | #{fields}}"
+    else
+      ~s|TODO_PORT("struct update #{escape(snippet(n))}")|
+    end
+  end
 
   defp expr({:%, _, [aliases, {:%{}, _, kvs}]}) do
     fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{expr(v)}" end)

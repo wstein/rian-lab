@@ -356,15 +356,22 @@ end|) =~ ~S|"v=${x}!"|
     end
   end
 
-  describe "struct/map updates don't crash the total walk" do
-    test "struct update `%M{base | f: v}` is flagged, not a FunctionClauseError" do
+  describe "struct/map updates desugar to the Rian map-update form" do
+    test "struct update `%Mod{base | f: v}` → Rian `%{base | f: v}` (struct is a tagged map)" do
+      # a Rian struct value is a tagged map (ADR-0043), so a struct update is the
+      # map exact-assoc — preserving `__struct__`. No marker; field access in the
+      # value (`p.t`) lowers too.
       out = rian("defmodule M do\n  def u(p), do: %P{p | type: p.t}\nend")
-      assert out =~ ~s|TODO_PORT("struct update|
+      assert out =~ "%{p | type: p.t}"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO"
     end
 
-    test "map update `%{base | k: v}` is flagged too" do
+    test "map update `%{base | k: v}` → Rian `%{base | k: v}` (no marker)" do
       out = rian("defmodule M do\n  def u(m), do: %{m | k: 1}\nend")
-      assert out =~ "TODO_PORT"
+      assert out =~ "%{m | k: 1}"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO"
     end
   end
 
