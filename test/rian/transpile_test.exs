@@ -400,6 +400,18 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ ~s|TODO_PORT("remote/stdlib call: MapSet.new|
     end
 
+    test "an Erlang/atom-module call (`:erlang.fun`) is emitted as FFI, not a marker" do
+      out = rian("defmodule M do\n  def f(b), do: :erlang.binary_to_atom(b, :utf8)\nend")
+      assert out =~ ":erlang.binary_to_atom(b, :utf8)"
+      refute out =~ ~s|TODO_PORT("remote/stdlib call: :erlang|
+    end
+
+    test "anonymous-function application `f.(x)` → Rian variable application `f(x)`" do
+      out = rian("defmodule M do\n  def g(f, x), do: f.(x)\nend")
+      assert out =~ ":= f(x)"
+      refute out =~ ~s|TODO_PORT("f.(|
+    end
+
     test "field access (`r.name`, chained) is Rian-native, not a marker" do
       out = rian("defmodule M do\n  def n(r), do: r.name\n  def c(x), do: x.a.b\nend")
       assert out =~ ":= r.name"

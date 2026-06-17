@@ -921,6 +921,11 @@ defmodule Rian.Transpile do
 
   defp expr({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: to_string(name)
 
+  # anonymous-function application `f.(args)` → Rian variable application `f(args)`
+  # (Rian distinguishes calling a fn-valued variable from a local call by scope).
+  defp expr({{:., _, [f]}, _, args}) when is_list(args),
+    do: "#{expr(f)}(#{Enum.map_join(args, ", ", &expr/1)})"
+
   defp expr(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
 
   # RHS of a pipe `l |> r`: the pipe injects `l` as the first arg, so a stdlib
@@ -953,6 +958,11 @@ defmodule Rian.Transpile do
         # native remote call (BEAM FFI). It compiles and runs on BEAM, so the draft
         # is far less marker-ridden; it is *not* portable, so `Rian.Reach` pins the
         # function off `:rs`/`:js` (honestly reported, not hidden).
+        "#{m}.#{fun}(#{arg_strs})"
+
+      is_atom(mod) ->
+        # An Erlang/atom-module call `:erlang.fun(…)` — valid Rian FFI (BEAM-only),
+        # so emit it natively rather than flag it. `m` already carries the `:` prefix.
         "#{m}.#{fun}(#{arg_strs})"
 
       true ->
