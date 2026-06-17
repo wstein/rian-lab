@@ -41,7 +41,7 @@ defmodule Rian.Transpile do
     "# Translated: defs/clauses (+guards), defstruct→struct, if/case, operators,",
     "#   pipes (|>), single- & multi-clause lambdas (multi → `(p) -> case p do …`),",
     "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
-    "#   string interpolation (${e}), nil→None.",
+    "#   word sigils (~w → list), referenced @attrs → const, string interpolation (${e}), nil→None.",
     "# You must still: (1) fill type holes `_Unk`, (2) resolve every",
     "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
     "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
@@ -381,9 +381,13 @@ defmodule Rian.Transpile do
 
   defp toplevel({:defmodule, _, [aliases, [do: body]]}, sigmap, types, struct_anns) do
     name = short_name(aliases)
+    referenced = referenced_attrs(body)
 
     inner =
-      body |> block_stmts() |> render_items(sigmap, name, struct_anns) |> Enum.map(&indent/1)
+      body
+      |> block_stmts()
+      |> render_items(sigmap, name, struct_anns, referenced)
+      |> Enum.map(&indent/1)
 
     # synthesized `type …` declarations (Phase B error sets, `@rian type`) after `mod … do`.
     type_lines = if types == [], do: [], else: Enum.map(types, &("  " <> &1)) ++ [""]
@@ -405,7 +409,7 @@ defmodule Rian.Transpile do
   # Walk the statement list, attaching a pending `@doc` to the next def, and
   # merging consecutive same-name/arity clauses into one rendered group.
 
-  defp render_items(stmts, sigmap, mod_name, struct_anns) do
+  defp render_items(stmts, sigmap, mod_name, struct_anns, referenced) do
     {lines, _pending_doc, open} =
       Enum.reduce(stmts, {[], nil, nil}, fn stmt, {acc, doc, open} ->
         case classify(stmt) do
@@ -417,8 +421,9 @@ defmodule Rian.Transpile do
             # Elixir nests struct/util modules; recurse. A struct-only wrapper flattens
             # to its `struct …` decl (the module is just a namespace for the struct);
             # a submodule with other content nests as `mod Name do … end`.
-            {acc ++ flush(open, sigmap) ++ render_submodule(name, body, sigmap, struct_anns), doc,
-             nil}
+            {acc ++
+               flush(open, sigmap) ++
+               render_submodule(name, body, sigmap, struct_anns, referenced), doc, nil}
 
           {:defstruct, fields} ->
             # an Elixir `defstruct` IS the module's record type → a Rian `struct` decl
@@ -460,12 +465,39 @@ defmodule Rian.Transpile do
             # `@spec` types when inferring) — passive provenance, not a TODO action.
             {acc ++ flush(open, sigmap) ++ ["# type: #{snippet(node)}"], doc, nil}
 
+          {:attr_def, name, value} ->
+            # An Elixir module attribute. When it is referenced as a value it is a
+            # module constant → a Rian `const`; otherwise it is a directive (`@impl`,
+            # `@typep`) with no Rian image → a port marker.
+            line =
+              if MapSet.member?(referenced, name),
+                do: "const #{name} _Unk := #{render_body(value)}",
+                else: "# TODO[port]: @#{name} #{snippet(value)}"
+
+            {acc ++ flush(open, sigmap) ++ [line], doc, nil}
+
           {:other, node} ->
             {acc ++ flush(open, sigmap) ++ ["# TODO[port]: #{snippet(node)}"], doc, nil}
         end
       end)
 
     lines ++ flush(open, sigmap)
+  end
+
+  # Names of module attributes that are *referenced as a value* (`@prims` in an
+  # expression), as opposed to merely *defined*. Only these lower to a Rian
+  # `const`; a directive attribute (`@impl true`) is never read back this way.
+  defp referenced_attrs(body) do
+    {_, set} =
+      Macro.prewalk(body, MapSet.new(), fn
+        {:@, _, [{name, _, ctx}]} = node, acc when is_atom(name) and not is_list(ctx) ->
+          {node, MapSet.put(acc, name)}
+
+        node, acc ->
+          {node, acc}
+      end)
+
+    set
   end
 
   defp classify({:@, _, [{:moduledoc, _, [text]}]}) when is_binary(text), do: {:moduledoc, text}
@@ -492,13 +524,17 @@ defmodule Rian.Transpile do
 
   defp classify({:def, _, [head, kw]}), do: {:clause, :pub, head, kw}
   defp classify({:defp, _, [head, kw]}), do: {:clause, :priv, head, kw}
+
+  # Any remaining `@name <value>` (after the doc/spec/type/rian clauses above) is a
+  # module attribute — a constant or a directive; `render_items` decides which.
+  defp classify({:@, _, [{name, _, [value]}]}) when is_atom(name), do: {:attr_def, name, value}
   defp classify(other), do: {:other, other}
 
   # render a nested `defmodule`: flatten a struct-only wrapper to its `struct` decl
   # (Elixir's one-struct-per-module idiom), else nest it as a `mod … do … end`.
-  defp render_submodule(name, body, sigmap, struct_anns) do
+  defp render_submodule(name, body, sigmap, struct_anns, referenced) do
     stmts = block_stmts(body)
-    inner = render_items(stmts, sigmap, name, struct_anns)
+    inner = render_items(stmts, sigmap, name, struct_anns, referenced)
 
     if struct_only_module?(stmts) do
       inner
@@ -793,6 +829,20 @@ defmodule Rian.Transpile do
     do: remote_call(mod, fun, args, 0)
 
   # local call / nullary var reference.
+  # A module-attribute *reference* used as a value (`@prims`) is a read of a module
+  # constant — render the bare name (the definition lowers to a `const`). Without
+  # this it falls through to the generic call clause and mis-renders as `@(prims)`.
+  defp expr({:@, _, [{name, _, ctx}]}) when is_atom(name) and not is_list(ctx),
+    do: to_string(name)
+
+  # `~w(a b c)` word sigil → a Rian list literal (the common spelling of the string/
+  # atom-list module constants this transpiler turns into `const`s). The `a`
+  # modifier yields atoms; the default yields strings.
+  defp expr({:sigil_w, _, [{:<<>>, _, [str]}, mods]}) when is_binary(str) do
+    fmt = if ?a in mods, do: &":#{&1}", else: &~s|"#{&1}"|
+    "[#{str |> String.split() |> Enum.map_join(", ", fmt)}]"
+  end
+
   defp expr({name, _, args}) when is_atom(name) and is_list(args),
     do: "#{name}(#{Enum.map_join(args, ", ", &expr/1)})"
 

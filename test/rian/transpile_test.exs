@@ -298,6 +298,29 @@ end|) =~ ~S|"v=${x}!"|
     end
   end
 
+  describe "Elixir module attributes" do
+    test "a referenced value-attribute lowers to a `const`; references read the bare name" do
+      out =
+        rian("defmodule M do\n  @prims ~w(a b c)\n  def names, do: @prims\nend")
+
+      assert out =~ ~s|const prims _Unk := ["a", "b", "c"]|
+      assert out =~ "pub def names() _Unk := prims"
+      # the reference is the bare const name, never the unlexable `@(prims)`
+      refute out =~ "@(prims"
+    end
+
+    test "the `a` modifier of `~w` yields an atom list" do
+      assert rian("defmodule M do\n  @ks ~w(a b)a\n  def k, do: @ks\nend") =~
+               "const ks _Unk := [:a, :b]"
+    end
+
+    test "a directive attribute (`@impl`, unreferenced) stays a marker, not a `const`" do
+      out = rian("defmodule M do\n  @impl true\n  def c(x), do: x\nend")
+      assert out =~ "# TODO[port]: @impl true"
+      refute out =~ "const impl"
+    end
+  end
+
   describe "struct/map updates don't crash the total walk" do
     test "struct update `%M{base | f: v}` is flagged, not a FunctionClauseError" do
       out = rian("defmodule M do\n  def u(p), do: %P{p | type: p.t}\nend")
