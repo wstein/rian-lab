@@ -13,8 +13,9 @@ defmodule Mix.Tasks.Rian.Transpile do
   of unresolved `TODO_PORT`/`# TODO[port]` markers and emitted def groups) goes to
   stderr so it never pollutes a redirected draft.
 
-  **Folder mode** — when the argument is a directory, every `**/*.ex` under it is
-  drafted; with `-o OUTDIR` the parallel `.rian` files are written there (relative
+  **Folder mode** — when the argument is a directory, every `**/*.{ex,exs}` under it
+  is drafted (so `.exs` scripts and test modules are triaged too, not just `.ex`
+  sources); with `-o OUTDIR` the parallel `.rian` files are written there (relative
   paths preserved). A **triage report** is printed to stderr: each module's defs,
   markers, and markers-per-def, ranked easiest-first, so you can see which modules
   are cheap to port and which are struct-reflection-heavy before committing.
@@ -116,8 +117,11 @@ defmodule Mix.Tasks.Rian.Transpile do
   # ── folder ──────────────────────────────────────────────────────────────────
 
   defp run_dir(dir, o) do
-    files = Path.wildcard(Path.join(dir, "**/*.ex"))
-    if files == [], do: Mix.raise("no .ex files under #{dir}")
+    # Both `.ex` and `.exs`: a `.exs` script/test module is valid Elixir the
+    # transpiler parses (not evaluates), so test modules can be triaged too — its
+    # unsupported macros (`test`/`assert`) just surface as honest `TODO[port]`s.
+    files = Path.wildcard(Path.join(dir, "**/*.{ex,exs}"))
+    if files == [], do: Mix.raise("no .ex/.exs files under #{dir}")
 
     # Phase A: prime the cross-module signature table so cross-module calls resolve
     # during per-file inference.
@@ -142,7 +146,10 @@ defmodule Mix.Tasks.Rian.Transpile do
   end
 
   defp write_draft(text, dir, file, out) do
-    dest = Path.join(out, String.replace_suffix(Path.relative_to(file, dir), ".ex", ".rian"))
+    # Strip either `.ex` or `.exs` — a plain `replace_suffix(".ex", …)` would miss
+    # `.exs` (its suffix is `.exs`) and write the draft as `foo.exs`, not `foo.rian`.
+    rel = Regex.replace(~r/\.exs?$/, Path.relative_to(file, dir), ".rian")
+    dest = Path.join(out, rel)
     File.mkdir_p!(Path.dirname(dest))
     File.write!(dest, text)
   end
