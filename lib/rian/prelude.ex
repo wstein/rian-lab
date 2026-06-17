@@ -55,10 +55,15 @@ defmodule Rian.Prelude do
   @prelude_sources for n <- ~w(list dict str int),
                        do: File.read!("examples/rian/prelude_#{n}.rian")
 
+  # Parse the bundled prelude sources ONCE, at compile time — the tokenize+parse is
+  # pure and the sources are fixed `@external_resource`s, so both `@prelude_exports`
+  # and `beams/0` reuse this instead of re-parsing on every `load/0`.
+  @prelude_progs for src <- @prelude_sources, do: Rian.Decl.parse(src)
+
   # The `{module, fun}` pairs the prelude actually defines — so only these redirect
   # to the linked module; an unimplemented `List.to_string` still hits Elixir's List.
-  @prelude_exports for src <- @prelude_sources,
-                       m <- Rian.Decl.parse(src).mods,
+  @prelude_exports for prog <- @prelude_progs,
+                       m <- prog.mods,
                        f <- m.funcs,
                        into: MapSet.new(),
                        do: {m.name, to_string(f.name)}
@@ -78,8 +83,7 @@ defmodule Rian.Prelude do
   @doc "Compile the bundled prelude sources to `[{linked_atom, beam_binary}]`."
   @spec beams() :: [{module(), binary()}]
   def beams do
-    Enum.flat_map(@prelude_sources, fn src ->
-      prog = Rian.Decl.parse(src)
+    Enum.flat_map(@prelude_progs, fn prog ->
       renamed = %{prog | mods: Enum.map(prog.mods, &%{&1 | name: "Rian.Prelude.#{&1.name}"})}
       Rian.Beam.compile_program_ir(renamed)
     end)
