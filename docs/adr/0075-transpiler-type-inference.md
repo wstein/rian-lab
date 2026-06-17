@@ -69,6 +69,20 @@ On `lib/rian` the MVP fills **~31% of type slots** (815/2607). Per-file rates sh
 `pratt` 47%, `js/jvm` 42%) while pure-IR modules floor out (`ir.ex` 0%, `core.ex` 14%, `opaque` 18%,
 `protocol` 19%). No file exceeds ~60%.
 
+> **Re-measure 2026-06-17 (honesty note).** The current `--infer` output over `lib/rian` shows
+> **652 printed `_Unk` holes** — far below the 1792 above. **This is *not* an inference gain.** The
+> drop is the later **`defp`-omission policy** (a private function no longer prints `_Unk` for an
+> unrecovered slot; `Rian.InferLocal` recovers it locally or it is silently omitted, ADR-0034), which
+> removed ~1100 *printed* holes that were never *filled*. Reporting the 1792→652 fall as a higher fill
+> rate would be the kind of aspirational claim ADR-0000's honesty bar forbids. The remaining 652 are
+> overwhelmingly `pub def` slots whose blockers are the same Result/atom/struct-IR walls below. The
+> Algorithm-J pass's marginal contribution on today's printed holes is ~29 (turning `infer:true` off
+> raises the count to ~681); the clause-guard/type-predicate/Kernel-accessor evidence added in
+> `bf54dd4` fills **3** of those printed holes — small because most of its ~140 type-determining
+> guards sit in *private* functions whose slots are omitted, not printed. The evidence is sound and
+> accident-free; its effect on the *roundtrip-relevant* (public) hole count is marginal, as the
+> root-cause analysis below predicts.
+
 Classifying the blocking construct of every unfilled group (counts overlap):
 
 | blocker | groups | why it's a hole |
