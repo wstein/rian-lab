@@ -56,6 +56,45 @@ defmodule Rian.TranspileTest do
     end
   end
 
+  describe "module-less source (bare top-level `def`s, no `defmodule`)" do
+    test "a single bare `def` renders FLAT — no `mod … do` box, no indent" do
+      out = rian("def double(n) do\n  n * 2\nend")
+      assert out =~ "\npub def double(n _Unk) _Unk := n * 2\n"
+      refute out =~ "mod "
+      refute out =~ "TODO[port]: top-level"
+    end
+
+    test "multiple bare clauses group into one flat def with no module wrapper" do
+      src =
+        "def fib(0) do\n  0\nend\n\ndef fib(1) do\n  1\nend\n\ndef fib(n) do\n  fib(n - 1) + fib(n - 2)\nend"
+
+      out = rian(src)
+      assert out =~ "pub def fib(_Unk) _Unk"
+      assert out =~ "pub def fib(0) := 0"
+      assert out =~ "pub def fib(1) := 1"
+      assert out =~ "pub def fib(n) := fib(n - 1) + fib(n - 2)"
+      refute out =~ "mod "
+    end
+
+    test "a bare `@type` stays passive provenance ahead of the flat defs" do
+      src =
+        "@type opt :: :none | {:some, term()}\ndef get(:none, d) do\n  d\nend\n\ndef get({:some, v}, _) do\n  v\nend"
+
+      out = rian(src)
+      assert out =~ "# type: @type opt"
+      assert out =~ "pub def get(:none, d) := d"
+      assert out =~ "pub def get({:some, v}, _) := v"
+      refute out =~ "mod "
+    end
+
+    test "a non-declaration top-level degrades per-statement, not to one opaque blob" do
+      out = rian("IO.puts(\"hi\")\ndef f(x) do\n  x\nend")
+      assert out =~ "# TODO[port]:"
+      assert out =~ "pub def f(x _Unk) _Unk := x"
+      refute out =~ "top-level is not a single"
+    end
+  end
+
   describe "@rian attribute annotations — author the type inference can't recover" do
     test "a `@rian` def attribute supplies the signature (no --infer needed)" do
       src = ~S'''

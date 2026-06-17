@@ -15,9 +15,12 @@ defmodule Rian.Transpile do
       the inline `head := expr`), `defstruct` (→ a `struct Mod(…)` record skeleton),
       nested `defmodule`s (a struct-only wrapper flattens to its `struct`; a
       function-bearing one is hoisted to a sibling top-level `mod`, since Rian is
-      flat), `@type`/`@typep` (→ a synthesized `type …` decl and/or resolved into
-      `@spec`s), `if`/`case` (incl. `when` arms), binary/unary operators, ctor & struct
-      patterns (`%ECall{fun: f}` → `ECall(fun: f)`), tuples, lists/cons, maps (atom **and**
+      flat), a **module-less** source — a bare sequence of top-level `def`s with no
+      `defmodule` wrapper (the shape of the codegen fixtures and hand-written `.rian`
+      files) — which renders flat, with no `mod … do` box, `@type`/`@typep` (→ a
+      synthesized `type …` decl and/or resolved into `@spec`s), `if`/`case` (incl.
+      `when` arms), binary/unary operators, ctor & struct patterns
+      (`%ECall{fun: f}` → `ECall(fun: f)`), tuples, lists/cons, maps (atom **and**
       non-atom `=>` keys, ADR-0033), pins (`^x`), bitstrings, atoms, literals, calls;
     * documentation / compile-metadata / conformance attributes with **no runtime
       semantics** are *dropped* (not flagged): `@typedoc`, `@doc false`, `@impl`,
@@ -160,8 +163,18 @@ defmodule Rian.Transpile do
       Enum.flat_map(hoisted, &["" | module_lines(&1, sigmap, [], struct_anns)])
   end
 
-  defp toplevel(other, _sigmap, _types, _struct_anns) do
-    @header ++ ["# TODO[port]: top-level is not a single `defmodule`", "# #{snippet(other)}"]
+  # A **module-less** top level — Rian source needs no `defmodule` wrapper (the
+  # codegen fixtures and hand-written `.rian` files are bare `def`s). Render the
+  # declarations FLAT: no `mod … do` box, no indentation, just the decls a finished
+  # `.rian` would carry. Each statement without a Rian image still drops to its own
+  # greppable `TODO[port]` marker via `render_items`, so a non-declaration script
+  # degrades per-statement rather than collapsing into one opaque blob.
+  defp toplevel(other, sigmap, types, struct_anns) do
+    stmts = block_stmts(other)
+    type_lines = if types == [], do: [], else: types ++ [""]
+
+    @header ++
+      type_lines ++ render_items(stmts, sigmap, nil, struct_anns, referenced_attrs(other))
   end
 
   # `[parent | hoisted]` — the top module with its function-bearing submodules

@@ -134,6 +134,14 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
     namespace for the struct), and a submodule with real content nests as `mod Sub do … end`.
     `@enforce_keys` is skipped (subsumed by Rian's typed fields). So `ir.ex` now yields all 12
     `struct` skeletons instead of a wall of markers.
+  - **Module-less sources (IMPLEMENTED).** A source that is **not** wrapped in a `defmodule` — a bare
+    sequence of top-level `def`s (the shape of the codegen fixtures under `test/fixtures/codegen/` and
+    of every hand-written `.rian`, since Rian source needs no module wrapper) — no longer collapses to
+    a single `# TODO[port]: top-level is not a single defmodule` blob. It renders **flat**: the
+    declarations are emitted with no `mod … do` box and no indentation, exactly as a finished
+    module-less `.rian` looks. Inference (`--infer`) runs over the bare statement list just as it does
+    inside a module. A statement with no Rian image still drops to its own greppable `TODO[port]`
+    marker, so a non-declaration script degrades per-statement rather than as one opaque blob.
   - **`@type` harvesting (IMPLEMENTED).** `Rian.Transpile.Infer.collect_types/2` reads every `@type`
     into a **type-env** (local name → Rian term) and a list of synthesized decls. A *union* `@type`
     (`@type ty :: String.t() | atom()`) synthesizes a named `type Ty := String | Symbol` decl; a
