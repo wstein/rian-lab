@@ -325,6 +325,11 @@ defmodule Rian.Core do
   def from_expr({:label, n, e}), do: %ELabel{name: n, expr: from_expr(e)}
   def from_expr({:lambda, ps, b}), do: %ELambda{params: ps, body: from_expr(b)}
 
+  # a comprehension `for p <- src, filter, … do body end` (ADR-0079) desugars to
+  # nested `List.flat_map`/`if`/`[body]` over the portable prelude (ADR-0047), so it
+  # is just ordinary Core nodes downstream — no emitter/checker/exhaustiveness clause.
+  def from_expr({:comprehension, clauses, body}), do: desugar_for(clauses, body)
+
   # resolved construction nodes (Rian.Lower's resolve_* passes produce these)
   def from_expr({:variant_lit, enum, ctor, named, pairs}),
     do: %EVariant{enum: enum, ctor: ctor, named: named, pairs: from_pairs(pairs)}
@@ -429,6 +434,27 @@ defmodule Rian.Core do
   # (an expression looked up in the map), so a computed key lowers via `from_expr`.
   defp map_pat_pair({{:key, k}, p}), do: {{:key, from_expr(k)}, from_pat(p)}
   defp map_pat_pair({k, p}), do: {k, from_pat(p)}
+
+  # comprehension desugar (ADR-0079), right-to-left over the clause list:
+  #   ⟦ [], body ⟧          = [body]                        (singleton list at the leaf)
+  #   ⟦ (v <- src) :: r ⟧   = List.flat_map(src, (v) -> ⟦ r ⟧)
+  #   ⟦ (filter)   :: r ⟧   = if filter do ⟦ r ⟧ else [] end
+  defp desugar_for([], body), do: %EList{elems: [from_expr(body)], tail: :close}
+
+  defp desugar_for([{:gen, var, src} | rest], body) do
+    %ECall{
+      fun: %EDot{head: %EId{name: "List"}, name: "flat_map"},
+      args: [from_expr(src), %ELambda{params: [{var, nil}], body: desugar_for(rest, body)}]
+    }
+  end
+
+  defp desugar_for([{:filter, cond} | rest], body) do
+    %EIf{
+      cond: from_expr(cond),
+      then: desugar_for(rest, body),
+      else: %EList{elems: [], tail: :close}
+    }
+  end
 
   @doc """
   Generic typed-core walk used by the partial emitters (`Rian.JS`, `Rian.JVM`):

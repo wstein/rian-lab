@@ -621,6 +621,29 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "comprehensions `for p <- src, filter, … do body end` (ADR-0079)" do
+    test "a single generator parses to a `{:comprehension, …}` surface node" do
+      assert Pratt.parse_sexpr("for x <- xs do x * 2 end") ==
+               "(for (<- x xs) (block (* x 2)))"
+    end
+
+    test "a generator with a boolean filter" do
+      assert Pratt.parse_sexpr("for x <- xs, x > 0 do x end") ==
+               "(for (<- x xs) (? (> x 0)) (block x))"
+    end
+
+    test "multiple generators" do
+      assert Pratt.parse_sexpr("for x <- xs, y <- ys do x + y end") ==
+               "(for (<- x xs) (<- y ys) (block (+ x y)))"
+    end
+
+    test "a destructuring generator is rejected (MVP binds a plain variable)" do
+      assert_raise ArgumentError, ~r/generator must bind a plain variable/, fn ->
+        Pratt.parse("for {a, b} <- ps do a end")
+      end
+    end
+  end
+
   describe "unexpected leading token" do
     test "a token that begins no primary expression raises" do
       assert_raise ArgumentError, ~r/unexpected token/, fn -> Pratt.parse(")") end

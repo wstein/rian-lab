@@ -132,6 +132,18 @@ defmodule Rian.Macro do
 
   def map_node({:label, n, e}, f), do: {:label, n, f.(e)}
 
+  # comprehension (ADR-0079): recurse into each generator source / filter condition
+  # and the body (the generator's bound var is a leaf name, left as-is).
+  def map_node({:comprehension, clauses, body}, f) do
+    clauses =
+      Enum.map(clauses, fn
+        {:gen, v, src} -> {:gen, v, f.(src)}
+        {:filter, c} -> {:filter, f.(c)}
+      end)
+
+    {:comprehension, clauses, f.(body)}
+  end
+
   # bitstring (ADR-0078): recurse into each segment's *value* (the spec is metadata).
   def map_node({:bitstr, segs}, f),
     do: {:bitstr, Enum.map(segs, fn {:bitseg, v, specs} -> {:bitseg, f.(v), specs} end)}

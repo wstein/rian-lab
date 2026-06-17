@@ -618,6 +618,38 @@ end|) =~ ~S|"v=${x}!"|
     end
   end
 
+  describe "comprehensions desugar (ADR-0079)" do
+    test "Elixir `for` → Rian `for … do … end` (generators + filter, no marker)" do
+      out =
+        rian("""
+        defmodule M do
+          def dbl(xs), do: for x <- xs, do: x * 2
+          def pos(xs), do: for x <- xs, x > 0, do: x
+          def grid(xs, ys), do: for x <- xs, y <- ys, do: {x, y}
+        end
+        """)
+
+      assert out =~ "for x <- xs do x * 2 end"
+      assert out =~ "for x <- xs, x > 0 do x end"
+      assert out =~ "for x <- xs, y <- ys do {x, y} end"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO"
+    end
+
+    test "`for … into: …` (and `:reduce`) stays an honest marker — out of MVP scope" do
+      out = rian(~S|defmodule M do
+  def s(cs), do: for c <- cs, into: "", do: c
+end|)
+
+      assert out =~ ~s|TODO_PORT("for comprehension|
+    end
+
+    test "a destructuring generator stays a marker (MVP binds a plain variable)" do
+      out = rian("defmodule M do\n  def f(ps), do: for {a, _b} <- ps, do: a\nend")
+      assert out =~ ~s|TODO_PORT("for comprehension|
+    end
+  end
+
   describe "transpile_with_stats" do
     test "counts def groups and unresolved markers" do
       {_text, stats} =

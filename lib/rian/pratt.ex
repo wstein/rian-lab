@@ -184,6 +184,7 @@ defmodule Rian.Pratt do
   defp parse_primary([{:kw, "if"} | rest]), do: parse_if(rest)
   defp parse_primary([{:kw, "case"} | rest]), do: parse_case(rest)
   defp parse_primary([{:kw, "with"} | rest]), do: parse_with(rest)
+  defp parse_primary([{:kw, "for"} | rest]), do: parse_for(rest)
   defp parse_primary([{:lbracket} | rest]), do: parse_list(rest, [])
   defp parse_primary([{:mapopen} | rest]), do: parse_map_start(rest)
   defp parse_primary([{:bitopen} | rest]), do: parse_bitstr(rest, [])
@@ -358,6 +359,49 @@ defmodule Rian.Pratt do
     case tokens do
       [{:comma} | rest] -> parse_with_clauses(rest, acc)
       _ -> {Enum.reverse(acc), tokens}
+    end
+  end
+
+  # `for p <- src, filter, … do body end` (ADR-0079). A comma-separated clause is a
+  # generator (`var <- src`, reusing the ADR-0039 `<-` arrow) or a boolean filter.
+  # Parses to a surface `{:comprehension, clauses, body}` that `Core.from_expr`
+  # desugars to nested `List.flat_map`/`if`/`[body]` over the portable prelude.
+  defp parse_for(tokens) do
+    {clauses, tokens} = parse_for_clauses(tokens, [])
+    tokens = expect_kw(tokens, "do")
+    {body, tokens} = parse_block(tokens)
+    tokens = expect_kw(tokens, "end")
+    {{:comprehension, clauses, body}, tokens}
+  end
+
+  defp parse_for_clauses(tokens, acc) do
+    {clause, rest} = parse_for_clause(tokens)
+    acc = [clause | acc]
+
+    case rest do
+      [{:comma} | r] -> parse_for_clauses(r, acc)
+      _ -> {Enum.reverse(acc), rest}
+    end
+  end
+
+  # a generator binds a plain variable (MVP, ADR-0079) — `var <- src`.
+  defp parse_for_clause([{:id, name}, {:op, "<-"} | rest]) do
+    {src, rest} = parse_expr(rest, 0)
+    {{:gen, name, src}, rest}
+  end
+
+  # anything else is a boolean filter — unless it is a *pattern* generator
+  # (`{a, b} <- xs`), which the MVP rejects rather than mis-parsing as a filter.
+  defp parse_for_clause(tokens) do
+    {expr, rest} = parse_expr(tokens, 0)
+
+    case rest do
+      [{:op, "<-"} | _] ->
+        raise ArgumentError,
+              "for: a generator must bind a plain variable (ADR-0079 MVP); got a pattern"
+
+      _ ->
+        {{:filter, expr}, rest}
     end
   end
 
@@ -942,6 +986,16 @@ defmodule Rian.Pratt do
           " (else#{Enum.map_join(els, "", fn {p, _g, b} -> " (#{sexpr_pat(p)} -> #{sexpr(b)})" end)})"
 
     "(with #{cs} #{sexpr(body)}#{e})"
+  end
+
+  defp sexpr({:comprehension, clauses, body}) do
+    cs =
+      Enum.map_join(clauses, " ", fn
+        {:gen, v, src} -> "(<- #{v} #{sexpr(src)})"
+        {:filter, c} -> "(? #{sexpr(c)})"
+      end)
+
+    "(for #{cs} #{sexpr(body)})"
   end
 
   defp sexpr({:block, stmts}),

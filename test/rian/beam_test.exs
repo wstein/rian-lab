@@ -44,6 +44,21 @@ defmodule Rian.BeamTest do
       assert mod.kind("Vec(x)") == 0
     end
 
+    test "comprehensions `for … do … end` desugar to prelude calls and run (ADR-0079)" do
+      {:ok, mod} =
+        Beam.load(
+          "def dbl(xs Vec(Int53)) Vec(Int53) := for x <- xs do x * 2 end\n" <>
+            "def pos(xs Vec(Int53)) Vec(Int53) := for x <- xs, x > 0 do x end\n" <>
+            "def grid(xs Vec(Int53), ys Vec(Int53)) Vec(Int53) := for x <- xs, y <- ys do x + y end",
+          :rian_beam_for
+        )
+
+      assert mod.dbl([1, 2, 3]) == [2, 4, 6]
+      assert mod.pos([-1, 2, -3, 4]) == [2, 4]
+      # nested: 1+10, 1+20, 2+10, 2+20
+      assert mod.grid([1, 2], [10, 20]) == [11, 21, 12, 22]
+    end
+
     test "a non-atom-key map `%{\"k\" => v}` builds and pattern-matches and runs (ADR-0033)" do
       {:ok, mod} =
         Beam.load(

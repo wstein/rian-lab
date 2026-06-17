@@ -27,13 +27,13 @@ defmodule Rian.RoundtripTest do
     end
 
     test "a draft that still carries a marker fails the BEAM stages (does not lie green)" do
-      # a `for` comprehension has no Rian enumeration surface (no `EFor`) → a
-      # TODO_PORT marker → the draft cannot compile either way. (Field access, stdlib
-      # calls, atom-key *and* non-atom-key maps, pins, and bitstrings now lower; this
-      # is a residual marker class explicitly out of scope, ADR-0075 plan.)
+      # a `for … into: …` comprehension builds a string/collection — out of the ADR-0079
+      # MVP (list-producing only) → a TODO_PORT marker → the draft cannot compile either
+      # way. (Plain `for`, field access, stdlib calls, atom- and non-atom-key maps, pins,
+      # bitstrings, and default args now lower; `into:`/`:reduce` is the residual class.)
       src = ~S'''
       defmodule R do
-        def doubled(xs), do: for x <- xs, do: x * 2
+        def join(cs), do: for c <- cs, into: "", do: c
       end
       '''
 

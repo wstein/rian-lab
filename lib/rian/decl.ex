@@ -800,9 +800,10 @@ defmodule Rian.Decl do
   defp take_decl([{:kw, "protocol"} | _]),
     do: raise(Error, "expected `protocol Name do … end`")
 
-  # `impl Protocol for Type do <defs> end` (ADR-0042 §3). `for` is in declaration
-  # position here (an `{:id, "for"}` token), never the comprehension `for`.
-  defp take_decl([{:kw, "impl"}, {:id, proto}, {:id, "for"}, {:id, type}, {:kw, "do"} | rest]) do
+  # `impl Protocol for Type do <defs> end` (ADR-0042 §3). `for` is the keyword token
+  # `{:kw, "for"}` here (shared with the comprehension, ADR-0079) — declaration
+  # position disambiguates it from an expression `for`.
+  defp take_decl([{:kw, "impl"}, {:id, proto}, {:kw, "for"}, {:id, type}, {:kw, "do"} | rest]) do
     {inner, rest} = take_mod_body(rest, [])
     {{:impl, proto, type, inner, nil}, rest}
   end
