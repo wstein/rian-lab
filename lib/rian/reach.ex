@@ -327,7 +327,7 @@ defmodule Rian.Reach do
 
   defp fn_type_blocker,
     do: %{
-      construct: "Fn(...) function type in a signature (no Rust closure-as-value lowering)",
+      construct: "returned closure over a type variable / nested Fn (no owned-capture + 'static yet)",
       kind: :generic,
       kills: [:rs]
     }
@@ -355,18 +355,24 @@ defmodule Rian.Reach do
   defp result_value_blocker,
     do: %{construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: :result, kills: [:jvm]}
 
-  # Does any signature position — a parameter type or the return type — contain an
-  # `Fn(...)` function type? The Rust emitter has no closure-as-value lowering: it
-  # spells the type as the bare trait `Fn<...>` (rustc E0782) and an `Fn` *parameter*
-  # mangles to an undeclared type (E0425). This is independent of type variables —
-  # a concrete `Fn(Int53, Int53)` fails just as a generic `Fn(T, U)` does — and of
-  # position (param or return), so a substring check over the whole signature is the
-  # honest gate. Every *non-`Fn`* owned-tvar return (bare `T`, `Vec(T)`, `Option(T)`,
-  # `T | E`, a user sum over `T`) is lowered by the owned↔borrow coercion and is not
-  # blocked here (ADR-0061, landed 2026-06-14).
+  # Closure-as-value lowering landed (ADR-0061, 2026-06-17): a `Fn(...)` callback
+  # PARAMETER lowers to `&impl Fn(...)` and a CONCRETE returned closure to a
+  # `Box<dyn Fn(...)>` (`Box::new(move …)`), both rustc-verified. What still has no
+  # Rust lowering — and so still pins `:rs` — is a returned closure that mentions a
+  # TYPE VARIABLE (`mk(x T) Fn(Int53, T)`) or is NESTED in another type
+  # (`Option(Fn(Int53, T))`): the boxed `dyn Fn` there needs owned capture of a
+  # borrowed param plus a `T: 'static` bound, not yet emitted. Param-`Fn` and concrete
+  # top-level `Fn(...)` returns are NOT blocked.
   defp sig_uses_fn_type?(f) do
-    types = Enum.map(Map.get(f, :params, []), & &1.type) ++ [Map.get(f, :ret)]
-    Enum.any?(types, fn t -> is_binary(t) and String.contains?(t, "Fn(") end)
+    ret = Map.get(f, :ret)
+    is_binary(ret) and String.contains?(ret, "Fn(") and
+      not concrete_fn_return?(ret, Map.get(f, :tvars, []))
+  end
+
+  # a bare top-level `Fn(args, ret)` return with no type variable — lowered to a concrete
+  # `Box<dyn Fn(...)>` + `Box::new(move …)` (e.g. `adder`); supported on `:rs`.
+  defp concrete_fn_return?(ret, tvars) do
+    String.starts_with?(ret, "Fn(") and not Enum.any?(tvars, &String.match?(ret, ~r/\b#{&1}\b/))
   end
 
   # Does a type string contain a type-variable token? `tvar?` is the compiler-wide
