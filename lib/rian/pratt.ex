@@ -406,6 +406,13 @@ defmodule Rian.Pratt do
   # map pattern `%{k: p, …}` — matches any map carrying those keys (ADR-0043)
   defp parse_pat([{:mapopen} | rest]), do: parse_pat_map(rest, [])
 
+  # as-pattern `name @ pat` — bind the whole value to `name` while also matching
+  # `pat` (Core `PAs`). `@ ` must be spaced so it is not the `@name` annotation.
+  defp parse_pat([{:id, name}, {:op, "@"} | rest]) do
+    {p, rest} = parse_pat(rest)
+    {{:as, name, p}, rest}
+  end
+
   defp parse_pat([{:id, name} | rest]) do
     if pascal?(name) do
       case rest do
@@ -793,6 +800,7 @@ defmodule Rian.Pratt do
     do: "[#{Enum.map_join(ps, ", ", &sexpr_pat/1)} | #{sexpr_pat(t)}]"
 
   defp sexpr_pat({:var, x}), do: x
+  defp sexpr_pat({:as, n, p}), do: "(@ #{n} #{sexpr_pat(p)})"
   defp sexpr_pat({:ctor, n, []}), do: n
   defp sexpr_pat({:ctor, n, args}), do: "#{n}(#{Enum.map_join(args, ", ", &sexpr_pat/1)})"
 

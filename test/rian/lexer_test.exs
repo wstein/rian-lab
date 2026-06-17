@@ -25,6 +25,11 @@ defmodule Rian.LexerTest do
       assert Lexer.expr_tokens("a!=b") == [{:id, "a"}, {:op, "!="}, {:id, "b"}]
     end
 
+    test "`@` is the as-pattern operator when spaced; `@name` stays the annotation lane" do
+      assert Lexer.expr_tokens("n @ p") == [{:id, "n"}, {:op, "@"}, {:id, "p"}]
+      assert Lexer.expr_tokens("@doc") == [{:annot, "doc"}]
+    end
+
     test "literals: separators, floats, normalized exponents, strings" do
       assert Lexer.expr_tokens("1_000") == [{:num, "1_000"}]
       assert Lexer.expr_tokens("3.14") == [{:num, "3.14"}]

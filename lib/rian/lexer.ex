@@ -34,7 +34,9 @@ defmodule Rian.Lexer do
   @keywords ~w(if do else end def type range case when struct alias mod pub const macro use with protocol impl opaque abstract)
 
   @multi ["->", "..", ":=", "|>", "<>", "<~", "<-", "<=", ">=", "==", "!="]
-  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&"]
+  # `@` is the as-pattern operator (`name @ pat`); the annotation lane (`@name`,
+  # checked first) still wins when `@` is immediately followed by an identifier.
+  @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&", "@"]
 
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/
   # Identifiers may carry a single trailing `?` or `!` — the Elixir/Ruby/Crystal

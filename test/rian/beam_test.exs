@@ -125,6 +125,21 @@ defmodule Rian.BeamTest do
       assert mod.of_up(?5) == {:error, :range_error}
     end
 
+    test "an as-pattern `name @ pat` binds the whole value while matching the pattern" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          def f(p Vec(Int64)) Vec(Int64)
+          def f(whole @ [h | _]) := [h | whole]
+          def f(_) := []
+          """,
+          :rian_beam_aspat
+        )
+
+      assert mod.f([1, 2, 3]) == [1, 1, 2, 3]
+      assert mod.f([]) == []
+    end
+
     test "multi-clause with a `when` guard" do
       {:ok, mod} =
         Beam.load(

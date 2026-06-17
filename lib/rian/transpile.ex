@@ -43,7 +43,8 @@ defmodule Rian.Transpile do
     "# Translated: defs/clauses (+guards), defstruct→struct, if/case, operators,",
     "#   pipes (|>), single- & multi-clause lambdas (multi → `(p) -> case p do …`),",
     "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
-    "#   word sigils (~w → list), referenced @attrs → const, string interpolation (${e}), nil→None.",
+    "#   word sigils (~w → list), referenced @attrs → const, as-patterns (var @ pat),",
+    "#   field access (r.f), string interpolation (${e}), nil→None.",
     "# You must still: (1) fill type holes `_Unk`, (2) resolve every",
     "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
     "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
@@ -1077,8 +1078,17 @@ defmodule Rian.Transpile do
   defp pat({:_, _, ctx}) when is_atom(ctx), do: "_"
   defp pat({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: underscore_var(name)
 
-  # as-pattern `x = p` has no direct Rian image here.
-  defp pat({:=, _, _} = node), do: ~s|TODO_PORT("as-pattern #{escape(snippet(node))}")|
+  # as-pattern: Elixir `pat = var` (or `var = pat`) → Rian `var @ pat` (Core `PAs`),
+  # binding the whole value while matching the pattern. Only a variable can be the
+  # binder; two complex sides have no Rian image and stay a marker.
+  defp pat({:=, _, [l, r]}) do
+    cond do
+      var?(r) -> "#{var_name(r)} @ #{pat(l)}"
+      var?(l) -> "#{var_name(l)} @ #{pat(r)}"
+      true -> ~s|TODO_PORT("as-pattern #{escape(snippet({:=, [], [l, r]}))}")|
+    end
+  end
+
   defp pat(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
 
   defp var?({n, _, ctx}) when is_atom(n) and is_atom(ctx), do: true

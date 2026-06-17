@@ -35,6 +35,12 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "as-patterns (`name @ pat`)" do
+    test "an as-pattern in a case arm parses to a PAs node" do
+      assert p("case x do n @ {a, b} -> n end") == "(case x ((@ n {a, b}) -> n))"
+    end
+  end
+
   describe "reserved keywords are valid field labels (ADR-0033)" do
     test "a keyword labels a construction field (`type:`, `def:`)" do
       assert p("Foo(type: 1, def: 2)") == "(call Foo type: 1 def: 2)"

@@ -899,6 +899,8 @@ defmodule Rian.Lower do
 
   defp pat_ex(%PWild{}), do: "_"
   defp pat_ex(%PVar{name: x}), do: x
+  # as-pattern `name @ pat` → Elixir `pat = name`.
+  defp pat_ex(%Core.PAs{name: n, pat: p}), do: "#{pat_ex(p)} = #{n}"
   defp pat_ex(%PLit{value: v}) when is_binary(v), do: inspect(v)
   defp pat_ex(%PLit{value: v}), do: to_string(v)
   # a `Char` is its codepoint integer on the BEAM/Elixir text target (ADR-0036)
@@ -1740,6 +1742,8 @@ defmodule Rian.Lower do
 
   defp pat_rs(%PWild{}, _), do: "_"
   defp pat_rs(%PVar{name: x}, _), do: x
+  # as-pattern: Rust spells it `name @ pat`.
+  defp pat_rs(%Core.PAs{name: n, pat: p}, m), do: "#{n} @ #{pat_rs(p, m)}"
   defp pat_rs(%PLit{value: v}, _) when is_binary(v), do: str_lit(v)
   defp pat_rs(%PLit{value: v}, _), do: to_string(v)
   # a `Char` literal pattern is a native Rust `char` literal (ADR-0036)

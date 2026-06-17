@@ -923,6 +923,8 @@ defmodule Rian.Beam do
   # ── pattern forms (consume the typed core IR, Rian.Core) ───────────────
   defp pat_form(%Core.PWild{}), do: {:var, @ln, :_}
   defp pat_form(%Core.PVar{name: x}), do: var_form(x)
+  # as-pattern `name @ pat` → Erlang `Name = Pat` (`{:match, …}` in pattern position).
+  defp pat_form(%Core.PAs{name: n, pat: p}), do: {:match, @ln, var_form(n), pat_form(p)}
   defp pat_form(%Core.PChar{value: cp}), do: {:integer, @ln, cp}
   defp pat_form(%Core.PLit{value: v}) when is_integer(v), do: {:integer, @ln, v}
   # a string-literal pattern matches the same binary the literal constructs

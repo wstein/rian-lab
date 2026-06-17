@@ -229,6 +229,12 @@ defmodule Rian.TranspileTest do
   end
 
   describe "honest quarantine — nothing untranslated masquerades as done" do
+    test "an Elixir as-pattern (`pat = var`) becomes Rian `var @ pat`, not a marker" do
+      out = rian("defmodule M do\n  def f({:bin, op} = node), do: {node, op}\nend")
+      assert out =~ "node @ {:bin, op}"
+      refute out =~ ~s|TODO_PORT("as-pattern|
+    end
+
     test "a construct with no Rian image (map update) stays a greppable marker" do
       # field access and stdlib calls now lower (see below); a map *update* still
       # has no Rian surface, so it stays an honest marker.
