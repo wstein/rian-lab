@@ -29,7 +29,7 @@ defmodule Rian.InferLocal do
   `:infer` survives this pass.
   """
 
-  alias Rian.{Check, IR}
+  alias Rian.{Check, IR, Pratt}
 
   @doc """
   Fill undeclared private-function return types by local inference (ADR-0034). A
@@ -41,6 +41,13 @@ defmodule Rian.InferLocal do
   @spec fill_returns(map()) :: map()
   def fill_returns(prog) when is_map(prog) do
     if Enum.any?(all_funcs(prog), &(untyped_ret?(&1) or has_infer_param?(&1))) do
+      # Parse every clause body to its AST ONCE up front. The fixpoint below re-reads
+      # each body on every round (per `:infer` param, per round); since `Pratt.parse_body`
+      # passes an already-parsed AST through unchanged and `IR.Clause` permits an AST
+      # body, parsing once here turns those repeated tokenize+parse passes into O(1)
+      # passthroughs — for the fixpoint and for every downstream consumer.
+      prog = parse_bodies(prog)
+
       # 1. resolve params + returns with NO arithmetic default (`:unknown`), so a param
       #    is never frozen to `Int53` from a neighbour that may still resolve (a not-yet-
       #    typed callee); 2. re-run with the `Int53` default now that every neighbour has
@@ -70,6 +77,20 @@ defmodule Rian.InferLocal do
 
   defp all_funcs(prog),
     do: Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
+
+  # parse every clause body to its AST once (idempotent: `parse_body` passes an
+  # already-parsed AST through), so the fixpoint and downstream emitters reuse it.
+  defp parse_bodies(prog) do
+    pb = fn f ->
+      %{f | clauses: Enum.map(f.clauses, fn c -> %{c | body: Pratt.parse_body(c.body)} end)}
+    end
+
+    prog
+    |> Map.update(:funcs, [], fn fs -> Enum.map(fs, pb) end)
+    |> Map.update(:mods, [], fn ms ->
+      Enum.map(ms, fn m -> %{m | funcs: Enum.map(m.funcs, pb)} end)
+    end)
+  end
 
   defp untyped_ret?(%IR.Func{pub?: false, ret: nil}), do: true
   defp untyped_ret?(_), do: false
