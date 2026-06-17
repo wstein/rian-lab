@@ -38,6 +38,7 @@ idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
 | [16_doctests.rian](16_doctests.rian) | Doctests (ADR-0060 tier B) — `expr #=> expected` in a `@doc` heredoc, executed by `Rian.Doctest`; a drifted example fails the build |
 | [17_stdlib_eq_ord.rian](17_stdlib_eq_ord.rian) | A portable stdlib slice over `Eq`/`Ord` (ADR-0042) — `contains`/`sort`/`maximum` as **bounded generics** (`forall T: Eq`/`Ord`); the protocol's first real customer, with `@test`s + doctests |
 | [18_dict_eq.rian](18_dict_eq.rian) | A `Dict` over `Eq` — `get`/`has`/`put` bounded `forall K: Eq` over a generic `Pair(k K, v V)`; "Dict keys need Eq" made real (Int64 + String keys), runs on BEAM/JS, with `@test`s + doctests |
+| [19_prelude_consumer.rian](19_prelude_consumer.rian) | **Consuming the `List` prelude with closures** — `map`/`filter`/`reduce`/`member` fed `Fn` callbacks, all reaching `ex`/`rs`/`js` (the consumer side of ADR-0061 closure-as-value: `&impl Fn` params, lambdas lower per target); runs on BEAM with the prelude linked |
 | [conformance_core.rian](conformance_core.rian) | The **Tier-1 admission gate** corpus (ADR-0049 §5a) — `@test`s over the portable core (`Int53` arithmetic, `div`/`rem`, comparison/boolean, multi-clause recursion + guards) that `Rian.ConformanceTest` runs on **every** Tier-1 target (`:ex`/`:rs`/`:js`); a regression on any fails the build |
 
 Suggested reading order is numeric; 04 is the one to linger on — it is what

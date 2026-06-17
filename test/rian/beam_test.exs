@@ -35,6 +35,25 @@ defmodule Rian.BeamTest do
       assert mod.max() == 99
     end
 
+    test "the prelude-consumer tour example runs on BEAM (List HOF fed closures, ADR-0061)" do
+      src = File.read!("examples/rian/19_prelude_consumer.rian")
+      {:ok, mod} = Beam.load(src, :"Elixir.RianPreludeConsumer19")
+
+      assert mod.doubled([1, 2, 3, 4]) == [2, 4, 6, 8]
+      assert mod.evens([1, 2, 3, 4, 5, 6]) == [2, 4, 6]
+      assert mod.total([1, 2, 3, 4]) == 10
+      assert mod.has([1, 2, 3], 2) == true
+      assert mod.has([1, 2, 3], 9) == false
+      assert mod.sum_of_doubled_evens([1, 2, 3, 4]) == 20
+
+      # the consumer is portable — every function reaches the shared core (ADR-0061)
+      rep = src |> Rian.Decl.parse() |> Rian.Reach.analyze()
+
+      for f <- ~w(doubled evens total has sum_of_doubled_evens) do
+        assert :rs in (rep[f].reach |> MapSet.to_list()), "#{f} should reach :rs"
+      end
+    end
+
     test "underscore numeric literals lex AND compile, in expression and pattern position" do
       # Regression: the lexer accepts `1_000` but `String.to_integer/1` on the
       # lexeme would raise — the lexer/parser contradiction the verification pass
