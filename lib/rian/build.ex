@@ -31,7 +31,7 @@ defmodule Rian.Build do
           opts[:rust] -> print(Rian.Lower.rust_program(Rian.Decl.parse(src)))
           opts[:js] -> print(Rian.JS.compile(src))
           opts[:jvm] -> print(Rian.JVM.compile(src))
-          true -> build_beam(src, opts[:out] || ".")
+          true -> build_beam(src, Keyword.get(opts, :out, "."))
         end
 
       {_opts, _, _} ->

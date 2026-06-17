@@ -566,7 +566,7 @@ defmodule Rian.Transpile do
           {:clause, vis, head, kw} ->
             clause = build_clause(head, kw)
 
-            if open && same_group?(open, vis, clause),
+            if open != nil and same_group?(open, vis, clause),
               do: {acc, add_clause(open, clause)},
               else: {close_group(acc, open), new_group(vis, clause, nil)}
 
@@ -672,7 +672,7 @@ defmodule Rian.Transpile do
             clause = build_clause(head, kw)
 
             cond do
-              open && same_group?(open, vis, clause) ->
+              open != nil and same_group?(open, vis, clause) ->
                 {acc, doc, add_clause(open, clause)}
 
               true ->
@@ -853,10 +853,10 @@ defmodule Rian.Transpile do
     # than silently emitting just the happy path.
     body =
       cond do
-        kw && Keyword.has_key?(kw, :do) && recovery_keys(kw) != [] ->
+        kw != nil and Keyword.has_key?(kw, :do) and recovery_keys(kw) != [] ->
           {:__recovery__, recovery_keys(kw), Keyword.get(kw, :do)}
 
-        kw && Keyword.has_key?(kw, :do) ->
+        kw != nil and Keyword.has_key?(kw, :do) ->
           Keyword.get(kw, :do)
 
         true ->
@@ -892,7 +892,9 @@ defmodule Rian.Transpile do
     sig = Map.get(sigmap, {to_string(name), arity})
     ptypes = if sig, do: sig.params, else: List.duplicate("_Unk", arity)
     ret = if sig, do: sig.ret, else: "_Unk"
-    forall = if sig && sig.tvars != [], do: " forall #{Enum.join(sig.tvars, ", ")}", else: ""
+
+    forall =
+      if sig != nil and sig.tvars != [], do: " forall #{Enum.join(sig.tvars, ", ")}", else: ""
 
     # infer-local (ADR-0034): a PRIVATE function needn't declare its return — drop the
     # `_Unk` return hole so `Rian.InferLocal` recovers it once the params are typed
@@ -1125,8 +1127,10 @@ defmodule Rian.Transpile do
       :error ->
         # a genuine bitstring (sizes/`::utf8`/`::binary`, ADR-0078) → Rian `<<…>>`;
         # an unsupported segment/specifier falls back to a marker (no broken output).
-        bitstr_text(segments, &expr/1) ||
-          ~s|TODO_PORT("binary construction #{escape(snippet(n))}")|
+        case bitstr_text(segments, &expr/1) do
+          nil -> ~s|TODO_PORT("binary construction #{escape(snippet(n))}")|
+          v -> v
+        end
     end
   end
 
@@ -1571,7 +1575,11 @@ defmodule Rian.Transpile do
   end
 
   defp pat({:<<>>, _, segments} = n),
-    do: bitstr_text(segments, &pat/1) || ~s|TODO_PORT(#{inspect(snippet(n))})|
+    do:
+      (case bitstr_text(segments, &pat/1) do
+         nil -> ~s|TODO_PORT(#{inspect(snippet(n))})|
+         v -> v
+       end)
 
   # a string-prefix match `"pre" <> rest` is sugar for the bitstring pattern
   # `<<"pre", rest::binary>>` (ADR-0078); flatten a `<>`-chain of literal prefixes
@@ -1706,7 +1714,7 @@ defmodule Rian.Transpile do
   defp bitspec_text({:-, _, [a, b]}) do
     sa = bitspec_text(a)
     sb = bitspec_text(b)
-    if sa && sb, do: "#{sa}-#{sb}"
+    if sa != nil and sb != nil, do: "#{sa}-#{sb}"
   end
 
   defp bitspec_text(n) when is_integer(n), do: "#{n}"

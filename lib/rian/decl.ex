@@ -991,7 +991,11 @@ defmodule Rian.Decl do
     {ret, guard} = parse_head(head)
     # normalize parenthesized type spacing (`Vec ( Int64 )` -> `Vec(Int64)`) so the
     # declared return type matches inferred parametric types (ADR-0042 checking)
-    ret = ret && collapse_parens(ret)
+    ret =
+      case ret do
+        nil -> nil
+        r -> collapse_parens(r)
+      end
 
     %{
       name: name,
@@ -1302,7 +1306,15 @@ defmodule Rian.Decl do
   # literal (a single token) never contributes a stray comma (`[',' | rest]`) and all
   # bracket kinds nest. A signature's type params and its clauses' patterns yield the
   # same count, so a sig stays grouped with its clauses; different arities split.
-  defp raw_arity(%{params: p}), do: count_params(to_string(p || ""))
+  defp raw_arity(%{params: p}) do
+    params_str =
+      case p do
+        nil -> ""
+        v -> v
+      end
+
+    count_params(to_string(params_str))
+  end
 
   defp count_params(p) do
     case String.trim(p) do
@@ -1341,8 +1353,8 @@ defmodule Rian.Decl do
       ret: req_ret(sig),
       clauses: Enum.map(clauses, &clause(&1, length(params))),
       pub?: sig[:pub] == true,
-      tvars: sig[:tvars] || [],
-      bounds: sig[:bounds] || %{},
+      tvars: Map.get(sig, :tvars, []),
+      bounds: Map.get(sig, :bounds, %{}),
       doc: sig[:doc],
       synthetic: sig[:synthetic] == true,
       test?: sig[:test] == true,
@@ -1361,8 +1373,8 @@ defmodule Rian.Decl do
       ret: req_ret(d),
       clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}],
       pub?: d[:pub] == true,
-      tvars: d[:tvars] || [],
-      bounds: d[:bounds] || %{},
+      tvars: Map.get(d, :tvars, []),
+      bounds: Map.get(d, :bounds, %{}),
       doc: d[:doc],
       synthetic: d[:synthetic] == true,
       test?: d[:test] == true,
@@ -1383,8 +1395,8 @@ defmodule Rian.Decl do
       clauses: [],
       externals: ext,
       pub?: sig[:pub] == true,
-      tvars: sig[:tvars] || [],
-      bounds: sig[:bounds] || %{},
+      tvars: Map.get(sig, :tvars, []),
+      bounds: Map.get(sig, :bounds, %{}),
       doc: sig[:doc]
     }
   end
@@ -1415,7 +1427,16 @@ defmodule Rian.Decl do
     |> Enum.with_index()
     |> Enum.map(fn {p, i} ->
       {name, cap, type} = param(p)
-      %Param{name: name || "arg#{i}", type: type, cap: cap}
+
+      %Param{
+        name:
+          case name do
+            nil -> "arg#{i}"
+            n -> n
+          end,
+        type: type,
+        cap: cap
+      }
     end)
   end
 

@@ -261,7 +261,11 @@ defmodule Rian.Transpile.Infer do
 
     case body do
       {:"::", _, [{name, _, args}, ret]} when is_atom(name) ->
-        args = args || []
+        args =
+          case args do
+            nil -> []
+            v -> v
+          end
 
         {{to_string(name), length(args)},
          %{
@@ -959,7 +963,7 @@ defmodule Rian.Transpile.Infer do
         {payload_term, store, bad} = ok_payload(tail_pairs, ctx, store)
         tags = for {:error, tag} <- shapes, uniq: true, do: tag
 
-        if payload_term && not bad,
+        if payload_term != nil and not bad,
           do: {{:result, payload_term, tags}, store},
           else: {:no, store}
     end
@@ -974,7 +978,11 @@ defmodule Rian.Transpile.Infer do
         {:ok, v} ->
           {vt, s} = gen(v, env, ctx, s)
           {s, r} = if acc, do: unify(s, acc, vt), else: {s, :ok}
-          {acc || vt, s, bad or r == :conflict}
+
+          {case acc do
+             nil -> vt
+             v -> v
+           end, s, bad or r == :conflict}
 
         _ ->
           {acc, s, bad}

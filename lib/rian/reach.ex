@@ -154,12 +154,13 @@ defmodule Rian.Reach do
 
     violations =
       for mod <- Map.get(prog, :mods, []),
-          required = mod.targets || default,
+          required = or_default(mod.targets, default),
           required != nil,
           f <- mod.funcs,
           f.pub?,
           key = "#{f.name}/#{length(f.params)}",
-          missing = required -- MapSet.to_list(reach[key][:reach] || MapSet.new(@targets)),
+          missing =
+            required -- MapSet.to_list(or_default(reach[key][:reach], MapSet.new(@targets))),
           missing != [] do
         {mod.name, f.name, Enum.sort(missing)}
       end
@@ -169,6 +170,11 @@ defmodule Rian.Reach do
       vs -> {:error, contract_message(vs)}
     end
   end
+
+  # a value, or the fallback when it is absent (`nil`) — explicit nil-match in place
+  # of the truthy `||`, so it lowers to clean clause dispatch on every target.
+  defp or_default(nil, fallback), do: fallback
+  defp or_default(value, _fallback), do: value
 
   @doc "Raise `Rian.Reach.Error` on any unmet `@targets(…)` contract, else `:ok`."
   @spec gate!(map()) :: :ok
@@ -233,7 +239,12 @@ defmodule Rian.Reach do
   `rian: [targets: […]]`, else `nil` (no default gate).
   """
   def build_default do
-    validate_default(Application.get_env(:rian_lab, :rian_targets) || mix_default())
+    validate_default(
+      case Application.get_env(:rian_lab, :rian_targets) do
+        nil -> mix_default()
+        v -> v
+      end
+    )
   end
 
   defp mix_default do

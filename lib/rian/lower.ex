@@ -593,8 +593,11 @@ defmodule Rian.Lower do
   defp resolve_rust_pats({:case, scrut, arms}, meta) do
     {:case, resolve_rust_pats(scrut, meta),
      Enum.map(arms, fn {pt, g, b} ->
-       {{:rpat, core_pat_rs(pt, meta)}, g && resolve_rust_pats(g, meta),
-        resolve_rust_pats(b, meta)}
+       {{:rpat, core_pat_rs(pt, meta)},
+        case g do
+          nil -> nil
+          g -> resolve_rust_pats(g, meta)
+        end, resolve_rust_pats(b, meta)}
      end)}
   end
 
@@ -604,8 +607,11 @@ defmodule Rian.Lower do
        {{:rpat, core_pat_rs(pt, meta)}, resolve_rust_pats(e, meta)}
      end), resolve_rust_pats(body, meta),
      Enum.map(els, fn {pt, g, b} ->
-       {{:rpat, core_pat_rs(pt, meta)}, g && resolve_rust_pats(g, meta),
-        resolve_rust_pats(b, meta)}
+       {{:rpat, core_pat_rs(pt, meta)},
+        case g do
+          nil -> nil
+          g -> resolve_rust_pats(g, meta)
+        end, resolve_rust_pats(b, meta)}
      end)}
   end
 
@@ -1245,7 +1251,13 @@ defmodule Rian.Lower do
   defp rust_generics(%{tvars: tvars, bounds: bounds}) do
     inner =
       Enum.map_join(tvars, ", ", fn tv ->
-        traits = Enum.map(Map.get(bounds || %{}, tv, []), &"Rian#{&1}") ++ ["Clone"]
+        bounds_map =
+          case bounds do
+            nil -> %{}
+            b -> b
+          end
+
+        traits = Enum.map(Map.get(bounds_map, tv, []), &"Rian#{&1}") ++ ["Clone"]
         "#{tv}: #{Enum.join(traits, " + ")}"
       end)
 
@@ -1282,7 +1294,12 @@ defmodule Rian.Lower do
   defp rust_fn(func, ctx, vis, base_ec) do
     # the program-wide emitter context (proto/parametric/sigs). A per-unit entry
     # (`to_rust`/`module_rust`) passes none — default to empty maps.
-    base_ec = base_ec || emit_ctx()
+    base_ec =
+      case base_ec do
+        nil -> emit_ctx()
+        v -> v
+      end
+
     # parametric-type instantiation for this function (ADR-0061): `Pair` -> `Pair<K, V>`
     # (a generic function reuses `Pair`'s param names) or `Pair<i64, i64>` (a concrete
     # builder, inferred from its body). `pinst` rewrites the Rust type strings; `gen_func`
@@ -1342,7 +1359,11 @@ defmodule Rian.Lower do
 
         ec = %{
           fn_ec
-          | borrowed: borrowed || MapSet.new(),
+          | borrowed:
+              case borrowed do
+                nil -> MapSet.new()
+                v -> v
+              end,
             slices: slice_binders(func.params, c.pats),
             owned_fields: owned_field_binders(pre, ctx),
             tenv: tenv,

@@ -130,7 +130,7 @@ defmodule Rian.Check do
   end
 
   defp num_lub(x, y) do
-    if num_kind(x) && num_kind(y) do
+    if num_kind(x) != nil and num_kind(y) != nil do
       case join(x, y) do
         :unknown -> nil
         t -> t
@@ -170,7 +170,19 @@ defmodule Rian.Check do
   def infer(%EChar{}, _env, _ic), do: "Char"
   def infer(%EId{name: b}, _env, _ic) when b in ~w(true false), do: "Bool"
   # a name resolves to a bound var, else a nullary variant constructor, else unknown
-  def infer(%EId{name: x}, env, ic), do: Map.get(env, x) || ctor_type(ic, x) || :unknown
+  def infer(%EId{name: x}, env, ic) do
+    case Map.get(env, x) do
+      nil ->
+        case ctor_type(ic, x) do
+          nil -> :unknown
+          v -> v
+        end
+
+      v ->
+        v
+    end
+  end
+
   def infer(%EUnary{op: "-", arg: x}, env, ic), do: infer(x, env, ic)
   def infer(%EUnary{op: "not"}, _env, _ic), do: "Bool"
 
@@ -207,8 +219,25 @@ defmodule Rian.Check do
   # annotated param contributes its type (an un-annotated one is the `_` wildcard),
   # and the body is inferred under those bindings (ADR-0042 higher-order inference)
   def infer(%ELambda{params: ps, body: body}, env, ic) do
-    lenv = Enum.reduce(ps, env, fn {n, t}, e -> Map.put(e, n, t || :unknown) end)
-    args = Enum.map(ps, fn {_n, t} -> t || :unknown end)
+    lenv =
+      Enum.reduce(ps, env, fn {n, t}, e ->
+        tt =
+          case t do
+            nil -> :unknown
+            v -> v
+          end
+
+        Map.put(e, n, tt)
+      end)
+
+    args =
+      Enum.map(ps, fn {_n, t} ->
+        case t do
+          nil -> :unknown
+          v -> v
+        end
+      end)
+
     build_fn(args, infer(body, lenv, ic))
   end
 
@@ -252,8 +281,14 @@ defmodule Rian.Check do
 
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
-      fn_type?(ft = Map.get(env, f)) -> fn_ret(ft)
-      true -> ctor_type(ic, f) || called_ret_with(ic, f, as, env)
+      fn_type?(ft = Map.get(env, f)) ->
+        fn_ret(ft)
+
+      true ->
+        case ctor_type(ic, f) do
+          nil -> called_ret_with(ic, f, as, env)
+          v -> v
+        end
     end
   end
 
@@ -391,7 +426,14 @@ defmodule Rian.Check do
     arms =
       Enum.map(arms, fn {pat, g, body} ->
         e = narrow(pat, st, ic, env)
-        {pat, g && annotate(g, e, ic), annotate(body, e, ic)}
+
+        ann_g =
+          case g do
+            nil -> nil
+            g -> annotate(g, e, ic)
+          end
+
+        {pat, ann_g, annotate(body, e, ic)}
       end)
 
     %{n | scrut: annotate(s, env, ic), arms: arms, type: infer(n, env, ic)}
@@ -696,11 +738,25 @@ defmodule Rian.Check do
   end
 
   # value-position `if` with an empty else branch — the proven error
-  defp pos_walk({:if, cnd, _then, {:block, []}}, :value),
-    do: pos_walk(cnd, :value) || {:error, if_else_msg()}
+  defp pos_walk({:if, cnd, _then, {:block, []}}, :value) do
+    case pos_walk(cnd, :value) do
+      nil -> {:error, if_else_msg()}
+      v -> v
+    end
+  end
 
-  defp pos_walk({:if, cnd, then_b, else_b}, pos),
-    do: pos_walk(cnd, :value) || pos_walk(then_b, pos) || pos_walk(else_b, pos)
+  defp pos_walk({:if, cnd, then_b, else_b}, pos) do
+    case pos_walk(cnd, :value) do
+      nil ->
+        case pos_walk(then_b, pos) do
+          nil -> pos_walk(else_b, pos)
+          v -> v
+        end
+
+      v ->
+        v
+    end
+  end
 
   # a `<~` mutation yields unit (expressions spec), so it has no value to use here
   defp pos_walk({:bin, "<~", _lhs, _rhs}, :value), do: {:error, mutation_value_msg()}
@@ -715,13 +771,24 @@ defmodule Rian.Check do
 
   defp pos_walk({:block, stmts}, pos), do: block_walk(stmts, pos)
 
-  defp pos_walk({:case, scrut, arms}, pos),
-    do: pos_walk(scrut, :value) || Enum.find_value(arms, fn {_p, _g, b} -> pos_walk(b, pos) end)
+  defp pos_walk({:case, scrut, arms}, pos) do
+    case pos_walk(scrut, :value) do
+      nil -> Enum.find_value(arms, fn {_p, _g, b} -> pos_walk(b, pos) end)
+      v -> v
+    end
+  end
 
   defp pos_walk({:with, cls, body, els}, pos) do
-    Enum.find_value(cls, fn {_p, e} -> pos_walk(e, :value) end) ||
-      pos_walk(body, pos) ||
-      Enum.find_value(els, fn {_p, _g, b} -> pos_walk(b, pos) end)
+    case Enum.find_value(cls, fn {_p, e} -> pos_walk(e, :value) end) do
+      nil ->
+        case pos_walk(body, pos) do
+          nil -> Enum.find_value(els, fn {_p, _g, b} -> pos_walk(b, pos) end)
+          v -> v
+        end
+
+      v ->
+        v
+    end
   end
 
   # any other node is a value-context container — its children are all used values
@@ -736,7 +803,13 @@ defmodule Rian.Check do
   # a block: non-final statements are effects; the final statement keeps the block's pos
   defp block_walk([], _pos), do: nil
   defp block_walk([last], pos), do: stmt_walk(last, pos)
-  defp block_walk([s | rest], pos), do: stmt_walk(s, :effect) || block_walk(rest, pos)
+
+  defp block_walk([s | rest], pos) do
+    case stmt_walk(s, :effect) do
+      nil -> block_walk(rest, pos)
+      v -> v
+    end
+  end
 
   # a binding's RHS is always a used value; an `:expr` statement keeps the stmt's pos
   defp stmt_walk({:bind, _n, e}, _pos), do: pos_walk(e, :value)
@@ -764,12 +837,19 @@ defmodule Rian.Check do
   defp check_numeric_mix(%Func{params: ps, clauses: clauses}, ic) do
     Enum.find_value(clauses, :ok, fn c ->
       env = clause_env(c.pats, ps, ic)
-      scan_num_mix(Pratt.parse_body(c.body), env, ic) || :ok
+
+      case scan_num_mix(Pratt.parse_body(c.body), env, ic) do
+        nil -> :ok
+        v -> v
+      end
     end)
   end
 
   defp scan_num_mix({:bin, op, l, r} = node, env, ic) when op in @arith do
-    num_mix_error(op, l, r, env, ic) || scan_num_mix_children(node, env, ic)
+    case num_mix_error(op, l, r, env, ic) do
+      nil -> scan_num_mix_children(node, env, ic)
+      v -> v
+    end
   end
 
   defp scan_num_mix(node, env, ic) when is_tuple(node),
@@ -814,10 +894,13 @@ defmodule Rian.Check do
   # ADR-0065 ("adopt later, not now"), and without this gate the BEAM emitter would
   # silently miscompile `foo(x: 1)` into a bogus `%{__struct__: :foo, x: 1}`.
   defp check_labels(%Func{clauses: clauses}) do
-    Enum.find_value(clauses, :ok, fn
-      %{body: nil} -> nil
-      %{body: body} -> label_error(Pratt.parse_body(body))
-    end) || :ok
+    case Enum.find_value(clauses, :ok, fn
+           %{body: nil} -> nil
+           %{body: body} -> label_error(Pratt.parse_body(body))
+         end) do
+      nil -> :ok
+      v -> v
+    end
   end
 
   defp label_error({:call, {:id, f}, args} = node) when is_list(args) do
@@ -869,7 +952,11 @@ defmodule Rian.Check do
     else
       Enum.find_value(clauses, :ok, fn c ->
         env = clause_env(c.pats, ps, ic)
-        scan_bound_calls(Pratt.parse_body(c.body), env, ic, fbounds) || :ok
+
+        case scan_bound_calls(Pratt.parse_body(c.body), env, ic, fbounds) do
+          nil -> :ok
+          v -> v
+        end
       end)
     end
   end
@@ -877,7 +964,10 @@ defmodule Rian.Check do
   # walk the (surface tuple) body for call sites, checking any that target a
   # bounded generic; returns the first `{:error, msg}` or `nil`.
   defp scan_bound_calls({:call, {:id, g}, args} = node, env, ic, fbounds) do
-    call_bound_error(g, args, env, ic, fbounds) || walk_children(node, env, ic, fbounds)
+    case call_bound_error(g, args, env, ic, fbounds) do
+      nil -> walk_children(node, env, ic, fbounds)
+      v -> v
+    end
   end
 
   defp scan_bound_calls(node, env, ic, fbounds) when is_tuple(node),
@@ -1083,8 +1173,12 @@ defmodule Rian.Check do
   defp list_elems({:block, [{:expr, e}]}), do: list_elems(e)
   defp list_elems(_), do: []
 
-  defp oor_scan({:if, _c, t, e}, ty, lo, hi, n),
-    do: oor_scan(t, ty, lo, hi, n) || oor_scan(e, ty, lo, hi, n)
+  defp oor_scan({:if, _c, t, e}, ty, lo, hi, n) do
+    case oor_scan(t, ty, lo, hi, n) do
+      nil -> oor_scan(e, ty, lo, hi, n)
+      v -> v
+    end
+  end
 
   defp oor_scan({:case, _s, arms}, ty, lo, hi, n),
     do: Enum.find_value(arms, fn {_p, _g, b} -> oor_scan(b, ty, lo, hi, n) end)
@@ -1421,7 +1515,16 @@ defmodule Rian.Check do
          %{direct: direct_tags(f), callees: propagated_callees(f), declared: declared}}
       end)
 
-    fixpoint(facts, Map.new(facts, fn {n, fc} -> {n, fc.declared || fc.direct} end))
+    fixpoint(
+      facts,
+      Map.new(facts, fn {n, fc} ->
+        {n,
+         case fc.declared do
+           nil -> fc.direct
+           v -> v
+         end}
+      end)
+    )
   end
 
   defp fixpoint(facts, table) do
@@ -1582,7 +1685,14 @@ defmodule Rian.Check do
   defp pattern_type(%PLit{value: v}, _ic) when is_integer(v), do: "Int53"
   defp pattern_type(%PLit{value: v}, _ic) when is_binary(v), do: "String"
   defp pattern_type(%PChar{}, _ic), do: "Char"
-  defp pattern_type(%PCtor{ctor: c}, ic), do: ctor_type(ic, c) || :unknown
+
+  defp pattern_type(%PCtor{ctor: c}, ic) do
+    case ctor_type(ic, c) do
+      nil -> :unknown
+      v -> v
+    end
+  end
+
   defp pattern_type(_pat, _ic), do: :unknown
 
   # unify two parameter-type constraints: `:unknown` is the identity (no information),

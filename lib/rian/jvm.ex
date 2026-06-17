@@ -207,11 +207,16 @@ defmodule Rian.JVM do
   @spec to_jar(String.t(), String.t(), keyword()) :: {:ok, String.t()}
   def to_jar(src, jar_path, opts \\ []) do
     kotlinc =
-      System.find_executable("kotlinc") ||
-        raise(
-          RuntimeError,
-          "`kotlinc` not found on PATH — needed to assemble a JVM .jar (ADR-0049 Tier 2)"
-        )
+      case System.find_executable("kotlinc") do
+        nil ->
+          raise(
+            RuntimeError,
+            "`kotlinc` not found on PATH — needed to assemble a JVM .jar (ADR-0049 Tier 2)"
+          )
+
+        v ->
+          v
+      end
 
     ktfile = Path.join(System.tmp_dir!(), "rian_jar_#{System.unique_integer([:positive])}.kt")
     File.write!(ktfile, kotlin_module(src, opts[:main]))
