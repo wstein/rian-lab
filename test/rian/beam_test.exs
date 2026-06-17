@@ -11,6 +11,30 @@ defmodule Rian.BeamTest do
       assert {:file, _} = :code.is_loaded(:rian_beam_double)
     end
 
+    test "a `const` lowers to a 0-arity accessor; references call it (incl. lowercase)" do
+      {:ok, mod} =
+        Beam.load(
+          "mod C do\n" <>
+            "  const K Int53 := 42\n" <>
+            "  const targets := [:ex, :rs]\n" <>
+            "  pub def answer() Int53 := K\n" <>
+            "  pub def all() Vec(Symbol) := targets\n" <>
+            "end",
+          :"Elixir.RianBeamConst"
+        )
+
+      # uppercase and lowercase consts both resolve to their snake-cased accessor
+      assert mod.answer() == 42
+      assert mod.all() == [:ex, :rs]
+    end
+
+    test "a `const` is callable directly as its accessor" do
+      {:ok, mod} =
+        Beam.load("mod C do\n  pub const Max Int53 := 99\nend", :"Elixir.RianBeamConst2")
+
+      assert mod.max() == 99
+    end
+
     test "underscore numeric literals lex AND compile, in expression and pattern position" do
       # Regression: the lexer accepts `1_000` but `String.to_integer/1` on the
       # lexeme would raise — the lexer/parser contradiction the verification pass

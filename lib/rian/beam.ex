@@ -61,6 +61,11 @@ defmodule Rian.Beam do
   plus the named fields), and a map *pattern* `%{k: p, …}` matches any map
   carrying those keys.
 
+  **Constants (ADR-0033).** A `const NAME := value` lowers to a 0-arity accessor
+  function `name() -> value` (snake-cased), exported, and a reference to the const
+  calls it. Resolution is by the module's const-set (case-insensitive), so both
+  `const Targets` and `const targets` resolve to `targets()` — matching `Rian.Lower`.
+
   **Not yet** (raise a clear error, never a silent miscompile): *positional*
   struct construction (named `Name(f: v)` works) and map *update* (`%{m | k: v}`).
   """
@@ -76,6 +81,7 @@ defmodule Rian.Beam do
     ECaptureNamed,
     ECase,
     EChar,
+    EConstRef,
     EDot,
     EId,
     EIf,
@@ -120,7 +126,7 @@ defmodule Rian.Beam do
         ranges_of(prog),
         types_of(prog),
         structs_of(prog),
-        Rian.Check.program_ic(prog)
+        ic_with_consts(prog, consts_of(prog))
       )
 
     {:module, ^module} = :code.load_binary(module, ~c"#{module}.beam", bin)
@@ -145,7 +151,7 @@ defmodule Rian.Beam do
           top ++ Map.get(m, :ranges, []),
           Map.get(m, :types, []),
           Map.get(m, :structs, []),
-          Rian.Check.program_ic(prog)
+          ic_with_consts(prog, Map.get(m, :consts, []))
         )
 
       {:module, ^atom} = :code.load_binary(atom, ~c"#{atom}.beam", bin)
@@ -170,7 +176,7 @@ defmodule Rian.Beam do
       ranges_of(prog),
       types_of(prog),
       structs_of(prog),
-      Rian.Check.program_ic(prog)
+      ic_with_consts(prog, consts_of(prog))
     )
   end
 
@@ -197,7 +203,7 @@ defmodule Rian.Beam do
           top ++ Map.get(m, :ranges, []),
           Map.get(m, :types, []),
           Map.get(m, :structs, []),
-          Rian.Check.program_ic(prog)
+          ic_with_consts(prog, Map.get(m, :consts, []))
         )
 
       {atom, bin}
@@ -240,7 +246,7 @@ defmodule Rian.Beam do
       ranges_of(prog),
       types_of(prog),
       structs_of(prog),
-      Rian.Check.program_ic(prog)
+      ic_with_consts(prog, consts_of(prog))
     )
   end
 
@@ -272,7 +278,7 @@ defmodule Rian.Beam do
           top ++ Map.get(m, :ranges, []),
           Map.get(m, :types, []),
           Map.get(m, :structs, []),
-          Rian.Check.program_ic(prog)
+          ic_with_consts(prog, Map.get(m, :consts, []))
         )
 
       {atom, bin}
@@ -298,14 +304,26 @@ defmodule Rian.Beam do
     rtable = Rian.Range.table(ranges)
     tctx = type_ctx(types, ranges, structs)
 
+    # A `const NAME := value` lowers to a 0-arity accessor `name() -> value`, and
+    # references to it (resolved in `body_forms` via the const-set carried in `ic`)
+    # call that accessor. The set is added to `ic` so the bodies — and each const's
+    # own value — resolve sibling consts.
+    consts = Map.get(ic, :const_decls, [])
+    ic = Map.put(ic, :consts, MapSet.new(consts, & &1.name))
+
+    exports =
+      Enum.map(funcs, &{String.to_atom(&1.name), arity(&1)}) ++
+        Enum.map(consts, &{const_fun(&1.name), 0})
+
     forms =
       [
         {:attribute, @ln, :module, module},
-        {:attribute, @ln, :export, Enum.map(funcs, &{String.to_atom(&1.name), arity(&1)})}
+        {:attribute, @ln, :export, exports}
       ] ++
         type_attrs(types, structs, tctx) ++
         Enum.map(funcs, &spec_form(&1, tctx)) ++
-        Enum.map(funcs, &function_form(&1, rtable, ic))
+        Enum.map(funcs, &function_form(&1, rtable, ic)) ++
+        Enum.map(consts, &const_form(&1, rtable, ic))
 
     # `:debug_info` retains the abstract code (incl. the `-spec` attributes) in
     # the `.beam`, so Dialyzer can read the contracts (Stage 0.5).
@@ -319,6 +337,26 @@ defmodule Rian.Beam do
   # the functions to compile: a single `mod`'s, else the top-level ones
   defp funcs_of(%{funcs: [], mods: [m]}), do: m.funcs
   defp funcs_of(%{funcs: funcs}), do: funcs
+
+  defp consts_of(%{funcs: [], mods: [m]}), do: Map.get(m, :consts, [])
+  defp consts_of(prog), do: Map.get(prog, :consts, [])
+
+  # a const's 0-arity accessor function: `const NAME := value` → `name() -> value`.
+  defp const_form(c, rtable, ic) do
+    {:function, @ln, const_fun(c.name), 0,
+     [{:clause, @ln, [], [], body_forms(c.value, %{}, rtable, %{}, ic)}]}
+  end
+
+  # the accessor name (and the call target a reference lowers to): snake-cased, so
+  # both `const Targets` and `const targets` resolve to `targets()`.
+  defp const_fun(name), do: PatternLower.to_snake(name)
+
+  # Carry the `const` declarations through the existing `ic` map (rather than a new
+  # `beam_for` parameter threaded through every entry point): `beam_for` reads
+  # `:const_decls` to emit the 0-arity accessors and resolve references. Entry
+  # points that build no consts pass a plain `ic` and are unaffected.
+  defp ic_with_consts(prog, consts),
+    do: prog |> Rian.Check.program_ic() |> Map.put(:const_decls, consts)
 
   # an `@external` function (ADR-0068): on the BEAM the `:ex` spec is a Rian-surface
   # host expression, so splice it as the function body — a synthetic clause whose
@@ -511,9 +549,32 @@ defmodule Rian.Beam do
   defp body_forms(src, scope, rtable, tenv, ic),
     do:
       block_forms(
-        Rian.Range.expand_of(Rian.Check.annotate(Pratt.parse_body(src), tenv, ic), rtable),
+        Rian.Range.expand_of(
+          Rian.Check.annotate(
+            resolve_consts(Pratt.parse_body(src), Map.get(ic, :consts, MapSet.new())),
+            tenv,
+            ic
+          ),
+          rtable
+        ),
         scope
       )
+
+  # Rewrite a reference to a declared `const` (`{:id, NAME}` with NAME in the set)
+  # into a `{:const_ref, NAME}` node, which lowers to a call to its accessor. The
+  # set is case-insensitive (membership), so lowercase consts resolve too.
+  defp resolve_consts(node, cset) do
+    if MapSet.size(cset) == 0 do
+      node
+    else
+      walk_consts(node, cset)
+    end
+  end
+
+  defp walk_consts({:id, name} = node, cset),
+    do: if(MapSet.member?(cset, name), do: {:const_ref, name}, else: node)
+
+  defp walk_consts(node, cset), do: Rian.Macro.map_node(node, &walk_consts(&1, cset))
 
   # A block statement lowers to one Erlang form *and* threads the block scope
   # (the `map_reduce` reducer in `block_forms`). A `:=` bind emits `Var = Expr`;
@@ -567,6 +628,10 @@ defmodule Rian.Beam do
   defp expr_form(%EId{name: b}, _s) when b in ~w(true false), do: {:atom, @ln, String.to_atom(b)}
   # `pi` is the math constant — `:math.pi()`, matching the text emitter (`Rian.Lower`)
   defp expr_form(%EId{name: "pi"}, s), do: remote_call(:math, "pi", [], s)
+  # a `const` reference calls its 0-arity accessor `name()`.
+  defp expr_form(%EConstRef{name: name}, _s),
+    do: {:call, @ln, {:atom, @ln, const_fun(name)}, []}
+
   # a bare PascalCase id is a nullary sum-variant value -> its snake atom tag; a
   # lowercase id is a variable — resolved through the scope to its *current*
   # Erlang var (a `:=` shadow rebinds the name to a fresh var; unshadowed names
