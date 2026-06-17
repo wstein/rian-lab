@@ -488,7 +488,9 @@ defmodule Rian.Transpile do
   # being host-FFI / not-yet-typed): truthy `&&`/`||` (no truthy operators —
   # ADR-0035) and exception flow (`def … rescue`/`catch`/`after` — errors are
   # values, ADR-0040). These are the targets of the errors-as-values migration.
-  @incompatible_marker ~r/TODO_PORT\("(?:truthy (?:&&|\|\|)|def (?:rescue|catch|after)) /
+  # A def with several recovery kinds renders them slash-joined (`def rescue/after`),
+  # so the `def …` arm allows a `/kind` tail — otherwise a multi-kind def slips the gate.
+  @incompatible_marker ~r{TODO_PORT\("(?:truthy (?:&&|\|\|)|def (?:rescue|catch|after)(?:/(?:rescue|catch|after))*) }
 
   @doc """
   The Rian-model-**incompatible** constructs in `source` — truthy `&&`/`||` and

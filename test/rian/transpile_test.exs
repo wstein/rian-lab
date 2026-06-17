@@ -28,6 +28,25 @@ defmodule Rian.TranspileTest do
       assert line =~ "def rescue"
     end
 
+    test "flags a multi-kind recovery def (`rescue` + `after` → `def rescue/after`)" do
+      # several recovery kinds render slash-joined; the gate must still catch them —
+      # a `def rescue/after …` marker would otherwise slip a single-kind-only regex.
+      src = """
+      defmodule M do
+        def f(v) do
+          g(v)
+        rescue
+          _ -> nil
+        after
+          cleanup()
+        end
+      end
+      """
+
+      assert [line] = Transpile.incompatible(src)
+      assert line =~ "def rescue/after"
+    end
+
     test "clean code (case / Map.get) is compatible — no markers" do
       src = """
       defmodule M do
