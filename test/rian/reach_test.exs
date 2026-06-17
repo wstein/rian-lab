@@ -228,7 +228,11 @@ defmodule Rian.ReachTest do
       # BEAM/JS lower a map (native map / JS object); Rust raises "map literals are
       # BEAM-only" and JVM lists `EMap` unsupported.
       assert targets(rep, "build") == [:ex, :js]
-      assert Enum.any?(entry(rep, "build").blockers, &(&1.kind == :map and &1.kills == [:rs, :jvm]))
+
+      assert Enum.any?(
+               entry(rep, "build").blockers,
+               &(&1.kind == :map and &1.kills == [:rs, :jvm])
+             )
     end
 
     test "a map update `%{base | k: v}` reaches `:ex`+`:js` but is off `:rs`/`:jvm`" do
@@ -237,7 +241,11 @@ defmodule Rian.ReachTest do
       # the update form has the same target story as the literal — BEAM/JS lower it,
       # Rust/JVM raise BEAM-only — so the matrix pins it off `:rs`/`:jvm` (no gate lie).
       assert targets(rep, "bump") == [:ex, :js]
-      assert Enum.any?(entry(rep, "bump").blockers, &(&1.kind == :map and &1.kills == [:rs, :jvm]))
+
+      assert Enum.any?(
+               entry(rep, "bump").blockers,
+               &(&1.kind == :map and &1.kills == [:rs, :jvm])
+             )
     end
 
     test "an as-pattern reaches `:ex`+`:rs` but is off `:js`/`:jvm` (the emitters raise)" do
@@ -250,7 +258,11 @@ defmodule Rian.ReachTest do
 
       # BEAM/Rust lower `name @ pat` via PatternLower; JS/JVM raise Unsupported.
       assert targets(rep, "f") == [:ex, :rs]
-      assert Enum.any?(entry(rep, "f").blockers, &(&1.kind == :pattern and &1.kills == [:js, :jvm]))
+
+      assert Enum.any?(
+               entry(rep, "f").blockers,
+               &(&1.kind == :pattern and &1.kills == [:js, :jvm])
+             )
     end
 
     test "an FFI module-head atom is not double-flagged as a bare atom" do

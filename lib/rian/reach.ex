@@ -362,7 +362,8 @@ defmodule Rian.Reach do
 
   defp fn_type_blocker,
     do: %{
-      construct: "returned closure over a type variable / nested Fn (no owned-capture + 'static yet)",
+      construct:
+        "returned closure over a type variable / nested Fn (no owned-capture + 'static yet)",
       kind: :generic,
       kills: [:rs]
     }
@@ -420,6 +421,7 @@ defmodule Rian.Reach do
   # top-level `Fn(...)` returns are NOT blocked.
   defp sig_uses_fn_type?(f) do
     ret = Map.get(f, :ret)
+
     is_binary(ret) and String.contains?(ret, "Fn(") and
       not concrete_fn_return?(ret, Map.get(f, :tvars, []))
   end
