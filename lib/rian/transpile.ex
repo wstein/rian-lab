@@ -53,7 +53,7 @@ defmodule Rian.Transpile do
     "# ─────────────────────────────────────────────────────────────────────────",
     "# DRAFT skeleton — transpiled from Elixir by `mix rian.transpile`. NOT done.",
     "# Translated: defs/clauses (+guards), defstruct→struct, if/case, operators",
-    "#   (precedence-parenthesized; truthy &&/|| → boolean and/or),",
+    "#   (precedence-parenthesized),",
     "#   pipes (|>), single- & multi-clause lambdas (multi → `(p) -> case p do …`),",
     "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
     "#   word sigils (~w → list), referenced @attrs → const, as-patterns (var @ pat),",
@@ -78,12 +78,13 @@ defmodule Rian.Transpile do
   @max_slug 64
   @max_prefix 28
 
-  # Elixir binary operators → their Rian infix spelling. Most map unchanged; the
-  # truthy short-circuit pair `&&`/`||` maps to Rian's boolean `and`/`or` (Rian has
-  # no truthy operators — the value-vs-bool / nil-vs-Option mismatch surfaces at the
-  # type gate, like every other nil-as-sentinel, per the `expr(nil)` note below).
-  # `div`/`rem` are Elixir local calls Rian spells infix. `++` is absent — Rian has
-  # no `++`; it lowers to `List.concat/2`.
+  # Elixir binary operators → their Rian infix spelling, mapped unchanged. The truthy
+  # pair `&&`/`||` is deliberately ABSENT: Rian's `and`/`or` are boolean (they lower
+  # to native `&&`/`||` and the checker requires Bool operands), so they are not a
+  # faithful image of Elixir's value-returning, nil-coalescing `&&`/`||` — those are
+  # emitted as a `TODO_PORT` marker for restructuring to `case`/Option (see
+  # `expr/1`'s `&&`/`||` clause). `div`/`rem` are Elixir local calls Rian spells
+  # infix. `++` is absent too — Rian has no `++`; it lowers to `List.concat/2`.
   @binops %{
     :+ => "+",
     :- => "-",
@@ -98,8 +99,6 @@ defmodule Rian.Transpile do
     :!= => "!=",
     :and => "and",
     :or => "or",
-    :&& => "and",
-    :|| => "or",
     :div => "div",
     :rem => "rem"
   }
@@ -1144,6 +1143,16 @@ defmodule Rian.Transpile do
   defp expr({op, _, [l, r]}) when is_map_key(@binops, op) do
     rop = @binops[op]
     "#{paren_operand(l, rop, :left)} #{rop} #{paren_operand(r, rop, :right)}"
+  end
+
+  # Elixir's truthy `&&`/`||` (value-returning, nil/false-falsy) have no faithful Rian
+  # image: `and`/`or` are boolean-only, so `x || default` / `guard && f(guard)` must be
+  # restructured to `case`/Option by hand (the self-host port does exactly this). Emit
+  # an honest marker rather than a wrong boolean op or an eager `&&(l, r)` call.
+  defp expr({op, _, [_l, _r]} = n) when op in [:&&, :||] do
+    kind = if op == :&&, do: "&&", else: "||"
+
+    ~s|TODO_PORT("truthy #{kind} (nil-coalescing) — restructure to case/Option: #{escape(snippet(n))}")|
   end
 
   # Elixir list concat `l ++ r` → the portable prelude `List.concat/2` (Rian has no

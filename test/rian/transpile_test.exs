@@ -652,17 +652,18 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ "a ++ b"
     end
 
-    test "truthy `&&`/`||` map to Rian's boolean short-circuit `and`/`or`" do
-      # Rian has no truthy operators; `and`/`or` short-circuit (and emit valid Rian),
-      # so a guard idiom like `g && f(g)` no longer eagerly evaluates `f(g)`. The
-      # value-vs-bool / nil-vs-Option mismatch surfaces at the type gate, not here.
+    test "truthy `&&`/`||` become a TODO_PORT marker (no faithful Rian image)" do
+      # Rian's `and`/`or` are boolean (they lower to native `&&`/`||`), so they are
+      # NOT a sound port of Elixir's value-returning, nil-coalescing `&&`/`||`; the
+      # self-host port restructures these to `case`/Option by hand. Emit an honest
+      # marker rather than a wrong boolean op or an eager `&&(l, r)` call.
       out = rian("defmodule M do\n  def g(x), do: x && f(x)\n  def d(x, y), do: x || y\nend")
-      assert out =~ ":= x and f(x)"
-      assert out =~ ":= x or y"
-      # refute against the body only — the emitted header legend mentions `&&/||`.
+      assert out =~ ~s{TODO_PORT("truthy && (nil-coalescing)}
+      assert out =~ ~s{TODO_PORT("truthy || (nil-coalescing)}
+      # never the invalid eager call form, nor a silently-wrong boolean op.
       body = out |> String.split("mod M do") |> List.last()
-      refute body =~ "&&"
-      refute body =~ "||"
+      refute body =~ "&&("
+      refute body =~ ":= x and f(x)"
     end
   end
 
