@@ -125,6 +125,26 @@ defmodule Rian.BeamTest do
       assert mod.of_up(?5) == {:error, :range_error}
     end
 
+    test "portable-prelude calls link and run (`List.map`/`List.sum`), Elixir's List intact" do
+      {:ok, mod} =
+        Beam.load(
+          "mod P do\n" <>
+            "  pub def dbl(xs Vec(Int53)) Vec(Int53) := List.map(xs, (x) -> x * 2)\n" <>
+            "  pub def total(xs Vec(Int53)) Int53 := List.sum(xs)\n" <>
+            "  pub def chars(cs Vec(Char)) String := List.to_string(cs)\n" <>
+            "end",
+          :"Elixir.RianBeamPrelude"
+        )
+
+      # List.map / List.sum hit the linked Rian prelude (Rian.Prelude.List)
+      assert mod.dbl([1, 2, 3]) == [2, 4, 6]
+      assert mod.total([4, 5, 6]) == 15
+      # List.to_string is NOT a prelude op → stays Elixir's List (FFI), still works
+      assert mod.chars(~c"hi") == "hi"
+      # the linked prelude never clobbered Elixir's own List
+      assert List.first([9, 8]) == 9
+    end
+
     test "an as-pattern `name @ pat` binds the whole value while matching the pattern" do
       {:ok, mod} =
         Beam.load(

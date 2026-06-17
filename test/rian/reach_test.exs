@@ -26,6 +26,21 @@ defmodule Rian.ReachTest do
       assert rep["add"].blockers == []
     end
 
+    test "a portable-prelude call (`List.map`) reaches every target; a stdlib FFI does not" do
+      rep =
+        reach("""
+        mod P do
+          pub def dbl(xs Vec(Int53)) Vec(Int53) := List.map(xs, (x) -> x * 2)
+          pub def srt(xs Vec(Int53)) Vec(Int53) := Enum.sort(xs)
+        end
+        """)
+
+      # `List.map` is the portable prelude (ADR-0047) — reaches all four targets
+      assert targets(rep, "dbl") == [:ex, :js, :jvm, :rs]
+      # `Enum.sort` has no prelude image — host FFI, pinned to the BEAM
+      assert targets(rep, "srt") == [:ex]
+    end
+
     test "an inferred private helper reaches every target (inference widens portability)" do
       # `inc`'s parameter has no written type; private parameter inference recovers
       # `x : Int53` (ADR-0034 Phase 2), so Reach sees a concrete signature and the

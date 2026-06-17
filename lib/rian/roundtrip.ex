@@ -48,6 +48,9 @@ defmodule Rian.Roundtrip do
   @doc "Run the full roundtrip on one Elixir source string, returning a `t:report/0`."
   @spec run(String.t()) :: report()
   def run(ex_src) when is_binary(ex_src) do
+    # link the portable prelude so a transpiled `List`/`Dict`/`Str` call the draft
+    # carries can compile and run on the BEAM path (idempotent).
+    Rian.Prelude.load()
     rian = ex_src |> Transpile.transpile() |> format_rian()
     mods = split_top_mods(rian)
     origin = safe(fn -> origin_forms(ex_src) end)

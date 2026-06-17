@@ -568,7 +568,9 @@ defmodule Rian.Reach do
        ),
        do: {[ffi(":#{m}.#{fun}", conc_erl?(m, fun)) | bl], ca}
 
-  # Elixir-module call `Mod.fun(…)` — host FFI unless `Mod` is a Rian module here
+  # Elixir-module call `Mod.fun(…)` — host FFI unless `Mod` is a Rian module here,
+  # or a portable-prelude module (`List`/`Dict`/`Str`/`Int`, written in Rian over
+  # the per-target primitive layer, ADR-0047 §2 — portable by construction).
   defp classify(
          %Core.ECall{fun: %Core.EDot{head: %Core.EId{name: m}, name: fun}},
          modnames,
@@ -577,6 +579,7 @@ defmodule Rian.Reach do
     cond do
       not pascal?(m) -> {bl, ca}
       MapSet.member?(modnames, m) -> {bl, ca}
+      Rian.Prelude.defines?(m, fun) -> {bl, ca}
       true -> {[ffi("#{m}.#{fun}", m in @conc_ex) | bl], ca}
     end
   end

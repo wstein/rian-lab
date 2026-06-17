@@ -117,6 +117,8 @@ defmodule Rian.Beam do
     prog = Decl.parse(src)
     :ok = Rian.Reach.gate!(prog)
     prog = Rian.Opaque.erase(prog)
+    # link the portable prelude (`List`/`Dict`/`Str`/`Int`) so calls to it resolve.
+    :ok = Rian.Prelude.load()
     load_aux_mods(prog)
 
     {:ok, ^module, bin} =
@@ -666,9 +668,12 @@ defmodule Rian.Beam do
     do: cons(es, core_list_tail(tail), &expr_form(&1, s))
 
   # a remote call `Mod.fun(…)` — free BEAM FFI (ADR-0041): a Pascal head is an
-  # Elixir module (`String` -> `'Elixir.String'`), an atom head is an Erlang one
+  # Elixir module (`String` -> `'Elixir.String'`), an atom head is an Erlang one.
+  # A portable-prelude module (`List`/`Dict`/`Str`/`Int`) redirects to its linked
+  # `Rian.Prelude` module so the call hits the Rian-written op rather than Elixir's
+  # same-named stdlib (and never clobbers it).
   defp expr_form(%ECall{fun: %EDot{head: %EId{name: m}, name: fun}, args: args}, s),
-    do: remote_call(if(pascal?(m), do: :"Elixir.#{m}", else: String.to_atom(m)), fun, args, s)
+    do: remote_call(module_atom(m, fun), fun, args, s)
 
   defp expr_form(%ECall{fun: %EDot{head: %EAtom{name: m}, name: fun}, args: args}, s),
     do: remote_call(String.to_atom(m), fun, args, s)
@@ -1023,6 +1028,17 @@ defmodule Rian.Beam do
   defp remote_call(mod, fun, args, scope) do
     {:call, @ln, {:remote, @ln, {:atom, @ln, mod}, {:atom, @ln, String.to_atom(fun)}},
      Enum.map(args, &expr_form(&1, scope))}
+  end
+
+  # the BEAM atom a `Mod.fun(…)` call targets: a portable-prelude module redirects
+  # to its linked `Rian.Prelude.*` atom; a Pascal head is an Elixir module; an atom
+  # head an Erlang one.
+  defp module_atom(m, fun) do
+    cond do
+      Rian.Prelude.defines?(m, fun) -> Rian.Prelude.atom(m)
+      pascal?(m) -> :"Elixir.#{m}"
+      true -> String.to_atom(m)
+    end
   end
 
   # `(fun (S) -> project(S) end)(A + B)` — bind the bignum sum once, then project
