@@ -1023,14 +1023,24 @@ defmodule Rian.Beam do
   # other specs form the type list (`utf8`/`binary`/…).
   defp bitseg_form({value, specs}, s) do
     {size, tsl} = bit_size_tsl(specs)
-    {:bin_element, @ln, expr_form(value, s), size, tsl}
+    {:bin_element, @ln, bit_value_form(value, &expr_form(&1, s)), size, tsl}
   end
 
   # the pattern form of a segment: the value is itself a pattern (binder/literal).
   defp bitseg_pat_form(value, specs) do
     {size, tsl} = bit_size_tsl(specs)
-    {:bin_element, @ln, pat_form(value), size, tsl}
+    {:bin_element, @ln, bit_value_form(value, &pat_form/1), size, tsl}
   end
+
+  # a string-literal segment lowers to the Erlang `{:string, …}` char-list value (the
+  # byte sequence), NOT `str_form`'s nested `{:bin, …}` — a `{:bin}` inside a
+  # `bin_element` is an illegal pattern/expr. Other values lower via `form_fun`.
+  defp bit_value_form(%Core.EStr{value: v}, _form_fun), do: {:string, @ln, String.to_charlist(v)}
+
+  defp bit_value_form(%Core.PLit{value: v}, _form_fun) when is_binary(v),
+    do: {:string, @ln, String.to_charlist(v)}
+
+  defp bit_value_form(value, form_fun), do: form_fun.(value)
 
   # map the parsed specifiers to the Erlang `{Size, TypeSpecifierList}` pair, each
   # `:default` when unspecified (shared by construction and pattern segments).

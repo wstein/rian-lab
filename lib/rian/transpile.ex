@@ -1162,7 +1162,33 @@ defmodule Rian.Transpile do
   defp pat({:<<>>, _, segments} = n),
     do: bitstr_text(segments, &pat/1) || ~s|TODO_PORT(#{inspect(snippet(n))})|
 
+  # a string-prefix match `"pre" <> rest` is sugar for the bitstring pattern
+  # `<<"pre", rest::binary>>` (ADR-0078); flatten a `<>`-chain of literal prefixes
+  # ending in a binder. A non-literal/non-binder shape falls back to a marker.
+  defp pat({:<>, _, _} = n) do
+    case concat_pat_segs(n) do
+      nil -> ~s|TODO_PORT(#{inspect(snippet(n))})|
+      segs -> "<<#{Enum.join(segs, ", ")}>>"
+    end
+  end
+
   defp pat(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  # `"a" <> "b" <> rest` → `["a"`, `"b"`, `rest::binary"]` segment texts; nil if the
+  # tail isn't a literal or a bare binder.
+  defp concat_pat_segs({:<>, _, [prefix, rest]}) when is_binary(prefix) do
+    case concat_pat_segs(rest) do
+      nil -> nil
+      segs -> [inspect(prefix) | segs]
+    end
+  end
+
+  defp concat_pat_segs(bin) when is_binary(bin), do: [inspect(bin)]
+
+  defp concat_pat_segs({name, _, ctx}) when is_atom(name) and is_atom(ctx),
+    do: ["#{pat({name, [], ctx})}::binary"]
+
+  defp concat_pat_segs(_), do: nil
 
   # ── bitstrings (ADR-0078) ──────────────────────────────────────────────
   # Render an Elixir `<<>>` segment list to Rian `<<seg::spec, …>>` text, reused for

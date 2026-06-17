@@ -33,6 +33,17 @@ defmodule Rian.BeamTest do
       assert mod.first("") == 0
     end
 
+    test "a string-literal bitstring segment `<<\"pre\", rest::binary>>` matches (ADR-0078)" do
+      {:ok, mod} =
+        Beam.load(
+          ~s|def kind(s String) Int53\ndef kind(<<"Fn(", _r::binary>>) := 1\ndef kind(_) := 0|,
+          :rian_beam_bitlit
+        )
+
+      assert mod.kind("Fn(x)") == 1
+      assert mod.kind("Vec(x)") == 0
+    end
+
     test "a map update `%{m | k: v}` replaces present keys and runs (ADR-0032)" do
       {:ok, mod} =
         Beam.load(

@@ -186,6 +186,19 @@ defmodule Rian.TranspileTest do
       refute out =~ ~s|TODO_PORT("|
     end
 
+    test "a string-prefix pattern `\"pre\" <> rest` → a bitstring pattern (ADR-0078 Stage 4)" do
+      out =
+        rian("""
+        defmodule Px do
+          def kind("Fn(" <> _rest), do: 1
+          def kind(_), do: 0
+        end
+        """)
+
+      assert out =~ ~s|kind(<<"Fn(", _::binary>>) := 1|
+      refute out =~ ~s|TODO_PORT("|
+    end
+
     test "defp is private (`def`, no `pub`) and OMITS hole types — params and return (ADR-0034)" do
       # a private function needn't declare its types — `Rian.InferLocal` recovers
       # them, so an unresolved param/return is omitted rather than printed as `_Unk`.
