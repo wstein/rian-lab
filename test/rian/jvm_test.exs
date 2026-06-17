@@ -87,6 +87,11 @@ defmodule Rian.JVMTest do
       probe: ~s|println(step(3L)); println(step(-1L))|
     },
     %{
+      id: :const_ref,
+      src: "mod M do\n  const Answer := 42\n  def get() Int53 := Answer\nend",
+      probe: ~s|println(get())|
+    },
+    %{
       id: :str_pat,
       src: """
       def tag(s String) Int64
@@ -329,6 +334,15 @@ defmodule Rian.JVMTest do
       assert kt =~ "fun half(a0: Double): Double"
       assert kt =~ "(x / 2.0)"
       expect_jvm(jvm, :half, "3.5")
+    end
+
+    @tag :jvm
+    test "a `const` reference resolves to the emitted top-level val", %{jvm_batch: jvm} do
+      # before the const-resolution pass this emitted an unresolved identifier;
+      # now the const lowers to `val Answer = 42L` and the reference resolves to it.
+      kt = jvm_kt(jvm, :const_ref)
+      assert kt =~ "val Answer = 42L"
+      expect_jvm(jvm, :const_ref, "42")
     end
 
     @tag :jvm

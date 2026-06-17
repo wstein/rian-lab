@@ -76,6 +76,7 @@ defmodule Rian.JS do
     ECall,
     ECase,
     EChar,
+    EConstRef,
     EDot,
     EId,
     EIf,
@@ -146,13 +147,38 @@ defmodule Rian.JS do
     # the dispatcher with JS-native guards (ADR-0061 §3).
     funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
     Core.reject_unsupported!(funcs, @js_unsupported, :js, Unsupported)
+    # `const NAME := value` (ADR-0033) lowers to a top-level `const`, and a reference
+    # resolves to it — threaded through `ic[:consts]` so every clause body sees the
+    # const set (parity with `Rian.Beam`/`Rian.Lower`; without this a const reference
+    # emitted as a bare, undefined identifier — a silent miscompile).
+    consts = all_consts(prog)
     # the program inference context lets each clause body emit from the TYPED core
     # IR (`Check.annotate` fills every node's type, ADR-0050 §3).
-    ic = Check.program_ic(prog)
+    ic = Check.program_ic(prog) |> Map.put(:consts, MapSet.new(consts, & &1.name))
+    const_js = Enum.map_join(consts, "\n", &const_js(&1, i53, ic))
     fn_js = Enum.map_join(funcs, "\n\n", &function_js(&1, i53, ic))
     disp_js = protocol_dispatchers_js(prog, i53)
 
-    [fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+    [const_js, fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+  end
+
+  defp all_consts(prog),
+    do:
+      Map.get(prog, :consts, []) ++
+        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :consts, []))
+
+  # `const NAME := value` -> a top-level JS `const` (exported when `pub`). The value
+  # is a single expression that parses, resolves sibling const references, and emits
+  # in the program integer mode.
+  defp const_js(c, i53, ic) do
+    %EBlock{stmts: [{:expr, e}]} =
+      c.value
+      |> Pratt.parse_body()
+      |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
+      |> Check.annotate(%{}, ic)
+
+    export = if c.pub?, do: "export ", else: ""
+    "#{export}const #{c.name} = #{expr_js(e, i53)};"
   end
 
   # every function the JS file emits: the top-level ones plus every `mod`'s,
@@ -401,9 +427,16 @@ defmodule Rian.JS do
   defp guarded_return(body, nil, params, i53, tenv, ic),
     do: clause_return(body, params, i53, tenv, ic)
 
-  defp guarded_return(body, g, params, i53, tenv, ic),
-    do:
-      "if (#{expr_js(Check.annotate(Pratt.parse(g), tenv, ic), i53)}) { #{clause_return(body, params, i53, tenv, ic)} }"
+  defp guarded_return(body, g, params, i53, tenv, ic) do
+    guard =
+      g
+      |> Pratt.parse()
+      |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
+      |> Check.annotate(tenv, ic)
+      |> expr_js(i53)
+
+    "if (#{guard}) { #{clause_return(body, params, i53, tenv, ic)} }"
+  end
 
   # Match `pat` against the JS access path `acc` -> `{tests, binds}`. A sum
   # variant is a tagged array `["Ctor", arg0, …]` (ADR-0049), so a constructor
@@ -491,9 +524,26 @@ defmodule Rian.JS do
   # `const` forbid same-scope re-declaration); `$` is JS-valid and never appears
   # in a Rian identifier, so a `$`-suffixed fresh name cannot collide.
   defp clause_return(src, params, i53, tenv, ic) do
-    %EBlock{stmts: stmts} = Check.annotate(Pratt.parse_body(src), tenv, ic)
+    %EBlock{stmts: stmts} =
+      src
+      |> Pratt.parse_body()
+      |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
+      |> Check.annotate(tenv, ic)
+
     block_return(Rian.Shadow.dedup(stmts, params, &js_fresh/2), i53)
   end
+
+  # Rewrite a reference to a declared `const` (`{:id, NAME}`, NAME in the set) into a
+  # `{:const_ref, NAME}` surface node, which `Core.from_expr` lifts to `EConstRef` and
+  # this emitter spells as the const's name (parity with `Rian.Beam`/`Rian.Lower`).
+  defp resolve_consts(node, cset) do
+    if MapSet.size(cset) == 0, do: node, else: walk_consts(node, cset)
+  end
+
+  defp walk_consts({:id, name} = node, cset),
+    do: if(MapSet.member?(cset, name), do: {:const_ref, name}, else: node)
+
+  defp walk_consts(node, cset), do: Rian.Macro.map_node(node, &walk_consts(&1, cset))
 
   defp js_fresh(base, count), do: base <> "$" <> Integer.to_string(count)
 
@@ -515,6 +565,8 @@ defmodule Rian.JS do
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_js(%ENum{text: n}, i53), do: num_js(n, i53)
+  # a reference to a declared `const` -> the top-level `const`'s name (emitted by `const_js`).
+  defp expr_js(%EConstRef{name: name}, _i53), do: name
   # a `Char` is its codepoint integer, in the program's integer mode
   defp expr_js(%EChar{value: cp}, i53), do: cp_lit(cp, i53)
   # a Rian `String` is a JS string; `<>` concatenation is `+` (see js_op)

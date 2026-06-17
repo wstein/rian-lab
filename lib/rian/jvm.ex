@@ -65,6 +65,7 @@ defmodule Rian.JVM do
     ECall,
     ECase,
     EChar,
+    EConstRef,
     EDot,
     EId,
     EIf,
@@ -117,15 +118,52 @@ defmodule Rian.JVM do
     funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
     Core.reject_unsupported!(funcs, @jvm_unsupported, :jvm, Unsupported)
     type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
+    # `const NAME := value` (ADR-0033) lowers to a top-level `val`, and a reference
+    # resolves to it — threaded through `ic[:consts]` (parity with `Rian.Beam`/
+    # `Rian.Lower`); without this a const reference emitted as an unresolved Kotlin
+    # identifier (a silent miscompile).
+    consts = all_consts(prog)
     # the program inference context types each clause body's core IR (ADR-0050 §3).
-    ic = Rian.Check.program_ic(prog)
+    ic = Rian.Check.program_ic(prog) |> Map.put(:consts, MapSet.new(consts, & &1.name))
+    const_decls = Enum.map_join(consts, "\n", &const_kt(&1, ic))
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt(&1, ic))
     # inject the float-repr helper only when the program lowers `__prim_float_repr`.
     runtime =
       if String.contains?(fn_decls, "__rian_float_repr("), do: float_repr_helper(), else: ""
 
-    [runtime, type_decls, fn_decls] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+    [runtime, type_decls, const_decls, fn_decls]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
   end
+
+  defp all_consts(prog),
+    do:
+      Map.get(prog, :consts, []) ++
+        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :consts, []))
+
+  # `const NAME := value` -> a top-level Kotlin `val`. The value is a single
+  # expression that parses and resolves sibling const references.
+  defp const_kt(c, ic) do
+    %EBlock{stmts: [{:expr, e}]} =
+      c.value
+      |> Pratt.parse_body()
+      |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
+      |> Rian.Check.annotate(%{}, ic)
+
+    "val #{c.name} = #{expr_kt(e)}"
+  end
+
+  # Rewrite a reference to a declared `const` (`{:id, NAME}`, NAME in the set) into a
+  # `{:const_ref, NAME}` surface node (lifted to `EConstRef` by `Core.from_expr`),
+  # which this emitter spells as the const's name (parity with `Rian.Beam`/`Rian.Lower`).
+  defp resolve_consts(node, cset) do
+    if MapSet.size(cset) == 0, do: node, else: walk_consts(node, cset)
+  end
+
+  defp walk_consts({:id, name} = node, cset),
+    do: if(MapSet.member?(cset, name), do: {:const_ref, name}, else: node)
+
+  defp walk_consts(node, cset), do: Rian.Macro.map_node(node, &walk_consts(&1, cset))
 
   # The `__prim_float_repr` lowering (ADR-0069). Returns the **shortest** decimal
   # string that round-trips to `x` — the contract `Show.float` relies on. Java's
@@ -320,9 +358,16 @@ defmodule Rian.JVM do
   defp guarded_return(body, nil, params, tenv, ic),
     do: "return #{clause_value(body, params, tenv, ic)}"
 
-  defp guarded_return(body, g, params, tenv, ic),
-    do:
-      "if (#{expr_kt(Rian.Check.annotate(Pratt.parse(g), tenv, ic))}) { return #{clause_value(body, params, tenv, ic)} }"
+  defp guarded_return(body, g, params, tenv, ic) do
+    guard =
+      g
+      |> Pratt.parse()
+      |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
+      |> Rian.Check.annotate(tenv, ic)
+      |> expr_kt()
+
+    "if (#{guard}) { return #{clause_value(body, params, tenv, ic)} }"
+  end
 
   # Match `pat` against the Kotlin access path `acc` -> `{tests, binds}`. A sum
   # value is a `data class`, so a ctor pattern smart-casts (`acc is Ctor`) and
@@ -387,7 +432,12 @@ defmodule Rian.JVM do
   # plain identifier, so the fresh name is backtick-quoted (`` `x$1` ``): a valid
   # Kotlin identifier that a Rian source name can never collide with.
   defp clause_value(src, params, tenv, ic) do
-    %EBlock{stmts: stmts} = Rian.Check.annotate(Pratt.parse_body(src), tenv, ic)
+    %EBlock{stmts: stmts} =
+      src
+      |> Pratt.parse_body()
+      |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
+      |> Rian.Check.annotate(tenv, ic)
+
     block_value(Rian.Shadow.dedup(stmts, params, &kt_fresh/2))
   end
 
@@ -410,6 +460,8 @@ defmodule Rian.JVM do
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_kt(%ENum{text: n}), do: num_kt(n)
+  # a reference to a declared `const` -> the top-level `val`'s name (emitted by `const_kt`).
+  defp expr_kt(%EConstRef{name: name}), do: name
   defp expr_kt(%EChar{value: cp}), do: "#{cp}L"
   defp expr_kt(%EStr{value: s}), do: kt_str(s)
   defp expr_kt(%EId{name: b}) when b in ~w(true false), do: b

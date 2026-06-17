@@ -31,6 +31,19 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a `const` reference resolves to the emitted top-level const, not a bare identifier" do
+      js = JS.compile("mod M do\n  const Answer := 42\n  pub def get() Int53 := Answer\nend")
+      assert js =~ "const Answer = 42;"
+      assert js =~ "return Answer;"
+
+      # before the const-resolution pass this emitted bare `Answer` with no
+      # declaration, so Node threw `ReferenceError`; now it runs.
+      case node_eval(js, "get()") do
+        :no_node -> :ok
+        out -> assert out == "42"
+      end
+    end
+
     test "Int53 uses native JS numbers (not BigInt) — exact to 2^53 (ADR-0049)" do
       js53 = JS.compile("def inc(n Int53) Int53 := n + 1")
       # native number literal — no `n` suffix
