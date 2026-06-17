@@ -593,6 +593,9 @@ defmodule Rian.Decl do
     # per-target. (`Lower` carries it explicitly in its emitter context, no longer
     # via the process dictionary.)
     proto = proto_method_traits(prog)
+    # the program inference context — `Lower` annotates each clause body's typed
+    # core IR with it (ADR-0050 §3).
+    ic = Check.program_ic(prog)
 
     funs =
       Enum.map(funcs, fn f ->
@@ -601,13 +604,13 @@ defmodule Rian.Decl do
         # their guards (`element/2`, `:tag`) are BEAM-only and would crash `to_rust`.
         out =
           if f.dispatch,
-            do: Lower.compile_elixir(types, f, structs, ranges),
-            else: Lower.compile(types, f, structs, ranges, proto)
+            do: Lower.compile_elixir(types, f, structs, ranges, ic),
+            else: Lower.compile(types, f, structs, ranges, proto, ic)
 
         {f.name, out}
       end)
 
-    mod_units = Enum.map(mods, fn m -> {m.name, Lower.compile_module(m)} end)
+    mod_units = Enum.map(mods, fn m -> {m.name, Lower.compile_module(m, ic)} end)
     funs ++ mod_units ++ protocol_unit(prog, types, structs)
   end
 
@@ -638,10 +641,11 @@ defmodule Rian.Decl do
     :ok = Rian.Reach.gate!(prog)
 
     %{types: types, ranges: ranges, structs: structs, funcs: funcs, mods: mods} =
-      Rian.Opaque.erase(prog)
+      prog = Rian.Opaque.erase(prog)
 
-    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs, ranges)} end)
-    funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m)} end)
+    ic = Check.program_ic(prog)
+    funs = Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs, ranges, ic)} end)
+    funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m, ic)} end)
   end
 
   # ── Tokens -> declarations (recursive descent) ─────────────────────────

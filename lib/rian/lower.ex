@@ -69,16 +69,16 @@ defmodule Rian.Lower do
   # `proto` is the protocol-method -> trait-name map for the Rust UFCS call-site
   # rewrite (ADR-0061 §2). `Decl.compile` passes it (a function unit's body may
   # call a protocol method); a direct caller that uses no protocols omits it.
-  @spec compile(list(), map(), list(), list(), map()) :: map()
-  def compile(types, func, structs \\ [], ranges \\ [], proto \\ %{}) do
+  @spec compile(list(), map(), list(), list(), map(), map()) :: map()
+  def compile(types, func, structs \\ [], ranges \\ [], proto \\ %{}, ic \\ %{}) do
     env = build_env(types, structs, ranges)
     :ok = check!(func, env)
     meta = build_meta(types)
     smeta = build_struct_meta(structs)
 
     %{
-      elixir: to_elixir(func, types, structs, smeta),
-      rust: to_rust(func, types, meta, structs, smeta, proto)
+      elixir: to_elixir(func, types, structs, smeta, ic),
+      rust: to_rust(func, types, meta, structs, smeta, proto, ic)
     }
   end
 
@@ -88,11 +88,11 @@ defmodule Rian.Lower do
   BEAM-only, and Rust gets traits instead (ADR-0061), so emitting their Rust is
   both wrong and a hard error.
   """
-  @spec compile_elixir(list(), map(), list(), list()) :: map()
-  def compile_elixir(types, func, structs \\ [], ranges \\ []) do
+  @spec compile_elixir(list(), map(), list(), list(), map()) :: map()
+  def compile_elixir(types, func, structs \\ [], ranges \\ [], ic \\ %{}) do
     env = build_env(types, structs, ranges)
     :ok = check!(func, env)
-    %{elixir: to_elixir(func, types, structs, build_struct_meta(structs))}
+    %{elixir: to_elixir(func, types, structs, build_struct_meta(structs), ic)}
   end
 
   @doc """
@@ -100,29 +100,29 @@ defmodule Rian.Lower do
   The BEAM text view is exactly the Elixir one, so this delegates to
   `compile_elixir/4` — a distinct entry point kept for call-site intent.
   """
-  @spec compile_beam(list(), map(), list(), list()) :: map()
-  def compile_beam(types, func, structs \\ [], ranges \\ []),
-    do: compile_elixir(types, func, structs, ranges)
+  @spec compile_beam(list(), map(), list(), list(), map()) :: map()
+  def compile_beam(types, func, structs \\ [], ranges \\ [], ic \\ %{}),
+    do: compile_elixir(types, func, structs, ranges, ic)
 
   @doc """
   Compile a whole `%Rian.IR.Mod{}` to both targets: a `defmodule` (BEAM) and a
   `mod` (Rust), with its types/structs emitted once and each function wrapped at
   its declared visibility (`pub?` -> `def`/`pub fn`, else `defp`/private `fn`).
   """
-  @spec compile_module(struct()) :: map()
-  def compile_module(%Rian.IR.Mod{} = m) do
-    %{elixir: module_elixir(m), rust: module_rust(m)}
+  @spec compile_module(struct(), map()) :: map()
+  def compile_module(%Rian.IR.Mod{} = m, ic \\ %{}) do
+    %{elixir: module_elixir(m, ic), rust: module_rust(m, ic)}
   end
 
   @doc "Compile a module to the BEAM target only."
-  @spec compile_module_beam(struct()) :: map()
-  def compile_module_beam(%Rian.IR.Mod{} = m), do: %{elixir: module_elixir(m)}
+  @spec compile_module_beam(struct(), map()) :: map()
+  def compile_module_beam(%Rian.IR.Mod{} = m, ic \\ %{}), do: %{elixir: module_elixir(m, ic)}
 
-  defp module_elixir(%{name: name, types: types, structs: structs, funcs: funcs} = m) do
+  defp module_elixir(%{name: name, types: types, structs: structs, funcs: funcs} = m, ic) do
     env = build_env(types, structs, Map.get(m, :ranges, []))
     Enum.each(funcs, &(:ok = check!(&1, env)))
     consts = Map.get(m, :consts, [])
-    ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts))
+    ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts), %{}, ic)
 
     body =
       [
@@ -150,14 +150,14 @@ defmodule Rian.Lower do
   defp rs_doc(doc, prefix),
     do: doc |> String.split("\n") |> Enum.map_join("\n", &"#{prefix} #{&1}")
 
-  defp module_rust(%{name: name, types: types, structs: structs, funcs: funcs} = m) do
+  defp module_rust(%{name: name, types: types, structs: structs, funcs: funcs} = m, ic) do
     env = build_env(types, structs, Map.get(m, :ranges, []))
     Enum.each(funcs, &(:ok = check!(&1, env)))
     consts = Map.get(m, :consts, [])
     # a signature table (name -> func) lets the Rust call-site borrow pass see
     # which params are `&[T]`/`&str` and which calls return owned values
     sigs = Map.new(funcs, fn f -> {f.name, f} end)
-    ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts), sigs)
+    ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts), sigs, ic)
 
     # a type/struct must be `pub` if it is exported (`pub type`) OR named in a
     # `pub` function's signature — Rust forbids a public fn exposing a private type
@@ -210,7 +210,13 @@ defmodule Rian.Lower do
   # `const NAME Type := value` -> a 0-arity accessor on the BEAM (`def`/`defp`).
   defp ex_const(c, ctx) do
     def_kw = if c.pub?, do: "def", else: "defp"
-    val = c.value |> body_ast(ctx) |> Core.from_expr() |> emit(:elixir, emit_ctx()) |> elem(0)
+    val =
+      c.value
+      |> body_ast(ctx)
+      |> Rian.Check.annotate(%{}, ctx.ic)
+      |> emit(:elixir, emit_ctx(%{ic: ctx.ic}))
+      |> elem(0)
+
     "#{def_kw} #{PL.to_snake(c.name)}() do #{val} end"
   end
 
@@ -222,8 +228,8 @@ defmodule Rian.Lower do
       c.value
       |> body_ast(ctx)
       |> resolve_rust_pats(ctx.meta)
-      |> Core.from_expr()
-      |> emit(:rust, emit_ctx())
+      |> Rian.Check.annotate(%{}, ctx.ic)
+      |> emit(:rust, emit_ctx(%{ic: ctx.ic}))
       |> elem(0)
 
     "#{vis}const #{c.name}: #{prim_rust(c.type)} = #{val};"
@@ -297,11 +303,11 @@ defmodule Rian.Lower do
   end
 
   # ── Elixir backend ─────────────────────────────────────────────────────
-  @spec to_elixir(map(), list(), list(), map()) :: term()
-  def to_elixir(func, types, structs \\ [], smeta \\ %{}) do
+  @spec to_elixir(map(), list(), list(), map(), map()) :: term()
+  def to_elixir(func, types, structs \\ [], smeta \\ %{}, ic \\ %{}) do
     typespecs = Enum.map_join(types, "\n", &ex_typespec/1)
     struct_defs = Enum.map_join(structs, "\n", &ex_struct/1)
-    ctx = ctx(build_meta(types), smeta, MapSet.new())
+    ctx = ctx(build_meta(types), smeta, MapSet.new(), %{}, ic)
 
     [struct_defs, typespecs, elixir_clauses(func, ctx, "def")]
     |> Enum.reject(&(&1 == ""))
@@ -312,11 +318,14 @@ defmodule Rian.Lower do
   # `smeta` (struct table), `cset` (in-scope constant names). `cset`'s `MapSet.t()`
   # is declared explicitly so it stays opaque through the field access in
   # `resolve_consts/2` (otherwise its element type is inferred structurally).
-  @typep rctx :: %{meta: map(), smeta: map(), cset: MapSet.t(), funs: map()}
+  @typep rctx :: %{meta: map(), smeta: map(), cset: MapSet.t(), funs: map(), ic: map()}
   @spec ctx(map(), map(), MapSet.t()) :: rctx()
   @spec ctx(map(), map(), MapSet.t(), map()) :: rctx()
-  defp ctx(meta, smeta, cset, funs \\ %{}),
-    do: %{meta: meta, smeta: smeta, cset: cset, funs: funs}
+  @spec ctx(map(), map(), MapSet.t(), map(), map()) :: rctx()
+  # `ic` is the program inference context (`Check.program_ic`); threaded so the
+  # clause emitters can annotate the body's typed core IR (ADR-0050 §3).
+  defp ctx(meta, smeta, cset, funs \\ %{}, ic \\ %{}),
+    do: %{meta: meta, smeta: smeta, cset: cset, funs: funs, ic: ic}
 
   # The **emitter context** `ec` — the ambient data the expression emitter
   # (`emit`/`p`/`emit_block`) needs, threaded as an explicit immutable map
@@ -335,7 +344,11 @@ defmodule Rian.Lower do
         ex_scope: MapSet.new(),
         proto: %{},
         parametric: %{},
-        sigs: %{}
+        sigs: %{},
+        # the per-clause typing env + program inference context, so the body/guard
+        # leaves can lower from the typed core IR (ADR-0050 §3)
+        tenv: %{},
+        ic: %{}
       },
       opts
     )
@@ -353,8 +366,10 @@ defmodule Rian.Lower do
         # the clause head's pattern variables are in scope for the body, so a call
         # to one of them is a variable application (`f.(x)`), not a local call
         vars = Enum.flat_map(c.pats, fn p -> core_pat_vars(Core.from_pat(p)) end)
-        ec = emit_ctx(%{ex_scope: MapSet.new(vars)})
-        body = c.body |> body_ast(ctx) |> Core.from_expr() |> emit(:elixir, ec) |> elem(0)
+        # the per-clause typing env types the body's core IR (ADR-0050 §3).
+        tenv = Rian.Check.clause_env(c.pats, func.params, ctx.ic)
+        ec = emit_ctx(%{ex_scope: MapSet.new(vars), tenv: tenv, ic: ctx.ic})
+        body = c.body |> body_ast(ctx) |> Rian.Check.annotate(tenv, ctx.ic) |> emit(:elixir, ec) |> elem(0)
         "#{head}#{guard_str(c, :elixir, ec)} do #{body} end"
       end)
 
@@ -487,7 +502,7 @@ defmodule Rian.Lower do
         # `g` is a source string (Rian.Decl) or an already-parsed AST (Stage-2
         # front-end, ADR-0063) — `Pratt.parse/1` accepts either.
         ast = Pratt.parse(g) |> deref_ids(deref)
-        guard_kw(target) <> (emit(Core.from_expr(ast), target, ec) |> elem(0))
+        guard_kw(target) <> (emit(Rian.Check.annotate(ast, ec.tenv, ec.ic), target, ec) |> elem(0))
     end
   end
 
@@ -890,13 +905,13 @@ defmodule Rian.Lower do
     do: "{:#{PL.to_snake(name)}, #{Enum.map_join(args, ", ", &pat_ex/1)}}"
 
   # ── Rust backend ───────────────────────────────────────────────────────
-  @spec to_rust(map(), list(), term(), list(), map(), map()) :: term()
-  def to_rust(func, types, meta, structs \\ [], smeta \\ %{}, proto \\ %{}) do
+  @spec to_rust(map(), list(), term(), list(), map(), map(), map()) :: term()
+  def to_rust(func, types, meta, structs \\ [], smeta \\ %{}, proto \\ %{}, ic \\ %{}) do
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
     struct_defs = Enum.map_join(structs, "\n\n", &rust_struct/1)
     base_ec = emit_ctx(%{proto: proto})
 
-    [struct_defs, enums, rust_fn(func, ctx(meta, smeta, MapSet.new()), "", base_ec)]
+    [struct_defs, enums, rust_fn(func, ctx(meta, smeta, MapSet.new(), %{}, ic), "", base_ec)]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
@@ -950,8 +965,8 @@ defmodule Rian.Lower do
   traits). This composes the stdlib + protocols + generics that the per-unit
   `to_rust` cannot (it repeats type defs per unit).
   """
-  @spec rust_program(map()) :: term()
-  def rust_program(prog) do
+  @spec rust_program(map(), map()) :: term()
+  def rust_program(prog, ic \\ %{}) do
     # Erase abstract types to their base (ADR-0067) — a whole-program Rust emit
     # entry reached directly (e.g. tests), so it must erase like `Decl.compile`.
     prog = Rian.Opaque.erase(prog)
@@ -972,7 +987,7 @@ defmodule Rian.Lower do
     base_ec =
       emit_ctx(%{proto: proto_method_traits(protocols), parametric: parametric, sigs: sigs})
 
-    c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new(), sigs)
+    c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new(), sigs, ic)
 
     [
       Enum.map_join(structs, "\n\n", &rust_struct/1),
@@ -982,7 +997,7 @@ defmodule Rian.Lower do
       # sibling `mod`s become Rust `mod snake { … }` (each self-contained — see
       # `module_rust/1`), so a cross-module call `Mod.fun(…)` -> `snake::fun(…)`
       # resolves. This is how the injected `Show` (ADR-0069 `${float}`) is emitted.
-      Enum.map_join(Map.get(prog, :mods, []), "\n\n", &module_rust/1)
+      Enum.map_join(Map.get(prog, :mods, []), "\n\n", &module_rust(&1, ic))
     ]
     |> Enum.reject(&(&1 in ["", nil]))
     |> Enum.join("\n\n")
@@ -1119,7 +1134,7 @@ defmodule Rian.Lower do
     |> rewrite_proto_calls(ec.proto)
     |> resolve_rust_pats(c.meta)
     |> insert_borrows(Map.get(c, :funs, %{}), ec)
-    |> Core.from_expr()
+    |> Rian.Check.annotate(ec.tenv, ec.ic)
     |> emit(:rust, ec)
     |> elem(0)
   end
@@ -1279,11 +1294,16 @@ defmodule Rian.Lower do
         # plus this clause's borrow/slice/owned-field sets. `owned_fields` (Gap C) must
         # be collected from the structured `{:ctor, …}` arms in `pre`, before
         # `resolve_rust_pats` stringifies them.
+        # the per-clause typing env types the body's core IR (ADR-0050 §3).
+        tenv = Rian.Check.clause_env(c.pats, func.params, ctx.ic)
+
         ec = %{
           fn_ec
           | borrowed: borrowed || MapSet.new(),
             slices: slice_binders(func.params, c.pats),
-            owned_fields: owned_field_binders(pre, ctx)
+            owned_fields: owned_field_binders(pre, ctx),
+            tenv: tenv,
+            ic: ctx.ic
         }
 
         surface =
@@ -1291,7 +1311,7 @@ defmodule Rian.Lower do
           |> resolve_rust_pats(ctx.meta)
           |> insert_borrows(Map.get(ctx, :funs, %{}), ec, borrowed)
 
-        ast = Core.from_expr(surface)
+        ast = Rian.Check.annotate(surface, tenv, ctx.ic)
         body = emit(ast, :rust, ec) |> elem(0)
         rebinds = arm_rebinds(c.pats, iso, used_ids(surface))
 
@@ -1770,11 +1790,11 @@ defmodule Rian.Lower do
   @doc "Emit a single Rian expression string to :elixir or :rust."
   @spec emit_expr(String.t(), atom()) :: term()
   def emit_expr(src, target),
-    do: emit(Core.from_expr(Rian.Pratt.parse(src)), target, emit_ctx()) |> elem(0)
+    do: emit(Rian.Check.annotate(Rian.Pratt.parse(src), %{}, %{}), target, emit_ctx()) |> elem(0)
 
   @doc "Emit an already-built AST (e.g. after macro expansion / comptime folding)."
   @spec emit_ast(term(), atom()) :: term()
-  def emit_ast(ast, target), do: emit(Core.from_expr(ast), target, emit_ctx()) |> elem(0)
+  def emit_ast(ast, target), do: emit(Rian.Check.annotate(ast, %{}, %{}), target, emit_ctx()) |> elem(0)
 
   # emit/3 -> {string, prec}; p/4 wraps in parens when prec < ctx.
   defp p(node, ctx, t, ec) do
