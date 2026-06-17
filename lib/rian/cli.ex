@@ -13,10 +13,14 @@ defmodule Rian.CLI do
       rian fmt -                # read stdin, write formatted source to stdout
       rian run FILE             # compile to BEAM and run `main/0`, printing its value
       rian run FILE --main FUNC # run a different zero-arg entry
+      rian build FILE [-o DIR]  # compile to BEAM `.beam` files (the rebar3 backend)
+      rian build FILE --rust    # print Rust/JS/JVM source (--rust|--js|--jvm)
+      rian check FILE           # run the type/exhaustiveness gates (exit 0/1)
+      rian targets FILE [--require ex,rs,js]   # per-function reachability / gate
 
-  The actual logic lives in `Rian.Format.CLI` / `Rian.Run`, so the same code backs
-  both this escript and the `mix rian.format` / `mix rian.run` tasks; this module
-  only adapts argv → exit code via `System.halt/1`.
+  The actual logic lives in `Rian.Format.CLI` / `Rian.Run` / `Rian.Build`, so the same
+  code backs both this escript and the `mix rian.*` tasks; this module only adapts
+  argv → exit code via `System.halt/1`.
   """
 
   @doc "escript entry point."
@@ -30,6 +34,9 @@ defmodule Rian.CLI do
   # returns an integer exit code
   defp dispatch(["fmt" | rest]), do: Rian.Format.CLI.run(rest)
   defp dispatch(["run" | rest]), do: Rian.Run.cli(rest)
+  defp dispatch(["build" | rest]), do: Rian.Build.build(rest)
+  defp dispatch(["check" | rest]), do: Rian.Build.check(rest)
+  defp dispatch(["targets" | rest]), do: Rian.Build.targets(rest)
 
   defp dispatch(["-h" | _]), do: usage(0)
   defp dispatch(["--help" | _]), do: usage(0)
@@ -52,6 +59,10 @@ defmodule Rian.CLI do
       rian fmt -                format stdin → stdout
       rian run FILE             compile to BEAM and run `main/0`
       rian run FILE --main FUNC run a different zero-arg entry
+      rian build FILE [-o DIR]  compile to BEAM `.beam` files in DIR (default .)
+      rian build FILE --rust    print Rust/JS/JVM source (--rust|--js|--jvm)
+      rian check FILE           run the type/exhaustiveness gates (exit 0/1)
+      rian targets FILE [--require ex,rs,js]   per-function reachability / gate
     """)
 
     code

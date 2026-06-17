@@ -34,7 +34,7 @@ mix rian.compile FILE [--beam|--rust|--js|--jvm] [--show-elixir]  # BEAM bytecod
 mix rian.roundtrip FILE|DIR [-o tmp]              # Elixir→Rian→Elixir roundtrip dashboard (Rian.Roundtrip): both BEAM backends + forms-equiv vs original
 mix rian.jar FILE [-o OUT.jar] [--main FUNC]      # runnable JVM .jar via Kotlin+kotlinc (ADR-0049/0062 rung B)
 mix rian.format FILE… [--check|--diff|--stdout]   # canonical zero-config formatter (Rian.Format, ADR-0045); wraps to 98 cols; --check = CI gate; `-` = stdin
-mix escript.build                                 # build the toolchain-free `rian` binary; `./rian fmt …` / `./rian run …` (ADR-0031 Tier 3)
+mix escript.build                                 # toolchain-free `rian` binary: `rian fmt|run|build|check|targets` (Rian.CLI→Rian.{Format.CLI,Run,Build}, ADR-0031 Tier 3)
 mix rian.run FILE [--main FUNC]                   # compile a .rian to BEAM + invoke its `main/0` (zero-arg); non-interactive sibling of rian.repl (Rian.Run, ADR-0031)
 mix rian.repl                                     # compiling REPL (parse→check→abstract-forms→load→run)
 mix rian.targets FILE [--require ex,rs,js]        # per-function target-reachability report / gate

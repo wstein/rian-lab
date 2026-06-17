@@ -160,6 +160,14 @@ all exist and are tested.
   second semantics (that would cut against ADR-0057's "one source, many targets"); it is a run
   *convenience*, statically gated like every other path. Logic lives in `Rian.Run`, shared by the task
   and the escript (`rian run`) — the same split as `rian fmt`/`Rian.Format.CLI`.
+- **The `rian` escript is now the multi-target *driver* (ADR-0026 §2 "self-contained binary").** Beyond
+  `fmt`/`run` it carries `build`/`check`/`targets` (`Rian.Build`): `rian build FILE -o DIR` writes
+  loadable `Elixir.<Mod>.beam` files (and `--rust`/`--js`/`--jvm` print source); `rian check` runs the
+  gates; `rian targets [--require …]` is the portability gate, toolchain-free. These surface the
+  `mix rian.compile`/`rian.targets` logic with no Elixir/mix on the host — and `rian build -o DIR` is the
+  backend the **rebar3 plugin** shells out to (`integration/rebar3_rian/`), so Rian sources compile inside
+  a rebar3 project (the ADR-0026 "Erlang citizen" deliverable). The driver *orchestrates* the per-target
+  ecosystems (rebar3/Hex, cargo, node); it does **not** reimplement dependency management.
 - **Concurrency is native-per-target — a deliberate boundary, not a gap** (clarified 2026-06-13;
   refines the 2026-06-12 lock). Rian's purpose is to **share sequential application logic and tests**
   across targets — the canonical proof is Rian's own lexer/parser running on the BEAM, Rust, and
