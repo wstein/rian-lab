@@ -80,7 +80,7 @@ defmodule Mix.Tasks.Rian.Transpile do
       end
 
     cond do
-      opts[:check] or opts[:update_baseline] ->
+      opts[:check] || opts[:update_baseline] ->
         run_check(path, opts[:baseline] || @baseline_default, !!opts[:update_baseline])
 
       true ->
