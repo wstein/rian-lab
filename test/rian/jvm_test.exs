@@ -92,6 +92,11 @@ defmodule Rian.JVMTest do
       probe: ~s|println(get())|
     },
     %{
+      id: :const_block,
+      src: "mod M do\n  const X := a := 40; a + 2\n  def get() Int53 := X\nend",
+      probe: ~s|println(get())|
+    },
+    %{
       id: :str_pat,
       src: """
       def tag(s String) Int64
@@ -343,6 +348,13 @@ defmodule Rian.JVMTest do
       kt = jvm_kt(jvm, :const_ref)
       assert kt =~ "val Answer = 42L"
       expect_jvm(jvm, :const_ref, "42")
+    end
+
+    @tag :jvm
+    test "a multi-statement `const` value lowers to a `run { … }` val", %{jvm_batch: jvm} do
+      kt = jvm_kt(jvm, :const_block)
+      assert kt =~ "val X = run { val a = 40L; (a + 2L) }"
+      expect_jvm(jvm, :const_block, "42")
     end
 
     @tag :jvm

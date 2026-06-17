@@ -141,16 +141,17 @@ defmodule Rian.JVM do
       Map.get(prog, :consts, []) ++
         Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :consts, []))
 
-  # `const NAME := value` -> a top-level Kotlin `val`. The value is a single
-  # expression that parses and resolves sibling const references.
+  # `const NAME := value` -> a top-level Kotlin `val`. The value parses and resolves
+  # sibling const references; `block_value` emits a single expression inline and a
+  # multi-statement block value as a scoped `run { … }`.
   defp const_kt(c, ic) do
-    %EBlock{stmts: [{:expr, e}]} =
+    %EBlock{stmts: stmts} =
       c.value
       |> Pratt.parse_body()
       |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
       |> Rian.Check.annotate(%{}, ic)
 
-    "val #{c.name} = #{expr_kt(e)}"
+    "val #{c.name} = #{block_value(Rian.Shadow.dedup(stmts, [], &kt_fresh/2))}"
   end
 
   # Rewrite a reference to a declared `const` (`{:id, NAME}`, NAME in the set) into a

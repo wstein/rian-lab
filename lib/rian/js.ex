@@ -168,17 +168,24 @@ defmodule Rian.JS do
         Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :consts, []))
 
   # `const NAME := value` -> a top-level JS `const` (exported when `pub`). The value
-  # is a single expression that parses, resolves sibling const references, and emits
-  # in the program integer mode.
+  # parses, resolves sibling const references, and emits in the program integer mode.
+  # A single-expression value emits inline; a multi-statement block value wraps in an
+  # IIFE so the `const` still binds a single expression.
   defp const_js(c, i53, ic) do
-    %EBlock{stmts: [{:expr, e}]} =
+    %EBlock{stmts: stmts} =
       c.value
       |> Pratt.parse_body()
       |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
       |> Check.annotate(%{}, ic)
 
+    val =
+      case Rian.Shadow.dedup(stmts, [], &js_fresh/2) do
+        [{:expr, e}] -> expr_js(e, i53)
+        deduped -> "(() => { #{block_return(deduped, i53)} })()"
+      end
+
     export = if c.pub?, do: "export ", else: ""
-    "#{export}const #{c.name} = #{expr_js(e, i53)};"
+    "#{export}const #{c.name} = #{val};"
   end
 
   # every function the JS file emits: the top-level ones plus every `mod`'s,

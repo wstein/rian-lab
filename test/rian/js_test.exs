@@ -44,6 +44,16 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a multi-statement `const` value wraps in an IIFE (still a single binding)" do
+      js = JS.compile("mod M do\n  const X := a := 40; a + 2\n  pub def g() Int53 := X\nend")
+      assert js =~ "const X = (() => { let a = 40; return (a + 2); })();"
+
+      case node_eval(js, "g()") do
+        :no_node -> :ok
+        out -> assert out == "42"
+      end
+    end
+
     test "Int53 uses native JS numbers (not BigInt) — exact to 2^53 (ADR-0049)" do
       js53 = JS.compile("def inc(n Int53) Int53 := n + 1")
       # native number literal — no `n` suffix
