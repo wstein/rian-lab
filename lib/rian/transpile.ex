@@ -91,6 +91,8 @@ defmodule Rian.Transpile do
     {"Map", :put, 3} => {"Dict", "put"},
     {"Map", :has_key?, 2} => {"Dict", "has"},
     {"String", :length, 1} => {"Str", "length"},
+    {"String", :to_charlist, 1} => {"Str", "chars"},
+    {"List", :to_string, 1} => {"Str", "from_chars"},
     {"Integer", :to_string, 1} => {"Str", "from_int"}
   }
 

@@ -45,11 +45,14 @@ defmodule Rian.TranspileTest do
       refute out =~ "enforce_keys"
     end
 
-    test "a nested module with functions nests as `mod`, not flattened" do
+    test "a function-bearing nested module is HOISTED to a top-level `mod` (Rian is flat)" do
       src = "defmodule Outer do\n  defmodule Helper do\n    def h(x), do: x\n  end\nend"
       out = rian(src)
-      assert out =~ "mod Helper do"
-      assert out =~ "def h("
+      # `Helper` becomes a sibling top-level module, not a nested one (which Rian's
+      # flat `Decl` would drop) — both `mod`s start at column 0.
+      assert out =~ "\nmod Outer do"
+      assert out =~ "\nmod Helper do"
+      assert out =~ "pub def h("
     end
   end
 
@@ -357,6 +360,14 @@ end|) =~ ~S|"v=${x}!"|
 
     test "Enum.sum → List.sum" do
       assert rian("defmodule M do\n  def f(xs), do: Enum.sum(xs)\nend") =~ "List.sum(xs)"
+    end
+
+    test "codepoint conversions map to Str (same prim lowering as the Elixir call)" do
+      # String.to_charlist ≡ Str.chars; List.to_string ≡ Str.from_chars.
+      assert rian("defmodule M do\n  def f(s), do: String.to_charlist(s)\nend") =~ "Str.chars(s)"
+
+      assert rian("defmodule M do\n  def f(cs), do: List.to_string(cs)\nend") =~
+               "Str.from_chars(cs)"
     end
 
     test "Enum.map → List.map with its lambda eta-translated" do
