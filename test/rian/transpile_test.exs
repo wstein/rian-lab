@@ -275,7 +275,9 @@ end|) =~ ~S|"v=${x}!"|
 
     test "a multi-clause `fn` lowers to a single-clause lambda over a `case`" do
       out =
-        rian("defmodule M do\n  def g(xs), do: Enum.reduce(xs, 0, fn 0, a -> a; x, a -> x + a end)\nend")
+        rian(
+          "defmodule M do\n  def g(xs), do: Enum.reduce(xs, 0, fn 0, a -> a; x, a -> x + a end)\nend"
+        )
 
       assert out =~ "(p1, p2) -> case {p1, p2} do"
       assert out =~ "{0, a} -> a"
@@ -287,6 +289,12 @@ end|) =~ ~S|"v=${x}!"|
       out = rian("defmodule M do\n  def g(%{lo: a}), do: a\nend")
       assert out =~ "%{lo: a}"
       refute out =~ "%{:lo"
+    end
+
+    test "a match `=` in expression position renders as `:=`, not the prefix `=(l, r)`" do
+      out = rian("defmodule M do\n  def g(x), do: with(y = f(x), do: y)\nend")
+      assert out =~ "y := f(x)"
+      refute out =~ "=(y"
     end
   end
 

@@ -144,8 +144,12 @@ defmodule Rian.Transpile do
       # a bodiless `def` head does not (it raises "no clauses"), so it falls through
       # to `parse_rian_sig`, which supplies the dummy body.
       case safe_decl(str) do
-        %{structs: [s | _]} -> {defs, Map.put(structs, s.name, str), types}
-        %{types: [_ | _]} -> {defs, structs, types ++ [str]}
+        %{structs: [s | _]} ->
+          {defs, Map.put(structs, s.name, str), types}
+
+        %{types: [_ | _]} ->
+          {defs, structs, types ++ [str]}
+
         _ ->
           case parse_rian_sig(str) do
             {k, sig} ->
@@ -710,6 +714,12 @@ defmodule Rian.Transpile do
   # it infix. Without this it falls through to the generic local-call clause and
   # mis-renders as the prefix `|>(l, r)`.
   defp expr({:|>, _, [l, r]}), do: "#{expr(l)} |> #{pipe_rhs(r)}"
+
+  # A match `=` reached in expression position (a `with`/`case` arm, a nested
+  # statement) is Rian's bind `:=`, same as the block-statement path (`stmt/1`).
+  # Without this it falls through to the generic local-call clause and mis-renders
+  # as the prefix `=(l, r)`.
+  defp expr({:=, _, [l, r]}), do: "#{pat(l)} := #{expr(r)}"
 
   defp expr({:-, _, [x]}), do: "-#{expr(x)}"
   defp expr({:not, _, [x]}), do: "not #{expr(x)}"
