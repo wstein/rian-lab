@@ -1,12 +1,13 @@
 # ADR-0075 — Transpiler type inference: filling `_Unk` holes
 
 **Status:** Accepted (direction) · implemented (MVP: `Rian.Transpile.Infer`, `--infer`)
-**Implemented:** Algorithm-J whole-program inference over the Elixir AST with occurs-check, `[Gen]`
+**Implemented:** Algorithm-J inference over the Elixir AST with occurs-check, `[Gen]`
 generalization, `Int53` cross-target defaulting, two-pass intra-module sibling propagation,
 Phase A cross-module sigs, Phase B Result/error-set inference + synthesis, and Phase C `@spec`
 harvesting (cross-checked) — all accident-free (type-check-gated). Measured ceiling on the Elixir
 compiler corpus is ~31% (corpus-bound; see below); `@spec` harvest adds 51 spec-backed slots with
-0 regressions; sum-type reconstruction for struct IR remains the open lever
+0 regressions; sum-type reconstruction for struct IR remains the open lever. The exploratory
+`port_analysis` / `port.spec` decision-amplification layer was **removed** as unused (see below)
 **Refs:** ADR-0034 (type-system foundations / infer-local·declare-public), ADR-0040 (error
 handling / `T | E`), ADR-0042 (`Fn(…)`), ADR-0064 (portable numerics / `Int53`), ADR-0026
 (Dialyzer `-spec` *emission* — the inverse map), ADR-0063
@@ -110,8 +111,8 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
     (named for the enclosing module, field names recovered, defaults dropped). This is the *safe*
     half of struct reconstruction: the field **names** port mechanically; only the field **types**
     stay `_Unk` holes (the IR wall above). A non-literal `defstruct @fields` still falls back to a
-    marker rather than emit a wrong decl. `port_analysis` already inventoried struct fields (the §3
-    proposed-sum clusters); this closes the matching gap on the transpiler side.
+    marker rather than emit a wrong decl. This is the field-name half of struct reconstruction on
+    the transpiler side.
   - **Nested struct modules (IMPLEMENTED).** The Elixir one-struct-per-module idiom (an outer
     `defmodule` wrapping many `defmodule Sub do @enforce_keys … defstruct … end`, e.g. `lib/rian/ir.ex`'s
     12 IR structs) no longer drops each inner module to a `TODO[port]`. A nested `defmodule` is
@@ -127,9 +128,8 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
     **resolves local refs in `@spec`s** (`@spec unwrap(t()) :: t()` → `unwrap(b Box) Box`), amplifying
     Phase C: specs that mention local types now fill instead of bailing. Untranslatable `@type`s
     (tuples/maps) synthesize nothing and resolve nothing — honest. A consumed `@type` becomes a passive
-    `# type:` provenance line. Wired into both the transpiler and the `whole_program` (port-analysis)
-    path. Like `@spec`, the *mechanism* is general; `lib/rian`'s own `@type`s are mostly tuples, so the
-    gain on this corpus is small.
+    `# type:` provenance line. Wired into the transpiler. Like `@spec`, the *mechanism* is general;
+    `lib/rian`'s own `@type`s are mostly tuples, so the gain on this corpus is small.
 - **Phase C — `@spec` harvesting (IMPLEMENTED, cross-checked).** Elixir is untyped, so inference can
   only *reconstruct* types from usage — but a large fraction of real Elixir carries `@spec`, which
   **is** the human-written type the engine was reconstructing. `Rian.Transpile.Infer.collect_specs/1`
@@ -161,51 +161,24 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
 - Fill rate becomes a tracked, ratcheting metric — but always paired with the type-check gate, so
   it measures *correct* fills only.
 
-## Pre-step port-analysis (the human-judgment bridge)
+## Removed: port-analysis & the `port.spec` decision-amplification layer
 
-Since the wall is human-judgment-shaped, a team debate converged on a **read-only,
-generated `PORT.analysis.md`** (`mix rian.port_analysis`, `Rian.PortAnalysis`) as the
-first increment: it surfaces (1) inferred sigs with reach, (2) holes-with-reasons,
-(3) **proposed sum-type groupings** clustered from cross-module dispatch
-co-occurrence, and (4) an **error-idiom inventory** with proposed variants. It is
-regenerable (anti-drift). It earns its keep: run cross-module on `lib/rian` it
-reconstructs the two real `Core` sums (`Expr` = the `E*` nodes, `Pat` = the `P*` nodes)
-from non-local dispatch evidence — the decision a human cannot make from a single draft.
-Generating it also caught a latent bug: a partially-resolved parametric type
-(`Vec(<unknown>)`) was rendered `Vec(hole)` (invalid Rian); it now falls back to a
-whole-slot hole.
+An exploratory layer once sat on top of the engine: a read-only generated `PORT.analysis.md`
+(`mix rian.port_analysis`, `Rian.PortAnalysis`) that surfaced proposed sum-type groupings
+(clustered from cross-module dispatch co-occurrence) and an error-idiom inventory, plus a
+`port.spec` *decision-amplification* loop (`Rian.PortSpec`) — a human edits `Placeholder =
+RianType` lines once and a dedicated **whole-program** inference pass (`whole_program/4` +
+`prime_wp/2`) substitutes the named type program-wide, into both the report and the
+`mix rian.transpile DIR --spec port.spec` drafts. It demonstrably reconstructed the two real
+`Core` sums (`Expr`/`Pat`) from dispatch evidence and amplified two edits into ~65 resolved slots.
 
-### The `port.spec` feedback loop (IMPLEMENTED, `Rian.PortSpec`)
-
-The report's placeholders aren't hundreds of distinct types — they're a few dozen real
-ones, each carrying **one shared name** across the whole program (the whole-program
-unification links every site). So the loop is **decision amplification**: the human edits
-a `port.spec` of `Placeholder = RianType` lines (`Sum1 = Expr`, `Unk0042 = String`), and
-`mix rian.port_analysis --spec port.spec` substitutes program-wide — **one decision per
-shared placeholder re-resolves every site**. On `lib/rian`, naming the two dispatch sums
-(`Sum1 = Expr`, `Sum2 = Pat`) re-resolves **65 signature slots** (37 `Expr` + 28 `Pat`) and
-**fully resolves 18 functions** out of the §2 review list, from two edits. The far bigger
-lever is the **threaded context types** — three unknowns (`Check`'s `ic` ≈ 112 sites,
-`Infer`'s store ≈ 101, `Beam`'s program IR ≈ 91) carry ~300 sites between them, each one
-decision — but those need a real design call (what Rian type is the inference context?).
-`--emit-spec` writes a stub listing every decision to make (sums with members,
-unknowns with site counts) as a checklist. A named sum's now-fully-resolved sigs graduate
-out of the §2 review list, and the placeholder index shows only the undecided remainder —
-so the report doubles as a porting *burndown*. The substitution is a rename of shared
-names, not a re-inference, so it cannot introduce an accidental fill (the human owns each
-`= RianType` decision).
-
-**The spec also drives the transpiler's drafts (IMPLEMENTED).** `mix rian.transpile DIR
---spec port.spec` runs the **whole-program** inference over `DIR` (so the shared
-`Sum#`/`Unk####` numbering matches the report the spec was authored against),
-`prime_wp/2` applies the spec, and each emitted `.rian` draft's signatures carry the
-**named types** (`def ev(x Expr) …`) where decided, falling back to a whole `_Unk` hole
-for any slot still holding an undecided placeholder (a partially-resolved `Vec(Unk…)` is
-not valid draft Rian). So the same `port.spec` that cleans the *report* now also types
-the *drafts* a human finishes — name a sum once, every draft signature over it resolves.
-On `lib/rian`, the two-sum spec yields `Expr`/`Pat` in ~38/31 draft slots. Still deferred:
-running `Rian.Check` per emitted draft as a hard accident gate, and mapping error idioms
-through the same file.
+**This layer was removed** (`mix rian.port_analysis`, `Rian.PortAnalysis`, `Rian.PortSpec`, the
+`whole_program/4` pass, and the transpiler's `--spec` path): in practice the actual porting was
+driven hands-on against `--infer` drafts, the spec-loop never entered the workflow, and a separate
+whole-program inference pass duplicating the per-group engine was not worth carrying. The surviving,
+**supported** inference surface is `mix rian.transpile --infer` / `--infer-report` — per-def-group
+inference with a `prime_xmod/2` cross-module signature cache (Phase A). Sum-type reconstruction
+(the human-judgment wall) remains an open lever, to be revisited under a dedicated ADR if pursued.
 
 ## Open items
 

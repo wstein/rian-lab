@@ -1,8 +1,9 @@
 defmodule Rian.Transpile.Infer do
   @moduledoc """
-  Whole-program type inference that fills the transpiler's `_Unk` holes
-  (ADR-0034-aligned: it *produces* explicit signatures rather than relaxing the
-  declare-public boundary).
+  Type inference that fills the transpiler's `_Unk` holes — per def group, with a
+  cross-module signature cache (`prime_xmod/2`) so calls into sibling modules
+  resolve (ADR-0034-aligned: it *produces* explicit signatures rather than relaxing
+  the declare-public boundary).
 
   It runs at the transpiler's rendering seam over the **Elixir quoted AST** of a
   def group (the same shapes `Rian.Transpile.expr/1` handles), generating
@@ -366,153 +367,6 @@ defmodule Rian.Transpile.Infer do
     end)
   end
 
-  # ── whole-program inference (the PORT-ANALYSIS path) ──────────────────────
-  @doc """
-  Whole-program inference over `[{module, [group]}]`. Every function's parameter
-  and return is a SHARED unification variable; call sites link caller↔callee
-  monomorphically, struct construction/patterns resolve to their proposed sum
-  (`clusters`), and the residual free variables become stable, SHARED `Unk####`
-  names — the same logical unknown carries one identity across the program.
-
-  `specs` (optional) maps `{mod, fn, arity} => %{params, ret}` of spec TERMS (from
-  `collect_specs/1` + a re-key by module) — harvested `@spec` hints, seeded per
-  function after its body pass and cross-checked (a conflict keeps the proven type).
-
-  Returns `%{sigs: %{{mod,fn,arity} => %{params, ret}}, unks: %{name => [sites]}}`.
-  """
-  @spec whole_program(list(), term(), list(), map()) :: term()
-  def whole_program(modules, stdlib, clusters \\ [], specs \\ %{}) do
-    s0 = store_new()
-
-    # 1. allocate a shared sig var for every param + return slot.
-    {sigvars, s1} =
-      for {mod, groups} <- modules, g <- groups, reduce: {%{}, s0} do
-        {sv, s} ->
-          ar = hd(g.clauses).arity
-          {pvars, s} = fresh_n(s, ar)
-          {rvar, s} = fresh(s)
-          {Map.put(sv, {mod, to_string(hd(g.clauses).name), ar}, {pvars, rvar}), s}
-      end
-
-    ctx = %{
-      prelude: prelude_sigs(),
-      stdlib: stdlib,
-      sigvars: sigvars,
-      clusters: clusters,
-      siblings: %{},
-      xmod: %{}
-    }
-
-    # 2. one pass over every body into the SHARED store (union-find is
-    # order-independent, so cross-function constraints settle without a fixpoint).
-    store =
-      for {mod, groups} <- modules, g <- groups, reduce: s1 do
-        s ->
-          key = {mod, to_string(hd(g.clauses).name), hd(g.clauses).arity}
-          {pvars, rvar} = sigvars[key]
-          cm = Map.put(ctx, :cur_mod, mod)
-
-          s =
-            Enum.reduce(g.clauses, s, fn clause, s ->
-              s = resolve_struct_params(clause.args, pvars, cm, s)
-              {env, s} = bind_params(clause.args, pvars, cm, s)
-              {bt, s} = gen(clause.body, env, cm, s)
-              {s, _} = unify(s, rvar, bt)
-              s
-            end)
-
-          # cross-checked `@spec` seeding (ADR-0075 Phase C): a residual-free slot
-          # adopts its declared spec type; a conflict keeps the proven body type.
-          apply_spec_terms(Map.get(specs, key), pvars, rvar, s)
-      end
-
-    resolve_program(sigvars, store)
-  end
-
-  # struct PARAMS (`def f(%ENum{})`) — resolve the shared param var to the cluster
-  # sum before pattern binding (gen_pat has no ctx; do it here).
-  defp resolve_struct_params(args, pvars, ctx, s) do
-    Enum.zip(args, pvars)
-    |> Enum.reduce(s, fn {pat, pv}, s ->
-      case pat do
-        {:%, _, [{:__aliases__, _, parts}, _]} ->
-          {s, _} = unify(s, pv, con(cluster_name(ctx.clusters, List.last(parts) |> to_string())))
-          s
-
-        _ ->
-          s
-      end
-    end)
-  end
-
-  # name the residual free variables `Unk####` (shared by equivalence class,
-  # deterministic by the smallest slot that reaches each), and render every slot.
-  defp resolve_program(sigvars, store) do
-    slots =
-      Enum.flat_map(sigvars, fn {key, {pvars, rvar}} ->
-        pslots = pvars |> Enum.with_index() |> Enum.map(fn {v, i} -> {key, "p#{i}", v} end)
-        pslots ++ [{key, "ret", rvar}]
-      end)
-
-    # free var id -> the lexicographically smallest {key, slot} reaching it.
-    first_site =
-      Enum.reduce(slots, %{}, fn {key, slot, v}, acc ->
-        Enum.reduce(unk_vars(store, v), acc, fn id, acc ->
-          Map.update(acc, id, {key, slot}, &min(&1, {key, slot}))
-        end)
-      end)
-
-    unk_names =
-      first_site
-      |> Enum.sort_by(fn {_id, site} -> site end)
-      |> Enum.with_index(1)
-      |> Map.new(fn {{id, _}, i} -> {id, "Unk#{String.pad_leading("#{i}", 4, "0")}"} end)
-
-    sigs =
-      Enum.reduce(slots, %{}, fn {key, slot, v}, acc ->
-        ts = render_wp(store, unk_names, v)
-        Map.update(acc, key, slot_sig(slot, ts, []), &put_slot(&1, slot, ts))
-      end)
-
-    unks =
-      slots
-      |> Enum.reduce(%{}, fn {key, slot, v}, acc ->
-        Enum.reduce(unk_vars(store, v), acc, fn id, acc ->
-          Map.update(acc, unk_names[id], [{key, slot}], &[{key, slot} | &1])
-        end)
-      end)
-      |> Map.new(fn {name, sites} -> {name, sites |> Enum.uniq() |> Enum.sort()} end)
-
-    %{sigs: sigs, unks: unks}
-  end
-
-  defp slot_sig("ret", ts, _), do: %{params: [], ret: ts}
-  defp slot_sig(_p, ts, _), do: %{params: [ts], ret: nil}
-  defp put_slot(sig, "ret", ts), do: %{sig | ret: ts}
-  defp put_slot(sig, _p, ts), do: %{sig | params: sig.params ++ [ts]}
-
-  # render for the whole-program path: numeric vars default to `Int53` (cross-target,
-  # ADR-0064); other residual free vars get their shared `Unk####` name.
-  defp render_wp(store, unk_names, t) do
-    case resolve(store, t) do
-      {:con, name} ->
-        name
-
-      {:app, head, parts} ->
-        "#{head}(#{Enum.map_join(parts, ", ", &render_wp(store, unk_names, &1))})"
-
-      {:var, id} ->
-        cond do
-          MapSet.member?(store.num, id) -> "Int53"
-          true -> Map.get(unk_names, id, "Unk?")
-        end
-    end
-  end
-
-  # free variables that are genuinely unknown (excludes numeric vars → they
-  # default to Int53, not an Unk placeholder).
-  defp unk_vars(store, v), do: free_vars(store, v) |> Enum.reject(&MapSet.member?(store.num, &1))
-
   # ── constraint generation: Elixir AST → term ──────────────────────────────
 
   # literals
@@ -696,54 +550,36 @@ defmodule Rian.Transpile.Infer do
     {app("Fn", pvars ++ [bt]), s}
   end
 
-  # struct construction `%Mod{…}` — the value IS that struct's type (Lever B): its
-  # proposed SUM in the whole-program path (`ctx.clusters`, shared name everywhere), else
-  # the struct's own declared name — sound now that the transpiler emits a `struct Mod(…)`
+  # struct construction `%Mod{…}` — the value IS that struct's type (Lever B): the
+  # struct's own declared name, sound now that the transpiler emits a `struct Mod(…)`
   # decl for every `defstruct`/nested struct module. Must precede the local-call clause
   # (`{:%, _, [a, b]}` otherwise looks like a call to `:%`).
-  defp gen({:%, _, [{:__aliases__, _, parts}, {:%{}, _, _}]}, _env, ctx, s) do
-    name = parts |> List.last() |> to_string()
-
-    case Map.get(ctx, :clusters) do
-      nil -> {con(name), s}
-      clusters -> {con(cluster_name(clusters, name)), s}
-    end
+  defp gen({:%, _, [{:__aliases__, _, parts}, {:%{}, _, _}]}, _env, _ctx, s) do
+    {con(parts |> List.last() |> to_string()), s}
   end
 
-  # remote call `Mod.fun(args)` — whole-program shared sig var (ctx.sigvars) first,
-  # then stdlib map, then the Phase A cross-module table, else free.
+  # remote call `Mod.fun(args)` — stdlib map first, then the Phase A cross-module
+  # table, else free.
   defp gen({{:., _, [mod, fun]}, _, args}, env, ctx, s) when is_list(args) do
     m = mod_name(mod)
 
-    case sigvar_call(ctx, {m, to_string(fun), length(args)}, args, env, s) do
-      {:ok, rvar, s} ->
-        {rvar, s}
+    case Map.get(ctx.stdlib, {m, fun, length(args)}) do
+      {rmod, rfun} ->
+        call_sig(ctx, {rmod, rfun, length(args)}, args, env, ctx, s)
 
-      :no ->
-        case Map.get(ctx.stdlib, {m, fun, length(args)}) do
-          {rmod, rfun} ->
-            call_sig(ctx, {rmod, rfun, length(args)}, args, env, ctx, s)
-
-          nil ->
-            case Map.get(ctx.xmod, {m, to_string(fun), length(args)}) do
-              nil -> gen_args_then_fresh(args, env, ctx, s)
-              sig -> instantiate(sig, args, env, ctx, s)
-            end
+      nil ->
+        case Map.get(ctx.xmod, {m, to_string(fun), length(args)}) do
+          nil -> gen_args_then_fresh(args, env, ctx, s)
+          sig -> instantiate(sig, args, env, ctx, s)
         end
     end
   end
 
-  # local call `f(args)` — whole-program shared sig var (current module) first.
+  # local call `f(args)` — a same-file sibling sig, else free.
   defp gen({name, _, args}, env, ctx, s) when is_atom(name) and is_list(args) do
-    case sigvar_call(ctx, {Map.get(ctx, :cur_mod), to_string(name), length(args)}, args, env, s) do
-      {:ok, rvar, s} ->
-        {rvar, s}
-
-      :no ->
-        case Map.get(ctx.siblings, {to_string(name), length(args)}) do
-          nil -> gen_args_then_fresh(args, env, ctx, s)
-          sig -> instantiate(sig, args, env, ctx, s)
-        end
+    case Map.get(ctx.siblings, {to_string(name), length(args)}) do
+      nil -> gen_args_then_fresh(args, env, ctx, s)
+      sig -> instantiate(sig, args, env, ctx, s)
     end
   end
 
@@ -755,26 +591,10 @@ defmodule Rian.Transpile.Infer do
     end
   end
 
-  # tuples — ANALYSIS-only (gated on ctx.clusters): a structured `Tuple(…)` term so
-  # the components flow and SHARE (a parser's `{node, rest}` decomposes into the AST
-  # type and the token-stream type instead of a fresh opaque hole). The transpiler
-  # path (no clusters) leaves them free — `Tuple(…)` isn't a Rian signature type.
-  defp gen({a, b}, env, ctx, s), do: maybe_tuple([a, b], env, ctx, s)
-  defp gen({:{}, _, elems}, env, ctx, s) when is_list(elems), do: maybe_tuple(elems, env, ctx, s)
-
-  # anything else (maps, with, captures, …) — unconstrained hole
+  # anything else (tuples, maps, with, captures, …) — unconstrained hole.
+  # `Tuple(…)` isn't a Rian signature type, so a `{node, rest}` decomposition stays
+  # an opaque free var rather than a structured term.
   defp gen(_other, _env, _ctx, s), do: fresh(s)
-
-  defp maybe_tuple(elems, env, ctx, s) do
-    case Map.get(ctx, :clusters) do
-      nil ->
-        fresh(s)
-
-      _ ->
-        {terms, s} = Enum.map_reduce(elems, s, fn e, s -> gen(e, env, ctx, s) end)
-        {app("Tuple", terms), s}
-    end
-  end
 
   defp gen_block([], _env, _ctx, s), do: fresh(s)
   defp gen_block([last], env, ctx, s), do: gen(last, env, ctx, s)
@@ -816,36 +636,6 @@ defmodule Rian.Transpile.Infer do
     end
   end
 
-  # whole-program call linking (`ctx.sigvars`, keyed `{mod, fun, arity}`): unify
-  # each arg with the callee's SHARED param var and return its SHARED return var —
-  # monomorphic, so the same unknown type carries one identity across the program.
-  defp sigvar_call(ctx, key, args, env, s) do
-    case Map.get(ctx, :sigvars, %{}) |> Map.get(key) do
-      nil ->
-        :no
-
-      {pvars, rvar} ->
-        s =
-          Enum.zip(args, pvars)
-          |> Enum.reduce(s, fn {a, pv}, s ->
-            {at, s} = gen(a, env, ctx, s)
-            {s, _} = unify(s, at, pv)
-            s
-          end)
-
-        {:ok, rvar, s}
-    end
-  end
-
-  # a struct's proposed-sum name: its cluster's `Sum<i>`, or the struct's own name
-  # if it's standalone (a singleton type).
-  defp cluster_name(clusters, struct) do
-    case Enum.find_index(clusters, &(struct in &1)) do
-      nil -> struct
-      i -> "Sum#{i + 1}"
-    end
-  end
-
   # instantiate a callee sig: freshen tvars, unify each param with the arg type,
   # return the (freshened) return term.
   defp instantiate(%{params: ps, ret: ret, tvars: tvars}, args, env, ctx, s) do
@@ -874,20 +664,11 @@ defmodule Rian.Transpile.Infer do
   # ── patterns → constraints + bindings ─────────────────────────────────────
 
   # struct pattern `%Mod{…}` — the matched value IS that struct's type, so constrain
-  # the param/scrutinee to it (Lever B): its proposed SUM in the whole-program path
-  # (`ctx.clusters`, so a `case x do %ENum{} -> _ ; %ECall{} -> _ end` pins `x` to the
-  # one shared sum), else the struct's own declared name. Field sub-patterns recurse.
-  # Must precede the var clause (`%Mod{}` is `{:%, _, […]}`, not `{name, _, ctx}`).
+  # the param/scrutinee to the struct's declared name (Lever B). Field sub-patterns
+  # recurse. Must precede the var clause (`%Mod{}` is `{:%, _, […]}`, not `{name, _, ctx}`).
   defp gen_pat({:%, _, [{:__aliases__, _, parts}, {:%{}, _, fields}]}, pv, env, ctx, s) do
     name = parts |> List.last() |> to_string()
-
-    t =
-      case Map.get(ctx, :clusters) do
-        nil -> con(name)
-        clusters -> con(cluster_name(clusters, name))
-      end
-
-    s = elem(unify(s, pv, t), 0)
+    s = elem(unify(s, pv, con(name)), 0)
 
     # bind field sub-patterns (`%ENum{text: t}` binds `t`) — fresh vars (field types
     # aren't modelled), so nested names are at least in scope.
