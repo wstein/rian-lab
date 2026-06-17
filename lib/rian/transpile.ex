@@ -52,7 +52,8 @@ defmodule Rian.Transpile do
   @header [
     "# ─────────────────────────────────────────────────────────────────────────",
     "# DRAFT skeleton — transpiled from Elixir by `mix rian.transpile`. NOT done.",
-    "# Translated: defs/clauses (+guards), defstruct→struct, if/case, operators,",
+    "# Translated: defs/clauses (+guards), defstruct→struct, if/case, operators",
+    "#   (precedence-parenthesized; truthy &&/|| → boolean and/or),",
     "#   pipes (|>), single- & multi-clause lambdas (multi → `(p) -> case p do …`),",
     "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
     "#   word sigils (~w → list), referenced @attrs → const, as-patterns (var @ pat),",
@@ -77,11 +78,66 @@ defmodule Rian.Transpile do
   @max_slug 64
   @max_prefix 28
 
-  # Elixir binary operators that map to a Rian infix spelling unchanged. `++`
-  # (list concat) is NOT here — Rian has no `++`; it lowers to `List.concat/2`.
-  @binops ~w(+ - * / <> <= >= < > == != and or)a
-  # Elixir local calls that Rian spells as infix operators.
-  @infix_calls %{div: "div", rem: "rem"}
+  # Elixir binary operators → their Rian infix spelling. Most map unchanged; the
+  # truthy short-circuit pair `&&`/`||` maps to Rian's boolean `and`/`or` (Rian has
+  # no truthy operators — the value-vs-bool / nil-vs-Option mismatch surfaces at the
+  # type gate, like every other nil-as-sentinel, per the `expr(nil)` note below).
+  # `div`/`rem` are Elixir local calls Rian spells infix. `++` is absent — Rian has
+  # no `++`; it lowers to `List.concat/2`.
+  @binops %{
+    :+ => "+",
+    :- => "-",
+    :* => "*",
+    :/ => "/",
+    :<> => "<>",
+    :<= => "<=",
+    :>= => ">=",
+    :< => "<",
+    :> => ">",
+    :== => "==",
+    :!= => "!=",
+    :and => "and",
+    :or => "or",
+    :&& => "and",
+    :|| => "or",
+    :div => "div",
+    :rem => "rem"
+  }
+
+  # Rian operator precedence levels (lower binds tighter) and associativity, kept in
+  # lockstep with `Rian.Pratt.opinfo/1` so the emitted parenthesization re-parses to
+  # the intended tree. Used by `paren_operand/3` to wrap an operand only when needed.
+  @op_level %{
+    "*" => 3,
+    "/" => 3,
+    "div" => 3,
+    "rem" => 3,
+    "+" => 4,
+    "-" => 4,
+    "<>" => 5,
+    "in" => 6,
+    "|>" => 7,
+    "<" => 8,
+    "<=" => 8,
+    ">" => 8,
+    ">=" => 8,
+    "==" => 9,
+    "!=" => 9,
+    "and" => 10,
+    "or" => 11,
+    "<~" => 12
+  }
+  @op_assoc %{
+    "<>" => :right,
+    "<~" => :right,
+    "in" => :none,
+    "<" => :none,
+    "<=" => :none,
+    ">" => :none,
+    ">=" => :none,
+    "==" => :none,
+    "!=" => :none
+  }
 
   # Stdlib auto-mapping (A1): `{ElixirMod, fun, arity} => {RianMod, rian_fun}`.
   # **Only** entries whose Rian image genuinely exists in the prelude
@@ -1085,8 +1141,10 @@ defmodule Rian.Transpile do
     "%{#{Enum.map_join(kvs, ", ", &map_pair_rian/1)}}"
   end
 
-  defp expr({op, _, [l, r]}) when op in @binops,
-    do: "#{expr(l)} #{op} #{expr(r)}"
+  defp expr({op, _, [l, r]}) when is_map_key(@binops, op) do
+    rop = @binops[op]
+    "#{paren_operand(l, rop, :left)} #{rop} #{paren_operand(r, rop, :right)}"
+  end
 
   # Elixir list concat `l ++ r` → the portable prelude `List.concat/2` (Rian has no
   # `++` operator).
@@ -1095,7 +1153,7 @@ defmodule Rian.Transpile do
   # The pipe is real Rian surface (`x |> f(y)` ≡ `f(x, y)`, ADR/01_basics) — render
   # it infix. Without this it falls through to the generic local-call clause and
   # mis-renders as the prefix `|>(l, r)`.
-  defp expr({:|>, _, [l, r]}), do: "#{expr(l)} |> #{pipe_rhs(r)}"
+  defp expr({:|>, _, [l, r]}), do: "#{paren_operand(l, "|>", :left)} |> #{pipe_rhs(r)}"
 
   # A match `=` reached in expression position (a `with`/`case` arm, a nested
   # statement) is Rian's bind `:=`, same as the block-statement path (`stmt/1`).
@@ -1103,9 +1161,9 @@ defmodule Rian.Transpile do
   # as the prefix `=(l, r)`.
   defp expr({:=, _, [l, r]}), do: "#{pat(l)} := #{expr(r)}"
 
-  defp expr({:-, _, [x]}), do: "-#{expr(x)}"
-  defp expr({:not, _, [x]}), do: "not #{expr(x)}"
-  defp expr({:!, _, [x]}), do: "not #{expr(x)}"
+  defp expr({:-, _, [x]}), do: "-#{paren_unary(x)}"
+  defp expr({:not, _, [x]}), do: "not #{paren_unary(x)}"
+  defp expr({:!, _, [x]}), do: "not #{paren_unary(x)}"
 
   defp expr({:if, _, [c, kw]}) do
     t = render_body(Keyword.get(kw, :do))
@@ -1196,10 +1254,6 @@ defmodule Rian.Transpile do
   defp expr(list) when is_list(list),
     do: "[#{Enum.map_join(list, ", ", &expr/1)}]"
 
-  # local call mapped to a Rian infix operator (`div`, `rem`).
-  defp expr({op, _, [l, r]}) when is_map_key(@infix_calls, op),
-    do: "#{expr(l)} #{@infix_calls[op]} #{expr(r)}"
-
   # `Mod.fun(args)` / `Mod.fun()` — a call on an alias module: (1) auto-map to a
   # Rian prelude call when the image exists (`@stdlib`); (2) inline if `Mod` is a
   # sibling Rian module; (3) Elixir-stdlib → BEAM FFI; (4) else flag.
@@ -1269,6 +1323,49 @@ defmodule Rian.Transpile do
     do: "#{expr(f)}(#{Enum.map_join(args, ", ", &expr/1)})"
 
   defp expr(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  # Render an operand of the Rian operator `parent_op`, wrapping it in parens iff
+  # omitting them would change the Rian re-parse. Using levels where *lower binds
+  # tighter*, the operand needs parens when it binds looser than the parent, or binds
+  # at the same level on the side the parent's associativity does not favour — which
+  # also covers same-level non-associative parents (Rian's parser rejects those
+  # unparenthesized). An atomic operand (`operand_level/1 == nil`) never needs them.
+  defp paren_operand(node, parent_op, side) do
+    s = expr(node)
+    plevel = @op_level[parent_op]
+    passoc = Map.get(@op_assoc, parent_op, :left)
+
+    case operand_level(node) do
+      nil ->
+        s
+
+      clevel ->
+        wrap? =
+          cond do
+            clevel > plevel -> true
+            clevel < plevel -> false
+            side == :left -> passoc != :left
+            true -> passoc != :right
+          end
+
+        if wrap?, do: "(#{s})", else: s
+    end
+  end
+
+  # A prefix `not`/`-` binds tighter than every infix operator (`Pratt.parse_prefix`
+  # reads its operand above all infix binding powers), so any infix operand must be
+  # parenthesized; an atomic operand is left bare.
+  defp paren_unary(node) do
+    s = expr(node)
+    if operand_level(node), do: "(#{s})", else: s
+  end
+
+  # The Rian precedence level of an operand's top infix operator, or `nil` when the
+  # operand is atomic (literal, var, call, list/tuple/map…) and never needs wrapping.
+  defp operand_level({op, _, [_, _]}) when is_map_key(@binops, op), do: @op_level[@binops[op]]
+  defp operand_level({:|>, _, [_, _]}), do: @op_level["|>"]
+  defp operand_level({:=, _, [_, _]}), do: 13
+  defp operand_level(_), do: nil
 
   # RHS of a pipe `l |> r`: the pipe injects `l` as the first arg, so a stdlib
   # call written with N args is really arity N+1 for the `@stdlib` lookup —

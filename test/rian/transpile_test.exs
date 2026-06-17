@@ -651,6 +651,56 @@ end|) =~ ~S|"v=${x}!"|
       assert out =~ "List.concat(a, b)"
       refute out =~ "a ++ b"
     end
+
+    test "truthy `&&`/`||` map to Rian's boolean short-circuit `and`/`or`" do
+      # Rian has no truthy operators; `and`/`or` short-circuit (and emit valid Rian),
+      # so a guard idiom like `g && f(g)` no longer eagerly evaluates `f(g)`. The
+      # value-vs-bool / nil-vs-Option mismatch surfaces at the type gate, not here.
+      out = rian("defmodule M do\n  def g(x), do: x && f(x)\n  def d(x, y), do: x || y\nend")
+      assert out =~ ":= x and f(x)"
+      assert out =~ ":= x or y"
+      # refute against the body only — the emitted header legend mentions `&&/||`.
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "&&"
+      refute body =~ "||"
+    end
+  end
+
+  describe "operator precedence — parenthesize only when the Rian re-parse needs it" do
+    test "a looser-binding left operand is parenthesized (`(13 - lvl) * 10`)" do
+      # `*` binds tighter than `-`, so the `- ` subtree must be wrapped or the Rian
+      # parser would read `13 - (lvl * 10)`.
+      out = rian("defmodule M do\n  def bp(lvl), do: (13 - lvl) * 10\nend")
+      assert out =~ ":= (13 - lvl) * 10"
+    end
+
+    test "no spurious parens when the operand already binds tighter (`a - b * c`)" do
+      out = rian("defmodule M do\n  def k(a, b, c), do: a - b * c\nend")
+      assert out =~ ":= a - b * c"
+    end
+
+    test "an `or` operand under `and` is parenthesized (boolean precedence)" do
+      out = rian(~S|defmodule M do
+        def vc(op, l, r), do: op == "x" and (vl(l) or vr(r))
+      end|)
+
+      assert out =~ ~s|:= op == "x" and (vl(l) or vr(r))|
+    end
+
+    test "a prefix `not` wraps any infix operand (`not (a or b)`)" do
+      out = rian("defmodule M do\n  def f(a, b), do: not (a or b)\nend")
+      assert out =~ ":= not (a or b)"
+    end
+
+    test "left-associativity is preserved without redundant parens (`a - b + c`)" do
+      out = rian("defmodule M do\n  def f(a, b, c), do: a - b + c\nend")
+      assert out =~ ":= a - b + c"
+    end
+
+    test "a right operand at the same level is parenthesized (`a - (b + c)`)" do
+      out = rian("defmodule M do\n  def f(a, b, c), do: a - (b + c)\nend")
+      assert out =~ ":= a - (b + c)"
+    end
   end
 
   describe "struct/map updates desugar to the Rian map-update form" do
