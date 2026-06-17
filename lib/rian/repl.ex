@@ -455,11 +455,7 @@ defmodule Rian.Repl do
 
   defp module_name(%Session{base: base}), do: String.to_atom("rian_repl_#{base}")
 
-  defp safe_parse_body(input) do
-    {:ok, Pratt.parse_body(input)}
-  rescue
-    e -> {:error, Exception.message(e)}
-  end
+  defp safe_parse_body(input), do: Pratt.parse_body_result(input)
 
   # A type env for inference: each bind's name mapped to its inferred type.
   # The session's `ic` is threaded in so a bind whose RHS calls a session
