@@ -1375,10 +1375,22 @@ defmodule Rian.Check do
       f
       |> propagated_callees()
       |> Enum.reduce(MapSet.new(), fn c, acc ->
-        MapSet.union(acc, Map.get(table, c, MapSet.new()))
+        MapSet.union(acc, propagated_for(table, c))
       end)
 
     MapSet.union(direct_tags(f), propagated)
+  end
+
+  # The call graph names callees by bare name (`with_callees`/`call_name`), while
+  # the fixpoint table is keyed by `{name, arity}` (arity overloading). Reading a
+  # callee's set therefore name-folds — the union over every arity of that name.
+  # This is deliberately conservative: an overloaded callee contributes the errors
+  # of all its arities, never fewer.
+  defp propagated_for(table, name) do
+    Enum.reduce(table, MapSet.new(), fn
+      {{^name, _arity}, set}, acc -> MapSet.union(acc, set)
+      _kv, acc -> acc
+    end)
   end
 
   defp direct_tags(f) do
@@ -1398,7 +1410,9 @@ defmodule Rian.Check do
     facts =
       Map.new(funcs, fn f ->
         declared = with({_e, set} <- declared_set(f.ret, tsets), do: set, else: (_ -> nil))
-        {f.name, %{direct: direct_tags(f), callees: propagated_callees(f), declared: declared}}
+
+        {{f.name, length(f.params)},
+         %{direct: direct_tags(f), callees: propagated_callees(f), declared: declared}}
       end)
 
     fixpoint(facts, Map.new(facts, fn {n, fc} -> {n, fc.declared || fc.direct} end))
@@ -1411,7 +1425,7 @@ defmodule Rian.Check do
           {n, d}
 
         {n, %{direct: direct, callees: callees}} ->
-          {n, Enum.reduce(callees, direct, &MapSet.union(&2, Map.get(table, &1, MapSet.new())))}
+          {n, Enum.reduce(callees, direct, &MapSet.union(&2, propagated_for(table, &1)))}
       end)
 
     if next == table, do: table, else: fixpoint(facts, next)
