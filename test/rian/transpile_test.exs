@@ -169,6 +169,23 @@ defmodule Rian.TranspileTest do
       assert out =~ "pub def double(x _Unk) _Unk := x + x"
     end
 
+    test "a bitstring construction + pattern → Rian `<<…>>` (ADR-0078, no marker)" do
+      out =
+        rian("""
+        defmodule Bx do
+          def first(<<c::utf8, rest::binary>>), do: c
+          def first(_), do: 0
+          def two(), do: <<104, 105>>
+        end
+        """)
+
+      assert out =~ "first(<<c::utf8, rest::binary>>) := c"
+      assert out =~ "<<104, 105>>"
+      # no emitted marker (`TODO_PORT("…")`) — the draft header mentions the word, so
+      # match the call-with-arg form, not a bare substring.
+      refute out =~ ~s|TODO_PORT("|
+    end
+
     test "defp is private (`def`, no `pub`) and OMITS hole types — params and return (ADR-0034)" do
       # a private function needn't declare its types — `Rian.InferLocal` recovers
       # them, so an unresolved param/return is omitted rather than printed as `_Unk`.

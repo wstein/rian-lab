@@ -802,8 +802,14 @@ defmodule Rian.Transpile do
   # construction (sizes/integer segments) is flagged instead.
   defp expr({:<<>>, _, segments} = n) do
     case string_parts(segments) do
-      {:ok, parts} -> ~s|"#{Enum.join(parts)}"|
-      :error -> ~s|TODO_PORT("binary construction #{escape(snippet(n))}")|
+      {:ok, parts} ->
+        ~s|"#{Enum.join(parts)}"|
+
+      :error ->
+        # a genuine bitstring (sizes/`::utf8`/`::binary`, ADR-0078) → Rian `<<…>>`;
+        # an unsupported segment/specifier falls back to a marker (no broken output).
+        bitstr_text(segments, &expr/1) ||
+          ~s|TODO_PORT("binary construction #{escape(snippet(n))}")|
     end
   end
 
@@ -1153,7 +1159,50 @@ defmodule Rian.Transpile do
     end
   end
 
+  defp pat({:<<>>, _, segments} = n),
+    do: bitstr_text(segments, &pat/1) || ~s|TODO_PORT(#{inspect(snippet(n))})|
+
   defp pat(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  # ── bitstrings (ADR-0078) ──────────────────────────────────────────────
+  # Render an Elixir `<<>>` segment list to Rian `<<seg::spec, …>>` text, reused for
+  # construction (`value_fun = expr/1`) and patterns (`pat/1`). Returns `nil` if any
+  # segment/specifier is outside the supported subset, so the caller emits a marker
+  # rather than broken Rian. The accepted specifiers mirror `Rian.Beam`.
+  @bit_specs ~w(integer float binary bytes bitstring bits utf8 utf16 utf32 signed unsigned big little native)a
+
+  defp bitstr_text(segments, value_fun) do
+    rendered = Enum.map(segments, &bitseg_text(&1, value_fun))
+    if Enum.all?(rendered, &(&1 != nil)), do: "<<#{Enum.join(rendered, ", ")}>>"
+  end
+
+  defp bitseg_text({:"::", _, [value, spec]}, value_fun) do
+    case bitspec_text(spec) do
+      nil -> nil
+      s -> "#{value_fun.(value)}::#{s}"
+    end
+  end
+
+  defp bitseg_text(value, value_fun) when is_integer(value) or is_binary(value),
+    do: value_fun.(value)
+
+  defp bitseg_text({_, _, ctx} = value, value_fun) when is_atom(ctx), do: value_fun.(value)
+  defp bitseg_text(_, _), do: nil
+
+  defp bitspec_text({:-, _, [a, b]}) do
+    sa = bitspec_text(a)
+    sb = bitspec_text(b)
+    if sa && sb, do: "#{sa}-#{sb}"
+  end
+
+  defp bitspec_text(n) when is_integer(n), do: "#{n}"
+  defp bitspec_text({:size, _, [n]}) when is_integer(n), do: "size(#{n})"
+  defp bitspec_text({:unit, _, [n]}) when is_integer(n), do: "unit(#{n})"
+
+  defp bitspec_text({name, _, ctx}) when is_atom(name) and is_atom(ctx) and name in @bit_specs,
+    do: "#{name}"
+
+  defp bitspec_text(_), do: nil
 
   defp var?({n, _, ctx}) when is_atom(n) and is_atom(ctx), do: true
   defp var?(_), do: false

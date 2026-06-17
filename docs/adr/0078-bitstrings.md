@@ -6,7 +6,12 @@
 `Rian.PatternLower` (refutable), `Rian.Beam` native bitstring construction + pattern forms +
 `Rian.Lower`'s Elixir-text path; `Rian.Decl` arity/clause splitters count `<<>>` depth; Rust/JS/JVM
 raise `Unsupported` and `Rian.Reach` pins bitstring functions (body **or** clause-head) BEAM-only.
-**Stage 3 (transpiler emit)** is not yet done.
+**Stage 3 (transpiler emit)** shipped: `Rian.Transpile` lowers Elixir `{:<<>>}` construction
+*and* patterns to the new surface (`lib/rian` transpiler markers 235 → 219), falling back to a
+`TODO_PORT` marker for any segment/specifier outside the supported subset. Residual (separate
+constructs, not `<<…>>`): **`"prefix" <> rest` binary-concat patterns** (string-prefix matching, heavy
+in the type-string parser) and **bitstring comprehension generators** (`for <<x <- s>>`) — both noted
+as follow-ups.
 
 > **Exhaustiveness is conservative (Stage 2).** A bitstring pattern is refutable to the Maranget gate
 > (`{:wild, true}`), so `<<c, rest::binary>>` + `<<>>` is **not** recognized as covering all binaries —
