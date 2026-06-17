@@ -160,10 +160,10 @@ defmodule Rian.ProtocolTest do
 
       # the BEAM dispatcher + impl (Elixir debug view) plus the Rust trait/impl unit
       assert Enum.map(units, &elem(&1, 0)) |> Enum.sort() ==
-               ["eq", "impl_eq_int64_eq", "protocols"]
+               ["eq/2", "impl_eq_int64_eq/2", "protocols"]
 
       # the dispatcher/impl carry only the Elixir view; Rust lives in `protocols`
-      {_, eq} = Enum.find(units, &(elem(&1, 0) == "eq"))
+      {_, eq} = Enum.find(units, &(elem(&1, 0) == "eq/2"))
       refute Map.has_key?(eq, :rust)
       {_, protos} = Enum.find(units, &(elem(&1, 0) == "protocols"))
       assert protos.rust =~ "trait RianEq"
@@ -453,7 +453,7 @@ defmodule Rian.ProtocolTest do
       assert protos.rust =~ "fn eq(&self, b: &Self) -> bool;"
       assert protos.rust =~ "impl RianEq for i64 {"
 
-      {_, eq3} = Enum.find(units, &(elem(&1, 0) == "equal3"))
+      {_, eq3} = Enum.find(units, &(elem(&1, 0) == "equal3/3"))
       # the bound becomes a real Rust trait bound (+ Clone for owned-construction
       # generics); protocol calls become method-call dispatch (auto-refs receiver)
       assert eq3.rust =~ "fn equal3<T: RianEq + Clone>"

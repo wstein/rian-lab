@@ -48,7 +48,7 @@ defmodule Rian.MacroPipelineTest do
 
     test "expansion happens before every emitter — the Rust output shows expanded code" do
       out = Decl.compile("macro sq(x) := x * x\ndef area(n Int64) Int64 := sq(n)")
-      {_, unit} = Enum.find(out, fn {n, _} -> n == "area" end)
+      {_, unit} = Enum.find(out, fn {n, _} -> String.split(n, "/") |> hd() == "area" end)
       # sq(n) lowered to `n * n`, not a call to a `sq` function (macros emit no IR)
       assert Map.get(unit, :rust) =~ "n * n"
       refute Map.get(unit, :rust) =~ "sq("

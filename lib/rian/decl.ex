@@ -610,7 +610,7 @@ defmodule Rian.Decl do
             do: Lower.compile_elixir(types, f, structs, ranges, ic),
             else: Lower.compile(types, f, structs, ranges, proto, ic)
 
-        {f.name, out}
+        {"#{f.name}/#{length(f.params)}", out}
       end)
 
     mod_units = Enum.map(mods, fn m -> {m.name, Lower.compile_module(m, ic)} end)
@@ -649,7 +649,9 @@ defmodule Rian.Decl do
     ic = Check.program_ic(prog)
 
     funs =
-      Enum.map(funcs, fn f -> {f.name, Lower.compile_beam(types, f, structs, ranges, ic)} end)
+      Enum.map(funcs, fn f ->
+        {"#{f.name}/#{length(f.params)}", Lower.compile_beam(types, f, structs, ranges, ic)}
+      end)
 
     funs ++ Enum.map(mods, fn m -> {m.name, Lower.compile_module_beam(m, ic)} end)
   end

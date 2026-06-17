@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Rian.CompileTest do
       assert out =~ "exports area/1"
       assert out =~ "bytes"
       # Rust is the real text target
-      assert out =~ "area — Rust"
+      assert out =~ "area/1 — Rust"
       assert out =~ "fn area(s: &Shape)"
       # the Elixir text emitter is demoted: not shown unless asked
       refute out =~ "DEBUG text view"

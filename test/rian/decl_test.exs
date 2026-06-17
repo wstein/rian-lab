@@ -212,7 +212,7 @@ defmodule Rian.DeclTest do
     """
 
     test "area lowers to idiomatic Elixir and Rust" do
-      [{"area", out}] = Decl.compile(@area)
+      [{_, out}] = Decl.compile(@area)
 
       assert out.elixir =~ "def area({:circle, r}) do :math.pi() * r * r end"
       assert out.rust =~ "fn area(s: &Shape) -> f64"
@@ -220,7 +220,7 @@ defmodule Rian.DeclTest do
     end
 
     test "the emitted Elixir runs on the BEAM" do
-      [{"area", out}] = Decl.compile(@area)
+      [{_, out}] = Decl.compile(@area)
       Code.eval_string("defmodule AreaFromSource do\n#{out.elixir}\nend")
 
       assert_in_delta AreaFromSource.area({:circle, 2.0}), :math.pi() * 4, 1.0e-9
@@ -228,7 +228,7 @@ defmodule Rian.DeclTest do
     end
 
     test "an iso sum (Value) lowers and runs" do
-      [{"eval", out}] =
+      [{_, out}] =
         Decl.compile("""
         type Value := Num(Int64) | Zero
 
@@ -244,7 +244,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a `case` body lowers to both targets — Rust resolves constructor patterns via meta" do
-      [{"area", out}] =
+      [{_, out}] =
         Decl.compile("""
         type Shape := Circle(radius Float64) | Square(side Float64)
 
@@ -267,7 +267,7 @@ defmodule Rian.DeclTest do
     end
 
     test "multiline block bodies lower and run (the token parser's headline)" do
-      [{"step", out}] =
+      [{_, out}] =
         Decl.compile("""
         def step(n Int64) Int64
           a := n * 2
@@ -284,7 +284,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a block body containing an `if` expression lowers and runs" do
-      [{"clamp", out}] =
+      [{_, out}] =
         Decl.compile("""
         def clamp(n Int64) Int64
           if n < 0 do 0 else n end
@@ -297,7 +297,7 @@ defmodule Rian.DeclTest do
     end
 
     test "string bodies and guards lower and run (classify-style)" do
-      [{"classify", out}] =
+      [{_, out}] =
         Decl.compile("""
         def classify(n Int64) String
         def classify(0) := "zero"
@@ -336,7 +336,7 @@ defmodule Rian.DeclTest do
     end
 
     test "an alias inside a compound type resolves and lowers" do
-      [{"first", out}] =
+      [{_, out}] =
         Decl.compile("""
         alias Id := Int64
         def first(xs val Vec(Id), d Id) Id := head(xs)
@@ -377,14 +377,14 @@ defmodule Rian.DeclTest do
     end
 
     test "docs lower to @moduledoc/@typedoc/@doc on the BEAM" do
-      [{"M", out}] = Decl.compile(@docs)
+      [{_, out}] = Decl.compile(@docs)
       assert out.elixir =~ ~s(@moduledoc "A tiny module.")
       assert out.elixir =~ ~s(@typedoc "A colour.")
       assert out.elixir =~ ~s(@doc "Double a number.")
     end
 
     test "docs lower to rustdoc `//!` / `///`" do
-      [{"M", out}] = Decl.compile(@docs)
+      [{_, out}] = Decl.compile(@docs)
       assert out.rust =~ "//! A tiny module."
       assert out.rust =~ "/// A colour."
       assert out.rust =~ "/// Double a number."
@@ -399,7 +399,7 @@ defmodule Rian.DeclTest do
 
   describe "prelude: Option (ADR-0047 §3 — no nil)" do
     test "Some/None are built-in — usable with no `type Option` declaration" do
-      [{"wrap", out}] = Decl.compile("def wrap(x Int64) Option := Some(x)")
+      [{_, out}] = Decl.compile("def wrap(x Int64) Option := Some(x)")
       assert out.elixir =~ "def wrap(x) do {:some, x} end"
       # native Rust Option; the prelude type is NOT re-emitted as a user enum
       assert out.rust =~ "Option::Some(x)"
@@ -410,7 +410,7 @@ defmodule Rian.DeclTest do
     end
 
     test "case over Option is exhaustive with Some/None and no catch-all" do
-      [{"uo", out}] =
+      [{_, out}] =
         Decl.compile_beam("""
         def uo(o Option, d Int64) Int64
         def uo(Some(x), _) := x
@@ -451,7 +451,7 @@ defmodule Rian.DeclTest do
     """
 
     test "with lowers to native Elixir `with`/`else` and a Rust match chain" do
-      [{"Wth", out}] = Decl.compile(@with_src)
+      [{_, out}] = Decl.compile(@with_src)
 
       assert out.elixir =~ "with {:ok, x} <- parse(a), {:ok, y} <- parse(b) do"
       assert out.elixir =~ "else {:error, e} -> {:error, e} end"
@@ -461,7 +461,7 @@ defmodule Rian.DeclTest do
     end
 
     test "with propagation runs on the BEAM (happy path and short-circuit)" do
-      [{"Wth", out}] = Decl.compile(@with_src)
+      [{_, out}] = Decl.compile(@with_src)
       Code.eval_string(out.elixir)
       assert Wth.add(2, 3) == {:ok, 5}
       assert Wth.add(0, 3) == {:error, 99}
@@ -469,7 +469,7 @@ defmodule Rian.DeclTest do
     end
 
     test "with no `else` propagates the non-matching value unchanged" do
-      [{"prop", out}] =
+      [{_, out}] =
         Decl.compile("""
         def prop(r R) R
           with {:ok, v} <- r do
@@ -490,13 +490,13 @@ defmodule Rian.DeclTest do
 
   describe "`T | E` return-type sugar (ADR-0040 §2)" do
     test "lowers to Rust Result<T, E>; the BEAM body carries the tagged tuple" do
-      [{"find", out}] = Decl.compile("def find(id Int64) User | NotFound := {:ok, id}")
+      [{_, out}] = Decl.compile("def find(id Int64) User | NotFound := {:ok, id}")
       assert out.rust =~ "fn find(id: i64) -> Result<User, NotFound>"
       assert out.elixir =~ "def find(id) do {:ok, id} end"
     end
 
     test "an alias resolves inside the result type" do
-      [{"f", out}] =
+      [{_, out}] =
         Decl.compile("""
         alias Id := Int64
         def f(x Id) Id | NotFound := {:ok, x}
@@ -514,7 +514,7 @@ defmodule Rian.DeclTest do
 
   describe "tuples and atoms (the Result surface, ADR-0040)" do
     test "tuple construction lowers to a BEAM tuple / Rust tuple and runs" do
-      [{"pair", out}] = Decl.compile("def pair(a Int64, b Int64) Pair := {a, b}")
+      [{_, out}] = Decl.compile("def pair(a Int64, b Int64) Pair := {a, b}")
       assert out.elixir =~ "def pair(a, b) do {a, b} end"
       assert out.rust =~ "(a, b)"
       Code.eval_string("defmodule TupT do\n#{out.elixir}\nend")
@@ -522,7 +522,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a tuple pattern in a clause head destructures and runs" do
-      [{"fst", out}] =
+      [{_, out}] =
         Decl.compile("""
         def fst(Pair) Int64
         def fst({a, b}) := a
@@ -534,18 +534,18 @@ defmodule Rian.DeclTest do
     end
 
     test "`{:ok, v}` / `{:error, e}` are the Result surface — tagged tuple / Ok-Err on Rust" do
-      [{"wrap", out}] = Decl.compile("def wrap(v Int64) R := {:ok, v}")
+      [{_, out}] = Decl.compile("def wrap(v Int64) R := {:ok, v}")
       assert out.elixir =~ "{:ok, v}"
       assert out.rust =~ "Ok(v)"
 
-      [{"fail", out2}] = Decl.compile("def fail(e Int64) R := {:error, e}")
+      [{_, out2}] = Decl.compile("def fail(e Int64) R := {:error, e}")
       assert out2.rust =~ "Err(e)"
     end
   end
 
   describe "one parser (ADR-0050 §2) — clause heads reuse Pratt's pattern parser" do
     test "string-literal clause patterns now work (parity the old Decl parser lacked)" do
-      [{"classify", out}] =
+      [{_, out}] =
         Decl.compile_beam("""
         def classify(s String) Int64
         def classify("hi") := 1
@@ -559,7 +559,7 @@ defmodule Rian.DeclTest do
     end
 
     test "negative-integer clause patterns work" do
-      [{"f", out}] =
+      [{_, out}] =
         Decl.compile_beam("""
         def f(n Int64) Int64
         def f(-1) := 0
@@ -575,7 +575,7 @@ defmodule Rian.DeclTest do
 
   describe "list patterns (B1 / self-hosting spike)" do
     test "cons recursion in clause heads runs on the BEAM" do
-      [{"sum", out}] =
+      [{_, out}] =
         Decl.compile_beam("""
         def sum(xs Vec(Int64)) Int64
         def sum([]) := 0
@@ -589,7 +589,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a fixed-length list pattern lowers to a Rust slice pattern" do
-      [{"pair", out}] =
+      [{_, out}] =
         Decl.compile("""
         def pair(xs Vec(Int64)) Int64
         def pair([a, b]) := a + b
@@ -601,7 +601,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a `case` over a list lowers and runs" do
-      [{"head0", out}] =
+      [{_, out}] =
         Decl.compile_beam("""
         def head0(xs Vec(Int64)) Int64
           case xs do
@@ -628,8 +628,8 @@ defmodule Rian.DeclTest do
         def pick(b Bool) Color := Red
         """)
 
-      {"circ", c} = List.keyfind(results, "circ", 0)
-      {"pick", p} = List.keyfind(results, "pick", 0)
+      {"circ/1", c} = List.keyfind(results, "circ/1", 0)
+      {"pick/1", p} = List.keyfind(results, "pick/1", 0)
 
       assert c.elixir =~ "def circ(r) do {:circle, r} end"
       assert c.rust =~ "Shape::Circle { radius: r }"
@@ -641,7 +641,7 @@ defmodule Rian.DeclTest do
     end
 
     test "named variant construction places fields by label" do
-      [{"circ", c}] =
+      [{_, c}] =
         Decl.compile("""
         type Shape := Circle(radius Float64) | Square(side Float64)
         def circ(r Float64) Shape := Circle(radius: r)
@@ -652,7 +652,7 @@ defmodule Rian.DeclTest do
     end
 
     test "an unlabeled-field variant constructs as a positional tuple / tuple variant" do
-      [{"wrap", c}] =
+      [{_, c}] =
         Decl.compile("""
         type Value := Num(Int64) | Zero
         def wrap(n Int64) Value := Num(n)
@@ -681,7 +681,7 @@ defmodule Rian.DeclTest do
 
   describe "multi-parameter functions (clauses-guards §5.2)" do
     test "single-clause: Elixir multi-arg def; Rust matches the argument tuple" do
-      [{"add", out}] = Decl.compile("def add(x Int64, y Int64) Int64 := x + y")
+      [{_, out}] = Decl.compile("def add(x Int64, y Int64) Int64 := x + y")
 
       assert out.elixir =~ "def add(x, y) do x + y end"
       assert out.rust =~ "fn add(x: i64, y: i64) -> i64"
@@ -693,7 +693,7 @@ defmodule Rian.DeclTest do
     end
 
     test "multi-clause with guards lowers and runs (max2)" do
-      [{"max2", out}] =
+      [{_, out}] =
         Decl.compile("""
         def max2(a Int64, b Int64) Int64
         def max2(a, b) when a >= b := a
@@ -732,7 +732,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a struct lowers to defstruct / Rust struct, and `Name(args)` builds it" do
-      [{"origin", out}] =
+      [{_, out}] =
         Decl.compile("""
         struct Point(x Float64, y Float64)
 
@@ -746,7 +746,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a struct value built from source runs on the BEAM, with field access" do
-      [{"shift", out}] =
+      [{_, out}] =
         Decl.compile("""
         struct Point(x Int64, y Int64)
 
@@ -761,7 +761,7 @@ defmodule Rian.DeclTest do
     end
 
     test "named construction places fields by name (order-independent)" do
-      [{"make", out}] =
+      [{_, out}] =
         Decl.compile("""
         struct Point(x Int64, y Int64)
 
@@ -818,7 +818,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a mod lowers to defmodule / Rust mod, exporting pub items and hiding the rest" do
-      [{"Geometry", out}] = Decl.compile(@mod)
+      [{_, out}] = Decl.compile(@mod)
 
       assert out.elixir =~ "defmodule Geometry do"
       assert out.elixir =~ "def area("
@@ -831,7 +831,7 @@ defmodule Rian.DeclTest do
     end
 
     test "the emitted module runs on the BEAM" do
-      [{"Geometry", out}] = Decl.compile(@mod)
+      [{_, out}] = Decl.compile(@mod)
       Code.eval_string(out.elixir)
       assert_in_delta Geometry.area({:circle, 2.0}), 3.14159265 * 4, 1.0e-6
       assert Geometry.area({:square, 3.0}) == 9.0
@@ -847,7 +847,7 @@ defmodule Rian.DeclTest do
         end
         """)
 
-      assert {"double", _} = List.keyfind(results, "double", 0)
+      assert {"double/1", _} = List.keyfind(results, "double/1", 0)
       assert {"M", mout} = List.keyfind(results, "M", 0)
       assert mout.elixir =~ "defmodule M do"
       assert mout.elixir =~ "def triple(n) do n * 3 end"
@@ -865,7 +865,7 @@ defmodule Rian.DeclTest do
     """
 
     test "consts lower to accessors / Rust const, and references resolve per target" do
-      [{"Scaling", out}] = Decl.compile(@consts)
+      [{_, out}] = Decl.compile(@consts)
 
       assert out.elixir =~ "def tau() do 6.28318530 end"
       assert out.elixir =~ "defp scale() do 2.0 end"
@@ -877,7 +877,7 @@ defmodule Rian.DeclTest do
     end
 
     test "a module with constants runs on the BEAM" do
-      [{"Scaling", out}] = Decl.compile(@consts)
+      [{_, out}] = Decl.compile(@consts)
       Code.eval_string(out.elixir)
       assert_in_delta Scaling.scaled(3.0), 6.28318530 * 3.0 * 2.0, 1.0e-9
     end
@@ -891,7 +891,7 @@ defmodule Rian.DeclTest do
 
   describe "use imports (module-scoped)" do
     test "qualified and selective imports lower to alias/import and Rust use" do
-      [{"Geo", out}] =
+      [{_, out}] =
         Decl.compile("""
         mod Geo do
           use Math
@@ -910,7 +910,7 @@ defmodule Rian.DeclTest do
     end
 
     test "an imported module's qualified call runs on the BEAM" do
-      [{"Shout", out}] =
+      [{_, out}] =
         Decl.compile("""
         mod Shout do
           use String

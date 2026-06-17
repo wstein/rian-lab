@@ -107,7 +107,11 @@ defmodule Rian.LowerTest do
 
   describe "higher-order application on the Elixir text target (no Beam drift)" do
     defp ex_of(src, name) do
-      {_, %{elixir: e}} = Rian.Decl.compile(src) |> Enum.find(&(elem(&1, 0) == name))
+      # compile units key by `"name/arity"` (arity overloading); these single-arity
+      # sources are looked up by bare name.
+      {_, %{elixir: e}} =
+        Rian.Decl.compile(src) |> Enum.find(&(elem(&1, 0) |> String.split("/") |> hd() == name))
+
       e
     end
 
