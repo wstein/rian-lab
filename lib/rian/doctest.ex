@@ -74,7 +74,12 @@ defmodule Rian.Doctest do
         []
 
       examples ->
-        mod = mod || :"rian_doctest_#{:erlang.phash2(src)}"
+        mod =
+          case mod do
+            nil -> :"rian_doctest_#{:erlang.phash2(src)}"
+            m -> m
+          end
+
         {:ok, ^mod} = Beam.load(augment(src, examples), mod)
 
         examples

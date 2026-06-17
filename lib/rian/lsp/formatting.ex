@@ -132,11 +132,15 @@ defmodule Rian.LSP.Formatting do
 
   defp start_hunk(old), do: %{old_start: old, del: 0, ins: []}
 
+  # the current open hunk, or a fresh one when none is open yet.
+  defp hunk(nil, old), do: start_hunk(old)
+  defp hunk(cur, _old), do: cur
+
   defp bump_del(cur, old, n),
-    do: %{(cur || start_hunk(old)) | del: (cur || start_hunk(old)).del + n}
+    do: %{hunk(cur, old) | del: hunk(cur, old).del + n}
 
   defp bump_ins(cur, old, ls),
-    do: %{(cur || start_hunk(old)) | ins: (cur || start_hunk(old)).ins ++ ls}
+    do: %{hunk(cur, old) | ins: hunk(cur, old).ins ++ ls}
 
   defp flush(nil, acc), do: acc
   defp flush(cur, acc), do: [cur | acc]

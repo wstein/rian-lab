@@ -88,7 +88,7 @@ defmodule Rian.Run do
         2
 
       {opts, [file], _} ->
-        case run_file(file, opts[:main] || "main") do
+        case run_file(file, Keyword.get(opts, :main, "main")) do
           {:ok, value} ->
             IO.puts(inspect(value))
             0

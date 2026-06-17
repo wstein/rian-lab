@@ -368,7 +368,11 @@ defmodule Rian.Core do
   defp from_stmt({:expr, e}), do: {:expr, from_expr(e)}
 
   defp from_arm({pat, guard, body}),
-    do: {from_pat(pat), guard && from_expr(guard), from_expr(body)}
+    do: {from_pat(pat), from_guard(guard), from_expr(body)}
+
+  # an arm's optional guard: absent (`nil`) stays absent, else lowers like any expr.
+  defp from_guard(nil), do: nil
+  defp from_guard(guard), do: from_expr(guard)
 
   # ADR-0035 (No Hidden Control Flow): a block's value is its **final expression**
   # (ML-family discipline — OCaml/Haskell/F#/Rust all require a trailing expression,

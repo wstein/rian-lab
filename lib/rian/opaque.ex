@@ -142,7 +142,7 @@ defmodule Rian.Opaque do
   defp strip({:call, {:dot, head, cn}, []} = node, {_, casts} = ctx, env) do
     decls = Map.get(casts, cn)
 
-    if decls && MapSet.member?(decls, Check.infer(head, env, %{})),
+    if decls != nil and MapSet.member?(decls, Check.infer(head, env, %{})),
       do: strip(head, ctx, env),
       else: strip_into(node, ctx, env)
   end

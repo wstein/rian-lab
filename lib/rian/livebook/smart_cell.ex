@@ -19,7 +19,7 @@ if Code.ensure_loaded?(Kino.SmartCell) do
 
     @impl true
     def init(attrs, ctx) do
-      source = attrs["source"] || ""
+      source = Map.get(attrs, "source", "")
       {:ok, assign(ctx, source: source), editor: [source: source, placement: :top]}
     end
 

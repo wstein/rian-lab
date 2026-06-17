@@ -128,7 +128,12 @@ defmodule Rian.Test do
   """
   @spec run(String.t(), module() | nil) :: [{String.t(), :pass | {:fail, term()}}]
   def run(src, mod \\ nil) do
-    mod = mod || default_mod(src)
+    mod =
+      case mod do
+        nil -> default_mod(src)
+        m -> m
+      end
+
     compile!(src, mod)
 
     for n <- tests(src), do: {n, outcome(run_one(mod, n))}

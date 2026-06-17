@@ -19,9 +19,16 @@ defmodule Rian.Repl.History do
   @doc "The history file path (app env / `RIAN_HISTORY` / `~/.rian_history`)."
   @spec path() :: String.t()
   def path do
-    Application.get_env(:rian_lab, :history_file) ||
-      System.get_env("RIAN_HISTORY") ||
-      Path.expand("~/.rian_history")
+    case Application.get_env(:rian_lab, :history_file) do
+      nil ->
+        case System.get_env("RIAN_HISTORY") do
+          nil -> Path.expand("~/.rian_history")
+          env -> env
+        end
+
+      configured ->
+        configured
+    end
   end
 
   @doc """

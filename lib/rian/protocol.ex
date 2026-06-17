@@ -213,7 +213,7 @@ defmodule Rian.Protocol do
         guard: nil,
         body: nil,
         pub: true,
-        tvars: ["Self" | sig[:tvars] || []],
+        tvars: ["Self" | Map.get(sig, :tvars, [])],
         synthetic: true,
         dispatch: :dispatcher
       }

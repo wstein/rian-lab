@@ -72,7 +72,14 @@ defmodule Rian.Shadow do
     arms2 =
       Enum.map(arms, fn {pat, g, b} ->
         inner = Map.drop(r, pat_var_names(pat))
-        {pat, g && ded_expr(g, inner, fresh), ded_expr(b, inner, fresh)}
+
+        guard =
+          case g do
+            nil -> nil
+            g -> ded_expr(g, inner, fresh)
+          end
+
+        {pat, guard, ded_expr(b, inner, fresh)}
       end)
 
     %{node | scrut: ded_expr(s, r, fresh), arms: arms2}

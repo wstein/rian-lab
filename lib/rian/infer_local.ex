@@ -147,7 +147,9 @@ defmodule Rian.InferLocal do
       ps
       |> Enum.with_index()
       |> Enum.map_reduce(false, fn {p, i}, ch ->
-        case p.type == :infer && Check.infer_param_type(f, i, ic) do
+        inferred = if p.type == :infer, do: Check.infer_param_type(f, i, ic), else: nil
+
+        case inferred do
           t when is_binary(t) ->
             {%{p | type: t}, true}
 
