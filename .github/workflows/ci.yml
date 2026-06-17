@@ -108,3 +108,38 @@ jobs:
         run: |
           kotlinc -version
           mix test --only jvm
+
+  # ── Dialyzer (success-typing) gate ─────────────────────────────────────────
+  # Runs in the official `elixir` container — a FULL OTP build that BUNDLES the
+  # `dialyzer` app. The `test` job stays on `ubuntu-latest` because that runner
+  # preships rustc + node for the toolchain lanes; the precompiled OTP that
+  # `erlef/setup-beam` installs there can omit `dialyzer`, which is why the oracle
+  # test self-skips on that job. This dedicated container job keeps the compiler's
+  # own Elixir dialyzer-clean (CLAUDE.md / mix.exs `dialyzer/0`). `dialyxir` is a
+  # `:dev`-only dep, so this job runs in the default `dev` env (no `MIX_ENV: test`).
+  dialyzer:
+    runs-on: ubuntu-latest
+    container: elixir:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install hex + rebar
+        run: mix local.hex --force && mix local.rebar --force
+
+      # Cache deps, build, and the PLTs (`priv/plts/{core,project}.plt`, mix.exs
+      # `dialyzer/0`) — the first PLT build is minutes-long; later runs are fast.
+      - name: Cache deps, build, and PLTs
+        uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+            priv/plts
+          key: ${{ runner.os }}-dialyzer-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-dialyzer-
+
+      - name: Fetch deps
+        run: mix deps.get
+
+      - name: Dialyzer (builds the PLT on first run, then analyzes)
+        run: mix dialyzer
