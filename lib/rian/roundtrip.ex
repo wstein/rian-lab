@@ -182,9 +182,10 @@ defmodule Rian.Roundtrip do
   # formatter for Elixir. A draft that still carries markers may not parse for the
   # Rian formatter, so it falls back to the raw text.
   defp format_rian(src) do
-    Format.format(src)
-  rescue
-    _ -> src
+    case Format.format_result(src) do
+      {:ok, out} -> out
+      {:error, _} -> src
+    end
   end
 
   defp format_ex(src) do

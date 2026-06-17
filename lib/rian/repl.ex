@@ -495,9 +495,10 @@ defmodule Rian.Repl do
   defp session_ic(%Session{units: []}), do: %{}
 
   defp session_ic(%Session{units: units}) do
-    Check.program_ic(Decl.parse(units_src(units)))
-  rescue
-    _ -> %{}
+    case Decl.parse_result(units_src(units)) do
+      {:ok, prog} -> Check.program_ic(prog)
+      {:error, _} -> %{}
+    end
   end
 
   defp safe_infer_input(input, env, ic) do
