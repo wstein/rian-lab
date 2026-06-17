@@ -229,11 +229,11 @@ defmodule Rian.TranspileTest do
   end
 
   describe "honest quarantine — nothing untranslated masquerades as done" do
-    test "a field access (lowercase receiver, no Rian image) stays a greppable marker" do
-      # `r.name` is struct-field reflection, not a call Rian can lower — it stays a
-      # marker (Elixir-stdlib *module* calls become FFI; see the FFI test below).
-      out = rian("defmodule M do\n  def t(r), do: r.name\nend")
-      assert out =~ "TODO_PORT(\"remote/stdlib call: r.name"
+    test "a construct with no Rian image (map update) stays a greppable marker" do
+      # field access and stdlib calls now lower (see below); a map *update* still
+      # has no Rian surface, so it stays an honest marker.
+      out = rian("defmodule M do\n  def t(m), do: %{m | k: 1}\nend")
+      assert out =~ "TODO_PORT"
     end
   end
 
@@ -392,6 +392,13 @@ end|) =~ ~S|"v=${x}!"|
       out = rian("defmodule M do\n  def f(s), do: MapSet.new(s)\nend")
       assert out =~ "MapSet.new(s)"
       refute out =~ ~s|TODO_PORT("remote/stdlib call: MapSet.new|
+    end
+
+    test "field access (`r.name`, chained) is Rian-native, not a marker" do
+      out = rian("defmodule M do\n  def n(r), do: r.name\n  def c(x), do: x.a.b\nend")
+      assert out =~ ":= r.name"
+      assert out =~ ":= x.a.b"
+      refute out =~ ~s|TODO_PORT("remote/stdlib call|
     end
 
     test "stats counts auto-mapped calls" do

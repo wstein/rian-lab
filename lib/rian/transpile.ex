@@ -883,10 +883,20 @@ defmodule Rian.Transpile do
   defp expr({op, _, [l, r]}) when is_map_key(@infix_calls, op),
     do: "#{expr(l)} #{@infix_calls[op]} #{expr(r)}"
 
-  # remote call `Mod.fun(args)`: (1) auto-map to a Rian prelude call when the
-  # image exists (`@stdlib`); (2) emit inline if `Mod` is a sibling Rian module
-  # (a valid Rian cross-module call); (3) else flag — Elixir stdlib / atom module
-  # / variable field-access (`r.name`) has no clean Rian image.
+  # `Mod.fun(args)` / `Mod.fun()` — a call on an alias module: (1) auto-map to a
+  # Rian prelude call when the image exists (`@stdlib`); (2) inline if `Mod` is a
+  # sibling Rian module; (3) Elixir-stdlib → BEAM FFI; (4) else flag.
+  defp expr({{:., _, [{:__aliases__, _, _} = mod, fun]}, _, args}) when is_list(args),
+    do: remote_call(mod, fun, args, 0)
+
+  # `value.field` (a dot on a non-module value, no args) is struct/map field access
+  # — Rian reads it natively (`value.field`, lowering to a map get on every target),
+  # so it needs no FFI. Alias receivers are handled above; an atom receiver
+  # (`:erl.f()`) is a remote call, excluded by `not is_atom(recv)`.
+  defp expr({{:., _, [recv, field]}, _, []}) when is_atom(field) and not is_atom(recv),
+    do: "#{expr(recv)}.#{field}"
+
+  # any other dot call (`:erlang.f()`, a method on a variable) — remote call.
   defp expr({{:., _, [mod, fun]}, _, args}) when is_list(args),
     do: remote_call(mod, fun, args, 0)
 
