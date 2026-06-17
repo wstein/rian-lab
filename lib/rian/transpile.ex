@@ -134,6 +134,52 @@ defmodule Rian.Transpile do
     |> Kernel.<>("\n")
   end
 
+  # Render the program. Rian modules are flat (`Rian.Decl` has no nested `mod`),
+  # so a function-bearing nested Elixir module is hoisted to a sibling top-level
+  # `mod` rather than nested (where it would be silently dropped); a struct-only
+  # nested module stays, flattening into the parent's `struct` decls.
+  defp toplevel({:defmodule, _, _} = top, sigmap, types, struct_anns) do
+    [parent | hoisted] = flatten_modules(top)
+
+    @header ++
+      module_lines(parent, sigmap, types, struct_anns) ++
+      Enum.flat_map(hoisted, &["" | module_lines(&1, sigmap, [], struct_anns)])
+  end
+
+  defp toplevel(other, _sigmap, _types, _struct_anns) do
+    @header ++ ["# TODO[port]: top-level is not a single `defmodule`", "# #{snippet(other)}"]
+  end
+
+  # `[parent | hoisted]` — the top module with its function-bearing submodules
+  # removed, followed by each of those submodules (recursively flattened) as a
+  # standalone top-level module.
+  defp flatten_modules({:defmodule, m, [al, [do: body]]}) do
+    {hoist, keep} = Enum.split_with(block_stmts(body), &hoistable_submodule?/1)
+    parent = {:defmodule, m, [al, [do: {:__block__, [], keep}]]}
+    [parent | Enum.flat_map(hoist, &flatten_modules/1)]
+  end
+
+  defp hoistable_submodule?({:defmodule, _, [_, [do: b]]}),
+    do: not struct_only_module?(block_stmts(b))
+
+  defp hoistable_submodule?(_), do: false
+
+  # the `mod Name do … end` lines for one module (no header).
+  defp module_lines({:defmodule, _, [aliases, [do: body]]}, sigmap, types, struct_anns) do
+    name = short_name(aliases)
+    referenced = referenced_attrs(body)
+
+    inner =
+      body
+      |> block_stmts()
+      |> render_items(sigmap, name, struct_anns, referenced)
+      |> Enum.map(&indent/1)
+
+    # synthesized `type …` declarations (Phase B error sets, `@rian type`) after `mod … do`.
+    type_lines = if types == [], do: [], else: Enum.map(types, &("  " <> &1)) ++ [""]
+    ["mod #{name} do" | type_lines ++ inner] ++ ["end"]
+  end
+
   # split `@rian` annotation strings into `{def sigmap, struct-by-name, [type decl]}`.
   # Whitespace is collapsed so a heredoc multi-line decl parses/emits as one line.
   defp classify_annotations(strings) do
@@ -380,25 +426,6 @@ defmodule Rian.Transpile do
 
   # ── module ────────────────────────────────────────────────────────────────
 
-  defp toplevel({:defmodule, _, [aliases, [do: body]]}, sigmap, types, struct_anns) do
-    name = short_name(aliases)
-    referenced = referenced_attrs(body)
-
-    inner =
-      body
-      |> block_stmts()
-      |> render_items(sigmap, name, struct_anns, referenced)
-      |> Enum.map(&indent/1)
-
-    # synthesized `type …` declarations (Phase B error sets, `@rian type`) after `mod … do`.
-    type_lines = if types == [], do: [], else: Enum.map(types, &("  " <> &1)) ++ [""]
-    @header ++ ["mod #{name} do" | type_lines ++ inner] ++ ["end"]
-  end
-
-  defp toplevel(other, _sigmap, _types, _struct_anns) do
-    @header ++ ["# TODO[port]: top-level is not a single `defmodule`", "# #{snippet(other)}"]
-  end
-
   defp short_name({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
   defp short_name(other), do: snippet(other)
 
@@ -533,15 +560,11 @@ defmodule Rian.Transpile do
 
   # render a nested `defmodule`: flatten a struct-only wrapper to its `struct` decl
   # (Elixir's one-struct-per-module idiom), else nest it as a `mod … do … end`.
+  # Only struct-only nested modules reach here — function-bearing ones are hoisted
+  # to standalone top-level `mod`s by `flatten_modules/1`. A struct-only module is
+  # just a namespace for its `struct`, so it flattens to that struct's decl.
   defp render_submodule(name, body, sigmap, struct_anns, referenced) do
-    stmts = block_stmts(body)
-    inner = render_items(stmts, sigmap, name, struct_anns, referenced)
-
-    if struct_only_module?(stmts) do
-      inner
-    else
-      ["mod #{name} do"] ++ Enum.map(inner, &indent/1) ++ ["end"]
-    end
+    render_items(block_stmts(body), sigmap, name, struct_anns, referenced)
   end
 
   # a wrapper whose only real declaration is a `defstruct` (the rest is docs /

@@ -1,7 +1,10 @@
 defmodule Rian.Roundtrip do
   @moduledoc """
-  The **Elixir→Rian→Elixir roundtrip** harness: drives one Elixir module through
-  the three-step pipeline and reports, per stage, whether it survives.
+  The **Elixir→Rian→Elixir roundtrip** harness: drives an Elixir source — one or
+  more modules — through the three-step pipeline and reports, per stage, whether it
+  survives. Rian modules are flat, so a nested Elixir module is hoisted to a
+  sibling top-level `mod`; the harness compiles every module and compares the
+  **merged** normalized forms, so nothing is silently dropped.
 
       lib/foo.ex ──transpile──▶ tmp/rian/foo.rian ─┬─Rian.Beam─────────▶ BEAM (path 2)
                                                     └─Rian.Lower(Elixir)─▶ tmp/ex/foo.ex ─▶ BEAM (path 3)
@@ -46,19 +49,20 @@ defmodule Rian.Roundtrip do
   @spec run(String.t()) :: report()
   def run(ex_src) when is_binary(ex_src) do
     rian = ex_src |> Transpile.transpile() |> format_rian()
-    origin = safe(fn -> compile_elixir(ex_src) end)
+    mods = split_top_mods(rian)
+    origin = safe(fn -> origin_forms(ex_src) end)
+    elixir = safe(fn -> render_elixir(mods) end)
 
     # An unresolved `TODO_PORT(...)` marker compiles as an ordinary call to an
     # undefined function — it would not *lie* about being a finished port, so the
     # BEAM stages are reported as failed while the draft still carries one. A
     # `_Unk` type hole is fine (it is an open type that compiles).
-    {direct, elixir, via} =
+    {direct, via} =
       if marker?(rian) do
         unresolved = {:error, "unresolved TODO_PORT marker(s)"}
-        {unresolved, safe(fn -> rian_to_elixir(rian) end), unresolved}
+        {unresolved, unresolved}
       else
-        {elixir, via} = via_elixir(rian)
-        {safe(fn -> beam_direct(rian) end), elixir, via}
+        {safe(fn -> beam_forms(mods) end), safe(fn -> elixir_forms(mods) end)}
       end
 
     %{
@@ -86,33 +90,68 @@ defmodule Rian.Roundtrip do
   end
 
   # ── stages ──────────────────────────────────────────────────────────────────
+  #
+  # Rian is flat (the transpiler hoists nested modules to siblings), so the program
+  # is one source per top-level module. Each module is compiled independently and
+  # its normalized forms merged, so the comparison spans the whole program rather
+  # than silently covering only the first module.
 
-  # Rian draft → BEAM through the canonical abstract-forms backend, into `@probe`.
-  defp beam_direct(rian) do
-    {:ok, @probe, bin} = Beam.compile(rian, @probe)
+  # path 2 — each module through the canonical abstract-forms backend (`Rian.Beam`).
+  defp beam_forms(mods), do: merged_forms(mods, &beam_one/1)
+
+  # path 3 — each module rendered to Elixir (`Rian.Lower`) and recompiled.
+  defp elixir_forms(mods), do: merged_forms(mods, fn m -> compile_elixir(rian_to_elixir(m)) end)
+
+  defp merged_forms(mods, compile_one),
+    do: mods |> Enum.flat_map(&FormsEquiv.normalize(compile_one.(&1))) |> Enum.sort()
+
+  defp beam_one(mod_src) do
+    {:ok, @probe, bin} = Beam.compile(mod_src, @probe)
     purge(@probe)
     bin
   end
 
-  # Rian draft → Elixir module source (`Rian.Lower`) → BEAM. Returns the rendered
-  # Elixir (for `tmp/ex` and inspection) alongside the compile result.
-  defp via_elixir(rian) do
-    elixir = safe(fn -> rian_to_elixir(rian) end)
+  # the combined Elixir text of every module (for `tmp/ex` and inspection).
+  defp render_elixir(mods), do: Enum.map_join(mods, "\n\n", &rian_to_elixir/1)
 
-    case elixir do
-      {:ok, text} -> {elixir, safe(fn -> compile_elixir(text) end)}
-      {:error, _} = e -> {elixir, e}
-    end
-  end
-
-  defp rian_to_elixir(rian) do
-    case Decl.parse(rian) do
+  defp rian_to_elixir(mod_src) do
+    case Decl.parse(mod_src) do
       # `compile_module_beam/1` renders only the Elixir text (path 3 target); the
       # full `compile_module/1` would also eagerly emit Rust, which is irrelevant
       # here and not defined for an undeclared cross-module construction.
       %{mods: [m | _]} -> Lower.compile_module_beam(m).elixir |> format_ex()
       _ -> raise "no module in Rian source"
     end
+  end
+
+  # The merged normalized forms of every module the original Elixir defines (it may
+  # nest modules); renamed so compiling it cannot clobber a live module.
+  defp origin_forms(ex_src) do
+    quoted = ex_src |> Code.string_to_quoted!() |> rename_to_probe()
+
+    with_debug_info(fn ->
+      mods = Code.compile_quoted(quoted)
+      forms = mods |> Enum.flat_map(fn {_m, bin} -> FormsEquiv.normalize(bin) end) |> Enum.sort()
+      Enum.each(mods, fn {m, _} -> purge(m) end)
+      forms
+    end)
+  end
+
+  # Split the formatted Rian into one source string per top-level module — each
+  # `mod … end` closing at a column-0 `end` (Rian is flat).
+  defp split_top_mods(rian) do
+    {blocks, _cur} =
+      rian
+      |> String.split("\n")
+      |> Enum.reduce({[], []}, fn line, {blocks, cur} ->
+        cur = [line | cur]
+
+        if line == "end" and Enum.any?(cur, &String.starts_with?(&1, "mod ")),
+          do: {[Enum.reverse(cur) | blocks], []},
+          else: {blocks, cur}
+      end)
+
+    blocks |> Enum.reverse() |> Enum.map(&Enum.join(&1, "\n"))
   end
 
   # Generated artifacts are emitted formatted — `Rian.Format` for Rian, the Elixir
@@ -136,14 +175,23 @@ defmodule Rian.Roundtrip do
   # purged after so the harness leaves nothing loaded in the VM.
   defp compile_elixir(src) do
     quoted = src |> Code.string_to_quoted!() |> rename_to_probe()
-    prev = Code.get_compiler_option(:debug_info)
-    Code.put_compiler_option(:debug_info, true)
 
-    try do
+    with_debug_info(fn ->
       mods = Code.compile_quoted(quoted)
       {@probe, bin} = List.keyfind(mods, @probe, 0)
       Enum.each(mods, fn {m, _} -> purge(m) end)
       bin
+    end)
+  end
+
+  # `debug_info` is required so `Rian.FormsEquiv` can read the abstract code back;
+  # restored after so the harness leaves the compiler option as it found it.
+  defp with_debug_info(fun) do
+    prev = Code.get_compiler_option(:debug_info)
+    Code.put_compiler_option(:debug_info, true)
+
+    try do
+      fun.()
     after
       Code.put_compiler_option(:debug_info, prev)
     end
@@ -174,17 +222,18 @@ defmodule Rian.Roundtrip do
     e -> {:error, Exception.message(e)}
   end
 
-  # the two BEAM binaries are forms-equivalent only if both stages produced one.
-  defp equiv({:ok, a}, {:ok, b}) when is_binary(a) and is_binary(b),
-    do: if(FormsEquiv.equivalent?(a, b), do: :equiv, else: :diverges)
+  # two programs are equivalent when their merged normalized forms match — compared
+  # only when both stages produced forms.
+  defp equiv({:ok, a}, {:ok, b}) when is_list(a) and is_list(b),
+    do: if(a == b, do: :equiv, else: :diverges)
 
   defp equiv(_, _), do: :skipped
 
   defp ok_value({:ok, v}), do: v
   defp ok_value({:error, _}), do: nil
 
-  # a BEAM stage reports `:ok`/`{:error, reason}` — the binary itself is internal.
-  defp as_stage({:ok, _bin}), do: :ok
+  # a stage reports `:ok`/`{:error, reason}` — the forms themselves are internal.
+  defp as_stage({:ok, _forms}), do: :ok
   defp as_stage({:error, _} = e), do: e
 
   defp write(path, content) do

@@ -116,13 +116,43 @@ defmodule Rian.RoundtripTest do
       end
     end
 
-    test "a real lib/rian module (ir.ex — the Core IR vocabulary) roundtrips equivalent" do
+    test "a real lib/rian module (ir.ex — the Core IR vocabulary) compiles on both backends" do
       r = Roundtrip.run(File.read!("lib/rian/ir.ex"))
 
       assert r.beam_direct == :ok
       assert r.beam_via_elixir == :ok
+      # the two Rian backends agree; the roundtrip honestly diverges from the
+      # original Elixir because Rian lowers a struct to a tagged map, not an Elixir
+      # `%struct{}` with its injected `__struct__/0,1`.
       assert r.equiv_two_paths == :equiv
-      assert r.equiv_vs_origin == :equiv
+      assert r.equiv_vs_origin == :diverges
+    end
+
+    test "a nested-module source roundtrips ALL modules (no silent drop)" do
+      # Rian modules are flat, so the transpiler hoists `Inner` to a sibling
+      # top-level `mod`; the harness must roundtrip both `a/1` and `b/1`, not just
+      # the first module.
+      src = ~S'''
+      defmodule Outer do
+        use Rian.Ann
+        @rian "pub def a(x Int53) Int53"
+        def a(x), do: x + 1
+
+        defmodule Inner do
+          use Rian.Ann
+          @rian "pub def b(y Int53) Int53"
+          def b(y), do: y * 2
+        end
+      end
+      '''
+
+      r = Roundtrip.run(src)
+      assert r.beam_direct == :ok
+      assert r.beam_via_elixir == :ok
+      assert r.equiv_two_paths == :equiv
+      # both modules survive the roundtrip — the regenerated Elixir defines each
+      assert r.elixir =~ "def a(x)"
+      assert r.elixir =~ "def b(y)"
     end
 
     test "named construction agrees across backends (Rian.Lower ↔ Rian.Beam parity)" do
