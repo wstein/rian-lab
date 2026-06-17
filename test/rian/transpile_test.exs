@@ -4,6 +4,7 @@ defmodule Rian.TranspileTest do
   alias Rian.Transpile
 
   defp rian(src), do: Transpile.transpile(src)
+  defp test_mod(body), do: rian("defmodule MyTest do\n  use ExUnit.Case\n#{body}\nend")
 
   describe "defstruct → a Rian `struct` record (named for the module)" do
     test "an atom-list defstruct becomes `struct Mod(field _Unk, …)`" do
@@ -92,6 +93,88 @@ defmodule Rian.TranspileTest do
       assert out =~ "# TODO[port]:"
       assert out =~ "pub def f(x _Unk) _Unk := x"
       refute out =~ "top-level is not a single"
+    end
+  end
+
+  describe "ExUnit test blocks → `@test def` (ADR-0060)" do
+    test "a test module is flattened to module-less `@test def`s (discoverable, macros in scope)" do
+      out = test_mod(~S|  test "doubling works" do
+    assert double(21) == 42
+  end|)
+
+      assert out =~ "@test def doubling_works() Bool := assert_eq(double(21), 42)"
+      # NOT wrapped in `mod` (a `mod` hides @test defs + the injected macros), and
+      # `use ExUnit.Case` is dropped (pure scaffolding), not left as a marker.
+      refute out =~ "mod MyTest"
+      refute out =~ "use ExUnit"
+    end
+
+    test "`assert`/`refute` map to the assertion macros, with ==/!= specialized" do
+      out = test_mod(~S|  test "eq" do
+    assert a() == b()
+  end
+
+  test "neq" do
+    assert a() != b()
+  end
+
+  test "bare" do
+    assert ok?()
+  end
+
+  test "refute eq" do
+    refute a() == b()
+  end
+
+  test "refute bare" do
+    refute bad?()
+  end|)
+
+      assert out =~ "@test def eq() Bool := assert_eq(a(), b())"
+      assert out =~ "@test def neq() Bool := assert_neq(a(), b())"
+      assert out =~ "@test def bare() Bool := assert(ok?())"
+      assert out =~ "@test def refute_eq() Bool := assert_neq(a(), b())"
+      assert out =~ "@test def refute_bare() Bool := refute(bad?())"
+    end
+
+    test "a multi-statement body becomes a block: binds preamble + and-combined asserts" do
+      out = test_mod(~S|  test "several" do
+    x = double(3)
+    assert x == 6
+    assert double(4) == 8
+  end|)
+
+      assert out =~ "@test def several() Bool do"
+      assert out =~ "  x := double(3)"
+      assert out =~ "  assert_eq(x, 6) and assert_eq(double(4), 8)"
+      assert out =~ "\nend"
+    end
+
+    test "`assert_raise` has no Rian image (no exceptions, ADR-0035) — a marker" do
+      out = test_mod(~S|  test "raises" do
+    assert_raise ArgumentError, fn -> boom() end
+  end|)
+
+      assert out =~ "@test def raises() Bool := TODO_PORT("
+      assert out =~ "assert_raise"
+    end
+
+    test "the test name slugifies to a valid Rian identifier" do
+      out = test_mod(~S|  test "1 plus 1 (sanity!)" do
+    assert one() == 1
+  end|)
+
+      # leading digit → `t_` prefix; punctuation/spaces → single `_`; trimmed.
+      assert out =~ "@test def t_1_plus_1_sanity() Bool := assert_eq(one(), 1)"
+    end
+
+    test "a dynamic (interpolated) test name is not ported — stays a marker" do
+      out = test_mod(~S|  test "run #{n}" do
+    assert ok?()
+  end|)
+
+      refute out =~ "\n@test def"
+      assert out =~ "TODO[port]"
     end
   end
 

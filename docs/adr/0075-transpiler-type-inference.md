@@ -142,6 +142,17 @@ are engine tuning; (a) and (b) are real analyses, and guessing them would violat
     module-less `.rian` looks. Inference (`--infer`) runs over the bare statement list just as it does
     inside a module. A statement with no Rian image still drops to its own greppable `TODO[port]`
     marker, so a non-declaration script degrades per-statement rather than as one opaque blob.
+  - **ExUnit test modules (IMPLEMENTED).** A `defmodule … use ExUnit.Case … test "…" do … end`
+    (detected by `use ExUnit.Case` or any `test`/`describe` block) is **flattened to module-less
+    `@test def`s** — not wrapped in a `mod`, because a `mod` hides `@test def`s from `Rian.Test`'s
+    discovery and the injected assertion macros from scope (ADR-0060). Each `test "name" do body end`
+    becomes `@test def slug() Bool := …`; `assert`/`refute` rewrite to the assertion-macro vocabulary
+    (`assert_eq`/`assert_neq` for `==`/`!=`, ADR-0060/ADR-0030), and because ExUnit runs *every*
+    assertion while a `@test def` returns one `Bool`, a multi-assertion body is **`and`-combined** with
+    any non-assertion statements (binds, setup) as the block preamble. `use ExUnit.Case` is dropped
+    (pure scaffolding); `assert_raise` and kin have no Rian image (no exceptions, ADR-0035) and stay
+    greppable markers. The result runs end-to-end via `Rian.Test` — closing the port loop the
+    assertion macros opened.
   - **`@type` harvesting (IMPLEMENTED).** `Rian.Transpile.Infer.collect_types/2` reads every `@type`
     into a **type-env** (local name → Rian term) and a list of synthesized decls. A *union* `@type`
     (`@type ty :: String.t() | atom()`) synthesizes a named `type Ty := String | Symbol` decl; a

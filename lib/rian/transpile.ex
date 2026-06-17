@@ -21,7 +21,11 @@ defmodule Rian.Transpile do
       synthesized `type …` decl and/or resolved into `@spec`s), `if`/`case` (incl.
       `when` arms), binary/unary operators, ctor & struct patterns
       (`%ECall{fun: f}` → `ECall(fun: f)`), tuples, lists/cons, maps (atom **and**
-      non-atom `=>` keys, ADR-0033), pins (`^x`), bitstrings, atoms, literals, calls;
+      non-atom `=>` keys, ADR-0033), pins (`^x`), bitstrings, atoms, literals, calls,
+      and **ExUnit test modules** — a `defmodule … use ExUnit.Case … test "…" do … end`
+      flattens to module-less `@test def`s (ADR-0060: tests are top-level), with
+      `assert`/`refute` rewritten to the assertion macros (`assert_eq`/`assert_neq` for
+      `==`/`!=`) and a multi-assertion body `and`-combined; `Rian.Test` runs the result;
     * documentation / compile-metadata / conformance attributes with **no runtime
       semantics** are *dropped* (not flagged): `@typedoc`, `@doc false`, `@impl`,
       `@external_resource`, `@enforce_keys`, `@rian`/`use Rian.Ann` — emitting a
@@ -52,7 +56,8 @@ defmodule Rian.Transpile do
     "#   pipes (|>), single- & multi-clause lambdas (multi → `(p) -> case p do …`),",
     "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
     "#   word sigils (~w → list), referenced @attrs → const, as-patterns (var @ pat),",
-    "#   field access (r.f), string interpolation (${e}), nil→None.",
+    "#   field access (r.f), string interpolation (${e}), nil→None,",
+    "#   ExUnit `test` blocks → `@test def`, assert/refute → assertion macros.",
     "# You must still: (1) fill type holes `_Unk`, (2) resolve every",
     "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
     "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
@@ -155,12 +160,20 @@ defmodule Rian.Transpile do
   # so a function-bearing nested Elixir module is hoisted to a sibling top-level
   # `mod` rather than nested (where it would be silently dropped); a struct-only
   # nested module stays, flattening into the parent's `struct` decls.
-  defp toplevel({:defmodule, _, _} = top, sigmap, types, struct_anns) do
-    [parent | hoisted] = flatten_modules(top)
+  defp toplevel({:defmodule, _, [_, [do: body]]} = top, sigmap, types, struct_anns) do
+    # A **test module** (`use ExUnit.Case`, or `test`/`describe` blocks) carries no
+    # Rian-meaningful name — `@test def`s are top-level (ADR-0060), where `Rian.Test`
+    # discovers them and the injected assertion macros are in scope (both fail inside
+    # a `mod`). So flatten it to module-less top-level rather than wrapping in `mod`.
+    if test_module?(body) do
+      @header ++ flat_items(body, sigmap, types, struct_anns)
+    else
+      [parent | hoisted] = flatten_modules(top)
 
-    @header ++
-      module_lines(parent, sigmap, types, struct_anns) ++
-      Enum.flat_map(hoisted, &["" | module_lines(&1, sigmap, [], struct_anns)])
+      @header ++
+        module_lines(parent, sigmap, types, struct_anns) ++
+        Enum.flat_map(hoisted, &["" | module_lines(&1, sigmap, [], struct_anns)])
+    end
   end
 
   # A **module-less** top level — Rian source needs no `defmodule` wrapper (the
@@ -170,11 +183,25 @@ defmodule Rian.Transpile do
   # greppable `TODO[port]` marker via `render_items`, so a non-declaration script
   # degrades per-statement rather than collapsing into one opaque blob.
   defp toplevel(other, sigmap, types, struct_anns) do
-    stmts = block_stmts(other)
+    @header ++ flat_items(other, sigmap, types, struct_anns)
+  end
+
+  # Render a statement-carrying node's declarations flat (no `mod` wrapper).
+  defp flat_items(node, sigmap, types, struct_anns) do
     type_lines = if types == [], do: [], else: types ++ [""]
 
-    @header ++
-      type_lines ++ render_items(stmts, sigmap, nil, struct_anns, referenced_attrs(other))
+    type_lines ++
+      render_items(block_stmts(node), sigmap, nil, struct_anns, referenced_attrs(node))
+  end
+
+  # An ExUnit test module: `use ExUnit.Case`, or any `test`/`describe` block.
+  defp test_module?(body) do
+    Enum.any?(block_stmts(body), fn
+      {:use, _, [{:__aliases__, _, [:ExUnit, :Case]} | _]} -> true
+      {:test, _, _} -> true
+      {:describe, _, _} -> true
+      _ -> false
+    end)
   end
 
   # `[parent | hoisted]` — the top module with its function-bearing submodules
@@ -569,6 +596,9 @@ defmodule Rian.Transpile do
             {acc ++ flush(open, sigmap) ++ ["# (dropped Elixir `#{what}`: #{snippet(node)})"],
              doc, nil}
 
+          {:test, name, body} ->
+            {acc ++ flush(open, sigmap) ++ test_def(name, body, ""), doc, nil}
+
           {:clause, vis, head, kw} ->
             clause = build_clause(head, kw)
 
@@ -653,6 +683,9 @@ defmodule Rian.Transpile do
   # `use Rian.Ann` directive is annotation support — both are consumed, not ported.
   defp classify({:@, _, [{:rian, _, _}]}), do: :skip
   defp classify({:use, _, [{:__aliases__, _, [:Rian, :Ann]}]}), do: :skip
+  # `use ExUnit.Case` (with or without options) is test-framework scaffolding with
+  # no Rian analog — `@test def` is the whole surface (ADR-0060). Drop it silently.
+  defp classify({:use, _, [{:__aliases__, _, [:ExUnit, :Case]} | _]}), do: :skip
 
   defp classify({:defmodule, _, [{:__aliases__, _, _} = al, [do: body]]}),
     do: {:submodule, short_name(al), body}
@@ -663,6 +696,15 @@ defmodule Rian.Transpile do
 
   defp classify({:def, _, [head, kw]}), do: {:clause, :pub, head, kw}
   defp classify({:defp, _, [head, kw]}), do: {:clause, :priv, head, kw}
+
+  # ExUnit `test "name" do … end` (or `test "name", ctx do … end`) → a Rian
+  # `@test def` (ADR-0060). Only a literal-string name ports to a function name; a
+  # dynamic/interpolated name falls through to a marker. The setup `ctx` argument is
+  # dropped (Rian has no per-test fixture context). `describe` is handled separately.
+  defp classify({:test, _, [name, [do: body]]}) when is_binary(name), do: {:test, name, body}
+
+  defp classify({:test, _, [name, _ctx, [do: body]]}) when is_binary(name),
+    do: {:test, name, body}
 
   # Any remaining `@name <value>` (after the doc/spec/type/rian clauses above) is a
   # module attribute — a constant or a directive; `render_items` decides which.
@@ -824,6 +866,60 @@ defmodule Rian.Transpile do
   defp name_str(n), do: to_string(n)
   defp var_name({n, _, ctx}) when is_atom(n) and is_atom(ctx), do: to_string(n)
   defp var_name(other), do: snippet(other)
+
+  # ── ExUnit test blocks (ADR-0060) ─────────────────────────────────────────
+  #
+  # `test "name" do … end` → `@test def slug() Bool := …`. The assertion macros
+  # (`assert`/`refute`/`assert_eq`/`assert_neq`) are injected by `Rian.Test`, so the
+  # body needs only the call sites. ExUnit runs every assertion; a Rian `@test def`
+  # returns ONE `Bool`, so the assertions are `and`-combined as the return value and
+  # any non-assertion statements (binds, setup calls) become the block preamble —
+  # sound because assertions are side-effect-free values that don't feed the binds.
+  defp test_def(name, body, prefix) do
+    slug = prefix <> test_slug(name)
+
+    case render_test_body(body) do
+      {:inline, expr} ->
+        ["", "@test def #{slug}() Bool := #{expr}"]
+
+      {:block, lines} ->
+        ["", "@test def #{slug}() Bool do"] ++ Enum.map(lines, &("  " <> &1)) ++ ["end"]
+    end
+  end
+
+  defp render_test_body(body) do
+    stmts =
+      case body do
+        {:__block__, _, ss} -> ss
+        one -> [one]
+      end
+
+    {asserts, preamble} = Enum.split_with(stmts, &assertion?/1)
+
+    cond do
+      # No ExUnit assertion to anchor the `Bool` — best-effort render the body; the
+      # human supplies the missing check (the draft won't type-check until then).
+      asserts == [] -> {:inline, render_body(body)}
+      preamble == [] -> {:inline, Enum.map_join(asserts, " and ", &expr/1)}
+      true -> {:block, Enum.map(preamble, &stmt/1) ++ [Enum.map_join(asserts, " and ", &expr/1)]}
+    end
+  end
+
+  defp assertion?({:assert, _, _}), do: true
+  defp assertion?({:refute, _, _}), do: true
+  defp assertion?(_), do: false
+
+  # A test name → a valid Rian identifier: lowercase, non-alphanumerics collapsed to
+  # `_`, and a leading non-letter prefixed (Rian identifiers start with a letter).
+  defp test_slug(name) do
+    slug = name |> String.downcase() |> String.replace(~r/[^a-z0-9]+/, "_") |> String.trim("_")
+
+    cond do
+      slug == "" -> "test"
+      String.match?(slug, ~r/^[a-z]/) -> slug
+      true -> "t_" <> slug
+    end
+  end
 
   # ── bodies ──────────────────────────────────────────────────────────────────
 
@@ -1062,6 +1158,23 @@ defmodule Rian.Transpile do
     fmt = if ?a in mods, do: &":#{&1}", else: &~s|"#{&1}"|
     "[#{str |> String.split() |> Enum.map_join(", ", fmt)}]"
   end
+
+  # ExUnit assertions → the Rian assertion-macro vocabulary (ADR-0060): `assert a
+  # == b` / `refute a == b` specialize to `assert_eq` / `assert_neq`; the bare forms
+  # map to `assert` / `refute`. A custom failure message (2nd arg) is dropped — the
+  # Bool test model can't carry it until `Test.Outcome` lands (ADR-0060 §2); the
+  # assertion itself ports. `assert_raise` and kin are exception-based (ADR-0035 has
+  # no exceptions), so they have no Rian image and stay a greppable marker.
+  defp expr({:assert, _, [{:==, _, [l, r]} | _]}), do: "assert_eq(#{expr(l)}, #{expr(r)})"
+  defp expr({:assert, _, [{:!=, _, [l, r]} | _]}), do: "assert_neq(#{expr(l)}, #{expr(r)})"
+  defp expr({:assert, _, [e | _]}), do: "assert(#{expr(e)})"
+  defp expr({:refute, _, [{:==, _, [l, r]} | _]}), do: "assert_neq(#{expr(l)}, #{expr(r)})"
+  defp expr({:refute, _, [{:!=, _, [l, r]} | _]}), do: "assert_eq(#{expr(l)}, #{expr(r)})"
+  defp expr({:refute, _, [e | _]}), do: "refute(#{expr(e)})"
+
+  defp expr({raise_assert, _, _} = n)
+       when raise_assert in [:assert_raise, :assert_receive, :assert_received, :catch_throw],
+       do: ~s|TODO_PORT(#{inspect(snippet(n))})|
 
   defp expr({name, _, args}) when is_atom(name) and is_list(args),
     do: "#{name}(#{Enum.map_join(args, ", ", &expr/1)})"

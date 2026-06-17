@@ -130,6 +130,11 @@ Recorded so the question stops recurring. A natural-language `.feature` layer is
   multi-module-internal doctests and the per-target (Rust/JS) doctest harness.
 - **Tour-as-regression.** Each `examples/rian/*.rian` already compiles; assert its documented
   outputs in CI (the `Rian.Fixpoint` pattern, generalised).
+- **ExUnit → `@test def` transpilation.** *Shipped* (`Rian.Transpile`, ADR-0075): `mix rian.transpile`
+  flattens an ExUnit test module to module-less `@test def`s and rewrites `assert`/`refute` to the
+  assertion macros — so the test-porting track produces drafts that run end-to-end via `Rian.Test`,
+  closing the loop the assertion macros opened. `assert_raise`/`setup` (no Rian image) stay markers;
+  the value-returning matcher forms wait on `Test.Outcome` below.
 - **`@test` annotation** vs the `test_` prefix convention — needs the annotation parser extended
   beyond doc comments (decl.ex).
 - **Matcher surface + `Test.Outcome`** (`eq`/`be`/`contain`, formatted diagnostics, the

@@ -88,6 +88,42 @@ defmodule Rian.TestRunnerTest do
       assert RT.assert_prelude() =~ "macro assert(cond)"
       assert RT.assert_prelude() =~ "macro refute(cond)"
     end
+
+    test "the loop closes: an ExUnit module transpiles to a draft that runs as Rian" do
+      ex = """
+      defmodule DoubleTest do
+        use ExUnit.Case, async: true
+
+        def double(n), do: n * 2
+
+        test "doubling works" do
+          assert double(21) == 42
+        end
+
+        test "is additive" do
+          assert double(3) == 6
+          assert double(4) == 8
+        end
+
+        test "honest failure" do
+          assert double(2) == 5
+        end
+      end
+      """
+
+      code =
+        ex
+        |> Rian.Transpile.transpile(infer: true)
+        |> String.split("\n")
+        |> Enum.reject(&String.starts_with?(&1, "#"))
+        |> Enum.join("\n")
+
+      assert RT.run(code) == [
+               {"doubling_works", :pass},
+               {"is_additive", :pass},
+               {"honest_failure", {:fail, false}}
+             ]
+    end
   end
 
   describe "per-target test harness (ADR-0060 §3)" do
