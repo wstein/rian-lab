@@ -151,6 +151,15 @@ all exist and are tested.
   the escript (ADR-0026) so `rian fmt`/`--check`/`--diff` run with no Elixir/mix toolchain, giving the
   deterministic same-bytes-every-platform CI gate a standalone home. Backend-independent — can ship
   with the escript packaging, not gated on the 0.5 cutover.
+- **`rian run FILE` (+ `mix rian.run`) — compile a `.rian` to BEAM and invoke its `main/0`** (shipped).
+  The user-facing surface of Stages 0.2/0.3 ("compile & run real `.rian` files") and the
+  non-interactive sibling of `mix rian.repl`: parse → `Rian.Check.gate!` → `Rian.Beam.load_program/1`
+  → `apply(mod, main, [])`, printing the entry's value. `--main FUNC` overrides the entry (a zero-arg
+  function, like `mix rian.jar --main`). **BEAM-only by nature** — the run *target* is the BEAM;
+  other targets emit via `mix rian.compile`. This is **not** an `.exs`-style "script" file type or a
+  second semantics (that would cut against ADR-0057's "one source, many targets"); it is a run
+  *convenience*, statically gated like every other path. Logic lives in `Rian.Run`, shared by the task
+  and the escript (`rian run`) — the same split as `rian fmt`/`Rian.Format.CLI`.
 - **Concurrency is native-per-target — a deliberate boundary, not a gap** (clarified 2026-06-13;
   refines the 2026-06-12 lock). Rian's purpose is to **share sequential application logic and tests**
   across targets — the canonical proof is Rian's own lexer/parser running on the BEAM, Rust, and

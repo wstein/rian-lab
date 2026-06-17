@@ -4,17 +4,19 @@ defmodule Rian.CLI do
   (`mix escript.build` → a `rian` binary; ADR-0031/0045 Tier 3). Runs with no Mix
   or Elixir toolchain on the host.
 
-  Currently one subcommand:
+  Subcommands:
 
       rian fmt FILE…            # rewrite each file in place
       rian fmt --check FILE…    # exit non-zero if any file is unformatted / unlexable
       rian fmt --diff FILE…     # print a unified diff of what would change (no write)
       rian fmt --stdout FILE…   # write formatted source to stdout (don't rewrite)
       rian fmt -                # read stdin, write formatted source to stdout
+      rian run FILE             # compile to BEAM and run `main/0`, printing its value
+      rian run FILE --main FUNC # run a different zero-arg entry
 
-  The actual formatting/diff/check logic lives in `Rian.Format.CLI` so the same
-  code backs both this escript and `mix rian.format`; this module only adapts
-  argv → exit code via `System.halt/1`.
+  The actual logic lives in `Rian.Format.CLI` / `Rian.Run`, so the same code backs
+  both this escript and the `mix rian.format` / `mix rian.run` tasks; this module
+  only adapts argv → exit code via `System.halt/1`.
   """
 
   @doc "escript entry point."
@@ -27,6 +29,7 @@ defmodule Rian.CLI do
 
   # returns an integer exit code
   defp dispatch(["fmt" | rest]), do: Rian.Format.CLI.run(rest)
+  defp dispatch(["run" | rest]), do: Rian.Run.cli(rest)
 
   defp dispatch(["-h" | _]), do: usage(0)
   defp dispatch(["--help" | _]), do: usage(0)
@@ -47,6 +50,8 @@ defmodule Rian.CLI do
       rian fmt --diff FILE…     print a unified diff of what would change
       rian fmt --stdout FILE…   write formatted source to stdout
       rian fmt -                format stdin → stdout
+      rian run FILE             compile to BEAM and run `main/0`
+      rian run FILE --main FUNC run a different zero-arg entry
     """)
 
     code
