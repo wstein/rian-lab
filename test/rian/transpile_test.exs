@@ -257,9 +257,16 @@ end|) =~ ~S|"v=${x}!"|
       assert rian("defmodule M do\n  def m, do: %{lo: 1, hi: 2}\nend") =~ "%{lo: 1, hi: 2}"
     end
 
-    test "multi-statement body → Rian `;`-separated block with binds" do
+    test "multi-statement clause body → a block clause (`head` … `end`), not a one-liner" do
       out = rian("defmodule M do\n  def g(x) do\n    y = x + 1\n    z = y + 1\n    z\n  end\nend")
-      assert out =~ "y := x + 1; z := y + 1; z"
+      # binds on their own indented lines, closed by `end` — far more readable than
+      # the `;`-joined inline form.
+      assert out =~ "pub def g(x _Unk) _Unk\n    y := x + 1\n    z := y + 1\n    z\n  end"
+    end
+
+    test "a single-statement clause body stays the inline `:= expr` form" do
+      assert rian("defmodule M do\n  def d(x), do: x + x\nend") =~
+               "pub def d(x _Unk) _Unk := x + x"
     end
 
     test "a call to a sibling Rian module is emitted inline, not flagged" do

@@ -10,12 +10,14 @@ defmodule Rian.Transpile do
   reconstruction a transpiler cannot do alone. So this tool produces a **draft
   skeleton** a human then finishes and equiv-locks against the oracle:
 
-    * forms with a clear Rian image are translated — `def`/`defp` clauses,
-      `defstruct` (→ a `struct Mod(…)` record skeleton), nested `defmodule`s (a
-      struct-only wrapper flattens to its `struct`, else nests as `mod`), `@type` (→
-      a synthesized `type …` decl and/or resolved into `@spec`s), `if`/`case` (incl.
-      `when` arms), binary/unary operators, ctor & struct patterns (`%ECall{fun: f}` →
-      `ECall(fun: f)`), tuples, lists/cons, atoms, string/number literals, local calls;
+    * forms with a clear Rian image are translated — `def`/`defp` clauses (a
+      multi-statement body becomes a block clause `head … end`, a single expression
+      the inline `head := expr`), `defstruct` (→ a `struct Mod(…)` record skeleton),
+      nested `defmodule`s (a struct-only wrapper flattens to its `struct`; a
+      function-bearing one is hoisted to a sibling top-level `mod`, since Rian is
+      flat), `@type` (→ a synthesized `type …` decl and/or resolved into `@spec`s),
+      `if`/`case` (incl. `when` arms), binary/unary operators, ctor & struct patterns
+      (`%ECall{fun: f}` → `ECall(fun: f)`), tuples, lists/cons, atoms, literals, calls;
     * everything else is left **in place** as a greppable `TODO_PORT("…")`
       sentinel (carrying the original Elixir) or a `# TODO[port]: …` line comment,
       so nothing untranslated can masquerade as done;
@@ -670,14 +672,22 @@ defmodule Rian.Transpile do
           |> Enum.zip(ptypes)
           |> Enum.map_join(", ", fn {a, t} -> param(var_name(a), t, vis) end)
 
-        ["#{kw} #{name}(#{params})#{ret_part}#{forall} := #{render_body(c.body)}"]
+        clause_lines("#{kw} #{name}(#{params})#{ret_part}#{forall}", c.body)
       else
         sig_line = "#{kw} #{name}(#{sig_params(ptypes, vis)})#{ret_part}#{forall}"
-        [sig_line | Enum.map(clauses, &render_clause(kw, &1))]
+        [sig_line | Enum.flat_map(clauses, &render_clause(kw, &1))]
       end
 
     [""] ++ doc_lines ++ body_lines
   end
+
+  # A clause's body lines. A multi-statement body becomes a **block clause**
+  # (`head\n  stmt\n  …\n  final\nend`); a single expression stays the inline
+  # `head := expr` form. The block reads far better than the `;`-joined one-liner.
+  defp clause_lines(head, {:__block__, _, [_, _ | _] = stmts}),
+    do: [head] ++ Enum.map(stmts, &("  " <> stmt(&1))) ++ ["end"]
+
+  defp clause_lines(head, body), do: ["#{head} := #{render_body(body)}"]
 
   # A PRIVATE parameter whose type is an unresolved hole omits the type — Rian
   # infers it (infer-local, like the dropped private return), so the draft carries
@@ -706,7 +716,7 @@ defmodule Rian.Transpile do
     # Rian supports `when` guards in clause heads (proven equiv-lockable), so
     # translate the guard rather than dropping it to a note.
     guard = if c.guard, do: " when #{expr(c.guard)}", else: ""
-    "#{kw} #{name_str(c.name)}(#{pats})#{guard} := #{render_body(c.body)}"
+    clause_lines("#{kw} #{name_str(c.name)}(#{pats})#{guard}", c.body)
   end
 
   defp name_str(n), do: to_string(n)
