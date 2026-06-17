@@ -132,5 +132,20 @@ defmodule Rian.InferLocalTest do
       assert %{name: "x", type: "Int64"} = param_of(src, "f", 0)
       assert tvars_of(src, "f") == []
     end
+
+    test "an arithmetic param is not frozen to Int53 by an as-yet-unresolved callee" do
+      # `slow`'s return is itself inferred (Float64); in the first fixpoint round it is
+      # still unknown. `x` must NOT be eagerly pinned to Int53 (and then rejected as an
+      # Int↔Float mismatch) — the Int53 arithmetic default is deferred until neighbours
+      # settle, so `x` generalizes and the program type-checks.
+      src = "mod M do\n  def slow() := 1.5\n  def g(x) := x + slow()\nend"
+      assert %{name: "x", type: "T"} = param_of(src, "g", 0)
+      assert Rian.Check.check_program(Decl.parse(src)) == :ok
+    end
+
+    test "a genuinely-unconstrained arithmetic param still defaults to Int53 (`x + y`)" do
+      assert %{name: "x", type: "Int53"} = param_of("def f(x, y) := x + y", "f", 0)
+      assert %{name: "y", type: "Int53"} = param_of("def f(x, y) := x + y", "f", 1)
+    end
   end
 end

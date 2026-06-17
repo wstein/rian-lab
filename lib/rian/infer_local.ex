@@ -41,9 +41,18 @@ defmodule Rian.InferLocal do
   @spec fill_returns(map()) :: map()
   def fill_returns(prog) when is_map(prog) do
     if Enum.any?(all_funcs(prog), &(untyped_ret?(&1) or has_infer_param?(&1))) do
-      # 1. fix concrete params + returns; 2. generalize any param the body left
-      #    unconstrained to `forall T`; 3. fix returns that depended on that tvar.
-      prog = prog |> fixpoint() |> generalize_params() |> fixpoint()
+      # 1. resolve params + returns with NO arithmetic default (`:unknown`), so a param
+      #    is never frozen to `Int53` from a neighbour that may still resolve (a not-yet-
+      #    typed callee); 2. re-run with the `Int53` default now that every neighbour has
+      #    settled, pinning genuinely-unconstrained arithmetic params (`x + y` → `Int53`);
+      #    3. generalize any param still unconstrained to `forall T`; 4. fix returns that
+      #    depended on the above.
+      prog =
+        prog
+        |> fixpoint(:unknown)
+        |> fixpoint("Int53")
+        |> generalize_params()
+        |> fixpoint("Int53")
 
       case Enum.filter(all_funcs(prog), &untyped_ret?/1) do
         [] ->
@@ -73,10 +82,10 @@ defmodule Rian.InferLocal do
   # rebuild the inference context each round so a param/return filled this pass is
   # visible to its callers next pass; stop when a pass fills nothing new (bounded by
   # the number of undeclared params + returns).
-  defp fixpoint(prog) do
-    ic = Check.program_ic(prog)
+  defp fixpoint(prog, num_default) do
+    ic = Map.put(Check.program_ic(prog), :num_default, num_default)
     {prog, changed?} = pass(prog, ic)
-    if changed?, do: fixpoint(prog), else: prog
+    if changed?, do: fixpoint(prog, num_default), else: prog
   end
 
   defp pass(prog, ic) do

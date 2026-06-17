@@ -1577,8 +1577,8 @@ defmodule Rian.Check do
     here =
       cond do
         op == "<>" and (var?(l, name) or var?(r, name)) -> "String"
-        (op in @arith or op in @int_ops) and var?(l, name) -> num_hint(infer(r, env, ic))
-        (op in @arith or op in @int_ops) and var?(r, name) -> num_hint(infer(l, env, ic))
+        (op in @arith or op in @int_ops) and var?(l, name) -> num_hint(infer(r, env, ic), ic)
+        (op in @arith or op in @int_ops) and var?(r, name) -> num_hint(infer(l, env, ic), ic)
         op in @bool_ops and var?(l, name) -> concretize(infer(r, env, ic))
         op in @bool_ops and var?(r, name) -> concretize(infer(l, env, ic))
         true -> :unknown
@@ -1689,8 +1689,17 @@ defmodule Rian.Check do
 
   # an arithmetic neighbour's type pins the variable when it is a concrete integer,
   # else the portable default `Int53` (a bare `x + 1` makes `x : Int53`, ADR-0064).
-  defp num_hint(t) when is_binary(t), do: if(int_type?(t), do: ordinal_base(t), else: :unknown)
-  defp num_hint(_), do: "Int53"
+  # A concrete integer neighbour pins the variable to that integer type. A *non-int*
+  # concrete neighbour (e.g. `Float64`) gives no integer hint (`:unknown`). An `:unknown`
+  # neighbour yields `ic[:num_default]`: during the `InferLocal` fixpoint that default is
+  # `:unknown` — so a param is NOT pinned to `Int53` from a neighbour that may still
+  # resolve (a yet-untyped callee), which would freeze a wrong type (ADR-0064/ADR-0035).
+  # Only the post-fixpoint pass sets it to `"Int53"`, applying the portable default once
+  # all neighbours have settled (a genuinely-unconstrained `x + y` → `Int53`).
+  defp num_hint(t, _ic) when is_binary(t),
+    do: if(int_type?(t), do: ordinal_base(t), else: :unknown)
+
+  defp num_hint(_, ic), do: Map.get(ic, :num_default, "Int53")
 
   defp var?(%EId{name: n}, n), do: true
   defp var?(_, _), do: false
