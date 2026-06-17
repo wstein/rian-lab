@@ -41,6 +41,7 @@ a <- 55
 | **Primitive type names** | `Int64`, `Int32`, `Float64`, `Float32`, `String`, `Bool`, `Symbol` | Crystal vocabulary (PascalCase). Width-explicit is kept for cross-target precision; only the *spelling* moves from Rust's `i64` to Crystal's `Int64`. Resolves ADR-0032's open item. |
 | **Binding** | `name [Type] := expr` (type optional, juxtaposed) | `:=` retained — single-assignment is a real Rian distinction from `<-`. |
 | **Mutation** | `name <- expr` → **re-spelled, see ADR-0039** | The `<-` token is reassigned to the family failable-bind/generator (`with`/`for`); capability-gated mutation moves to a new spelling (semantics unchanged). Decision-lock 2026-06-12. |
+| **Predicate/bang names** | an identifier may carry a single trailing `?` or `!` — `empty?`, `gate!` | The family convention (Elixir/Ruby/Crystal): `?` reads "predicate", `!` "stricter/effecting variant". `?` is otherwise unused in the grammar (zero ambiguity); a trailing `!` is part of the name only when it does not begin the `!=` operator (`a!=b` ≡ `a != b`). The codepoint survives to each target's symbol table (BEAM `empty?/1`). |
 
 ### Guards keep `when` — resolved by the Elixir `case` form
 

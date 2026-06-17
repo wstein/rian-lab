@@ -23,7 +23,7 @@ defmodule Rian.Lexer do
       {:num, lexeme}              42 · 3.14 · 1_000 · 1.0e9 (exponent normalized)
       {:op, op}                   operators + word-operators (and/or/not/in/rem/div)
       {:kw, kw}                   keywords (see @keywords)
-      {:id, name}                 identifier
+      {:id, name}                 identifier (optional trailing `?`/`!`: `empty?`, `gate!`)
   """
 
   # Word-operators (kept as ops so the precedence parser sees them uniformly).
@@ -37,7 +37,11 @@ defmodule Rian.Lexer do
   @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&"]
 
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/
-  @id_re ~r/^[A-Za-z_]\w*/
+  # Identifiers may carry a single trailing `?` or `!` — the Elixir/Ruby/Crystal
+  # predicate/bang convention (ADR-0033): `empty?`, `gate!`. A `!` is part of the
+  # name only when it is *not* the start of the `!=` operator, so `a!=b` still
+  # lexes as `a`, `!=`, `b`.
+  @id_re ~r/^[A-Za-z_]\w*(?:\?|!(?!=))?/
 
   @typedoc "A lexer token (see the `## Tokens` section above)."
   @type token ::

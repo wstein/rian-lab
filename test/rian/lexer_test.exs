@@ -12,6 +12,19 @@ defmodule Rian.LexerTest do
       assert {:kw, "if"} in Lexer.expr_tokens("if c do a else b end")
     end
 
+    test "identifiers carry a trailing `?`/`!` (predicate/bang, ADR-0033)" do
+      assert Lexer.expr_tokens("empty?") == [{:id, "empty?"}]
+      assert Lexer.expr_tokens("gate!") == [{:id, "gate!"}]
+
+      assert Lexer.expr_tokens("Reach.gate!(prog)") ==
+               [{:id, "Reach"}, {:op, "."}, {:id, "gate!"}, {:lparen}, {:id, "prog"}, {:rparen}]
+    end
+
+    test "a trailing `!` does not swallow the `!=` operator" do
+      assert Lexer.expr_tokens("a != b") == [{:id, "a"}, {:op, "!="}, {:id, "b"}]
+      assert Lexer.expr_tokens("a!=b") == [{:id, "a"}, {:op, "!="}, {:id, "b"}]
+    end
+
     test "literals: separators, floats, normalized exponents, strings" do
       assert Lexer.expr_tokens("1_000") == [{:num, "1_000"}]
       assert Lexer.expr_tokens("3.14") == [{:num, "3.14"}]
