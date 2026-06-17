@@ -65,6 +65,22 @@ defmodule Rian.RoundtripTest do
       Roundtrip.run("defmodule Calc do\n  def f(x), do: x\nend")
       refute :code.is_loaded(:"Elixir.RoundtripProbe")
     end
+
+    test "the generated Rian and Elixir are emitted formatted" do
+      src = ~S'''
+      defmodule Calc do
+        use Rian.Ann
+        @rian "pub def double(x Int53) Int53"
+        def double(x), do: x + x
+      end
+      '''
+
+      r = Roundtrip.run(src)
+
+      # idempotent under each language's formatter ⇒ already formatted
+      assert r.rian == Rian.Format.format(r.rian)
+      assert r.elixir == IO.iodata_to_binary(Code.format_string!(r.elixir)) <> "\n"
+    end
   end
 
   describe "end-to-end — a green roundtrip yields a working, test-passing module" do

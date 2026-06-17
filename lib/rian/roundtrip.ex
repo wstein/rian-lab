@@ -24,7 +24,7 @@ defmodule Rian.Roundtrip do
   honest gate for "how far does this module roundtrip".
   """
 
-  alias Rian.{Beam, Decl, FormsEquiv, Lower, Transpile}
+  alias Rian.{Beam, Decl, Format, FormsEquiv, Lower, Transpile}
 
   # Every backend compiles into this one throwaway module so (a) the BEAM binaries
   # line up for `Rian.FormsEquiv` and (b) compiling a `lib/rian/*.ex` source — or
@@ -45,7 +45,7 @@ defmodule Rian.Roundtrip do
   @doc "Run the full roundtrip on one Elixir source string, returning a `t:report/0`."
   @spec run(String.t()) :: report()
   def run(ex_src) when is_binary(ex_src) do
-    rian = Transpile.transpile(ex_src)
+    rian = ex_src |> Transpile.transpile() |> format_rian()
     origin = safe(fn -> compile_elixir(ex_src) end)
 
     # An unresolved `TODO_PORT(...)` marker compiles as an ordinary call to an
@@ -110,9 +110,24 @@ defmodule Rian.Roundtrip do
       # `compile_module_beam/1` renders only the Elixir text (path 3 target); the
       # full `compile_module/1` would also eagerly emit Rust, which is irrelevant
       # here and not defined for an undeclared cross-module construction.
-      %{mods: [m | _]} -> Lower.compile_module_beam(m).elixir
+      %{mods: [m | _]} -> Lower.compile_module_beam(m).elixir |> format_ex()
       _ -> raise "no module in Rian source"
     end
+  end
+
+  # Generated artifacts are emitted formatted — `Rian.Format` for Rian, the Elixir
+  # formatter for Elixir. A draft that still carries markers may not parse for the
+  # Rian formatter, so it falls back to the raw text.
+  defp format_rian(src) do
+    Format.format(src)
+  rescue
+    _ -> src
+  end
+
+  defp format_ex(src) do
+    IO.iodata_to_binary(Code.format_string!(src)) <> "\n"
+  rescue
+    _ -> src
   end
 
   # Compile Elixir source text into `@probe` (the top module renamed so nothing

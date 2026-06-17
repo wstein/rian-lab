@@ -88,6 +88,12 @@ defmodule Rian.FormatTest do
       assert Format.format("def f() := %{x: 0, y: 0}\n") == "def f() := %{x: 0, y: 0}\n"
       assert Format.format("def f() := g(:ok)\n") == "def f() := g(:ok)\n"
     end
+
+    test "a reserved keyword used as a field label spaces like any label (ADR-0033)" do
+      # `type:`/`def:` are keyword labels, not `: atom` openers — `type: v`, not `type :v`.
+      assert Format.format("def f() := Field(type: \"T\")\n") == "def f() := Field(type: \"T\")\n"
+      assert Format.format("def f() := %{case: 1}\n") == "def f() := %{case: 1}\n"
+    end
   end
 
   describe "indentation" do

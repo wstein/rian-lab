@@ -494,7 +494,7 @@ defmodule Rian.Format do
   end
 
   defp mark([{:tok, {:op, ":"}} | rest], prev, acc) do
-    t = if value_end?(prev), do: {:tok, {:kcolon}}, else: {:tok, {:acolon}}
+    t = if label_colon?(prev), do: {:tok, {:kcolon}}, else: {:tok, {:acolon}}
     mark(rest, t, [t | acc])
   end
 
@@ -503,6 +503,11 @@ defmodule Rian.Format do
   # value-end as a *node* (the next `-`/`+` is binary, the next `:` is a key)
   defp value_end?(nil), do: false
   defp value_end?(node), do: value_end_tok?(tail_tok(node))
+
+  # A `:` is a key/label colon when it follows a value OR a reserved keyword used
+  # as a field label (`type:`, ADR-0033); otherwise it opens an atom (`:foo`).
+  defp label_colon?(nil), do: false
+  defp label_colon?(node), do: value_end?(node) or match?({:kw, _}, tail_tok(node))
 
   defp value_end_tok?({:id, _}), do: true
   defp value_end_tok?({:num, _}), do: true
