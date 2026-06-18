@@ -76,6 +76,43 @@ defmodule Rian.Manifest do
     end
   end
 
+  @doc """
+  The nearest `rian.toml` at or above `start_dir` (default the CWD), as an absolute
+  path, or `nil` if none exists up to the filesystem root. This is how a tool finds
+  the **project root** from anywhere inside the tree (the `cargo`/`git` walk-up) — the
+  anchor for the build-default target set (`Rian.Reach`) and `@external` file-reference
+  resolution (ADR-0080 §2/§7).
+  """
+  @spec locate(Path.t()) :: Path.t() | nil
+  def locate(start_dir \\ ".") do
+    start_dir |> Path.expand() |> walk_up()
+  end
+
+  defp walk_up(dir) do
+    candidate = Path.join(dir, "rian.toml")
+    parent = Path.dirname(dir)
+
+    cond do
+      File.regular?(candidate) -> candidate
+      parent == dir -> nil
+      true -> walk_up(parent)
+    end
+  end
+
+  @doc """
+  The **project root** for `start_dir` — the directory of the nearest `rian.toml`
+  (`locate/1`), or `start_dir` itself when there is no manifest above it. A relative
+  `@external` file-reference resolves against this base, so it is stable regardless of
+  which entry file inside the project is built/run (ADR-0080 §7).
+  """
+  @spec root(Path.t()) :: Path.t()
+  def root(start_dir) do
+    case locate(start_dir) do
+      nil -> start_dir
+      path -> Path.dirname(path)
+    end
+  end
+
   # ── the constrained-TOML reader: text -> %{"table" => %{"key" => value}} ──────
 
   defp tables(text) do

@@ -130,4 +130,36 @@ defmodule Rian.ManifestTest do
       assert msg =~ "cannot read"
     end
   end
+
+  describe "locate/1 and root/1 — project-root discovery (ADR-0080 §2/§7)" do
+    setup do
+      base = Path.join(System.tmp_dir!(), "rian_locate_#{System.unique_integer([:positive])}")
+      sub = Path.join([base, "src", "deep"])
+      File.mkdir_p!(sub)
+      File.write!(Path.join(base, "rian.toml"), ~s|[project]\nname = "x"\nversion = "1"\n|)
+      on_exit(fn -> File.rm_rf(base) end)
+      %{base: Path.expand(base), sub: sub}
+    end
+
+    test "locate/1 walks up to the nearest rian.toml", %{base: base, sub: sub} do
+      assert Manifest.locate(sub) == Path.join(base, "rian.toml")
+    end
+
+    test "root/1 is the manifest's directory from anywhere inside the project", %{
+      base: base,
+      sub: sub
+    } do
+      assert Manifest.root(sub) == base
+      assert Manifest.root(base) == base
+    end
+
+    test "root/1 falls back to start_dir when no manifest is above it" do
+      orphan = Path.join(System.tmp_dir!(), "rian_orphan_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(orphan)
+      on_exit(fn -> File.rm_rf(orphan) end)
+
+      assert Manifest.locate(orphan) == nil
+      assert Manifest.root(orphan) == orphan
+    end
+  end
 end
