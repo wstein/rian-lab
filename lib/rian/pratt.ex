@@ -86,6 +86,7 @@ defmodule Rian.Pratt do
   parse failure pattern-match this rather than `try/rescue`.
   """
   @spec parse_body_result(String.t() | tuple()) :: {:ok, tuple()} | {:error, String.t()}
+  @rian_host "parser boundary: parse_body raises a malformed-input error into a value"
   def parse_body_result(src) do
     {:ok, parse_body(src)}
   rescue

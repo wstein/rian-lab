@@ -1,4 +1,6 @@
 defmodule Rian.Repl do
+  use Rian.Ann
+
   @moduledoc """
   The Rian REPL eval engine (ADR-0053) — a **compiling** REPL: every entry runs
   the real pipeline (`Lexer → Decl/Pratt → Check → Beam → :code.load_binary →
@@ -405,6 +407,7 @@ defmodule Rian.Repl do
   # hit a genuine runtime fault (host FFI, a partial prim) — the one irreducible
   # boundary where the REPL turns a BEAM exception into an `{:error, _}` value rather
   # than crashing the session.
+  @rian_host "runtime boundary: evaluating gated code can still fault on host FFI / a partial prim"
   defp eval_loaded(module) do
     {:ok, apply(module, :__repl__, [])}
   rescue
@@ -517,6 +520,7 @@ defmodule Rian.Repl do
     end
   end
 
+  @rian_host "best-effort boundary: completion inference degrades to :unknown, never crashes the REPL"
   defp infer_or_unknown(ast, env, ic) do
     Check.infer(ast, env, ic)
   rescue

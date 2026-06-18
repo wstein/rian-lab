@@ -1,4 +1,6 @@
 defmodule Rian.Repl.History do
+  use Rian.Ann
+
   @moduledoc """
   File-backed REPL history, persisted across sessions (ADR-0053).
 
@@ -56,6 +58,7 @@ defmodule Rian.Repl.History do
   IO error is swallowed so persistence can never take down a REPL session.
   """
   @spec add(iodata()) :: :ok
+  @rian_host "best-effort host boundary: history file I/O must never crash the REPL"
   def add(line) do
     entry = line |> IO.chardata_to_string() |> String.trim_trailing("\n") |> String.trim()
 

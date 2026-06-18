@@ -37,8 +37,49 @@ defmodule Rian.Ann do
   defmacro __using__(_opts) do
     quote do
       Module.register_attribute(__MODULE__, :rian, accumulate: true, persist: true)
+      Module.register_attribute(__MODULE__, :rian_host, accumulate: true, persist: true)
     end
   end
+
+  @doc """
+  Names of the `def`s tagged `@rian_host` — a **sanctioned exception boundary**
+  (ADR-0035/0040): a function whose `try/rescue` converts a host-runtime or parser
+  raise into a value (e.g. `Code.format_string!`, ad-hoc compile, file I/O, the
+  parser's `{:error,_}` boundary). The construct gate (`Rian.Transpile.incompatible/1`)
+  excludes these — they are honest non-portability, not a Rian-concept clash. The
+  attribute tags the **next** `def`/`defp` in its block (like `@doc`).
+  """
+  @spec host_funcs(String.t()) :: [String.t()]
+  def host_funcs(source) when is_binary(source) do
+    case Code.string_to_quoted(source) do
+      {:ok, ast} -> host_from_ast(ast)
+      _ -> []
+    end
+  end
+
+  defp host_from_ast(ast) do
+    {_, {_pending, names}} =
+      Macro.prewalk(ast, {false, []}, fn
+        {:@, _, [{:rian_host, _, _}]} = n, {_pending, acc} ->
+          {n, {true, acc}}
+
+        {df, _, [head | _]} = n, {true, acc} when df in [:def, :defp] ->
+          {n, {false, [def_name(head) | acc]}}
+
+        {df, _, _} = n, {_pending, acc} when df in [:def, :defp] ->
+          {n, {false, acc}}
+
+        n, state ->
+          {n, state}
+      end)
+
+    names |> Enum.reject(&is_nil/1) |> Enum.uniq()
+  end
+
+  # the bare function name of a `def` head (`name(args)` or `name(args) when g`).
+  defp def_name({:when, _, [call | _]}), do: def_name(call)
+  defp def_name({name, _, _}) when is_atom(name), do: to_string(name)
+  defp def_name(_), do: nil
 
   @doc "Extract every `@rian` annotation STRING from Elixir source (via its AST)."
   @spec from_source(String.t()) :: [String.t()]

@@ -1,4 +1,6 @@
 defmodule Rian.Format do
+  use Rian.Ann
+
   @moduledoc """
   The canonical Rian source formatter — a gofmt-style, **opinionated, zero-config**
   re-printer. `format/1` takes `.rian` source and returns the formatted source.
@@ -103,6 +105,7 @@ defmodule Rian.Format do
   of silently passing them.
   """
   @spec format_result(String.t()) :: {:ok, String.t()} | {:error, String.t()}
+  @rian_host "formatter boundary: the lexer/CST build raises an unlexable-input error into a value"
   def format_result(src) when is_binary(src) do
     out =
       src

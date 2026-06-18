@@ -498,16 +498,33 @@ defmodule Rian.Transpile do
   emitted line (carrying the original Elixir snippet). Unlike `transpile_with_stats`'
   `ports`, this excludes honest host-FFI markers and `_Unk` type holes: those are
   non-portable-but-legitimate or fillable, not *conceptual* incompatibilities.
-  `Mix.Tasks.Rian.Transpile`'s `--check` gates a codebase against regressions here.
+
+  A function tagged `@rian_host` (a sanctioned exception boundary — `Rian.Ann`) is
+  also excluded: its `rescue` converts a host/parser raise into a value, which is
+  honest non-portability (ADR-0040), not a concept clash. `Mix.Tasks.Rian.Transpile`'s
+  `--check` gates a codebase against regressions in what remains.
   """
   @spec incompatible(String.t()) :: [String.t()]
   def incompatible(source) when is_binary(source) do
+    host = MapSet.new(Rian.Ann.host_funcs(source))
+
     source
     |> transpile()
     |> String.split("\n")
     |> Enum.drop(length(@header))
     |> Enum.filter(&Regex.match?(@incompatible_marker, &1))
+    |> Enum.reject(&host_boundary_line?(&1, host))
     |> Enum.map(&String.trim/1)
+  end
+
+  # a marker line belongs to a `@rian_host`-tagged function when the `def NAME(` it
+  # sits on names a tagged function (the outer def, not the `def rescue` in the marker
+  # text — `rescue` is never followed immediately by `(`).
+  defp host_boundary_line?(line, host) do
+    case Regex.run(~r/\b(?:pub )?def (\w+)\(/, line) do
+      [_, name] -> MapSet.member?(host, name)
+      _ -> false
+    end
   end
 
   # ── type inference (ADR-0034-aligned hole filling) ─────────────────────────

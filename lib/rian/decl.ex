@@ -1,4 +1,6 @@
 defmodule Rian.Decl do
+  use Rian.Ann
+
   @moduledoc """
   Stage 0.1 declaration parser (ADR-0031) — the gate from "verified components"
   to "a language that reads source files."
@@ -163,6 +165,7 @@ defmodule Rian.Decl do
   annotation reader) pattern-match the result rather than `try/rescue`.
   """
   @spec parse_result(String.t()) :: {:ok, map()} | {:error, String.t()}
+  @rian_host "parser boundary: parse/1 raises a malformed-input error into a value"
   def parse_result(src) do
     {:ok, parse(src)}
   rescue

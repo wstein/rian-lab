@@ -142,6 +142,7 @@ defmodule Rian.Beam do
   callers (`Rian.Run`, `Rian.REPL`) pattern-match rather than `try/rescue`.
   """
   @spec load_result(String.t(), module()) :: {:ok, module()} | {:error, String.t()}
+  @rian_host "compile boundary: load/2 (parse/gate/codegen) raises into a value"
   def load_result(src, module) when is_atom(module) do
     load(src, module)
   rescue
@@ -150,6 +151,7 @@ defmodule Rian.Beam do
 
   @doc "Errors-as-values twin of `load_program/1`: `{:ok, [module]} | {:error, message}`."
   @spec load_program_result(String.t()) :: {:ok, [module()]} | {:error, String.t()}
+  @rian_host "compile boundary: load_program/1 raises into a value"
   def load_program_result(src) do
     {:ok, load_program(src)}
   rescue

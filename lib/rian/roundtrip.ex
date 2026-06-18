@@ -1,4 +1,6 @@
 defmodule Rian.Roundtrip do
+  use Rian.Ann
+
   @moduledoc """
   The **Elixir→Rian→Elixir roundtrip** harness: drives an Elixir source — one or
   more modules — through the three-step pipeline and reports, per stage, whether it
@@ -188,6 +190,7 @@ defmodule Rian.Roundtrip do
     end
   end
 
+  @rian_host "host boundary: Code.format_string! has no non-raising variant"
   defp format_ex(src) do
     IO.iodata_to_binary(Code.format_string!(src)) <> "\n"
   rescue
@@ -253,6 +256,7 @@ defmodule Rian.Roundtrip do
 
   # ── result plumbing ───────────────────────────────────────────────────────────
 
+  @rian_host "host boundary: ad-hoc Elixir compilation / forms extraction raises into a value"
   defp safe(fun) do
     {:ok, fun.()}
   rescue

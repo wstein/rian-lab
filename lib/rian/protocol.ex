@@ -122,7 +122,11 @@ defmodule Rian.Protocol do
 
   # ── coherence ───────────────────────────────────────────────────────────
   defp check_impl({proto, type, methods}, protocols, reg) do
-    sigs = protocols[proto] || raise(Error, "`impl … for #{type}`: unknown protocol `#{proto}`")
+    sigs =
+      case protocols[proto] do
+        nil -> raise(Error, "`impl … for #{type}`: unknown protocol `#{proto}`")
+        sigs -> sigs
+      end
 
     want = sigs |> Enum.map(& &1.name) |> MapSet.new()
     got = methods |> Enum.map(& &1.name) |> MapSet.new()

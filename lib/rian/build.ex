@@ -1,4 +1,6 @@
 defmodule Rian.Build do
+  use Rian.Ann
+
   @moduledoc """
   Toolchain-free build/inspect verbs for the `rian` escript (ADR-0026/0031): the
   same operations as `mix rian.compile`/`rian.targets` surfaced with no Elixir/mix
@@ -39,6 +41,7 @@ defmodule Rian.Build do
   # (or BEAM codegen) can still raise on an unsupported construct or a gate failure
   # — converted to an exit code here rather than escaping the escript. Parse/IO
   # errors above are already values; this isolates the genuine emitter boundary.
+  @rian_host "emit boundary: a lowering / BEAM codegen raise becomes an exit code"
   defp emit(opts, src) do
     cond do
       opts[:rust] -> print(Rian.Lower.rust_program(Rian.Decl.parse(src)))

@@ -67,6 +67,29 @@ defmodule Rian.TranspileTest do
       assert Transpile.incompatible("defmodule M do\n  def f, do: :erlang.unique_integer()\nend") ==
                []
     end
+
+    test "a `@rian_host`-tagged def is a sanctioned boundary — its rescue is excluded" do
+      tagged = """
+      defmodule M do
+        use Rian.Ann
+        @rian_host "host boundary"
+        def f(x) do
+          g(x)
+        rescue
+          _ -> nil
+        end
+      end
+      """
+
+      # same body WITHOUT the tag is still flagged — proving the tag (not the shape)
+      # is what excludes it.
+      untagged = String.replace(tagged, ~s|  @rian_host "host boundary"\n|, "")
+
+      assert Transpile.incompatible(tagged) == []
+      assert [line] = Transpile.incompatible(untagged)
+      assert line =~ "def rescue"
+      assert Rian.Ann.host_funcs(tagged) == ["f"]
+    end
   end
 
   describe "defstruct → a Rian `struct` record (named for the module)" do
