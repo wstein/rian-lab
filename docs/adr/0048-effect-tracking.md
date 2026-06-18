@@ -41,20 +41,33 @@ end
 ### 2. Fine-grained effect taxonomy; pure = empty set
 
 The tracked effects are a small, **fine-grained**, extensible taxonomy: **`io`, `fs`, `clock`,
-`random`, `net`, `spawn`** (process creation; BEAM). **A function is pure iff its effect set is empty.**
-Fine-grained (not just pure/impure) so a signature shows *which* world it touches — `clock`/`random`
-mark nondeterminism explicitly, distinct from `fs`/`net`.
+`random`, `net`, `spawn`** (process creation; BEAM), and **`host`** (calls fallible host FFI — see
+below). **A function is pure iff its effect set is empty.** Fine-grained (not just pure/impure) so a
+signature shows *which* world it touches — `clock`/`random` mark nondeterminism explicitly, distinct
+from `fs`/`net`.
 
-**Host-raise is a candidate effect — this is the principled home for recoverable host errors.**
-Rian rejects catchable `try`/`catch` (ADR-0040 "Considered: capability-guarded exceptions"): the only
-sanctioned exception flow is `Prim.panic` (diverging, uncatchable — not an effect, it terminates). But
-the few **irreducible host boundaries** that *catch* a host-runtime raise into a value — `Code.format_string!`,
-ad-hoc compilation, file I/O — are exactly an effect: "this call may fault in the host." Today those are
-marked with the **interim `@rian_host` attribute** (`Rian.Ann`; excluded from `mix rian.transpile --check`
-and Reach-pinned like any host call). When this effect system lands, a `host`/`fault` row is where they
-would attach — a `@rian_host`-tagged function becomes one whose inferred effect set includes `host`,
-composed and declared by the §3 rules. Until then, `@rian_host` is the honest, greppable placeholder; it
-is **not** a new exception mechanism, just a marker for where the effect will live.
+**`host` — calls fallible host FFI (accepted; the home for recoverable host errors).** Rian rejects
+catchable `try`/`catch` (ADR-0040 "Considered: capability-guarded exceptions"): the only sanctioned
+exception flow is `Prim.panic` (diverging, uncatchable — not an effect, it terminates). But the few
+**irreducible host boundaries** that *catch* a host-runtime raise into a value — `Code.format_string!`,
+ad-hoc compilation, file I/O, `:code.load_binary` — are exactly an effect: "this call may fault in the
+host." Those are currently marked with the **interim `@rian_host` attribute** (`Rian.Ann`; excluded from
+`mix rian.transpile --check` and Reach-pinned like any host call); the `host` effect is where they
+attach, with an inferred set per the §3 rules. `@rian_host` stays the honest, greppable placeholder until
+this lands. It is **not** a new exception mechanism.
+
+**The catch lives in `@external`, not in Rian (settled).** Rian gets **no** catchable construct — that
+would reopen ADR-0040. Instead, a host-fault boundary is an **`@external` function (ADR-0068) that
+returns a `Result`**: each per-target host body performs the *native* catch (BEAM `try/rescue`, JS
+`try/catch`, Rust `Result`/`catch_unwind`) and exposes `{:ok,_} | {:error,_}`; the function has no
+portable Rian body. It declares `@effects(host)`, and pure Rian callers **infer** `host` up the call
+graph. So the `@rian_host` boundaries become `@external` + `@effects(host)` functions — almost always
+`:ex`-only, since they wrap BEAM-specific FFI — *not* portable Rian: that was a category error, these are
+host boundaries by nature (a callee in Rian either returns a `Result` or `panic`s — there is no
+catchable middle, so "catch a host raise" is inherently host-language code). Ergonomic cost (a host body
+per target; the error branch tested host-side or via a stub `@external`) is accepted; a future
+`@external`+`Result` *sugar* may reduce it but must **not** become a catch construct. Decided in the
+2026-06-18 effect debate.
 
 Because the boundary is *sanctioned* (not unfinished work), `mix rian.transpile` renders a
 `@rian_host`-tagged def as its **portable happy path** under a `# @rian_host: <reason>` note — the
@@ -68,13 +81,19 @@ Effect sets compose exactly like error sets, on the same infer-local/declare-pub
 
 - **Private functions / `:=`: inferred** — effect set = the **union** of the effect sets of the
   functions they call.
-- **`pub` functions: declared** — the effect set is explicit in the signature; the checker verifies the
-  body's inferred set is **⊆** the declared set (over-declaration allowed, as for error sets). **Caveat —
-  Reach-gating effects are *exact*, not `⊆`:** for `host` (and `spawn`), over-declaration is *not* benign
-  — those effects drive `Rian.Reach` (host ⇒ off `:rs`/`:js`/`:jvm`, ADR-0057), so a spurious declaration
-  hand-pins a portable function off the non-BEAM targets, reintroducing exactly the manual mis-pinning
-  ADR-0058's inferred reachability removes. So the rule splits by effect; see *Open items* (raised by
-  ADR-0081 §2).
+- **`pub` functions: declared, verified *exact* by default** — the effect set is explicit in the
+  signature and the checker verifies the declared set **equals** the body's inferred set. This **differs
+  from error sets** (which allow `⊆`/over-declaration): over-declaring an effect is *never* free — it
+  forfeits `comptime` (§4: only the empty set is comptime-evaluable, so a spuriously-effectful pure
+  function is locked out), and for **Reach-gating effects (`host`, `spawn`)** it also forfeits Reach
+  (host/spawn ⇒ off `:rs`/`:js`/`:jvm`, ADR-0057), hand-pinning a portable function off the non-BEAM
+  targets — exactly the manual mis-pinning ADR-0058's inferred reachability removes. So "compose like
+  error sets" governs the **inference fixpoint** (union over callees, below), *not* the over-declaration
+  policy. **`host`/`spawn`: exact, no opt-out** (over-declaration is a portability lie). **Neutral
+  effects (`io`/`fs`/`clock`/`random`/`net`): exact by default**, but an **explicit, documented**
+  over-declaration is permitted for API forward-compatibility (reserving the right to add the effect
+  without a breaking signature change), with the author accepting the `comptime` forfeit — never silent.
+  Decided in the 2026-06-18 effect debate.
 - **Effect polymorphism:** a higher-order function's effect set **includes the effects of its function
   parameters** (effect variables) — `Iter.each(f, xs)` is effectful **iff `f` is**. This is the direct
   analogue of error-set composition through callbacks and is essential for the stdlib (ADR-0047).
@@ -139,20 +158,12 @@ as capability-values; under B they stay distinct.)
   row (e.g. `@effects(host)`), with **no** short keyword/sugar (not `@host`/`@foreign`/`!io`). One
   grammar production, no per-effect keyword. (The illustrative `!io` elsewhere in this ADR predates that
   decision and is not the chosen syntax.)
-- **Declare-public rule splits by effect (raised by ADR-0081 §2)** — §3's `⊆`/over-declaration rule holds
-  for non-portability-neutral effects (`clock`, `random`, …), but **Reach-gating effects (`host`,
-  `spawn`) must be declared *exactly***: over-declaration is a portability regression, not a safe
-  widening (see the §3 caveat). Confirm the exact set of Reach-gating effects and the checker's two-mode
-  verification before implementing declare-public.
-- **Host-fault *catch* mechanism — currently undefined.** §2 says the sanctioned boundaries "catch a
-  host-runtime raise into a value", but Rian has no `try`/`rescue` and `Prim.panic` is uncatchable, so
-  there is **no Rian surface to catch a host fault** today. The `@rian_host`-tagged Elixir functions
-  (`load_result`, `format_result`, …) therefore cannot be ported to Rian — only marked `@effects(host)`
-  on their happy path, with the catch left host-side. Resolve before relying on the port: either add a
-  catchable `host_try`/rescue primitive (the only sanctioned catch, itself `@effects(host)`), or accept
-  that host-fault catching stays in `@external` host FFI (ADR-0068) and Rian functions only *propagate*
-  the host effect. This is the true gating prerequisite for ADR-0081's transpiler-emit step, ahead of the
-  grammar.
+- **Error-path testability of `@external` boundaries** (dissent, Samir Patel) — with the catch host-side
+  (§2), the `{:error,_}` branch isn't reachable from a Rian test. Mitigation: a host-level test of the
+  `@external(:ex)` body plus a Rian test against a stub `@external`. Document the convention.
+- **`@external`+`Result` ergonomics** (dissent, Liam Davis) — a per-target host *string* for a one-call
+  catch is verbose and not type-checked by `Rian.Check`. A future terser, checked sugar is possible — but
+  it must **not** become a catch construct (§2). Revisit only if the verbosity bites.
 - **Taxonomy granularity** — split `io` into `stdin`/`stdout`/`stderr`? Is `spawn` one effect or
   per-concurrency-primitive? Ties to the non-BEAM concurrency gap (ADR-0031).
 - **Optional cap-injection layer for tests** — can an *opt-in* capability/handle layer recover C's

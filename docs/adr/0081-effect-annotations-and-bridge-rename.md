@@ -162,8 +162,9 @@ naming question.)
 
 - **Migration surface:** ~30 `@rian`→`@rian_sig` edits across `lib/rian/*.ex`; `@rian_host` (24 sites)
   is **unchanged**. `Rian.Ann.__using__` registers `:rian_sig` instead of `:rian`; `from_beam/1` reads
-  the persisted `:rian_sig`. `host_funcs/1` and the `:rian_host` attribute are untouched. Tooling that
-  reads the `:rian` `.beam` attribute needs a window reading *both* `:rian` and `:rian_sig` (§ migration).
+  the persisted `:rian_sig`. `host_funcs/1` and the `:rian_host` attribute are untouched. Done as a
+  **clean cut** — no dual-read of the old `:rian` attribute (the only reader is this repo; everything
+  recompiles from source).
 - **Grammar cost:** one `take_decl` clause for `@effects(...)` — mirrors the existing `@targets(...)`
   handling. No new Core node, no sugar to desugar.
 - **Doc debt cleared:** the `Rian.Ann` moduledoc and the spec gain the bridge-vs-surface split and the
@@ -175,14 +176,18 @@ naming question.)
 
 ## Migration plan (staged, each independently shippable)
 
-1. **Docs only (now).** Add the bridge-vs-surface split to `Rian.Ann` moduledoc; no code/name changes.
-   The transpiler keeps the `# @rian_host:` comment.
-2. **Bridge rename.** `@rian`→`@rian_sig` in `lib/rian/*.ex` (`@rian_host` unchanged), with `Rian.Ann`
-   reading both the old `:rian` and new `:rian_sig` persisted attributes for one release (deprecation
-   window), then dropping `:rian`. Independent of the effect system.
-3. **Surface landing (with ADR-0048).** `Rian.Decl` parses `@effects(...)`; `Rian.Check` verifies the
-   declare-public assertion (§2); the `--check` allowlist switches to inference (§5); the transpiler
-   emits `@effects(host)` on `pub` boundaries and the `# @rian_host:` comment fallback is removed.
+1. **Docs + bridge moduledoc (done).** Bridge-vs-surface split added to `Rian.Ann` moduledoc.
+2. **Bridge rename (done).** `@rian`→`@rian_sig` in `lib/rian/*.ex` (`@rian_host` unchanged), a **clean
+   cut** — `Rian.Ann` registers/reads only `:rian_sig`, no dual-read of `:rian`.
+3. **Effect surface (with ADR-0048).** `Rian.Decl` parses `@effects(...)`; `Rian.Check` infers the host
+   effect (call-graph fixpoint, ADR-0048 §3) and verifies the `pub` declaration **exactly** (§2). The
+   `--check` gate's rescue sanction **stays explicit** (`@rian_host`): the gate runs on the *Elixir*
+   source and the host effect tracks the *Rian* image, distinct layers — inference must not auto-exempt
+   `rescue` (every `rescue` touches the host, so that would silence the gate entirely).
+4. **`@external` host boundaries.** Migrate each `@rian_host` Elixir function to an `@external` +
+   `@effects(host)` Rian function whose per-target host body does the native catch and returns a
+   `Result` (ADR-0048 §2) — the endpoint is a host boundary, **not** portable Rian. The transpiler then
+   emits `@effects(host)` on `pub` host boundaries and the `# @rian_host:` comment fallback is removed.
 
 ## Alternatives considered
 
