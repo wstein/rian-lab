@@ -2,6 +2,7 @@ defmodule Rian.TranspileInferTest do
   use ExUnit.Case, async: true
 
   alias Rian.Transpile
+  alias Rian.Transpile.Infer
 
   # transpile WITH inference and return the rendered lines (header stripped).
   defp infer(body) do
@@ -466,6 +467,176 @@ defmodule Rian.TranspileInferTest do
       # guessed (and likely wrong) concrete type.
       assert sig("  def f(t) when is_tuple(t), do: gg(t)", "f") =~ "f(_Unk)"
       assert sig("  def f(m) when is_map(m), do: gg(m)", "f") =~ "f(_Unk)"
+    end
+  end
+
+  describe "constraint generation — literals & operators" do
+    test "a float literal pins Float64 through arithmetic" do
+      assert sig("  def f(x), do: x + 1.0", "f") == "  pub def f(x Float64) Float64 := x + 1.0"
+    end
+
+    test "a bare string / bool literal pins its return type" do
+      assert sig(~s|  def f(), do: "hi"|, "f") == ~s|  pub def f() String := "hi"|
+      assert sig("  def f(), do: true", "f") == "  pub def f() Bool := true"
+    end
+
+    test "a `nil` literal is Option-shaped" do
+      assert sig("  def f(), do: nil", "f") =~ "None"
+    end
+
+    test "string interpolation is String regardless of the hole's type" do
+      assert sig(~S|  def f(s), do: "v=#{s}"|, "f") =~ ") String :="
+    end
+
+    test "`/` is Float64 division (operands left open)" do
+      assert sig("  def f(a, b), do: a / b", "f") =~ ") Float64 := a / b"
+    end
+
+    test "list concat `++` pins both operands and the result to a Vec" do
+      assert sig("  def f(a, b), do: a ++ b", "f") =~ "f(a Vec(T), b Vec(T)) Vec(T) forall T"
+    end
+
+    test "`and` pins both operands and the result to Bool" do
+      assert sig("  def f(a, b), do: a and b", "f") ==
+               "  pub def f(a Bool, b Bool) Bool := a and b"
+    end
+
+    test "an `if` with no `else` is an open hole in value position" do
+      assert sig("  def f(c), do: if(c, do: 1)", "f") =~ "f(c Bool) _Unk :="
+    end
+  end
+
+  describe "constraint generation — Kernel accessors & predicate evidence" do
+    test "is_float / is_boolean / is_list guards type the param" do
+      assert sig("  def f(x) when is_float(x), do: x", "f") =~ "f(Float64)"
+      assert sig("  def f(x) when is_boolean(x), do: x", "f") =~ "f(Bool)"
+      assert sig("  def f(x) when is_list(x), do: x", "f") =~ "f(Vec(T)) Vec(T) forall T"
+    end
+
+    test "hd / tl decompose a Vec" do
+      assert sig("  def f(xs), do: hd(xs)", "f") == "  pub def f(xs Vec(T)) T forall T := hd(xs)"
+      assert sig("  def f(xs), do: tl(xs)", "f") =~ "f(xs Vec(T)) Vec(T) forall T := tl(xs)"
+    end
+  end
+
+  describe "constraint generation — captures, lists, structs" do
+    test "an eta-expanded `&(&1 + &2)` infers a binary Fn" do
+      assert sig("  def f(), do: &(&1 + &2)", "f") =~ "Fn(Int53, Int53, Int53)"
+    end
+
+    test "a `&name/arity` capture is a Fn of that arity" do
+      assert sig("  def f(), do: &g/2", "f") =~ "(p1, p2) -> g(p1, p2)"
+    end
+
+    test "a list literal pins Vec(Int53); a cons body threads the element type" do
+      assert sig("  def f(), do: [1, 2, 3]", "f") == "  pub def f() Vec(Int53) := [1, 2, 3]"
+      assert sig("  def f(h, t), do: [h | t]", "f") =~ "f(h T, t Vec(T)) Vec(T) forall T"
+    end
+
+    test "a struct construction / pattern carries the struct's nominal type" do
+      assert sig("  def f(%Point{x: a}), do: a", "f") =~ "f(Point)"
+    end
+
+    test "literal patterns (float / string / bool) pin the param" do
+      assert sig("  def f([1.0]), do: 0", "f") =~ "f(Vec(Float64))"
+      assert sig(~s|  def f("a"), do: 0|, "f") =~ "f(String)"
+      assert sig("  def f(true), do: 0", "f") =~ "f(Bool)"
+    end
+  end
+
+  describe "constraint generation — honest holes (conflict / unbound / occurs)" do
+    test "a Bool↔String conflict leaves the proven type, never a wrong fill" do
+      # `x` is the `if` condition (Bool) AND a `<>` operand (String): the conflict
+      # is detected; the first-proven Bool stands rather than an accidental fill.
+      assert sig(~s|  def f(x), do: if(x, do: x <> "y", else: "z")|, "f") =~ "f(x Bool)"
+    end
+
+    test "an unbound variable reference is an honest hole" do
+      assert sig("  def f(), do: zzz", "f") == "  pub def f() _Unk := zzz"
+    end
+
+    test "a cyclic `[x | x]` is caught by the occurs-check and still types" do
+      assert sig("  def f(x), do: [x | x]", "f") =~ "f(x T) Vec(T) forall T"
+    end
+  end
+
+  describe "spec_type_to_rian/2 — Elixir @spec AST → Rian type string" do
+    test "primitive scalars map to their Rian image" do
+      assert Infer.spec_type_to_rian(quote(do: integer())) == "Int53"
+      assert Infer.spec_type_to_rian(quote(do: non_neg_integer())) == "Int53"
+      assert Infer.spec_type_to_rian(quote(do: float())) == "Float64"
+      assert Infer.spec_type_to_rian(quote(do: boolean())) == "Bool"
+      assert Infer.spec_type_to_rian(quote(do: binary())) == "String"
+      assert Infer.spec_type_to_rian(quote(do: atom())) == "Symbol"
+      assert Infer.spec_type_to_rian(quote(do: String.t())) == "String"
+    end
+
+    test "lists become Vec, unions become `A | B`, structs their name" do
+      assert Infer.spec_type_to_rian(quote(do: [integer()])) == "Vec(Int53)"
+      assert Infer.spec_type_to_rian(quote(do: list(integer()))) == "Vec(Int53)"
+      assert Infer.spec_type_to_rian(quote(do: integer() | float())) == "Int53 | Float64"
+      assert Infer.spec_type_to_rian(quote(do: %Foo{})) == "Foo"
+    end
+
+    test "a bare atom literal is a Symbol" do
+      assert Infer.spec_type_to_rian(:ok) == "Symbol"
+    end
+
+    test "types with no clean Rian image are an honest `_Unk` (never guessed)" do
+      assert Infer.spec_type_to_rian(quote(do: any())) == "_Unk"
+      assert Infer.spec_type_to_rian(quote(do: {integer(), atom()})) == "_Unk"
+      assert Infer.spec_type_to_rian(quote(do: [tuple()])) == "_Unk"
+      assert Infer.spec_type_to_rian(quote(do: integer() | {a, b})) == "_Unk"
+    end
+
+    test "a local @type ref resolves through the type_env" do
+      assert Infer.spec_type_to_rian(quote(do: expr()), %{expr: {:con, "Expr"}}) == "Expr"
+    end
+  end
+
+  describe "collect_specs/2" do
+    test "harvests @spec params and return into a {name, arity} hint map" do
+      assert Infer.collect_specs([quote(do: @spec(f(integer()) :: boolean()))]) ==
+               %{{"f", 1} => %{params: [{:con, "Int53"}], ret: {:con, "Bool"}}}
+    end
+
+    test "a zero-arity spec has empty params" do
+      assert Infer.collect_specs([quote(do: @spec(g() :: integer()))]) ==
+               %{{"g", 0} => %{params: [], ret: {:con, "Int53"}}}
+    end
+
+    test "a `when`-bounded spec drops the quantifier (unresolved refs stay holes)" do
+      assert Infer.collect_specs([quote(do: @spec(h(t) :: t when t: integer()))]) ==
+               %{{"h", 1} => %{params: [nil], ret: nil}}
+    end
+
+    test "non-spec statements and non-list input yield no hints" do
+      assert Infer.collect_specs([quote(do: def(notaspec(), do: 1))]) == %{}
+      assert Infer.collect_specs(:not_a_list) == %{}
+    end
+  end
+
+  describe "collect_types/2" do
+    test "a union @type synthesizes a decl and a name binding" do
+      assert Infer.collect_types([quote(do: @type(t :: integer() | float()))], "M") ==
+               {%{t: {:con, "T"}}, ["type T := Int53 | Float64"]}
+    end
+
+    test "a single-type @type inlines (no decl)" do
+      assert Infer.collect_types([quote(do: @type(id :: integer()))], "M") ==
+               {%{id: {:con, "Int53"}}, []}
+    end
+
+    test "`%__MODULE__{}` resolves to the module, a remote `Mod.t()` to its name" do
+      assert Infer.collect_types([quote(do: @type(me :: %__MODULE__{}))], "Mod") ==
+               {%{me: {:con, "Mod"}}, []}
+
+      assert Infer.collect_types([quote(do: @type(r :: Other.t()))], "M") ==
+               {%{r: {:con, "Other"}}, []}
+    end
+
+    test "non-list input yields the empty env" do
+      assert Infer.collect_types(:not_a_list, "M") == {%{}, []}
     end
   end
 
