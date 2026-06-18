@@ -57,6 +57,7 @@ defmodule Rian.Transpile.Infer do
   is simply not recorded, and recorded sigs are anchor-derived. `modules` is a list
   of `{short_module_name, [group]}`.
   """
+  @rian_sig "pub def prime_xmod(modules Vec(String), stdlib_map _Unk) _Unk"
   @spec prime_xmod(list(), map()) :: term()
   def prime_xmod(modules, stdlib_map) do
     base = %{prelude: prelude_sigs(), stdlib: stdlib_map, siblings: %{}, xmod: %{}}
@@ -206,6 +207,7 @@ defmodule Rian.Transpile.Infer do
   resolves to the module's own struct; a remote `Mod.t()` to `Mod`. Untranslatable
   `@type`s (tuples/maps) are dropped — no hint, no decl.
   """
+  @rian_sig "pub def collect_types(stmts _Unk, mod_name String) _Unk"
   def collect_types(stmts, mod_name) when is_list(stmts) do
     raw =
       for {:@, _, [{:type, _, [body]}]} <- stmts,
