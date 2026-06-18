@@ -975,23 +975,45 @@ defmodule Rian.Decl do
   # ADR-0048 §2). A not-yet-inferred effect (`io`, `fs`, …) is a hard error rather than
   # a silently-unverified declaration — the surface grows as each effect's leaf lands.
   defp parse_effects(toks) do
-    effects =
-      for {:id, e} <- toks do
-        atom = String.to_atom(e)
+    case strict_effects(toks) do
+      [] -> raise(Error, "`@effects(…)` needs at least one effect")
+      effects -> Enum.uniq(effects)
+    end
+  end
 
-        unless atom in Rian.Reach.effect_names() do
-          raise(
-            Error,
-            "unknown/unsupported effect `#{e}` in `@effects`; supported: #{inspect(Rian.Reach.effect_names())}"
-          )
-        end
+  # strict `id (, id)*`: a missing comma or a stray token is a hard error, not a
+  # silently-skipped token — so `@effects(host spawn)` / `@effects(host + spawn)` are
+  # rejected rather than quietly read as two effects (ADR-0081: the surface is the
+  # explicit comma-separated row).
+  defp strict_effects([{:id, e} | rest]), do: [effect_atom(e) | strict_effects_tail(rest)]
+  defp strict_effects([]), do: []
 
+  defp strict_effects([t | _]),
+    do: raise(Error, "expected an effect name in `@effects(…)`, got `#{inspect(t)}`")
+
+  defp strict_effects_tail([]), do: []
+
+  defp strict_effects_tail([{:comma}, {:id, e} | rest]),
+    do: [effect_atom(e) | strict_effects_tail(rest)]
+
+  defp strict_effects_tail([t | _]),
+    do: raise(Error, "expected `,` between effects in `@effects(…)`, got `#{inspect(t)}`")
+
+  # resolve an effect name against the known taxonomy WITHOUT interning unknown input
+  # into the atom table (`String.to_atom` on a bad name would pollute it permanently).
+  defp effect_atom(e) do
+    known = Rian.Reach.effect_names()
+
+    case Enum.find(known, &(Atom.to_string(&1) == e)) do
+      nil ->
+        raise(
+          Error,
+          "unknown/unsupported effect `#{e}` in `@effects`; supported: #{inspect(known)}"
+        )
+
+      atom ->
         atom
-      end
-
-    if effects == [],
-      do: raise(Error, "`@effects(…)` needs at least one effect"),
-      else: Enum.uniq(effects)
+    end
   end
 
   # attach one `@external(:target, spec)` to the bodiless `def` that follows. An

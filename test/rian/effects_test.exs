@@ -43,6 +43,24 @@ defmodule Rian.EffectsTest do
       end
     end
 
+    test "rejects a comma-less effect list (the surface is comma-separated)" do
+      assert_raise Decl.Error, ~r/expected `,` between effects/, fn ->
+        parse("@effects(host spawn)\npub def f() Int53 := 1")
+      end
+    end
+
+    test "rejects a stray operator between effects (no silently-skipped tokens)" do
+      assert_raise Decl.Error, ~r/expected `,` between effects/, fn ->
+        parse("@effects(host + spawn)\npub def f() Int53 := 1")
+      end
+    end
+
+    test "rejects a non-name in effect-name position" do
+      assert_raise Decl.Error, ~r/expected an effect name/, fn ->
+        parse("@effects(1)\npub def f() Int53 := 1")
+      end
+    end
+
     test "effect_names/0 is the ADR-0048 §2 taxonomy" do
       assert Reach.effect_names() == [:host, :spawn, :io, :fs, :clock, :random, :net]
     end
