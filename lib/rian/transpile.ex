@@ -401,13 +401,28 @@ defmodule Rian.Transpile do
         [{df, m, [{name, hm, params}, kw]}]
 
       Enum.all?(plain, &var?/1) ->
-        n = length(params)
+        # default args may sit in ANY position (`f(a \\ 1, b)` is legal Elixir, not just
+        # trailing). For each delegating arity, omit the *rightmost* `j` defaulted params
+        # (Elixir's rule) and splice their default value back at the original position.
+        default_idxs = for {p, i} <- Enum.with_index(params), match?({:\\, _, _}, p), do: i
 
         delegators =
-          for keep <- (n - defaulted)..(n - 1) do
-            taken = Enum.take(plain, keep)
-            call_args = taken ++ Enum.map(Enum.drop(params, keep), fn {:\\, _, [_, d]} -> d end)
-            {df, m, [{name, hm, taken}, [do: {name, [], call_args}]]}
+          for j <- defaulted..1//-1 do
+            omitted = default_idxs |> Enum.take(-j) |> MapSet.new()
+            kept = for {p, i} <- Enum.with_index(plain), not MapSet.member?(omitted, i), do: p
+
+            call_args =
+              for {p, i} <- Enum.with_index(params) do
+                case p do
+                  {:\\, _, [_, d]} ->
+                    if MapSet.member?(omitted, i), do: d, else: Enum.at(plain, i)
+
+                  _ ->
+                    Enum.at(plain, i)
+                end
+              end
+
+            {df, m, [{name, hm, kept}, [do: {name, [], call_args}]]}
           end
 
         delegators ++ [{df, m, [{name, hm, plain}, kw]}]

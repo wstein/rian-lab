@@ -249,17 +249,17 @@ defmodule Rian.External do
   defp find_module(nil, _fun, _arity), do: :error
 
   defp find_module(mods, fun, arity) do
-    # the foreign module is already compiled+loaded, so an exported function's name is
-    # an existing atom; if `fun` is not even an atom, no module exports it → `:error`
-    # (avoids interning unbounded user input via `String.to_atom/1`).
-    name = String.to_existing_atom(fun)
-
-    case Enum.find(mods, fn {m, _bin} -> function_exported?(m, name, arity) end) do
+    case Enum.find(mods, fn {m, _bin} -> exports?(m, fun, arity) end) do
       {m, _bin} -> {:ok, m}
       nil -> :error
     end
-  rescue
-    ArgumentError -> :error
+  end
+
+  # does `mod` export `fun/arity`? Compares the function's *string* name against each
+  # export — avoids interning unbounded input (`String.to_atom`) and the raise from
+  # `String.to_existing_atom` (errors-as-values over exception flow, ADR-0035).
+  defp exports?(mod, fun, arity) do
+    Enum.any?(mod.__info__(:functions), fn {n, a} -> a == arity and Atom.to_string(n) == fun end)
   end
 
   # map a fallible transform over a list, short-circuiting on the first `{:error, _}`.
