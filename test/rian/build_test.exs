@@ -113,5 +113,30 @@ defmodule Rian.BuildTest do
       file = tmp_file("def f() Int53 := 1\n")
       capture_io(:stderr, fn -> assert Build.build([file, "--nope"]) == 2 end)
     end
+
+    test "build on a missing file → exit 2 with a posix error message" do
+      err = capture_io(:stderr, fn -> assert Build.build(["/no/such/file.rian"]) == 2 end)
+      assert err =~ "no such file"
+    end
+
+    test "check with the wrong number of args → usage, exit 2" do
+      capture_io(:stderr, fn -> assert Build.check([]) == 2 end)
+      capture_io(:stderr, fn -> assert Build.check(["a.rian", "b.rian"]) == 2 end)
+    end
+
+    test "targets with no file → usage, exit 2" do
+      capture_io(:stderr, fn -> assert Build.targets([]) == 2 end)
+    end
+
+    test "targets on a missing file → exit 2 with a posix error message" do
+      err = capture_io(:stderr, fn -> assert Build.targets(["/no/such/file.rian"]) == 2 end)
+      assert err =~ "no such file"
+    end
+
+    test "targets on an unparseable file → exit 2 with the parse error" do
+      file = tmp_file("def f( := \n")
+      err = capture_io(:stderr, fn -> assert Build.targets([file]) == 2 end)
+      assert err =~ "targets:"
+    end
   end
 end
