@@ -921,6 +921,29 @@ end|) =~ ~S|"v=${x}!"|
       body = out |> String.split("mod M do") |> List.last()
       refute body =~ "TODO_PORT"
     end
+
+    test "a `@rian_host`-tagged rescue is a sanctioned boundary → happy path under a `# @rian_host:` note" do
+      # `@rian_host` (Rian.Ann) marks a def whose recovery lives host-side on purpose
+      # (ADR-0035/0048: the errors-as-values twin of a raising function). The recovery
+      # has no Rian image, but the def is NOT unfinished work — so the draft emits the
+      # portable happy path under a greppable host-boundary note, never a TODO_PORT.
+      out =
+        rian("""
+        defmodule M do
+          @rian_host "compile boundary: load/2 raises into a value"
+          def load_result(src) do
+            load(src)
+          rescue
+            e -> {:error, Exception.message(e)}
+          end
+        end
+        """)
+
+      assert out =~ "# @rian_host: compile boundary: load/2 raises into a value"
+      assert out =~ ":= load(src)"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO_PORT"
+    end
   end
 
   describe "struct/map updates desugar to the Rian map-update form" do

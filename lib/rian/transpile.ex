@@ -671,6 +671,8 @@ defmodule Rian.Transpile do
   # merging consecutive same-name/arity clauses into one rendered group.
 
   defp render_items(stmts, sigmap, mod_name, struct_anns, referenced) do
+    host = host_reasons(stmts)
+
     {lines, _pending_doc, open} =
       Enum.reduce(stmts, {[], nil, nil}, fn stmt, {acc, doc, open} ->
         case classify(stmt) do
@@ -711,7 +713,7 @@ defmodule Rian.Transpile do
             {acc ++ flush(open, sigmap) ++ render_describe(name, body), doc, nil}
 
           {:clause, vis, head, kw} ->
-            clause = build_clause(head, kw)
+            clause = build_clause(head, kw, host)
 
             cond do
               open != nil and same_group?(open, vis, clause) ->
@@ -876,8 +878,11 @@ defmodule Rian.Transpile do
     end
   end
 
-  # A clause: name, arity, parameter/pattern nodes, optional guard, body AST.
-  defp build_clause(head, kw) do
+  # A clause: name, arity, parameter/pattern nodes, optional guard, body AST. The
+  # collection-only pass (`def_groups/1`, for inference seeding) needs no host context.
+  defp build_clause(head, kw), do: build_clause(head, kw, %{})
+
+  defp build_clause(head, kw, host) do
     {call, guard} =
       case head do
         {:when, _, [c, g]} -> {c, g}
@@ -890,30 +895,58 @@ defmodule Rian.Transpile do
         {n, _, a} when is_atom(n) and is_nil(a) -> {n, []}
       end
 
+    has_do = kw != nil and Keyword.has_key?(kw, :do)
+    recovery = has_do and recovery_keys(kw) != []
+    # A `@rian_host`-tagged def is a SANCTIONED host boundary (ADR-0035/0048): its
+    # recovery is host-side, so the draft emits the portable happy path under a
+    # `# @rian_host:` note (`flush/2`), not a `TODO_PORT` "restructure" marker.
+    host_reason = Map.get(host, name)
+
     # Distinguish a *present* `nil` body (`def f, do: nil`) from a truly bodyless
     # def (no `:do` key): both reduce to the atom `nil`, but only the former should
-    # route through the `nil → Option` marker. The sentinel marks genuine absence. A
-    # `def … rescue/catch/after …` (Elixir exception flow) keeps `:do` but its
-    # recovery clauses have no Rian image — wrap so they surface as a marker rather
-    # than silently emitting just the happy path.
+    # route through the `nil → Option` marker. The sentinel marks genuine absence. An
+    # un-sanctioned `def … rescue/catch/after …` (Elixir exception flow) keeps `:do`
+    # but its recovery has no Rian image — wrap so it surfaces as a marker rather than
+    # silently emitting just the happy path.
     body =
       cond do
-        kw != nil and Keyword.has_key?(kw, :do) and recovery_keys(kw) != [] ->
-          {:__recovery__, recovery_keys(kw), Keyword.get(kw, :do)}
-
-        kw != nil and Keyword.has_key?(kw, :do) ->
-          Keyword.get(kw, :do)
-
-        true ->
-          :__no_body__
+        recovery and host_reason != nil -> Keyword.get(kw, :do)
+        recovery -> {:__recovery__, recovery_keys(kw), Keyword.get(kw, :do)}
+        has_do -> Keyword.get(kw, :do)
+        true -> :__no_body__
       end
 
-    %{name: name, arity: length(args), args: args, guard: guard, body: body}
+    %{name: name, arity: length(args), args: args, guard: guard, body: body, host: host_reason}
   end
 
   # Elixir exception-control keys on a `def`/`try` (`rescue`/`catch`/`after`) — Rian
   # has none (ADR-0035/0040: errors are values), so they cannot be ported mechanically.
   defp recovery_keys(kw), do: Enum.filter([:rescue, :catch, :after], &Keyword.has_key?(kw, &1))
+
+  # Map each `@rian_host "reason"` to the NAME of the `def`/`defp` it immediately
+  # precedes (the lib/rian convention; `Rian.Ann.host_funcs/1` is the runtime twin).
+  # These names route their recovery body to the portable happy path in `build_clause/3`.
+  defp host_reasons(stmts) do
+    {map, _pending} =
+      Enum.reduce(stmts, {%{}, nil}, fn
+        {:@, _, [{:rian_host, _, [reason]}]}, {m, _} when is_binary(reason) ->
+          {m, reason}
+
+        {:@, _, [{:rian_host, _, _}]}, {m, _} ->
+          {m, ""}
+
+        {kind, _, [head | _]}, {m, r} when kind in [:def, :defp] and r != nil ->
+          {Map.put(m, host_name(head), r), nil}
+
+        _other, {m, _r} ->
+          {m, nil}
+      end)
+
+    map
+  end
+
+  defp host_name({:when, _, [call, _]}), do: host_name(call)
+  defp host_name({name, _, _}) when is_atom(name), do: name
 
   defp new_group(vis, clause, doc), do: %{vis: vis, doc: doc, clauses: [clause]}
   defp add_clause(open, clause), do: %{open | clauses: open.clauses ++ [clause]}
@@ -930,6 +963,14 @@ defmodule Rian.Transpile do
   defp flush(%{vis: vis, doc: doc, clauses: clauses}, sigmap) do
     kw = if vis == :pub, do: "pub def", else: "def"
     doc_lines = if doc, do: [~s(@doc "#{escape(one_line(doc))}")], else: []
+    # `@rian_host` is not a Rian surface annotation (only `@doc`/`@test`/… are), so the
+    # sanctioned-host-boundary note is a greppable comment, not an attribute.
+    host_lines =
+      case hd(clauses).host do
+        nil -> []
+        reason -> ["# @rian_host: #{one_line(reason)}"]
+      end
+
     name = hd(clauses).name
     arity = hd(clauses).arity
 
@@ -962,7 +1003,7 @@ defmodule Rian.Transpile do
         [sig_line | Enum.flat_map(clauses, &render_clause(kw, &1))]
       end
 
-    [""] ++ doc_lines ++ body_lines
+    [""] ++ doc_lines ++ host_lines ++ body_lines
   end
 
   # A clause's body lines. A multi-statement body becomes a **block clause**
