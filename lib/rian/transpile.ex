@@ -1253,6 +1253,14 @@ defmodule Rian.Transpile do
   defp expr({:not, _, [x]}), do: "not #{paren_unary(x)}"
   defp expr({:!, _, [x]}), do: "not #{paren_unary(x)}"
 
+  # Elixir `raise` → Rian `panic` (ADR-0035/0040): the diverging, uncatchable abort.
+  # `raise Mod, msg` / `raise msg` panic with the message; bare `raise Mod` with the
+  # error name. This emits valid Rian (vs the invalid bare `raise(…)`); an *expected*
+  # error (one a caller should recover) is then restructured to a `Result` by hand —
+  # the same draft-finishing the transpiler always requires.
+  defp expr({:raise, _, args}), do: "panic(#{raise_msg(args)})"
+  defp expr({:reraise, _, args}), do: "panic(#{raise_msg(args)})"
+
   defp expr({:if, _, [c, kw]}) do
     t = render_body(Keyword.get(kw, :do))
     e = if Keyword.has_key?(kw, :else), do: render_body(Keyword.get(kw, :else)), else: nil
@@ -1411,6 +1419,14 @@ defmodule Rian.Transpile do
     do: "#{expr(f)}(#{Enum.map_join(args, ", ", &expr/1)})"
 
   defp expr(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  # the panic message for an Elixir `raise`: `raise Mod, msg` / `raise msg` use the
+  # message expression; a bare `raise Mod` uses the error name; a no-arg raise the
+  # literal "panic".
+  defp raise_msg([{:__aliases__, _, parts}]), do: expr(parts |> List.last() |> to_string())
+  defp raise_msg([_mod, msg | _]), do: expr(msg)
+  defp raise_msg([msg]), do: expr(msg)
+  defp raise_msg(_), do: expr("panic")
 
   # Render an operand of the Rian operator `parent_op`, wrapping it in parens iff
   # omitting them would change the Rian re-parse. Using levels where *lower binds

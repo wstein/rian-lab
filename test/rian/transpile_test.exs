@@ -738,6 +738,25 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ "a ++ b"
     end
 
+    test "Elixir `raise` → Rian `panic` (the diverging abort, ADR-0035/0040)" do
+      out =
+        rian("""
+        defmodule M do
+          def a, do: raise(ArgumentError, "bad input")
+          def b, do: raise("boom")
+          def c, do: raise(SomeError)
+        end
+        """)
+
+      assert out =~ ~s|:= panic("bad input")|
+      assert out =~ ~s|:= panic("boom")|
+      # a bare `raise Mod` panics with the error name
+      assert out =~ ~s|:= panic("SomeError")|
+      # never the invalid bare `raise(...)` (no such Rian builtin)
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "raise("
+    end
+
     test "truthy `&&`/`||` become a TODO_PORT marker (no faithful Rian image)" do
       # Rian's `and`/`or` are boolean (they lower to native `&&`/`||`), so they are
       # NOT a sound port of Elixir's value-returning, nil-coalescing `&&`/`||`; the
