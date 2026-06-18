@@ -132,8 +132,8 @@ defmodule Rian.BuildTest do
     end
 
     @tag :js
-    test "bundles a :js file-reference: writes the .mjs, copies the .ffi.mjs, runs under node" do
-      src_dir = Path.join(System.tmp_dir!(), "rian_ffi_js_#{System.unique_integer([:positive])}")
+    test "packages an npm package under _build/js/ — package.json + FFI, validates + runs (ADR-0082)" do
+      src_dir = Path.join(System.tmp_dir!(), "rian_pkg_js_#{System.unique_integer([:positive])}")
       File.mkdir_p!(src_dir)
       on_exit(fn -> File.rm_rf(src_dir) end)
 
@@ -149,21 +149,36 @@ defmodule Rian.BuildTest do
         ~S|@external(:js, "./codec.ffi.mjs", "encode") pub def enc(x val Int53) Int53| <> "\n"
       )
 
-      out_dir = tmp_dir()
-      out = capture_io(fn -> assert Build.build([rian, "--js", "-o", out_dir]) == 0 end)
+      out = tmp_dir()
+      _ = capture_io(fn -> assert Build.build([rian, "--js", "-o", out]) == 0 end)
 
-      assert out =~ "prog.mjs"
-      mjs = Path.join(out_dir, "prog.mjs")
+      proj = Path.join([out, "_build", "js"])
+      pkg = File.read!(Path.join(proj, "package.json"))
+      assert pkg =~ ~s("name": "prog")
+      assert pkg =~ ~s("type": "module")
+      assert pkg =~ ~s("main": "prog.mjs")
+
+      mjs = Path.join(proj, "prog.mjs")
       assert File.read!(mjs) =~ ~s|import { encode } from "./codec.ffi.mjs";|
-      # the foreign file is copied beside the output so the relative import resolves
-      assert File.exists?(Path.join(out_dir, "codec.ffi.mjs"))
+      # the FFI is copied beside the entry so the emitted relative import resolves
+      assert File.exists?(Path.join(proj, "codec.ffi.mjs"))
+
+      # npm validates package.json (parses it, checks required fields), offline
+      case System.find_executable("npm") do
+        nil ->
+          :ok
+
+        npm ->
+          {pack, code} = System.cmd(npm, ["pack", "--dry-run"], cd: proj, stderr_to_stdout: true)
+          assert code == 0, "npm pack failed:\n#{pack}"
+      end
 
       case System.find_executable("node") do
         nil ->
           :ok
 
         node ->
-          runner = Path.join(out_dir, "run.mjs")
+          runner = Path.join(proj, "run.mjs")
 
           File.write!(
             runner,

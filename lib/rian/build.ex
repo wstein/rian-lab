@@ -72,7 +72,12 @@ defmodule Rian.Build do
         end
 
       opts[:js] ->
-        emit_source(:js, ".mjs", opts, file, prog, src_dir, Rian.JS.compile(src))
+        # ADR-0082 step 4: `-o ROOT` generates an npm package under ROOT/_build/js/;
+        # no `-o` keeps the flat stdout source-inspection path.
+        case Keyword.get(opts, :out) do
+          nil -> print(Rian.JS.compile(src))
+          root -> build_npm(root, file, prog, src, src_dir)
+        end
 
       opts[:jvm] ->
         # ADR-0082 step 3: `-o ROOT` generates a Gradle project under ROOT/_build/jvm/;
@@ -92,22 +97,24 @@ defmodule Rian.Build do
     e -> err(Exception.message(e))
   end
 
-  # a source target (`--rust`/`--js`/`--jvm`): print to stdout, or — with `-o DIR` —
-  # write `<name><ext>` into DIR and copy each referenced foreign file beside it
-  # (ADR-0080 §7 b), so the emitted relative import/module resolves.
-  defp emit_source(target, ext, opts, file, prog, src_dir, source) do
-    case Keyword.get(opts, :out) do
-      nil ->
-        print(source)
+  # `rian build --js -o ROOT` (ADR-0082 step 4): generate a self-contained npm package
+  # under ROOT/_build/js/ — `package.json` from the manifest, the emitted ESM as
+  # `<name>.mjs`, and each `@external(:js)` `.ffi.mjs` copied beside it (where the emitted
+  # relative `import` resolves it, ADR-0082 invariant 5). Manifest generation runs first,
+  # so a non-empty `[deps]` fails before any write.
+  defp build_npm(root, file, prog, src, src_dir) do
+    manifest = project_manifest(file, src_dir)
+    main = Path.basename(file, ".rian") <> ".mjs"
+    pkg = Rian.Pkg.Npm.package_json(manifest, main)
+    js = Rian.JS.compile(src)
 
-      dir ->
-        File.mkdir_p!(dir)
-        out = Path.join(dir, Path.basename(file, ".rian") <> ext)
-        File.write!(out, source)
-        IO.puts(out)
-        copy_foreign(prog, target, src_dir, dir)
-        0
-    end
+    proj = Path.join([root, "_build", "js"])
+    File.mkdir_p!(proj)
+
+    write_file(Path.join(proj, "package.json"), pkg)
+    write_file(Path.join(proj, main), js)
+    copy_foreign(prog, :js, src_dir, proj)
+    0
   end
 
   # copy each distinct `.ffi.*` file the program references for `target` into `dir`,
