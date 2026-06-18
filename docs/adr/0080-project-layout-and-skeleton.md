@@ -194,9 +194,9 @@ the **same** manifest, so a Rian project drops into an Elixir umbrella without a
 ### 7. Foreign-FFI file layout & bundling (the home for `@external` references — ADR-0068 §1b)
 
 `@external`'s **reference** form (`@external(:js, "./ffi.mjs", "fun")`, ADR-0068 §1b) needs foreign code
-to live in real, per-target files this layout defines. **Resolution implemented; bundling pending** —
-`rian build` resolves each file-reference and fails closed (responsibilities a + c below); per-target
-bundling (b) is the remaining phase before inline-string specs can be removed.
+to live in real, per-target files this layout defines. **Resolution + BEAM bundling implemented** —
+`rian build` resolves each file-reference and fails closed (a + c below) and bundles a BEAM `.ffi.ex`
+into the app (b); JS/Rust/JVM bundling is the remaining phase before inline-string specs can be removed.
 
 - **Location — co-located, target-suffixed (the Gleam convention).** A foreign file sits beside the
   `.rian` that references it, named by the module + target: for `src/codec.rian`,
@@ -215,15 +215,18 @@ bundling (b) is the remaining phase before inline-string specs can be removed.
     file-reference resolves against the source's directory, a `.ex`/`.exs` is verified to define the
     named function at the Rian def's arity (from its AST), and a missing file/export fails the build.
     Other targets (`.mjs`/`.rs`/`.kt`) are existence-checked only — export verification lands with each
-    backend's bundler. **(b) is the next phase**: until it lands, an emitter refuses a file-reference
-    (`Rian.External.render/2` raises) rather than emit a call to a function the output does not carry.
+    backend's bundler. **(b) is implemented for BEAM** (`Rian.External.lower_beam/2`): the build compiles
+    the `.ffi.ex`, rewrites the `@external` to a module-reference, and writes the foreign `.beam` beside
+    the app, so the call lowers via the existing reference path. **JS/Rust/JVM bundling is the next
+    phase** (a JS `import`, a Rust `mod`, a JVM compile); until then an emitter refuses a non-BEAM
+    file-reference (`Rian.External.render/2` raises) rather than emit a call to unbundled code.
 - **Packaging.** `rian.toml` (§2) lists the foreign files so a published package ships them. A Hex
   package carries `.ffi.ex`; a package that also targets JS/Rust ships those `.ffi.*` too (consumers on
   a target without the matching file get an honest Reach pin off it, not a runtime failure).
 
 `@external` supports the **inline-string** spec (all targets) and the **host-module reference**
-(`Mod.fun`/`:erlang.fun`, no foreign file needed); the **file-reference** form is now parsed and
-**resolved** at build time (existence + `.ex` export), with **bundling/emission** the remaining §7 phase
+(`Mod.fun`/`:erlang.fun`, no foreign file needed); the **file-reference** form is parsed, **resolved**,
+and **bundled for BEAM** at build time, with **JS/Rust/JVM bundling** the remaining §7 phase
 (ADR-0068 §1b).
 
 ## Ratings

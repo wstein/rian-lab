@@ -254,10 +254,24 @@ defmodule Rian.ExternalTest do
       assert msg2 =~ "enc/2"
     end
 
-    test "render refuses a file-reference until bundling lands (ADR-0080 §7 b)" do
-      assert_raise ArgumentError, ~r/bundling is the next build-system phase/, fn ->
+    test "render refuses a non-BEAM file-reference (bundling unbuilt for those targets, §7 b)" do
+      # a `:ex` file-reference is bundled by the build (`lower_beam/2`), so `render` never
+      # sees one; a JS/Rust/JVM file-reference has no bundler yet, so rendering one raises.
+      assert_raise ArgumentError, ~r/other targets' bundling is not yet implemented/, fn ->
         External.render({:file, "./codec.ffi.mjs", "encode"}, [])
       end
+    end
+
+    test "lower_beam rewrites a :ex file-reference to a module-reference + returns its beam",
+         %{dir: dir} do
+      File.write!(Path.join(dir, "fx.ffi.ex"), "defmodule Fx do\n  def go(x), do: x + 1\nend\n")
+      prog = Decl.parse(~S|@external(:ex, "./fx.ffi.ex", "go") pub def f(x Int53) Int53|)
+
+      assert {:ok, lowered, [{mod, bin}]} = External.lower_beam(prog, dir)
+      assert mod == Fx
+      assert is_binary(bin)
+      [f] = lowered.funcs
+      assert f.externals == %{ex: {:ref, ["Fx", "go"], false}}
     end
   end
 

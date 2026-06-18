@@ -65,6 +65,45 @@ defmodule Rian.BuildTest do
       assert err =~ "absent.ffi.mjs"
       assert err =~ "does not exist"
     end
+
+    test "bundles a :ex file-reference: the .ffi.ex compiles beside the app and the call runs" do
+      src_dir = Path.join(System.tmp_dir!(), "rian_ffi_src_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(src_dir)
+      on_exit(fn -> File.rm_rf(src_dir) end)
+
+      File.write!(
+        Path.join(src_dir, "RbFfiCodec.ffi.ex"),
+        "defmodule RbFfiCodec do\n  def twice(x), do: x * 2\nend\n"
+      )
+
+      rian = Path.join(src_dir, "prog.rian")
+
+      File.write!(
+        rian,
+        ~S|@external(:ex, "./RbFfiCodec.ffi.ex", "twice") pub def main(x Int53) Int53| <> "\n"
+      )
+
+      dir = tmp_dir()
+      out = capture_io(fn -> assert Build.build([rian, "-o", dir]) == 0 end)
+
+      # both the Rian module and the bundled foreign module are written
+      assert out =~ "Elixir.RianCompiled.beam"
+      assert File.exists?(Path.join(dir, "Elixir.RianCompiled.beam"))
+      assert File.exists?(Path.join(dir, "Elixir.RbFfiCodec.beam"))
+
+      # the bundled artifact is real: load both and run the entry through the FFI
+      for atom <- [:"Elixir.RbFfiCodec", :"Elixir.RianCompiled"], do: :code.purge(atom)
+      true = :code.add_path(String.to_charlist(dir))
+      {:module, _} = :code.load_file(:"Elixir.RbFfiCodec")
+      {:module, mod} = :code.load_file(:"Elixir.RianCompiled")
+      assert mod.main(21) == 42
+
+      on_exit(fn ->
+        for atom <- [:"Elixir.RianCompiled", :"Elixir.RbFfiCodec"] do
+          :code.purge(atom) && :code.delete(atom)
+        end
+      end)
+    end
   end
 
   describe "build/1 — source targets" do

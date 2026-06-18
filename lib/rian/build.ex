@@ -44,7 +44,7 @@ defmodule Rian.Build do
   defp resolve_then_emit(opts, src, src_dir) do
     with {:ok, prog} <- Rian.Decl.parse_result(src),
          :ok <- Rian.External.resolve(prog, src_dir) do
-      emit(opts, src)
+      emit(opts, src, prog, src_dir)
     else
       {:error, reason} -> err(error_text(reason))
     end
@@ -55,29 +55,46 @@ defmodule Rian.Build do
   # — converted to an exit code here rather than escaping the escript. Parse/IO
   # errors above are already values; this isolates the genuine emitter boundary.
   @rian_host "emit boundary: a lowering / BEAM codegen raise becomes an exit code"
-  defp emit(opts, src) do
+  defp emit(opts, src, prog, src_dir) do
     cond do
       opts[:rust] -> print(Rian.Lower.rust_program(Rian.Decl.parse(src)))
       opts[:js] -> print(Rian.JS.compile(src))
       opts[:jvm] -> print(Rian.JVM.compile(src))
-      true -> build_beam(src, Keyword.get(opts, :out, "."))
+      true -> build_beam(prog, src, src_dir, Keyword.get(opts, :out, "."))
     end
   rescue
     e -> err(Exception.message(e))
   end
 
-  # compile to BEAM and write one `<module>.beam` per module into `dir`.
-  defp build_beam(src, dir) do
-    File.mkdir_p!(dir)
-    mods = compile_modules(src)
+  # compile to BEAM and write one `<module>.beam` per module into `dir`. A program with
+  # a `:ex` file-reference `@external` is bundled (ADR-0080 §7 b): the foreign `.ffi.ex`
+  # is compiled and shipped beside the app; everything else takes the unchanged path.
+  defp build_beam(prog, src, src_dir, dir) do
+    if Rian.External.has_beam_file_ref?(prog) do
+      build_beam_bundled(prog, src_dir, dir)
+    else
+      File.mkdir_p!(dir)
+      compile_modules(src) |> Enum.each(&write_beam(&1, dir))
+      0
+    end
+  end
 
-    Enum.each(mods, fn {atom, bin} ->
-      path = Path.join(dir, "#{atom}.beam")
-      File.write!(path, bin)
-      IO.puts(path)
-    end)
+  defp build_beam_bundled(prog, src_dir, dir) do
+    case Rian.External.lower_beam(prog, src_dir) do
+      {:error, msg} ->
+        err(msg)
 
-    0
+      {:ok, lowered, ffi_beams} ->
+        File.mkdir_p!(dir)
+        (compile_modules_ir(lowered) ++ ffi_beams) |> Enum.each(&write_beam(&1, dir))
+        0
+    end
+  end
+
+  defp write_beam({atom, bin}, dir) do
+    path = Path.join(dir, "#{atom}.beam")
+    File.write!(path, bin)
+    IO.puts(path)
   end
 
   # mods-xor-flat, mirroring `mix rian.compile`'s BEAM path: a file of `mod`s gives
@@ -92,6 +109,23 @@ defmodule Rian.Build do
 
       _ ->
         {:ok, atom, bin} = Rian.Beam.compile(src, :"Elixir.RianCompiled")
+        [{atom, bin}]
+    end
+  end
+
+  # the IR twin of `compile_modules/1`, for the bundled path: a program whose
+  # file-references have been lowered to module-references (`Rian.External.lower_beam/2`)
+  # is compiled straight from IR, skipping a re-parse that would re-derive the file-refs.
+  defp compile_modules_ir(prog) do
+    :ok = Rian.Check.gate!(prog)
+    :ok = Rian.Reach.gate!(prog)
+
+    case prog do
+      %{mods: [_ | _]} ->
+        Rian.Beam.compile_program_ir(prog)
+
+      _ ->
+        {:ok, atom, bin} = Rian.Beam.compile_ir(prog, :"Elixir.RianCompiled")
         [{atom, bin}]
     end
   end
