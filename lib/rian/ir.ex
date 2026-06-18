@@ -65,7 +65,8 @@ defmodule Rian.IR do
   struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause),
               is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)),
               doc Option(String), synthetic Bool, is_test Bool,
-              dispatch Option(Symbol), externals Map(Symbol, String))
+              dispatch Option(Symbol), externals Map(Symbol, String),
+              effects Vec(Symbol))
   """
 
   defmodule Field do

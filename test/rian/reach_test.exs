@@ -178,9 +178,9 @@ defmodule Rian.ReachTest do
 
       for f <- ~w(s t g) do
         assert targets(rep, f) == [:ex]
-        # a concurrency blocker is present (the load-bearing one); these bodies also
-        # pass bare atoms (`:m`/`:tab`/`:v`), which now carry honest `:atom` blockers
-        # too — both pin to `:ex`, so the function is ex-only either way.
+        # concurrency is the load-bearing blocker; the bare atoms (`:m`/`:tab`/`:v`) are
+        # NOT flagged — they are portable `Symbol` literals (ADR-0041, no blocker) — so
+        # the function is ex-only solely because of the concurrency primitive.
         assert Enum.any?(entry(rep, f).blockers, &(&1.kind == :concurrency))
       end
     end
