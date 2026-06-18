@@ -13,8 +13,12 @@ defmodule Rian.ReachRustHonestyTest do
       a generic function reuses the param names (`Pair<K, V>`, plus any free tvar like
       `has`'s `V`), and a non-generic builder (`sample`/`names`) gets its concrete
       instantiation (`Pair<i64, i64>` / `Pair<String, i64>`) inferred from its body.
+    * **associated-type protocol** (`foldable`, ADR-0074) — `type Elem: Clone` on the
+      trait, a `.to_vec()`'d borrowed-`Vec`-field return (Gap E+), and a borrowed
+      constructor argument (`fcount(Bag([1,2,3]))`) make the `Foldable` impls + reducer
+      compile and run on Rust.
 
-  The `@tag :rust` cases tie the matrix to reality: both slices must `rustc --test` green.
+  The `@tag :rust` cases tie the matrix to reality: each slice must `rustc --test` green.
   """
   use ExUnit.Case, async: false
 
@@ -345,6 +349,85 @@ defmodule Rian.ReachRustHonestyTest do
             File.rm(src)
             File.rm(bin)
           end
+        end
+    end
+  end
+
+  describe "foldable — an associated-type protocol reaches :rs (ADR-0074)" do
+    setup do: {:ok, rep: reach("foldable")}
+
+    test "the Foldable impls reach :rs (a borrowed `&Vec` field return is `.to_vec()`d)", %{
+      rep: rep
+    } do
+      # `def to_list(b) := case b do Bag(xs) -> xs end` binds `xs` to a `&Vec<T>`; the
+      # `-> Vec<T>` method clones it (Gap E+). Before that coercion these impls claimed
+      # `:rs` but rustc rejected the emitted `=> xs` (E0308) — an uncaught matrix lie.
+      for f <- ~w(impl_foldable_bag_to_list impl_foldable_words_to_list) do
+        assert :rs in targets(rep, f),
+               "#{f} returns a borrowed Vec field — must clone + claim :rs"
+      end
+    end
+  end
+
+  @tag :rust
+  test "rustc compiles+runs `fcount` over an associated-type Foldable (sum + `Vec(Elem)` return)" do
+    case System.find_executable("rustc") do
+      nil ->
+        :ok
+
+      rustc ->
+        # The element-agnostic reducer over a one-method protocol with an associated
+        # `type Elem` (ADR-0074): one `fcount` reduces both a `Bag` of `Int53` and a
+        # `Words` of `String` — BOTH impls are emitted and must compile (the `&Vec`
+        # field return is `.to_vec()`d, the trait carries `type Elem: Clone`, and the
+        # `fcount(Bag(...))` call borrows the constructed argument). The `@test` exercises
+        # the `Int53` case; constructing the `Words` value from string literals in a test
+        # hits an orthogonal, pre-existing gap (a `&str` literal stored into a `Vec<String>`
+        # field is not yet `.to_string()`d — independent of dispatch/associated types).
+        prog = """
+        protocol Foldable do
+          type Elem
+          def to_list(self Self) Vec(Elem)
+        end
+
+        type Bag := Bag(items Vec(Int53))
+        type Words := Words(items Vec(String))
+
+        impl Foldable for Bag do
+          type Elem := Int53
+          def to_list(b) := case b do Bag(xs) -> xs end
+        end
+
+        impl Foldable for Words do
+          type Elem := String
+          def to_list(w) := case w do Words(ss) -> ss end
+        end
+
+        def fcount(x C) Int53 forall C: Foldable := len_l(to_list(x))
+
+        def len_l(Vec(T)) Int53 forall T
+        def len_l([]) := 0
+        def len_l([_ | t]) := 1 + len_l(t)
+
+        @test def counts_a_bag() Bool := fcount(Bag([1, 2, 3])) == 3
+        """
+
+        src = Path.join(System.tmp_dir!(), "rian_fold_#{System.unique_integer([:positive])}.rs")
+        bin = String.trim_trailing(src, ".rs")
+        File.write!(src, Test.rust(prog))
+
+        try do
+          {out, code} =
+            System.cmd(rustc, ["--test", "-A", "warnings", "--edition", "2021", src, "-o", bin],
+              stderr_to_stdout: true
+            )
+
+          assert code == 0, "the associated-type Foldable should compile on rustc:\n#{out}"
+          {run, rc} = System.cmd(bin, [])
+          assert rc == 0, "fcount's @tests should pass under rustc --test:\n#{run}"
+        after
+          File.rm(src)
+          File.rm(bin)
         end
     end
   end

@@ -375,7 +375,7 @@ defmodule Rian.LowerTest do
       assert rust =~ "fn tag(&self, n: i64) -> i64"
     end
 
-    test "an associated type lowers to `type Elem;` (trait, `Self::Elem`) + `type Elem = i64;` (impl) — ADR-0074" do
+    test "an associated type lowers to `type Elem: Clone;` (trait, `Self::Elem`) + `type Elem = i64;` (impl) — ADR-0074" do
       p =
         Decl.parse("""
         protocol Foldable do
@@ -390,8 +390,10 @@ defmodule Rian.LowerTest do
         """)
 
       rust = Lower.rust_protocols(p.protocols, p.impl_decls, p.types, p.structs)
-      # trait: declares the associated type and projects it as `Self::Elem`
-      assert rust =~ "trait RianFoldable {\n    type Elem;"
+      # trait: declares the associated type (with the `Clone` bound every Rian tvar
+      # carries, so a consumer passing the element to a generic helper type-checks) and
+      # projects it as `Self::Elem`
+      assert rust =~ "trait RianFoldable {\n    type Elem: Clone;"
       assert rust =~ "fn first(&self) -> Self::Elem;"
       # impl: binds the associated type to the concrete Rust type, ret resolved
       assert rust =~ "impl RianFoldable for Bag {\n    type Elem = i64;"

@@ -65,24 +65,35 @@ clause-bounded associated types are a later ADR if a real consumer needs them.
 3. **Lowering.**
    - **BEAM / JS** — erase. Associated types are typing only; the runtime dispatcher
      (guarded `def` / `typeof`) is unchanged.
-   - **Rust (`Rian.Lower.rust_protocols`)** — emit `trait Rian<P> { type Elem; … }` and
-     `impl … { type Elem = <rust(T)>; … }`; a `Self.Elem` projection renders `<Self as
+   - **Rust (`Rian.Lower.rust_protocols`)** — emit `trait Rian<P> { type Elem: Clone; … }`
+     and `impl … { type Elem = <rust(T)>; … }`; a `Self.Elem` projection renders `<Self as
      RianP>::Elem` (or the concrete type where monomorphised). This is the only target that
-     materialises the associated type.
+     materialises the associated type. The `: Clone` bound mirrors the `: Clone` every Rian
+     tvar carries (the emitter clones owned values liberally) — without it a consumer that
+     passes the element through a generic helper (`fcount` → `len_l<T: Clone>`) fails to
+     satisfy `C::Elem: Clone`. An impl method that returns a borrowed `Vec` field
+     (`to_list(b) := case b do Bag(xs) -> xs end`) clones it (`xs.to_vec()`, Gap E+).
    - **JVM** — defer (Tier-2 protocol dispatch is itself not yet lowered).
 4. **Element-generic `Foldable`** — replace ADR-0073's concrete `to_list(self) Vec(Int53)`
    with `Vec(Elem)`, and generalise `fsum`/`fall`/… to `forall C: Foldable, C.Elem: Num/…`.
    The concrete example becomes the generic one; the ADR-0073 "concrete element" caveat is
    retired.
 
-### Reach interaction (no false promise)
+### Reach interaction
 
-Associated types are **erased** on runtime targets, so they do **not** change the
-sum-dispatch reach story: a `Foldable` impl'd over a sum type still reaches `[:ex, :js]`
-(the constructor-tag atom, ADR-0061), element-generic or not. This ADR does **not** claim
-to widen reach — closing the sum-dispatcher's `:rs`/`:jvm` gap is the separate ADR-0061
-dispatcher item. The win here is *expressiveness* (one generic reducer over many element
-types), not portability.
+Associated types are **erased** on the runtime targets (BEAM/JS), so the win there is
+purely *expressiveness* (one generic reducer over many element types), not portability.
+On Rust they **materialise** and genuinely lower: the `Foldable` impls
+(`impl_foldable_*_to_list`) compile and run on `:rs` (rustc-verified,
+`reach_rust_honesty_test`) once the trait carries `type Elem: Clone` and a borrowed `Vec`
+field return is `.to_vec()`d. The runtime **dispatcher** `to_list` (and its consumer
+`fcount`) is pinned off `:jvm` directly — the JVM emitter has no protocol lowering yet
+(ADR-0042, the `:dispatch` Reach blocker) — and is currently pinned off `:rs` only by the
+bare-atom proxy on the dispatcher's constructor tags (a conservative *under*-claim; the
+impls themselves compile on Rust). Removing that proxy is the atoms→`Symbol` step. One
+orthogonal, pre-existing gap remains independent of this ADR: a `&str` literal stored into
+a `Vec(String)` field at construction is not yet `.to_string()`d, so constructing a
+`Words` of `String` from literals does not yet lower (the `Int53` `Bag` path does).
 
 ## Alternatives considered
 

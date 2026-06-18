@@ -364,6 +364,7 @@ defmodule Rian.Lower do
         borrowed: MapSet.new(),
         slices: MapSet.new(),
         owned_fields: MapSet.new(),
+        borrowed_vec_fields: MapSet.new(),
         ok_string: false,
         err_string: false,
         ex_scope: MapSet.new(),
@@ -609,6 +610,34 @@ defmodule Rian.Lower do
 
   defp coerce_string_branch(e, ec), do: coerce_string_ast(e, ec)
 
+  # Gap E+ (ADR-0061): a `Vec`-returning body that tail-returns a BORROWED collection —
+  # a `&[T]` slice binder or a `&Vec<T>` field binder destructured from a borrowed value
+  # — needs `.to_vec()` to materialise the owned `Vec<T>` the signature promises. Like
+  # Gap B for `String`, push the coercion into `if`/`case` TAIL leaves rather than
+  # wrapping the whole expression. SELECTIVE: only a borrowed-collection leaf is cloned;
+  # an owned leaf (`vec![…]`, a cons rebuild, an owned-returning call) is already
+  # `Vec<T>` and is emitted untouched, so an owned-Vec return cannot regress.
+  defp coerce_owned_vec_ast(%EIf{cond: c, then: t, else: e}, ec),
+    do:
+      "if #{p(c, 0, :rust, ec)} { #{coerce_owned_vec_ast(t, ec)} } else { #{coerce_owned_vec_ast(e, ec)} }"
+
+  defp coerce_owned_vec_ast(%ECase{scrut: scrut, arms: arms}, ec),
+    do: rust_case(scrut, arms, &coerce_owned_vec_ast(&1, ec), ec)
+
+  defp coerce_owned_vec_ast(%EBlock{stmts: [{:expr, e}]}, ec), do: coerce_owned_vec_ast(e, ec)
+
+  defp coerce_owned_vec_ast(%EId{name: n} = e, ec) do
+    s = p(e, 0, :rust, ec)
+    if borrowed_collection?(n, ec), do: "#{s}.to_vec()", else: s
+  end
+
+  defp coerce_owned_vec_ast(ast, ec), do: p(ast, 0, :rust, ec)
+
+  # a clause var that is a `&[T]`/`&Vec<T>` at runtime: a slice binder (slice param or
+  # cons-tail) or a `Vec` field binder destructured from a borrowed scrutinee.
+  defp borrowed_collection?(n, ec),
+    do: MapSet.member?(ec.slices, n) or MapSet.member?(ec.borrowed_vec_fields, n)
+
   # Resolve every `case` arm pattern in a body to its Rust spelling using the
   # type meta, storing it back into the IR as `{:rpat, str}`. After this pass the
   # Rust emitter needs no ambient meta — the IR carries the resolution.
@@ -771,6 +800,48 @@ defmodule Rian.Lower do
 
   defp collect_owned_field_vars(_pat, _ctx, acc), do: acc
 
+  # Gap E+ (ADR-0061): the complement of `owned_field_binders` — variables bound to a
+  # `Vec` field of a sum destructured in the BODY from a *borrowed* scrutinee (a plain
+  # `val` param, the common `def to_list(b) := case b do Bag(xs) -> xs end`). Such a
+  # binder is a `&Vec<T>`, so RETURNING it where the owned `Vec<T>` the signature
+  # promises is wanted needs `.to_vec()` (`coerce_owned_vec_ast`). Only `Vec` fields are
+  # collected: a `String` field is handled by the `coerce_string_ast` path, and a scalar
+  # field is `Copy`. Mirrors `owned_field_binders`' walk, gated on a borrowed scrutinee.
+  defp borrowed_vec_field_binders(ast, ctx), do: bvfb(ast, ctx, MapSet.new())
+
+  defp bvfb({:case, scrut, arms}, ctx, acc) do
+    acc = bvfb(scrut, ctx, acc)
+    borrowed? = not owned_scrut?(scrut, ctx)
+
+    Enum.reduce(arms, acc, fn {pat, _g, body}, a ->
+      a = if borrowed?, do: collect_vec_field_vars(pat, ctx, a), else: a
+      bvfb(body, ctx, a)
+    end)
+  end
+
+  defp bvfb(t, ctx, acc) when is_tuple(t),
+    do: Enum.reduce(Tuple.to_list(t), acc, &bvfb(&1, ctx, &2))
+
+  defp bvfb(l, ctx, acc) when is_list(l), do: Enum.reduce(l, acc, &bvfb(&1, ctx, &2))
+  defp bvfb(_, _ctx, acc), do: acc
+
+  defp collect_vec_field_vars({:ctor, ctor, argpats}, ctx, acc) do
+    case Map.get(ctx.meta, PL.to_snake(ctor)) do
+      %{field_types: fts} ->
+        argpats
+        |> Enum.zip(fts)
+        |> Enum.reduce(acc, fn
+          {{:var, n}, "Vec(" <> _}, a -> MapSet.put(a, n)
+          {_, _}, a -> a
+        end)
+
+      _ ->
+        acc
+    end
+  end
+
+  defp collect_vec_field_vars(_pat, _ctx, acc), do: acc
+
   defp owned_scrut?({:ctor, _, _}, _ctx), do: true
 
   defp owned_scrut?({:call, {:id, f}, args}, ctx) do
@@ -861,11 +932,16 @@ defmodule Rian.Lower do
   defp closure_arg(%Core.EId{} = a, ec), do: p(a, 12, :rust, ec) <> ".clone()"
   defp closure_arg(a, ec), do: p(a, 0, :rust, ec)
 
-  # does this argument expression produce an owned `Vec`/`String`?
+  # does this argument expression produce an owned `Vec`/`String`/user value?
   defp owned_arg?({:list_lit, _, _}, _funs), do: true
   defp owned_arg?({:call, {:id, "__prim_str_chars"}, _}, _funs), do: true
   defp owned_arg?({:call, {:id, "__prim_str_from_chars"}, _}, _funs), do: true
   defp owned_arg?({:call, {:id, "__prim_str_concat"}, _}, _funs), do: true
+  # a resolved construction (`Bag(xs)` -> `{:variant_lit, …}`, `Point(1, 2)` ->
+  # `{:struct_lit, …}`) builds a fresh OWNED value, so feeding it to a `&T`/`&C` param
+  # needs `&` — e.g. a non-generic caller of a generic function, `fcount(Bag([1,2,3]))`.
+  defp owned_arg?({:variant_lit, _enum, _ctor, _named, _pairs}, _funs), do: true
+  defp owned_arg?({:struct_lit, _name, _pairs}, _funs), do: true
 
   defp owned_arg?({:call, {:id, name}, args}, funs) do
     case Map.get(funs, {name, length(args)}) do
@@ -1113,10 +1189,13 @@ defmodule Rian.Lower do
     do: for(p <- protocols, m <- p.methods, into: %{}, do: {m.name, p.name})
 
   defp rust_trait(%{name: name, methods: methods} = p) do
-    # associated types (ADR-0074 Stage 3): `type Elem` declares `type Elem;` in the
-    # trait, and each projection in a method signature becomes `Self::Elem`.
+    # associated types (ADR-0074 Stage 3): `type Elem` declares `type Elem: Clone;` in
+    # the trait, and each projection in a method signature becomes `Self::Elem`. The
+    # `Clone` bound mirrors the `: Clone` every Rian tvar carries (the emitter clones
+    # owned values liberally) — without it a consumer like `fcount`, which passes the
+    # element through a generic `len_l<T: Clone>`, fails to satisfy `C::Elem: Clone`.
     assoc = Map.get(p, :assoc, [])
-    type_members = Enum.map_join(assoc, "", &"    type #{&1};\n")
+    type_members = Enum.map_join(assoc, "", &"    type #{&1}: Clone;\n")
 
     sigs =
       Enum.map_join(methods, "\n", fn m ->
@@ -1182,8 +1261,26 @@ defmodule Rian.Lower do
 
     ret_ty = self_subst(sig.ret, rust_type)
     {ok?, err?} = result_str_flags(ret_ty)
-    ec = %{base_ec | ok_string: ok?, err_string: err?}
-    body = method.body |> rust_proto_body(c, ec) |> coerce_ret(ret_ty)
+    # the surface body (before pattern resolution) carries the `{:case, …}`/`{:ctor, …}`
+    # nodes `borrowed_vec_field_binders` reads — e.g. `def to_list(b) := case b do
+    # Bag(xs) -> xs end` binds `xs` to a `&Vec<T>`, which a `-> Vec<T>` method must clone.
+    pre = method.body |> body_ast(c) |> rewrite_proto_calls(base_ec.proto)
+
+    ec = %{
+      base_ec
+      | ok_string: ok?,
+        err_string: err?,
+        borrowed_vec_fields: borrowed_vec_field_binders(pre, c)
+    }
+
+    # A `Vec`-returning method coerces its borrowed-collection tail leaves to owned
+    # `Vec<T>` at the AST level (Gap E+, parity with `rust_fn`); every other return keeps
+    # the string-level `coerce_ret` path exactly (so `String`/scalar impls cannot regress).
+    body =
+      if match?("Vec(" <> _, ret_ty),
+        do: proto_body_ast(method.body, c, ec) |> coerce_owned_vec_ast(ec),
+        else: method.body |> rust_proto_body(c, ec) |> coerce_ret(ret_ty)
+
     # A Copy-primitive receiver used as a *value* — an `if` condition, arithmetic —
     # needs an owned binding: `&self` cannot stand where `bool`/`i64` is expected
     # (rustc E0308, e.g. `Show for Bool`'s `if b`). Deref-copy it when the impl target
@@ -1234,15 +1331,19 @@ defmodule Rian.Lower do
   # lower an impl-method body through the same Rust pipeline `rust_fn` uses,
   # rewriting protocol-method calls to UFCS first. `ec` carries the proto map (for
   # the UFCS rewrite) and the per-method result-string flags (for `Ok`/`Err` emit).
-  defp rust_proto_body(src, c, ec) do
+  defp rust_proto_body(src, c, ec),
+    do: proto_body_ast(src, c, ec) |> emit(:rust, ec) |> elem(0)
+
+  # the impl-method body as a typed-core AST (the shared prefix of `rust_proto_body`),
+  # exposed so `rust_impl_method` can route a `Vec`-returning body through the
+  # `coerce_owned_vec_ast` tail coercion (Gap E+) instead of the string-level emit.
+  defp proto_body_ast(src, c, ec) do
     src
     |> body_ast(c)
     |> rewrite_proto_calls(ec.proto)
     |> resolve_rust_pats(c.meta)
     |> insert_borrows(Map.get(c, :funs, %{}), ec)
     |> Rian.Check.annotate(ec.tenv, ec.ic)
-    |> emit(:rust, ec)
-    |> elem(0)
   end
 
   # trait method params from a sig string (`self Self, b Self`): receiver -> &self.
@@ -1431,6 +1532,7 @@ defmodule Rian.Lower do
               end,
             slices: slice_binders(func.params, c.pats),
             owned_fields: owned_field_binders(pre, ctx),
+            borrowed_vec_fields: borrowed_vec_field_binders(pre, ctx),
             tenv: tenv,
             ic: ctx.ic
         }
@@ -1454,18 +1556,19 @@ defmodule Rian.Lower do
         # no-op clone if the arm already yields a `String`). For a no-rebind body
         # the coercion is pushed into `if`/`case` TAIL leaves (Gap B) so a `&str`
         # literal arm unifies with a `String` arm; otherwise it wraps the arm.
+        # Coerce the clause body to the owned value its signature promises (a no-rebind
+        # body pushes the coercion into `if`/`case` TAIL leaves so a borrowed leaf unifies
+        # with an owned one — Gap B/E). A `String` return coerces every leaf to owned
+        # `String`; a `Vec` return SELECTIVELY `.to_vec()`s only the borrowed-collection
+        # leaves (a `&[T]` slice or `&Vec<T>` field binder — e.g. `def drop(cs, 0) := cs`
+        # or `def to_list(b) := case b do Bag(xs) -> xs end`), leaving owned leaves alone.
         arm =
-          if func.ret == "String" and rebinds == [],
-            do: coerce_string_ast(ast, ec),
-            else: coerce_ret(arm, func.ret)
-
-        # Gap E: a clause that returns a bare `&[T]` slice binder where a `Vec<T>` is
-        # promised needs `.to_vec()` (e.g. `def drop(cs, 0) := cs`). The body is a
-        # single-expression block, so unwrap it to reach the bare binder.
-        arm =
-          if match?("Vec(" <> _, func.ret) and tail_slice_id?(ast, ec),
-            do: "(#{arm}).to_vec()",
-            else: arm
+          cond do
+            func.ret == "String" and rebinds == [] -> coerce_string_ast(ast, ec)
+            match?("Vec(" <> _, func.ret) and rebinds == [] -> coerce_owned_vec_ast(ast, ec)
+            match?("Vec(" <> _, func.ret) and tail_slice_id?(ast, ec) -> "(#{arm}).to_vec()"
+            true -> coerce_ret(arm, func.ret)
+          end
 
         # a generic function returning a bare owned type variable (`T`) yields a
         # borrowed `&T` in its base arms (a returned param); `.clone()` to the owned
