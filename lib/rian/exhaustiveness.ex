@@ -31,6 +31,8 @@ defmodule Rian.Exhaustiveness do
   a bare `Int64`/`Char`/`String` still requires a `_` arm.
   """
 
+  use Rian.Ann
+
   alias Rian.{Core, PatternLower, Pratt, Prelude}
 
   # ── Environment helpers ────────────────────────────────────────────────
@@ -53,6 +55,7 @@ defmodule Rian.Exhaustiveness do
   end
 
   @doc "Register a sum type: variants is [{ctor_id, arity}, ...]."
+  @rian_sig "pub def add_type(env _Unk, type_name Symbol, variants Vec(_Unk)) _Unk"
   @spec add_type(map(), term(), list()) :: map()
   def add_type(env, type_name, variants) do
     ids = Enum.map(variants, fn {c, _} -> c end)
@@ -68,6 +71,7 @@ defmodule Rian.Exhaustiveness do
   covers the whole interval is exhaustive — unlike a bare `Int64`, whose
   signature stays infinite and still demands a `_`.
   """
+  @rian_sig "pub def add_range(env _Unk, type_name Symbol, lo Int53, hi Int53) _Unk"
   @spec add_range(map(), term(), integer(), integer()) :: map()
   def add_range(env, type_name, lo, hi) when lo <= hi do
     members = for v <- lo..hi, do: {:lit, v}
@@ -262,6 +266,7 @@ defmodule Rian.Exhaustiveness do
   # usefulness analysis on every `case` arm matrix, refusing to emit on a gap.
 
   @doc "The signature env for a whole program (types + ranges + structs)."
+  @rian_sig "pub def program_env(types Vec(Type), structs Vec(Struct), ranges Vec(Range)) _Unk"
   @spec program_env(list(), list(), list()) :: map()
   def program_env(types, structs, ranges) do
     env =
@@ -280,6 +285,7 @@ defmodule Rian.Exhaustiveness do
   end
 
   @doc "Refuse to emit any function whose body holds a non-exhaustive `case`."
+  @rian_sig "pub def check_case_bodies!(funcs Vec(Func), env _Unk) Symbol"
   @spec check_case_bodies!(list(), map()) :: term()
   def check_case_bodies!(funcs, env) do
     for func <- funcs, not Map.get(func, :synthetic, false), clause <- func.clauses do
@@ -293,6 +299,7 @@ defmodule Rian.Exhaustiveness do
   defp body_core(ast), do: Core.from_expr(ast)
 
   @doc "Check every `case` reachable in a Core expression; raise on the first gap."
+  @rian_sig "pub def check_match!(core Expr, env _Unk, where _Unk) _Unk"
   @spec check_match!(term(), map(), term()) :: term()
   def check_match!(core, env, where) do
     core |> collect_cases([]) |> Enum.each(&check_one_case!(&1, env, where))
