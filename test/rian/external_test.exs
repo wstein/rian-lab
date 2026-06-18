@@ -273,6 +273,22 @@ defmodule Rian.ExternalTest do
       [f] = lowered.funcs
       assert f.externals == %{ex: {:ref, ["Fx", "go"], false}}
     end
+
+    test "lower_beam reports a foreign file that parses but fails to compile, as a value",
+         %{dir: dir} do
+      # the file parses (so resolution finds `go/1`) but importing a missing module
+      # raises a CompileError at compile time — caught into an errors-as-value (ADR-0035).
+      File.write!(
+        Path.join(dir, "bad.ffi.ex"),
+        "defmodule Bad do\n  import Totally.Missing.Mod\n  def go(x), do: x\nend\n"
+      )
+
+      prog = Decl.parse(~S|@external(:ex, "./bad.ffi.ex", "go") pub def f(x Int53) Int53|)
+
+      assert {:error, msg} = External.lower_beam(prog, dir)
+      assert msg =~ "bad.ffi.ex"
+      assert msg =~ "failed to compile"
+    end
   end
 
   defp node_run(js, expr) do

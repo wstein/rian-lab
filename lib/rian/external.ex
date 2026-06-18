@@ -114,12 +114,10 @@ defmodule Rian.External do
   # file's AST and scans for a public `def` head of the name and arity, unwrapping a
   # `when` guard. `defp` does not count — a foreign export must be public.
   defp ex_defines?(full, fun, arity) do
-    name = String.to_atom(fun)
-
     case File.read(full) do
       {:ok, content} ->
         case Code.string_to_quoted(content) do
-          {:ok, ast} -> ast_defines?(ast, name, arity)
+          {:ok, ast} -> ast_defines?(ast, fun, arity)
           _ -> false
         end
 
@@ -128,21 +126,26 @@ defmodule Rian.External do
     end
   end
 
-  defp ast_defines?(ast, name, arity) do
+  # `fun` is the (string) name from the foreign `@external`; comparing head names as
+  # strings avoids interning an arbitrary user-supplied name into the atom table.
+  defp ast_defines?(ast, fun, arity) do
     {_, found} =
       Macro.prewalk(ast, false, fn
-        {:def, _, [head | _]} = node, acc -> {node, acc or head_arity(head) == {name, arity}}
+        {:def, _, [head | _]} = node, acc -> {node, acc or head_arity(head) == {fun, arity}}
         node, acc -> {node, acc}
       end)
 
     found
   end
 
-  # `{name, arity}` of a `def` head: `name(a, b)` → `{:name, 2}`, `name()`/`name` → 0,
-  # `name(a) when g` → unwrap the guard first.
+  # `{name, arity}` of a `def` head with the name as a **string** (to match `fun`):
+  # `name(a, b)` → `{"name", 2}`, `name()`/`name` → 0, `name(a) when g` → unwrap first.
   defp head_arity({:when, _, [inner | _]}), do: head_arity(inner)
-  defp head_arity({name, _, args}) when is_atom(name) and is_list(args), do: {name, length(args)}
-  defp head_arity({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: {name, 0}
+
+  defp head_arity({name, _, args}) when is_atom(name) and is_list(args),
+    do: {to_string(name), length(args)}
+
+  defp head_arity({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: {to_string(name), 0}
   defp head_arity(_), do: :no
 
   @doc """
@@ -195,8 +198,13 @@ defmodule Rian.External do
   # raises a `CompileError`, converted to an errors-as-value here (ADR-0035).
   @rian_host "FFI compile boundary: a foreign `.ffi.ex` CompileError becomes a Result"
   defp compile_ffi_file(full, path) do
-    {:ok, content} = File.read(full)
-    {:ok, Code.compile_string(content, full)}
+    case File.read(full) do
+      {:ok, content} ->
+        {:ok, Code.compile_string(content, full)}
+
+      {:error, reason} ->
+        {:error, "foreign file `#{path}` could not be read: #{:file.format_error(reason)}"}
+    end
   rescue
     e -> {:error, "foreign file `#{path}` failed to compile: #{Exception.message(e)}"}
   end
@@ -238,12 +246,17 @@ defmodule Rian.External do
   defp find_module(nil, _fun, _arity), do: :error
 
   defp find_module(mods, fun, arity) do
-    name = String.to_atom(fun)
+    # the foreign module is already compiled+loaded, so an exported function's name is
+    # an existing atom; if `fun` is not even an atom, no module exports it → `:error`
+    # (avoids interning unbounded user input via `String.to_atom/1`).
+    name = String.to_existing_atom(fun)
 
     case Enum.find(mods, fn {m, _bin} -> function_exported?(m, name, arity) end) do
       {m, _bin} -> {:ok, m}
       nil -> :error
     end
+  rescue
+    ArgumentError -> :error
   end
 
   # map a fallible transform over a list, short-circuiting on the first `{:error, _}`.
