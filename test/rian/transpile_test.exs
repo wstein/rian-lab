@@ -130,7 +130,7 @@ defmodule Rian.TranspileTest do
       assert out =~
                "# (dropped Elixir exception `Unsupported`: errors are values in Rian, ADR-0035)"
 
-      # refute against the body only — the draft header legend names `defexception`.
+      # scope the refutes to the body (after the report header).
       body = out |> String.split("mod Beam do") |> List.last()
       refute body =~ "mod Unsupported"
       refute body =~ "defexception"
@@ -1548,6 +1548,39 @@ end|)
         """)
 
       assert out =~ "@test def grp_t() Bool := assert_eq(a, b)"
+    end
+  end
+
+  describe "the DRAFT header is a per-file report (not a static legend)" do
+    test "it reports the real counts: defs, holes, markers, mapped, dropped" do
+      out =
+        rian("""
+        defmodule M do
+          @moduledoc "d"
+          import Enum
+          def f(x), do: Enum.map(x, fn y -> y || :z end)
+          def g(s), do: String.upcase(s)
+        end
+        """)
+
+      header = out |> String.split("mod M do") |> List.first()
+      assert header =~ "rian.transpile DRAFT — NOT done"
+      assert header =~ "2 defs"
+      assert header =~ "type hole"
+      assert header =~ "1 port marker"
+      assert header =~ "auto-mapped stdlib call"
+      assert header =~ "1 dropped (no Rian image)"
+      # no static capability legend any more
+      refute header =~ "Translated:"
+      refute header =~ "You must still"
+    end
+
+    test "a fully-inferred, marker-free draft reports nothing left to do" do
+      {out, stats} = Transpile.transpile_with_stats("def double(x), do: x + x", infer: true)
+      assert out =~ "no holes or markers remain"
+      # singular noun for a single def; the report counts the body, not itself
+      assert out =~ "1 def\n"
+      assert %{defs: 1, holes: 0, ports: 0} = stats
     end
   end
 end

@@ -68,31 +68,6 @@ defmodule Rian.Transpile do
   module before you commit to porting it.
   """
 
-  @header [
-    "# ─────────────────────────────────────────────────────────────────────────",
-    "# DRAFT skeleton — transpiled from Elixir by `mix rian.transpile`. NOT done.",
-    "# Translated: defs/clauses (+guards, +defaults), defstruct→struct, if/case,",
-    "#   operators (precedence-parenthesized),",
-    "#   pipes (|>), single- & multi-clause lambdas (multi → `(p) -> case p do …`),",
-    "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
-    "#   word sigils (~w → list), referenced @attrs → const (a const in a pattern → ^pin),",
-    "#   as-patterns (var @ pat), field access (r.f), string interpolation (${e}), nil→None,",
-    "#   ExUnit `test` blocks → `@test def`, assert/refute → assertion macros.",
-    "# Dropped (no Rian image — an honest note, never a marker): defexception modules,",
-    "#   defmacro, use Application, Code.ensure_loaded? guards, doc/metadata attrs.",
-    "# A `@rian_host` def → `@effects(host)` + `@external(:ex, \"<try/rescue>\")`; dynamic",
-    "#   dispatch `mod.f(a)` → `apply(mod, :f, [a])` (BEAM FFI).",
-    "# You must still: (1) fill type holes `_Unk`, (2) resolve every",
-    "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
-    "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
-    "# Auto-mapped stdlib calls (List./Dict./Str.) are spelled inline but NOT",
-    "#   semantics-verified — check arg-order/edge-cases against the Elixir source.",
-    "# Other Elixir-stdlib calls are emitted as BEAM FFI (native remote calls): they",
-    "#   compile/run on BEAM but are non-portable — Reach pins them off :rs/:js.",
-    "# ─────────────────────────────────────────────────────────────────────────",
-    ""
-  ]
-
   # `@test def` slug length budget (ExUnit `test`/`describe` → `@test def`, ADR-0060):
   # the whole identifier stays ≤ `@max_slug`, but a `describe` group prefix is capped
   # *separately* at `@max_prefix` so a long group name can't eat the whole budget and
@@ -228,6 +203,14 @@ defmodule Rian.Transpile do
   """
   @spec transpile(String.t(), keyword()) :: term()
   def transpile(source, opts \\ []) when is_binary(source) do
+    body = body_lines(source, opts)
+    ((report_header(body, opts) ++ body) |> Enum.join("\n")) <> "\n"
+  end
+
+  # Render the program body (no report header). Shared by `transpile/2`,
+  # `transpile_with_stats/2`, and `incompatible/2`, so the header's length never has
+  # to be guessed/stripped — each consumer works on the body directly.
+  defp body_lines(source, opts) do
     ast = Code.string_to_quoted!(source)
     {sigmap, types} = if opts[:infer], do: infer_program(ast), else: {%{}, []}
 
@@ -236,10 +219,69 @@ defmodule Rian.Transpile do
     # second parse of the source text); `Rian.Ann.from_beam/1` is the no-source reader.
     {def_anns, struct_anns, type_anns} = classify_annotations(Rian.Ann.from_ast(ast))
 
-    ast
-    |> toplevel(Map.merge(sigmap, def_anns), types ++ type_anns, struct_anns)
-    |> Enum.join("\n")
-    |> Kernel.<>("\n")
+    toplevel(ast, Map.merge(sigmap, def_anns), types ++ type_anns, struct_anns)
+  end
+
+  # The DRAFT banner — a **per-file report** computed from the rendered body, not a
+  # static capability legend: what this transpilation produced (def count) and what
+  # the human must still finish (type holes, port markers, auto-mapped stdlib calls
+  # to verify, dropped-with-note items). The literal `TODO_PORT("` / `TODO[port]:`
+  # marker spellings are deliberately avoided here so the banner is not itself counted
+  # by `body_stats/1` or mistaken for an unfinished port by `Rian.Roundtrip.marker?/1`.
+  defp report_header(body, opts) do
+    %{defs: defs, holes: holes, ports: ports, mapped: mapped} = body_stats(body)
+    dropped = Enum.count(body, &String.contains?(&1, "(dropped Elixir"))
+    rule = "# " <> String.duplicate("─", 73)
+
+    counts =
+      [
+        "#{defs} def#{plural(defs)}",
+        "#{holes} type hole#{plural(holes)} (_Unk)#{if opts[:infer], do: "", else: ", types not inferred"}",
+        "#{ports} port marker#{plural(ports)}",
+        mapped > 0 &&
+          "#{mapped} auto-mapped stdlib call#{plural(mapped)} (verify arg-order/edges)",
+        dropped > 0 && "#{dropped} dropped (no Rian image)"
+      ]
+      |> Enum.filter(& &1)
+      |> Enum.map(&("#   " <> &1))
+
+    todo =
+      if ports == 0 and holes == 0 do
+        ["# Next: equiv-lock against the Elixir oracle — no holes or markers remain."]
+      else
+        [
+          "# To finish: fill the _Unk type holes, resolve every TODO_PORT / # TODO[port]",
+          "#   marker, make matches exhaustive, then equiv-lock against the Elixir oracle."
+        ]
+      end
+
+    [rule, "# rian.transpile DRAFT — NOT done (a hand-finished scaffold, not a port)."] ++
+      counts ++ todo ++ [rule, ""]
+  end
+
+  defp plural(1), do: ""
+  defp plural(_), do: "s"
+
+  # Tally the body for the report / `transpile_with_stats`: emitted def heads, port
+  # markers, auto-mapped stdlib calls, and remaining `_Unk` type holes. Counted over
+  # the body alone (never the report header) so the banner can't inflate its own tally.
+  defp body_stats(body) do
+    ports =
+      Enum.count(
+        body,
+        &(String.contains?(&1, "TODO_PORT") or String.contains?(&1, "TODO[port]"))
+      )
+
+    # def heads — indented (inside a `mod`) or at column 0 (module-less source).
+    defs = Enum.count(body, &Regex.match?(~r/^\s*(pub )?def \w+\(/, &1))
+    # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics check.
+    mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, Enum.join(body, "\n")) |> length()
+    # holes are counted over the code only — comment provenance lines are dropped.
+    code =
+      body |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#")) |> Enum.join("\n")
+
+    holes = Regex.scan(~r/\b_Unk\b/, code) |> length()
+    %{ports: ports, defs: defs, mapped: mapped, holes: holes}
   end
 
   # Render the program. Rian modules are flat (`Rian.Decl` has no nested `mod`),
@@ -252,12 +294,11 @@ defmodule Rian.Transpile do
     # discovers them and the injected assertion macros are in scope (both fail inside
     # a `mod`). So flatten it to module-less top-level rather than wrapping in `mod`.
     if test_module?(body) do
-      @header ++ flat_items(body, sigmap, types, struct_anns)
+      flat_items(body, sigmap, types, struct_anns)
     else
       [parent | hoisted] = flatten_modules(top)
 
-      @header ++
-        module_lines(parent, sigmap, types, struct_anns) ++
+      module_lines(parent, sigmap, types, struct_anns) ++
         Enum.flat_map(hoisted, &["" | module_lines(&1, sigmap, [], struct_anns)])
     end
   end
@@ -269,7 +310,7 @@ defmodule Rian.Transpile do
   # greppable `TODO[port]` marker via `render_items`, so a non-declaration script
   # degrades per-statement rather than collapsing into one opaque blob.
   defp toplevel(other, sigmap, types, struct_anns) do
-    @header ++ flat_items(other, sigmap, types, struct_anns)
+    flat_items(other, sigmap, types, struct_anns)
   end
 
   # Render a statement-carrying node's declarations flat (no `mod` wrapper).
@@ -493,29 +534,11 @@ defmodule Rian.Transpile do
   """
   @spec transpile_with_stats(String.t(), keyword()) :: term()
   def transpile_with_stats(source, opts \\ []) when is_binary(source) do
-    text = transpile(source, opts)
-    # Count over the BODY, never the fixed DRAFT header: that header documents
-    # `TODO_PORT`/`# TODO[port]`/`_Unk` by name, so counting the whole text would
-    # inflate every module's marker and hole tally by the header's self-reference.
-    body = text |> String.split("\n") |> Enum.drop(length(@header))
-
-    ports =
-      Enum.count(
-        body,
-        &(String.contains?(&1, "TODO_PORT") or String.contains?(&1, "TODO[port]"))
-      )
-
-    # def heads — indented (inside a `mod`) or at column 0 (module-less source).
-    defs = Enum.count(body, &Regex.match?(~r/^\s*(pub )?def \w+\(/, &1))
-    # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics
-    # check; counted (occurrences, not lines) so the report can surface them.
-    mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, Enum.join(body, "\n")) |> length()
-    # holes are counted over the code only — comment provenance lines are dropped.
-    code =
-      body |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#")) |> Enum.join("\n")
-
-    holes = Regex.scan(~r/\b_Unk\b/, code) |> length()
-    {text, %{ports: ports, defs: defs, mapped: mapped, holes: holes}}
+    # Render the body once and count it directly — the report header is derived FROM
+    # these counts, so it is never part of the tally (no header self-reference).
+    body = body_lines(source, opts)
+    text = ((report_header(body, opts) ++ body) |> Enum.join("\n")) <> "\n"
+    {text, body_stats(body)}
   end
 
   # The markers for constructs that violate Rian's *concepts* (as opposed to merely
@@ -543,9 +566,7 @@ defmodule Rian.Transpile do
     host = MapSet.new(Rian.Ann.host_funcs(source))
 
     source
-    |> transpile()
-    |> String.split("\n")
-    |> Enum.drop(length(@header))
+    |> body_lines([])
     |> Enum.filter(&Regex.match?(@incompatible_marker, &1))
     |> Enum.reject(&host_boundary_line?(&1, host))
     |> Enum.map(&String.trim/1)
