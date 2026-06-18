@@ -50,7 +50,10 @@ defmodule Rian.Prelude do
 
   @prelude_names ~w(List Dict Str Int)
 
-  for n <- ~w(list dict str int), do: @external_resource("examples/rian/prelude_#{n}.rian")
+  @external_resource "examples/rian/prelude_list.rian"
+  @external_resource "examples/rian/prelude_dict.rian"
+  @external_resource "examples/rian/prelude_str.rian"
+  @external_resource "examples/rian/prelude_int.rian"
 
   @prelude_sources for n <- ~w(list dict str int),
                        do: File.read!("examples/rian/prelude_#{n}.rian")

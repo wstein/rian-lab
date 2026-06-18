@@ -311,6 +311,15 @@ defmodule Rian.Transpile do
   # (`def f(a) := f(a, [])`) — the same desugaring Elixir performs. Only expanded
   # when every parameter is a plain variable (so forwarding by name is sound);
   # otherwise the defaults are stripped to a single clause.
+  # A guarded head `def f(a, b \\ d) when guard` wraps the call in `{:when, …}`.
+  # Desugar the inner head, then re-attach the guard to every resulting clause (each
+  # delegator's params are a prefix of the originals, so a guard over them stays valid).
+  defp expand_defaults({df, m, [{:when, wm, [call, guard]}, kw]}) when df in [:def, :defp] do
+    {df, m, [call, kw]}
+    |> expand_defaults()
+    |> Enum.map(fn {d, mm, [head, body]} -> {d, mm, [{:when, wm, [head, guard]}, body]} end)
+  end
+
   defp expand_defaults({df, m, [{name, hm, params}, kw]})
        when df in [:def, :defp] and is_atom(name) and is_list(params) and
               kw != [] do
@@ -719,6 +728,11 @@ defmodule Rian.Transpile do
                ["# (dropped Elixir exception `#{name}`: errors are values in Rian, ADR-0035)"],
              doc, nil}
 
+          {:drop_note, text} ->
+            # a host-only construct (a `defmacro`, `use Application`, a `Code.ensure_loaded?`
+            # integration guard) with no Rian image — dropped with an honest note.
+            {acc ++ flush(open, sigmap) ++ ["# #{text}"], doc, nil}
+
           {:test, name, body} ->
             {acc ++ flush(open, sigmap) ++ test_def(name, body, ""), doc, nil}
 
@@ -828,6 +842,29 @@ defmodule Rian.Transpile do
 
   defp classify({:def, _, [head, kw]}), do: {:clause, :pub, head, kw}
   defp classify({:defp, _, [head, kw]}), do: {:clause, :priv, head, kw}
+
+  # `defmacro`/`defmacrop` is host metaprogramming (ExUnit `@test`-generating macros,
+  # `Rian.Ann.__using__`, Kino glue) — Rian has no syntax macros, so it has no Rian
+  # image. Drop it with a one-line note (name/arity), not a body-dumping marker.
+  defp classify({d, _, [head | _]}) when d in [:defmacro, :defmacrop],
+    do:
+      {:drop_note,
+       "(dropped Elixir `defmacro #{macro_sig(head)}`: host metaprogramming, no Rian image)"}
+
+  # `use Application` is OTP wiring — concurrency/OTP is native-per-target (ADR-0057),
+  # never a Rian surface — so the behaviour has no Rian image. Drop with a note.
+  defp classify({:use, _, [{:__aliases__, _, [:Application]} | _]}),
+    do: {:drop_note, "(dropped Elixir `use Application`: OTP is native-per-target, ADR-0057)"}
+
+  # A `if Code.ensure_loaded?(Mod) do … end` conditional-compilation guard wraps an
+  # optional host integration (the Livebook/Kino smart cell) — host-only, present only
+  # when the optional dep is loaded. Drop the whole guard with a note.
+  defp classify(
+         {:if, _, [{{:., _, [{:__aliases__, _, [:Code]}, :ensure_loaded?]}, _, _}, [do: _]]}
+       ),
+       do:
+         {:drop_note,
+          "(dropped: optional host integration behind a `Code.ensure_loaded?` guard — present only when the dep is loaded)"}
 
   # ExUnit `test "name" do … end` (or `test "name", ctx do … end`) → a Rian
   # `@test def` (ADR-0060). Only a literal-string name ports to a function name; a
@@ -971,6 +1008,14 @@ defmodule Rian.Transpile do
 
   defp host_name({:when, _, [call, _]}), do: host_name(call)
   defp host_name({name, _, _}) when is_atom(name), do: name
+
+  # `name/arity` for a `defmacro` head (used only in its drop note).
+  defp macro_sig({:when, _, [call, _]}), do: macro_sig(call)
+
+  defp macro_sig({name, _, args}) when is_atom(name) and is_list(args),
+    do: "#{name}/#{length(args)}"
+
+  defp macro_sig({name, _, _}) when is_atom(name), do: "#{name}/0"
 
   defp new_group(vis, clause, doc), do: %{vis: vis, doc: doc, clauses: [clause]}
   defp add_clause(open, clause), do: %{open | clauses: open.clauses ++ [clause]}
@@ -1573,6 +1618,13 @@ defmodule Rian.Transpile do
         # so emit it natively rather than flag it. `m` already carries the `:` prefix.
         "#{m}.#{fun}(#{arg_strs})"
 
+      var?(mod) and pipe_arity == 0 ->
+        # Dynamic dispatch on a runtime module value (`mod.fun(args)`, e.g. reflection
+        # or a selected-at-runtime module). Elixir's `mod.f(a)` IS `apply(mod, :f, [a])`
+        # — emit that faithful BEAM-FFI lowering (non-portable; Reach pins it off
+        # :rs/:js) rather than a porting marker. A piped form keeps the honest marker.
+        "apply(#{m}, :#{fun}, [#{arg_strs}])"
+
       true ->
         ~s|TODO_PORT("remote/stdlib call: #{escape("#{m}.#{fun}(#{arg_strs})")}")|
     end
@@ -1720,6 +1772,11 @@ defmodule Rian.Transpile do
   # a pin `^x` (Elixir `{:^, _, [expr]}`) → Rian `^expr` (ADR-0050): match the value
   # of an already-bound expression rather than binding a fresh var.
   defp pat({:^, _, [e]}), do: "^#{expr(e)}"
+
+  # A module attribute in pattern position (`{:ok, @probe, x} = …`) matches against
+  # the attribute's compile-time value — i.e. a `const`. Rian spells "match this
+  # binding's value, don't rebind" as a pin (`^name`, ADR A2 §2).
+  defp pat({:@, _, [{name, _, ctx}]}) when is_atom(name) and not is_list(ctx), do: "^#{name}"
 
   defp pat(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
 

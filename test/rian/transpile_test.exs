@@ -1065,11 +1065,79 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ ~s|TODO_PORT("remote/stdlib call|
     end
 
+    test "dynamic dispatch on a runtime module value lowers to `apply/3` (BEAM FFI), not a marker" do
+      # `mod.fun(args)` with a variable receiver IS `apply(mod, :fun, [args])` in
+      # Elixir — a faithful BEAM-FFI lowering (reflection / runtime-selected module),
+      # non-portable but honest, so it lowers rather than flagging a marker.
+      out = rian("defmodule M do\n  def call(mod, x), do: mod.tokenize(x)\nend")
+      assert out =~ "apply(mod, :tokenize, [x])"
+      refute out =~ ~s|TODO_PORT("remote/stdlib call|
+    end
+
     test "stats counts auto-mapped calls" do
       {_t, stats} =
         Transpile.transpile_with_stats("defmodule M do\n  def f(m, k), do: Map.put(m, k, 1)\nend")
 
       assert stats.mapped == 1
+    end
+  end
+
+  describe "host-only constructs drop with an honest note (no Rian image)" do
+    test "`defmacro`/`defmacrop` is host metaprogramming → a one-line drop note, not a body dump" do
+      out =
+        rian("""
+        defmodule M do
+          defmacro mac(x) do
+            quote do: unquote(x)
+          end
+
+          def f(x), do: x
+        end
+        """)
+
+      assert out =~ "# (dropped Elixir `defmacro mac/1`: host metaprogramming, no Rian image)"
+      assert out =~ "pub def f(x _Unk) _Unk := x"
+      refute out =~ "quote"
+      refute out =~ "TODO[port]: defmacro"
+    end
+
+    test "`use Application` (OTP) drops with a note (ADR-0057), not a marker" do
+      out = rian("defmodule M do\n  use Application\n  def f, do: :ok\nend")
+      assert out =~ "# (dropped Elixir `use Application`: OTP is native-per-target, ADR-0057)"
+      refute out =~ "TODO[port]: use Application"
+    end
+
+    test "a `Code.ensure_loaded?` integration guard drops the whole optional module with a note" do
+      out =
+        rian("""
+        if Code.ensure_loaded?(Kino.SmartCell) do
+          defmodule Cell do
+            def init(a), do: a
+          end
+        end
+        """)
+
+      assert out =~ "optional host integration behind a `Code.ensure_loaded?` guard"
+      refute out =~ "TODO[port]:"
+    end
+
+    test "a module attribute in pattern position becomes a pin (`^name`), not a marker" do
+      # `{:ok, @probe, x} = …` matches against the attribute's compile-time value; the
+      # Rian spelling is a pin of the const (ADR A2). The attr is also referenced as a
+      # value, so it becomes a `const`.
+      out =
+        rian("""
+        defmodule M do
+          @probe :p
+          def one(src) do
+            {:ok, @probe, bin} = compile(src, @probe)
+            bin
+          end
+        end
+        """)
+
+      assert out =~ "{:ok, ^probe, bin} := compile(src, probe)"
+      refute out =~ ~s|TODO_PORT("@probe")|
     end
   end
 
@@ -1126,6 +1194,26 @@ end|) =~ ~S|"v=${x}!"|
 
       assert out =~ ~S|pub def greet(name _Unk) _Unk := greet(name, "hi")|
       assert out =~ "pub def greet(name _Unk, greeting _Unk) _Unk := greeting"
+    end
+
+    test "a guarded default head desugars too, re-attaching the guard to each clause" do
+      # `def f(a, b \\ d) when guard` wraps the head in `{:when, …}`; the desugaring
+      # must see through it and keep the guard on both the delegator and the real
+      # clause (the guard's params are present in each). Without this the default
+      # parameter leaked through as a `TODO_PORT` marker.
+      out =
+        rian("""
+        defmodule M do
+          def eval(src, main \\\\ "main") when is_binary(src) do
+            run(src, main)
+          end
+        end
+        """)
+
+      assert out =~ ~S|pub def eval(src) when is_binary(src) := eval(src, "main")|
+      assert out =~ "pub def eval(src, main) when is_binary(src) := run(src, main)"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO_PORT"
     end
 
     test "a bodyless default-declaring head + real clauses expands to delegators (multi-clause form)" do
