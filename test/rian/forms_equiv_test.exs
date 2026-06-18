@@ -132,5 +132,31 @@ defmodule Rian.FormsEquivTest do
       names = FormsEquiv.normalize(ex) |> Enum.map(fn {:function, _, n, _, _} -> n end)
       assert names == [:only]
     end
+
+    test "folds a negated float literal so unary-minus matches Elixir's constant" do
+      # the Rian side emits `-1.5` as unary minus on the float literal; the safe
+      # rewrite folds it to the literal `-1.5` so it matches the Elixir oracle.
+      {ex, ri} = both("  def f, do: -1.5", "  pub def f() Float64 := -1.5")
+      assert FormsEquiv.equivalent?(ex, ri)
+    end
+  end
+
+  describe "abstract_code/1 — failure modes raise (debug_info contract)" do
+    test "a .beam compiled without debug_info raises" do
+      prev = Code.get_compiler_option(:debug_info)
+      Code.put_compiler_option(:debug_info, false)
+      [{mod, bin}] = Code.compile_string("defmodule FENoDbg do\n  def g, do: 1\nend")
+      Code.put_compiler_option(:debug_info, prev)
+      :code.purge(mod)
+      :code.delete(mod)
+
+      assert_raise RuntimeError, ~r/no abstract_code/, fn -> FormsEquiv.abstract_code(bin) end
+    end
+
+    test "a non-beam binary raises with the read error" do
+      assert_raise RuntimeError, ~r/could not read abstract_code/, fn ->
+        FormsEquiv.abstract_code(<<"not a beam">>)
+      end
+    end
   end
 end
