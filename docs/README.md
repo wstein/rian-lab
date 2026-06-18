@@ -153,6 +153,10 @@ For the surface syntax *by example*, read the annotated tour in
 demonstrates one facet (expressions, types/`match`, capabilities, modules,
 macros/`comptime`, FFI) and cites the spec it follows.
 
+For **how to write idiomatic Rian** — naming, control flow, errors, capabilities,
+and the design judgment of *which construct to reach for* — see
+[Effective Rian](style-guide.md), the style guide (modelled on *Effective Go*).
+
 ## Known gaps & open threads
 
 These are the highest-priority items distilled from the specs' own "open items"
