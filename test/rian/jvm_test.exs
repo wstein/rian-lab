@@ -133,6 +133,17 @@ defmodule Rian.JVMTest do
       """,
       probe: ~s|println(one(listOf(1L))); println(one(listOf(2L)))|
     },
+    %{
+      id: :generic_fn,
+      src: """
+      def first(Vec(T)) T forall T
+      def first([h | _]) := h
+      def len_l(Vec(T)) Int53 forall T
+      def len_l([]) := 0
+      def len_l([_ | t]) := 1 + len_l(t)
+      """,
+      probe: ~s|println(first(listOf("a", "b"))); println(len_l(listOf(1L, 2L, 3L)))|
+    },
     %{id: :interp_int, src: ~S|def f(n Int64) String := "v${n}"|, probe: ~S|println(f(42L))|},
     %{
       id: :symbol_tag,
@@ -700,6 +711,18 @@ defmodule Rian.JVMTest do
       kt = jvm_kt(jvm, :interp_bool)
       assert kt =~ ~S|if (b) "true" else "false"|
       expect_jvm(jvm, :interp_bool, "true\nfalse")
+    end
+
+    @tag :jvm
+    test "a generic function (`forall T`) declares Kotlin generics and runs (ADR-0042)", %{
+      jvm_batch: jvm
+    } do
+      # `forall T` lowers to a `<T>` declaration on the function; without it `T` in the
+      # signature is an unresolved Kotlin reference (a `:jvm` reach lie before this).
+      kt = jvm_kt(jvm, :generic_fn)
+      assert kt =~ "fun <T> first(a0: List<T>): T"
+      assert kt =~ "fun <T> len_l(a0: List<T>): Long"
+      expect_jvm(jvm, :generic_fn, "a\n3")
     end
 
     @tag :jvm

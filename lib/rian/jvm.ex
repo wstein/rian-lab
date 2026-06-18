@@ -32,8 +32,9 @@ defmodule Rian.JVM do
   ## Scope (this increment)
 
   Functions (single/multi-clause) over `Int64`/`Float64`/`Bool`/`String`;
-  variables; unary/binary operators; `if`-expressions; local calls; `when`
-  guards; and **sum variants** — a `type` lowers to a sealed hierarchy, a
+  **generic functions** (`forall T` → a `<T>` declaration on the `fun`, so a `T` in
+  the signature resolves); variables; unary/binary operators; `if`-expressions;
+  local calls; `when` guards; and **sum variants** — a `type` lowers to a sealed hierarchy, a
   construction `Ctor(a, …)` to a data-class constructor (nullary → an `object`),
   with clause patterns that smart-cast (`a0 is Ctor`) and recurse into positional
   fields (`a0.f0`, nested + literal patterns supported). A `case` expression lowers
@@ -305,7 +306,7 @@ defmodule Rian.JVM do
     "#{vis}fun #{f.name}(#{sig}): #{kt_type(f.ret)} { #{binds} return #{host} }"
   end
 
-  defp function_kt(%{name: name, clauses: clauses, ret: ret, params: params, pub?: pub?}, ic) do
+  defp function_kt(%{name: name, clauses: clauses, ret: ret, params: params, pub?: pub?} = f, ic) do
     sig_params =
       params
       |> Enum.with_index()
@@ -320,7 +321,20 @@ defmodule Rian.JVM do
 
     vis = if pub?, do: "", else: "private "
 
-    "#{vis}fun #{name}(#{sig_params}): #{kt_type(ret)} {\n#{lines}#{tail}}"
+    "#{vis}fun #{generics_kt(f)}#{name}(#{sig_params}): #{kt_type(ret)} {\n#{lines}#{tail}}"
+  end
+
+  # a generic function (`forall T`, ADR-0042) declares its type variables as Kotlin
+  # generics: `def len_l(Vec(T)) … forall T` -> `fun <T> len_l(a0: List<T>): Long`.
+  # Without the `<T>` declaration a `T` in the signature is an unresolved reference
+  # (kotlinc error) — so an un-declared generic was a `:jvm` reach lie. Bounds are not
+  # rendered: a Rian `T: Eq` bound is satisfied by the runtime protocol dispatcher (a
+  # `when (v0)` over the value's type), not a Kotlin `where` clause.
+  defp generics_kt(f) do
+    case Map.get(f, :tvars, []) do
+      [] -> ""
+      tvars -> "<#{Enum.join(tvars, ", ")}> "
+    end
   end
 
   # Emit clauses top-to-bottom; an unconditional clause (no tests, no guard)
