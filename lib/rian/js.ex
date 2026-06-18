@@ -309,7 +309,7 @@ defmodule Rian.JS do
         raise Unsupported, "`#{f.name}`: no `@external(:js, …)` body — not reachable on :js"
 
       spec ->
-        host = Rian.Decl.external_call(spec, f.params)
+        host = Rian.External.render(spec, f.params)
         args = Enum.map_join(0..(length(f.params) - 1)//1, ", ", &"a#{&1}")
 
         binds =

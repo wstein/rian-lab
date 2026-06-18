@@ -1283,7 +1283,7 @@ defmodule Rian.Lower do
         raise "`#{func.name}`: no `@external(:rs, …)` body — not reachable on :rs"
 
       spec ->
-        host = Rian.Decl.external_call(spec, func.params)
+        host = Rian.External.render(spec, func.params)
 
         param_decls =
           Enum.map_join(func.params, ", ", fn p ->

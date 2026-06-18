@@ -965,25 +965,8 @@ defmodule Rian.Decl do
   defp dotted_tail(_other),
     do: raise(Error, "malformed `@external` reference (expected `Mod.fun`)")
 
-  @doc """
-  Render an `@external` spec to a host-call string for an emitter (ADR-0068): a raw
-  string passes through; a reference `{:ref, parts, erlang?}` becomes a positional call
-  `path(p1, p2, …)` over the function's params. So a reference lowers via the existing
-  string-splicing path in every emitter — one helper, no per-backend reference logic.
-
-  **Calling convention (the author's contract):** the referenced function must take the
-  **same parameters in the same order** as the Rian `def` — the args are passed
-  **positionally**. `Rian.Check`'s resolution verifies the *arity* matches, but **not**
-  the order/types; a target that reorders or retypes its params will match arity yet be
-  miswired silently. (Same trust boundary as any FFI — ADR-0068: this is FFI, not magic.)
-  """
-  @spec external_call(String.t() | tuple(), [map()]) :: String.t()
-  def external_call(spec, _params) when is_binary(spec), do: spec
-
-  def external_call({:ref, parts, erlang?}, params) do
-    path = if erlang?, do: ":" <> Enum.join(parts, "."), else: Enum.join(parts, ".")
-    "#{path}(#{Enum.map_join(params, ", ", & &1.name)})"
-  end
+  # (the `@external` spec → host-call rendering lives in `Rian.External.render/2`, the
+  # neutral home shared by the emitters — `Rian.Decl` only *parses* the spec.)
 
   defp attach_effects({:def, raw}, effects), do: {:def, Map.put(raw, :effects, effects)}
   defp attach_effects(_other, _e), do: raise(Error, "`@effects(…)` may only precede a `def`")

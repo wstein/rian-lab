@@ -279,7 +279,7 @@ defmodule Rian.JVM do
         raise Unsupported, "`#{f.name}`: no `@external(:jvm, …)` body — not reachable on :jvm"
 
       spec ->
-        host = Rian.Decl.external_call(spec, f.params)
+        host = Rian.External.render(spec, f.params)
 
         sig =
           f.params

@@ -164,7 +164,7 @@ defmodule Rian.ExternalTest do
 
       assert f.externals == %{ex: {:ref, ["erlang", "binary_to_list"], true}}
       # the reference renders to the same host call a string spec would (params positional)
-      assert Decl.external_call(f.externals.ex, f.params) == ":erlang.binary_to_list(s)"
+      assert Rian.External.render(f.externals.ex, f.params) == ":erlang.binary_to_list(s)"
     end
 
     test "a dotted Elixir/Rian reference lowers to `Mod.fun(args)`" do
@@ -176,7 +176,7 @@ defmodule Rian.ExternalTest do
         )
 
       assert f.externals == %{ex: {:ref, ["Rian", "Beam", "load_result"], false}}
-      assert Decl.external_call(f.externals.ex, f.params) == "Rian.Beam.load_result(s, m)"
+      assert Rian.External.render(f.externals.ex, f.params) == "Rian.Beam.load_result(s, m)"
     end
 
     test "a reference to a non-existent host function/arity is a compile error (no silent stub)" do
