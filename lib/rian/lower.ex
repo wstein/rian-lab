@@ -187,12 +187,13 @@ defmodule Rian.Lower do
   # type/struct names mentioned in any `pub` function's param or return types
   # (the PascalCase identifiers in those type strings)
   defp pub_sig_type_names(funcs) do
-    for f <- funcs,
-        f.pub?,
-        ts <- [f.ret | Enum.map(f.params, & &1.type)],
-        name <- type_idents(ts),
-        into: MapSet.new(),
-        do: name
+    MapSet.new(
+      for f <- funcs,
+          f.pub?,
+          ts <- [f.ret | Enum.map(f.params, & &1.type)],
+          name <- type_idents(ts),
+          do: name
+    )
   end
 
   defp type_idents(nil), do: []

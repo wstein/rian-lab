@@ -963,7 +963,7 @@ defmodule Rian.Transpile.Infer do
 
       true ->
         {payload_term, store, bad} = ok_payload(tail_pairs, ctx, store)
-        tags = for {:error, tag} <- shapes, uniq: true, do: tag
+        tags = Enum.uniq(for {:error, tag} <- shapes, do: tag)
 
         if payload_term != nil and not bad,
           do: {{:result, payload_term, tags}, store},

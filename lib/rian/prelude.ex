@@ -62,11 +62,12 @@ defmodule Rian.Prelude do
 
   # The `{module, fun}` pairs the prelude actually defines — so only these redirect
   # to the linked module; an unimplemented `List.to_string` still hits Elixir's List.
-  @prelude_exports for prog <- @prelude_progs,
-                       m <- prog.mods,
-                       f <- m.funcs,
-                       into: MapSet.new(),
-                       do: {m.name, to_string(f.name)}
+  @prelude_exports MapSet.new(
+                     for prog <- @prelude_progs,
+                         m <- prog.mods,
+                         f <- m.funcs,
+                         do: {m.name, to_string(f.name)}
+                   )
 
   @doc "The portable-prelude module names redirected to their linked `Rian.Prelude.*` atoms."
   @spec module_names() :: [String.t()]

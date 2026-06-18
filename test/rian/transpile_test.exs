@@ -1247,6 +1247,25 @@ end|)
       refute out =~ ~s|TODO_PORT("for comprehension|
     end
 
+    test "the set/uniq porting idiom (lift the collectable out of the comprehension) is marker-free" do
+      # `into: MapSet.new()` / `uniq: true` have no Rian image (ADR-0079 non-goal), so
+      # the portable spelling wraps a plain list comprehension in the collectable call:
+      # `MapSet.new(for … do … end)` / `Enum.uniq(for … do … end)`. The inner `for`
+      # renders directly and the wrapping `MapSet`/`Enum` call lowers as BEAM FFI — no
+      # marker (cf. the `into: MapSet.new()` option form below, which stays a marker).
+      out =
+        rian("""
+        defmodule M do
+          def names(fs), do: MapSet.new(for f <- fs, do: f.name)
+          def tags(xs), do: Enum.uniq(for {:error, t} <- xs, do: t)
+        end
+        """)
+
+      assert out =~ "MapSet.new(for f <- fs do f.name end)"
+      assert out =~ "Enum.uniq(for {:error, t} <- xs do t end)"
+      refute out =~ ~s|TODO_PORT("for comprehension|
+    end
+
     test "a binary generator / unknown `into:` target stays an honest marker (ADR-0079)" do
       # `<<b <- bin>>` (binary comprehension) has no list image; `into: MapSet.new()` is
       # an unrecognized collectable — both stay markers rather than mis-render.
