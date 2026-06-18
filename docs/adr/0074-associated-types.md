@@ -83,17 +83,17 @@ clause-bounded associated types are a later ADR if a real consumer needs them.
 
 Associated types are **erased** on the runtime targets (BEAM/JS), so the win there is
 purely *expressiveness* (one generic reducer over many element types), not portability.
-On Rust they **materialise** and genuinely lower: the `Foldable` impls
-(`impl_foldable_*_to_list`) compile and run on `:rs` (rustc-verified,
-`reach_rust_honesty_test`) once the trait carries `type Elem: Clone` and a borrowed `Vec`
-field return is `.to_vec()`d. The runtime **dispatcher** `to_list` (and its consumer
-`fcount`) is pinned off `:jvm` directly — the JVM emitter has no protocol lowering yet
-(ADR-0042, the `:dispatch` Reach blocker) — and is currently pinned off `:rs` only by the
-bare-atom proxy on the dispatcher's constructor tags (a conservative *under*-claim; the
-impls themselves compile on Rust). Removing that proxy is the atoms→`Symbol` step. One
-orthogonal, pre-existing gap remains independent of this ADR: a `&str` literal stored into
-a `Vec(String)` field at construction is not yet `.to_string()`d, so constructing a
-`Words` of `String` from literals does not yet lower (the `Int53` `Bag` path does).
+On Rust they **materialise** and genuinely lower: the whole `Foldable` example —
+both impls, `fcount`, and a `Bag` of `Int53` *and* a `Words` of `String` — compiles and
+runs on `:rs` (rustc-verified, `reach_rust_honesty_test`). The coercions that had to land:
+the trait carries `type Elem: Clone`; a borrowed `Vec` field return is `.to_vec()`d
+(Gap E+); a constructed argument is borrowed for a generic `&C` param
+(`fcount(Bag([1,2,3]))`); and a string literal stored into a `Vec(String)` field at
+construction is `.to_string()`d (`rust_owned_elem`). The runtime **dispatcher** `to_list`
+(and its consumer `fcount`) is pinned off `:jvm` only — the JVM emitter has no protocol
+lowering yet (ADR-0042, the `:dispatch` Reach blocker); on `:rs` it is reachable (the
+constructor-tag atoms are portable `Symbol`s, ADR-0041, not a blocker). So `fcount`
+reaches `[:ex, :js, :rs]`.
 
 ## Alternatives considered
 

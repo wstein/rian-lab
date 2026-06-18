@@ -1328,7 +1328,11 @@ defmodule Rian.Lower do
   # (`rust_owned_elem`), and a `&str` for a `String` ok/err-type additionally `.to_string()`s.
   defp result_payload(val, string?, ec) do
     s = rust_owned_elem(val, ec)
-    if string?, do: "(#{s}).to_string()", else: s
+    # a `&str`/`Symbol` payload variable needs `.to_string()` for a `String` ok/err-type;
+    # a string/`Symbol` *literal* is already `.to_string()`d by `rust_owned_elem`, so it
+    # must not be coerced twice.
+    literal? = match?(%EStr{}, val) or match?(%EAtom{}, val)
+    if string? and not literal?, do: "(#{s}).to_string()", else: s
   end
 
   defp impl_param({name, sig_p}, rust_type) do
@@ -2526,6 +2530,13 @@ defmodule Rian.Lower do
       true -> s
     end
   end
+
+  # a string literal / `Symbol` value (`:foo`) lowers to a `&str`, but in an owned
+  # position — a `Vec(String)`/`Vec(Symbol)` element, a `String`/`Symbol` struct or
+  # variant field — the owned `String` is wanted, so `.to_string()` it (ADR-0041). E.g.
+  # `Words(["a", "b"])` builds `vec!["a".to_string(), "b".to_string()]` for `Vec<String>`.
+  defp rust_owned_elem(%EStr{} = e, ec), do: "#{p(e, 0, :rust, ec)}.to_string()"
+  defp rust_owned_elem(%EAtom{} = e, ec), do: "#{p(e, 0, :rust, ec)}.to_string()"
 
   defp rust_owned_elem(e, ec), do: p(e, 0, :rust, ec)
 

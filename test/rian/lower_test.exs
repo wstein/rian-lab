@@ -691,7 +691,9 @@ end|
     test "the `Ok(...)` payload gains `.to_string()`; `Err` (non-String) is untouched" do
       [{_, %{rust: rust}}] = Rian.Decl.compile(@res_src)
       assert rust =~ "-> Result<String, Oops>"
-      assert rust =~ ~S|Ok(("hi").to_string())|
+      # the string-literal payload is owned by `rust_owned_elem` (`"hi".to_string()`),
+      # not double-wrapped by `result_payload` (ADR-0041 owned-element coercion)
+      assert rust =~ ~S|Ok("hi".to_string())|
       # the error arm carries a non-String error type, so it is NOT coerced
       assert rust =~ "Err(Oops::Bad)"
       refute rust =~ ~S|Err(("|

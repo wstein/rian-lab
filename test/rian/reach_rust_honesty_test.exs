@@ -377,13 +377,11 @@ defmodule Rian.ReachRustHonestyTest do
 
       rustc ->
         # The element-agnostic reducer over a one-method protocol with an associated
-        # `type Elem` (ADR-0074): one `fcount` reduces both a `Bag` of `Int53` and a
-        # `Words` of `String` — BOTH impls are emitted and must compile (the `&Vec`
-        # field return is `.to_vec()`d, the trait carries `type Elem: Clone`, and the
-        # `fcount(Bag(...))` call borrows the constructed argument). The `@test` exercises
-        # the `Int53` case; constructing the `Words` value from string literals in a test
-        # hits an orthogonal, pre-existing gap (a `&str` literal stored into a `Vec<String>`
-        # field is not yet `.to_string()`d — independent of dispatch/associated types).
+        # `type Elem` (ADR-0074): one `fcount` reduces both a `Bag` of `Int53` AND a
+        # `Words` of `String`, exercising every coercion that had to land — the `&Vec`
+        # field return is `.to_vec()`d, the trait carries `type Elem: Clone`, the
+        # `fcount(Bag(...))` call borrows the constructed argument, and the `Words` value
+        # builds its `Vec(String)` field from string literals via `.to_string()`.
         prog = """
         protocol Foldable do
           type Elem
@@ -410,6 +408,7 @@ defmodule Rian.ReachRustHonestyTest do
         def len_l([_ | t]) := 1 + len_l(t)
 
         @test def counts_a_bag() Bool := fcount(Bag([1, 2, 3])) == 3
+        @test def counts_words() Bool := fcount(Words(["a", "b"])) == 2
         """
 
         src = Path.join(System.tmp_dir!(), "rian_fold_#{System.unique_integer([:positive])}.rs")
