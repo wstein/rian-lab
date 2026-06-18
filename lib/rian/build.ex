@@ -61,15 +61,12 @@ defmodule Rian.Build do
   defp emit(opts, file, src, prog, src_dir) do
     cond do
       opts[:rust] ->
-        emit_source(
-          :rs,
-          ".rs",
-          opts,
-          file,
-          prog,
-          src_dir,
-          Rian.Lower.rust_program(Rian.Decl.parse(src))
-        )
+        # ADR-0082 step 1: `-o ROOT` generates a Cargo crate under ROOT/_build/rs/;
+        # no `-o` keeps the flat stdout source-inspection path.
+        case Keyword.get(opts, :out) do
+          nil -> print(Rian.Lower.rust_program(Rian.Decl.parse(src)))
+          root -> build_cargo(root, file, prog, src, src_dir)
+        end
 
       opts[:js] ->
         emit_source(:js, ".mjs", opts, file, prog, src_dir, Rian.JS.compile(src))
@@ -119,6 +116,39 @@ defmodule Rian.Build do
       File.cp!(Path.expand(path, src_dir), dest)
       IO.puts(dest)
     end)
+  end
+
+  # `rian build --rust -o ROOT` (ADR-0082 step 1): generate a self-contained Cargo crate
+  # under ROOT/_build/rs/ — `Cargo.toml` from the project manifest, the emitted Rust as
+  # `src/lib.rs`, and each `@external(:rs)` `.ffi.rs` copied into `src/` (where the
+  # emitter's `#[path] mod` resolves it, ADR-0082 invariant 5). `cargo_toml/1` fails
+  # closed on a non-empty `[deps]` / a bin crate (invariant 4) — caught by `emit/5`.
+  defp build_cargo(root, file, prog, src, src_dir) do
+    manifest = project_manifest(file, src_dir)
+    crate = Path.join([root, "_build", "rs"])
+    src_out = Path.join(crate, "src")
+    File.mkdir_p!(src_out)
+
+    cargo = Path.join(crate, "Cargo.toml")
+    File.write!(cargo, Rian.Pkg.Cargo.cargo_toml(manifest))
+    IO.puts(cargo)
+
+    lib = Path.join(crate, Rian.Pkg.Cargo.root_rel(manifest))
+    File.write!(lib, Rian.Lower.rust_program(Rian.Decl.parse(src)))
+    IO.puts(lib)
+
+    copy_foreign(prog, :rs, src_dir, src_out)
+    0
+  end
+
+  # the project manifest the packaging backend reads (ADR-0082 invariant 1: rian.toml is
+  # the single source) — the project's `rian.toml` if present, else a synthesized `lib`
+  # default named after the source file so a loose `.rian` still packages.
+  defp project_manifest(file, src_dir) do
+    case Rian.Manifest.read(Path.join(src_dir, "rian.toml")) do
+      {:ok, m} -> m
+      {:error, _} -> %Rian.Manifest{name: Path.basename(file, ".rian"), version: "0.0.0"}
+    end
   end
 
   # compile to BEAM and write one `<module>.beam` per module into `dir`. A program with

@@ -1,7 +1,7 @@
 # ADR-0082 — Native packaging layer: generate native build files from `rian.toml`
 
 **Status:** Proposed
-**Implemented:** no — design only; closes (in part) the ADR-0026 "Hex/Cargo/npm metadata mapping from a Rian manifest" open item and the ADR-0080 §2 "packaging layer" / `[deps]` defer
+**Implemented:** partial — staging **step 1 landed**: `Rian.Pkg.Cargo` generates a deterministic `Cargo.toml` from `rian.toml`, and `rian build --rust -o ROOT` writes a self-contained crate under `ROOT/_build/rs/` with the `@external(:rs)` FFI wired into `src/`, gated by a `cargo build` toolchain test (`Rian.Pkg.CargoTest`, `Rian.BuildTest`); a non-empty `[deps]` / a `kind="app"` bin crate fail closed (invariant 4). Steps 2–6 (BEAM/Gradle/npm backends, PULL plugins, `rian eject`) pending. Closes (in part) the ADR-0026 "Hex/Cargo/npm metadata mapping from a Rian manifest" open item and the ADR-0080 §2 "packaging layer" / `[deps]` defer
 **Refs:** ADR-0026 (ecosystem integration — rebar3 plugin + Mix compiler, no fork), ADR-0080 (project layout — `_build/<target>/`, the `rian.toml` manifest), ADR-0057/0058 (one source → a target *set*; portability inferred), ADR-0068/ADR-0080 §7 (`@external` foreign files), ADR-0000 (honesty bar), ADR-0050 (per-target emitter structure the generator mirrors)
 **Owners:** Maya Lin (architecture) · Liam Davis (ecosystem) · Kira Neri (honesty/toolchain) · Elena Rostova (FFI) · Samir Patel (rigor) · Rachel Okafor (PM) · Arthur Pendelton (disambiguation)
 
@@ -88,11 +88,13 @@ reach), never a silently dropped dependency.
 ### Invariant 5 — The generated manifest wires in `@external` foreign files
 
 `@external(:rs|:jvm|:js, "./x.ffi.*", …)` (ADR-0080 §7) ships foreign source that must
-be wired into the native build, not merely copied beside the output (today's
-`copy_foreign` is too weak — a sibling-dir `.ffi.rs` does not resolve as a bare `mod`).
-The generated manifest declares it: a Rust `mod`/path entry, a Gradle `sourceSet`, an
-npm export, a `:ex` module on the load path (the BEAM case already works via
-`Rian.External.lower_beam`). This wiring is generated in PUSH, documented for the user
+be wired into the native build. The §7(b) emitters already wire it for a **single-file**
+toolchain build (a Rust `#[path] mod`, an ESM `import`, a same-package JVM call; the BEAM
+case via `Rian.External.lower_beam`) and `copy_foreign` drops the file beside the output —
+enough for `rustc file.rs`, but not a real crate. Packaging **elevates** this into the
+native project: the generated manifest/source-tree places and declares the foreign file
+as a first-class module (a Rust `mod` under `src/`, a Gradle `sourceSet`, an npm export, a
+`:ex` module on the load path). This wiring is generated in PUSH, documented for the user
 in PULL, and is part of the Invariant-4 build test either way.
 
 ### The BEAM/"Elixir" flavor
@@ -138,7 +140,9 @@ made explicit rather than implicit).
 A prerequisite that lands with step 1: **restructure build output to `_build/<target>/`**
 (today `emit_source` writes flat into `-o DIR`, [build.ex](../../lib/rian/build.ex)) —
 aligning with ADR-0080 §1 and giving each target a real project root, which also fixes
-the FFI-resolution fragility of `copy_foreign`.
+the FFI-resolution fragility of `copy_foreign`. The restructure **rolls out per target
+with its backend** (Rust under step 1; JS/JVM/BEAM with their steps), so a target without
+a backend yet keeps the flat `-o`/stdout path until then.
 
 ## Consequences
 
@@ -146,7 +150,9 @@ the FFI-resolution fragility of `copy_foreign`.
   (CLAUDE.md) now extends to packaging, but only for backends that exist — non-emitted
   targets carry no packaging code.
 - `rian build`'s output layout changes from flat `-o DIR` to `_build/<target>/`; the
-  `-o` flag selects the root, the target subdir is implied.
+  `-o` flag selects the root, the target subdir is implied. This rolls out per target with
+  its backend — **Rust is live** (`--rust -o ROOT` → `ROOT/_build/rs/`); JS/JVM keep the
+  flat `-o`/stdout path until their backends land.
 - `mix test.all` gains real native-build steps (`cargo build`, …) — slower but the only
   honest signal (Invariant 4). These are `:rust`/`:jvm`/`:js` tagged, excluded from the
   fast inner loop like the existing toolchain tests.

@@ -150,44 +150,51 @@ defmodule Rian.BuildTest do
     end
 
     @tag :rust
-    test "bundles a :rs file-reference: includes the .ffi.rs as a mod, compiles + runs under rustc" do
-      case System.find_executable("rustc") do
+    test "packages a Rust crate under _build/rs/ — Cargo.toml + wired FFI, builds via cargo (ADR-0082)" do
+      src_dir = Path.join(System.tmp_dir!(), "rian_pkg_rs_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(src_dir)
+      on_exit(fn -> File.rm_rf(src_dir) end)
+
+      # the project manifest is the single source of the generated Cargo.toml (invariant 1)
+      File.write!(
+        Path.join(src_dir, "rian.toml"),
+        ~s([project]\nname = "demo_pkg"\nversion = "0.2.0"\nlicense = "Apache-2.0"\n)
+      )
+
+      File.write!(Path.join(src_dir, "codec.ffi.rs"), "pub fn encode(x: i64) -> i64 { x + 1 }\n")
+      rian = Path.join(src_dir, "prog.rian")
+
+      File.write!(
+        rian,
+        ~S|@external(:rs, "./codec.ffi.rs", "encode") pub def enc(x val Int64) Int64| <> "\n"
+      )
+
+      out = tmp_dir()
+      _ = capture_io(fn -> assert Build.build([rian, "--rust", "-o", out]) == 0 end)
+
+      crate = Path.join([out, "_build", "rs"])
+      cargo_toml = File.read!(Path.join(crate, "Cargo.toml"))
+      assert cargo_toml =~ ~s(name = "demo_pkg")
+      assert cargo_toml =~ ~s(version = "0.2.0")
+      assert cargo_toml =~ "[lib]"
+
+      lib = File.read!(Path.join(crate, "src/lib.rs"))
+      assert lib =~ ~s|#[path = "codec.ffi.rs"] mod codec;|
+      # the FFI file is wired into the crate's src/ where the `#[path] mod` resolves it
+      assert File.exists?(Path.join(crate, "src/codec.ffi.rs"))
+
+      case System.find_executable("cargo") do
         nil ->
           :ok
 
-        rustc ->
-          src_dir =
-            Path.join(System.tmp_dir!(), "rian_ffi_rs_#{System.unique_integer([:positive])}")
+        cargo ->
+          {res, code} =
+            System.cmd(cargo, ["build", "--manifest-path", Path.join(crate, "Cargo.toml")],
+              stderr_to_stdout: true,
+              env: [{"CARGO_TERM_COLOR", "never"}]
+            )
 
-          File.mkdir_p!(src_dir)
-          on_exit(fn -> File.rm_rf(src_dir) end)
-
-          File.write!(
-            Path.join(src_dir, "codec.ffi.rs"),
-            "pub fn encode(x: i64) -> i64 { x + 1 }\n"
-          )
-
-          rian = Path.join(src_dir, "prog.rian")
-
-          File.write!(
-            rian,
-            ~S|@external(:rs, "./codec.ffi.rs", "encode") pub def enc(x val Int64) Int64| <> "\n"
-          )
-
-          out_dir = tmp_dir()
-          out = capture_io(fn -> assert Build.build([rian, "--rust", "-o", out_dir]) == 0 end)
-
-          assert out =~ "prog.rs"
-          rs = Path.join(out_dir, "prog.rs")
-          assert File.read!(rs) =~ ~s|#[path = "codec.ffi.rs"] mod codec;|
-          # the foreign file is copied beside the output so the `#[path]` mod resolves
-          assert File.exists?(Path.join(out_dir, "codec.ffi.rs"))
-
-          File.write!(rs, File.read!(rs) <> "\nfn main() { println!(\"{}\", enc(41)); }\n")
-          bin = Path.join(out_dir, "prog_bin")
-          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", rs, "-o", bin])
-          {res, 0} = System.cmd(bin, [])
-          assert String.trim(res) == "42"
+          assert code == 0, "cargo build failed:\n#{res}"
       end
     end
 
