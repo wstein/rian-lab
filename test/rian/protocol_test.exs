@@ -646,7 +646,9 @@ defmodule Rian.ProtocolTest do
       # (`split_commas("")` -> [], protocol.ex:297) and no return type
       # (`subst_self(nil, _)` -> nil, protocol.ex:287).
       protocols = %{"P" => [%{name: "nullary", params: "", ret: nil}]}
-      impls = [{"P", "Int64", [%{name: "nullary", params: "", guard: nil, body: "0"}]}]
+      # an impl tuple is `{proto, type, methods, assoc}` — the empty `%{}` = no
+      # associated-type bindings (ADR-0074 W1).
+      impls = [{"P", "Int64", [%{name: "nullary", params: "", guard: nil, body: "0"}], %{}}]
 
       defs = Protocol.expand(protocols, impls)
       by_name = Map.new(defs, &{&1.name, &1})
@@ -668,7 +670,7 @@ defmodule Rian.ProtocolTest do
       # protocol declares one param, the impl supplies two -> arity mismatch
       # (protocol.ex:192-195)
       protocols = %{"Q" => [%{name: "m", params: "self Self", ret: "Bool"}]}
-      impls = [{"Q", "Int64", [%{name: "m", params: "a, b", guard: nil, body: "true"}]}]
+      impls = [{"Q", "Int64", [%{name: "m", params: "a, b", guard: nil, body: "true"}], %{}}]
 
       assert_raise CoherenceError,
                    ~r/method `m` has 2 parameter\(s\) but the protocol declares 1/,

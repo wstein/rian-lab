@@ -225,7 +225,7 @@ defmodule Rian.ReachTest do
       assert targets(rep, "both") == [:ex, :js, :jvm, :rs]
     end
 
-    test "an associated-type-returning dispatcher (Foldable) is off `:jvm`" do
+    test "an associated type in a COVARIANT return (`Vec(Elem)`) still reaches `:jvm`" do
       rep =
         reach("""
         protocol Foldable do
@@ -241,9 +241,32 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      # `Vec(Elem)` has no single concrete Kotlin return type, so `Rian.JVM` drops it.
-      assert targets(rep, "to_list") == [:ex, :js, :rs]
-      assert [%{kind: :dispatch, kills: [:jvm]}] = entry(rep, "to_list").blockers
+      # `Vec(Elem)` erases to `List<Any>` (Kotlin `List` is covariant), and the impl's
+      # `Elem := Int53` is resolved at expansion (W1) so it type-checks — reaches `:jvm`.
+      assert targets(rep, "to_list") == [:ex, :js, :jvm, :rs]
+      refute Enum.any?(entry(rep, "to_list").blockers, &(&1.kind == :dispatch))
+    end
+
+    test "an associated type in a BARE (non-`Vec`) return is off `:jvm`" do
+      rep =
+        reach("""
+        protocol Head do
+          type Elem
+          def head(self Self) Elem
+        end
+
+        type Box := Box(v Int53)
+
+        impl Head for Box do
+          type Elem := Int53
+          def head(b) := case b do Box(x) -> x end
+        end
+        """)
+
+      # a bare `Elem` return can't be erased to a useful Kotlin type (only `Any`), so the
+      # dispatcher pins off `:jvm` — the covariant-`Vec` carve-out does not apply.
+      assert targets(rep, "head") == [:ex, :js, :rs]
+      assert [%{kind: :dispatch, kills: [:jvm]}] = entry(rep, "head").blockers
     end
   end
 

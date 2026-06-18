@@ -136,7 +136,7 @@ defmodule Rian.JVM do
 
     assoc_names = jvm_assoc_names(prog)
     {dispatchers, funcs} = Enum.split_with(all, &(&1.dispatch == :dispatcher))
-    dispatchers = Enum.reject(dispatchers, &ret_mentions_assoc?(&1.ret, assoc_names))
+    dispatchers = Enum.reject(dispatchers, &assoc_blocks_jvm?(&1, assoc_names))
     Core.reject_unsupported!(funcs, @jvm_unsupported, :jvm, Unsupported)
     type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
     # `const NAME := value` (ADR-0033) lowers to a top-level `val`, and a reference
@@ -148,7 +148,10 @@ defmodule Rian.JVM do
     ic = Rian.Check.program_ic(prog) |> Map.put(:consts, MapSet.new(consts, & &1.name))
     const_decls = Enum.map_join(consts, "\n", &const_kt(&1, ic))
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt(&1, ic))
-    disp_decls = Enum.map_join(dispatchers, "\n\n", &dispatcher_kt(&1, impl_first_type))
+
+    disp_decls =
+      Enum.map_join(dispatchers, "\n\n", &dispatcher_kt(&1, impl_first_type, assoc_names))
+
     # inject the float-repr helper only when the program lowers `__prim_float_repr`.
     runtime =
       if String.contains?(fn_decls, "__rian_float_repr("), do: float_repr_helper(), else: ""
@@ -158,16 +161,32 @@ defmodule Rian.JVM do
     |> Enum.join("\n\n")
   end
 
-  # the associated-type names declared across the program's protocols (ADR-0074) — a
-  # dispatcher returning one (`Foldable.to_list() Vec(Elem)`) has no single concrete
-  # Kotlin return type, so it stays off `:jvm`.
+  # the associated-type names declared across the program's protocols (ADR-0074).
   defp jvm_assoc_names(prog),
     do: prog |> Map.get(:protocols, []) |> Enum.flat_map(&Map.get(&1, :assoc, [])) |> MapSet.new()
 
-  defp ret_mentions_assoc?(nil, _assoc), do: false
+  # Can the JVM NOT lower a dispatcher because of an associated type? Only when the
+  # associated type appears somewhere it can't be erased to `Any`: a **parameter**
+  # (contravariant) or a **bare / non-`Vec` return**. Inside a covariant `Vec(...)`
+  # return it erases fine — `Vec(Elem)` → `List<Any>` (Kotlin `List` is covariant), so a
+  # `Foldable.to_list() Vec(Elem)` dispatcher lowers and reaches `:jvm` (ADR-0074;
+  # element-AGNOSTIC consumers only — an element-typed use needs a use-site cast). The
+  # `Vec(...)` wrapper is stripped before the check so its assoc occurrences don't count.
+  defp assoc_blocks_jvm?(func, assoc) do
+    param_types = func |> Map.get(:params, []) |> Enum.map(& &1.type)
+    ret_bare = (func.ret || "") |> String.replace(~r/Vec\([^()]*\)/, "")
+    Enum.any?([ret_bare | param_types], &type_mentions_assoc?(&1, assoc))
+  end
 
-  defp ret_mentions_assoc?(ret, assoc),
-    do: Enum.any?(assoc, &Regex.match?(~r/\b#{Regex.escape(&1)}\b/, ret))
+  defp type_mentions_assoc?(nil, _assoc), do: false
+
+  defp type_mentions_assoc?(t, assoc),
+    do: Enum.any?(assoc, &Regex.match?(~r/\b#{Regex.escape(&1)}\b/, t))
+
+  # substitute each associated-type name with `Any` (the erased Kotlin type) — turns a
+  # dispatcher's `Vec(Elem)` return into `Vec(Any)` → `List<Any>` via `kt_type`.
+  defp subst_assoc_any(type, assoc),
+    do: Enum.reduce(assoc, type, &Regex.replace(~r/\b#{Regex.escape(&1)}\b/, &2, "Any"))
 
   defp all_consts(prog),
     do:
@@ -283,6 +302,13 @@ defmodule Rian.JVM do
     do: Map.get(prog, :types, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.types)
 
   # ── sum type -> a Kotlin sealed hierarchy ───────────────────────────────
+  # a single-variant sum whose ctor name **is** the type name (`type Bag := Bag(items …)`,
+  # the common newtype/wrapper shape) — emit just the standalone data class. A
+  # `sealed interface Bag` + `data class Bag : Bag` would be a Kotlin redeclaration (and
+  # a self-supertype); with one variant the interface is unnecessary anyway, and `is Bag`
+  # / construction / field access all resolve to the one `Bag`.
+  defp sum_decl(%{name: name, variants: [%{ctor: name} = v]}), do: variant_body(v)
+
   defp sum_decl(t) do
     variants = Enum.map_join(t.variants, "\n", &variant_decl(&1, t.name))
     "sealed interface #{t.name}\n#{variants}"
@@ -290,15 +316,18 @@ defmodule Rian.JVM do
 
   # a nullary variant is a singleton `object`; an arg-carrying one a `data class`
   # with positional fields `f0, f1, …` (Rian variants are positional).
-  defp variant_decl(%{ctor: ctor, fields: []}, tname), do: "object #{ctor} : #{tname}"
+  defp variant_decl(v, tname), do: "#{variant_body(v)} : #{tname}"
 
-  defp variant_decl(%{ctor: ctor, fields: fields}, tname) do
+  # the data class / object for a variant, without the `: SealedInterface` supertype.
+  defp variant_body(%{ctor: ctor, fields: []}), do: "object #{ctor}"
+
+  defp variant_body(%{ctor: ctor, fields: fields}) do
     params =
       fields
       |> Enum.with_index()
       |> Enum.map_join(", ", fn {f, i} -> "val f#{i}: #{kt_type(f.type)}" end)
 
-    "data class #{ctor}(#{params}) : #{tname}"
+    "data class #{ctor}(#{params})"
   end
 
   # ── function / clause dispatch ──────────────────────────────────────────
@@ -359,7 +388,7 @@ defmodule Rian.JVM do
   # the same runtime type as the receiver). The `is`-test type is `impl_…`'s first
   # parameter type rendered through `kt_type` (`Int53` → `Long`, a sum/struct → its
   # class), recovered from the clause's `impl_…(…)` call.
-  defp dispatcher_kt(disp, impl_first_type) do
+  defp dispatcher_kt(disp, impl_first_type, assoc) do
     params =
       disp.params
       |> Enum.with_index()
@@ -377,8 +406,11 @@ defmodule Rian.JVM do
 
     vis = if Map.get(disp, :pub?, true), do: "", else: "private "
     miss = inspect("#{disp.name}: no matching impl")
+    # an associated type in a covariant `Vec(...)` return erases to `List<Any>` (the
+    # `impl_…` arms return `List<Long>`/`List<String>`, covariantly `List<Any>`).
+    ret = kt_type(subst_assoc_any(disp.ret, assoc))
 
-    "#{vis}fun #{disp.name}(#{params}): #{kt_type(disp.ret)} = when (a0) {\n#{arms}\n" <>
+    "#{vis}fun #{disp.name}(#{params}): #{ret} = when (a0) {\n#{arms}\n" <>
       "    else -> throw RuntimeException(#{miss})\n}"
   end
 

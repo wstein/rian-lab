@@ -126,7 +126,7 @@ defmodule Rian.Protocol do
   end
 
   # ── coherence ───────────────────────────────────────────────────────────
-  defp check_impl({proto, type, methods}, protocols, reg) do
+  defp check_impl({proto, type, methods, _assoc}, protocols, reg) do
     sigs =
       case protocols[proto] do
         nil -> raise(Error, "`impl … for #{type}`: unknown protocol `#{proto}`")
@@ -162,7 +162,7 @@ defmodule Rian.Protocol do
     discriminator? = runtime_dispatch_target?(targets)
 
     impls
-    |> Enum.reduce(%{}, fn {proto, type, _}, seen ->
+    |> Enum.reduce(%{}, fn {proto, type, _, _}, seen ->
       key = {proto, type}
       if Map.has_key?(seen, key), do: raise(Error, "duplicate `impl #{proto} for #{type}`")
 
@@ -194,7 +194,7 @@ defmodule Rian.Protocol do
     argv = pat
 
     clauses =
-      for {^proto, type, _methods} <- impls do
+      for {^proto, type, _methods, _assoc} <- impls do
         %{
           name: sig.name,
           params: pat,
@@ -212,6 +212,14 @@ defmodule Rian.Protocol do
     if clauses == [] do
       []
     else
+      # the protocol's associated types (the keys each impl binds, ADR-0074) — collected
+      # from this proto's impls. They join `Self` as the dispatcher's **type variables**
+      # so the return-type gate treats a `Vec(Elem)` return as polymorphic: each clause
+      # returns a *resolved* concrete type (`Vec(Int53)` / `Vec(String)`) that unifies
+      # with `Vec(Elem)` per clause, exactly as `Self` does for the receiver.
+      assoc_tvars =
+        for({^proto, _t, _m, a} <- impls, k <- Map.keys(a), do: k) |> Enum.uniq()
+
       # a bodiless signature heads the multi-clause group; `Self` is listed as a
       # type variable so the return-type gate treats a `Self`-mentioning return as
       # generic (the dispatcher is polymorphic in the receiver).
@@ -222,7 +230,7 @@ defmodule Rian.Protocol do
         guard: nil,
         body: nil,
         pub: true,
-        tvars: ["Self" | Map.get(sig, :tvars, [])],
+        tvars: Enum.uniq(["Self" | Map.get(sig, :tvars, [])] ++ assoc_tvars),
         synthetic: true,
         dispatch: :dispatcher
       }
@@ -241,7 +249,7 @@ defmodule Rian.Protocol do
   end
 
   # ── impl methods: mangled single-clause functions ────────────────────────
-  defp impl_methods({proto, type, methods}, protocols) do
+  defp impl_methods({proto, type, methods, assoc}, protocols) do
     sigs = Map.new(protocols[proto], &{&1.name, &1})
 
     Enum.map(methods, fn m ->
@@ -257,14 +265,21 @@ defmodule Rian.Protocol do
         )
       end
 
+      # Resolve BOTH `Self` (-> the impl type) and each associated type (`Elem` -> its
+      # `type Elem := Int53` binding, ADR-0074 W1) in the generated method's declared
+      # types. Without the assoc resolution the impl declares `Vec(Elem)` while its body
+      # returns `Vec(Int53)`, and `Check.gate!` rejects the impl on every gated path
+      # (`Decl.compile`/`Rian.JVM`); the dispatcher stays polymorphic in `Elem`.
+      resolve = fn t -> t |> subst_self(type) |> subst_assoc(assoc) end
+
       params =
         Enum.zip(names, types)
-        |> Enum.map_join(", ", fn {n, t} -> "#{n} #{subst_self(t, type)}" end)
+        |> Enum.map_join(", ", fn {n, t} -> "#{n} #{resolve.(t)}" end)
 
       %{
         name: mangle(proto, type, m.name),
         params: params,
-        ret: subst_self(sig.ret, type),
+        ret: resolve.(sig.ret),
         guard: m.guard,
         body: m.body,
         pub: false,
@@ -273,6 +288,13 @@ defmodule Rian.Protocol do
       }
     end)
   end
+
+  # substitute each associated-type binding (`%{"Elem" => "Int53"}`) into a type string —
+  # `Vec(Elem)` -> `Vec(Int53)` for the impl that bound it (ADR-0074, expansion-time).
+  defp subst_assoc(nil, _assoc), do: nil
+
+  defp subst_assoc(t, assoc),
+    do: Enum.reduce(assoc, t, fn {a, conc}, acc -> Regex.replace(~r/\b#{a}\b/, acc, conc) end)
 
   # ── helpers ──────────────────────────────────────────────────────────────
   defp mangle(proto, type, method),

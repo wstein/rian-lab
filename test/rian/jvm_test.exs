@@ -163,6 +163,31 @@ defmodule Rian.JVMTest do
       probe:
         ~s|println(contains(listOf(1L, 2L, 3L), 2L)); println(contains(listOf("a", "b"), "z"))|
     },
+    %{
+      id: :foldable_assoc,
+      src: """
+      protocol Foldable do
+        type Elem
+        def to_list(self Self) Vec(Elem)
+      end
+      type Bag := Bag(items Vec(Int53))
+      type Words := Words(items Vec(String))
+      impl Foldable for Bag do
+        type Elem := Int53
+        def to_list(b) := case b do Bag(xs) -> xs end
+      end
+      impl Foldable for Words do
+        type Elem := String
+        def to_list(w) := case w do Words(ss) -> ss end
+      end
+      def fcount(x C) Int53 forall C: Foldable := len_l(to_list(x))
+      def len_l(Vec(T)) Int53 forall T
+      def len_l([]) := 0
+      def len_l([_ | t]) := 1 + len_l(t)
+      """,
+      probe:
+        ~s|println(fcount(Bag(listOf(1L, 2L, 3L)))); println(fcount(Words(listOf("a", "b"))))|
+    },
     %{id: :interp_int, src: ~S|def f(n Int64) String := "v${n}"|, probe: ~S|println(f(42L))|},
     %{
       id: :symbol_tag,
@@ -730,6 +755,20 @@ defmodule Rian.JVMTest do
       kt = jvm_kt(jvm, :interp_bool)
       assert kt =~ ~S|if (b) "true" else "false"|
       expect_jvm(jvm, :interp_bool, "true\nfalse")
+    end
+
+    @tag :jvm
+    test "an associated-type protocol (Foldable) reaches :jvm — `List<Any>` erasure (ADR-0074)",
+         %{
+           jvm_batch: jvm
+         } do
+      # `Elem := Int53`/`String` is resolved at expansion (W1) so the impls type-check;
+      # the dispatcher's covariant `Vec(Elem)` return erases to `List<Any>`. One `fcount`
+      # reduces a `Bag` of `Int53` AND a `Words` of `String` — element-agnostic, runs.
+      kt = jvm_kt(jvm, :foldable_assoc)
+      assert kt =~ "fun to_list(a0: Any): List<Any> = when (a0) {"
+      assert kt =~ "is Bag -> impl_foldable_bag_to_list(a0)"
+      expect_jvm(jvm, :foldable_assoc, "3\n2")
     end
 
     @tag :jvm

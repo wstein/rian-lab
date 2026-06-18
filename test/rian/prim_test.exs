@@ -178,13 +178,13 @@ defmodule Rian.PrimTest do
       assert m.fcount({:bag, [1, 2, 3]}) == 3
       assert m.fcount({:words, ["a", "b"]}) == 2
 
-      # reach is honest: a SUM-dispatching protocol consumer is `[:ex, :js, :rs]` — the
-      # runtime dispatcher pins it off `:jvm` (the JVM emitter has no protocol lowering
-      # yet, ADR-0042), but Rust monomorphises the impls behind a trait, so `:rs` is
-      # reachable (the associated-type Foldable compiles+runs on rustc, ADR-0074).
+      # reach is honest and FULL now: the associated-type `Foldable` reaches every target.
+      # Rust monomorphises the impls; the JVM resolves `Elem := Int53` at expansion (W1,
+      # ADR-0074) so the impls type-check, lowers the dispatcher to a `when (a0)` over
+      # `is <Type>`, and erases the covariant `Vec(Elem)` return to `List<Any>` — `fcount`
+      # over a `Bag` of `Int53` and a `Words` of `String` compiles+runs on kotlinc (`3`/`2`).
       rep = Rian.Reach.analyze(Rian.Decl.parse(src))
-      assert Enum.sort(MapSet.to_list(reach_entry(rep, "fcount").reach)) == [:ex, :js, :rs]
-      # the underlying concrete fold IS all-target — only the dispatcher's `:jvm` gate bites.
+      assert Enum.sort(MapSet.to_list(reach_entry(rep, "fcount").reach)) == [:ex, :js, :jvm, :rs]
       assert Enum.sort(MapSet.to_list(reach_entry(rep, "len_l").reach)) == [:ex, :js, :jvm, :rs]
     end
 

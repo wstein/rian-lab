@@ -450,7 +450,12 @@ defmodule Rian.Decl do
 
     impls =
       for {:impl, proto, type, inner, _doc} <- decls do
-        {proto, type, for({:def, raw} <- inner, do: raw)}
+        # carry the impl's associated-type bindings (`type Elem := Int53`, ADR-0074) so
+        # protocol expansion can resolve them into the generated method signatures (W1) —
+        # otherwise the impl method declares `Vec(Elem)` and `Check.gate!` rejects it
+        # against the `Vec(Int53)` body it actually returns.
+        assoc = for {:type, t, _, _} <- inner, into: %{}, do: parse_assoc_binding(t)
+        {proto, type, for({:def, raw} <- inner, do: raw), assoc}
       end
 
     if protocols == %{} and impls == [],

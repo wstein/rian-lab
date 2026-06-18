@@ -89,28 +89,35 @@ runs on `:rs` (rustc-verified, `reach_rust_honesty_test`). The coercions that ha
 the trait carries `type Elem: Clone`; a borrowed `Vec` field return is `.to_vec()`d
 (Gap E+); a constructed argument is borrowed for a generic `&C` param
 (`fcount(Bag([1,2,3]))`); and a string literal stored into a `Vec(String)` field at
-construction is `.to_string()`d (`rust_owned_elem`). The runtime **dispatcher** `to_list`
-(and its consumer `fcount`) is pinned off `:jvm`; on `:rs` it is reachable (the
-constructor-tag atoms are portable `Symbol`s, ADR-0041, not a blocker). So `fcount`
-reaches `[:ex, :js, :rs]`.
+construction is `.to_string()`d (`rust_owned_elem`). The constructor-tag atoms are
+portable `Symbol`s (ADR-0041), not a blocker. With the JVM also lowering it (next
+section), the runtime **dispatcher** `to_list` and its consumer `fcount` reach **all four
+targets** — `[:ex, :js, :jvm, :rs]`.
 
-**Why `Foldable` stays off `:jvm` — the gate, not the dispatcher (2026-06-18).** JVM
-protocol dispatch *itself* lowers (ADR-0042 — a `when (a0)` over `is <Type>`), and an
-associated type in a covariant `Vec(...)` return *could* erase to `List<Any>` (Kotlin
-`List` is covariant; verified by hand). But `Rian.JVM.compile` runs the **type gate**
-(`Rian.Check.gate!`) before emitting, and that gate **rejects the example**:
-`impl_foldable_bag_to_list` declares `Vec(Elem)` but its body infers `Vec(Int53)`, and
-the checker does not resolve `Elem := Int53` (ADR-0074 **Stage 2b — checker resolution —
-was dropped**). This is not JVM-specific: `Decl.compile` (the gated `:ex` path) rejects
-`foldable` identically; it runs at all only through the *ungated* `Beam.load` /
-`rust_program` (the Rust emitter resolves the projection *during* emit, after the gate it
-never runs). So the real prerequisite for `Foldable` on `:jvm` is **associated-type
-resolution before the gate** — substituting each impl's `type Elem := …` binding into its
-method signatures so the impl type-checks — not the dispatcher or a use-site cast. Until
-that lands, `Rian.Reach` keeps the associated-type dispatcher (and `fcount`) off `:jvm`,
-honestly: `JVM.compile(foldable)` raises, so claiming `:jvm` would be a matrix lie
-(ADR-0000). Uniform-return protocols (`Eq`/`Ord`/`Show`) are unaffected — no associated
-type, no gate mismatch — and reach `:jvm` today.
+**Stage 2b reconsidered → resolution at expansion (W1, 2026-06-18).** The original drop
+of Stage 2b ("checker resolution — no payoff") rested on a false premise: `Check.gate!`
+*does* flag an unresolved projection. `impl_foldable_bag_to_list` declares `Vec(Elem)`
+but its body infers `Vec(Int53)`, and with `Elem` unresolved the gate rejects it — on
+*every* gated path (`Decl.compile` for `:ex` rejected `foldable` identically; it ran only
+through the ungated `Beam.load`/`rust_program`). The fix is **not** checker resolution
+(which would tighten the deliberately-conservative checker, ADR-0000) but **resolution at
+protocol expansion**: `Rian.Protocol.impl_methods` substitutes each impl's `type Elem :=
+Int53` binding into the generated method signatures (alongside the existing `Self`
+substitution), so the impl is *generated correct* (`… Vec(Int53)`) and type-checks
+everywhere. The **dispatcher** stays polymorphic — its associated types join `Self` as
+*type variables*, so its `Vec(Elem)` return accepts each clause's resolved concrete
+return. This closed the pre-existing `:ex` inconsistency as a bonus.
+
+**`Foldable` reaches `:jvm`.** With expansion-time resolution in place, the JVM lowers the
+dispatcher to a `when (a0)` over `is <Type>` and erases the covariant `Vec(Elem)` return
+to `List<Any>` (Kotlin `List` is covariant). One `fcount` over a `Bag` of `Int53` and a
+`Words` of `String` **compiles and runs on kotlinc+java** (`3` / `2`, `Rian.JVMTest`), so
+`to_list`/`fcount` reach all four targets. The carve-out (the prior debate's fence): the
+covariant-`Vec` erasure is sound only for an associated type in a **covariant return**; a
+bare `Elem` return or an `Elem` **parameter** can't be erased and keeps the `:dispatch`
+blocker off `:jvm` (`Rian.Reach.assoc_blocks_jvm?`). Element-*typed* consumers (`fsum`,
+`C.Elem: Num`) still need a use-site `as` cast — a later increment; today's `List<Any>`
+buys the element-*agnostic* reducers.
 
 ## Alternatives considered
 

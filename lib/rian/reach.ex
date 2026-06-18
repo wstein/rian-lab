@@ -535,13 +535,14 @@ defmodule Rian.Reach do
 
     # a generated runtime protocol DISPATCHER (`dispatch: :dispatcher`, ADR-0042) is a
     # guarded runtime type-test that selects an impl by the value's shape. Every target
-    # now lowers it — BEAM (guarded clauses), JS (`typeof`/tag), Rust (monomorphised
-    # trait), and JVM (a `when (a0)` over `is <Type>`, ADR-0042). The ONE exception is a
-    # dispatcher whose return mentions an **associated type** (ADR-0074 — `Foldable`'s
-    # `to_list() Vec(Elem)`): it has no single concrete Kotlin return, so `Rian.JVM` drops
-    # it and it pins off `:jvm` (callers inherit through the reach fixpoint).
+    # lowers it now — BEAM (guarded clauses), JS (`typeof`/tag), Rust (monomorphised
+    # trait), and JVM (a `when (a0)` over `is <Type>`). An **associated type** (ADR-0074)
+    # in the return is fine when it sits in a covariant `Vec(...)` — it erases to JVM
+    # `List<Any>` (`Foldable.to_list() Vec(Elem)` reaches `:jvm`). It only pins off `:jvm`
+    # when it appears where the JVM can't erase it: a parameter (contravariant) or a bare
+    # non-`Vec` return. Callers inherit the pin through the reach fixpoint.
     disp =
-      if Map.get(f, :dispatch) == :dispatcher and ret_mentions_assoc?(f.ret, pctx.assoc),
+      if Map.get(f, :dispatch) == :dispatcher and assoc_blocks_jvm?(f, pctx.assoc),
         do: [dispatch_blocker()],
         else: []
 
@@ -651,15 +652,22 @@ defmodule Rian.Reach do
   defp pin_blocker,
     do: %{construct: "pin (`^x`)", kind: :pin, kills: [:rs, :js, :jvm]}
 
-  # does a (return) type mention an associated-type name (`Vec(Elem)` over `{"Elem"}`)?
-  defp ret_mentions_assoc?(nil, _assoc), do: false
+  # does an associated type appear where the JVM can't erase it to `Any` — a parameter
+  # (contravariant) or a bare/non-`Vec` return? Inside a covariant `Vec(...)` return it
+  # erases to `List<Any>` (`Foldable.to_list() Vec(Elem)` reaches `:jvm`), so the `Vec(...)`
+  # wrapper is stripped before the check. Mirrors `Rian.JVM.assoc_blocks_jvm?`.
+  defp assoc_blocks_jvm?(f, assoc) do
+    param_types = Enum.map(Map.get(f, :params, []), & &1.type)
+    ret_bare = (Map.get(f, :ret) || "") |> String.replace(~r/Vec\([^()]*\)/, "")
 
-  defp ret_mentions_assoc?(ret, assoc),
-    do: Enum.any?(assoc, &Regex.match?(~r/\b#{Regex.escape(&1)}\b/, ret))
+    Enum.any?([ret_bare | param_types], fn t ->
+      Enum.any?(assoc, &Regex.match?(~r/\b#{Regex.escape(&1)}\b/, t))
+    end)
+  end
 
-  # An **associated-type-returning** protocol dispatcher (`Foldable.to_list() Vec(Elem)`,
-  # ADR-0074): every target lowers an ordinary dispatcher now, but this one has no single
-  # concrete Kotlin return type, so `Rian.JVM` drops it and it pins off `:jvm`.
+  # A protocol dispatcher whose associated type sits in a position the JVM can't erase
+  # (a parameter or a bare return, ADR-0074): every other dispatcher lowers, but this one
+  # has no concrete Kotlin shape there, so `Rian.JVM` drops it and it pins off `:jvm`.
   defp dispatch_blocker,
     do: %{construct: "associated-type protocol dispatch", kind: :dispatch, kills: [:jvm]}
 
