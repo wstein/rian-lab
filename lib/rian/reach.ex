@@ -50,18 +50,41 @@ defmodule Rian.Reach do
 
   @targets [:ex, :rs, :js, :jvm]
 
-  # The effect names a function may declare today (ADR-0048 §2): the inferable,
-  # Reach-gating subset. `host` = calls fallible host FFI; `spawn` = a concurrency
-  # primitive. Both kill the non-BEAM targets, so over-declaring is a portability lie
-  # (ADR-0081 §2 exact rule). The other ADR-0048 effects (io/fs/clock/random/net) await
-  # their own leaf detection and are not yet declarable (`Rian.Decl` rejects them).
-  @effect_names [:host, :spawn]
+  # The effect names a function may declare (ADR-0048 §2). `host` = calls fallible host
+  # FFI; `spawn` = a concurrency primitive (both Reach-gating — they kill the non-BEAM
+  # targets, so over-declaring is a portability lie, ADR-0081 §2). The world categories
+  # `io`/`fs`/`clock`/`random`/`net` are inferred ALONGSIDE `host` for known host
+  # modules (a raw `:rand.uniform` is both `host` — non-portable FFI — and `random`);
+  # they stand alone only once a portable effectful stdlib lowers them per target
+  # (ADR-0047, not yet built).
+  @effect_names [:host, :spawn, :io, :fs, :clock, :random, :net]
+
+  # Known host modules → their world effect category (ADR-0048 §2). Module-root keyed
+  # (the construct is `Mod.fun`/`:mod.fun`); an uncatalogued host call is `host`-only
+  # (correct but coarse — add the module here to refine). `clock` is function-keyed
+  # (the time primitives) since its modules (`:os`/`:erlang`/`System`) are mixed.
+  @effect_mods %{
+    "IO" => :io,
+    "io" => :io,
+    "File" => :fs,
+    "file" => :fs,
+    "rand" => :random,
+    "random" => :random,
+    "gen_tcp" => :net,
+    "gen_udp" => :net,
+    "gen_sctp" => :net,
+    "ssl" => :net,
+    "inet" => :net,
+    "httpc" => :net
+  }
+  @clock_funs ~w(system_time monotonic_time os_time timestamp now)
+  @clock_mods ~w(os erlang System)
 
   @typedoc "A lowering target (emitter-backed)."
   @type target :: :ex | :rs | :js | :jvm
 
-  @typedoc "A tracked effect (ADR-0048 §2; the currently-inferable subset)."
-  @type effect :: :host | :spawn
+  @typedoc "A tracked effect (ADR-0048 §2)."
+  @type effect :: :host | :spawn | :io | :fs | :clock | :random | :net
 
   # Erlang modules that are concurrency/process/state (ex-only AND native-per-target)
   @conc_erl ~w(ets dets mnesia gen_server gen_statem gen_event global pg pg2 sys supervisor)
@@ -159,12 +182,28 @@ defmodule Rian.Reach do
     Map.new(effects, fn {{name, arity}, set} -> {"#{name}/#{arity}", set} end)
   end
 
-  # a blocker's effect contribution: host FFI carries `host`, a concurrency primitive
-  # `spawn`. Every other blocker kind (`ref`/`Int`/width/map/…) is a reach concern, not
-  # an effect — it contributes nothing here.
-  defp effect_of(%{kind: :ffi}), do: [:host]
+  # a blocker's effect contribution: host FFI carries `host` plus its world category
+  # (a known module — `io`/`fs`/`random`/`net`, or a clock primitive), a concurrency
+  # primitive `spawn`. Every other blocker kind (`ref`/`Int`/width/map/…) is a reach
+  # concern, not an effect — it contributes nothing here.
+  defp effect_of(%{kind: :ffi, construct: c}), do: [:host | ffi_category(c)]
   defp effect_of(%{kind: :concurrency}), do: [:spawn]
   defp effect_of(_blocker), do: []
+
+  # the world-effect category of an FFI construct (`Mod.fun`/`:mod.fun`), or `[]` for
+  # an uncatalogued host module (it stays `host`-only). Module-root for the clean
+  # categories; function name for `clock` (its modules are mixed).
+  defp ffi_category(construct) do
+    segs = construct |> String.trim_leading(":") |> String.split(".")
+    modroot = hd(segs)
+    fun = List.last(segs)
+
+    cond do
+      Map.has_key?(@effect_mods, modroot) -> [Map.fetch!(@effect_mods, modroot)]
+      fun in @clock_funs and modroot in @clock_mods -> [:clock]
+      true -> []
+    end
+  end
 
   # effects(f) = direct(f) ∪ ⋃ effects(callee) — monotone-increasing, runs to a fixpoint.
   defp effect_fixpoint(facts, table) do

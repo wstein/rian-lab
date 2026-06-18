@@ -1,8 +1,9 @@
 defmodule Rian.EffectsTest do
   # The `@effects(...)` surface effect annotation (ADR-0048/0081): grammar
   # (`Rian.Decl`), inference (`Rian.Reach.effect_sets/1`), and the exact
-  # declare-public check (`Rian.Check`). Scoped to the inferable, Reach-gating
-  # subset `{host, spawn}`.
+  # declare-public check (`Rian.Check`). Covers the taxonomy
+  # `host`/`spawn`/`io`/`fs`/`clock`/`random`/`net` — world categories are inferred
+  # alongside `host` for known FFI modules.
   use ExUnit.Case, async: true
 
   alias Rian.{Check, Decl, Reach}
@@ -24,9 +25,9 @@ defmodule Rian.EffectsTest do
       assert f.effects == [:host, :spawn]
     end
 
-    test "rejects a not-yet-inferable effect name (no silently-unverified declaration)" do
-      assert_raise Decl.Error, ~r/unknown\/unsupported effect `io`/, fn ->
-        parse("@effects(io)\npub def f() Int53 := 1")
+    test "rejects an unknown effect name (no silently-unverified declaration)" do
+      assert_raise Decl.Error, ~r/unknown\/unsupported effect `telepathy`/, fn ->
+        parse("@effects(telepathy)\npub def f() Int53 := 1")
       end
     end
 
@@ -42,8 +43,8 @@ defmodule Rian.EffectsTest do
       end
     end
 
-    test "effect_names/0 is the inferable, Reach-gating subset" do
-      assert Reach.effect_names() == [:host, :spawn]
+    test "effect_names/0 is the ADR-0048 §2 taxonomy" do
+      assert Reach.effect_names() == [:host, :spawn, :io, :fs, :clock, :random, :net]
     end
   end
 
@@ -59,6 +60,27 @@ defmodule Rian.EffectsTest do
 
     test "a concurrency primitive carries `spawn`" do
       assert eff(effects("pub def go(x Int53) Int53 := :erlang.spawn(x)"), "go/1") == [:spawn]
+    end
+
+    test "a known host module also carries its world category (alongside host)" do
+      # a raw FFI call is non-portable (`host`) AND touches a world (`io`/`fs`/…), so it
+      # carries both; the category stands alone only with a portable stdlib (ADR-0047).
+      assert eff(effects("pub def p(x String) Symbol := IO.puts(x)"), "p/1") == [:host, :io]
+      assert eff(effects("pub def r(x String) String := File.read(x)"), "r/1") == [:fs, :host]
+
+      assert eff(effects("pub def g(x Int53) Int53 := :rand.uniform(x)"), "g/1") == [
+               :host,
+               :random
+             ]
+
+      assert eff(effects("pub def t() Int53 := :os.system_time(:second)"), "t/0") == [
+               :clock,
+               :host
+             ]
+    end
+
+    test "an uncatalogued host module is `host`-only (coarse but honest)" do
+      assert eff(effects("pub def h(x String) String := :crypto.hash(x)"), "h/1") == [:host]
     end
 
     test "the effect propagates transitively through the call graph" do

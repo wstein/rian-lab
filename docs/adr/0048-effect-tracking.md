@@ -1,12 +1,18 @@
 # ADR-0048 — Effect Tracking: fine-grained, inferred, ambient (not object-capability)
 
 **Status:** Accepted · **Resolves:** the ADR-0047 effects/IO open item
-**Implemented:** partial — the **`host`/`spawn` effects** are end-to-end: `@effects(...)` grammar
-(`Rian.Decl`), call-graph inference (`Rian.Reach.effect_sets/1`, reusing the FFI/concurrency leaf signal
-`analyze/1` uses), and **exact** declare-public verification (`Rian.Check.check_effects`, §3 / ADR-0081
-§2) — `test/rian/effects_test.exs`. **Not yet:** the neutral effects (`io`/`fs`/`clock`/`random`/`net`,
-each needs its own leaf detection — `Rian.Decl` rejects declaring them for now); `comptime`-purity
-gating; effect-polymorphism over function parameters; the transpiler emitting `@effects(host)`
+**Implemented:** partial — **inference + exact declare-public verification for the full taxonomy**
+(`host`/`spawn` + the world categories `io`/`fs`/`clock`/`random`/`net`, derived from raw host FFI):
+`@effects(...)` grammar (`Rian.Decl`), call-graph inference (`Rian.Reach.effect_sets/1`, reusing the
+leaf signal `analyze/1` uses), and **exact** verification (`Rian.Check.check_effects`, §3 / ADR-0081 §2)
+— `test/rian/effects_test.exs`. **Not yet:** the world categories standing *alone* (no `host`) over a
+portable effectful stdlib (ADR-0047, unbuilt); **`comptime`-purity gating** (blocked — `Rian.Comptime`'s
+sandbox rejects *all* function calls today, so there is no effectful call to gate; meaningful only once
+comptime can evaluate *pure* calls); **effect-polymorphism** over function parameters (needs **effect
+variables** — the error-set analog also doesn't exist: `Rian.Check`'s `call_name/1` ignores a call
+through a function-typed parameter, contributing zero; a HOF that calls its param is therefore inferred
+pure, which is unsound once a consumer relies on it — defer until the effectful stdlib needs it); the
+transpiler emitting `@effects(host)`
 **Refs:** ADR-0025 (memory capabilities — *orthogonal*), ADR-0030/0046 (`comptime` purity), ADR-0034 §1 (infer-local/declare-public), ADR-0035 (transparency — "what you read is what runs"), ADR-0039 (`<~` mutation), ADR-0040 §4 (composition — the parallel), ADR-0041 (per-target), ADR-0047 (pure/effectful boundary)
 **Owners:** Arthur Pendelton (effect inference) · Marcus Chen (transparency) · Elena Rostova (lowering) · Maya Lin (multi-target) · Samir Patel (testability) · Kira Neri (determinism) · Chloe Bennett (comptime) · Liam Davis (family ergonomics) · Rachel Okafor (PM)
 
@@ -50,6 +56,15 @@ The tracked effects are a small, **fine-grained**, extensible taxonomy: **`io`, 
 below). **A function is pure iff its effect set is empty.** Fine-grained (not just pure/impure) so a
 signature shows *which* world it touches — `clock`/`random` mark nondeterminism explicitly, distinct
 from `fs`/`net`.
+
+**Implemented:** all seven are inferred and declarable (`Rian.Reach.effect_names/0`). Today the world
+categories are derived **from raw host FFI** (`Rian.Reach`'s `@effect_mods` table: a `:rand.*` call →
+`random`, `IO.*` → `io`, `File.*` → `fs`, `:gen_tcp.*` → `net`, the time primitives → `clock`) — so such
+a call carries **both** the category **and** `host` (it is non-portable FFI *and* touches that world).
+A category stands **alone** (no `host`, reaching all targets) only once a **portable effectful stdlib**
+lowers it per target (ADR-0047 §2, not yet built); until then the dual tag keeps the effect view and the
+reach view consistent. An uncatalogued host module is `host`-only (coarse but honest — extend the table
+to refine).
 
 **`host` — calls fallible host FFI (accepted; the home for recoverable host errors).** Rian rejects
 catchable `try`/`catch` (ADR-0040 "Considered: capability-guarded exceptions"): the only sanctioned
