@@ -31,6 +31,11 @@ defmodule Rian.Format.Doc do
   iff it has no propagated hard break *and* `fits?` the columns remaining on the line.
   """
 
+  use Rian.Ann
+
+  @rian_sig """
+  type Doc := Empty | Hardline | Text(String) | Line(String) | Concat(Vec(Doc)) | Nest(Int53, Doc) | Group(Bool, Doc) | LineSuffix(Doc) | IfBreak(Doc, Doc)
+  """
   @typedoc "A pretty-printing document."
   @type t ::
           :empty
@@ -44,24 +49,33 @@ defmodule Rian.Format.Doc do
           | {:if_break, t(), t()}
 
   # ── constructors ──────────────────────────────────────────────────────────
+  @rian_sig "pub def empty() Doc"
   @spec empty() :: t()
   def empty, do: :empty
+  @rian_sig "pub def text(s String) Doc"
   @spec text(String.t()) :: t()
   def text(s) when is_binary(s), do: {:text, s}
+  @rian_sig "pub def nest(n Int53, doc Doc) Doc"
   @spec nest(integer(), t()) :: t()
   def nest(n, doc) when is_integer(n), do: {:nest, n, doc}
+  @rian_sig "pub def line() Doc"
   @spec line() :: t()
   def line, do: {:line, " "}
+  @rian_sig "pub def softline() Doc"
   @spec softline() :: t()
   def softline, do: {:line, ""}
+  @rian_sig "pub def hardline() Doc"
   @spec hardline() :: t()
   def hardline, do: :hardline
+  @rian_sig "pub def line_suffix(doc Doc) Doc"
   @spec line_suffix(t()) :: t()
   def line_suffix(doc), do: {:line_suffix, doc}
+  @rian_sig "pub def if_break(broken Doc, flat Doc) Doc"
   @spec if_break(t(), t()) :: t()
   def if_break(broken, flat), do: {:if_break, broken, flat}
 
   @doc "Concatenate a list of docs (flattening `empty`)."
+  @rian_sig "pub def concat(docs Vec(Doc)) Doc"
   @spec concat([t()]) :: t()
   def concat(docs) when is_list(docs) do
     case Enum.reject(docs, &(&1 == :empty)) do
@@ -71,10 +85,12 @@ defmodule Rian.Format.Doc do
     end
   end
 
+  @rian_sig "pub def concat(a Doc, b Doc) Doc"
   @spec concat(t(), t()) :: t()
   def concat(a, b), do: concat([a, b])
 
   @doc "Join `docs` with `sep` between each."
+  @rian_sig "pub def join(sep Doc, docs Vec(Doc)) Doc"
   @spec join(t(), [t()]) :: t()
   def join(_sep, []), do: :empty
   def join(sep, docs), do: concat(Enum.intersperse(docs, sep))
@@ -86,6 +102,8 @@ defmodule Rian.Format.Doc do
   magic trailing comma: a source trailing comma keeps a group expanded even if it
   would fit).
   """
+  @rian_sig "pub def group(doc Doc) Doc"
+  @rian_sig "pub def group(doc Doc, force Bool) Doc"
   @spec group(t(), boolean()) :: t()
   def group(doc, force \\ false), do: {:group, force or must_break?(doc), doc}
 
@@ -125,6 +143,7 @@ defmodule Rian.Format.Doc do
 
   # ── render ────────────────────────────────────────────────────────────────
   @doc "Render `doc` to a string within a soft `width` column budget."
+  @rian_sig "pub def render(doc Doc, width Int53) String"
   @spec render(t(), integer()) :: String.t()
   def render(doc, width) when is_integer(width) do
     # state: worklist, current column `k`, buffered line-suffix docs (reversed)
