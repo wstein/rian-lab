@@ -76,6 +76,7 @@ defmodule Rian.External do
   Returns `:ok` or `{:error, message}` (errors-as-values, ADR-0035). A program with no
   file-references resolves trivially.
   """
+  @rian_sig "pub def resolve(prog Prog, src_dir String) _Unk"
   @spec resolve(map(), Path.t()) :: :ok | {:error, String.t()}
   def resolve(prog, src_dir) do
     refs =
@@ -153,6 +154,7 @@ defmodule Rian.External do
   i.e. the BEAM build must bundle a foreign `.ffi.ex` (see `lower_beam/2`). A program
   with only string/module-reference externals (or none) needs no bundling.
   """
+  @rian_sig "pub def has_beam_file_ref?(prog Prog) Bool"
   @spec has_beam_file_ref?(map()) :: boolean()
   def has_beam_file_ref?(prog) do
     Enum.any?(all_funcs(prog), &match?({:file, _, _}, Map.get(externals(&1), :ex)))
@@ -169,6 +171,7 @@ defmodule Rian.External do
   with the named function at the right arity (fail-closed, ADR-0041 §2). Non-`:ex`
   references are left untouched. The foreign modules are compiled (and thus loaded) here.
   """
+  @rian_sig "pub def lower_beam(prog Prog, src_dir String) _Unk"
   @spec lower_beam(map(), Path.t()) :: {:ok, map(), [{module(), binary()}]} | {:error, String.t()}
   def lower_beam(prog, src_dir) do
     paths =
