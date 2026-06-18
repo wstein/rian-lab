@@ -148,6 +148,32 @@ defmodule Rian.InferLocalTest do
       assert %{name: "y", type: "Int53"} = param_of("def f(x, y) := x + y", "f", 1)
     end
 
+    test "a boolean-operator body pins the param to Bool" do
+      assert %{name: "x", type: "Bool"} = param_of("def f(x) := x and true", "f", 0)
+    end
+
+    test "a char `case` scrutinee pins the param to Char" do
+      src = "def classify(c) := case c do\n  'a' -> 1\n  _ -> 0\nend"
+      assert %{name: "c", type: "Char"} = param_of(src, "classify", 0)
+    end
+
+    test "a constructor `case` scrutinee pins the param to the sum type" do
+      src =
+        "mod M do\n  type Opt := Som(v Int53) | Non\n  def f(o) := case o do\n    Som(v) -> v\n    Non -> 0\n  end\nend"
+
+      assert %{name: "o", type: "Opt"} = param_of(src, "f", 0)
+    end
+
+    test "inference recurses through unary, if, and block bodies" do
+      # each exercises a distinct `var_constraint` recursion arm; `x` ends up Int53
+      # from the arithmetic leaf inside.
+      assert %{type: "Int53"} = param_of("def f(x) := -(x + 1)", "f", 0)
+      assert %{type: "Int53"} = param_of("def f(x) := if true do x + 1 else 0 end", "f", 0)
+
+      block = "def f(x) Int53\n  y Int53 := x + 1\n  z := y\n  z\nend"
+      assert %{type: "Int53"} = param_of(block, "f", 0)
+    end
+
     test "generalizing past the 26-letter alphabet yields unique tvars (no collision)" do
       # 27 unconstrained params force a 27th type variable; it must be a fresh name
       # (`A0`), never a duplicate of the first param's `T`.

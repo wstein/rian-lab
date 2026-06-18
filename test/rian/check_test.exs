@@ -191,6 +191,18 @@ defmodule Rian.CheckTest do
     test "a parametric binding displays at its declared type" do
       assert Check.infer(Pratt.parse_body("xs Vec(Int64) := [1, 2, 3] ; xs")) == "Vec(Int64)"
     end
+
+    test "an in-range literal checks against each fixed-width integer type's bounds" do
+      # exercises the two's-complement width_bounds/1 table across all widths.
+      for ty <- ~w(Int8 Int16 Int32 Int53 Int64 Int128 UInt8 UInt16 UInt32 UInt64 UInt128) do
+        assert Check.check("def f() #{ty} := 100") == :ok, "#{ty} should accept 100"
+      end
+    end
+
+    test "an out-of-range literal for a narrow width is a proven error" do
+      assert {:error, _} = Check.check("def f() Int8 := 999")
+      assert {:error, _} = Check.check("def f() UInt8 := -1")
+    end
   end
 
   describe "Char type (ADR-0036)" do
