@@ -20,6 +20,8 @@ defmodule Rian.Fixpoint do
   plugs into: replace the corpus/projection as the Rian lexer grows toward the
   full Rian token vocabulary, and the harness keeps proving agreement.
   """
+  use Rian.Ann
+
   alias Rian.Beam
 
   @typedoc "A loaded BEAM module exposing `tokenize/1` (a compiled Rian lexer)."
@@ -44,6 +46,7 @@ defmodule Rian.Fixpoint do
 
   `project` maps one Rian token (tagged tuple/atom) to its reference-token shape.
   """
+  @rian_sig "pub def check(mod Symbol, corpus Vec(String), project _Unk) _Unk"
   @spec check(lexer_mod(), [String.t()], (term() -> term()), (String.t() -> [term()])) ::
           :ok | {:mismatch, String.t(), [term()], [term()]}
   def check(mod, corpus, project, reference \\ &Rian.Lexer.expr_tokens/1) do
