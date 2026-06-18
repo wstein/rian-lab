@@ -328,6 +328,43 @@ defmodule Rian.BuildTest do
     end
   end
 
+  describe "eject (ADR-0082 step 6)" do
+    test "promotes _build/<target>/ to a user-owned dir, out of _build/" do
+      root = tmp_dir()
+      File.mkdir_p!(Path.join([root, "_build", "rs", "src"]))
+      File.write!(Path.join([root, "_build", "rs", "Cargo.toml"]), "[package]\n")
+
+      out = capture_io(fn -> assert Build.eject_at(root, "rs", "rs") == 0 end)
+      assert out =~ "ejected"
+      # moved out of _build/ to the user-owned dir, and the source is gone
+      assert File.exists?(Path.join([root, "rs", "Cargo.toml"]))
+      refute File.dir?(Path.join([root, "_build", "rs"]))
+    end
+
+    test "fails closed (exit 2) when there is nothing to eject" do
+      root = tmp_dir()
+      File.mkdir_p!(root)
+      err = capture_io(:stderr, fn -> assert Build.eject_at(root, "rs", "rs") == 2 end)
+      assert err =~ "does not exist"
+    end
+
+    test "fails closed (exit 2) rather than overwrite an existing destination" do
+      root = tmp_dir()
+      File.mkdir_p!(Path.join([root, "_build", "ex", "ebin"]))
+      File.mkdir_p!(Path.join(root, "ex"))
+
+      err = capture_io(:stderr, fn -> assert Build.eject_at(root, "ex", "ex") == 2 end)
+      assert err =~ "refusing to overwrite"
+      # the generated dir is left untouched
+      assert File.dir?(Path.join([root, "_build", "ex"]))
+    end
+
+    test "rejects an unknown target" do
+      err = capture_io(:stderr, fn -> assert Build.eject(["wat"]) == 2 end)
+      assert err =~ "unknown target"
+    end
+  end
+
   describe "build/1 — source targets" do
     test "--rust prints Rust source" do
       file = tmp_file("def add(a Int53, b Int53) Int53 := a + b\n")

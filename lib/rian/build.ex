@@ -326,6 +326,71 @@ defmodule Rian.Build do
     end
   end
 
+  # the `_build/<target>/` subdir names — the same per-target dirs the packaging
+  # backends write (`rs`/`ex`/`jvm`/`js`).
+  @eject_targets ~w(ex rs js jvm)
+
+  @doc """
+  `rian eject <ex|rs|js|jvm> [-o DEST]` — promote a generated `_build/<target>/` into a
+  **user-owned** project at DEST (default `./<target>/`), the one-way ADR-0082 escape
+  hatch (invariant 2's explicit exception). The directory is moved *out* of `_build/`
+  (which `rian build` regenerates wholesale), so after eject Rian no longer owns it —
+  it becomes a normal project the user maintains, with Rian a PULL codegen step. Fails
+  closed: the source must exist and DEST must not (eject never overwrites).
+  """
+  @spec eject([String.t()]) :: non_neg_integer()
+  def eject(argv) do
+    case OptionParser.parse(argv, strict: [out: :string], aliases: [o: :out]) do
+      {opts, [target], _} when target in @eject_targets ->
+        eject_at(File.cwd!(), target, Keyword.get(opts, :out, target))
+
+      {_opts, [bad], _} ->
+        err("eject: unknown target #{inspect(bad)} (one of: #{Enum.join(@eject_targets, ", ")})")
+
+      _ ->
+        err("usage: rian eject <#{Enum.join(@eject_targets, "|")}> [-o DEST]")
+    end
+  end
+
+  @doc false
+  # the testable core: promote `<root>/_build/<target>/` to `dest` (resolved against
+  # `root`). The CLI passes `root = File.cwd!()`.
+  @spec eject_at(Path.t(), String.t(), Path.t()) :: non_neg_integer()
+  def eject_at(root, target, dest) do
+    src = Path.join([root, "_build", target])
+    dest_path = Path.expand(dest, root)
+
+    cond do
+      not File.dir?(src) ->
+        err("eject: `#{src}` does not exist — run `rian build -o .` for that target first")
+
+      File.exists?(dest_path) ->
+        err("eject: refusing to overwrite `#{dest_path}` — eject is one-way; move it aside first")
+
+      true ->
+        promote(src, dest_path)
+
+        IO.puts(
+          "ejected #{src} → #{dest_path} (now user-owned; `rian build` no longer regenerates it)"
+        )
+
+        0
+    end
+  end
+
+  # move the generated project out of `_build/`. `File.rename` is an atomic move on the
+  # common case (same filesystem); fall back to copy-then-drop across devices (`:exdev`).
+  defp promote(src, dest) do
+    case File.rename(src, dest) do
+      :ok ->
+        :ok
+
+      {:error, _} ->
+        File.cp_r!(src, dest)
+        File.rm_rf!(src)
+    end
+  end
+
   defp targets_report(src, required) do
     case Rian.Decl.parse_result(src) do
       {:error, msg} -> err("targets: #{msg}")

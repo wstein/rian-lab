@@ -17,6 +17,8 @@ defmodule Rian.CLI do
       rian build FILE --rust    # print Rust/JS/JVM source (--rust|--js|--jvm)
       rian check FILE           # run the type/exhaustiveness gates (exit 0/1)
       rian targets FILE [--require ex,rs,js]   # per-function reachability / gate
+      rian eject <ex|rs|js|jvm> [-o DEST]      # promote a generated _build/<target>/ to user-owned
+
 
   The actual logic lives in `Rian.Format.CLI` / `Rian.Run` / `Rian.Build`, so the same
   code backs both this escript and the `mix rian.*` tasks. This module only maps a
@@ -45,6 +47,7 @@ defmodule Rian.CLI do
   def run(["build" | rest]), do: Rian.Build.build(rest)
   def run(["check" | rest]), do: Rian.Build.check(rest)
   def run(["targets" | rest]), do: Rian.Build.targets(rest)
+  def run(["eject" | rest]), do: Rian.Build.eject(rest)
 
   def run(["-h" | _]), do: usage(0)
   def run(["--help" | _]), do: usage(0)
@@ -71,6 +74,7 @@ defmodule Rian.CLI do
       rian build FILE --rust    print Rust/JS/JVM source (--rust|--js|--jvm)
       rian check FILE           run the type/exhaustiveness gates (exit 0/1)
       rian targets FILE [--require ex,rs,js]   per-function reachability / gate
+      rian eject <ex|rs|js|jvm> [-o DEST]   promote _build/<target>/ to a user-owned project
     """)
 
     code
