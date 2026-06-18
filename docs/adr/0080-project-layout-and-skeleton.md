@@ -3,8 +3,12 @@
 **Status:** Proposed (direction) · not yet implemented — this ADR fixes the **one canonical project
 shape** and the manifest, so every Rian project looks the same and the future `rian new` has a single
 template to emit. It resolves the long-standing "Rian manifest" open item in ADR-0026/ADR-0031.
-**Implemented:** no — `rian new`, the `rian.toml` reader, and the Mix-compiler/Hex mapping are not yet
-built. The layout and the manifest schema below are the contract those tools will implement.
+**Implemented:** partial — the **`rian.toml` reader** is built (`Rian.Manifest`, §2: parse + validate
+`[project]`/`[deps]`/`[lint]`; `Rian.Reach.build_default` reads its `targets`; `test/rian/manifest_test.exs`),
+as **Phase 1 of the build system** (the foreign-file pipeline that unblocks ADR-0068 §7 / inline-string
+removal, then `rian build`/bundle/package, then `rian new`, build on it). Still **not** built: `rian new`,
+per-target foreign-file resolve/bundle (§7), and the Mix-compiler/Hex mapping. The layout below is the
+contract those remaining tools implement.
 **Refs:** ADR-0026 (BEAM ecosystem / Hex / rebar3+mix — the manifest open item this closes), ADR-0031
 (bootstrap: self-contained `rian` escript ships these commands; manifest-schema open item), ADR-0045
 (formatter — **zero-config**, so there is *no* formatter config file by design), ADR-0077 (linter —

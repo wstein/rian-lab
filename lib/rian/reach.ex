@@ -351,18 +351,33 @@ defmodule Rian.Reach do
   defp deep(t), do: t |> Tuple.to_list() |> Enum.flat_map(&find_atom_ordering/1)
 
   @doc """
-  The build-default target set (ADR-0058 §2) for modules that declare no
-  `@targets`: the `:rian_lab` app env `:rian_targets`, else `mix.exs`'s
-  `rian: [targets: […]]`, else `nil` (no default gate).
+  The build-default target set (ADR-0058 §2) for modules that declare no `@targets`,
+  resolved in priority: a `rian.toml` manifest's `targets` (ADR-0080 §2, the canonical
+  source for a real Rian project), else the `:rian_lab` app env `:rian_targets`, else
+  `mix.exs`'s `rian: [targets: […]]`, else `nil` (no default gate).
   """
   def build_default do
-    validate_default(
-      case Application.get_env(:rian_lab, :rian_targets) do
-        nil -> mix_default()
-        v -> v
+    # priority fall-through without truthy `||` (errors-as-values, ADR-0035): each
+    # source returns `nil` when absent; `with nil <- …` carries the first non-nil out.
+    resolved =
+      with nil <- manifest_default(),
+           nil <- app_env_default() do
+        mix_default()
       end
-    )
+
+    validate_default(resolved)
   end
+
+  # the manifest is the single project-metadata source (ADR-0080 §2); its `targets`
+  # already validated by `Rian.Manifest`. Absent/invalid manifest -> fall through.
+  defp manifest_default do
+    case Rian.Manifest.read() do
+      {:ok, %Rian.Manifest{targets: [_ | _] = ts}} -> ts
+      _ -> nil
+    end
+  end
+
+  defp app_env_default, do: Application.get_env(:rian_lab, :rian_targets)
 
   defp mix_default do
     if Code.ensure_loaded?(Mix.Project) and Mix.Project.get() do
