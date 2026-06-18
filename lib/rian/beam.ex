@@ -240,7 +240,7 @@ defmodule Rian.Beam do
   the loaded module atoms; cross-`mod` calls between them resolve because each is
   named `Elixir.<Mod>` — the same atom a Pascal-qualified call lowers to.
   """
-  @rian "pub def load_program(src String) Vec(Symbol)"
+  @rian_sig "pub def load_program(src String) Vec(Symbol)"
   @spec load_program(String.t()) :: [module()]
   def load_program(src) do
     src

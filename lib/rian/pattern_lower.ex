@@ -115,7 +115,7 @@ defmodule Rian.PatternLower do
   end
 
   # PascalCase / "JNum" -> snake atom ; pre-snaked atoms pass through.
-  @rian "pub def to_snake(a Symbol | String) Symbol"
+  @rian_sig "pub def to_snake(a Symbol | String) Symbol"
   @spec to_snake(atom() | String.t()) :: atom()
   def to_snake(name) when is_atom(name), do: name
 

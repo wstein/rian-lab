@@ -9,9 +9,9 @@ defmodule Rian.RoundtripTest do
       src = ~S'''
       defmodule Calc do
         use Rian.Ann
-        @rian "pub def double(x Int53) Int53"
+        @rian_sig "pub def double(x Int53) Int53"
         def double(x), do: x + x
-        @rian "pub def abs(x Int53) Int53"
+        @rian_sig "pub def abs(x Int53) Int53"
         def abs(x), do: if(x < 0, do: -x, else: x)
       end
       '''
@@ -52,7 +52,7 @@ defmodule Rian.RoundtripTest do
       src = ~S'''
       defmodule S do
         use Rian.Ann
-        @rian "pub def total(xs Vec(Int53)) Int53"
+        @rian_sig "pub def total(xs Vec(Int53)) Int53"
         def total(xs), do: Enum.sum(xs)
       end
       '''
@@ -72,7 +72,7 @@ defmodule Rian.RoundtripTest do
       src = ~S'''
       defmodule Calc do
         use Rian.Ann
-        @rian "pub def double(x Int53) Int53"
+        @rian_sig "pub def double(x Int53) Int53"
         def double(x), do: x + x
       end
       '''
@@ -90,9 +90,9 @@ defmodule Rian.RoundtripTest do
       src = ~S'''
       defmodule Arith do
         use Rian.Ann
-        @rian "pub def double(x Int53) Int53"
+        @rian_sig "pub def double(x Int53) Int53"
         def double(x), do: x + x
-        @rian "pub def sum_to(n Int53) Int53"
+        @rian_sig "pub def sum_to(n Int53) Int53"
         def sum_to(n), do: if(n <= 0, do: 0, else: n + sum_to(n - 1))
       end
       '''
@@ -135,7 +135,7 @@ defmodule Rian.RoundtripTest do
       assert r.equiv_two_paths == :diverges
 
       # and vs the original it diverges too — Elixir's injected defstruct accessors
-      # have no image in Rian's erased-struct model (and the `@rian` annotations
+      # have no image in Rian's erased-struct model (and the `@rian_sig` annotations
       # rename fields, e.g. `pub?` → `is_pub`).
       assert r.equiv_vs_origin == :diverges
     end
@@ -147,7 +147,7 @@ defmodule Rian.RoundtripTest do
       src = ~S'''
       defmodule M do
         use Rian.Ann
-        @rian "type Color := Red | Green | Blue"
+        @rian_sig "type Color := Red | Green | Blue"
       end
       '''
 
@@ -165,12 +165,12 @@ defmodule Rian.RoundtripTest do
       src = ~S'''
       defmodule Outer do
         use Rian.Ann
-        @rian "pub def a(x Int53) Int53"
+        @rian_sig "pub def a(x Int53) Int53"
         def a(x), do: x + 1
 
         defmodule Inner do
           use Rian.Ann
-          @rian "pub def b(y Int53) Int53"
+          @rian_sig "pub def b(y Int53) Int53"
           def b(y), do: y * 2
         end
       end
@@ -192,7 +192,7 @@ defmodule Rian.RoundtripTest do
       src = ~S'''
       defmodule Mk do
         use Rian.Ann
-        @rian "pub def origin() Pt"
+        @rian_sig "pub def origin() Pt"
         def origin, do: %Pt{x: 0, y: 0}
       end
       '''

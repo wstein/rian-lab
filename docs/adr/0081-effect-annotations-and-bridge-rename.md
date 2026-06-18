@@ -1,7 +1,7 @@
 # ADR-0081 — `@effects(host)` surface effect annotation; `@rian`→`@rian_sig` bridge rename
 
-**Status:** Bridge rename (§4) **Accepted — implemented**; effect surface (§1–§3) **Proposed
-(direction)**, gated on ADR-0048. This ADR fixes the **naming and shape** of the host-effect surface
+**Status:** Accepted — **bridge rename (§4) implemented**; the **effect surface (§1–§3) is direction
+only**, gated on ADR-0048. This ADR fixes the **naming and shape** of the host-effect surface
 annotation (the concrete realization of ADR-0048's "host effect") and untangles the two annotation
 *layers* (Elixir-bridge vs Rian-surface) that the `@rian`/`@rian_host` names currently conflate. It does
 not, by itself, build the effect system.

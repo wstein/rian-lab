@@ -47,12 +47,12 @@ defmodule Rian.Prim do
   @overflow_ops Enum.map(~w(wrapping_add saturating_add checked_add), &("__prim_" <> &1))
 
   @doc "The intrinsic names the reserved `Prim.*` surface exposes."
-  @rian "pub def names() Vec(String)"
+  @rian_sig "pub def names() Vec(String)"
   @spec names() :: [String.t()]
   def names, do: @prims
 
   @doc "The canonical `__prim_*` 64-bit-overflow ops (JS-unsupported; off `:js`)."
-  @rian "pub def overflow_ops() Vec(String)"
+  @rian_sig "pub def overflow_ops() Vec(String)"
   @spec overflow_ops() :: [String.t()]
   def overflow_ops, do: @overflow_ops
 

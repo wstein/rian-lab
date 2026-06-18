@@ -402,20 +402,20 @@ defmodule Rian.TranspileTest do
     end
   end
 
-  describe "@rian attribute annotations — author the type inference can't recover" do
-    test "a `@rian` def attribute supplies the signature (no --infer needed)" do
+  describe "@rian_sig attribute annotations — author the type inference can't recover" do
+    test "a `@rian_sig` def attribute supplies the signature (no --infer needed)" do
       src = ~S'''
       defmodule M do
         use Rian.Ann
-        @rian "pub def rust_param(Symbol, String) String"
+        @rian_sig "pub def rust_param(Symbol, String) String"
         def rust_param(name, val), do: val
       end
       '''
 
       out = rian(src)
       assert out =~ "pub def rust_param(name Symbol, val String) String := val"
-      # the @rian attribute + use Rian.Ann are consumed, not re-emitted as markers
-      refute out =~ "TODO[port]: @rian"
+      # the @rian_sig attribute + use Rian.Ann are consumed, not re-emitted as markers
+      refute out =~ "TODO[port]: @rian_sig"
       refute out =~ "use Rian.Ann"
     end
 
@@ -423,7 +423,7 @@ defmodule Rian.TranspileTest do
       src = ~S'''
       defmodule M do
         use Rian.Ann
-        @rian "def tag(Symbol) Bool"
+        @rian_sig "def tag(Symbol) Bool"
         defp tag(x), do: process(x)
       end
       '''
@@ -431,24 +431,24 @@ defmodule Rian.TranspileTest do
       assert Transpile.transpile(src, infer: true) =~ "def tag(x Symbol) Bool := process(x)"
     end
 
-    test "an unparseable @rian annotation is warned about, not silently dropped" do
+    test "an unparseable @rian_sig annotation is warned about, not silently dropped" do
       src = ~S'''
       defmodule M do
         use Rian.Ann
-        @rian "pub? not valid rian"
+        @rian_sig "pub? not valid rian"
         def f(x), do: x
       end
       '''
 
       warning = ExUnit.CaptureIO.capture_io(:stderr, fn -> rian(src) end)
-      assert warning =~ "unparseable @rian annotation"
+      assert warning =~ "unparseable @rian_sig annotation"
     end
 
-    test "a `@rian` struct attribute supplies the field types (heredoc multiline)" do
+    test "a `@rian_sig` struct attribute supplies the field types (heredoc multiline)" do
       src = ~S'''
       defmodule Func do
         use Rian.Ann
-        @rian """
+        @rian_sig """
         struct Func(name String, params Vec(Param),
                     ret String, is_pub Bool)
         """
@@ -461,12 +461,12 @@ defmodule Rian.TranspileTest do
       refute rian(src) =~ ~r/struct Func\([^)]*_Unk/
     end
 
-    test "a `@rian` type attribute emits the type DEFINITION (at its central home)" do
+    test "a `@rian_sig` type attribute emits the type DEFINITION (at its central home)" do
       # the type is defined ONCE, where it lives (e.g. the IR module).
       src = ~S'''
       defmodule IR do
         use Rian.Ann
-        @rian "type Expr := ENum | ECall | EIf"
+        @rian_sig "type Expr := ENum | ECall | EIf"
       end
       '''
 
@@ -478,7 +478,7 @@ defmodule Rian.TranspileTest do
       src = ~S'''
       defmodule M do
         use Rian.Ann
-        @rian "pub def f(x Expr) Int53"
+        @rian_sig "pub def f(x Expr) Int53"
         def f(x), do: g(x)
       end
       '''
@@ -493,7 +493,7 @@ defmodule Rian.TranspileTest do
       src = ~S'''
       defmodule M do
         use Rian.Ann
-        @rian "pub def wrong_name(Int53) Int53"
+        @rian_sig "pub def wrong_name(Int53) Int53"
         def f(x), do: x + 1
       end
       '''

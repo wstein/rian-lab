@@ -1,42 +1,51 @@
 defmodule Rian.Ann do
   @moduledoc """
-  **`@rian` annotations** — author a function/struct/type's exact Rian signature in the
+  **`@rian_sig` annotations** — author a function/struct/type's exact Rian signature in the
   Elixir source, for the cases the Elixir→Rian transpiler's inference can't recover (the
   public-API boundary above all; ADR-0034 declare-public). A native Rian declaration,
   so there's no Elixir→Rian translation guesswork.
 
   Used as a registered, **persisted** module attribute so it (a) compiles cleanly under
-  `--warnings-as-errors` — a bare `@rian` would warn "set but never used" — and (b) is
+  `--warnings-as-errors` — a bare `@rian_sig` would warn "set but never used" — and (b) is
   stored in the `.beam`, so tooling can read it from a compiled module without the source:
 
       defmodule Rian.IR.Func do
         use Rian.Ann
 
-        @rian \"\"\"
+        @rian_sig \"\"\"
         struct Func(name String, params Vec(Param), ret String,
                     clauses Vec(Clause), pub? Bool, tvars Vec(String))
         \"\"\"
         defstruct [...]
 
-        @rian "pub def arity(Func) Int53"
+        @rian_sig "pub def arity(Func) Int53"
         def arity(f), do: length(f.params)
       end
 
   A heredoc handles the multi-line struct/type case natively. The value is any Rian
   `def` / `pub def` / `struct` / `type` declaration head. Read it with `from_source/1`
   (Elixir text) or `from_beam/1` (a loaded module or a `.beam` path).
+
+  ## Two annotation layers (ADR-0081)
+
+  `@rian_sig` and `@rian_host` are **Elixir-bridge** annotations: they live only in
+  `lib/rian/*.ex` and describe *crossing into* Rian from the host language — the `@rian_*`
+  prefix is the namespace. They are distinct from the **Rian-surface** annotations that live
+  in `.rian` source and describe Rian semantics (`@external` per-target FFI bodies, ADR-0068;
+  `@effects(host)` the host effect, ADR-0048). The bridge marker `@rian_host` *transpiles to*
+  the surface effect `@effects(host)`; they intentionally never share a file.
   """
 
   @doc """
-  Register `@rian` as an accumulating, **persisted** attribute — so it compiles
-  warning-free (a bare `@rian` would warn "set but never used") and is stored in the
-  `.beam`, readable by tooling without the source. `@rian` is a *native Rian* annotation:
+  Register `@rian_sig` as an accumulating, **persisted** attribute — so it compiles
+  warning-free (a bare `@rian_sig` would warn "set but never used") and is stored in the
+  `.beam`, readable by tooling without the source. `@rian_sig` is a *native Rian* annotation:
   the source of truth for a function/struct/type's type, read by the Elixir→Rian
   transpiler. No Elixir `@spec`/`@type` is generated from it — Rian is the type system.
   """
   defmacro __using__(_opts) do
     quote do
-      Module.register_attribute(__MODULE__, :rian, accumulate: true, persist: true)
+      Module.register_attribute(__MODULE__, :rian_sig, accumulate: true, persist: true)
       Module.register_attribute(__MODULE__, :rian_host, accumulate: true, persist: true)
     end
   end
@@ -81,7 +90,7 @@ defmodule Rian.Ann do
   defp def_name({name, _, _}) when is_atom(name), do: to_string(name)
   defp def_name(_), do: nil
 
-  @doc "Extract every `@rian` annotation STRING from Elixir source (via its AST)."
+  @doc "Extract every `@rian_sig` annotation STRING from Elixir source (via its AST)."
   @spec from_source(String.t()) :: [String.t()]
   def from_source(source) when is_binary(source) do
     case Code.string_to_quoted(source) do
@@ -91,7 +100,7 @@ defmodule Rian.Ann do
   end
 
   @doc """
-  Extract every `@rian` annotation STRING from an ALREADY-PARSED Elixir AST — no
+  Extract every `@rian_sig` annotation STRING from an ALREADY-PARSED Elixir AST — no
   re-parse. The live-source path: the transpiler already holds the module AST, so it
   reads annotations from it rather than parsing the text a second time.
   """
@@ -101,7 +110,7 @@ defmodule Rian.Ann do
   defp collect(ast) do
     {_, anns} =
       Macro.prewalk(ast, [], fn
-        {:@, _, [{:rian, _, [str]}]} = node, acc when is_binary(str) -> {node, [str | acc]}
+        {:@, _, [{:rian_sig, _, [str]}]} = node, acc when is_binary(str) -> {node, [str | acc]}
         node, acc -> {node, acc}
       end)
 
@@ -109,7 +118,7 @@ defmodule Rian.Ann do
   end
 
   @doc """
-  Extract every `@rian` annotation STRING from a compiled module's persisted attributes —
+  Extract every `@rian_sig` annotation STRING from a compiled module's persisted attributes —
   a loaded module atom or a `.beam` file path. The roundtrip / no-source reader.
   """
   @spec from_beam(module() | String.t()) :: [String.t()]
@@ -117,7 +126,7 @@ defmodule Rian.Ann do
     # guard the reflective `__info__/1` with an explicit load check instead of
     # rescuing UndefinedFunctionError (ADR-0035: no exception control flow).
     if Code.ensure_loaded?(module) do
-      module.__info__(:attributes) |> Keyword.get_values(:rian) |> List.flatten()
+      module.__info__(:attributes) |> Keyword.get_values(:rian_sig) |> List.flatten()
     else
       []
     end
@@ -128,7 +137,7 @@ defmodule Rian.Ann do
     # catch-all arm — no `rescue` needed.
     case :beam_lib.chunks(String.to_charlist(path), [:attributes]) do
       {:ok, {_mod, [{:attributes, attrs}]}} ->
-        attrs |> Keyword.get_values(:rian) |> List.flatten()
+        attrs |> Keyword.get_values(:rian_sig) |> List.flatten()
 
       _ ->
         []

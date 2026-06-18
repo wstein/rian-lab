@@ -141,7 +141,7 @@ defmodule Rian.Doctest do
   @fence ~r/```rian\n(?<body>.*?)\n```/s
 
   @doc "Each ` ```rian ` fenced block in `md`, as a Rian source string."
-  @rian "pub def fences(md String) Vec(String)"
+  @rian_sig "pub def fences(md String) Vec(String)"
   @spec fences(String.t()) :: [String.t()]
   def fences(md), do: Regex.scan(@fence, md, capture: ["body"]) |> Enum.map(&hd/1)
 

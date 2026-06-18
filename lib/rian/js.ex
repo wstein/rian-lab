@@ -121,7 +121,7 @@ defmodule Rian.JS do
   }
 
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
-  @rian "pub def compile(src String) String"
+  @rian_sig "pub def compile(src String) String"
   @spec compile(String.t()) :: String.t()
   def compile(src) do
     prog = Decl.parse(src)

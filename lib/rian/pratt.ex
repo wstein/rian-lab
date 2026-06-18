@@ -33,7 +33,7 @@ defmodule Rian.Pratt do
     Rian.Prim.normalize(ast)
   end
 
-  @rian "pub def parse_sexpr(str String) String"
+  @rian_sig "pub def parse_sexpr(str String) String"
   @spec parse_sexpr(String.t()) :: String.t()
   def parse_sexpr(str), do: sexpr(parse(str))
 

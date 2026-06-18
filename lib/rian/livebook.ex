@@ -56,7 +56,7 @@ defmodule Rian.Livebook do
   end
 
   @doc "Reset the notebook's shared session to a fresh, empty one."
-  @rian "pub def reset() Symbol"
+  @rian_sig "pub def reset() Symbol"
   @spec reset() :: :ok
   def reset do
     if pid = Process.whereis(@server), do: Agent.update(pid, fn _ -> Repl.new() end)

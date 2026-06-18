@@ -85,7 +85,7 @@ defmodule Rian.Test do
   defp with_assertions(src), do: @assert_prelude <> "\n" <> src
 
   @doc "The names of the `@test def`s declared in `src`, in source order."
-  @rian "pub def tests(src String) Vec(String)"
+  @rian_sig "pub def tests(src String) Vec(String)"
   @spec tests(String.t()) :: [String.t()]
   def tests(src), do: Decl.parse(src).funcs |> Enum.filter(& &1.test?) |> Enum.map(& &1.name)
 
@@ -95,7 +95,7 @@ defmodule Rian.Test do
     do: Decl.parse(src).funcs |> Enum.filter(& &1.test?) |> Enum.map(&{&1.name, &1.ret})
 
   @doc "Compile `src` to bytecode under `mod` and load it (idempotent reload)."
-  @rian "pub def compile!(src String, mod Symbol) Symbol"
+  @rian_sig "pub def compile!(src String, mod Symbol) Symbol"
   @spec compile!(String.t(), module()) :: module()
   def compile!(src, mod) do
     {:ok, ^mod} = Beam.load(with_assertions(src), mod)
@@ -103,7 +103,7 @@ defmodule Rian.Test do
   end
 
   @doc "Invoke one compiled test by name; returns its raw `Bool` or `Outcome` result."
-  @rian "pub def run_one(mod Symbol, name String) Bool"
+  @rian_sig "pub def run_one(mod Symbol, name String) Bool"
   @spec run_one(module(), String.t()) :: term()
   def run_one(mod, name), do: apply(mod, String.to_atom(name), [])
 
@@ -140,7 +140,7 @@ defmodule Rian.Test do
   end
 
   @doc "A stable module atom derived from the source (for one-off runs)."
-  @rian "pub def default_mod(src String) Symbol"
+  @rian_sig "pub def default_mod(src String) Symbol"
   @spec default_mod(String.t()) :: module()
   def default_mod(src), do: :"rian_test_#{:erlang.phash2(src)}"
 
@@ -150,7 +150,7 @@ defmodule Rian.Test do
   `Outcome` (matcher) test panics with the `Fail(msg)` so `rustc --test` reports
   *why* it failed. Compile/run with `rustc --test`.
   """
-  @rian "pub def rust(src String) String"
+  @rian_sig "pub def rust(src String) String"
   @spec rust(String.t()) :: String.t()
   def rust(src) do
     # Use the **whole-program** Rust assembly (`rust_program`), not the per-function
@@ -178,7 +178,7 @@ defmodule Rian.Test do
   `Outcome` (matcher) test asserts `Pass`, surfacing the `Fail` message. Run with
   `node --test`.
   """
-  @rian "pub def js(src String) String"
+  @rian_sig "pub def js(src String) String"
   @spec js(String.t()) :: String.t()
   def js(src) do
     header = ~s|import { test } from "node:test";\nimport assert from "node:assert";\n|

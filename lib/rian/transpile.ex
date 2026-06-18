@@ -29,7 +29,7 @@ defmodule Rian.Transpile do
     * constructs with **no runtime semantics** or **no Rian image** are *dropped*
       with an honest note (not flagged as work): documentation / compile-metadata /
       conformance attributes (`@typedoc`, `@doc false`, `@impl`, `@external_resource`,
-      `@enforce_keys`, `@rian`/`use Rian.Ann`); an **exception-only `defmodule`**
+      `@enforce_keys`, `@rian_sig`/`use Rian.Ann`); an **exception-only `defmodule`**
       (`defexception` — errors are values in Rian, ADR-0035); `defmacro`/`defmacrop`
       (host metaprogramming — Rian has no syntax macros); `use Application` (OTP is
       native-per-target, ADR-0057); and a `Code.ensure_loaded?` integration guard
@@ -217,8 +217,8 @@ defmodule Rian.Transpile do
   `@spec` as a cross-checked hint), leaving an honest `_Unk` hole otherwise —
   a hole signals "a human must supply this type", never an auto-filled placeholder.
 
-  **`@rian` annotations** (always honoured, with or without `infer`) are the
-  authoritative escape hatch (`Rian.Ann`): a `@rian` module attribute carrying a native
+  **`@rian_sig` annotations** (always honoured, with or without `infer`) are the
+  authoritative escape hatch (`Rian.Ann`): a `@rian_sig` module attribute carrying a native
   Rian `def`/`struct`/`type` declaration supplies the exact types inference can't
   recover. A `def` annotation overrides the function's signature; a `struct`/`type`
   annotation replaces the holes the `defstruct`/`@type` emission leaves. A heredoc gives
@@ -229,7 +229,7 @@ defmodule Rian.Transpile do
     ast = Code.string_to_quoted!(source)
     {sigmap, types} = if opts[:infer], do: infer_program(ast), else: {%{}, []}
 
-    # `@rian` annotations are authoritative — merge `def` sigs OVER inference, hand the
+    # `@rian_sig` annotations are authoritative — merge `def` sigs OVER inference, hand the
     # `struct`/`type` decls to the renderer. Read from the AST we ALREADY parsed (no
     # second parse of the source text); `Rian.Ann.from_beam/1` is the no-source reader.
     {def_anns, struct_anns, type_anns} = classify_annotations(Rian.Ann.from_ast(ast))
@@ -319,7 +319,7 @@ defmodule Rian.Transpile do
       |> render_items(sigmap, name, struct_anns, referenced)
       |> Enum.map(&indent/1)
 
-    # synthesized `type …` declarations (Phase B error sets, `@rian type`) after `mod … do`.
+    # synthesized `type …` declarations (Phase B error sets, `@rian_sig type`) after `mod … do`.
     type_lines = if types == [], do: [], else: Enum.map(types, &("  " <> &1)) ++ [""]
     ["mod #{name} do" | type_lines ++ inner] ++ ["end"]
   end
@@ -392,7 +392,7 @@ defmodule Rian.Transpile do
   defp strip_default({:\\, _, [p, _]}), do: p
   defp strip_default(p), do: p
 
-  # split `@rian` annotation strings into `{def sigmap, struct-by-name, [type decl]}`.
+  # split `@rian_sig` annotation strings into `{def sigmap, struct-by-name, [type decl]}`.
   # Whitespace is collapsed so a heredoc multi-line decl parses/emits as one line.
   defp classify_annotations(strings) do
     Enum.reduce(strings, {%{}, %{}, []}, fn raw, {defs, structs, types} ->
@@ -418,7 +418,7 @@ defmodule Rian.Transpile do
             # is unusable. Surface it instead of silently dropping it to `_Unk`
             # (the old regex path swallowed such mistakes without a trace).
             nil ->
-              IO.warn("ignoring unparseable @rian annotation: #{inspect(str)}", [])
+              IO.warn("ignoring unparseable @rian_sig annotation: #{inspect(str)}", [])
               {defs, structs, types}
           end
       end
@@ -722,7 +722,7 @@ defmodule Rian.Transpile do
 
           {:defstruct, fields} ->
             # an Elixir `defstruct` IS the module's record type → a Rian `struct` decl
-            # named for the module; a `@rian struct …` annotation supplies the field
+            # named for the module; a `@rian_sig struct …` annotation supplies the field
             # types, else they are `_Unk` holes for a human to type.
             {acc ++ flush(open, sigmap) ++ [struct_decl(mod_name, fields, struct_anns)], doc, nil}
 
@@ -837,9 +837,9 @@ defmodule Rian.Transpile do
   defp classify({:@, _, [{:external_resource, _, _}]}), do: :skip
   # `@enforce_keys` is an Elixir runtime concern subsumed by Rian's typed fields.
   defp classify({:@, _, [{:enforce_keys, _, _}]}), do: :skip
-  # `@rian` annotations are HARVESTED into the signatures/struct/type decls; the
+  # `@rian_sig` annotations are HARVESTED into the signatures/struct/type decls; the
   # `use Rian.Ann` directive is annotation support — both are consumed, not ported.
-  defp classify({:@, _, [{:rian, _, _}]}), do: :skip
+  defp classify({:@, _, [{:rian_sig, _, _}]}), do: :skip
   # `@rian_host` marks a sanctioned exception boundary for the `--check` gate
   # (`Rian.Ann.host_funcs/1`); it is metadata, not a ported declaration.
   defp classify({:@, _, [{:rian_host, _, _}]}), do: :skip
@@ -939,7 +939,7 @@ defmodule Rian.Transpile do
   defp struct_field?(_), do: false
 
   # `defstruct [:x, y: 0]` → `struct Mod(x _Unk, y _Unk)` (defaults dropped — the field
-  # NAMES port; their types and any default are for the human to fill). A `@rian struct
+  # NAMES port; their types and any default are for the human to fill). A `@rian_sig struct
   # Mod(…)` annotation (by name) supplies the field types verbatim instead.
   defp struct_decl(mod_name, fields, struct_anns) do
     case Map.get(struct_anns, mod_name) do

@@ -32,26 +32,26 @@ defmodule Rian.IR do
   # the self-host's ported form). A capability is a small sum; a type-name field is a
   # `String`; a nullable field (Elixir default `nil`) is `Option(_)`; `Pat`/`Core` are
   # the Core sums defined centrally in core.rian — referenced by name, not redeclared.
-  @rian "type Cap := Val | Iso | Ref | Tag"
+  @rian_sig "type Cap := Val | Iso | Ref | Tag"
 
-  @rian "struct Field(label Option(String), type String)"
-  @rian "struct Variant(ctor String, fields Vec(Field))"
-  @rian "struct Type(name String, variants Vec(Variant), is_pub Bool, doc Option(String))"
-  @rian "struct Range(name String, base String, lo Int53, hi Int53, is_pub Bool, doc Option(String))"
-  @rian "struct Opaque(name String, base String, is_pub Bool, doc Option(String), ops Vec(String), casts Vec(String))"
-  @rian "struct Struct(name String, fields Vec(Field), is_pub Bool, doc Option(String))"
-  @rian "struct Const(name String, type String, value String, is_pub Bool, doc Option(String))"
-  @rian "struct Use(path String, names Vec(String))"
-  @rian "struct Param(name String, type String, cap Cap)"
-  @rian "struct Clause(pats Vec(Pat), body Core, guard Option(Core))"
+  @rian_sig "struct Field(label Option(String), type String)"
+  @rian_sig "struct Variant(ctor String, fields Vec(Field))"
+  @rian_sig "struct Type(name String, variants Vec(Variant), is_pub Bool, doc Option(String))"
+  @rian_sig "struct Range(name String, base String, lo Int53, hi Int53, is_pub Bool, doc Option(String))"
+  @rian_sig "struct Opaque(name String, base String, is_pub Bool, doc Option(String), ops Vec(String), casts Vec(String))"
+  @rian_sig "struct Struct(name String, fields Vec(Field), is_pub Bool, doc Option(String))"
+  @rian_sig "struct Const(name String, type String, value String, is_pub Bool, doc Option(String))"
+  @rian_sig "struct Use(path String, names Vec(String))"
+  @rian_sig "struct Param(name String, type String, cap Cap)"
+  @rian_sig "struct Clause(pats Vec(Pat), body Core, guard Option(Core))"
 
-  @rian """
+  @rian_sig """
   struct Mod(name String, uses Vec(Use), types Vec(Type), ranges Vec(Range),
              opaques Vec(Opaque), structs Vec(Struct), consts Vec(Const),
              funcs Vec(Func), doc Option(String), targets Option(Vec(Symbol)))
   """
 
-  @rian """
+  @rian_sig """
   struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause),
               is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)),
               doc Option(String), synthetic Bool, is_test Bool,

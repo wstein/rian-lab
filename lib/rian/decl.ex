@@ -161,7 +161,7 @@ defmodule Rian.Decl do
   Errors-as-values entry point (ADR-0035/0040): parse a program, returning
   `{:ok, prog} | {:error, message}` instead of raising. The single boundary that
   turns the parser's internal raise into a value, so callers that recover from a
-  malformed source (the REPL, `rian build`/`run`, the transpiler's `@rian`
+  malformed source (the REPL, `rian build`/`run`, the transpiler's `@rian_sig`
   annotation reader) pattern-match the result rather than `try/rescue`.
   """
   @spec parse_result(String.t()) :: {:ok, map()} | {:error, String.t()}

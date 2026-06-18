@@ -73,7 +73,7 @@ defmodule Rian.Transpile.Infer do
     table
   end
 
-  @rian "pub def clear_xmod() Bool"
+  @rian_sig "pub def clear_xmod() Bool"
   @spec clear_xmod() :: boolean()
   def clear_xmod, do: :persistent_term.erase({__MODULE__, :xmod})
 
@@ -342,7 +342,7 @@ defmodule Rian.Transpile.Infer do
   Render an Elixir `@spec` type AST as a **Rian type string** — the converse of the
   harvest (ADR-0026 inverse). `_Unk` when the Elixir type has no clean Rian image
   (a tuple/map/atom-literal — a porting decision a human must make). `type_env` resolves
-  local `@type` refs. Used to convert `@spec` into a native `@rian` annotation.
+  local `@type` refs. Used to convert `@spec` into a native `@rian_sig` annotation.
   """
   @spec spec_type_to_rian(Macro.t(), map()) :: String.t()
   def spec_type_to_rian(ast, type_env \\ %{}) do

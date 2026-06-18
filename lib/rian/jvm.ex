@@ -105,7 +105,7 @@ defmodule Rian.JVM do
   }
 
   @doc "Compile `src`'s types + functions to a single Kotlin source module (a string)."
-  @rian "pub def compile(src String) String"
+  @rian_sig "pub def compile(src String) String"
   @spec compile(String.t()) :: String.t()
   def compile(src) do
     prog = Decl.parse(src)
