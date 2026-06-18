@@ -40,4 +40,30 @@ defmodule Mix.Tasks.Rian.TranspileTest do
       assert_raise Mix.Error, ~r/no \.ex\/\.exs files/, fn -> run_dir([empty]) end
     end
   end
+
+  describe "--check ratchet (ADR-0035/0040 portability gate)" do
+    test "a new incompatible construct fails --check; --update-baseline then accepts it", %{
+      dir: dir
+    } do
+      # an exception-flow boundary has no Rian image → a Rian-model-incompatible construct
+      File.write!(
+        Path.join(dir, "src/bad.ex"),
+        "def f(x) do\n  risky(x)\nrescue\n  e -> {:error, e}\nend\n"
+      )
+
+      baseline = Path.join(dir, "baseline.txt")
+
+      # no baseline yet (implicit 0) → the rescue boundary is a regression → exit non-zero
+      assert_raise Mix.Error, ~r/incompatible/, fn ->
+        run_dir([dir, "--check", "--baseline", baseline])
+      end
+
+      # record the current state, then --check passes (the count is within baseline)
+      run_dir([dir, "--check", "--update-baseline", "--baseline", baseline])
+      assert File.exists?(baseline)
+
+      out = run_dir([dir, "--check", "--baseline", baseline])
+      assert out =~ "ok"
+    end
+  end
 end
