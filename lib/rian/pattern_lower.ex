@@ -25,6 +25,7 @@ defmodule Rian.PatternLower do
   alias Rian.Core
 
   # Register a product type (struct) so struct patterns can be ordered + decomposed.
+  @rian_sig "pub def add_struct(env _Unk, name Symbol, fields Vec(_Unk)) _Unk"
   @spec add_struct(map(), term(), list()) :: map()
   def add_struct(env, name, fields) when is_list(fields) do
     s = to_snake(name)
@@ -58,6 +59,7 @@ defmodule Rian.PatternLower do
   core IR (`Rian.Core`); a surface pattern is translated via `Core.from_pat`, so
   callers and the direct tests can still pass surface tuples (ADR-0050).
   """
+  @rian_sig "pub def lower(pat Pat, env _Unk) _Unk"
   @spec lower(term(), map()) :: {term(), boolean()}
   def lower(pat, env) when not is_struct(pat), do: lower(Core.from_pat(pat), env)
   def lower(%Core.PWild{}, _env), do: {:wild, false}
@@ -115,7 +117,9 @@ defmodule Rian.PatternLower do
   end
 
   # PascalCase / "JNum" -> snake atom ; pre-snaked atoms pass through.
-  @rian_sig "pub def to_snake(a Symbol | String) Symbol"
+  # `name` is an atom-or-string union, which has no single Rian param type (`|` is
+  # return-position Result sugar only), so the param stays an honest `_Unk` hole.
+  @rian_sig "pub def to_snake(name _Unk) Symbol"
   @spec to_snake(atom() | String.t()) :: atom()
   def to_snake(name) when is_atom(name), do: name
 
