@@ -21,11 +21,14 @@ defmodule Rian.Macro do
   not "macro soup"; an invisible `<-` is. `@max_depth` remains a separate runaway
   backstop.)
   """
+  use Rian.Ann
+
   alias Rian.Pratt
 
   @max_depth 200
 
   @doc "Build a macro env from defs: [%{name, params: [String], template: String}]."
+  @rian_sig "pub def build_env(defs Vec(_Unk)) _Unk"
   @spec build_env([map()]) :: map()
   def build_env(defs) do
     Map.new(defs, fn %{name: n, params: ps, template: t} ->
@@ -85,6 +88,7 @@ defmodule Rian.Macro do
   defp introduces_failable_bind?(_), do: false
 
   # ── generic child mapping (also reused by Rian.Comptime) ───────────────
+  @rian_sig "pub def map_node(node T, f Fn(T, T)) T forall T"
   @spec map_node(term(), (term() -> term())) :: term()
   def map_node({:bin, op, l, r}, f), do: {:bin, op, f.(l), f.(r)}
   def map_node({:unary, op, x}, f), do: {:unary, op, f.(x)}
