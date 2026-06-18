@@ -75,21 +75,23 @@ A **file reference** `@external(:js, "./ffi.mjs", "fun")` (Gleam's non-BEAM form
 `{:file, path, fun}` spec and is **resolved** at build time (`Rian.External.resolve/2`, wired into
 `rian build`): the file must exist beside the source and a `.ex`/`.exs` must export the named function at
 the right arity, else the build fails closed (ADR-0080 §7 a/c). It is then **bundled** (ADR-0080 §7 b)
-for **BEAM** (`Rian.External.lower_beam/2` compiles the `.ffi.ex` and rewrites the `@external` to a
-module-reference), **JS** (`rian build --js -o DIR` copies the `.ffi.mjs` and emits an ESM `import`), and
-**Rust** (`--rust -o DIR` copies the `.ffi.rs` and includes it as a `#[path] mod`). **JVM bundling** is
-the remaining phase; until it lands the JVM emitter refuses a file-reference rather than emit a call to
-unbundled code.
+for **all four targets**: **BEAM** (`Rian.External.lower_beam/2` compiles the `.ffi.ex` and rewrites the
+`@external` to a module-reference), **JS** (`rian build --js -o DIR` copies the `.ffi.mjs` and emits an
+ESM `import`), **Rust** (`--rust -o DIR` copies the `.ffi.rs` and includes it as a `#[path] mod`), and
+**JVM** (`--jvm -o DIR` copies the `.ffi.kt` to the same package, compiled together by `kotlinc`). Each
+is verified end-to-end against its toolchain.
 
 **Deprecation path for the inline string.** The reference form is the destination; the string form is
 demoted to a constrained convenience. It is **not removed yet** because the self-hosting compiler
 (`compiler/compose_real_sum.rian`) relies on construct-the-args inline FFI, which has no reference image
-without authored foreign wrappers + the ADR-0080 §7 build integration. Removal is gated on that
-migration ("once references are ergonomic enough" — the 2026-06-18 debate consensus).
+without authored foreign wrappers. The ADR-0080 §7 build integration that wrapper migration needs is now
+**complete** (file-references bundle on all four targets), so removal is gated only on that migration
+("once references are ergonomic enough" — the 2026-06-18 debate consensus).
 
-Both forms lower through **one** emitter helper (`Rian.Decl.external_call/2`): a string passes through; a
-reference renders to its positional call. So no emitter carries per-form reference logic — `Rian.Reach`
-and the effect view are unchanged (they read the target *keys*, never the spec).
+The string and module-reference forms lower through **one** emitter helper (`Rian.External.render/2`): a
+string passes through; a reference renders to its positional call. A file-reference is bundled per target
+by the build (it never reaches `render/2`). `Rian.Reach` and the effect view are unchanged across all
+forms (they read the target *keys*, never the spec).
 
 ### 2. Reach computes the target set from the annotations (the honesty rule)
 
@@ -161,10 +163,10 @@ They do not overlap: one is "which Rian code", the other is "which host call".
 - **Embedded quotes in an inline-string spec** — a string spec containing `"` (e.g. a Rust
   `format!("{:.6}", x)`) needs the Rian lexer's `\"` escape; until then string specs must be quote-free.
   *The reference form sidesteps this entirely* (no host string), which is another reason it's preferred.
-- **File-reference bundling for JVM (ADR-0080 §7 b)** — `@external(:js, "./ffi.mjs", "fun")` is parsed,
-  **resolved** (`Rian.External.resolve/2`), and **bundled for BEAM/JS/Rust** (compile + module-ref / copy
-  + ESM import / copy + `#[path] mod`). The JVM compile/bundle/package story is not built, so the JVM
-  emitter still refuses a file-reference. The remaining blocker for emitting JVM file-references *and* for
-  removing the inline-string form.
+- ~~**File-reference bundling (ADR-0080 §7 b)**~~ — *resolved (2026-06-18):* `@external(:t, "./ffi.x",
+  "fun")` is parsed, **resolved** (`Rian.External.resolve/2`), and **bundled on all four targets**
+  (compile + module-ref / copy + ESM import / copy + `#[path] mod` / copy + same-package compile), each
+  toolchain-verified. Removing the inline-string form now hinges only on migrating the self-hosting
+  compiler's construct-the-args FFI to authored wrappers.
 - ~~**Structured spec form**~~ — *resolved (2026-06-18):* the reference form `@external(:t, Mod.fun)` /
   `:erlang.fun` is implemented (§1b), with boundary resolution in `Rian.Check`.

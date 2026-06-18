@@ -274,26 +274,32 @@ defmodule Rian.JVM do
   # an `@external` function (ADR-0068): emit the `:jvm` host body verbatim, binding
   # each param to its positional argument by name. No `:jvm` body -> off `:jvm`.
   defp function_kt(%{externals: ext} = f, _ic) when map_size(ext) > 0 do
-    case Map.get(ext, :jvm) do
-      nil ->
-        raise Unsupported, "`#{f.name}`: no `@external(:jvm, …)` body — not reachable on :jvm"
+    host =
+      case Map.get(ext, :jvm) do
+        nil ->
+          raise Unsupported, "`#{f.name}`: no `@external(:jvm, …)` body — not reachable on :jvm"
 
-      spec ->
-        host = Rian.External.render(spec, f.params)
+        # a file-reference calls the foreign top-level function (the build copies the
+        # `.ffi.kt` into the same package, compiled together); params passed by name.
+        {:file, _path, fun} ->
+          "#{fun}(#{Enum.map_join(f.params, ", ", & &1.name)})"
 
-        sig =
-          f.params
-          |> Enum.with_index()
-          |> Enum.map_join(", ", fn {p, i} -> "a#{i}: #{kt_type(p.type)}" end)
+        spec ->
+          Rian.External.render(spec, f.params)
+      end
 
-        binds =
-          f.params
-          |> Enum.with_index()
-          |> Enum.map_join(" ", fn {p, i} -> "val #{p.name} = a#{i};" end)
+    sig =
+      f.params
+      |> Enum.with_index()
+      |> Enum.map_join(", ", fn {p, i} -> "a#{i}: #{kt_type(p.type)}" end)
 
-        vis = if f.pub?, do: "", else: "private "
-        "#{vis}fun #{f.name}(#{sig}): #{kt_type(f.ret)} { #{binds} return #{host} }"
-    end
+    binds =
+      f.params
+      |> Enum.with_index()
+      |> Enum.map_join(" ", fn {p, i} -> "val #{p.name} = a#{i};" end)
+
+    vis = if f.pub?, do: "", else: "private "
+    "#{vis}fun #{f.name}(#{sig}): #{kt_type(f.ret)} { #{binds} return #{host} }"
   end
 
   defp function_kt(%{name: name, clauses: clauses, ret: ret, params: params, pub?: pub?}, ic) do

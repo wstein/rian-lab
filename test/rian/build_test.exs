@@ -190,6 +190,48 @@ defmodule Rian.BuildTest do
           assert String.trim(res) == "42"
       end
     end
+
+    @tag :jvm
+    test "bundles a :jvm file-reference: copies the .ffi.kt, compiles + runs under kotlinc/java" do
+      kotlinc = System.find_executable("kotlinc")
+      java = System.find_executable("java")
+
+      src_dir = Path.join(System.tmp_dir!(), "rian_ffi_kt_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(src_dir)
+      on_exit(fn -> File.rm_rf(src_dir) end)
+
+      File.write!(
+        Path.join(src_dir, "codec.ffi.kt"),
+        "fun encode(x: Long): Long { return x + 1 }\n"
+      )
+
+      rian = Path.join(src_dir, "prog.rian")
+
+      File.write!(
+        rian,
+        ~S|@external(:jvm, "./codec.ffi.kt", "encode") pub def enc(x val Int64) Int64| <> "\n"
+      )
+
+      out_dir = tmp_dir()
+      out = capture_io(fn -> assert Build.build([rian, "--jvm", "-o", out_dir]) == 0 end)
+
+      assert out =~ "prog.kt"
+      assert File.read!(Path.join(out_dir, "prog.kt")) =~ "return encode(x)"
+      # the foreign file is copied beside the output so it compiles in the same package
+      assert File.exists?(Path.join(out_dir, "codec.ffi.kt"))
+
+      if kotlinc && java do
+        File.write!(Path.join(out_dir, "runner.kt"), "fun main() { println(enc(41L)) }\n")
+        jar = Path.join(out_dir, "bundle.jar")
+        files = Path.wildcard(Path.join(out_dir, "*.kt"))
+
+        {_, 0} =
+          System.cmd(kotlinc, files ++ ["-include-runtime", "-d", jar], stderr_to_stdout: true)
+
+        {res, 0} = System.cmd(java, ["-jar", jar])
+        assert String.trim(res) == "42"
+      end
+    end
   end
 
   describe "build/1 — source targets" do
