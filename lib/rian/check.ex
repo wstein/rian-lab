@@ -721,6 +721,8 @@ defmodule Rian.Check do
   **not** verify an `@effects` declaration; supply `effects: Rian.Reach.effect_sets(prog)`
   to enable it.
   """
+  @rian_sig "pub def check_func(func Func) _Unk"
+  @rian_sig "pub def check_func(func Func, ic _Unk) _Unk"
   @rian_sig "pub def check_func(func Func, ic _Unk, table _Unk) _Unk"
   @spec check_func(struct(), map(), map()) :: term()
   def check_func(func, ic \\ %{}, eset \\ %{tsets: %{}, table: %{}})
