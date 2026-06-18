@@ -185,11 +185,19 @@ naming question.)
    runs on the *Elixir* source and the host effect tracks the *Rian* image, distinct layers — inference
    must not auto-exempt `rescue` (every `rescue` touches the host, so that would silence the gate).
 4. **`@external` host boundaries (done).** The transpiler renders each `@rian_host` Elixir function as
-   an `@external(:ex, "<try/rescue>")` + `@effects(host)` Rian function — the host catch lives in the
-   external body returning a `Result` (ADR-0048 §2), a host boundary, **not** portable Rian. The
-   `# @rian_host:` comment is gone from `rian/src`; the output round-trips through `Rian.Decl`. (The
-   Elixir `lib/rian` source keeps its `@rian_host` tag — it *is* the running compiler; only its
-   transpiled `.rian` image graduates.)
+   `@effects(host)` + an `@external(:ex, Rian.Mod.fun)` **reference** to the original Elixir function
+   (ADR-0068 §1b reference form) — the host catch lives in that original (a boundary, **not** portable
+   Rian). The `# @rian_host:` comment is gone from `rian/src`; the output round-trips through
+   `Rian.Decl`. (The Elixir `lib/rian` source keeps its `@rian_host` tag — it *is* the running compiler;
+   only its transpiled `.rian` image graduates.)
+
+   **Lifecycle (the migration coupling, explicit).** The `@external(:ex, Rian.Mod.fun)` delegation means
+   the ported `:ex` function is **not self-contained** — at runtime it calls the *original Elixir
+   module*, so that module must stay loaded. This is intentional for the Elixir-pass-retirement track:
+   the `.rian` image delegates to the tested original while the port matures. The coupling is **retired**
+   when the original Elixir function is replaced by a portable Rian body (or an authored `@external`
+   foreign file per ADR-0080 §7) and the delegation is dropped — at which point the `:ex` reference to
+   `Rian.Mod.fun` is removed. Until then, a regenerated `rian/src` depends on `lib/rian` being compiled.
 
 ## Alternatives considered
 

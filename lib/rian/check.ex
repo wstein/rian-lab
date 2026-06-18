@@ -996,7 +996,10 @@ defmodule Rian.Check do
 
   # `{module_atom | nil, fun_atom}` for a reference. An erlang ref (`:erlang.foo`) is a
   # bare-atom module; an Elixir ref (`Rian.Beam.load_result`) is `Elixir.`-prefixed. A
-  # single-element local ref (`foo`) has no resolvable host module → `{nil, :foo}` (skip).
+  # single-element local ref (`foo`) has no resolvable host module → `{nil, :foo}`, which
+  # `resolve_external_ref/3` SKIPS **intentionally**: a bare local name is a Rian-side
+  # function, not a host module, so it can't be checked with `function_exported?`; a typo
+  # there surfaces at runtime, not here (the resolution check covers host MFAs only).
   defp ref_mfa([single], false), do: {nil, String.to_atom(single)}
 
   defp ref_mfa(parts, true) do

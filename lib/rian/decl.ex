@@ -970,6 +970,12 @@ defmodule Rian.Decl do
   string passes through; a reference `{:ref, parts, erlang?}` becomes a positional call
   `path(p1, p2, …)` over the function's params. So a reference lowers via the existing
   string-splicing path in every emitter — one helper, no per-backend reference logic.
+
+  **Calling convention (the author's contract):** the referenced function must take the
+  **same parameters in the same order** as the Rian `def` — the args are passed
+  **positionally**. `Rian.Check`'s resolution verifies the *arity* matches, but **not**
+  the order/types; a target that reorders or retypes its params will match arity yet be
+  miswired silently. (Same trust boundary as any FFI — ADR-0068: this is FFI, not magic.)
   """
   @spec external_call(String.t() | tuple(), [map()]) :: String.t()
   def external_call(spec, _params) when is_binary(spec), do: spec
