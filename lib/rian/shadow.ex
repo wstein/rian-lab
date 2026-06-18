@@ -21,6 +21,8 @@ defmodule Rian.Shadow do
   re-declared. Each nested Rian block is its own target scope, so only rebinds
   within one block are renamed; references thread out through the rename map `r`.
   """
+  use Rian.Ann
+
   alias Rian.Core.{EBlock, ECase, EId, PCtor, PList, PStruct, PTuple, PVar}
 
   @doc """
@@ -29,6 +31,7 @@ defmodule Rian.Shadow do
   `params` are the clause parameter names (seeded so a param rebind renames);
   `fresh` is `fn base, count -> fresh_name end`, the target's fresh-name scheme.
   """
+  @rian_sig "pub def dedup(stmts Vec(_Unk), params Vec(String), fresh Fn(String, Int53, String)) Vec(_Unk)"
   @spec dedup(list(), list(), fun()) :: term()
   def dedup(stmts, params, fresh), do: ded_block(stmts, %{}, Map.new(params, &{&1, 1}), fresh)
 
