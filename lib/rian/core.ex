@@ -28,6 +28,58 @@ defmodule Rian.Core do
   opaque erasure, monomorphization) rather than recomputing from meta.
   """
 
+  use Rian.Ann
+
+  # ── Rian-surface type schema for the Core IR (ADR-0050) ──────────────────────
+  # Harvested by the Elixir→Rian transpiler to fill its `_Unk` holes (ADR-0080 §2
+  # type-design track). The two sums classify the nodes; each `struct` annotation types
+  # one node's fields. `type` is the inferred type-repr (a type string; `nil` until the
+  # checker fills it, per the moduledoc). Genuinely-heterogeneous fields — a literal
+  # `value`, a cons `tail`, `case` arms, `with` clauses, block `stmts`, map/struct/
+  # bitstring `pairs`/`fields`/`segments`, lambda `params` — stay `_Unk` honestly (no
+  # single Rian type; they need their own node types a later pass can model).
+  @rian_sig "type Pat := PWild | PVar | PLit | PChar | PAtom | PTuple | PList | PCtor | PAs | PPin | PStruct | PMap | PBitstr"
+  @rian_sig "type Expr := ENum | EStr | EChar | EId | EAtom | EUnary | EBin | ECall | EDot | EIf | ECase | EWith | EBlock | EList | EMap | EMapUpdate | EBitstr | ETuple | ELambda | ECapture | ECaptureNamed | ECapArg | ELabel | EVariant | EStruct | EConstRef"
+  @rian_sig "struct PWild(type String)"
+  @rian_sig "struct PVar(name String, type String)"
+  @rian_sig "struct PLit(value _Unk, type String)"
+  @rian_sig "struct PChar(value Int53, type String)"
+  @rian_sig "struct PAtom(name String, type String)"
+  @rian_sig "struct PTuple(elems Vec(Pat), type String)"
+  @rian_sig "struct PList(elems Vec(Pat), tail _Unk, type String)"
+  @rian_sig "struct PCtor(ctor String, args Vec(Pat), type String)"
+  @rian_sig "struct PAs(name String, pat Pat, type String)"
+  @rian_sig "struct PPin(expr Expr, type String)"
+  @rian_sig "struct PStruct(name String, fields _Unk, type String)"
+  @rian_sig "struct PMap(pairs _Unk, type String)"
+  @rian_sig "struct PBitstr(segments _Unk, type String)"
+  @rian_sig "struct ENum(text String, type String)"
+  @rian_sig "struct EStr(value String, type String)"
+  @rian_sig "struct EChar(value Int53, type String)"
+  @rian_sig "struct EId(name String, type String)"
+  @rian_sig "struct EAtom(name String, type String)"
+  @rian_sig "struct EUnary(op String, arg Expr, type String)"
+  @rian_sig "struct EBin(op String, left Expr, right Expr, type String)"
+  @rian_sig "struct ECall(fun Expr, args Vec(Expr), type String)"
+  @rian_sig "struct EDot(head Expr, name String, type String)"
+  @rian_sig "struct EIf(cond Expr, then Expr, else Expr, type String)"
+  @rian_sig "struct ECase(scrut Expr, arms _Unk, type String)"
+  @rian_sig "struct EWith(clauses _Unk, body Expr, els _Unk, type String)"
+  @rian_sig "struct EBlock(stmts _Unk, type String)"
+  @rian_sig "struct EList(elems Vec(Expr), tail _Unk, type String)"
+  @rian_sig "struct EMap(pairs _Unk, type String)"
+  @rian_sig "struct EMapUpdate(base Expr, pairs _Unk, type String)"
+  @rian_sig "struct EBitstr(segments _Unk, type String)"
+  @rian_sig "struct ETuple(elems Vec(Expr), type String)"
+  @rian_sig "struct ELambda(params _Unk, body Expr, type String)"
+  @rian_sig "struct ECapture(body Expr, type String)"
+  @rian_sig "struct ECaptureNamed(path String, arity Int53, type String)"
+  @rian_sig "struct ECapArg(n Int53, type String)"
+  @rian_sig "struct ELabel(name String, expr Expr, type String)"
+  @rian_sig "struct EVariant(enum String, ctor String, named _Unk, pairs _Unk, type String)"
+  @rian_sig "struct EStruct(name String, pairs _Unk, type String)"
+  @rian_sig "struct EConstRef(name String, type String)"
+
   defmodule PWild do
     @moduledoc "`_` — matches anything."
     defstruct type: nil
