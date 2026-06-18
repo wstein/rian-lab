@@ -135,6 +135,11 @@ defmodule Rian.JVMTest do
     },
     %{id: :interp_int, src: ~S|def f(n Int64) String := "v${n}"|, probe: ~S|println(f(42L))|},
     %{
+      id: :symbol_tag,
+      src: "def tag(s Symbol) Symbol\ndef tag(:ok) := :done\ndef tag(_) := :other\n",
+      probe: ~s|println(tag("ok")); println(tag("nope"))|
+    },
+    %{
       id: :interp_bool,
       src: ~S|def f(b Bool) String := "${b}"|,
       probe: ~S|println(f(true)); println(f(false))|
@@ -695,6 +700,21 @@ defmodule Rian.JVMTest do
       kt = jvm_kt(jvm, :interp_bool)
       assert kt =~ ~S|if (b) "true" else "false"|
       expect_jvm(jvm, :interp_bool, "true\nfalse")
+    end
+
+    @tag :jvm
+    test "a `Symbol` lowers to a Kotlin `String` — value, pattern, and param/return (ADR-0041)",
+         %{
+           jvm_batch: jvm
+         } do
+      # `:foo` is an interned-name string off the BEAM: the `Symbol` param/return type
+      # is `String`, the `:ok` pattern tests `a0 == "ok"`, and the `:done`/`:other`
+      # values are string literals.
+      kt = jvm_kt(jvm, :symbol_tag)
+      assert kt =~ "fun tag(a0: String): String"
+      assert kt =~ ~S|a0 == "ok"|
+      assert kt =~ ~S|return "done"|
+      expect_jvm(jvm, :symbol_tag, "done\nother")
     end
   end
 

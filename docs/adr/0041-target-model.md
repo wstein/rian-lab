@@ -52,9 +52,11 @@ allocation, and init-order footguns on Rust, for no observable benefit.
 - **Reach is honest about atoms/`Result` against the *emitters*, not this ADR's aspiration (2026-06-14).**
   This ADR calls atoms and `Result` architecturally portable; `Rian.Reach` reports what the emitters
   actually lower and removes a blocker as each emitter catches up. Current state:
-  - a **bare value atom** lowers on **`:ex`** (native atom) and **`:js`** (a string — `Rian.JS`), but
-    not **`:rs`** (`Rian.Lower` raises "atom is BEAM-only") or **`:jvm`** (no atom lowering) → reaches
-    `[:ex, :js]`.
+  - a **bare value atom** (`Symbol`) now lowers on **every** target → reaches `[:ex, :js, :jvm, :rs]`:
+    a native atom on **`:ex`**, an interned-name string on **`:js`** (`Rian.JS`), a `&str` literal on
+    **`:rs`** (`Rian.Lower` — owned `String` / borrowed `&str` per `Rian.Capability`), and a Kotlin
+    `String` on **`:jvm`** (`Rian.JVM`). The blocker is removed; a `Symbol` value/pattern/param/return
+    is portable (rustc- and kotlinc-verified). Ordering is still a compile error (P9, above).
   - a constructed **`Result`** (`{:ok,_}`/`{:error,_}`) lowers on **`:ex`** (tuple), **`:rs`** (`Ok`/`Err`),
     and **`:js`** (`["ok", v]`), but not **`:jvm`** (no tuple/`case` lowering yet) → reaches `[:ex, :rs, :js]`.
 

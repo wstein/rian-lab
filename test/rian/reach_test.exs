@@ -236,11 +236,12 @@ defmodule Rian.ReachTest do
   end
 
   describe "atoms/Result are honest against the emitters (ADR-0041 vs emitter)" do
-    test "a bare value atom reaches `:ex`+`:js` but is off `:rs`/`:jvm`" do
+    test "a bare value atom (`Symbol`) reaches every target (ADR-0041)" do
       rep = reach("def f(s Symbol) Bool := s == :foo")
-      # JS lowers an atom to a string; Rust raises BEAM-only, JVM has no atom lowering
-      assert targets(rep, "f") == [:ex, :js]
-      assert [%{kind: :atom, kills: [:rs, :jvm]}] = entry(rep, "f").blockers
+      # a `Symbol` is a native atom on the BEAM and an interned-name string elsewhere
+      # (`Rian.JS`/`Rian.Lower`/`Rian.JVM` all lower it) — portable, no blocker.
+      assert targets(rep, "f") == [:ex, :js, :jvm, :rs]
+      refute Enum.any?(entry(rep, "f").blockers, &(&1.kind == :atom))
     end
 
     test "a constructed Result reaches `:ex`+`:rs`+`:js` but is off `:jvm`" do

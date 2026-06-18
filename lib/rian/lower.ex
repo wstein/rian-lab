@@ -1298,8 +1298,16 @@ defmodule Rian.Lower do
   # signature promises. Applied per clause arm in `rust_fn` and to impl-method
   # bodies in `rust_impl_method`; `.to_string()` is a no-op clone when the body
   # already yields a `String` (e.g. a `<>` concat that lowered to `format!`).
-  defp coerce_ret(body, "String"), do: "(#{body}).to_string()"
-  defp coerce_ret(body, _ret), do: body
+  defp coerce_ret(body, ret) do
+    if string_repr?(ret), do: "(#{body}).to_string()", else: body
+  end
+
+  # types whose Rust representation is an owned `String` / borrowed `&str`: the literal
+  # `String`, and a `Symbol` (`:foo`), which lowers to a string (ADR-0041). A body that
+  # yields a `&str` (a literal, a `Symbol` value) must `.to_string()` for an owned return.
+  defp string_repr?("String"), do: true
+  defp string_repr?("Symbol"), do: true
+  defp string_repr?(_), do: false
 
   # A `String | E` return wraps its value in `Ok(…)`/`Err(…)` (ADR-0040): an
   # `Ok("hi")` is `Result<&str, _>`, not the `Result<String, _>` the signature
@@ -1310,7 +1318,7 @@ defmodule Rian.Lower do
   # the payload is already a `String`.
   defp result_str_flags(ret) do
     case result_parts(ret) do
-      {:result, ok, err} -> {ok == "String", err == "String"}
+      {:result, ok, err} -> {string_repr?(ok), string_repr?(err)}
       _ -> {false, false}
     end
   end
@@ -1564,7 +1572,7 @@ defmodule Rian.Lower do
         # or `def to_list(b) := case b do Bag(xs) -> xs end`), leaving owned leaves alone.
         arm =
           cond do
-            func.ret == "String" and rebinds == [] -> coerce_string_ast(ast, ec)
+            string_repr?(func.ret) and rebinds == [] -> coerce_string_ast(ast, ec)
             match?("Vec(" <> _, func.ret) and rebinds == [] -> coerce_owned_vec_ast(ast, ec)
             match?("Vec(" <> _, func.ret) and tail_slice_id?(ast, ec) -> "(#{arm}).to_vec()"
             true -> coerce_ret(arm, func.ret)
@@ -1979,7 +1987,9 @@ defmodule Rian.Lower do
   defp pat_rs(%PTuple{elems: [%PAtom{name: "ok"}, p]}, m), do: "Ok(#{pat_rs(p, m)})"
   defp pat_rs(%PTuple{elems: [%PAtom{name: "error"}, p]}, m), do: "Err(#{pat_rs(p, m)})"
   defp pat_rs(%PTuple{elems: ps}, m), do: "(#{Enum.map_join(ps, ", ", &pat_rs(&1, m))})"
-  defp pat_rs(%PAtom{name: a}, _), do: raise("Erlang atom pattern is BEAM-only: :#{a}")
+  # a `Symbol` pattern matches the atom's interned name as a `&str` literal (ADR-0041),
+  # mirroring the value emit; the `:ok`/`:error` Result tags are handled above.
+  defp pat_rs(%PAtom{name: a}, _), do: str_lit(a)
   defp pat_rs(%Core.PBitstr{}, _), do: raise("bitstring patterns are BEAM-only (ADR-0078)")
   defp pat_rs(%Core.PPin{}, _), do: raise("pin patterns not yet lowered to Rust (guard form)")
 
@@ -2098,9 +2108,11 @@ defmodule Rian.Lower do
   defp emit(%EId{name: "pi"}, :elixir, _ec), do: {":math.pi()", 12}
   defp emit(%EId{name: "pi"}, :rust, _ec), do: {"std::f64::consts::PI", 12}
   defp emit(%EId{name: x}, _t, _ec), do: {x, 12}
-  # atom literal / Erlang FFI (BEAM-only on Rust)
+  # a `Symbol` (`:foo`) is a native atom on the BEAM and an interned-name string
+  # elsewhere (ADR-0041): equality-only, so it lowers to a Rust `&str` literal (a JS
+  # string, `Rian.JS`). Erlang FFI (`:mod.fun`) stays BEAM-only.
   defp emit(%EAtom{name: a}, :elixir, _ec), do: {":" <> a, 12}
-  defp emit(%EAtom{name: a}, :rust, _ec), do: raise("Erlang atom is BEAM-only: :#{a}")
+  defp emit(%EAtom{name: a}, :rust, _ec), do: {str_lit(a), 12}
   defp emit(%EDot{head: %EAtom{name: m}, name: n}, :elixir, _ec), do: {":#{m}.#{n}", 12}
 
   defp emit(%EDot{head: %EAtom{name: m}}, :rust, _ec),

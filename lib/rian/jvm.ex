@@ -43,9 +43,10 @@ defmodule Rian.JVM do
   `listOf(h, …) + t`; clause/`case` patterns test `size` (exact for a closed list,
   `>=` for a cons), match fixed elements by index (`acc[i]`), and bind the rest with
   `acc.drop(n)`. The `Str`/`Char` prims over codepoint lists are lowered
-  (`str_chars`/`str_from_chars`/`str_concat`/`char_code`). **Not yet** (raise
-  `Rian.JVM.Unsupported`): tuples, maps, structs, atoms/`Symbol`, `with`, lambdas,
-  protocols, general FFI.
+  (`str_chars`/`str_from_chars`/`str_concat`/`char_code`). A `Symbol`/atom (`:foo`)
+  lowers to a Kotlin `String` — its interned name (ADR-0041) — as a value, a pattern
+  test (`a0 == "ok"`), and a param/return type. **Not yet** (raise
+  `Rian.JVM.Unsupported`): tuples, maps, structs, `with`, lambdas, protocols, general FFI.
 
   ## Capabilities
 
@@ -60,6 +61,7 @@ defmodule Rian.JVM do
   alias Rian.{Check, Core, Decl, Pratt}
 
   alias Rian.Core.{
+    EAtom,
     EBin,
     EBlock,
     ECall,
@@ -73,6 +75,7 @@ defmodule Rian.JVM do
     ENum,
     EStr,
     EUnary,
+    PAtom,
     PChar,
     PCtor,
     PList,
@@ -391,6 +394,8 @@ defmodule Rian.JVM do
   defp pat_match(%PWild{}, _acc), do: {[], []}
   defp pat_match(%PVar{name: n}, acc), do: {[], [{n, acc}]}
   defp pat_match(%PLit{value: v}, acc), do: {["#{acc} == #{lit_kt(v)}"], []}
+  # a `Symbol` pattern (`:ok`) tests the interned name as a Kotlin `String` (ADR-0041).
+  defp pat_match(%PAtom{name: a}, acc), do: {["#{acc} == #{kt_str(a)}"], []}
   defp pat_match(%PChar{value: cp}, acc), do: {["#{acc} == #{cp}L"], []}
 
   defp pat_match(%PCtor{ctor: ctor, args: args}, acc) do
@@ -480,6 +485,8 @@ defmodule Rian.JVM do
   defp expr_kt(%EConstRef{name: name}), do: name
   defp expr_kt(%EChar{value: cp}), do: "#{cp}L"
   defp expr_kt(%EStr{value: s}), do: kt_str(s)
+  # a `Symbol` value (`:foo`) lowers to its interned name as a Kotlin `String` (ADR-0041).
+  defp expr_kt(%EAtom{name: a}), do: kt_str(a)
   defp expr_kt(%EId{name: b}) when b in ~w(true false), do: b
   # a bare PascalCase id is a nullary sum variant -> its singleton `object`
   defp expr_kt(%EId{name: x}), do: x
@@ -676,6 +683,10 @@ defmodule Rian.JVM do
         "Boolean"
 
       t == "String" ->
+        "String"
+
+      # a `Symbol` (`:foo`) is an interned-name `String` off the BEAM (ADR-0041).
+      t == "Symbol" ->
         "String"
 
       t == "Char" ->

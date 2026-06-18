@@ -44,7 +44,9 @@ defmodule Rian.PrimitiveTest do
   end
 
   test "Rust enum fields map Crystal primitives to Rust spellings" do
-    assert Lower.compile(types(), func()).rust =~ "P(i64, f64, String, bool, Symbol)"
+    # a `Symbol` field lowers to an owned `String` (ADR-0041) — `Symbol` is not a Rust
+    # type; off the BEAM an atom is its interned-name string.
+    assert Lower.compile(types(), func()).rust =~ "P(i64, f64, String, bool, String)"
   end
 
   test "return type lowers per target (Int64 -> i64 / integer())" do

@@ -76,6 +76,9 @@ defmodule Rian.Capability do
   @rian_sig "pub def owned(a String) String"
   @spec owned(String.t()) :: String.t()
   def owned("String"), do: "String"
+  # a `Symbol` (`:foo`) is an interned-name string off the BEAM (ADR-0041), so it shares
+  # `String`'s owned/borrowed Rust spelling (`String` / `&str`).
+  def owned("Symbol"), do: "String"
 
   # `Int` is arbitrary precision (ADR-0064) — it needs a bignum on Rust (`i128` is
   # still bounded), which is not implemented. Fail loudly instead of emitting an
@@ -126,6 +129,7 @@ defmodule Rian.Capability do
   @rian_sig "pub def borrowed(a String) String"
   @spec borrowed(String.t()) :: String.t()
   def borrowed("String"), do: "&str"
+  def borrowed("Symbol"), do: "&str"
 
   def borrowed("Vec(" <> rest) do
     # strip only the closing `)` of this `Vec(` (see `owned/1`), so a nested element

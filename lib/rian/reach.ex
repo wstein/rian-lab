@@ -29,12 +29,12 @@ defmodule Rian.Reach do
       portable per ADR-0041); only FFI *calls* are flagged.
     * Clause-head patterns are scanned only for as-patterns (`name @ pat`),
       bitstring patterns (`<<…>>`), and pins (`^x`) — emitter gaps off the typed/JVM
-      targets; all other blockers (FFI, atoms) live in bodies/guards.
+      targets; the FFI blocker lives in call bodies/guards.
 
   Reach models **architectural** reachability (what a target *can* run — `ref` off
   the BEAM, `Int64` off JS, FFI off non-BEAM). It deliberately does NOT track an
-  emitter's **implementation status** (atoms/`with`/lambdas not *yet* lowered on JS;
-  tuples/lists/maps not *yet* on the Tier-2 JVM) — those are portable by
+  emitter's **implementation status** (`with`/lambdas not *yet* lowered on JS;
+  tuples/maps not *yet* on the Tier-2 JVM) — those are portable by
   design (ADR-0041/0040/0049) and will land. That gap is reported by a per-emitter
   capability pre-check (`Rian.JS`/`Rian.JVM` `reject_unsupported!`), which fails fast
   with a clear "not yet supported on :js/:jvm" message — keeping this matrix honest
@@ -619,15 +619,6 @@ defmodule Rian.Reach do
       kills: [:rs]
     }
 
-  # A bare value atom (`:foo`, a `Symbol` literal): lowered on the BEAM (native atom)
-  # and on JS (a string, `Rian.JS` `EAtom` clause), but **not** on Rust (`Rian.Lower`
-  # raises "atom is BEAM-only") or JVM (atoms listed unsupported). ADR-0041 deems atoms
-  # architecturally portable; Reach reports what the emitters actually lower (the matrix
-  # matches the emitters, not the aspiration — ADR-0000). FFI module-head atoms and
-  # Result tags are consumed by their own `scan` clauses, so this fires only on values.
-  defp bare_atom_blocker,
-    do: %{construct: "bare atom literal (`:foo`)", kind: :atom, kills: [:rs, :jvm]}
-
   # A map literal `%{…}` (ADR-0033): lowered on the BEAM (native map) and on JS (a
   # plain object, `Rian.JS`'s `EMap` clause), but **not** on Rust (`Rian.Lower` raises
   # "map literals are BEAM-only in PoC") or JVM (`Core.EMap` is in `@jvm_unsupported`).
@@ -942,9 +933,12 @@ defmodule Rian.Reach do
   defp classify(%Core.ECall{fun: %Core.EId{name: f}}, _modnames, {bl, ca}),
     do: {bl, MapSet.put(ca, f)}
 
-  # a bare value atom that escaped the FFI-head and Result-tag `scan` clauses above —
-  # off every non-BEAM target (no emitter lowers it).
-  defp classify(%Core.EAtom{}, _modnames, {bl, ca}), do: {[bare_atom_blocker() | bl], ca}
+  # a bare value atom (`:foo`) is a `Symbol` — portable everywhere (ADR-0041): a native
+  # atom on the BEAM, an interned-name string on JS/Rust/JVM (`Rian.JS`/`Rian.Lower`/
+  # `Rian.JVM` all lower it). No blocker. (FFI module-head atoms and Result tags are
+  # consumed by their own `scan` clauses above; ordering a `Symbol` is a separate compile
+  # error — `find_atom_ordering` — since atom term-order isn't portable.)
+  defp classify(%Core.EAtom{}, _modnames, acc), do: acc
 
   # a map literal `%{…}` — atom-key maps lower on BEAM/JS (off Rust/JVM); a non-atom
   # (computed) key `%{expr => v}` has no faithful JS-object lowering (`Rian.JS` raises),

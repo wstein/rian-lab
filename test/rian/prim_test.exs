@@ -178,12 +178,13 @@ defmodule Rian.PrimTest do
       assert m.fcount({:bag, [1, 2, 3]}) == 3
       assert m.fcount({:words, ["a", "b"]}) == 2
 
-      # reach is honest: a SUM-dispatching protocol consumer is `[:ex, :js]` (the
-      # constructor-tag atom in the dispatcher pins off `:rs`/`:jvm`) — exactly the
-      # reach of the shipped `Show`-over-`Expr`; associated types erase, no change.
+      # reach is honest: a SUM-dispatching protocol consumer is `[:ex, :js, :rs]` — the
+      # runtime dispatcher pins it off `:jvm` (the JVM emitter has no protocol lowering
+      # yet, ADR-0042), but Rust monomorphises the impls behind a trait, so `:rs` is
+      # reachable (the associated-type Foldable compiles+runs on rustc, ADR-0074).
       rep = Rian.Reach.analyze(Rian.Decl.parse(src))
-      assert Enum.sort(MapSet.to_list(reach_entry(rep, "fcount").reach)) == [:ex, :js]
-      # the underlying concrete fold IS all-target — only the dispatcher gates it.
+      assert Enum.sort(MapSet.to_list(reach_entry(rep, "fcount").reach)) == [:ex, :js, :rs]
+      # the underlying concrete fold IS all-target — only the dispatcher's `:jvm` gate bites.
       assert Enum.sort(MapSet.to_list(reach_entry(rep, "len_l").reach)) == [:ex, :js, :jvm, :rs]
     end
 

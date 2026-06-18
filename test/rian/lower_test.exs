@@ -174,12 +174,9 @@ defmodule Rian.LowerTest do
       assert Lower.emit_expr("a or b", :rust) == "a || b"
     end
 
-    test "an Erlang atom literal is BEAM-only — Rust raises, Elixir keeps it" do
+    test "a `Symbol` (`:foo`) keeps its atom on Elixir and lowers to a `&str` on Rust (ADR-0041)" do
       assert Lower.emit_expr(":foo", :elixir) == ":foo"
-
-      assert_raise RuntimeError, ~r/Erlang atom is BEAM-only/, fn ->
-        Lower.emit_expr(":foo", :rust)
-      end
+      assert Lower.emit_expr(":foo", :rust) == ~s|"foo"|
     end
   end
 
@@ -440,6 +437,36 @@ defmodule Rian.LowerTest do
           assert String.trim(out) == "ok"
       end
     end
+
+    @tag :rust
+    test "a `Symbol` function compiles and runs under rustc — `&str`/`String` (ADR-0041)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          p =
+            Decl.parse("def tag(s Symbol) Symbol\ndef tag(:ok) := :done\ndef tag(_) := :other\n")
+
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_sym_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            Lower.rust_program(p) <>
+              ~s|\nfn main() { assert_eq!(tag("ok"), "done"); assert_eq!(tag("x"), "other"); println!("ok"); }\n|
+          )
+
+          {_, 0} =
+            System.cmd(rustc, ["--edition", "2021", src, "-o", bin], stderr_to_stdout: true)
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "ok"
+      end
+    end
   end
 
   describe "rust_program (whole-program assembly)" do
@@ -496,7 +523,7 @@ defmodule Rian.LowerTest do
       assert rust =~ "if *c == hd(vec![*c])"
     end
 
-    test "an Erlang atom pattern raises on Rust (BEAM-only)" do
+    test "a `Symbol` pattern matches the interned name as a `&str` literal on Rust (ADR-0041)" do
       func = %{
         name: "h",
         params: [%{name: "x", type: "Symbol", cap: :val}],
@@ -507,9 +534,9 @@ defmodule Rian.LowerTest do
         ]
       }
 
-      assert_raise RuntimeError, ~r/Erlang atom pattern is BEAM-only/, fn ->
-        Lower.to_rust(func, [], %{})
-      end
+      rust = Lower.to_rust(func, [], %{})
+      assert rust =~ "fn h(x: &str)"
+      assert rust =~ ~s|"foo" => 1|
     end
   end
 

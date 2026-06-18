@@ -277,8 +277,16 @@ defmodule Rian.InterpTest do
       assert Enum.any?(parts, &match?({:call, {:id, "show"}, [id: "c"]}, &1))
     end
 
-    test "user-`Show` over a sum is honestly `[:ex, :js]` (the constructor-tag atom pins off :rs/:jvm)" do
-      assert reach(@sum_src, "describe").reach |> MapSet.to_list() |> Enum.sort() == [:ex, :js]
+    test "user-`Show` over a sum is honestly `[:ex, :js, :rs]` (the dispatcher pins off :jvm only)" do
+      # Rust monomorphises the `Show` impls behind a trait (rustc-verified), so `:rs` is
+      # reachable; only `:jvm` is pinned, by the runtime dispatcher (ADR-0042 — the JVM
+      # emitter has no protocol lowering yet). The constructor-tag atoms are portable
+      # `Symbol`s (ADR-0041), not a blocker.
+      assert reach(@sum_src, "describe").reach |> MapSet.to_list() |> Enum.sort() == [
+               :ex,
+               :js,
+               :rs
+             ]
     end
 
     test "a struct with an `impl Show` interpolates the whole value via `show/1`" do

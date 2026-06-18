@@ -174,7 +174,7 @@ sections; they are tracked here so the corpus has one place to look:
   (`get`/`has`/`put` bounded `forall K: Eq` over a generic `Pair(k K, v V)`, Int64 + String keys,
   [18_dict_eq.rian](../examples/rian/18_dict_eq.rian)) — both run by their own `@test`s + doctests
   on BEAM/JS. *Still open:* dynamic (`dyn`) dispatch.
-- **JS emitter completeness** (ADR-0049) — `with`/lambdas/atoms/FFI still raise `Unsupported`
+- **JS emitter completeness** (ADR-0049) — `with`/lambdas/FFI still raise `Unsupported`
   ([js.ex](../lib/rian/js.ex)); a browser playground that runs the compiler client-side needs them.
 - **Two-Elixir-emitter consolidation** — *resolved*. The Erlang abstract-forms backend
   ([beam.ex](../lib/rian/beam.ex)) is the real BEAM path; [lower.ex](../lib/rian/lower.ex)'s Elixir
