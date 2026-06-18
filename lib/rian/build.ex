@@ -37,12 +37,13 @@ defmodule Rian.Build do
     end
   end
 
-  # Resolve every file-reference `@external` against the source's directory before
-  # emitting (ADR-0080 §7 a/c): a missing foreign file / absent export fails the build
-  # closed, never a silent stub. A program with no file-references resolves trivially.
-  # Parse errors-as-values here, mirroring `check`/`targets`.
+  # Resolve every file-reference `@external` against the **project root** — the nearest
+  # `rian.toml` dir, else the source's own dir (ADR-0080 §7 a/c): a missing foreign file
+  # / absent export fails the build closed, never a silent stub. Anchoring on the root
+  # makes a reference stable regardless of which entry inside the project is built. A
+  # program with no file-references resolves trivially. Parse errors-as-values here.
   defp resolve_then_emit(opts, file, src) do
-    src_dir = Path.dirname(file)
+    src_dir = Rian.Manifest.root(Path.dirname(file))
 
     with {:ok, prog} <- Rian.Decl.parse_result(src),
          :ok <- Rian.External.resolve(prog, src_dir) do

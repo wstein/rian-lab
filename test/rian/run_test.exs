@@ -110,6 +110,39 @@ defmodule Rian.RunTest do
       assert Run.run_file(path) == {:ok, 42}
     end
 
+    test "a multi-dir project resolves file-references against the project root (rian.toml)" do
+      # layout: root/rian.toml, root/ffi/Codec.ffi.ex, root/src/app.rian. The entry
+      # sits in src/ but references the FFI project-root-relative (`ffi/…`), which
+      # resolves because the base is the manifest's dir, not the entry's (ADR-0080 §7).
+      root = Path.join(System.tmp_dir!(), "rian_run_proj_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(Path.join(root, "ffi"))
+      File.mkdir_p!(Path.join(root, "src"))
+      on_exit(fn -> File.rm_rf(root) end)
+
+      File.write!(Path.join(root, "rian.toml"), ~s|[project]\nname = "x"\nversion = "1"\n|)
+
+      File.write!(
+        Path.join([root, "ffi", "RunMfCodec.ffi.ex"]),
+        "defmodule RunMfCodec do\n  def twice(x), do: x * 2\nend\n"
+      )
+
+      entry = Path.join([root, "src", "app.rian"])
+
+      File.write!(
+        entry,
+        ~S|@external(:ex, "ffi/RunMfCodec.ffi.ex", "twice") pub def twice(x Int53) Int53| <>
+          "\npub def main() Int53 := twice(21)\n"
+      )
+
+      on_exit(fn ->
+        for atom <- [:"Elixir.RianCompiled", :"Elixir.RunMfCodec"] do
+          :code.purge(atom) && :code.delete(atom)
+        end
+      end)
+
+      assert Run.run_file(entry) == {:ok, 42}
+    end
+
     test "a file-reference with no usable base dir (string eval) is a clear error" do
       src =
         ~S|@external(:ex, "./x.ffi.ex", "go") pub def go(x Int53) Int53| <>

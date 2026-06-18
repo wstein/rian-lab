@@ -37,7 +37,10 @@ defmodule Rian.Run do
   def run_file(path, main \\ "main") do
     case File.read(path) do
       {:ok, src} ->
-        with {:ok, mod, fun} <- resolve(src, main, Path.dirname(path)) do
+        # resolve `@external` file-references against the project root (nearest
+        # `rian.toml` dir), else the entry's own dir — so a reference is stable
+        # wherever the entry sits in the project (ADR-0080 §7).
+        with {:ok, mod, fun} <- resolve(src, main, Rian.Manifest.root(Path.dirname(path))) do
           {:ok, apply(mod, fun, [])}
         end
 
