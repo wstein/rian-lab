@@ -1991,6 +1991,15 @@ defmodule Rian.Check do
     Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, eset), do: nil end)
   end
 
+  # The program inference context — the type/function/ctor tables `program_ic/1`
+  # precomputes once and threads through inference (ADR-0050). `tdefs` (type name →
+  # its ctor names) is the one cleanly typed bucket; the rest are tuple-keyed or
+  # nested tables left `_Unk` until each is modelled.
+  @rian_sig """
+  type Ic := Ic(tdefs Dict(String, Vec(String)), funs _Unk, fsigs _Unk, ctors _Unk,
+                ranges _Unk, opaques _Unk, impls _Unk, fbounds _Unk)
+  """
+
   @doc """
   Build the inference context (`:tdefs`/`:funs`/`:ctors`) for a parsed program.
 
@@ -1998,6 +2007,7 @@ defmodule Rian.Check do
   threads session declarations into expression typing — can reuse the same
   context-building rules as `check_program/1` without re-running the checker.
   """
+  @rian_sig "pub def program_ic(prog Prog) Ic"
   @spec program_ic(map()) :: %{
           tdefs: map(),
           funs: map(),
