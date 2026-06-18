@@ -32,7 +32,7 @@ syntax highlighter, formatter, or third-party tooling can rely on.
 `Rian.Pratt.opinfo`). Lower level binds tighter:
 
 | Level | Operators | Assoc |
-|---|---|---|
+| --- | --- | --- |
 | prefix | `-` `not` (bind tighter than any binary) | — |
 | 3 | `*` `/` `rem` `div` | left |
 | 4 | `+` `-` | left |
