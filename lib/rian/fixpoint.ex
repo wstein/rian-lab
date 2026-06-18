@@ -46,7 +46,8 @@ defmodule Rian.Fixpoint do
 
   `project` maps one Rian token (tagged tuple/atom) to its reference-token shape.
   """
-  @rian_sig "pub def check(mod Symbol, corpus Vec(String), project _Unk) _Unk"
+  @rian_sig "pub def check(mod Symbol, corpus Vec(String), project Fn(_Unk, _Unk)) _Unk"
+  @rian_sig "pub def check(mod Symbol, corpus Vec(String), project Fn(_Unk, _Unk), reference Fn(String, Vec(_Unk))) _Unk"
   @spec check(lexer_mod(), [String.t()], (term() -> term()), (String.t() -> [term()])) ::
           :ok | {:mismatch, String.t(), [term()], [term()]}
   def check(mod, corpus, project, reference \\ &Rian.Lexer.expr_tokens/1) do
