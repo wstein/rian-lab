@@ -1,4 +1,4 @@
-# ADR-0081 — `@effects`/`@host` surface effect annotations; `@rian`→`@sig`, `@rian_host`→`@host` bridge rename
+# ADR-0081 — `@effects`/`@host` surface effect annotations; `@rian`→`@rian_sig` bridge rename
 
 **Status:** Proposed (direction) · not yet implemented — this ADR fixes the **naming and shape** of the
 host-effect surface annotation (the concrete realization of ADR-0048's "host effect") and untangles the
@@ -6,7 +6,7 @@ two annotation *layers* (Elixir-bridge vs Rian-surface) that the `@rian`/`@rian_
 conflate. It does not, by itself, build the effect system.
 **Implemented:** no — the host effect stays an inferred `:ex` pin (ADR-0058) and the transpiler keeps
 emitting the interim `# @rian_host:` comment (ADR-0048) until ADR-0048's effect surface lands. The
-bridge rename (`@rian`→`@sig`, `@rian_host`→`@host`) is a mechanical follow-up that *can* land
+bridge rename (`@rian`→`@rian_sig`, keeping `@rian_host`) is a mechanical follow-up that *can* land
 independently; staged in §5.
 **Refs:** ADR-0048 (effect tracking — the `host` effect this gives a surface), ADR-0068 (`@external`:
 target-scoped FFI *bodies* — the mechanism this is explicitly **not**, §3), ADR-0034 (infer-local /
@@ -19,9 +19,11 @@ marks)
 **Owners:** Elena Rostova (FFI / lowering) · Maya Lin (emitters / grammar) · Samir Patel
 (no-silent-non-portability guard) · Arthur Pendelton (Reach) · Kira Neri (honesty) · Rachel Okafor (PM)
 **Origin:** the annotation-naming debate (2026-06-18). Consensus on `@host`-not-`@foreign` and on
-splitting the bridge/surface namespaces; two directional calls taken on top of the consensus —
-**`@host` as sugar for a general `@effects(host)` row**, and **rename `@rian` → `@sig`** (with
-`@rian_host` → `@host` as the coherent completion).
+splitting the bridge/surface namespaces; directional calls taken on top of the consensus —
+**`@host` as sugar for a general `@effects(host)` row**, and **rename `@rian` → `@rian_sig`** (a
+follow-up note clarified that the bridge annotations live in *Elixir* source, so the `@rian_*` prefix
+is the correct, meaningful namespace there — `@rian_sig`/`@rian_host` are kept as honest siblings, not
+flattened to `@sig`/`@host`).
 
 ## Context
 
@@ -112,23 +114,34 @@ emitting the `# @rian_host:` comment introduced for the marker cleanup — see �
 The spec must carry this table verbatim; the two are the most confusable pair in the annotation
 vocabulary and the reason `@foreign` is rejected.
 
-### 4. Bridge rename: `@rian` → `@sig`, `@rian_host` → `@host`
+### 4. Bridge rename: `@rian` → `@rian_sig` (keep `@rian_host`)
 
-The Elixir-bridge annotations are renamed to describe *what they mean*, not *which language they bridge
-to*:
+The bridge annotations live in **Elixir** source, alongside `@doc`/`@spec`/`@impl`. There, the
+`@rian_*` prefix is not noise — it is the **namespace** that says "this attribute is the Elixir→Rian
+bridge," and it keeps the annotation from reading as a generic Elixir construct. Flattening `@rian` to
+`@sig` would *drop* that namespace and, worse, invite confusion with `@spec` (which `@rian` deliberately
+does **not** generate — Rian is the type system). So the bridge stays namespaced:
 
-- `@rian` → **`@sig`** — it embeds a Rian **signature** (`@sig "pub def arity(Func) Int53"`).
-- `@rian_host` → **`@host`** — it tags a host-effect boundary, the same word as the Rian surface.
+- `@rian` → **`@rian_sig`** — embeds a Rian **signature** (`@rian_sig "pub def arity(Func) Int53"`).
+- `@rian_host` → **kept** — already correctly namespaced.
 
-This is the *fix* for the false-sibling problem, not a new collision: `@rian`/`@rian_host` only
-*looked* related; `@sig` (signature embedding) and `@host` (effect tag) are honestly orthogonal.
-Bridge `@host` and surface `@host` share a spelling but **never share a file** (`.ex` vs `.rian`), so
-the compiler never sees both at once; the shared name makes the cross-boundary mapping legible:
+This *resolves* the original "false sibling" complaint by making the siblings **true**: `@rian_sig` and
+`@rian_host` are two sub-kinds (`sig`, `host`) of one Elixir-bridge family (`@rian_*`), rather than a
+bare base (`@rian`) with a lone modifier (`@rian_host`) that read as base-plus-suffix. The Rian
+*surface* host effect is the separate `@host`/`@effects(host)` (§1), so the layers stay distinct **and**
+get distinct spellings — the cross-boundary mapping is explicit:
 
-> Elixir-bridge `@host` (tags an `.ex` def) **transpiles to** Rian-surface `@host` (≡ `@effects(host)`).
+> Elixir-bridge `@rian_host` (tags an `.ex` def) **transpiles to** Rian-surface `@host` (≡ `@effects(host)`).
 
-`@sig` and the persisted `.beam` attribute it registers (`:sig`, was `:rian`) are read by
-`Rian.Ann.from_source/1` / `from_beam/1` and the transpiler's signature harvest.
+**Rejected sub-forms.** `@sig` — drops the bridge namespace, collides conceptually with `@spec`.
+`@rian(sig)` / a tagged value (`@rian sig: "…"`, `@rian {:sig, "…"}`) — `@name(tag)` is not an Elixir
+attribute form, so a sub-kind would have to live in the *value*, changing it from a bare string to a
+keyword/tuple and rippling into `Rian.Ann.from_source/1`/`from_beam/1` parsing and every call site —
+strictly more churn than a distinct attribute name, for no gain.
+
+`@rian_sig` and the persisted `.beam` attribute it registers (`:rian_sig`, was `:rian`) are read by
+`Rian.Ann.from_source/1` / `from_beam/1` and the transpiler's signature harvest. `@rian_host` and its
+`:rian_host` attribute are unchanged.
 
 ### 5. Reach / `--check` / migration follow inference, not the keyword
 
@@ -140,10 +153,10 @@ naming question.)
 
 ## Consequences
 
-- **Migration surface:** ~30 `@rian`→`@sig` and ~24 `@rian_host`→`@host` edits across `lib/rian/*.ex`;
-  `Rian.Ann.__using__` registers `:sig`/`:host` instead of `:rian`/`:rian_host`; `host_funcs/1` reads
-  `:host`; `from_beam/1` reads the persisted `:sig`. Tooling that reads `.beam` attributes needs a
-  window reading *both* old and new keys (§ migration).
+- **Migration surface:** ~30 `@rian`→`@rian_sig` edits across `lib/rian/*.ex`; `@rian_host` (24 sites)
+  is **unchanged**. `Rian.Ann.__using__` registers `:rian_sig` instead of `:rian`; `from_beam/1` reads
+  the persisted `:rian_sig`. `host_funcs/1` and the `:rian_host` attribute are untouched. Tooling that
+  reads the `:rian` `.beam` attribute needs a window reading *both* `:rian` and `:rian_sig` (§ migration).
 - **Grammar cost:** one `take_decl` clause for `@effects(...)` plus the `@host` sugar — mirrors the
   existing `@targets(...)` handling. No new Core node (it desugars).
 - **Doc debt cleared:** the `Rian.Ann` moduledoc and the spec gain the bridge-vs-surface split and the
@@ -157,9 +170,9 @@ naming question.)
 
 1. **Docs only (now).** Add the bridge-vs-surface split to `Rian.Ann` moduledoc; no code/name changes.
    The transpiler keeps the `# @rian_host:` comment.
-2. **Bridge rename.** `@rian`→`@sig`, `@rian_host`→`@host` in `lib/rian/*.ex`, with `Rian.Ann` reading
-   both the old and new persisted attributes for one release (deprecation window), then dropping the
-   old keys. Independent of the effect system.
+2. **Bridge rename.** `@rian`→`@rian_sig` in `lib/rian/*.ex` (`@rian_host` unchanged), with `Rian.Ann`
+   reading both the old `:rian` and new `:rian_sig` persisted attributes for one release (deprecation
+   window), then dropping `:rian`. Independent of the effect system.
 3. **Surface landing (with ADR-0048).** `Rian.Decl` parses `@effects(...)`/`@host`; `Rian.Check`
    verifies the declare-public assertion (§2); the `--check` allowlist switches to inference (§5); the
    transpiler emits `@host` on `pub` boundaries and the `# @rian_host:` comment fallback is removed.
@@ -175,11 +188,17 @@ naming question.)
   public boundary assertion (ADR-0034) and the at-a-glance legibility Samir Patel requires; and leaves
   the `--check` allowlist without an explicit `pub`-boundary signal. The chosen design keeps inference
   for `defp` and a checked declaration for `pub`.
-- **Keep `@rian`/`@rian_host` — rejected (by direction).** The false-sibling naming actively
-  mis-teaches the bridge/surface boundary (Kira Neri). Churn is real (Rachel Okafor), hence the staged
-  deprecation window in §5, but the mental-model cost was judged to outweigh it.
-- **`@rian_sig` / `@sig_host` — not taken.** Verbose, and `_host`/`_sig` suffixes re-create the orphan-
-  prefix problem once the `@rian` sibling is gone.
+- **`@rian` → `@sig` — rejected.** Drops the `@rian_*` bridge namespace in Elixir source and reads as a
+  cousin of `@spec` (the exact association to avoid — `@rian`/`@rian_sig` deliberately generates no
+  typespec). The bridge needs a namespace; `@sig` has none.
+- **`@rian(sig)` / tagged value (`@rian sig: "…"`, `@rian {:sig, "…"}`) — rejected.** `@name(tag)` is
+  not an Elixir attribute form; a sub-kind would have to move into the *value*, turning the bare-string
+  value into a keyword/tuple and rippling through `Rian.Ann` parsing and every call site. Strictly more
+  churn than a distinct attribute name, for no gain.
+- **Keep `@rian` as-is — rejected.** The bare base `@rian` reads as base-plus-suffix against
+  `@rian_host`, obscuring that they are two sub-kinds of one bridge family (Kira Neri). `@rian_sig`
+  makes the sibling relation honest. Churn is ~30 sites (Rachel Okafor), bounded by the §5 deprecation
+  window.
 
 ## Open questions
 
