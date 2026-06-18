@@ -793,6 +793,9 @@ defmodule Rian.Transpile do
   # `@rian` annotations are HARVESTED into the signatures/struct/type decls; the
   # `use Rian.Ann` directive is annotation support — both are consumed, not ported.
   defp classify({:@, _, [{:rian, _, _}]}), do: :skip
+  # `@rian_host` marks a sanctioned exception boundary for the `--check` gate
+  # (`Rian.Ann.host_funcs/1`); it is metadata, not a ported declaration.
+  defp classify({:@, _, [{:rian_host, _, _}]}), do: :skip
   defp classify({:use, _, [{:__aliases__, _, [:Rian, :Ann]}]}), do: :skip
   # `use ExUnit.Case` (with or without options) is test-framework scaffolding with
   # no Rian analog — `@test def` is the whole surface (ADR-0060). Drop it silently.
