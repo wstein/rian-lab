@@ -723,6 +723,7 @@ defmodule Rian.Check do
          :ok <- check_bounds(f, ic),
          :ok <- check_numeric_mix(f, ic),
          :ok <- check_value_position(f),
+         :ok <- check_effects(f, eset),
          do: check_error_set(f, eset)
   end
 
@@ -1477,6 +1478,52 @@ defmodule Rian.Check do
 
   defp check_error_set(_f, _eset), do: :ok
 
+  # ADR-0048 §3 / ADR-0081 §2: a function's declared `@effects(...)` must equal its
+  # inferred effect set — **exact**, not the `⊆`/over-declaration rule error sets use
+  # (over-declaring a Reach-gating effect hand-pins a portable function off the
+  # non-BEAM targets, and any over-declaration forfeits `comptime`). Declaration is
+  # optional (an undeclared function is inferred, like an unannotated error set); when
+  # present it is verified both ways — over- AND under-declaration are errors. An
+  # `@external` function's inferred set IS its declared set (the host body is the leaf),
+  # so this passes trivially for it.
+  defp check_effects(%Func{effects: []}, _eset), do: :ok
+
+  defp check_effects(%Func{effects: declared} = f, eset) do
+    case Map.get(eset, :effects) do
+      nil ->
+        :ok
+
+      report ->
+        inferred = Map.get(report, "#{f.name}/#{length(f.params)}", MapSet.new())
+        want = MapSet.new(declared)
+
+        if want == inferred do
+          :ok
+        else
+          over = MapSet.difference(want, inferred) |> MapSet.to_list()
+          under = MapSet.difference(inferred, want) |> MapSet.to_list()
+          {:error, effect_mismatch_msg(f.name, over, under)}
+        end
+    end
+  end
+
+  defp effect_mismatch_msg(name, over, under) do
+    parts =
+      [
+        if(over != [],
+          do:
+            "declares effect(s) #{inspect(over)} it does not perform " <>
+              "(effects are exact — over-declaration is not allowed, ADR-0048 §3)"
+        ),
+        if(under != [],
+          do: "performs effect(s) #{inspect(under)} not in its `@effects` declaration"
+        )
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    "`#{name}`: " <> Enum.join(parts, "; ")
+  end
+
   # `T | E` -> `{E, MapSet of E's tags}` (a named `E` expands to its variants); else nil.
   defp declared_set(ret, tsets) do
     case String.split(ret, "|") |> Enum.map(&String.trim/1) do
@@ -1874,7 +1921,14 @@ defmodule Rian.Check do
     ic = program_ic(prog)
     all_funcs = funcs ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
     tsets = error_sets(all_types(prog))
-    eset = %{tsets: tsets, table: solve_error_sets(all_funcs, tsets)}
+    # the inferred effect set per function (ADR-0048 §3); `Rian.Reach` owns the
+    # host-FFI leaf signal, so the effect view never disagrees with the reach view.
+    eset = %{
+      tsets: tsets,
+      table: solve_error_sets(all_funcs, tsets),
+      effects: Rian.Reach.effect_sets(prog)
+    }
+
     Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, eset), do: nil end)
   end
 

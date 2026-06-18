@@ -1,7 +1,12 @@
 # ADR-0048 — Effect Tracking: fine-grained, inferred, ambient (not object-capability)
 
-**Status:** Accepted (direction) · **Resolves:** the ADR-0047 effects/IO open item
-**Implemented:** no — no effect-tracking module or test; `Rian.Check` infers no effects
+**Status:** Accepted · **Resolves:** the ADR-0047 effects/IO open item
+**Implemented:** partial — the **`host`/`spawn` effects** are end-to-end: `@effects(...)` grammar
+(`Rian.Decl`), call-graph inference (`Rian.Reach.effect_sets/1`, reusing the FFI/concurrency leaf signal
+`analyze/1` uses), and **exact** declare-public verification (`Rian.Check.check_effects`, §3 / ADR-0081
+§2) — `test/rian/effects_test.exs`. **Not yet:** the neutral effects (`io`/`fs`/`clock`/`random`/`net`,
+each needs its own leaf detection — `Rian.Decl` rejects declaring them for now); `comptime`-purity
+gating; effect-polymorphism over function parameters; the transpiler emitting `@effects(host)`
 **Refs:** ADR-0025 (memory capabilities — *orthogonal*), ADR-0030/0046 (`comptime` purity), ADR-0034 §1 (infer-local/declare-public), ADR-0035 (transparency — "what you read is what runs"), ADR-0039 (`<~` mutation), ADR-0040 §4 (composition — the parallel), ADR-0041 (per-target), ADR-0047 (pure/effectful boundary)
 **Owners:** Arthur Pendelton (effect inference) · Marcus Chen (transparency) · Elena Rostova (lowering) · Maya Lin (multi-target) · Samir Patel (testability) · Kira Neri (determinism) · Chloe Bennett (comptime) · Liam Davis (family ergonomics) · Rachel Okafor (PM)
 

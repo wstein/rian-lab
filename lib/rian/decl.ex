@@ -743,6 +743,19 @@ defmodule Rian.Decl do
   defp take_decl([{:annot, "external"} | _]),
     do: raise(Error, ~S|expected `@external(:target, "host expression")`|)
 
+  # `@effects(host, …)` — the function's declared effect set (ADR-0048/0081). One
+  # precedes a `def`; `Rian.Check` verifies it against the inferred set (exact, §3).
+  # The surface is the explicit `@effects(...)` row — no per-effect keyword (ADR-0081).
+  defp take_decl([{:annot, "effects"}, {:lparen} | rest]) do
+    {eff_toks, rest} = take_parens(rest, 0, [])
+    effects = parse_effects(eff_toks)
+    {decl, rest} = take_decl(skip_nl(rest))
+    {attach_effects(decl, effects), rest}
+  end
+
+  defp take_decl([{:annot, "effects"} | _]),
+    do: raise(Error, "expected `@effects(host, …)`")
+
   defp take_decl([{:annot, a} | _]),
     do:
       raise(
@@ -922,6 +935,33 @@ defmodule Rian.Decl do
 
   defp parse_external(_other),
     do: raise(Error, ~S|`@external` takes a target atom and a string: `@external(:js, "expr")`|)
+
+  defp attach_effects({:def, raw}, effects), do: {:def, Map.put(raw, :effects, effects)}
+  defp attach_effects(_other, _e), do: raise(Error, "`@effects(…)` may only precede a `def`")
+
+  # `@effects(host, spawn)` token list -> a deduped list of effect atoms, each
+  # validated against the inferable, Reach-gating taxonomy (`Rian.Reach.effect_names/0`,
+  # ADR-0048 §2). A not-yet-inferred effect (`io`, `fs`, …) is a hard error rather than
+  # a silently-unverified declaration — the surface grows as each effect's leaf lands.
+  defp parse_effects(toks) do
+    effects =
+      for {:id, e} <- toks do
+        atom = String.to_atom(e)
+
+        unless atom in Rian.Reach.effect_names() do
+          raise(
+            Error,
+            "unknown/unsupported effect `#{e}` in `@effects`; supported: #{inspect(Rian.Reach.effect_names())}"
+          )
+        end
+
+        atom
+      end
+
+    if effects == [],
+      do: raise(Error, "`@effects(…)` needs at least one effect"),
+      else: Enum.uniq(effects)
+  end
 
   # attach one `@external(:target, spec)` to the bodiless `def` that follows. An
   # `@external` function must have NO portable body for that target (ADR-0068 §1),
@@ -1373,7 +1413,8 @@ defmodule Rian.Decl do
       doc: sig[:doc],
       synthetic: sig[:synthetic] == true,
       test?: sig[:test] == true,
-      dispatch: sig[:dispatch]
+      dispatch: sig[:dispatch],
+      effects: Map.get(sig, :effects, [])
     }
   end
 
@@ -1393,7 +1434,8 @@ defmodule Rian.Decl do
       doc: d[:doc],
       synthetic: d[:synthetic] == true,
       test?: d[:test] == true,
-      dispatch: d[:dispatch]
+      dispatch: d[:dispatch],
+      effects: Map.get(d, :effects, [])
     }
   end
 
@@ -1412,7 +1454,8 @@ defmodule Rian.Decl do
       pub?: sig[:pub] == true,
       tvars: Map.get(sig, :tvars, []),
       bounds: Map.get(sig, :bounds, %{}),
-      doc: sig[:doc]
+      doc: sig[:doc],
+      effects: Map.get(sig, :effects, [])
     }
   end
 

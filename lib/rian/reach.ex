@@ -50,8 +50,18 @@ defmodule Rian.Reach do
 
   @targets [:ex, :rs, :js, :jvm]
 
+  # The effect names a function may declare today (ADR-0048 §2): the inferable,
+  # Reach-gating subset. `host` = calls fallible host FFI; `spawn` = a concurrency
+  # primitive. Both kill the non-BEAM targets, so over-declaring is a portability lie
+  # (ADR-0081 §2 exact rule). The other ADR-0048 effects (io/fs/clock/random/net) await
+  # their own leaf detection and are not yet declarable (`Rian.Decl` rejects them).
+  @effect_names [:host, :spawn]
+
   @typedoc "A lowering target (emitter-backed)."
   @type target :: :ex | :rs | :js | :jvm
+
+  @typedoc "A tracked effect (ADR-0048 §2; the currently-inferable subset)."
+  @type effect :: :host | :spawn
 
   # Erlang modules that are concurrency/process/state (ex-only AND native-per-target)
   @conc_erl ~w(ets dets mnesia gen_server gen_statem gen_event global pg pg2 sys supervisor)
@@ -62,6 +72,10 @@ defmodule Rian.Reach do
   @doc "The closed target vocabulary (emitter-backed). Extends only when an emitter lands."
   @spec targets() :: [target()]
   def targets, do: @targets
+
+  @doc "The effect names a function may declare today (inferable + Reach-gating, ADR-0048 §2)."
+  @spec effect_names() :: [effect()]
+  def effect_names, do: @effect_names
 
   @doc """
   Analyze a parsed program (`Rian.Decl.parse/1` output).
@@ -104,6 +118,70 @@ defmodule Rian.Reach do
     Map.new(facts, fn {{name, arity} = n, fc} ->
       {"#{name}/#{arity}", %{reach: Map.fetch!(reach, n), blockers: Enum.reverse(fc.blockers)}}
     end)
+  end
+
+  @doc """
+  The inferred effect set of every function, keyed `"name/arity"` (ADR-0048 §3).
+
+  A function's effects = its **direct** effects ∪ the effects of every callee, run to
+  a call-graph fixpoint (union semantics — a caller has an effect iff it or any callee
+  does). Direct effects come from the **same `scan_func` blockers `analyze/1` uses**, so
+  the effect view and the reach view never disagree: a host-FFI blocker (`:ffi`) →
+  `host`, a concurrency blocker (`:concurrency`) → `spawn`. An `@external` function has
+  no portable body, so its effects are its **declared** set (the host body is the leaf,
+  not inferable). Returns `%{"name/arity" => MapSet.t(effect)}`.
+  """
+  @spec effect_sets(map()) :: %{String.t() => MapSet.t(effect())}
+  def effect_sets(prog) do
+    funs = all_funcs(prog)
+    modnames = MapSet.new(Enum.map(Map.get(prog, :mods, []), & &1.name))
+    local_names = MapSet.new(Enum.map(funs, & &1.name))
+    pctx = parametric_ctx(prog, funs)
+
+    facts =
+      Map.new(funs, fn f ->
+        {blockers, callees} = scan_func(f, modnames, pctx)
+
+        {direct, callees} =
+          case Map.get(f, :externals, %{}) do
+            ext when map_size(ext) > 0 ->
+              {MapSet.new(Map.get(f, :effects, [])), MapSet.new()}
+
+            _ ->
+              {MapSet.new(Enum.flat_map(blockers, &effect_of/1)), callees}
+          end
+
+        {{f.name, length(f.params)},
+         %{direct: direct, callees: MapSet.intersection(callees, local_names)}}
+      end)
+
+    effects = effect_fixpoint(facts, Map.new(facts, fn {n, fc} -> {n, fc.direct} end))
+    Map.new(effects, fn {{name, arity}, set} -> {"#{name}/#{arity}", set} end)
+  end
+
+  # a blocker's effect contribution: host FFI carries `host`, a concurrency primitive
+  # `spawn`. Every other blocker kind (`ref`/`Int`/width/map/…) is a reach concern, not
+  # an effect — it contributes nothing here.
+  defp effect_of(%{kind: :ffi}), do: [:host]
+  defp effect_of(%{kind: :concurrency}), do: [:spawn]
+  defp effect_of(_blocker), do: []
+
+  # effects(f) = direct(f) ∪ ⋃ effects(callee) — monotone-increasing, runs to a fixpoint.
+  defp effect_fixpoint(facts, table) do
+    next =
+      Map.new(facts, fn {n, %{direct: direct, callees: cs}} ->
+        {n, Enum.reduce(cs, direct, fn c, acc -> MapSet.union(acc, effect_for(table, c)) end)}
+      end)
+
+    if next == table, do: table, else: effect_fixpoint(facts, next)
+  end
+
+  # a name-folded callee contributes the *union* of its arities' effect sets — the
+  # over-approximate (honest) direction for effects: never under-claim an effect a
+  # caller might perform. No matching arity (external/unknown) contributes nothing.
+  defp effect_for(table, name) do
+    for({{^name, _arity}, s} <- table, do: s)
+    |> Enum.reduce(MapSet.new(), &MapSet.union/2)
   end
 
   @doc """

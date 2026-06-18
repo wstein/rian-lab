@@ -219,6 +219,10 @@ defmodule Rian.IR do
     `%{target => "host expression"}`. A function with a non-empty `externals` has no
     portable Rian body (`clauses: []`) — its reach is exactly the declared targets
     (`Rian.Reach`), and each emitter lowers its own target's spec.
+
+    `effects` is the declared `@effects(...)` set (ADR-0048/0081): a list of effect
+    atoms (`[:host]`, …). `Rian.Check` verifies it equals the inferred set exactly
+    (`Rian.Reach.effect_sets/1`); `[]` means undeclared (inferred, not forced).
     """
     @enforce_keys [:name, :params, :ret, :clauses]
     defstruct name: nil,
@@ -232,7 +236,8 @@ defmodule Rian.IR do
               synthetic: false,
               test?: false,
               dispatch: nil,
-              externals: %{}
+              externals: %{},
+              effects: []
 
     @type t :: %__MODULE__{}
   end
