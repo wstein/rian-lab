@@ -45,6 +45,17 @@ The tracked effects are a small, **fine-grained**, extensible taxonomy: **`io`, 
 Fine-grained (not just pure/impure) so a signature shows *which* world it touches — `clock`/`random`
 mark nondeterminism explicitly, distinct from `fs`/`net`.
 
+**Host-raise is a candidate effect — this is the principled home for recoverable host errors.**
+Rian rejects catchable `try`/`catch` (ADR-0040 "Considered: capability-guarded exceptions"): the only
+sanctioned exception flow is `Prim.panic` (diverging, uncatchable — not an effect, it terminates). But
+the few **irreducible host boundaries** that *catch* a host-runtime raise into a value — `Code.format_string!`,
+ad-hoc compilation, file I/O — are exactly an effect: "this call may fault in the host." Today those are
+marked with the **interim `@rian_host` attribute** (`Rian.Ann`; excluded from `mix rian.transpile --check`
+and Reach-pinned like any host call). When this effect system lands, a `host`/`fault` row is where they
+would attach — a `@rian_host`-tagged function becomes one whose inferred effect set includes `host`,
+composed and declared by the §3 rules. Until then, `@rian_host` is the honest, greppable placeholder; it
+is **not** a new exception mechanism, just a marker for where the effect will live.
+
 ### 3. Composition mirrors error sets (ADR-0040 §4)
 
 Effect sets compose exactly like error sets, on the same infer-local/declare-public line (ADR-0034 §1):
