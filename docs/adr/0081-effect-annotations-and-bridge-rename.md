@@ -89,10 +89,19 @@ cost of a sugar/desugar layer and the temptation to grow a keyword per effect (`
 Per ADR-0034 §1 and ADR-0058:
 
 - A **`defp`** carries the host effect **by inference** — no annotation. Reach already does this.
-- A **`pub`** function *may* declare `@effects(host)`; the checker **verifies** the declaration against
-  the inferred effect set (a `pub` that declares `@effects(host)` but never touches the host is an
-  error; one that omits it but does is a declare-public violation, same shape as an undeclared error in
-  the return type).
+- A **`pub`** function declares `@effects(host)`; the checker **verifies** the declaration against the
+  inferred set. For the host effect this verification is **exact**, not the `⊆`/over-declaration rule
+  ADR-0048 §3 inherits from error sets — declaring `@effects(host)` on a function that does **not** touch
+  the host is an *error*, and omitting it on one that does is a declare-public violation.
+
+  **Why exact, not `⊆` (the divergence from error sets).** Over-declaring an *error* is harmless — the
+  caller handles an error that never fires. Over-declaring `@effects(host)` is **not** harmless: the host
+  effect *drives `Rian.Reach`* (host ⇒ off `:rs`/`:js`/`:jvm`, ADR-0057), so a spurious `@effects(host)`
+  would pin an actually-portable function off the non-BEAM targets — a hand-asserted portability
+  *regression*, the precise manual mis-pinning ADR-0058's *inferred* reachability exists to abolish. So
+  any **Reach-gating** effect (host, spawn) must be declared *exactly*; non-portability-neutral effects
+  (`clock`, `random`, …) may keep the `⊆` rule. This splits ADR-0048 §3's single composition rule — see
+  that ADR's Open items, which this ADR adds.
 
 Consequence for the transpiler: it emits `@effects(host)` **only on `pub` host boundaries**; a private
 host-caller is left annotation-free and carried by inference. (Until the grammar lands, it keeps

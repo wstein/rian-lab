@@ -69,7 +69,12 @@ Effect sets compose exactly like error sets, on the same infer-local/declare-pub
 - **Private functions / `:=`: inferred** — effect set = the **union** of the effect sets of the
   functions they call.
 - **`pub` functions: declared** — the effect set is explicit in the signature; the checker verifies the
-  body's inferred set is **⊆** the declared set (over-declaration allowed, as for error sets).
+  body's inferred set is **⊆** the declared set (over-declaration allowed, as for error sets). **Caveat —
+  Reach-gating effects are *exact*, not `⊆`:** for `host` (and `spawn`), over-declaration is *not* benign
+  — those effects drive `Rian.Reach` (host ⇒ off `:rs`/`:js`/`:jvm`, ADR-0057), so a spurious declaration
+  hand-pins a portable function off the non-BEAM targets, reintroducing exactly the manual mis-pinning
+  ADR-0058's inferred reachability removes. So the rule splits by effect; see *Open items* (raised by
+  ADR-0081 §2).
 - **Effect polymorphism:** a higher-order function's effect set **includes the effects of its function
   parameters** (effect variables) — `Iter.each(f, xs)` is effectful **iff `f` is**. This is the direct
   analogue of error-set composition through callbacks and is essential for the stdlib (ADR-0047).
@@ -130,8 +135,24 @@ as capability-values; under B they stay distinct.)
 
 ## Open items
 
-- **Effect-set surface spelling** — `!io` / a `with effects` clause / an annotation; pick the concrete
-  syntax against the family and the collision test (ADR-0032). (Illustrative `!io` above is not final.)
+- **Effect-set surface spelling** — *settled by ADR-0081:* the surface is the explicit `@effects(...)`
+  row (e.g. `@effects(host)`), with **no** short keyword/sugar (not `@host`/`@foreign`/`!io`). One
+  grammar production, no per-effect keyword. (The illustrative `!io` elsewhere in this ADR predates that
+  decision and is not the chosen syntax.)
+- **Declare-public rule splits by effect (raised by ADR-0081 §2)** — §3's `⊆`/over-declaration rule holds
+  for non-portability-neutral effects (`clock`, `random`, …), but **Reach-gating effects (`host`,
+  `spawn`) must be declared *exactly***: over-declaration is a portability regression, not a safe
+  widening (see the §3 caveat). Confirm the exact set of Reach-gating effects and the checker's two-mode
+  verification before implementing declare-public.
+- **Host-fault *catch* mechanism — currently undefined.** §2 says the sanctioned boundaries "catch a
+  host-runtime raise into a value", but Rian has no `try`/`rescue` and `Prim.panic` is uncatchable, so
+  there is **no Rian surface to catch a host fault** today. The `@rian_host`-tagged Elixir functions
+  (`load_result`, `format_result`, …) therefore cannot be ported to Rian — only marked `@effects(host)`
+  on their happy path, with the catch left host-side. Resolve before relying on the port: either add a
+  catchable `host_try`/rescue primitive (the only sanctioned catch, itself `@effects(host)`), or accept
+  that host-fault catching stays in `@external` host FFI (ADR-0068) and Rian functions only *propagate*
+  the host effect. This is the true gating prerequisite for ADR-0081's transpiler-emit step, ahead of the
+  grammar.
 - **Taxonomy granularity** — split `io` into `stdin`/`stdout`/`stderr`? Is `spawn` one effect or
   per-concurrency-primitive? Ties to the non-BEAM concurrency gap (ADR-0031).
 - **Optional cap-injection layer for tests** — can an *opt-in* capability/handle layer recover C's
