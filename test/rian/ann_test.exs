@@ -61,4 +61,54 @@ defmodule Rian.AnnTest do
   test "from_beam on a module without @rian_sig is empty (not a crash)" do
     assert Rian.Ann.from_beam(Enum) == []
   end
+
+  test "from_beam on a module that is not loaded is empty (no rescue)" do
+    refute Code.ensure_loaded?(:no_such_module_at_all)
+    assert Rian.Ann.from_beam(:no_such_module_at_all) == []
+  end
+
+  describe "from_beam/1 from a .beam PATH (the no-source reader)" do
+    test "reads @rian from a real compiled module's .beam file" do
+      path = Path.join(Application.app_dir(:rian_lab, "ebin"), "Elixir.Rian.Prim.beam")
+      anns = Rian.Ann.from_beam(path)
+      assert "pub def names() Vec(String)" in anns
+    end
+
+    test "a missing / unreadable .beam path is empty (not a crash)" do
+      assert Rian.Ann.from_beam("/no/such/file.beam") == []
+    end
+  end
+
+  describe "from_source/1 robustness" do
+    test "unparseable source yields no annotations (not a raise)" do
+      assert Rian.Ann.from_source("defmodule M do  @rian (((") == []
+    end
+  end
+
+  describe "host_funcs/1 — @rian_host exception-boundary tagging" do
+    test "names the def/defp following each @rian_host, skipping untagged defs" do
+      src = ~S'''
+      defmodule M do
+        use Rian.Ann
+
+        @rian_host "reads a file"
+        def load(p), do: File.read!(p)
+
+        def plain(x), do: x + 1
+
+        @rian_host "guarded host call"
+        defp parse(s) when is_binary(s), do: Code.string_to_quoted!(s)
+      end
+      '''
+
+      hosts = Rian.Ann.host_funcs(src)
+      assert "load" in hosts
+      assert "parse" in hosts
+      refute "plain" in hosts
+    end
+
+    test "unparseable source yields no host names (not a raise)" do
+      assert Rian.Ann.host_funcs("defmodule M do @rian_host (((") == []
+    end
+  end
 end
