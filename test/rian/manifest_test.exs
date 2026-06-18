@@ -1,6 +1,8 @@
 defmodule Rian.ManifestTest do
   # The `rian.toml` manifest reader (ADR-0080 §2) — the build system's foundation.
-  use ExUnit.Case, async: true
+  # async: false — `with_project/2` mutates the global `:rian_manifest` app env that
+  # `Rian.Reach.gate!/1` reads on every compile; a concurrent test would see it.
+  use ExUnit.Case, async: false
 
   alias Rian.Manifest
 
@@ -160,6 +162,39 @@ defmodule Rian.ManifestTest do
 
       assert Manifest.locate(orphan) == nil
       assert Manifest.root(orphan) == orphan
+    end
+
+    test "with_project/2 configures :rian_manifest during fun and restores it after", %{
+      base: base
+    } do
+      Application.delete_env(:rian_lab, :rian_manifest)
+      on_exit(fn -> Application.delete_env(:rian_lab, :rian_manifest) end)
+
+      inner =
+        Manifest.with_project(base, fn ->
+          Application.get_env(:rian_lab, :rian_manifest)
+        end)
+
+      assert inner == Path.join(base, "rian.toml")
+      # restored to the prior (unset) state
+      assert Application.get_env(:rian_lab, :rian_manifest) == nil
+    end
+
+    test "with_project/2 restores a prior value, and is a no-op when no manifest is found" do
+      orphan = Path.join(System.tmp_dir!(), "rian_orphan_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(orphan)
+      on_exit(fn -> File.rm_rf(orphan) end)
+      Application.put_env(:rian_lab, :rian_manifest, "prior.toml")
+      on_exit(fn -> Application.delete_env(:rian_lab, :rian_manifest) end)
+
+      inner =
+        Manifest.with_project(orphan, fn ->
+          Application.get_env(:rian_lab, :rian_manifest)
+        end)
+
+      # no manifest above `orphan`, so the prior value is untouched throughout
+      assert inner == "prior.toml"
+      assert Application.get_env(:rian_lab, :rian_manifest) == "prior.toml"
     end
   end
 end

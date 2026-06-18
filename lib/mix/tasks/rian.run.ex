@@ -40,7 +40,13 @@ defmodule Mix.Tasks.Rian.Run do
     # ensure the project (and Rian.*) is compiled before we call into it
     Mix.Task.run("compile")
 
-    case Rian.Run.run_file(file, opts[:main] || "main") do
+    # honor the project's `rian.toml` targets (ADR-0080 §2), scoped to this run
+    result =
+      Rian.Manifest.with_project(Path.dirname(file), fn ->
+        Rian.Run.run_file(file, opts[:main] || "main")
+      end)
+
+    case result do
       {:ok, value} -> Mix.shell().info(inspect(value))
       {:error, msg} -> Mix.raise(msg)
     end

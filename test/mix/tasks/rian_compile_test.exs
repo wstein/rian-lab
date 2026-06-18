@@ -1,11 +1,29 @@
 defmodule Mix.Tasks.Rian.CompileTest do
-  use ExUnit.Case, async: true
+  # async: false — the manifest cases set the global `:rian_manifest` app env (via
+  # `Rian.Manifest.with_project`) that `Rian.Reach.gate!/1` reads on every compile.
+  use ExUnit.Case, async: false
 
   import ExUnit.CaptureIO
 
   alias Mix.Tasks.Rian.Compile
 
   defp run(args), do: capture_io(fn -> Compile.run(args) end)
+
+  # a tiny project dir holding a `rian.toml` with the given targets + one source file.
+  defp project(targets, src) do
+    dir = Path.join(System.tmp_dir!(), "rian_proj_#{System.unique_integer([:positive])}")
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf(dir) end)
+
+    File.write!(
+      Path.join(dir, "rian.toml"),
+      ~s|[project]\nname = "x"\nversion = "1"\n#{targets}\n|
+    )
+
+    file = Path.join(dir, "p.rian")
+    File.write!(file, src)
+    file
+  end
 
   describe "compiling a real .rian file" do
     test "emits both real targets by default: BEAM bytecode + Rust source" do
@@ -73,6 +91,22 @@ defmodule Mix.Tasks.Rian.CompileTest do
       after
         File.rm(path)
       end
+    end
+  end
+
+  describe "honors the project rian.toml targets (ADR-0080 §2)" do
+    # a host-FFI function reaches only :ex (Reach pins it off :rs/:js/:jvm).
+    @host_mod "mod M do\n  pub def go() Int53 := :erlang.unique_integer()\nend\n"
+
+    test "a manifest demanding an unreachable target fails the compile" do
+      file = project(~s|targets = ["ex", "rs"]|, @host_mod)
+      assert_raise Mix.Error, ~r/contract not met/, fn -> run([file, "--beam"]) end
+    end
+
+    test "the same function compiles when the manifest declares only the reachable target" do
+      file = project(~s|targets = ["ex"]|, @host_mod)
+      out = run([file, "--beam"])
+      assert out =~ "BEAM bytecode"
     end
   end
 end

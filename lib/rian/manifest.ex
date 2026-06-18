@@ -113,6 +113,34 @@ defmodule Rian.Manifest do
     end
   end
 
+  @doc """
+  Run `fun` with the project's manifest configured: point `:rian_manifest` at the
+  `rian.toml` located at or above `start_dir`, so `Rian.Reach.build_default` gates the
+  compile against the project's declared `targets` (ADR-0080 §2). The previous value is
+  restored afterwards, so this is the **entry-point boundary** (an escript subcommand, a
+  mix task) opting a single build into its project context — not a global mutation that
+  could leak into an unrelated compile. A no-op (beyond running `fun`) when no manifest
+  is found. Returns `fun`'s result.
+  """
+  @spec with_project(Path.t(), (-> result)) :: result when result: var
+  def with_project(start_dir \\ ".", fun) when is_function(fun, 0) do
+    prev = Application.fetch_env(:rian_lab, :rian_manifest)
+
+    case locate(start_dir) do
+      nil -> :ok
+      path -> Application.put_env(:rian_lab, :rian_manifest, path)
+    end
+
+    try do
+      fun.()
+    after
+      case prev do
+        {:ok, v} -> Application.put_env(:rian_lab, :rian_manifest, v)
+        :error -> Application.delete_env(:rian_lab, :rian_manifest)
+      end
+    end
+  end
+
   # ── the constrained-TOML reader: text -> %{"table" => %{"key" => value}} ──────
 
   defp tables(text) do

@@ -61,7 +61,8 @@ defmodule Mix.Tasks.Rian.Compile do
 
     # ensure the project (and Rian.*) is compiled before we call into it
     Mix.Task.run("compile")
-    compile_and_print(file, opts)
+    # honor the project's `rian.toml` targets (ADR-0080 §2), scoped to this build
+    Rian.Manifest.with_project(Path.dirname(file), fn -> compile_and_print(file, opts) end)
   end
 
   defp compile_and_print(file, opts) do
@@ -76,7 +77,7 @@ defmodule Mix.Tasks.Rian.Compile do
     if :jvm in show, do: print_jvm(src)
     if :elixir in show, do: print_elixir_debug(src)
   rescue
-    e in [Rian.Decl.Error, Rian.Check.Error, ArgumentError, RuntimeError] ->
+    e in [Rian.Decl.Error, Rian.Check.Error, Rian.Reach.Error, ArgumentError, RuntimeError] ->
       Mix.raise("#{file}: #{Exception.message(e)}")
   end
 
