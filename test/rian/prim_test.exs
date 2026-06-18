@@ -24,6 +24,20 @@ defmodule Rian.PrimTest do
       assert Rian.Check.infer(ast, %{}, %{}) == :unknown
     end
 
+    test "bare `panic(msg)` is the ergonomic alias (no `Prim.` prefix needed)" do
+      # the reserved 1-arg builtin normalizes to the same intrinsic as `Prim.panic`.
+      assert Pratt.parse(~s|panic("x")|) == {:call, {:id, "__prim_panic"}, [{:str, "x"}]}
+
+      {:ok, _} =
+        Beam.load(
+          "mod B do\n  pub def f(n Int53) Int53\n  pub def f(0) := panic(\"zero\")\n  pub def f(n) := n\nend",
+          :"Elixir.RianBarePanic"
+        )
+
+      assert RianBarePanic.f(7) == 7
+      assert_raise ErlangError, fn -> RianBarePanic.f(0) end
+    end
+
     test "lowers to `erlang:error` on BEAM — runs, and aborts with the message" do
       {:ok, _} = Beam.load(@panic_src, :"Elixir.RianPanicTest")
       assert RianPanicTest.guard(5) == 10

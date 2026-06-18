@@ -59,7 +59,9 @@ defmodule Rian.Prim do
   @doc """
   Walk a tuple-form expression AST and rewrite `Prim.<name>(args)` calls into
   `__prim_<name>(args)`. Idempotent; non-`Prim` calls pass through unchanged; an
-  unknown `Prim.<name>` raises (the namespace is reserved, ADR-0047 §2).
+  unknown `Prim.<name>` raises (the namespace is reserved, ADR-0047 §2). A bare,
+  1-arg `panic(msg)` is also rewritten to `__prim_panic(msg)` — the one primitive
+  ergonomic enough to spell without the `Prim.` prefix (ADR-0035/0040).
   """
   @spec normalize(term()) :: term()
   def normalize({:call, {:dot, {:id, "Prim"}, name}, args}) when name in @prims,
@@ -72,6 +74,14 @@ defmodule Rian.Prim do
         "unknown primitive `Prim.#{name}` — `Prim` is the reserved intrinsic " <>
           "namespace (ADR-0047 §2); valid: #{Enum.join(@prims, ", ")}"
       )
+
+  # ergonomic bare `panic(msg)` ≡ `Prim.panic(msg)` (ADR-0035/0040): the diverging,
+  # uncatchable abort. `panic` is a reserved builtin — a 1-arg `panic` call rewrites
+  # to the intrinsic, so callers needn't write the `Prim.` prefix for the one
+  # primitive that is genuinely surface-level (an invariant violation / unreachable
+  # arm). Other arities pass through as an ordinary call.
+  def normalize({:call, {:id, "panic"}, [arg]}),
+    do: {:call, {:id, "__prim_panic"}, [normalize(arg)]}
 
   def normalize(node) when is_tuple(node) do
     node
