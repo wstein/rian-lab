@@ -146,6 +146,7 @@ defmodule Rian.Capability do
 
   # ── Linearity (use-once) check ─────────────────────────────────────────
   @doc "Check a single expression: iso/ref vars in `env` must be used at most once."
+  @rian_sig "pub def lin_check(env _Unk, ast Expr) _Unk"
   @spec lin_check(map(), term()) :: :ok | {:error, list()}
   def lin_check(env, ast), do: verdict(env, count_uses(ast))
 
@@ -153,6 +154,7 @@ defmodule Rian.Capability do
   Check a straight-line block. `bindings` is [{name, capability, rhs_ast}];
   each binding name enters scope (with its capability) for later bindings/final.
   """
+  @rian_sig "pub def lin_check_block(env _Unk, bindings Vec(_Unk), final Expr) _Unk"
   @spec lin_check_block(map(), list(), term()) :: :ok | {:error, list()}
   def lin_check_block(env, bindings, final) do
     {total, env2} =
@@ -177,6 +179,7 @@ defmodule Rian.Capability do
   arms is consumed once (`max` over arms), so a value moved once per branch is
   legal. Counting is otherwise additive along a path.
   """
+  @rian_sig "pub def count_uses(ast Expr) _Unk"
   @spec count_uses(term()) :: map()
   def count_uses(ast), do: count_uses(ast, MapSet.new())
 
