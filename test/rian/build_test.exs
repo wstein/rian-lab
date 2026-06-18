@@ -54,6 +54,19 @@ defmodule Rian.BuildTest do
     end
   end
 
+  describe "build/1 — foreign-file resolution (ADR-0080 §7)" do
+    test "fails closed (exit 2) on a missing @external file-reference" do
+      file =
+        tmp_file(
+          ~S|@external(:js, "./absent.ffi.mjs", "fun") pub def main(x Int53) Int53| <> "\n"
+        )
+
+      err = capture_io(:stderr, fn -> assert Build.build([file, "--js"]) == 2 end)
+      assert err =~ "absent.ffi.mjs"
+      assert err =~ "does not exist"
+    end
+  end
+
   describe "build/1 — source targets" do
     test "--rust prints Rust source" do
       file = tmp_file("def add(a Int53, b Int53) Int53 := a + b\n")

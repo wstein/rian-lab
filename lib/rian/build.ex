@@ -28,12 +28,25 @@ defmodule Rian.Build do
 
       {opts, [file], _} ->
         case File.read(file) do
-          {:ok, src} -> emit(opts, src)
+          {:ok, src} -> resolve_then_emit(opts, src, Path.dirname(file))
           {:error, reason} -> err(error_text(reason))
         end
 
       {_opts, _, _} ->
         err("usage: rian build FILE [-o DIR] [--rust|--js|--jvm]")
+    end
+  end
+
+  # Resolve every file-reference `@external` against the source's directory before
+  # emitting (ADR-0080 §7 a/c): a missing foreign file / absent export fails the build
+  # closed, never a silent stub. A program with no file-references resolves trivially.
+  # Parse errors-as-values here, mirroring `check`/`targets`.
+  defp resolve_then_emit(opts, src, src_dir) do
+    with {:ok, prog} <- Rian.Decl.parse_result(src),
+         :ok <- Rian.External.resolve(prog, src_dir) do
+      emit(opts, src)
+    else
+      {:error, reason} -> err(error_text(reason))
     end
   end
 

@@ -7,7 +7,7 @@ defmodule Rian.ExternalTest do
   """
   use ExUnit.Case, async: false
 
-  alias Rian.{Check, Decl, Reach}
+  alias Rian.{Check, Decl, External, Reach}
 
   describe "parsing (ADR-0068 §1)" do
     test "one-or-more `@external` attrs attach a per-target body map to a bodiless def" do
@@ -201,9 +201,62 @@ defmodule Rian.ExternalTest do
       assert Reach.entry(rep, "t").reach |> MapSet.to_list() == [:ex]
     end
 
-    test "the file-reference form is a clear not-yet-supported error (ADR-0080 §7)" do
-      assert_raise Decl.Error, ~r/file-reference .* not yet supported/, fn ->
-        Decl.parse(~S|@external(:js, "./ffi.mjs", "fun") pub def f(x Int53) Int53|)
+    test "the file-reference form parses to a `{:file, path, fun}` spec (ADR-0080 §7)" do
+      prog = Decl.parse(~S|@external(:js, "./ffi.mjs", "fun") pub def f(x Int53) Int53|)
+      [f] = prog.funcs
+      assert f.externals == %{js: {:file, "./ffi.mjs", "fun"}}
+    end
+  end
+
+  describe "file-reference resolution (ADR-0080 §7 a/c)" do
+    setup do
+      dir = Path.join(System.tmp_dir!(), "rian_ffi_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+      {:ok, dir: dir}
+    end
+
+    test "a program with no file-references resolves trivially", %{dir: dir} do
+      prog = Decl.parse(~S|@external(:ex, :erlang.length) pub def f(x _Unk) Int53|)
+      assert External.resolve(prog, dir) == :ok
+    end
+
+    test "fails closed when the referenced file is missing", %{dir: dir} do
+      prog = Decl.parse(~S|@external(:js, "./missing.ffi.mjs", "fun") pub def f(x Int53) Int53|)
+      assert {:error, msg} = External.resolve(prog, dir)
+      assert msg =~ "missing.ffi.mjs"
+      assert msg =~ "does not exist"
+    end
+
+    test "a non-Elixir file is existence-checked only and resolves when present", %{dir: dir} do
+      File.write!(Path.join(dir, "codec.ffi.mjs"), "export function encode(x) { return x }\n")
+      prog = Decl.parse(~S|@external(:js, "./codec.ffi.mjs", "encode") pub def f(x Int53) Int53|)
+      assert External.resolve(prog, dir) == :ok
+    end
+
+    test "an Elixir file must export the named function at the right arity", %{dir: dir} do
+      File.write!(
+        Path.join(dir, "codec.ffi.ex"),
+        "defmodule Codec do\n  def enc(x), do: x\nend\n"
+      )
+
+      ok = Decl.parse(~S|@external(:ex, "./codec.ffi.ex", "enc") pub def f(x Int53) Int53|)
+      assert External.resolve(ok, dir) == :ok
+
+      bad_name = Decl.parse(~S|@external(:ex, "./codec.ffi.ex", "nope") pub def f(x Int53) Int53|)
+      assert {:error, msg} = External.resolve(bad_name, dir)
+      assert msg =~ "nope/1"
+
+      bad_arity =
+        Decl.parse(~S|@external(:ex, "./codec.ffi.ex", "enc") pub def f(a Int53, b Int53) Int53|)
+
+      assert {:error, msg2} = External.resolve(bad_arity, dir)
+      assert msg2 =~ "enc/2"
+    end
+
+    test "render refuses a file-reference until bundling lands (ADR-0080 §7 b)" do
+      assert_raise ArgumentError, ~r/bundling is the next build-system phase/, fn ->
+        External.render({:file, "./codec.ffi.mjs", "encode"}, [])
       end
     end
   end

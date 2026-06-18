@@ -969,6 +969,11 @@ defmodule Rian.Check do
       {_target, spec}, acc when is_binary(spec) ->
         {:cont, acc}
 
+      # a file-reference is resolved against the filesystem at build time
+      # (`Rian.External.resolve/2`) — the checker has no source path, so it skips it.
+      {_target, {:file, _path, _fun}}, acc ->
+        {:cont, acc}
+
       {target, {:ref, parts, erlang?}}, acc ->
         case resolve_external_ref(parts, erlang?, arity) do
           :ok -> {:cont, acc}

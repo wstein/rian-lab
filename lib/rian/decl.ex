@@ -947,13 +947,11 @@ defmodule Rian.Decl do
 
   defp parse_external_spec([{:id, m} | rest]), do: {:ref, [m | dotted_tail(rest)], false}
 
-  defp parse_external_spec([{:str, _path}, {:comma}, {:str, _fun}]),
-    do:
-      raise(
-        Error,
-        "file-reference `@external(:t, \"path\", \"fun\")` is not yet supported — use a dotted " <>
-          "reference `@external(:t, Mod.fun)` or a string (foreign-file layout: ADR-0080 §7)"
-      )
+  # file-reference `@external(:t, "path", "fun")` (ADR-0068 §1b / ADR-0080 §7): an
+  # authored foreign file beside the source. Stored `{:file, path, fun}`; the file's
+  # existence and export are resolved at build time (`Rian.External.resolve/2`), not
+  # here — the parser has no source path.
+  defp parse_external_spec([{:str, path}, {:comma}, {:str, fun}]), do: {:file, path, fun}
 
   defp parse_external_spec(_other),
     do:

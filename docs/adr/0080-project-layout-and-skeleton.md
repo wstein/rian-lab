@@ -194,8 +194,9 @@ the **same** manifest, so a Rian project drops into an Elixir umbrella without a
 ### 7. Foreign-FFI file layout & bundling (the home for `@external` references — ADR-0068 §1b)
 
 `@external`'s **reference** form (`@external(:js, "./ffi.mjs", "fun")`, ADR-0068 §1b) needs foreign code
-to live in real, per-target files this layout defines. **Proposed (direction); not yet built** — this is
-the prerequisite gating the file-reference form and the removal of inline-string specs.
+to live in real, per-target files this layout defines. **Resolution implemented; bundling pending** —
+`rian build` resolves each file-reference and fails closed (responsibilities a + c below); per-target
+bundling (b) is the remaining phase before inline-string specs can be removed.
 
 - **Location — co-located, target-suffixed (the Gleam convention).** A foreign file sits beside the
   `.rian` that references it, named by the module + target: for `src/codec.rian`,
@@ -210,13 +211,20 @@ the prerequisite gating the file-reference form and the removal of inline-string
   `.ffi.ex` into the app; JS: copy/bundle `.ffi.mjs` and emit a relative `import`; Rust: include the
   `.ffi.rs` as a module; JVM: compile `.ffi.kt`); (c) **fails closed** if a referenced file/function is
   missing (ADR-0041 §2 — never a silent stub).
+  - **(a) + (c) are implemented** (`Rian.External.resolve/2`, wired into `Rian.Build.build/1`): each
+    file-reference resolves against the source's directory, a `.ex`/`.exs` is verified to define the
+    named function at the Rian def's arity (from its AST), and a missing file/export fails the build.
+    Other targets (`.mjs`/`.rs`/`.kt`) are existence-checked only — export verification lands with each
+    backend's bundler. **(b) is the next phase**: until it lands, an emitter refuses a file-reference
+    (`Rian.External.render/2` raises) rather than emit a call to a function the output does not carry.
 - **Packaging.** `rian.toml` (§2) lists the foreign files so a published package ships them. A Hex
   package carries `.ffi.ex`; a package that also targets JS/Rust ships those `.ffi.*` too (consumers on
   a target without the matching file get an honest Reach pin off it, not a runtime failure).
 
-Until §7 lands, `@external` supports the **inline-string** spec (all targets) and the **host-module
-reference** (`Mod.fun`/`:erlang.fun`, no foreign file needed); the **file-reference** form is parsed but
-rejected with a clear error (ADR-0068 §1b).
+`@external` supports the **inline-string** spec (all targets) and the **host-module reference**
+(`Mod.fun`/`:erlang.fun`, no foreign file needed); the **file-reference** form is now parsed and
+**resolved** at build time (existence + `.ex` export), with **bundling/emission** the remaining §7 phase
+(ADR-0068 §1b).
 
 ## Ratings
 

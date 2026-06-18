@@ -71,9 +71,12 @@ The spec after `@external(:target, …)` is one of:
   (`:erlang.error({:type_error, name})`, `:compile.forms(forms, [:return_errors])`) which a positional
   reference cannot express without an authored foreign wrapper.
 
-A **file reference** `@external(:js, "./ffi.mjs", "fun")` (Gleam's non-BEAM form) is **parsed-rejected
-for now** with a clear error — it needs the foreign-file layout + per-target build/bundle integration
-(ADR-0080 §7), which is not yet built.
+A **file reference** `@external(:js, "./ffi.mjs", "fun")` (Gleam's non-BEAM form) parses to a
+`{:file, path, fun}` spec and is **resolved** at build time (`Rian.External.resolve/2`, wired into
+`rian build`): the file must exist beside the source and a `.ex`/`.exs` must export the named function at
+the right arity, else the build fails closed (ADR-0080 §7 a/c). Its **bundling/emission** — compiling
+the foreign file into the target output (ADR-0080 §7 b) — is the remaining phase; until it lands an
+emitter refuses a file-reference rather than emit a call to an unbundled function.
 
 **Deprecation path for the inline string.** The reference form is the destination; the string form is
 demoted to a constrained convenience. It is **not removed yet** because the self-hosting compiler
@@ -155,8 +158,9 @@ They do not overlap: one is "which Rian code", the other is "which host call".
 - **Embedded quotes in an inline-string spec** — a string spec containing `"` (e.g. a Rust
   `format!("{:.6}", x)`) needs the Rian lexer's `\"` escape; until then string specs must be quote-free.
   *The reference form sidesteps this entirely* (no host string), which is another reason it's preferred.
-- **File-reference build integration (ADR-0080 §7)** — `@external(:js, "./ffi.mjs", "fun")` is parsed
-  but rejected: it needs the foreign-file layout + per-target compile/bundle/package story before it can
-  lower. The blocker for both the file-reference form *and* removing the inline-string form.
+- **File-reference bundling (ADR-0080 §7 b)** — `@external(:js, "./ffi.mjs", "fun")` is parsed and
+  **resolved** (existence + `.ex` export, `Rian.External.resolve/2`), but its per-target compile/bundle/
+  package story is not built, so an emitter still refuses to lower it. The remaining blocker for emitting
+  file-references *and* for removing the inline-string form.
 - ~~**Structured spec form**~~ — *resolved (2026-06-18):* the reference form `@external(:t, Mod.fun)` /
   `:erlang.fun` is implemented (§1b), with boundary resolution in `Rian.Check`.
