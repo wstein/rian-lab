@@ -462,5 +462,28 @@ defmodule Rian.ReachTest do
         Application.delete_env(:rian_lab, :rian_targets)
       end
     end
+
+    test "build_default/0 consults a manifest only via the configured :rian_manifest path" do
+      # the manifest is read from configuration, NEVER the working directory on its own,
+      # so a stray `rian.toml` cannot silently re-gate a test/REPL compile (ADR-0080 §2).
+      dir = Path.join(System.tmp_dir!(), "rian_mani_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      path = Path.join(dir, "rian.toml")
+      File.write!(path, ~s|[project]\nname = "x"\nversion = "1"\ntargets = ["js"]\n|)
+
+      try do
+        # unconfigured (and no `:rian_targets`/mix default): the file is not read
+        Application.delete_env(:rian_lab, :rian_manifest)
+        Application.delete_env(:rian_lab, :rian_targets)
+        assert Reach.build_default() == nil
+
+        # configured: build_default reads exactly that file's `targets`
+        Application.put_env(:rian_lab, :rian_manifest, path)
+        assert Reach.build_default() == [:js]
+      after
+        Application.delete_env(:rian_lab, :rian_manifest)
+        File.rm_rf!(dir)
+      end
+    end
   end
 end

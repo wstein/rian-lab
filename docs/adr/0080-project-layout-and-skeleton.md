@@ -4,7 +4,8 @@
 shape** and the manifest, so every Rian project looks the same and the future `rian new` has a single
 template to emit. It resolves the long-standing "Rian manifest" open item in ADR-0026/ADR-0031.
 **Implemented:** partial — the **`rian.toml` reader** is built (`Rian.Manifest`, §2: parse + validate
-`[project]`/`[deps]`/`[lint]`; `Rian.Reach.build_default` reads its `targets`; `test/rian/manifest_test.exs`),
+`[project]`/`[deps]`/`[lint]`; `Rian.Reach.build_default` reads its `targets` from the path the escript
+CLI configures — never the CWD directly; `test/rian/manifest_test.exs`),
 as **Phase 1 of the build system** (the foreign-file pipeline that unblocks ADR-0068 §7 / inline-string
 removal, then `rian build`/bundle/package, then `rian new`, build on it). Still **not** built: `rian new`,
 per-target foreign-file resolve/bundle (§7), and the Mix-compiler/Hex mapping. The layout below is the

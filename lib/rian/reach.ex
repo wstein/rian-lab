@@ -360,8 +360,14 @@ defmodule Rian.Reach do
   @doc """
   The build-default target set (ADR-0058 §2) for modules that declare no `@targets`,
   resolved in priority: a `rian.toml` manifest's `targets` (ADR-0080 §2, the canonical
-  source for a real Rian project), else the `:rian_lab` app env `:rian_targets`, else
-  `mix.exs`'s `rian: [targets: […]]`, else `nil` (no default gate).
+  source for a real Rian project) — consulted only when its path is configured via the
+  `:rian_lab` app env `:rian_manifest` (the escript CLI sets it at `main/1`) — else the
+  `:rian_lab` app env `:rian_targets`, else `mix.exs`'s `rian: [targets: […]]`, else
+  `nil` (no default gate).
+
+  The manifest is sourced from configuration, **never** read from the working directory
+  by the deep per-compile `gate!/1`: a REPL/test/library compile is never silently
+  re-gated by a stray `rian.toml` in whatever directory it happens to run from.
   """
   def build_default do
     # priority fall-through without truthy `||` (errors-as-values, ADR-0035): each
@@ -376,10 +382,14 @@ defmodule Rian.Reach do
   end
 
   # the manifest is the single project-metadata source (ADR-0080 §2); its `targets`
-  # already validated by `Rian.Manifest`. Absent/invalid manifest -> fall through.
+  # are already validated by `Rian.Manifest`. It is read only from the configured
+  # `:rian_manifest` path (the build CLI's project context) — never the CWD on its own,
+  # so the gate stays deterministic outside a build. Absent/invalid -> fall through.
   defp manifest_default do
-    case Rian.Manifest.read() do
-      {:ok, %Rian.Manifest{targets: [_ | _] = ts}} -> ts
+    with path when is_binary(path) <- Application.get_env(:rian_lab, :rian_manifest),
+         {:ok, %Rian.Manifest{targets: [_ | _] = ts}} <- Rian.Manifest.read(path) do
+      ts
+    else
       _ -> nil
     end
   end

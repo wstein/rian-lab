@@ -27,6 +27,12 @@ defmodule Rian.CLI do
   @doc "escript entry point."
   @spec main([String.t()]) :: no_return()
   def main(argv) do
+    # establish the project context: the standalone build reads its target contract
+    # from the project's `rian.toml` (ADR-0080 §2). Set here (the escript boundary),
+    # not in `run/1`, so the library/REPL/test compile path never auto-reads a CWD
+    # manifest — `Rian.Reach.build_default` consults this configured path only.
+    Application.put_env(:rian_lab, :rian_manifest, "rian.toml")
+
     argv
     |> run()
     |> System.halt()
