@@ -945,10 +945,10 @@ defmodule Rian.Check do
   # (ADR-0068 open item — restrict initially). Non-external functions are unaffected.
   defp check_external_caps(%Func{externals: ext}) when map_size(ext) == 0, do: :ok
 
-  defp check_external_caps(%Func{name: name, params: params}) do
+  defp check_external_caps(%Func{name: name, params: params, externals: ext}) do
     case Enum.find(params, &(&1.cap in [:iso, :ref])) do
       nil ->
-        :ok
+        check_external_refs(name, length(params), ext)
 
       p ->
         {:error,
@@ -956,6 +956,61 @@ defmodule Rian.Check do
            "(linearity is not enforceable across an FFI boundary, ADR-0068/0055)"}
     end
   end
+
+  # Resolve each `@external` *reference* (`@external(:t, Mod.fun)`, ADR-0068): a host
+  # `Mod.fun`/`:erlang.fun` reference must name a function of matching arity, or it's a
+  # compile error (the no-silent-stub guarantee, ADR-0041 §2). Best-effort: when the
+  # host module loads we verify the export; when it can't be loaded we can't verify, so
+  # we don't reject (conservative — never a false error for a not-yet-loaded module).
+  # String specs are trusted host text, not resolved.
+  defp check_external_refs(name, arity, ext) do
+    Enum.reduce_while(ext, :ok, fn
+      {_target, spec}, acc when is_binary(spec) ->
+        {:cont, acc}
+
+      {target, {:ref, parts, erlang?}}, acc ->
+        case resolve_external_ref(parts, erlang?, arity) do
+          :ok -> {:cont, acc}
+          {:error, why} -> {:halt, {:error, "`#{name}`: `@external(:#{target}, …)` #{why}"}}
+        end
+    end)
+  end
+
+  defp resolve_external_ref(parts, erlang?, arity) do
+    {mod, fun} = ref_mfa(parts, erlang?)
+
+    cond do
+      mod == nil ->
+        :ok
+
+      not Code.ensure_loaded?(mod) ->
+        :ok
+
+      function_exported?(mod, fun, arity) ->
+        :ok
+
+      true ->
+        {:error, "references `#{ref_str(parts, erlang?)}` but no `#{fun}/#{arity}` is exported"}
+    end
+  end
+
+  # `{module_atom | nil, fun_atom}` for a reference. An erlang ref (`:erlang.foo`) is a
+  # bare-atom module; an Elixir ref (`Rian.Beam.load_result`) is `Elixir.`-prefixed. A
+  # single-element local ref (`foo`) has no resolvable host module → `{nil, :foo}` (skip).
+  defp ref_mfa([single], false), do: {nil, String.to_atom(single)}
+
+  defp ref_mfa(parts, true) do
+    {mod_parts, [fun]} = Enum.split(parts, -1)
+    {String.to_atom(Enum.join(mod_parts, ".")), String.to_atom(fun)}
+  end
+
+  defp ref_mfa(parts, false) do
+    {mod_parts, [fun]} = Enum.split(parts, -1)
+    {Module.concat(Enum.map(mod_parts, &String.to_atom/1)), String.to_atom(fun)}
+  end
+
+  defp ref_str(parts, true), do: ":" <> Enum.join(parts, ".")
+  defp ref_str(parts, false), do: Enum.join(parts, ".")
 
   # ADR-0042 §2 — protocol bounds. At each call to a bounded generic, instantiate
   # the callee's type variables from the argument types; when a bound `T: P`

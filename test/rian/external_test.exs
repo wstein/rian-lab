@@ -155,6 +155,59 @@ defmodule Rian.ExternalTest do
     end
   end
 
+  describe "reference form `@external(:t, Mod.fun)` (ADR-0068 / ADR-0081)" do
+    test "an erlang reference parses to a tagged ref and lowers to a positional call" do
+      f =
+        hd(
+          Decl.parse(~S|@external(:ex, :erlang.binary_to_list) pub def to_list(s String) _Unk|).funcs
+        )
+
+      assert f.externals == %{ex: {:ref, ["erlang", "binary_to_list"], true}}
+      # the reference renders to the same host call a string spec would (params positional)
+      assert Decl.external_call(f.externals.ex, f.params) == ":erlang.binary_to_list(s)"
+    end
+
+    test "a dotted Elixir/Rian reference lowers to `Mod.fun(args)`" do
+      f =
+        hd(
+          Decl.parse(
+            ~S|@external(:ex, Rian.Beam.load_result) pub def lr(s String, m Symbol) _Unk|
+          ).funcs
+        )
+
+      assert f.externals == %{ex: {:ref, ["Rian", "Beam", "load_result"], false}}
+      assert Decl.external_call(f.externals.ex, f.params) == "Rian.Beam.load_result(s, m)"
+    end
+
+    test "a reference to a non-existent host function/arity is a compile error (no silent stub)" do
+      bad = ~S|@external(:ex, :erlang.no_such_fun_xyz) pub def b(s String) _Unk|
+      {:error, msg} = Check.check(bad)
+      assert msg =~ "no `no_such_fun_xyz/1` is exported"
+    end
+
+    test "a resolvable erlang reference passes the check; the string form still works" do
+      assert Check.check(~S|@external(:ex, :erlang.binary_to_list) pub def t(s String) _Unk|) ==
+               :ok
+
+      assert Check.check(~S|@external(:ex, ":erlang.binary_to_list(s)") pub def t(s String) _Unk|) ==
+               :ok
+    end
+
+    test "Reach reads the target set identically for a reference (spec form is irrelevant)" do
+      rep =
+        Decl.parse(~S|@external(:ex, :erlang.binary_to_list) pub def t(s String) _Unk|)
+        |> Reach.analyze()
+
+      assert Reach.entry(rep, "t").reach |> MapSet.to_list() == [:ex]
+    end
+
+    test "the file-reference form is a clear not-yet-supported error (ADR-0080 §7)" do
+      assert_raise Decl.Error, ~r/file-reference .* not yet supported/, fn ->
+        Decl.parse(~S|@external(:js, "./ffi.mjs", "fun") pub def f(x Int53) Int53|)
+      end
+    end
+  end
+
   defp node_run(js, expr) do
     case System.find_executable("node") do
       nil ->

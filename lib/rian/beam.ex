@@ -393,7 +393,8 @@ defmodule Rian.Beam do
         []
 
       spec ->
-        clause = %{pats: Enum.map(f.params, &{:var, &1.name}), body: spec, guard: nil}
+        body = Rian.Decl.external_call(spec, f.params)
+        clause = %{pats: Enum.map(f.params, &{:var, &1.name}), body: body, guard: nil}
         [%{f | clauses: [clause], externals: %{}}]
     end
   end

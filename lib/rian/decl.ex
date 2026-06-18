@@ -917,10 +917,12 @@ defmodule Rian.Decl do
       else: Enum.uniq(targets)
   end
 
-  # `@external(:target, "spec")` args -> `{target_atom, spec_string}` (ADR-0068).
-  # The target is validated against the closed vocabulary; the spec is a raw
-  # host-expression string the matching emitter lowers (FFI is trusted, not parsed).
-  defp parse_external([{:op, ":"}, {:id, t}, {:comma}, {:str, spec}]) do
+  # `@external(:target, spec)` args -> `{target_atom, spec}` (ADR-0068). The target is
+  # validated; the spec is either a raw host-expression **string** (`"…"`, the interim
+  # form) or a **function reference** — a dotted name `Mod.fun` (Elixir/Rian) or
+  # `:erlang.fun` (Erlang). A reference lowers to a positional call (ADR-0068 §1, the
+  # Gleam model); it is the preferred form (checkable, tooled). FFI is trusted, not parsed.
+  defp parse_external([{:op, ":"}, {:id, t}, {:comma} | rest]) do
     atom = String.to_atom(t)
 
     unless atom in Rian.Reach.targets() do
@@ -930,11 +932,52 @@ defmodule Rian.Decl do
       )
     end
 
-    {atom, spec}
+    {atom, parse_external_spec(rest)}
   end
 
   defp parse_external(_other),
     do: raise(Error, ~S|`@external` takes a target atom and a string: `@external(:js, "expr")`|)
+
+  # the spec after `@external(:target, …`: a string (legacy), or a function reference
+  # `:erlang.fun` (erlang) / `Mod.fun` (Elixir/Rian local), stored `{:ref, parts, erlang?}`.
+  defp parse_external_spec([{:str, spec}]), do: spec
+
+  defp parse_external_spec([{:op, ":"}, {:id, m} | rest]),
+    do: {:ref, [m | dotted_tail(rest)], true}
+
+  defp parse_external_spec([{:id, m} | rest]), do: {:ref, [m | dotted_tail(rest)], false}
+
+  defp parse_external_spec([{:str, _path}, {:comma}, {:str, _fun}]),
+    do:
+      raise(
+        Error,
+        "file-reference `@external(:t, \"path\", \"fun\")` is not yet supported — use a dotted " <>
+          "reference `@external(:t, Mod.fun)` or a string (foreign-file layout: ADR-0080 §7)"
+      )
+
+  defp parse_external_spec(_other),
+    do:
+      raise(Error, ~S|`@external` takes a string `"expr"` or a reference `Mod.fun`/`:erlang.fun`|)
+
+  defp dotted_tail([{:op, "."}, {:id, x} | rest]), do: [x | dotted_tail(rest)]
+  defp dotted_tail([]), do: []
+
+  defp dotted_tail(_other),
+    do: raise(Error, "malformed `@external` reference (expected `Mod.fun`)")
+
+  @doc """
+  Render an `@external` spec to a host-call string for an emitter (ADR-0068): a raw
+  string passes through; a reference `{:ref, parts, erlang?}` becomes a positional call
+  `path(p1, p2, …)` over the function's params. So a reference lowers via the existing
+  string-splicing path in every emitter — one helper, no per-backend reference logic.
+  """
+  @spec external_call(String.t() | tuple(), [map()]) :: String.t()
+  def external_call(spec, _params) when is_binary(spec), do: spec
+
+  def external_call({:ref, parts, erlang?}, params) do
+    path = if erlang?, do: ":" <> Enum.join(parts, "."), else: Enum.join(parts, ".")
+    "#{path}(#{Enum.map_join(params, ", ", & &1.name)})"
+  end
 
   defp attach_effects({:def, raw}, effects), do: {:def, Map.put(raw, :effects, effects)}
   defp attach_effects(_other, _e), do: raise(Error, "`@effects(…)` may only precede a `def`")

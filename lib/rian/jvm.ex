@@ -279,6 +279,8 @@ defmodule Rian.JVM do
         raise Unsupported, "`#{f.name}`: no `@external(:jvm, …)` body — not reachable on :jvm"
 
       spec ->
+        host = Rian.Decl.external_call(spec, f.params)
+
         sig =
           f.params
           |> Enum.with_index()
@@ -290,7 +292,7 @@ defmodule Rian.JVM do
           |> Enum.map_join(" ", fn {p, i} -> "val #{p.name} = a#{i};" end)
 
         vis = if f.pub?, do: "", else: "private "
-        "#{vis}fun #{f.name}(#{sig}): #{kt_type(f.ret)} { #{binds} return #{spec} }"
+        "#{vis}fun #{f.name}(#{sig}): #{kt_type(f.ret)} { #{binds} return #{host} }"
     end
   end
 
