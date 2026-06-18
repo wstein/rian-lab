@@ -75,7 +75,12 @@ defmodule Rian.Build do
         emit_source(:js, ".mjs", opts, file, prog, src_dir, Rian.JS.compile(src))
 
       opts[:jvm] ->
-        emit_source(:jvm, ".kt", opts, file, prog, src_dir, Rian.JVM.compile(src))
+        # ADR-0082 step 3: `-o ROOT` generates a Gradle project under ROOT/_build/jvm/;
+        # no `-o` keeps the flat stdout source-inspection path.
+        case Keyword.get(opts, :out) do
+          nil -> print(Rian.JVM.compile(src))
+          root -> build_gradle(root, file, prog, src, src_dir)
+        end
 
       true ->
         # ADR-0082 step 2: `-o ROOT` packages an OTP app under ROOT/_build/ex/
@@ -144,6 +149,28 @@ defmodule Rian.Build do
     IO.puts(lib)
 
     copy_foreign(prog, :rs, src_dir, src_out)
+    0
+  end
+
+  # `rian build --jvm -o ROOT` (ADR-0082 step 3): generate a self-contained Gradle/Kotlin
+  # project under ROOT/_build/jvm/ — `settings.gradle.kts` + `build.gradle.kts` from the
+  # manifest, the emitted Kotlin as `src/main/kotlin/<name>.kt`, and each `@external(:jvm)`
+  # `.ffi.kt` copied into the same source set (invariant 5). Manifest generation runs
+  # first, so a non-empty `[deps]` / a `kind="app"` project fails before any write.
+  defp build_gradle(root, file, prog, src, src_dir) do
+    manifest = project_manifest(file, src_dir)
+    settings = Rian.Pkg.Gradle.settings_gradle(manifest)
+    build = Rian.Pkg.Gradle.build_gradle(manifest)
+    kotlin = Rian.JVM.compile(src)
+
+    proj = Path.join([root, "_build", "jvm"])
+    kt_dir = Path.join([proj, "src", "main", "kotlin"])
+    File.mkdir_p!(kt_dir)
+
+    write_file(Path.join(proj, "settings.gradle.kts"), settings)
+    write_file(Path.join(proj, "build.gradle.kts"), build)
+    write_file(Path.join(kt_dir, Path.basename(file, ".rian") <> ".kt"), kotlin)
+    copy_foreign(prog, :jvm, src_dir, kt_dir)
     0
   end
 

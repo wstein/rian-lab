@@ -225,11 +225,11 @@ defmodule Rian.BuildTest do
     end
 
     @tag :jvm
-    test "bundles a :jvm file-reference: copies the .ffi.kt, compiles + runs under kotlinc/java" do
+    test "packages a Gradle project under _build/jvm/ — FFI in the source set, kotlinc-valid" do
       kotlinc = System.find_executable("kotlinc")
       java = System.find_executable("java")
 
-      src_dir = Path.join(System.tmp_dir!(), "rian_ffi_kt_#{System.unique_integer([:positive])}")
+      src_dir = Path.join(System.tmp_dir!(), "rian_pkg_kt_#{System.unique_integer([:positive])}")
       File.mkdir_p!(src_dir)
       on_exit(fn -> File.rm_rf(src_dir) end)
 
@@ -245,24 +245,70 @@ defmodule Rian.BuildTest do
         ~S|@external(:jvm, "./codec.ffi.kt", "encode") pub def enc(x val Int64) Int64| <> "\n"
       )
 
-      out_dir = tmp_dir()
-      out = capture_io(fn -> assert Build.build([rian, "--jvm", "-o", out_dir]) == 0 end)
+      out = tmp_dir()
+      _ = capture_io(fn -> assert Build.build([rian, "--jvm", "-o", out]) == 0 end)
 
-      assert out =~ "prog.kt"
-      assert File.read!(Path.join(out_dir, "prog.kt")) =~ "return encode(x)"
-      # the foreign file is copied beside the output so it compiles in the same package
-      assert File.exists?(Path.join(out_dir, "codec.ffi.kt"))
+      proj = Path.join([out, "_build", "jvm"])
+      assert File.read!(Path.join(proj, "build.gradle.kts")) =~ ~s|kotlin("jvm")|
+      assert File.read!(Path.join(proj, "settings.gradle.kts")) =~ "rootProject.name"
 
+      kt = Path.join([proj, "src", "main", "kotlin"])
+      assert File.read!(Path.join(kt, "prog.kt")) =~ "return encode(x)"
+      # the FFI is copied into the same source set so the default-package call resolves
+      assert File.exists?(Path.join(kt, "codec.ffi.kt"))
+
+      # reuse the JVM toolchain harness: the packaged source set is valid Kotlin
       if kotlinc && java do
-        File.write!(Path.join(out_dir, "runner.kt"), "fun main() { println(enc(41L)) }\n")
-        jar = Path.join(out_dir, "bundle.jar")
-        files = Path.wildcard(Path.join(out_dir, "*.kt"))
+        File.write!(Path.join(out, "runner.kt"), "fun main() { println(enc(41L)) }\n")
+        jar = Path.join(out, "bundle.jar")
+        files = Path.wildcard(Path.join(kt, "*.kt")) ++ [Path.join(out, "runner.kt")]
 
         {_, 0} =
           System.cmd(kotlinc, files ++ ["-include-runtime", "-d", jar], stderr_to_stdout: true)
 
         {res, 0} = System.cmd(java, ["-jar", jar])
         assert String.trim(res) == "42"
+      end
+    end
+
+    @tag :gradle
+    test "the generated Gradle project builds through gradle (invariant 4)" do
+      case System.find_executable("gradle") do
+        nil ->
+          :ok
+
+        gradle ->
+          src_dir =
+            Path.join(System.tmp_dir!(), "rian_gradle_#{System.unique_integer([:positive])}")
+
+          File.mkdir_p!(src_dir)
+          on_exit(fn -> File.rm_rf(src_dir) end)
+
+          File.write!(
+            Path.join(src_dir, "codec.ffi.kt"),
+            "fun encode(x: Long): Long { return x + 1 }\n"
+          )
+
+          rian = Path.join(src_dir, "prog.rian")
+
+          File.write!(
+            rian,
+            ~S|@external(:jvm, "./codec.ffi.kt", "encode") pub def enc(x val Int64) Int64| <> "\n"
+          )
+
+          out = tmp_dir()
+          _ = capture_io(fn -> assert Build.build([rian, "--jvm", "-o", out]) == 0 end)
+
+          proj = Path.join([out, "_build", "jvm"])
+
+          {res, code} =
+            System.cmd(gradle, ["build", "--console=plain", "-q"],
+              cd: proj,
+              stderr_to_stdout: true
+            )
+
+          assert code == 0, "gradle build failed:\n#{res}"
+          assert Path.wildcard(Path.join(proj, "build/libs/*.jar")) != []
       end
     end
   end
