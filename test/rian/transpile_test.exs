@@ -785,6 +785,15 @@ end|) =~ ~S|"v=${x}!"|
       refute body =~ "raise("
     end
 
+    test "Elixir `reraise` → `panic` on the exception, never the trailing stacktrace" do
+      # `reraise exc, stacktrace` puts the stacktrace LAST; panic on the exception
+      # (the first arg), not on the trailing stacktrace argument.
+      out = rian("defmodule M do\n  def a(e, st), do: reraise(e, st)\nend")
+
+      assert out =~ ":= panic(e)"
+      refute out =~ "reraise"
+    end
+
     test "truthy `&&`/`||` become a TODO_PORT marker (no faithful Rian image)" do
       # Rian's `and`/`or` are boolean (they lower to native `&&`/`||`), so they are
       # NOT a sound port of Elixir's value-returning, nil-coalescing `&&`/`||`; the
@@ -976,6 +985,28 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ "# @rian_host:"
       refute out =~ ":= load(src)"
       refute out =~ "try do"
+      body = out |> String.split("mod M do") |> List.last()
+      refute body =~ "TODO_PORT"
+    end
+
+    test "an `@spec` between `@rian_host` and the `def` does not break the host mapping" do
+      # the conventional order is `@rian_host` / `@spec` / `def`; the intervening `@spec`
+      # must not clear the pending host reason, else the rescue regresses to a TODO_PORT.
+      out =
+        rian("""
+        defmodule M do
+          @rian_host "compile boundary: load/2 raises into a value"
+          @spec load_result(String.t()) :: {:ok, term()} | {:error, String.t()}
+          def load_result(src) do
+            load(src)
+          rescue
+            e -> {:error, Exception.message(e)}
+          end
+        end
+        """)
+
+      assert out =~ "@effects(host)"
+      assert out =~ "@external(:ex, M.load_result)"
       body = out |> String.split("mod M do") |> List.last()
       refute body =~ "TODO_PORT"
     end
@@ -1412,6 +1443,19 @@ end|)
 
       assert stats.defs == 2
       assert stats.ports == 1
+    end
+
+    test "the `mapped` tally counts code only — a stdlib name in a `# spec:` comment is excluded" do
+      # `--infer` emits a `# spec:` provenance line carrying the original `@spec`
+      # verbatim; a `List.t()` in that comment must not inflate the auto-mapped count
+      # (the body calls no stdlib op), just as `holes` already ignores comment lines.
+      {_text, stats} =
+        Transpile.transpile_with_stats(
+          "defmodule M do\n  @spec f(list) :: List.t()\n  def f(xs), do: xs\nend",
+          infer: true
+        )
+
+      assert stats.mapped == 0
     end
   end
 

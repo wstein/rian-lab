@@ -41,7 +41,9 @@ defmodule Rian.Transpile do
       (ADR-0048 §2 / ADR-0068 / ADR-0081 §5): `@effects(host)` + an `@external(:ex,
       Mod.fun)` **reference** to the original Elixir function (a bodiless def, no
       portable body; delegates to the tested original, no escaped host blob), not a
-      marker and not a comment. **Dynamic dispatch** on a runtime
+      marker and not a comment. The annotation binds the **next** `def`, so an
+      intervening `@spec`/`@doc` (the conventional order) does not break the tag.
+      **Dynamic dispatch** on a runtime
       module value (`mod.fun(args)`) lowers to its faithful BEAM-FFI form
       `apply(mod, :fun, [args])` (reflection / runtime module selection — non-portable,
       Reach pins it off `:rs`/`:js`), and a **module attribute in pattern position**
@@ -276,12 +278,14 @@ defmodule Rian.Transpile do
 
     # def heads — indented (inside a `mod`) or at column 0 (module-less source).
     defs = Enum.count(body, &Regex.match?(~r/^\s*(pub )?def \w+\(/, &1))
-    # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics check.
-    mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, Enum.join(body, "\n")) |> length()
-    # holes are counted over the code only — comment provenance lines are dropped.
+
+    # counts are over the code only — comment provenance lines (`# spec:` carrying the
+    # original `@spec`, which can mention `List.t(` / `_Unk`) must not inflate the tally.
     code =
       body |> Enum.reject(&String.starts_with?(String.trim_leading(&1), "#")) |> Enum.join("\n")
 
+    # auto-mapped stdlib calls (A1) — resolved inline, but flagged for a semantics check.
+    mapped = Regex.scan(~r/\b(?:List|Dict|Str|Int)\.[a-z_]+\(/, code) |> length()
     holes = Regex.scan(~r/\b_Unk\b/, code) |> length()
     %{ports: ports, defs: defs, mapped: mapped, holes: holes}
   end
@@ -1064,8 +1068,11 @@ defmodule Rian.Transpile do
         {kind, _, [head | _]}, {m, r} when kind in [:def, :defp] and r != nil ->
           {Map.put(m, host_name(head), r), nil}
 
-        _other, {m, _r} ->
-          {m, nil}
+        # a non-def node (e.g. an intervening `@spec`/`@doc`) must NOT clear a pending
+        # reason — the `@rian_host` annotation sticks until the next `def` consumes it,
+        # so `@rian_host` + `@spec` + `def` (the conventional order) still maps the def.
+        _other, acc ->
+          acc
       end)
 
     map
@@ -1460,7 +1467,10 @@ defmodule Rian.Transpile do
   # error (one a caller should recover) is then restructured to a `Result` by hand —
   # the same draft-finishing the transpiler always requires.
   defp expr({:raise, _, args}), do: "panic(#{raise_msg(args)})"
-  defp expr({:reraise, _, args}), do: "panic(#{raise_msg(args)})"
+  # `reraise exc, stacktrace` / `reraise exc, attrs, stacktrace` — the FIRST arg is the
+  # exception/message and the LAST is always the stacktrace, so panic on the exception
+  # (not the trailing `__STACKTRACE__`, which `raise_msg/1`'s 2-arg arm would otherwise pick).
+  defp expr({:reraise, _, [exc | _]}), do: "panic(#{raise_msg([exc])})"
 
   defp expr({:if, _, [c, kw]}) do
     t = render_body(Keyword.get(kw, :do))
