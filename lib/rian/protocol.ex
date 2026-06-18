@@ -48,6 +48,8 @@ defmodule Rian.Protocol do
   (`[{proto, type, [method_raw_map]}]`) into a list of raw `def` maps to append
   to a scope's function stream. Raises `Error` on any coherence violation.
   """
+  @rian_sig "pub def expand(protocols _Unk, impls Vec(_Unk), types Vec(Type)) _Unk"
+  @rian_sig "pub def expand(protocols _Unk, impls Vec(_Unk), types Vec(Type), structs Vec(Struct)) _Unk"
   @rian_sig "pub def expand(protocols _Unk, impls Vec(_Unk), types Vec(Type), structs Vec(Struct), targets _Unk) _Unk"
   @spec expand(map(), list(), list(), list(), term()) :: term()
   def expand(protocols, impls, types \\ [], structs \\ [], targets \\ nil) do
