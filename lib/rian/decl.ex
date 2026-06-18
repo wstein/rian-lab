@@ -96,6 +96,7 @@ defmodule Rian.Decl do
 
   # ── Public API ─────────────────────────────────────────────────────────
   @doc "Parse source into `%{types: [...], structs: [...], funcs: [...], mods: [...]}` (pipeline IR)."
+  @rian_sig "pub def parse(src String) Prog"
   @spec parse(String.t()) :: map()
   def parse(src) do
     decls = src |> Lexer.tokenize() |> split_decls()
