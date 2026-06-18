@@ -20,6 +20,17 @@ Rian adopts **No Hidden Control Flow** as a standing design principle. Concretel
 1. **No exceptions in the portable core.** Errors are values — `Result(T, E)` over a typed error
    set (ADR-0034). Control does not jump invisibly up the stack. (The BEAM target may still surface
    `FunctionClauseError` for explicitly `@partial` functions; that is opt-in, never silent.)
+   **Termination is permitted, recovery is not:** `Prim.panic(msg) : T forall T` is a diverging,
+   **uncatchable** abort for invariant violations / unreachable arms (lowers to
+   `erlang:error`/`panic!`/`throw`/Kotlin `throw`; portable to every target). It is *not* hidden
+   control flow — with no `catch`, control routes nowhere; the process terminates. Use it only for
+   "can't happen," never for an expected error (that is a `Result`). **Catchable `try`/`catch` was
+   considered and rejected** (decision 2026-06-18, see ADR-0040 §"Considered: capability-guarded
+   exceptions"): Rust has no idiomatic catchable exception (`catch_unwind` needs `UnwindSafe` and
+   aborts under `panic=abort`), so a Rian `catch` would be a *runtime-semantics* divergence across
+   targets — breaking the ADR-0050 "idiomatic per target" thesis, not just a missing API. A
+   genuinely-host-raising boundary (`Code.format_string!`, ad-hoc compile, file I/O) is an **FFI
+   effect**, tracked by `Rian.Reach` like any host call — not a surface exception.
 2. **No hidden allocation on non-GC targets.** On Rust/WASM, allocation is visible in the lowering;
    capability-driven ownership (ADR-0025) governs it. The GC targets (BEAM/JVM/JS) allocate as
    their runtimes do.

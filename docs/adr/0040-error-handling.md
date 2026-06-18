@@ -102,6 +102,42 @@ The Rust target gets `?`-ergonomics **in the emitter** without `?` in the surfac
 - **Pairs with the existing error sets** (ADR-0036 `RangeError`, ADR-0037 `DecodeError`) — they are
   now first-class citizens of `with`.
 
+## Considered: capability-guarded exceptions (rejected 2026-06-18)
+
+A proposal to add `try`/`catch`/`raise` to Rian, gated behind a capability/effect so the control
+flow is "visible," was debated and **rejected**. The deciding arguments:
+
+- **Portability of *semantics*, not syntax (ADR-0050).** All four targets have exception *syntax*,
+  but not compatible *semantics*. Rust has no idiomatic catchable exception: `std::panic::catch_unwind`
+  requires `UnwindSafe` bounds our generics won't satisfy, and is a hard abort under
+  `panic = "abort"` (a standard release profile). A Rian `catch` that works on BEAM/JS/JVM would
+  silently *abort the process* on Rust — a runtime-semantics divergence Reach can't paper over.
+- **`catch` is exactly the non-local transfer ADR-0035 forbids.** A capability makes the *possibility*
+  visible in the signature but not the *flow*; the `raise` site stays invisible at the handler, which
+  is the property `<-`/`with` exist to give.
+- **A sound `throws E` effect is the error-set fixpoint we already have** (`Check.solve_error_sets`),
+  relabelled — more machinery for weaker guarantees than `Result`.
+
+What we adopted instead:
+
+- **`Prim.panic` (uncatchable abort)** — see §1 below and ADR-0035 §1. Portable *because* it has no
+  handler (no hidden routing); for invariant violations only.
+- **Host-raise is an FFI effect, not a surface exception.** The few genuinely-irreducible boundaries
+  (`Code.format_string!`, ad-hoc compilation, file I/O, evaluating arbitrary loaded code) call into
+  host runtimes that only raise; converting their raise to a value needs a `try/rescue` *at that
+  host boundary*. These are tracked as host/FFI effects (like any non-portable host call) and are
+  excluded from the `mix rian.transpile --check` construct gate — they are honest non-portability,
+  not a Rian-concept clash.
+- **Algebraic effects (ADR-0048)** remain the only principled long-term home if recoverable host
+  errors are ever wanted — never the ownership-capability lattice (keep the axes separate).
+
+### `Prim.panic(msg) : T forall T`
+
+The diverging, uncatchable abort (implemented as a `Prim` intrinsic, ADR-0047). Types as `:unknown`
+(well-typed in any position, never returns); lowers to `erlang:error` / `panic!` (`!`) / a `throw`
+IIFE / Kotlin `throw` (`Nothing`); `Rian.Reach` reports a panicking function as all-target. It is the
+honest spelling of a defensive "can't happen," distinct from a `Result` (an *expected* error).
+
 ## Resolved (decision-lock 2026-06-12)
 
 - **`pub` error-set strictness → ⊆ declared.** Over-declaration is allowed: a public API may reserve
