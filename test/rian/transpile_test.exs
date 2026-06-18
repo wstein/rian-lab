@@ -950,18 +950,16 @@ end|) =~ ~S|"v=${x}!"|
       refute body =~ "TODO_PORT"
     end
 
-    test "a `@rian_host`-tagged rescue is a sanctioned boundary → happy path under a `# @rian_host:` note" do
-      # `@rian_host` (Rian.Ann) marks a def whose recovery lives host-side on purpose
-      # (ADR-0035/0048: the errors-as-values twin of a raising function). The recovery
-      # has no Rian image, but the def is NOT unfinished work — so the draft emits the
-      # portable happy path under a greppable host-boundary note, never a TODO_PORT.
-      # a `when` guard on the tagged head must be preserved (it names the boundary
-      # function the same way `Rian.Ann.host_funcs/1` does).
+    test "a `@rian_host`-tagged rescue → real `@effects(host)` + `@external(:ex, …)` (ADR-0048 §2)" do
+      # `@rian_host` (Rian.Ann) marks a def whose `rescue` catches a host fault into a
+      # value (ADR-0035/0048). The catch lives in an `@external(:ex, …)` host body and
+      # the effect is declared `@effects(host)` — real Rian surface, not a comment and
+      # not a TODO_PORT. The reason becomes the `@doc` when the def has none.
       out =
         rian("""
         defmodule M do
           @rian_host "compile boundary: load/2 raises into a value"
-          def load_result(src) when is_binary(src) do
+          def load_result(src) do
             load(src)
           rescue
             e -> {:error, Exception.message(e)}
@@ -969,8 +967,16 @@ end|) =~ ~S|"v=${x}!"|
         end
         """)
 
-      assert out =~ "# @rian_host: compile boundary: load/2 raises into a value"
-      assert out =~ "pub def load_result(src) when is_binary(src) := load(src)"
+      assert out =~ ~s|@doc "compile boundary: load/2 raises into a value"|
+      assert out =~ "@effects(host)"
+
+      assert out =~
+               ~s|@external(:ex, "try do load(src) rescue e -> {:error, Exception.message(e)} end")|
+
+      # a bodiless def — no portable body, no comment
+      assert out =~ "pub def load_result(src"
+      refute out =~ "# @rian_host:"
+      refute out =~ ":= load(src)"
       body = out |> String.split("mod M do") |> List.last()
       refute body =~ "TODO_PORT"
     end

@@ -37,8 +37,10 @@ defmodule Rian.Transpile do
       `# TODO[port]` for these would falsely imply lost behaviour;
     * a **`@rian_host`-tagged** def is a sanctioned host boundary (ADR-0035/0048: the
       errors-as-values twin of a raising function), whose `rescue`/`catch`/`after`
-      lives host-side on purpose — so it renders as the **portable happy path** under a
-      greppable `# @rian_host:` note, not a marker. **Dynamic dispatch** on a runtime
+      catches a host fault into a value — so it renders as real Rian surface
+      (ADR-0048 §2 / ADR-0081 §5): `@effects(host)` + an `@external(:ex, "<host body>")`
+      carrying the full `try`/`rescue` (a bodiless def, no portable body), not a marker
+      and not a comment. **Dynamic dispatch** on a runtime
       module value (`mod.fun(args)`) lowers to its faithful BEAM-FFI form
       `apply(mod, :fun, [args])` (reflection / runtime module selection — non-portable,
       Reach pins it off `:rs`/`:js`), and a **module attribute in pattern position**
@@ -78,7 +80,7 @@ defmodule Rian.Transpile do
     "#   ExUnit `test` blocks → `@test def`, assert/refute → assertion macros.",
     "# Dropped (no Rian image — an honest note, never a marker): defexception modules,",
     "#   defmacro, use Application, Code.ensure_loaded? guards, doc/metadata attrs.",
-    "# A `@rian_host` def → its happy path under a `# @rian_host:` note; dynamic",
+    "# A `@rian_host` def → `@effects(host)` + `@external(:ex, \"<try/rescue>\")`; dynamic",
     "#   dispatch `mod.f(a)` → `apply(mod, :f, [a])` (BEAM FFI).",
     "# You must still: (1) fill type holes `_Unk`, (2) resolve every",
     "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
@@ -976,10 +978,11 @@ defmodule Rian.Transpile do
 
     has_do = kw != nil and Keyword.has_key?(kw, :do)
     recovery = has_do and recovery_keys(kw) != []
-    # A `@rian_host`-tagged def is a SANCTIONED host boundary (ADR-0035/0048): its
-    # recovery is host-side, so the draft emits the portable happy path under a
-    # `# @rian_host:` note (`flush/2`), not a `TODO_PORT` "restructure" marker.
+    # A `@rian_host`-tagged def is a SANCTIONED host boundary (ADR-0035/0048): the host
+    # catch lives in an `@external(:ex, …)` body returning a value (ADR-0048 §2), so the
+    # draft emits `@effects(host)` + `@external` (`flush/2`), not a `TODO_PORT` marker.
     host_reason = Map.get(host, name)
+    host_body = if host_reason != nil, do: host_body_str(kw, recovery), else: nil
 
     # Distinguish a *present* `nil` body (`def f, do: nil`) from a truly bodyless
     # def (no `:do` key): both reduce to the atom `nil`, but only the former should
@@ -995,8 +998,26 @@ defmodule Rian.Transpile do
         true -> :__no_body__
       end
 
-    %{name: name, arity: length(args), args: args, guard: guard, body: body, host: host_reason}
+    %{
+      name: name,
+      arity: length(args),
+      args: args,
+      guard: guard,
+      body: body,
+      host: host_reason,
+      host_body: host_body
+    }
   end
+
+  # The `@external(:ex, …)` host-body string for a `@rian_host` def: the *full* host
+  # expression (incl. the `rescue`/`catch`/`after` recovery that catches the host fault
+  # into a value) reconstructed as a `try` block, so the catch lives in the external
+  # body where it belongs — not dropped as the happy-path emission did.
+  defp host_body_str(kw, true) do
+    snippet({:try, [], [Keyword.take(kw, [:do, :rescue, :catch, :after, :else])]})
+  end
+
+  defp host_body_str(kw, false), do: snippet(Keyword.get(kw, :do))
 
   # Elixir exception-control keys on a `def`/`try` (`rescue`/`catch`/`after`) — Rian
   # has none (ADR-0035/0040: errors are values), so they cannot be ported mechanically.
@@ -1050,13 +1071,6 @@ defmodule Rian.Transpile do
   defp flush(%{vis: vis, doc: doc, clauses: clauses}, sigmap) do
     kw = if vis == :pub, do: "pub def", else: "def"
     doc_lines = if doc, do: [~s(@doc "#{escape(one_line(doc))}")], else: []
-    # `@rian_host` is not a Rian surface annotation (only `@doc`/`@test`/… are), so the
-    # sanctioned-host-boundary note is a greppable comment, not an attribute.
-    host_lines =
-      case hd(clauses).host do
-        nil -> []
-        reason -> ["# @rian_host: #{one_line(reason)}"]
-      end
 
     name = hd(clauses).name
     arity = hd(clauses).arity
@@ -1075,22 +1089,44 @@ defmodule Rian.Transpile do
     # already resolved (a real type) is kept as useful signal.
     ret_part = if vis != :pub and ret == "_Unk", do: "", else: " #{ret}"
 
-    body_lines =
-      if simple?(clauses) do
-        [c] = clauses
+    case hd(clauses).host do
+      nil ->
+        body_lines =
+          if simple?(clauses) do
+            [c] = clauses
+
+            params =
+              c.args
+              |> Enum.zip(ptypes)
+              |> Enum.map_join(", ", fn {a, t} -> param(var_name(a), t, vis) end)
+
+            clause_lines("#{kw} #{name}(#{params})#{ret_part}#{forall}", c.body)
+          else
+            sig_line = "#{kw} #{name}(#{sig_params(ptypes, vis)})#{ret_part}#{forall}"
+            [sig_line | Enum.flat_map(clauses, &render_clause(kw, &1))]
+          end
+
+        [""] ++ doc_lines ++ body_lines
+
+      reason ->
+        # A `@rian_host` boundary → real Rian surface (ADR-0048 §2 / ADR-0081 §5): the
+        # host catch lives in an `@external(:ex, …)` body and the effect is declared
+        # `@effects(host)` — a bodiless def, no portable body. The reason becomes the
+        # `@doc` when the function has none of its own.
+        host_doc = if doc, do: doc_lines, else: [~s(@doc "#{escape(one_line(reason))}")]
+        ext = ~s|@external(:ex, "#{escape(hd(clauses).host_body)}")|
+        # a bodiless `@external` def carries NAMED params (no clauses to hold patterns) —
+        # render them from the tagged clause's args, like the single-clause path.
+        c = hd(clauses)
 
         params =
           c.args
           |> Enum.zip(ptypes)
           |> Enum.map_join(", ", fn {a, t} -> param(var_name(a), t, vis) end)
 
-        clause_lines("#{kw} #{name}(#{params})#{ret_part}#{forall}", c.body)
-      else
-        sig_line = "#{kw} #{name}(#{sig_params(ptypes, vis)})#{ret_part}#{forall}"
-        [sig_line | Enum.flat_map(clauses, &render_clause(kw, &1))]
-      end
-
-    [""] ++ doc_lines ++ host_lines ++ body_lines
+        sig_line = "#{kw} #{name}(#{params})#{ret_part}#{forall}"
+        [""] ++ host_doc ++ ["@effects(host)", ext, sig_line]
+    end
   end
 
   # A clause's body lines. A multi-statement body becomes a **block clause**
