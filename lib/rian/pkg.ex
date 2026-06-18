@@ -12,7 +12,8 @@ defmodule Rian.Pkg do
   native plugin embeds Rian in an existing project. They share the backend, so the two
   can never disagree.
 
-  Implemented backends: `Rian.Pkg.Cargo` (Rust, ADR-0082 staging step 1). The BEAM
-  (`rebar.config`), Gradle, and npm backends are staged behind it.
+  Implemented backends (ADR-0082 staging steps 1–4): `Rian.Pkg.Cargo` (Rust →
+  `Cargo.toml`), `Rian.Pkg.Rebar` (BEAM → `rebar.config`), `Rian.Pkg.Gradle`
+  (JVM/Kotlin → `build.gradle.kts`), and `Rian.Pkg.Npm` (ECMAScript → `package.json`).
   """
 end
