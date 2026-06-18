@@ -1,6 +1,6 @@
 # ADR-0068 — `@external`: target-scoped FFI bodies, Reach-honest
 
-**Status:** Accepted — **implemented (2026-06-14)** across `Rian.Decl` (parse), `Rian.Reach` (honest target set), `Rian.Check` (signature + `val`/`tag` restriction), and all four emitters (`Rian.Beam`/`Rian.JS`/`Rian.JVM`/`Rian.Lower`); `test/rian/external_test.exs`
+**Status:** Accepted — **implemented (2026-06-14)** across `Rian.Decl` (parse), `Rian.Reach` (honest target set), `Rian.Check` (signature + `val`/`tag` restriction), and all four emitters (`Rian.Beam`/`Rian.JS`/`Rian.JVM`/`Rian.Lower`); `test/rian/external_test.exs`. **Reference form** `@external(:t, Mod.fun)` (the preferred, Gleam-aligned spelling) + boundary resolution added 2026-06-18 (§1b); inline strings demoted to interim, file-references deferred to ADR-0080 §7
 **Implemented:** yes — `Rian.Decl`/`Rian.Reach`/`Rian.Check` + all four emitters (`test/rian/external_test.exs`)
 **Refs:** ADR-0057 (concurrency & FFI are native-per-target — the principle this gives a surface), ADR-0058 (configurable target environments; **inferred** reachability, *not* a binary `@shared` flag), ADR-0056 (`comptime if target` — the *adjacent but distinct* mechanism; see §4), ADR-0041 §2 (an unmapped host call is a compile error, never a silent stub), ADR-0035 (no hidden control flow / what-you-read-is-what-runs), ADR-0050 (one typed Core IR)
 **Owners:** Elena Rostova (FFI / lowering) · Maya Lin (emitters / the anti-`#if` position) · Samir Patel (no-silent-stub guard) · Arthur Pendelton (Reach) · Kira Neri (honesty) · Rachel Okafor (PM)
@@ -48,6 +48,42 @@ pub def format6(x val Float64) String
 - The **observable contract is uniform** (ADR-0041): every target's body must honour the *same*
   declared in/out types. The compiler checks the signature; the *equivalence* of the host bodies is
   the author's obligation, exactly as for any FFI (this is FFI, not magic).
+
+### 1b. Two spec forms: a **reference** (preferred) or an inline **string** (interim)
+
+The spec after `@external(:target, …)` is one of:
+
+- **A function reference (preferred, the Gleam model — implemented 2026-06-18):** `@external(:ex,
+  :erlang.binary_to_list)` (an Erlang MFA) or `@external(:ex, Rian.Beam.load_result)` (an Elixir/Rian
+  module function). It lowers to a **positional call** — the Rian params are passed in order:
+  `:erlang.binary_to_list(s)`, `Rian.Beam.load_result(src, module)`. The foreign code lives in a **real,
+  tooled, testable file** (host highlighting, host type-checking, host unit tests — resolving the
+  ADR-0048 error-path-testability dissent), and the reference is **machine-readable at the boundary**:
+  `Rian.Check` *resolves* it — a reference to a function/arity that the (loadable) host module does not
+  export is a **compile error** (the no-silent-stub guarantee, ADR-0041 §2; best-effort — an
+  un-loadable module can't be verified, so it isn't rejected). This is the form the transpiler emits for
+  a `@rian_host` boundary (`@external(:ex, Rian.Mod.fun)`, ADR-0081 §5) — delegating to the tested
+  original, no escaped host blob.
+- **An inline host-expression string (interim):** `@external(:ex, ":erlang.float_to_binary(x)")`. Each
+  emitter splices it as the body (the params are in scope by name). Self-contained and unblocked, but
+  **opaque** — no host highlighting/checking, escape-fragile for multi-line bodies, and untestable until
+  spliced. Retained for raw single expressions and for FFI that *constructs* its arguments
+  (`:erlang.error({:type_error, name})`, `:compile.forms(forms, [:return_errors])`) which a positional
+  reference cannot express without an authored foreign wrapper.
+
+A **file reference** `@external(:js, "./ffi.mjs", "fun")` (Gleam's non-BEAM form) is **parsed-rejected
+for now** with a clear error — it needs the foreign-file layout + per-target build/bundle integration
+(ADR-0080 §7), which is not yet built.
+
+**Deprecation path for the inline string.** The reference form is the destination; the string form is
+demoted to a constrained convenience. It is **not removed yet** because the self-hosting compiler
+(`compiler/compose_real_sum.rian`) relies on construct-the-args inline FFI, which has no reference image
+without authored foreign wrappers + the ADR-0080 §7 build integration. Removal is gated on that
+migration ("once references are ergonomic enough" — the 2026-06-18 debate consensus).
+
+Both forms lower through **one** emitter helper (`Rian.Decl.external_call/2`): a string passes through; a
+reference renders to its positional call. So no emitter carries per-form reference logic — `Rian.Reach`
+and the effect view are unchanged (they read the target *keys*, never the spec).
 
 ### 2. Reach computes the target set from the annotations (the honesty rule)
 
@@ -116,8 +152,11 @@ They do not overlap: one is "which Rian code", the other is "which host call".
 
 ## Open items
 
-- **Embedded quotes in a spec** — a spec containing `"` (e.g. a Rust `format!("{:.6}", x)`) needs the
-  Rian lexer to support `\"` string escapes (a separate, general lexer gap; tracked). Until then specs
-  must be quote-free.
-- **Structured spec form** — a `module`/`function` reference (Gleam-style) as an optional, more
-  checkable alternative to the raw expression, if a need appears.
+- **Embedded quotes in an inline-string spec** — a string spec containing `"` (e.g. a Rust
+  `format!("{:.6}", x)`) needs the Rian lexer's `\"` escape; until then string specs must be quote-free.
+  *The reference form sidesteps this entirely* (no host string), which is another reason it's preferred.
+- **File-reference build integration (ADR-0080 §7)** — `@external(:js, "./ffi.mjs", "fun")` is parsed
+  but rejected: it needs the foreign-file layout + per-target compile/bundle/package story before it can
+  lower. The blocker for both the file-reference form *and* removing the inline-string form.
+- ~~**Structured spec form**~~ — *resolved (2026-06-18):* the reference form `@external(:t, Mod.fun)` /
+  `:erlang.fun` is implemented (§1b), with boundary resolution in `Rian.Check`.
