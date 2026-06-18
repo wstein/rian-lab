@@ -268,6 +268,7 @@ defmodule Rian.Reach do
   nil the module is not gated — constraints are selected by need. Returns `:ok`
   or `{:error, message}`.
   """
+  @rian_sig "pub def check_contracts(prog Prog) _Unk"
   @rian_sig "pub def check_contracts(prog Prog, default _Unk) _Unk"
   @spec check_contracts(map(), term()) :: :ok | {:error, String.t()}
   def check_contracts(prog, default \\ nil) do
@@ -369,6 +370,7 @@ defmodule Rian.Reach do
   by the deep per-compile `gate!/1`: a REPL/test/library compile is never silently
   re-gated by a stray `rian.toml` in whatever directory it happens to run from.
   """
+  @rian_sig "pub def build_default() Vec(Symbol)"
   def build_default do
     # priority fall-through without truthy `||` (errors-as-values, ADR-0035): each
     # source returns `nil` when absent; `with nil <- …` carries the first non-nil out.
