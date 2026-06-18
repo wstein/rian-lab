@@ -719,6 +719,9 @@ defmodule Rian.Lower do
       # a string literal fed to a *generic* `&K` param (`K` resolves to owned `String`,
       # which has the `Clone`/`impl`s a tvar needs — `str` does not): `&"a".to_string()`.
       generic_tvar_borrow?(pt) and match?({:str, _}, a) -> owned_str_arg(elem(a, 1))
+      # a `Symbol` literal (`:foo`) fed to the same generic `&K`: a Symbol lowers to an
+      # owned `String` too, so it needs the identical owned-borrow, not a bare `&str`.
+      generic_tvar_borrow?(pt) and match?({:atom, _}, a) -> owned_str_arg(elem(a, 1))
       owned_field_var?(a, ec) -> {:unary, "&", a}
       borrowed != nil -> borrow_value(a, borrowed)
       owned_arg?(a, funs) -> {:unary, "&", a}

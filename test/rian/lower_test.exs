@@ -467,6 +467,38 @@ defmodule Rian.LowerTest do
           assert String.trim(out) == "ok"
       end
     end
+
+    @tag :rust
+    test "a `Symbol` literal passed to a generic `&K` param compiles (owned-borrow, ADR-0041)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          # `pick`'s params are a generic `&K`; calling it with Symbol literals must
+          # owned-borrow them (`&"ok".to_string()`), not emit a bare `&str` (rustc E0277).
+          p =
+            Decl.parse("def pick(a T, b T) T forall T := a\ndef go() Symbol := pick(:ok, :no)")
+
+          dir = System.tmp_dir!()
+          src = Path.join(dir, "rian_symg_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(src, ".rs")
+
+          File.write!(
+            src,
+            Lower.rust_program(p) <>
+              ~s|\nfn main() { assert_eq!(go(), "ok"); println!("ok"); }\n|
+          )
+
+          {_, 0} =
+            System.cmd(rustc, ["--edition", "2021", src, "-o", bin], stderr_to_stdout: true)
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(src)
+          File.rm(bin)
+          assert String.trim(out) == "ok"
+      end
+    end
   end
 
   describe "rust_program (whole-program assembly)" do
