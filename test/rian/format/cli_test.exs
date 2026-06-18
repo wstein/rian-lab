@@ -81,6 +81,93 @@ defmodule Rian.Format.CLITest do
     end
   end
 
+  describe "stdin (`-`)" do
+    test "formats stdin to stdout and returns 0" do
+      out =
+        capture_io("def f(x):=x+1\n", fn ->
+          send(self(), {:code, CLI.run(["-"])})
+        end)
+
+      assert out == "def f(x) := x + 1\n"
+      assert_received {:code, 0}
+    end
+
+    test "empty stdin is a no-op (0)" do
+      out = capture_io("", fn -> send(self(), {:code, CLI.run(["-"])}) end)
+      assert out == ""
+      assert_received {:code, 0}
+    end
+
+    test "unlexable stdin echoes the input, reports on stderr, returns 1" do
+      input = "def f() := \"unterminated\n"
+
+      out =
+        capture_io(input, fn ->
+          capture_io(:stderr, fn -> send(self(), {:code, CLI.run(["-"])}) end)
+        end)
+
+      assert out == input
+      assert_received {:code, 1}
+    end
+  end
+
+  describe "in place — unchanged & errors" do
+    test "an already-formatted file is left unchanged (0) and says so", %{dir: dir} do
+      f = write(dir, "ok.rian", "def f(x) := x + 1\n")
+      out = capture_io(fn -> send(self(), {:code, CLI.run([f])}) end)
+      assert out =~ "unchanged  #{f}"
+      assert_received {:code, 0}
+      assert File.read!(f) == "def f(x) := x + 1\n"
+    end
+
+    test "a missing file reports an ERROR on stderr and returns 1", %{dir: dir} do
+      missing = Path.join(dir, "nope.rian")
+      err = capture_io(:stderr, fn -> send(self(), {:code, CLI.run([missing])}) end)
+      assert err =~ "ERROR"
+      assert err =~ "cannot read"
+      assert_received {:code, 1}
+    end
+
+    test "an unlexable file reports an ERROR and returns 1", %{dir: dir} do
+      f = write(dir, "broken.rian", "def f() := \"unterminated\n")
+      capture_io(:stderr, fn -> send(self(), {:code, CLI.run([f])}) end)
+      assert_received {:code, 1}
+    end
+  end
+
+  describe "--stdout / --diff errors" do
+    test "--stdout on a missing file reports on stderr and returns 1", %{dir: dir} do
+      missing = Path.join(dir, "nope.rian")
+      err = capture_io(:stderr, fn -> send(self(), {:code, CLI.run(["--stdout", missing])}) end)
+      assert err =~ "cannot read"
+      assert_received {:code, 1}
+    end
+
+    test "--diff on an already-formatted file prints nothing and returns 0", %{dir: dir} do
+      f = write(dir, "ok.rian", "def f(x) := x + 1\n")
+      out = capture_io(fn -> send(self(), {:code, CLI.run(["--diff", f])}) end)
+      assert out == ""
+      assert_received {:code, 0}
+    end
+
+    test "--diff on a missing file reports on stderr and returns 1", %{dir: dir} do
+      missing = Path.join(dir, "nope.rian")
+      err = capture_io(:stderr, fn -> send(self(), {:code, CLI.run(["--diff", missing])}) end)
+      assert err =~ "cannot read"
+      assert_received {:code, 1}
+    end
+  end
+
+  describe "multiple files" do
+    test "returns the worst exit code across files", %{dir: dir} do
+      good = write(dir, "good.rian", "def f(x) := x + 1\n")
+      bad = write(dir, "bad.rian", "def f(x):=x+1\n")
+      # --check: good→0, bad→1, worst is 1
+      capture_io(:stderr, fn -> send(self(), {:code, CLI.run(["--check", good, bad])}) end)
+      assert_received {:code, 1}
+    end
+  end
+
   describe "robustness" do
     test "unknown option returns 2", %{dir: dir} do
       f = write(dir, "x.rian", "def f() := 1\n")
