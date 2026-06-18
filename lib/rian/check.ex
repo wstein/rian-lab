@@ -712,6 +712,12 @@ defmodule Rian.Check do
     * **error set** — when the return type is `T | E`, the function's *produced*
       set — directly-built `{:error, Tag}` ∪ propagated callee sets — must be a
       subset of `E` (over-declaration allowed; ADR-0040 §4).
+
+  Note: the `@effects(…)` declaration check (ADR-0081) only runs when `eset` carries
+  an `:effects` key (a whole-program report, threaded by `check_program/1`). The
+  default `eset` has none, so a direct `check_func/3` — e.g. from the REPL — does
+  **not** verify an `@effects` declaration; supply `effects: Rian.Reach.effect_sets(prog)`
+  to enable it.
   """
   @spec check_func(struct(), map(), map()) :: term()
   def check_func(func, ic \\ %{}, eset \\ %{tsets: %{}, table: %{}})

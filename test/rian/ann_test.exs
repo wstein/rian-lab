@@ -68,7 +68,7 @@ defmodule Rian.AnnTest do
   end
 
   describe "from_beam/1 from a .beam PATH (the no-source reader)" do
-    test "reads @rian from a real compiled module's .beam file" do
+    test "reads @rian_sig from a real compiled module's .beam file" do
       path = Path.join(Application.app_dir(:rian_lab, "ebin"), "Elixir.Rian.Prim.beam")
       anns = Rian.Ann.from_beam(path)
       assert "pub def names() Vec(String)" in anns
