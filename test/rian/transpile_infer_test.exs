@@ -560,6 +560,56 @@ defmodule Rian.TranspileInferTest do
     end
   end
 
+  describe "constraint generation — blocks, tuples, FFI, guarded arms" do
+    test "a `false` literal and `not` pin Bool" do
+      assert sig("  def f(), do: false", "f") == "  pub def f() Bool := false"
+      assert sig("  def f(a), do: not a", "f") == "  pub def f(a Bool) Bool := not a"
+    end
+
+    test "a tuple pattern carries no constraint in the MVP (param stays a hole)" do
+      assert sig("  def f({a, b}), do: a", "f") =~ "f(_Unk)"
+    end
+
+    test "a multi-statement block threads binds and non-bind statements to the last expr" do
+      # `z = …` (a bind), then `z + 1` (a non-bind statement), then `z` (the value).
+      assert sig("  def f(x) do\n    z = x + 1\n    z + 1\n    z\n  end", "f") =~
+               "f(x Int53) Int53"
+    end
+
+    test "an atom-head FFI call (`:lists.reverse`) is an unmodelled hole" do
+      assert sig("  def f(x), do: :lists.reverse(x)", "f") =~ "f(x _Unk) _Unk"
+    end
+
+    test "a guarded case arm is handled (tails recurse through the guard)" do
+      assert sig("  def f(x), do: (case x do\n    n when n > 0 -> 1\n    _ -> 0\n  end)", "f") =~
+               ") Int53 :="
+    end
+
+    test "Result analysis recurses into a block-bodied clause" do
+      src = ~S'''
+      defmodule M do
+        def f(b) do
+          x = b
+          case x do
+            0 -> {:error, Bad}
+            _ -> {:ok, x}
+          end
+        end
+      end
+      '''
+
+      # `b` is pinned Int53 by the `0` arm; the point is tails/1 walks the block body.
+      assert Transpile.transpile(src, infer: true) =~ "def f(b Int53)"
+    end
+  end
+
+  describe "collect_types/2 — list @type" do
+    test "a `[t]` @type becomes a Vec term in the env" do
+      assert Infer.collect_types([quote(do: @type(ids :: [integer()]))], "M") ==
+               {%{ids: {:app, "Vec", [{:con, "Int53"}]}}, []}
+    end
+  end
+
   describe "spec_type_to_rian/2 — Elixir @spec AST → Rian type string" do
     test "primitive scalars map to their Rian image" do
       assert Infer.spec_type_to_rian(quote(do: integer())) == "Int53"
