@@ -45,6 +45,16 @@ defmodule Rian.IR do
   @rian_sig "struct Param(name String, type String, cap Cap)"
   @rian_sig "struct Clause(pats Vec(Pat), body Core, guard Option(Core))"
 
+  # The whole-program IR — the map `Rian.Decl.parse/1` returns and every gate/emitter
+  # consumes (ADR-0050). The declaration buckets are cleanly typed IR records; the
+  # protocol-machinery fields (`impls` = `(String, String)` pairs, `protocols`/
+  # `impl_decls` = untyped tables) stay `_Unk` honestly until that layer is modelled.
+  @rian_sig """
+  type Prog := Prog(funcs Vec(Func), types Vec(Type), structs Vec(Struct),
+                    opaques Vec(Opaque), ranges Vec(Range), mods Vec(Mod),
+                    impls _Unk, protocols _Unk, impl_decls _Unk)
+  """
+
   @rian_sig """
   struct Mod(name String, uses Vec(Use), types Vec(Type), ranges Vec(Range),
              opaques Vec(Opaque), structs Vec(Struct), consts Vec(Const),

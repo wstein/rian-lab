@@ -41,6 +41,7 @@ defmodule Rian.Reach do
   about *architecture* while the emitters report their own *coverage*.
   """
 
+  use Rian.Ann
   alias Rian.{Core, Pratt}
 
   defmodule Error do
@@ -109,6 +110,7 @@ defmodule Rian.Reach do
   entry up with `entry/2`**, not a raw `report[name]` index, which silently returns
   `nil` for a bare name and crashes downstream.
   """
+  @rian_sig "pub def analyze(prog Prog) Dict(String, _Unk)"
   @spec analyze(map()) :: map()
   def analyze(prog) do
     funs = all_funcs(prog)
@@ -154,6 +156,7 @@ defmodule Rian.Reach do
   no portable body, so its effects are its **declared** set (the host body is the leaf,
   not inferable). Returns `%{"name/arity" => MapSet.t(effect)}`.
   """
+  @rian_sig "pub def effect_sets(prog Prog) Dict(String, _Unk)"
   @spec effect_sets(map()) :: %{String.t() => MapSet.t(effect())}
   def effect_sets(prog) do
     funs = all_funcs(prog)
@@ -265,6 +268,7 @@ defmodule Rian.Reach do
   nil the module is not gated — constraints are selected by need. Returns `:ok`
   or `{:error, message}`.
   """
+  @rian_sig "pub def check_contracts(prog Prog, default _Unk) _Unk"
   @spec check_contracts(map(), term()) :: :ok | {:error, String.t()}
   def check_contracts(prog, default \\ nil) do
     reach = analyze(prog)
@@ -294,10 +298,12 @@ defmodule Rian.Reach do
   defp or_default(value, _fallback), do: value
 
   @doc "Raise `Rian.Reach.Error` on any unmet `@targets(…)` contract, else `:ok`."
+  @rian_sig "pub def gate!(prog Prog) Symbol"
   @spec gate!(map()) :: :ok
   def gate!(prog), do: gate!(prog, build_default())
 
   @doc "Gate against an explicit build-default target set (`nil` = none)."
+  @rian_sig "pub def gate!(prog Prog, default _Unk) Symbol"
   @spec gate!(map(), term()) :: :ok
   def gate!(prog, default) do
     :ok = symbol_lint!(prog)
@@ -318,6 +324,7 @@ defmodule Rian.Reach do
   Ordering an atom literal is a cross-target divergence, so it is a compile error
   here rather than a silent per-target difference. Returns `:ok` or raises.
   """
+  @rian_sig "pub def symbol_lint!(prog Prog) Symbol"
   @spec symbol_lint!(map()) :: :ok
   def symbol_lint!(prog) do
     case Enum.flat_map(all_funcs(prog), &func_symbol_violations/1) do

@@ -52,6 +52,7 @@ defmodule Rian.Check do
   to themselves, `:unknown` unifies with anything, two differing concrete types
   are a `:mismatch`.
   """
+  use Rian.Ann
   alias Rian.{Core, Pratt}
 
   alias Rian.Core.{
@@ -2162,6 +2163,7 @@ defmodule Rian.Check do
   end
 
   @doc "The compile-time type gate: raise `Rian.Check.Error` on a proven mismatch, else `:ok`."
+  @rian_sig "pub def gate!(prog Prog) Symbol"
   @spec gate!(map()) :: :ok
   def gate!(prog) do
     case check_program(prog) do
