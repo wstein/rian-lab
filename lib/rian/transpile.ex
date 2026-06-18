@@ -38,9 +38,10 @@ defmodule Rian.Transpile do
     * a **`@rian_host`-tagged** def is a sanctioned host boundary (ADR-0035/0048: the
       errors-as-values twin of a raising function), whose `rescue`/`catch`/`after`
       catches a host fault into a value — so it renders as real Rian surface
-      (ADR-0048 §2 / ADR-0081 §5): `@effects(host)` + an `@external(:ex, "<host body>")`
-      carrying the full `try`/`rescue` (a bodiless def, no portable body), not a marker
-      and not a comment. **Dynamic dispatch** on a runtime
+      (ADR-0048 §2 / ADR-0068 / ADR-0081 §5): `@effects(host)` + an `@external(:ex,
+      Mod.fun)` **reference** to the original Elixir function (a bodiless def, no
+      portable body; delegates to the tested original, no escaped host blob), not a
+      marker and not a comment. **Dynamic dispatch** on a runtime
       module value (`mod.fun(args)`) lowers to its faithful BEAM-FFI form
       `apply(mod, :fun, [args])` (reflection / runtime module selection — non-portable,
       Reach pins it off `:rs`/`:js`), and a **module attribute in pattern position**
@@ -238,9 +239,10 @@ defmodule Rian.Transpile do
         "#{defs} def#{plural(defs)}",
         "#{holes} type hole#{plural(holes)} (_Unk)#{if opts[:infer], do: "", else: ", types not inferred"}",
         "#{ports} port marker#{plural(ports)}",
-        mapped > 0 &&
-          "#{mapped} auto-mapped stdlib call#{plural(mapped)} (verify arg-order/edges)",
-        dropped > 0 && "#{dropped} dropped (no Rian image)"
+        if(mapped > 0,
+          do: "#{mapped} auto-mapped stdlib call#{plural(mapped)} (verify arg-order/edges)"
+        ),
+        if(dropped > 0, do: "#{dropped} dropped (no Rian image)")
       ]
       |> Enum.filter(& &1)
       |> Enum.map(&("#   " <> &1))
@@ -354,12 +356,15 @@ defmodule Rian.Transpile do
   defp module_lines({:defmodule, _, [aliases, [do: body]]}, sigmap, types, struct_anns) do
     name = short_name(aliases)
     referenced = referenced_attrs(body)
+    # the FULL Elixir module name (`Rian.Beam`) — threaded so a `@rian_host` boundary
+    # emits an `@external(:ex, Rian.Beam.fun)` reference to the real Elixir function.
+    full_mod = aliases |> elem(2) |> Enum.map_join(".", &to_string/1)
 
     inner =
       body
       |> block_stmts()
       |> Enum.flat_map(&expand_defaults/1)
-      |> render_items(sigmap, name, struct_anns, referenced)
+      |> render_items(sigmap, name, struct_anns, referenced, full_mod)
       |> Enum.map(&indent/1)
 
     # synthesized `type …` declarations (Phase B error sets, `@rian_sig type`) after `mod … do`.
@@ -725,7 +730,7 @@ defmodule Rian.Transpile do
   # Walk the statement list, attaching a pending `@doc` to the next def, and
   # merging consecutive same-name/arity clauses into one rendered group.
 
-  defp render_items(stmts, sigmap, mod_name, struct_anns, referenced) do
+  defp render_items(stmts, sigmap, mod_name, struct_anns, referenced, full_mod \\ nil) do
     host = host_reasons(stmts)
 
     {lines, _pending_doc, open} =
@@ -788,7 +793,7 @@ defmodule Rian.Transpile do
                 {acc, doc, add_clause(open, clause)}
 
               true ->
-                {acc ++ flush(open, sigmap), nil, new_group(vis, clause, doc)}
+                {acc ++ flush(open, sigmap), nil, new_group(vis, clause, doc, full_mod)}
             end
 
           {:spec, node} ->
@@ -1077,7 +1082,9 @@ defmodule Rian.Transpile do
 
   defp macro_sig({name, _, _}) when is_atom(name), do: "#{name}/0"
 
-  defp new_group(vis, clause, doc), do: %{vis: vis, doc: doc, clauses: [clause]}
+  defp new_group(vis, clause, doc, full_mod \\ nil),
+    do: %{vis: vis, doc: doc, clauses: [clause], full_mod: full_mod}
+
   defp add_clause(open, clause), do: %{open | clauses: open.clauses ++ [clause]}
 
   defp same_group?(open, vis, clause) do
@@ -1089,7 +1096,7 @@ defmodule Rian.Transpile do
 
   defp flush(nil, _sigmap), do: []
 
-  defp flush(%{vis: vis, doc: doc, clauses: clauses}, sigmap) do
+  defp flush(%{vis: vis, doc: doc, clauses: clauses} = group, sigmap) do
     kw = if vis == :pub, do: "pub def", else: "def"
     doc_lines = if doc, do: [~s(@doc "#{escape(one_line(doc))}")], else: []
 
@@ -1135,7 +1142,16 @@ defmodule Rian.Transpile do
         # `@effects(host)` — a bodiless def, no portable body. The reason becomes the
         # `@doc` when the function has none of its own.
         host_doc = if doc, do: doc_lines, else: [~s(@doc "#{escape(one_line(reason))}")]
-        ext = ~s|@external(:ex, "#{escape(hd(clauses).host_body)}")|
+        # prefer a REFERENCE to the real Elixir function (`@external(:ex, Rian.Beam.fun)`,
+        # ADR-0068/0081) — no escaped host blob, delegates to the tested original. Fall
+        # back to the inline `try/rescue` string only when the full module is unknown
+        # (a module-less / hoisted host def, which the real corpus doesn't have).
+        ext =
+          case Map.get(group, :full_mod) do
+            nil -> ~s|@external(:ex, "#{escape(hd(clauses).host_body)}")|
+            full -> "@external(:ex, #{full}.#{name})"
+          end
+
         # a bodiless `@external` def carries NAMED params (no clauses to hold patterns) —
         # render them from the tagged clause's args, like the single-clause path.
         c = hd(clauses)

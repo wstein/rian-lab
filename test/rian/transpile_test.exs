@@ -950,11 +950,12 @@ end|) =~ ~S|"v=${x}!"|
       refute body =~ "TODO_PORT"
     end
 
-    test "a `@rian_host`-tagged rescue → real `@effects(host)` + `@external(:ex, …)` (ADR-0048 §2)" do
-      # `@rian_host` (Rian.Ann) marks a def whose `rescue` catches a host fault into a
-      # value (ADR-0035/0048). The catch lives in an `@external(:ex, …)` host body and
-      # the effect is declared `@effects(host)` — real Rian surface, not a comment and
-      # not a TODO_PORT. The reason becomes the `@doc` when the def has none.
+    test "a `@rian_host`-tagged rescue → `@effects(host)` + an `@external` REFERENCE (ADR-0068/0081)" do
+      # `@rian_host` marks a def whose `rescue` catches a host fault into a value
+      # (ADR-0035/0048). It renders as real Rian surface: `@effects(host)` + an
+      # `@external(:ex, Mod.fun)` REFERENCE to the original Elixir function (no escaped
+      # host blob, delegates to the tested original — ADR-0068 reference form). Bodiless
+      # def, no comment, no TODO_PORT. The reason becomes the `@doc` when the def has none.
       out =
         rian("""
         defmodule M do
@@ -969,14 +970,12 @@ end|) =~ ~S|"v=${x}!"|
 
       assert out =~ ~s|@doc "compile boundary: load/2 raises into a value"|
       assert out =~ "@effects(host)"
-
-      assert out =~
-               ~s|@external(:ex, "try do load(src) rescue e -> {:error, Exception.message(e)} end")|
-
-      # a bodiless def — no portable body, no comment
+      assert out =~ "@external(:ex, M.load_result)"
+      # a bodiless def — no portable body, no comment, no inline host string
       assert out =~ "pub def load_result(src"
       refute out =~ "# @rian_host:"
       refute out =~ ":= load(src)"
+      refute out =~ "try do"
       body = out |> String.split("mod M do") |> List.last()
       refute body =~ "TODO_PORT"
     end
