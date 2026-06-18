@@ -9,7 +9,12 @@ defmodule Rian.Prim do
   primitives that each backend lowers natively (ADR-0047 §2 portable prelude):
   `Prim.str_chars`, `Prim.str_from_chars`, `Prim.str_concat`, `Prim.str_concat_all`,
   `Prim.str_to_atom`, `Prim.char_code`, `Prim.map_new`/`get`/`put`/`has`,
-  `Prim.wrapping_add`/`saturating_add`/`checked_add`.
+  `Prim.wrapping_add`/`saturating_add`/`checked_add`, and `Prim.panic` — the
+  diverging, **uncatchable** abort (ADR-0035/0040): `Prim.panic(msg) : T forall T`,
+  lowering to `erlang:error`/`panic!`/`throw`/Kotlin `throw`. It has no Rian `catch`
+  (so it is not hidden control flow — termination routes nowhere) and is portable
+  to every target; use it for invariant violations / unreachable arms, never for an
+  *expected* error (that is a `Result`).
 
   Source code uses `Prim.X(args)`; the legacy `__prim_X(args)` form is still
   accepted (the rewrite produces it) but should no longer appear in tour or
@@ -32,6 +37,7 @@ defmodule Rian.Prim do
     char_code int_to_string int_to_float char_to_string
     map_new map_get map_put map_has
     wrapping_add saturating_add checked_add
+    panic
   )
 
   # The explicit 64-bit-overflow ops (ADR-0035 §3 / ADR-0064 §2a): they carry the

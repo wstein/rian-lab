@@ -750,6 +750,11 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}, s),
     do: {:bin, @ln, [{:bin_element, @ln, expr_form(c, s), :default, [:utf8]}]}
 
+  # diverging abort (ADR-0035/0040): `erlang:error/1` raises, never returns — the
+  # uncatchable `panic`. Reason is the message binary so the BEAM crash names it.
+  defp expr_form(%ECall{fun: %EId{name: "__prim_panic"}, args: [msg]}, s),
+    do: remote_call(:erlang, "error", [msg], s)
+
   # string → atom (the BEAM-native interning the self-host backend needs to build
   # Erlang variable/operator atoms; atoms are BEAM-only, so `Rian.Reach` pins a
   # caller off `:rs`/`:js`/`:jvm`).

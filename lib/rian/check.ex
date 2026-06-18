@@ -279,6 +279,11 @@ defmodule Rian.Check do
   # (ADR-0069 §6); portable, lowered natively per target.
   def infer(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [_]}, _env, _ic), do: "String"
 
+  # `__prim_panic(msg) : T forall T` — the diverging abort (ADR-0035/0040). It never
+  # returns, so it is well-typed in any position; the checker models that as
+  # `:unknown` (unifies with whatever the context expects, no provable mismatch).
+  def infer(%ECall{fun: %EId{name: "__prim_panic"}, args: [_]}, _env, _ic), do: :unknown
+
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) ->

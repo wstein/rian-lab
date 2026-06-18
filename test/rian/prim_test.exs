@@ -7,6 +7,44 @@ defmodule Rian.PrimTest do
   # (and raises clearly on a miss) — these sources have no overloads.
   defp reach_entry(rep, name), do: Rian.Reach.entry(rep, name)
 
+  describe "Prim.panic — diverging, uncatchable abort (ADR-0035/0040)" do
+    @panic_src """
+    mod P do
+      pub def guard(n Int53) Int53
+      pub def guard(n) := case n do
+        0 -> Prim.panic("zero not allowed")
+        _ -> n * 2
+      end
+    end
+    """
+
+    test "rewrites to `__prim_panic` and types as `:unknown` (well-typed anywhere)" do
+      assert Pratt.parse(~s|Prim.panic("x")|) == {:call, {:id, "__prim_panic"}, [{:str, "x"}]}
+      ast = Pratt.parse(~s|Prim.panic("x")|) |> Rian.Core.from_expr()
+      assert Rian.Check.infer(ast, %{}, %{}) == :unknown
+    end
+
+    test "lowers to `erlang:error` on BEAM — runs, and aborts with the message" do
+      {:ok, _} = Beam.load(@panic_src, :"Elixir.RianPanicTest")
+      assert RianPanicTest.guard(5) == 10
+      assert_raise ErlangError, fn -> RianPanicTest.guard(0) end
+    end
+
+    test "is portable — a function that may panic reaches every target" do
+      rep = Rian.Decl.parse(@panic_src) |> Rian.Reach.analyze()
+
+      assert reach_entry(rep, "guard").reach |> MapSet.to_list() |> Enum.sort() ==
+               [:ex, :js, :jvm, :rs]
+    end
+
+    test "lowers idiomatically per target (panic!/throw)" do
+      prog = Rian.Decl.parse(@panic_src)
+      assert Rian.Lower.rust_program(prog) =~ ~s|panic!("{}", "zero not allowed")|
+      assert Rian.JS.compile(@panic_src) =~ ~s|throw new Error("zero not allowed")|
+      assert Rian.JVM.compile(@panic_src) =~ ~s|throw RuntimeException("zero not allowed")|
+    end
+  end
+
   describe "Prim.X(args) normalization (Rian.Prim)" do
     test "`Prim.str_chars(s)` rewrites to `__prim_str_chars(s)` at parse time" do
       ast = Pratt.parse("Prim.str_chars(s)")

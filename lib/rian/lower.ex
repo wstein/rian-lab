@@ -1981,6 +1981,14 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, :elixir, ec),
     do: {"Integer.to_string(#{p(n, 0, :elixir, ec)})", 12}
 
+  # diverging abort (ADR-0035/0040): Rust `panic!` (type `!`, an expression) /
+  # Elixir `raise`. Never returns, so it is well-typed in any position.
+  defp emit(%ECall{fun: %EId{name: "__prim_panic"}, args: [msg]}, :rust, ec),
+    do: {"panic!(\"{}\", #{p(msg, 0, :rust, ec)})", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_panic"}, args: [msg]}, :elixir, ec),
+    do: {"raise(#{p(msg, 0, :elixir, ec)})", 12}
+
   # float → shortest-round-trip scientific (ADR-0069 Float64 unlock); `Rian.Show.float`
   # normalizes it to the ECMAScript canonical. Rust `{:e}` and Erlang `[:short]` both
   # carry the unique shortest digits (different presentation, same digits).

@@ -685,6 +685,11 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}, i53),
     do: "String.fromCodePoint(Number(#{expr_js(c, i53)}))"
 
+  # diverging abort (ADR-0035/0040): `throw` is a JS statement, so wrap it in an
+  # immediately-invoked arrow to keep `panic` an expression (it never returns).
+  defp expr_js(%ECall{fun: %EId{name: "__prim_panic"}, args: [msg]}, i53),
+    do: "(() => { throw new Error(#{expr_js(msg, i53)}); })()"
+
   # explicit 64-bit overflow ops (ADR-0035 §3) operate on `Int64`, which is NOT
   # supported on JS (ADR-0064): their two's-complement-at-64 contract has no JS
   # representation without per-op `BigInt.asIntN` masking — the silent BigInt

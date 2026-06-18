@@ -479,6 +479,11 @@ defmodule Rian.JVM do
   defp expr_kt(%EUnary{op: "not", arg: x}), do: "!#{expr_kt(x)}"
   defp expr_kt(%EBin{op: op, left: l, right: r}), do: "(#{expr_kt(l)} #{kt_op(op)} #{expr_kt(r)})"
 
+  # diverging abort (ADR-0035/0040): Kotlin `throw` is an expression of type
+  # `Nothing`, so `panic` lowers directly (no IIFE wrapper needed, unlike JS).
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_panic"}, args: [msg]}),
+    do: "throw RuntimeException(#{expr_kt(msg)})"
+
   # integer → string (ADR-0069 interpolation): Kotlin `Long.toString()`
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
     do: "(#{expr_kt(n)}).toString()"
