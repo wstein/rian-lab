@@ -1500,4 +1500,48 @@ end|)
       assert out =~ ~s|TODO_PORT("as-pattern|
     end
   end
+
+  describe "expressions — `!`, captures, lambda bodies, and ExUnit refute" do
+    test "the `!` operator renders as `not`" do
+      assert rian("defmodule M do\n  def f(x), do: !x\nend") =~ "not x"
+    end
+
+    test "a `&Mod.fun/arity` capture eta-expands to a lambda" do
+      out = rian("defmodule M do\n  def f, do: &String.upcase/1\nend")
+      assert out =~ "(p1) -> String.upcase(p1)"
+    end
+
+    test "a lambda body renders single- and multi-statement blocks" do
+      one = rian("defmodule M do\n  def f(xs), do: Enum.map(xs, fn x -> x + 1 end)\nend")
+      assert one =~ "(x) -> x + 1"
+
+      multi =
+        rian("""
+        defmodule M do
+          def f(xs), do: Enum.map(xs, fn x ->
+            y = x + 1
+            y * 2
+          end)
+        end
+        """)
+
+      assert multi =~ "(x) -> y := x + 1; y * 2"
+    end
+
+    test "ExUnit `describe`/`test` blocks and `refute a != b` lower to a @test def" do
+      out =
+        rian("""
+        defmodule MT do
+          use ExUnit.Case
+          describe "grp" do
+            test "t" do
+              refute a != b
+            end
+          end
+        end
+        """)
+
+      assert out =~ "@test def grp_t() Bool := assert_eq(a, b)"
+    end
+  end
 end
