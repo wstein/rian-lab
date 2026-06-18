@@ -1042,6 +1042,7 @@ defmodule Rian.Lower do
   traits). This composes the stdlib + protocols + generics that the per-unit
   `to_rust` cannot (it repeats type defs per unit).
   """
+  @rian_sig "pub def rust_program(prog Prog) _Unk"
   @rian_sig "pub def rust_program(prog Prog, ic _Unk) _Unk"
   @spec rust_program(map(), map()) :: term()
   def rust_program(prog, ic \\ %{}) do
