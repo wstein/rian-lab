@@ -1409,4 +1409,95 @@ end|)
       assert stats.ports == 1
     end
   end
+
+  describe "module-body classification (classify/1)" do
+    test "@moduledoc / @doc are kept; alias/import/require are dropped with a note" do
+      out =
+        rian("""
+        defmodule M do
+          @moduledoc "module docs"
+          @typep t :: integer()
+          alias Foo.Bar
+          import Enum
+          require Logger
+          @doc "f docs"
+          def f(x), do: x
+        end
+        """)
+
+      assert out =~ "# module docs"
+      assert out =~ "# type: @typep t :: integer()"
+      assert out =~ ~s|# (dropped Elixir `alias`: alias Foo.Bar)|
+      assert out =~ ~s|# (dropped Elixir `import`: import Enum)|
+      assert out =~ ~s|# (dropped Elixir `require`: require Logger)|
+      assert out =~ ~s|@doc "f docs"|
+    end
+
+    test "@moduledoc false yields an empty doc note (not a marker)" do
+      out = rian("defmodule M do\n  @moduledoc false\n  def f(x), do: x\nend")
+      # refute against the body only — the draft header legend names `TODO_PORT(...)`.
+      refute List.last(String.split(out, "mod M do")) =~ "TODO_PORT"
+    end
+  end
+
+  describe "bitstring specifiers (ADR-0078)" do
+    test "size(n)/unit(n)/`-`-chained and type specifiers render" do
+      out =
+        rian("defmodule M do\n  def f(x), do: <<x::integer, 1::size(8)-unit(2), 2::utf8>>\nend")
+
+      assert out =~ "<<x::integer, 1::size(8)-unit(2), 2::utf8>>"
+      refute List.last(String.split(out, "mod M do")) =~ "TODO_PORT"
+    end
+  end
+
+  describe "comprehension reduce with a filter (ADR-0079)" do
+    test "a filter inside a `reduce:` fold becomes a guarded accumulator step" do
+      out =
+        rian("""
+        defmodule M do
+          def f(xs), do: (for x <- xs, x > 0, reduce: 0 do acc -> acc + x end)
+        end
+        """)
+
+      assert out =~ "List.reduce(xs, 0,"
+      assert out =~ "if x > 0 do"
+    end
+  end
+
+  describe "multi-clause fn with guards" do
+    test "a guarded multi-clause `fn` lowers to a single-subject `case`" do
+      out =
+        rian("""
+        defmodule M do
+          def f(xs), do: Enum.map(xs, fn x when x > 0 -> x
+            _ -> 0
+          end)
+        end
+        """)
+
+      assert out =~ "(p1) -> case p1 do"
+      assert out =~ "x when x > 0 -> x"
+    end
+  end
+
+  describe "patterns — false literal and as-pattern variants" do
+    test "a `false` clause-head literal and as-patterns on either side render" do
+      out =
+        rian("""
+        defmodule M do
+          def f(false), do: 0
+          def f(whole = {a, b}), do: whole
+        end
+        """)
+
+      assert out =~ "pub def f(false) := 0"
+      # `var = pat` (var on the left) → `var @ pat`, same as `pat = var`
+      assert out =~ "f(whole @ {a, b})"
+    end
+
+    test "an as-pattern with two complex sides has no Rian image (marker)" do
+      out = rian("defmodule M do\n  def f({a, b} = {c, d}), do: a\nend")
+      assert out =~ ~s|TODO_PORT("as-pattern|
+    end
+  end
 end
