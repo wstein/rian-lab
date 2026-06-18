@@ -667,4 +667,69 @@ defmodule Rian.PrattTest do
       assert Pratt.parse_sexpr("if c do a; b else d end") == "(if c (block a b) (block d))"
     end
   end
+
+  describe "bitstrings — size/unit specifiers, empty form, and errors (ADR-0078)" do
+    test "size(n)/unit(n) specifiers and the empty `<<>>` form parse" do
+      assert p("<<x::8, 1::16-unit(2)>>") == "<<x, 1>>"
+      assert p("<<x::size(8)>>") == "<<x>>"
+      assert p("<<>>") == "<<>>"
+    end
+
+    test "a pattern segment accepts a numeric size(n) specifier and a wildcard value" do
+      assert [{:bitstr_pat, segs}] = Pratt.parse_pats("<<a::8, _::16, n::size(8)>>")
+
+      assert [{:bitseg, {:var, "a"}, _}, {:bitseg, :wild, _}, {:bitseg, {:var, "n"}, [size: 8]}] =
+               segs
+    end
+
+    test "a pattern segment accepts literal values (number, negative, char) and `<<>>`" do
+      assert [{:bitstr_pat, segs}] = Pratt.parse_pats("<<5::8, -1::8, 'a'::8>>")
+
+      assert [{:bitseg, {:lit, 5}, _}, {:bitseg, {:lit, -1}, _}, {:bitseg, {:char_lit, 97}, _}] =
+               segs
+
+      assert Pratt.parse_pats("<<>>") == [{:bitstr_pat, []}]
+    end
+
+    test "a dynamic size, an empty/bad spec, and a missing separator are precise errors" do
+      assert_raise ArgumentError, ~r/dynamic bitstring size/, fn -> p("<<x::size(n)>>") end
+      assert_raise ArgumentError, ~r/bad bitstring specifier/, fn -> p("<<x::>>") end
+      assert_raise ArgumentError, ~r/expected `,` or `>>` in bitstring,/, fn -> p("<<x 1>>") end
+
+      assert_raise ArgumentError, ~r/expected `,` or `>>` in bitstring pattern/, fn ->
+        Pratt.parse_pats("<<a::8 b>>")
+      end
+    end
+  end
+
+  describe "atoms, interpolation, and pattern sexpr forms" do
+    test "a quoted-string atom and a computed-key map parse" do
+      assert p(~s|:"hi there"|) == ":hi there"
+      assert p("%{k => 1, a: 2}") == "%{k => 1 a: 2}"
+    end
+
+    test "string interpolation renders literal and hole parts" do
+      assert p(~s|"a=${x}b"|) == ~s|(str-interp "a=" ${x} "b")|
+    end
+
+    test "a char literal renders as `?codepoint`" do
+      assert p("'a'") == "?97"
+    end
+
+    test "char, pin, and computed-key-map patterns render in `case` arms" do
+      assert p("case x do\n  'a' -> 1\n  _ -> 0\nend") == "(case x (?97 -> 1) (_ -> 0))"
+      assert p("case x do\n  ^y -> 1\n  _ -> 0\nend") == "(case x ((^ y) -> 1) (_ -> 0))"
+
+      assert p("case x do\n  %{k => v} -> v\n  _ -> 0\nend") ==
+               "(case x (%{k => v} -> v) (_ -> 0))"
+    end
+  end
+
+  describe "parse-error position descriptions (tok_desc/1)" do
+    test "names the offending number / string / char token" do
+      assert_raise ArgumentError, ~r/got number `2`/, fn -> p("(1 2)") end
+      assert_raise ArgumentError, ~r/got string "x"/, fn -> p(~s|(1 "x")|) end
+      assert_raise ArgumentError, ~r/got char `\?97`/, fn -> p("(1 'a')") end
+    end
+  end
 end
