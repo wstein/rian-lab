@@ -260,6 +260,7 @@ defmodule Rian.Beam do
   loop. Clause bodies may be source strings *or* already-parsed `{:block,…}` ASTs
   — `Pratt.parse_body/1` accepts either (the macro-pipeline passthrough).
   """
+  @rian_sig "pub def compile_ir(prog Prog, module Symbol) _Unk"
   @spec compile_ir(map(), module()) :: {:ok, module(), binary()}
   def compile_ir(prog, module) when is_atom(module) do
     :ok = Rian.Reach.gate!(prog)
@@ -276,6 +277,7 @@ defmodule Rian.Beam do
   end
 
   @doc "Compile and load a pre-built program IR (see `compile_ir/2`)."
+  @rian_sig "pub def load_ir(prog Prog, module Symbol) _Unk"
   @spec load_ir(map(), module()) :: {:ok, module()}
   def load_ir(prog, module) when is_atom(module) do
     {:ok, ^module, bin} = compile_ir(prog, module)
@@ -288,6 +290,7 @@ defmodule Rian.Beam do
   `Elixir.<Mod>` BEAM module) — the Stage-2 seam for a Rian front-end that parses
   `mod` declarations (see `compile_program/1`, IR form).
   """
+  @rian_sig "pub def compile_program_ir(prog Prog) _Unk"
   @spec compile_program_ir(map()) :: [{module(), binary()}]
   def compile_program_ir(prog) do
     prog = Rian.Opaque.erase(prog)
@@ -311,6 +314,7 @@ defmodule Rian.Beam do
   end
 
   @doc "Compile and load a multi-module program IR (see `compile_program_ir/1`)."
+  @rian_sig "pub def load_program_ir(prog Prog) Vec(Symbol)"
   @spec load_program_ir(map()) :: [module()]
   def load_program_ir(prog) do
     prog
