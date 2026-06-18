@@ -61,7 +61,7 @@ defmodule Rian.Build do
     cond do
       opts[:rust] ->
         emit_source(
-          :rust,
+          :rs,
           ".rs",
           opts,
           file,

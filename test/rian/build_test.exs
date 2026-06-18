@@ -148,6 +148,48 @@ defmodule Rian.BuildTest do
           assert String.trim(res) == "42"
       end
     end
+
+    @tag :rust
+    test "bundles a :rs file-reference: includes the .ffi.rs as a mod, compiles + runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          src_dir =
+            Path.join(System.tmp_dir!(), "rian_ffi_rs_#{System.unique_integer([:positive])}")
+
+          File.mkdir_p!(src_dir)
+          on_exit(fn -> File.rm_rf(src_dir) end)
+
+          File.write!(
+            Path.join(src_dir, "codec.ffi.rs"),
+            "pub fn encode(x: i64) -> i64 { x + 1 }\n"
+          )
+
+          rian = Path.join(src_dir, "prog.rian")
+
+          File.write!(
+            rian,
+            ~S|@external(:rs, "./codec.ffi.rs", "encode") pub def enc(x val Int64) Int64| <> "\n"
+          )
+
+          out_dir = tmp_dir()
+          out = capture_io(fn -> assert Build.build([rian, "--rust", "-o", out_dir]) == 0 end)
+
+          assert out =~ "prog.rs"
+          rs = Path.join(out_dir, "prog.rs")
+          assert File.read!(rs) =~ ~s|#[path = "codec.ffi.rs"] mod codec;|
+          # the foreign file is copied beside the output so the `#[path]` mod resolves
+          assert File.exists?(Path.join(out_dir, "codec.ffi.rs"))
+
+          File.write!(rs, File.read!(rs) <> "\nfn main() { println!(\"{}\", enc(41)); }\n")
+          bin = Path.join(out_dir, "prog_bin")
+          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", rs, "-o", bin])
+          {res, 0} = System.cmd(bin, [])
+          assert String.trim(res) == "42"
+      end
+    end
   end
 
   describe "build/1 — source targets" do

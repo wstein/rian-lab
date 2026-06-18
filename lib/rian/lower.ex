@@ -1040,6 +1040,10 @@ defmodule Rian.Lower do
     c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new(), sigs, ic)
 
     [
+      # `@external(:rs, "./codec.ffi.rs", "fun")` file-references (ADR-0080 §7 b): an
+      # authored foreign `.ffi.rs` is included as a Rust `mod` (the build copies it
+      # beside the output); the call lowers to `mod::fun(args)`.
+      rust_foreign_mods(prog),
       Enum.map_join(structs, "\n\n", &rust_struct/1),
       Enum.map_join(types, "\n\n", &rust_enum(&1, "", parametric)),
       trait_impl_block(protocols, impl_decls, c, base_ec),
@@ -1052,6 +1056,29 @@ defmodule Rian.Lower do
     |> Enum.reject(&(&1 in ["", nil]))
     |> Enum.join("\n\n")
   end
+
+  # `#[path = "codec.ffi.rs"] mod codec;` for each distinct `.ffi.rs` the program
+  # references on `:rs` (ADR-0080 §7 b). The `#[path]` points at the copied basename
+  # beside the output; the module name is the file's stem (`codec.ffi.rs` -> `codec`).
+  defp rust_foreign_mods(prog) do
+    funcs = Map.get(prog, :funcs, []) ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
+
+    funcs
+    |> Enum.flat_map(fn f ->
+      case Map.get(Map.get(f, :externals, %{}), :rs) do
+        {:file, path, _fun} -> [path]
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+    |> Enum.sort()
+    |> Enum.map_join("\n", fn path ->
+      ~s(#[path = "#{Path.basename(path)}"] mod #{ffi_mod_name(path)};)
+    end)
+  end
+
+  defp ffi_mod_name(path),
+    do: path |> Path.basename() |> String.replace_suffix(".ffi.rs", "") |> PL.to_snake()
 
   defp proto_method_traits(protocols),
     do: for(p <- protocols, m <- p.methods, into: %{}, do: {m.name, p.name})
@@ -1278,20 +1305,26 @@ defmodule Rian.Lower do
   defp rust_fn(func, ctx, vis, base_ec \\ nil)
 
   defp rust_fn(%{externals: ext} = func, _ctx, vis, _base_ec) when map_size(ext) > 0 do
-    case Map.get(ext, :rs) do
-      nil ->
-        raise "`#{func.name}`: no `@external(:rs, …)` body — not reachable on :rs"
+    host =
+      case Map.get(ext, :rs) do
+        nil ->
+          raise "`#{func.name}`: no `@external(:rs, …)` body — not reachable on :rs"
 
-      spec ->
-        host = Rian.External.render(spec, func.params)
+        # a file-reference calls the included `mod`'s function (the `mod` decl is at
+        # the top of the program, `rust_foreign_mods/1`); params are passed by name.
+        {:file, path, fun} ->
+          "#{ffi_mod_name(path)}::#{fun}(#{Enum.map_join(func.params, ", ", & &1.name)})"
 
-        param_decls =
-          Enum.map_join(func.params, ", ", fn p ->
-            "#{p.name}: #{Rian.Capability.rust_param(p.cap, p.type)}"
-          end)
+        spec ->
+          Rian.External.render(spec, func.params)
+      end
 
-        "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} { #{host} }"
-    end
+    param_decls =
+      Enum.map_join(func.params, ", ", fn p ->
+        "#{p.name}: #{Rian.Capability.rust_param(p.cap, p.type)}"
+      end)
+
+    "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} { #{host} }"
   end
 
   defp rust_fn(func, ctx, vis, base_ec) do
