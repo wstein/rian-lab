@@ -10,7 +10,9 @@ defmodule Rian.Manifest do
   This parses the **constrained TOML subset** the manifest uses — `[table]` headers,
   `key = "string"`, `key = ["string", …]` arrays, `#` comments — deliberately *not* a
   general TOML parser, to keep the compiler's zero-runtime-dependency posture. A value
-  shape outside the subset is a clear error rather than a silent misread.
+  shape outside the subset is a clear error rather than a silent misread: strings carry
+  no escape sequences (so an embedded `"` is malformed, not a truncation), and a comma
+  *inside* a quoted array value is preserved rather than split on.
 
   ```toml
   [project]
@@ -141,8 +143,10 @@ defmodule Rian.Manifest do
     end
   end
 
+  # the constrained subset has no escape sequences, so a string value contains no `"`;
+  # `[^"]*` (not greedy `.*`) rejects a malformed `"a"b"` instead of capturing `a"b`.
   defp parse_value(<<?", _::binary>> = s) do
-    case Regex.run(~r/^"(.*)"$/, s) do
+    case Regex.run(~r/^"([^"]*)"$/, s) do
       [_, inner] -> {:ok, inner}
       _ -> :error
     end
@@ -157,20 +161,23 @@ defmodule Rian.Manifest do
 
   defp parse_value(_other), do: :error
 
+  # Split a `["a", "b"]` body into its quoted elements. Scanning quoted tokens (rather
+  # than `String.split(",")`) keeps a comma *inside* a value intact (`"Last, First"`),
+  # and the residue check — everything outside the quoted tokens must be commas/space —
+  # still rejects malformed input (`["a" junk "b"]`) instead of silently dropping it.
   defp parse_string_array(inner) do
-    items =
-      inner
-      |> String.split(",")
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
-      |> Enum.map(fn item ->
-        case Regex.run(~r/^"(.*)"$/, item) do
-          [_, v] -> v
-          _ -> :bad
-        end
-      end)
+    trimmed = String.trim(inner)
 
-    if :bad in items, do: :error, else: {:ok, items}
+    if trimmed == "" do
+      {:ok, []}
+    else
+      items = Regex.scan(~r/"([^"]*)"/, trimmed) |> Enum.map(fn [_, v] -> v end)
+
+      residue =
+        Regex.replace(~r/"[^"]*"/, trimmed, "") |> String.replace(",", "") |> String.trim()
+
+      if items != [] and residue == "", do: {:ok, items}, else: :error
+    end
   end
 
   # ── tables -> validated struct ───────────────────────────────────────────────

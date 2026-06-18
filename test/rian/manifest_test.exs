@@ -54,6 +54,15 @@ defmodule Rian.ManifestTest do
 
       assert m.license == "LicenseRef-my#tag"
     end
+
+    test "a comma inside a quoted array value is preserved, not split on" do
+      assert {:ok, m} = Manifest.parse(~S|[project]
+      name = "app"
+      version = "1.0.0"
+      authors = ["Hopper, Grace", "Lovelace, Ada"]|)
+
+      assert m.authors == ["Hopper, Grace", "Lovelace, Ada"]
+    end
   end
 
   describe "parse/1 — validation errors (clear, never a silent misread)" do
@@ -92,6 +101,24 @@ defmodule Rian.ManifestTest do
       assert {:error, msg} = Manifest.parse(~S|[project]
       name = "x"
       version = 1|)
+
+      assert msg =~ "malformed entry"
+    end
+
+    test "a malformed string value (an embedded quote) is rejected, not silently truncated" do
+      assert {:error, msg} = Manifest.parse(~S|[project]
+      name = "x"
+      version = "1"
+      license = "a"b"|)
+
+      assert msg =~ "malformed entry"
+    end
+
+    test "an array with junk between quoted elements is rejected" do
+      assert {:error, msg} = Manifest.parse(~S|[project]
+      name = "x"
+      version = "1"
+      authors = ["ok" junk "no"]|)
 
       assert msg =~ "malformed entry"
     end
