@@ -29,8 +29,14 @@ defmodule Rian.Manifest do
   ```
   """
 
+  use Rian.Ann
   alias Rian.Reach
 
+  @rian_sig """
+  struct Manifest(name String, version String, kind String, license Option(String),
+                  authors Vec(String), targets Vec(Symbol),
+                  deps Dict(String, String), lint Dict(String, String))
+  """
   @enforce_keys [:name, :version]
   defstruct name: nil,
             version: nil,
@@ -50,6 +56,7 @@ defmodule Rian.Manifest do
   `{:ok, %Rian.Manifest{}}` or `{:error, message}` — a missing file, an unreadable
   file, a malformed line, or a failed validation all surface as a clear message.
   """
+  @rian_sig "pub def read(path String) (Manifest | String)"
   @spec read(Path.t()) :: {:ok, t()} | {:error, String.t()}
   def read(path \\ "rian.toml") do
     case File.read(path) do
@@ -59,6 +66,7 @@ defmodule Rian.Manifest do
   end
 
   @doc "Parse manifest TOML text. Returns `{:ok, %Rian.Manifest{}}` or `{:error, message}`."
+  @rian_sig "pub def parse(text String) (Manifest | String)"
   @spec parse(String.t()) :: {:ok, t()} | {:error, String.t()}
   def parse(text) when is_binary(text) do
     with {:ok, tables} <- tables(text) do
