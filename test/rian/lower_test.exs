@@ -696,4 +696,21 @@ end|
       end
     end
   end
+
+  describe "Elixir emission — maps & bitstrings" do
+    defp elixir_of(src) do
+      %{mods: [m | _]} = Rian.Decl.parse(src)
+      Lower.compile_module_beam(m).elixir
+    end
+
+    test "a computed-key (`=>`) map pair emits alongside atom-key shorthand" do
+      out = elixir_of("mod M do\n  pub def f(k Int53) Int53 := %{k => 1, a: 2}\nend")
+      assert out =~ "%{k => 1, a: 2}"
+    end
+
+    test "bitstring segments emit type/size/unit specs" do
+      out = elixir_of("mod M do\n  pub def f(x Int53) Binary := <<x::8, 1::16-unit(2)>>\nend")
+      assert out =~ "<<x::8, 1::16-unit(2)>>"
+    end
+  end
 end
