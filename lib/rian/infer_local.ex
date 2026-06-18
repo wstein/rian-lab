@@ -29,6 +29,8 @@ defmodule Rian.InferLocal do
   `:infer` survives this pass.
   """
 
+  use Rian.Ann
+
   alias Rian.{Check, IR, Pratt}
 
   @doc """
@@ -38,6 +40,7 @@ defmodule Rian.InferLocal do
   body touching something unmodelled — raises a clear "annotate it" error rather than
   letting a `nil` return reach the checker.
   """
+  @rian_sig "pub def fill_returns(prog Prog) Prog"
   @spec fill_returns(map()) :: map()
   def fill_returns(prog) when is_map(prog) do
     if Enum.any?(all_funcs(prog), &(untyped_ret?(&1) or has_infer_param?(&1))) do
