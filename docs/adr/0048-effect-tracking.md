@@ -11,8 +11,8 @@ sandbox rejects *all* function calls today, so there is no effectful call to gat
 comptime can evaluate *pure* calls); **effect-polymorphism** over function parameters (needs **effect
 variables** — the error-set analog also doesn't exist: `Rian.Check`'s `call_name/1` ignores a call
 through a function-typed parameter, contributing zero; a HOF that calls its param is therefore inferred
-pure, which is unsound once a consumer relies on it — defer until the effectful stdlib needs it); the
-transpiler emitting `@effects(host)`
+pure, which is unsound once a consumer relies on it — defer until the effectful stdlib needs it). The
+transpiler **does** emit `@effects(host)` + `@external(:ex, …)` for `@rian_host` boundaries (ADR-0081 §5).
 **Refs:** ADR-0025 (memory capabilities — *orthogonal*), ADR-0030/0046 (`comptime` purity), ADR-0034 §1 (infer-local/declare-public), ADR-0035 (transparency — "what you read is what runs"), ADR-0039 (`<~` mutation), ADR-0040 §4 (composition — the parallel), ADR-0041 (per-target), ADR-0047 (pure/effectful boundary)
 **Owners:** Arthur Pendelton (effect inference) · Marcus Chen (transparency) · Elena Rostova (lowering) · Maya Lin (multi-target) · Samir Patel (testability) · Kira Neri (determinism) · Chloe Bennett (comptime) · Liam Davis (family ergonomics) · Rachel Okafor (PM)
 

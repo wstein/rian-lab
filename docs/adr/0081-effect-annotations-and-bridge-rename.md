@@ -179,15 +179,17 @@ naming question.)
 1. **Docs + bridge moduledoc (done).** Bridge-vs-surface split added to `Rian.Ann` moduledoc.
 2. **Bridge rename (done).** `@rian`→`@rian_sig` in `lib/rian/*.ex` (`@rian_host` unchanged), a **clean
    cut** — `Rian.Ann` registers/reads only `:rian_sig`, no dual-read of `:rian`.
-3. **Effect surface (with ADR-0048).** `Rian.Decl` parses `@effects(...)`; `Rian.Check` infers the host
-   effect (call-graph fixpoint, ADR-0048 §3) and verifies the `pub` declaration **exactly** (§2). The
-   `--check` gate's rescue sanction **stays explicit** (`@rian_host`): the gate runs on the *Elixir*
-   source and the host effect tracks the *Rian* image, distinct layers — inference must not auto-exempt
-   `rescue` (every `rescue` touches the host, so that would silence the gate entirely).
-4. **`@external` host boundaries.** Migrate each `@rian_host` Elixir function to an `@external` +
-   `@effects(host)` Rian function whose per-target host body does the native catch and returns a
-   `Result` (ADR-0048 §2) — the endpoint is a host boundary, **not** portable Rian. The transpiler then
-   emits `@effects(host)` on `pub` host boundaries and the `# @rian_host:` comment fallback is removed.
+3. **Effect surface (done).** `Rian.Decl` parses `@effects(...)`; `Rian.Reach.effect_sets/1` infers the
+   effect set (call-graph fixpoint, ADR-0048 §3); `Rian.Check.check_effects` verifies the declaration
+   **exactly** (§2). The `--check` gate's rescue sanction **stays explicit** (`@rian_host`): the gate
+   runs on the *Elixir* source and the host effect tracks the *Rian* image, distinct layers — inference
+   must not auto-exempt `rescue` (every `rescue` touches the host, so that would silence the gate).
+4. **`@external` host boundaries (done).** The transpiler renders each `@rian_host` Elixir function as
+   an `@external(:ex, "<try/rescue>")` + `@effects(host)` Rian function — the host catch lives in the
+   external body returning a `Result` (ADR-0048 §2), a host boundary, **not** portable Rian. The
+   `# @rian_host:` comment is gone from `rian/src`; the output round-trips through `Rian.Decl`. (The
+   Elixir `lib/rian` source keeps its `@rian_host` tag — it *is* the running compiler; only its
+   transpiled `.rian` image graduates.)
 
 ## Alternatives considered
 
