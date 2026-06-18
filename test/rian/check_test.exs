@@ -1259,5 +1259,20 @@ defmodule Rian.CheckTest do
 
       assert msg =~ "labeled arguments"
     end
+
+    test "a labeled argument on a qualified (dotted) call is rejected" do
+      assert {:error, msg} = Check.check("def f() Int64 := String.foo(a: 1)")
+
+      assert msg =~ "labeled arguments"
+      assert msg =~ "String.foo"
+      assert msg =~ "ADR-0065"
+    end
+
+    test "a labeled argument on a piped-into plain call is rejected" do
+      assert {:error, msg} =
+               Check.check("def g(a Int64) Int64 := a\ndef f() Int64 := 1 |> g(a: 1)")
+
+      assert msg =~ "labeled arguments"
+    end
   end
 end

@@ -894,21 +894,24 @@ defmodule Rian.Check do
   # ADR-0065 ("adopt later, not now"), and without this gate the BEAM emitter would
   # silently miscompile `foo(x: 1)` into a bogus `%{__struct__: :foo, x: 1}`.
   defp check_labels(%Func{clauses: clauses}) do
-    case Enum.find_value(clauses, :ok, fn
-           %{body: nil} -> nil
-           %{body: body} -> label_error(Pratt.parse_body(body))
-         end) do
-      nil -> :ok
-      v -> v
-    end
+    Enum.find_value(clauses, :ok, fn
+      %{body: nil} -> nil
+      %{body: body} -> label_error(Pratt.parse_body(body))
+    end)
   end
 
-  defp label_error({:call, {:id, f}, args} = node) when is_list(args) do
-    if Enum.any?(args, &match?({:label, _, _}, &1)) and not pascal?(f) do
+  # A label is admissible only on **construction** — a bare PascalCase callee
+  # (`Point(x: 1)`). Any other callee is rejected: an unqualified lowercase call
+  # (`g(a: 1)`), but equally a *qualified* one (`Mod.foo(a: 1)`) whose `{:dot, …}`
+  # callee is never a constructor — both lower with the label silently erased, so
+  # the gate must catch them too (ADR-0065 — labeled call args are not a surface
+  # feature yet).
+  defp label_error({:call, callee, args} = node) when is_list(args) do
+    if Enum.any?(args, &match?({:label, _, _}, &1)) and not construction?(callee) do
       {:error,
-       "`#{f}(…)`: labeled arguments (`name: value`) are only for struct/variant construction " <>
-         "(a PascalCase constructor), not plain function calls (ADR-0065 — labeled call args are " <>
-         "not yet a surface feature)"}
+       "`#{callee_name(callee)}(…)`: labeled arguments (`name: value`) are only for struct/variant " <>
+         "construction (a PascalCase constructor), not function calls (ADR-0065 — labeled call args " <>
+         "are not yet a surface feature)"}
     else
       label_error_children(node)
     end
@@ -920,6 +923,15 @@ defmodule Rian.Check do
 
   defp label_error_children(node),
     do: node |> Tuple.to_list() |> Enum.find_value(&label_error/1)
+
+  # Construction is a bare PascalCase callee; a qualified (`{:dot, …}`) or
+  # lowercase callee is an ordinary function call, never a constructor.
+  defp construction?({:id, f}), do: pascal?(f)
+  defp construction?(_), do: false
+
+  defp callee_name({:id, f}), do: f
+  defp callee_name({:dot, base, field}), do: "#{callee_name(base)}.#{field}"
+  defp callee_name(_), do: "(…)"
 
   # An `@external` function (ADR-0068) is trusted FFI: its signature is checked but
   # its host bodies are not. Linearity (`iso`/`ref`, ADR-0055) cannot be enforced

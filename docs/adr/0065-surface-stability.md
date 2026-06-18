@@ -102,7 +102,8 @@ but they are **deliberately deferred** until the higher-priority work lands.
   vocabulary) and waits behind the higher-priority mechanism work (ADR-0067 abstract types, ADR-0068
   `@external`). **Adopt later, not now.** *Enforced (2026-06-14):* because the parser already produces
   `{:label, …}` nodes (they are the existing struct/variant *construction* syntax, `Name(field: v)`),
-  a labeled argument on a **plain** (lowercase) function call is now a **clean compile error**
-  (`Rian.Check.check_labels`, `test/rian/check_test.exs`) rather than a silent BEAM miscompile into a
-  bogus struct. Lifting the freeze later means turning that error into real labeled-call semantics
+  a labeled argument on any **non-construction** callee — a **plain** lowercase call (`g(a: 1)`) or a
+  **qualified** dotted call (`Mod.foo(a: 1)`), neither of which is a constructor — is now a **clean
+  compile error** (`Rian.Check.check_labels`, `test/rian/check_test.exs`) rather than a silent BEAM
+  miscompile into a bogus struct (lowercase) or a label silently erased (qualified). Lifting the freeze later means turning that error into real labeled-call semantics
   (which also needs labeled *parameters* at the definition — currently unspecified).
