@@ -1906,7 +1906,8 @@ defmodule Rian.Lower do
   # text targets: Elixir and Rust share `\n \r \t \\ \"` plus the `\u{HEX}`
   # form, so one renderer serves the shared `emit/2` path. Printable codepoints
   # (incl. non-ASCII) pass through; other control codepoints use `\u{HEX}`.
-  defp str_lit(s), do: ~s(") <> for(<<cp::utf8 <- s>>, into: "", do: str_lit_cp(cp)) <> ~s(")
+  defp str_lit(s),
+    do: ~s(") <> for(cp <- String.to_charlist(s), into: "", do: str_lit_cp(cp)) <> ~s(")
 
   defp str_lit_cp(?\\), do: "\\\\"
   defp str_lit_cp(?"), do: "\\\""

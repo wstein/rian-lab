@@ -334,7 +334,7 @@ defmodule Rian.Lexer do
 
   # re-escape a decoded string value for rendering inside `"…"` (the inverse of
   # `lex_string/2`), one codepoint at a time.
-  defp escape_str(s), do: for(<<cp::utf8 <- s>>, into: "", do: str_cp_source(cp))
+  defp escape_str(s), do: for(cp <- String.to_charlist(s), into: "", do: str_cp_source(cp))
 
   # rendering of a single codepoint inside a `"…"` body. Backslash and the double
   # quote must be escaped; control codepoints fall back to `\u{HEX}`.

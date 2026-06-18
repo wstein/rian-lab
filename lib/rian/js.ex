@@ -809,7 +809,8 @@ defmodule Rian.JS do
   # render a decoded `String` value as a JS double-quoted literal, escaping the
   # quote/backslash, the common control chars by name, and any other control
   # codepoint as `\uHHHH` (printable codepoints, incl. non-ASCII, pass through).
-  defp js_str(s), do: ~s(") <> for(<<cp::utf8 <- s>>, into: "", do: js_str_cp(cp)) <> ~s(")
+  defp js_str(s),
+    do: ~s(") <> for(cp <- String.to_charlist(s), into: "", do: js_str_cp(cp)) <> ~s(")
 
   # an atom lowers to its name as a JS string literal (ADR-0041 §3: open symbols are
   # strings on JS); the same escaping as a `String` literal so a quirky tag is safe

@@ -612,7 +612,8 @@ defmodule Rian.JVM do
   # render a decoded `String` value as a Kotlin double-quoted literal. Beyond the
   # quote/backslash and common control chars, Kotlin needs `$` escaped (string
   # templates) and uses fixed four-digit `\uHHHH` for other control codepoints.
-  defp kt_str(s), do: ~s(") <> for(<<cp::utf8 <- s>>, into: "", do: kt_str_cp(cp)) <> ~s(")
+  defp kt_str(s),
+    do: ~s(") <> for(cp <- String.to_charlist(s), into: "", do: kt_str_cp(cp)) <> ~s(")
 
   defp kt_str_cp(?\\), do: "\\\\"
   defp kt_str_cp(?"), do: "\\\""

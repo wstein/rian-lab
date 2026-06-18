@@ -1157,6 +1157,21 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ ~s|TODO_PORT("for comprehension|
     end
 
+    test "the binary-comprehension porting idiom (`<<cp::utf8 <- s>>` → `String.to_charlist`) renders portably" do
+      # A binary generator has no list image (it stays a marker, see below), so the
+      # portable spelling iterates codepoints as a char list: `String.to_charlist/1`
+      # maps to the portable `Str.chars`, and `into: ""` folds with `<>`. This is the
+      # shape `Rian.{Lexer,Lower,JS,JVM}` use for string re-escaping.
+      out = rian(~S|defmodule M do
+  def esc(s), do: for cp <- String.to_charlist(s), into: "", do: cp_src(cp)
+end|)
+
+      assert out =~
+               ~s|List.reduce(for cp <- Str.chars(s) do cp_src(cp) end, "", (__e, __acc) -> __acc <> __e)|
+
+      refute out =~ ~s|TODO_PORT("for comprehension|
+    end
+
     test "`reduce:` folds the loop into an accumulator via nested `List.reduce` (ADR-0079)" do
       out =
         rian("""
