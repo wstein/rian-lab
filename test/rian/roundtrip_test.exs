@@ -185,6 +185,30 @@ defmodule Rian.RoundtripTest do
       assert r.elixir =~ "def b(y)"
     end
 
+    test "a multi-module top-level source skips the vs-origin check (no single probe rename)" do
+      # `origin_forms/1` renames the *single* outer `defmodule` to the probe; a source
+      # with two top-level modules has no single outer module, so the rename raises and
+      # the vs-origin oracle is honestly `:skipped` rather than a false comparison. The
+      # forward stages still run (each module roundtrips independently).
+      src = ~S'''
+      defmodule A do
+        use Rian.Ann
+        @rian_sig "pub def a(x Int53) Int53"
+        def a(x), do: x + 1
+      end
+
+      defmodule B do
+        use Rian.Ann
+        @rian_sig "pub def b(x Int53) Int53"
+        def b(x), do: x + 2
+      end
+      '''
+
+      r = Roundtrip.run(src)
+      assert r.beam_direct == :ok
+      assert r.equiv_vs_origin == :skipped
+    end
+
     test "named construction agrees across backends (Rian.Lower ↔ Rian.Beam parity)" do
       # `Pt(x: 1, y: 2)` is a struct construction; both backends must lower it to the
       # same `__struct__`-tagged map, so the two BEAM binaries are forms-equivalent
@@ -201,6 +225,35 @@ defmodule Rian.RoundtripTest do
       assert r.beam_direct == :ok
       assert r.beam_via_elixir == :ok
       assert r.equiv_two_paths == :equiv
+    end
+  end
+
+  describe "run_file/3 — transpile a file and write the rian/ex artifacts" do
+    setup do
+      dir = System.tmp_dir!() |> Path.join("rian_rt_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf!(dir) end)
+      {:ok, dir: dir}
+    end
+
+    test "writes <out>/rian/<stem>.rian and <out>/ex/<stem>.ex under a nested stem", %{dir: dir} do
+      src = ~S'''
+      defmodule Calc do
+        use Rian.Ann
+        @rian_sig "pub def double(x Int53) Int53"
+        def double(x), do: x + x
+      end
+      '''
+
+      file = Path.join(dir, "calc.ex")
+      File.write!(file, src)
+
+      # a nested stem must not collide and must create its subdirectories
+      report = Roundtrip.run_file(file, dir, "nested/calc")
+
+      assert report.beam_direct == :ok
+      assert File.read!(Path.join([dir, "rian", "nested/calc.rian"])) == report.rian
+      assert File.read!(Path.join([dir, "ex", "nested/calc.ex"])) == report.elixir
     end
   end
 end
