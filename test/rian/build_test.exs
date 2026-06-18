@@ -104,6 +104,50 @@ defmodule Rian.BuildTest do
         end
       end)
     end
+
+    @tag :js
+    test "bundles a :js file-reference: writes the .mjs, copies the .ffi.mjs, runs under node" do
+      src_dir = Path.join(System.tmp_dir!(), "rian_ffi_js_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(src_dir)
+      on_exit(fn -> File.rm_rf(src_dir) end)
+
+      File.write!(
+        Path.join(src_dir, "codec.ffi.mjs"),
+        "export function encode(x) { return x + 1; }\n"
+      )
+
+      rian = Path.join(src_dir, "prog.rian")
+
+      File.write!(
+        rian,
+        ~S|@external(:js, "./codec.ffi.mjs", "encode") pub def enc(x val Int53) Int53| <> "\n"
+      )
+
+      out_dir = tmp_dir()
+      out = capture_io(fn -> assert Build.build([rian, "--js", "-o", out_dir]) == 0 end)
+
+      assert out =~ "prog.mjs"
+      mjs = Path.join(out_dir, "prog.mjs")
+      assert File.read!(mjs) =~ ~s|import { encode } from "./codec.ffi.mjs";|
+      # the foreign file is copied beside the output so the relative import resolves
+      assert File.exists?(Path.join(out_dir, "codec.ffi.mjs"))
+
+      case System.find_executable("node") do
+        nil ->
+          :ok
+
+        node ->
+          runner = Path.join(out_dir, "run.mjs")
+
+          File.write!(
+            runner,
+            ~s|import { enc } from "./prog.mjs";\nconsole.log(String(enc(41)));\n|
+          )
+
+          {res, 0} = System.cmd(node, [runner])
+          assert String.trim(res) == "42"
+      end
+    end
   end
 
   describe "build/1 — source targets" do

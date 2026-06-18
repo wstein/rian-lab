@@ -160,8 +160,27 @@ defmodule Rian.JS do
     const_js = Enum.map_join(consts, "\n", &const_js(&1, i53, ic))
     fn_js = Enum.map_join(funcs, "\n\n", &function_js(&1, i53, ic))
     disp_js = protocol_dispatchers_js(prog, i53)
+    import_js = imports_js(funcs)
 
-    [const_js, fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+    [import_js, const_js, fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+  end
+
+  # `@external(:js, "./ffi.mjs", "fun")` file-references (ADR-0080 §7 b): one ESM
+  # `import { … } from "path"` per referenced file, grouping the functions imported
+  # from the same file. The build copies the `.ffi.mjs` beside the output.
+  defp imports_js(funcs) do
+    funcs
+    |> Enum.flat_map(fn f ->
+      case Map.get(Map.get(f, :externals, %{}), :js) do
+        {:file, path, fun} -> [{path, fun}]
+        _ -> []
+      end
+    end)
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Enum.sort()
+    |> Enum.map_join("\n", fn {path, funs} ->
+      "import { #{funs |> Enum.uniq() |> Enum.sort() |> Enum.join(", ")} } from #{inspect(path)};"
+    end)
   end
 
   defp all_consts(prog),
@@ -308,17 +327,13 @@ defmodule Rian.JS do
       nil ->
         raise Unsupported, "`#{f.name}`: no `@external(:js, …)` body — not reachable on :js"
 
+      # a file-reference calls the imported function (its `import` is at the module
+      # top, `imports_js/1`); the call binds params positionally like any host body.
+      {:file, _path, fun} ->
+        js_external_fn(f, "#{fun}(#{Enum.map_join(f.params, ", ", & &1.name)})")
+
       spec ->
-        host = Rian.External.render(spec, f.params)
-        args = Enum.map_join(0..(length(f.params) - 1)//1, ", ", &"a#{&1}")
-
-        binds =
-          f.params
-          |> Enum.with_index()
-          |> Enum.map_join(" ", fn {p, i} -> "const #{p.name} = a#{i};" end)
-
-        export = if f.pub?, do: "export ", else: ""
-        "#{export}function #{f.name}(#{args}) { #{binds} return (#{host}); }"
+        js_external_fn(f, Rian.External.render(spec, f.params))
     end
   end
 
@@ -332,6 +347,20 @@ defmodule Rian.JS do
     export = if pub?, do: "export ", else: ""
 
     "#{export}function #{name}(#{params}) {\n#{body}\n  throw new Error(\"#{name}: no clause matched\");\n}"
+  end
+
+  # wrap a `:js` host expression as the function body, binding each Rian param to its
+  # positional argument by name so the expression can reference it.
+  defp js_external_fn(f, host) do
+    args = Enum.map_join(0..(length(f.params) - 1)//1, ", ", &"a#{&1}")
+
+    binds =
+      f.params
+      |> Enum.with_index()
+      |> Enum.map_join(" ", fn {p, i} -> "const #{p.name} = a#{i};" end)
+
+    export = if f.pub?, do: "export ", else: ""
+    "#{export}function #{f.name}(#{args}) { #{binds} return (#{host}); }"
   end
 
   # The program is in number-mode if any function signature mentions a JS-native

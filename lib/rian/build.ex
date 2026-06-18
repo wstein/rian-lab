@@ -28,7 +28,7 @@ defmodule Rian.Build do
 
       {opts, [file], _} ->
         case File.read(file) do
-          {:ok, src} -> resolve_then_emit(opts, src, Path.dirname(file))
+          {:ok, src} -> resolve_then_emit(opts, file, src)
           {:error, reason} -> err(error_text(reason))
         end
 
@@ -41,10 +41,12 @@ defmodule Rian.Build do
   # emitting (ADR-0080 §7 a/c): a missing foreign file / absent export fails the build
   # closed, never a silent stub. A program with no file-references resolves trivially.
   # Parse errors-as-values here, mirroring `check`/`targets`.
-  defp resolve_then_emit(opts, src, src_dir) do
+  defp resolve_then_emit(opts, file, src) do
+    src_dir = Path.dirname(file)
+
     with {:ok, prog} <- Rian.Decl.parse_result(src),
          :ok <- Rian.External.resolve(prog, src_dir) do
-      emit(opts, src, prog, src_dir)
+      emit(opts, file, src, prog, src_dir)
     else
       {:error, reason} -> err(error_text(reason))
     end
@@ -55,15 +57,67 @@ defmodule Rian.Build do
   # — converted to an exit code here rather than escaping the escript. Parse/IO
   # errors above are already values; this isolates the genuine emitter boundary.
   @rian_host "emit boundary: a lowering / BEAM codegen raise becomes an exit code"
-  defp emit(opts, src, prog, src_dir) do
+  defp emit(opts, file, src, prog, src_dir) do
     cond do
-      opts[:rust] -> print(Rian.Lower.rust_program(Rian.Decl.parse(src)))
-      opts[:js] -> print(Rian.JS.compile(src))
-      opts[:jvm] -> print(Rian.JVM.compile(src))
-      true -> build_beam(prog, src, src_dir, Keyword.get(opts, :out, "."))
+      opts[:rust] ->
+        emit_source(
+          :rust,
+          ".rs",
+          opts,
+          file,
+          prog,
+          src_dir,
+          Rian.Lower.rust_program(Rian.Decl.parse(src))
+        )
+
+      opts[:js] ->
+        emit_source(:js, ".mjs", opts, file, prog, src_dir, Rian.JS.compile(src))
+
+      opts[:jvm] ->
+        emit_source(:jvm, ".kt", opts, file, prog, src_dir, Rian.JVM.compile(src))
+
+      true ->
+        build_beam(prog, src, src_dir, Keyword.get(opts, :out, "."))
     end
   rescue
     e -> err(Exception.message(e))
+  end
+
+  # a source target (`--rust`/`--js`/`--jvm`): print to stdout, or — with `-o DIR` —
+  # write `<name><ext>` into DIR and copy each referenced foreign file beside it
+  # (ADR-0080 §7 b), so the emitted relative import/module resolves.
+  defp emit_source(target, ext, opts, file, prog, src_dir, source) do
+    case Keyword.get(opts, :out) do
+      nil ->
+        print(source)
+
+      dir ->
+        File.mkdir_p!(dir)
+        out = Path.join(dir, Path.basename(file, ".rian") <> ext)
+        File.write!(out, source)
+        IO.puts(out)
+        copy_foreign(prog, target, src_dir, dir)
+        0
+    end
+  end
+
+  # copy each distinct `.ffi.*` file the program references for `target` into `dir`,
+  # preserving its basename (the co-located convention, ADR-0080 §7) so the emitted
+  # relative `import`/`mod` finds it.
+  defp copy_foreign(prog, target, src_dir, dir) do
+    funcs = Map.get(prog, :funcs, []) ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
+
+    paths =
+      for f <- funcs,
+          {^target, {:file, path, _fun}} <- Map.get(f, :externals, %{}),
+          uniq: true,
+          do: path
+
+    Enum.each(paths, fn path ->
+      dest = Path.join(dir, Path.basename(path))
+      File.cp!(Path.expand(path, src_dir), dest)
+      IO.puts(dest)
+    end)
   end
 
   # compile to BEAM and write one `<module>.beam` per module into `dir`. A program with
