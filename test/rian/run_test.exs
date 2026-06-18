@@ -53,6 +53,21 @@ defmodule Rian.RunTest do
     test "a *runtime* error in the entry propagates (its stacktrace is not swallowed)" do
       assert_raise ArithmeticError, fn -> Run.eval("pub def main() Int53 := 1 div 0\n") end
     end
+
+    test "an entry defined in more than one module → {:error, …}" do
+      src = """
+      mod A do
+        pub def main() Int53 := 1
+      end
+
+      mod B do
+        pub def main() Int53 := 2
+      end
+      """
+
+      assert {:error, msg} = Run.eval(src)
+      assert msg =~ "defined in more than one module"
+    end
   end
 
   describe "run_file/2" do
@@ -88,6 +103,19 @@ defmodule Rian.RunTest do
       file = tmp("pub def main() Int53 := 1\n")
       err = capture_io(:stderr, fn -> assert Run.cli([file, "--nope"]) == 2 end)
       assert err =~ "unknown option"
+    end
+
+    test "`--main` selects the entry and prints its value, exit 0" do
+      file = tmp(~s|mod M do\n  pub def demo() String := "hi!"\nend\n|)
+      out = capture_io(fn -> assert Run.cli([file, "--main", "demo"]) == 0 end)
+      assert out == ~s("hi!"\n)
+    end
+
+    test "more than one file → error on stderr, exit 2" do
+      a = tmp("pub def main() Int53 := 1\n")
+      b = tmp("pub def main() Int53 := 2\n")
+      err = capture_io(:stderr, fn -> assert Run.cli([a, b]) == 2 end)
+      assert err =~ "run one file at a time"
     end
   end
 end
