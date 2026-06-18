@@ -90,10 +90,27 @@ the trait carries `type Elem: Clone`; a borrowed `Vec` field return is `.to_vec(
 (Gap E+); a constructed argument is borrowed for a generic `&C` param
 (`fcount(Bag([1,2,3]))`); and a string literal stored into a `Vec(String)` field at
 construction is `.to_string()`d (`rust_owned_elem`). The runtime **dispatcher** `to_list`
-(and its consumer `fcount`) is pinned off `:jvm` only — the JVM emitter has no protocol
-lowering yet (ADR-0042, the `:dispatch` Reach blocker); on `:rs` it is reachable (the
+(and its consumer `fcount`) is pinned off `:jvm`; on `:rs` it is reachable (the
 constructor-tag atoms are portable `Symbol`s, ADR-0041, not a blocker). So `fcount`
 reaches `[:ex, :js, :rs]`.
+
+**Why `Foldable` stays off `:jvm` — the gate, not the dispatcher (2026-06-18).** JVM
+protocol dispatch *itself* lowers (ADR-0042 — a `when (a0)` over `is <Type>`), and an
+associated type in a covariant `Vec(...)` return *could* erase to `List<Any>` (Kotlin
+`List` is covariant; verified by hand). But `Rian.JVM.compile` runs the **type gate**
+(`Rian.Check.gate!`) before emitting, and that gate **rejects the example**:
+`impl_foldable_bag_to_list` declares `Vec(Elem)` but its body infers `Vec(Int53)`, and
+the checker does not resolve `Elem := Int53` (ADR-0074 **Stage 2b — checker resolution —
+was dropped**). This is not JVM-specific: `Decl.compile` (the gated `:ex` path) rejects
+`foldable` identically; it runs at all only through the *ungated* `Beam.load` /
+`rust_program` (the Rust emitter resolves the projection *during* emit, after the gate it
+never runs). So the real prerequisite for `Foldable` on `:jvm` is **associated-type
+resolution before the gate** — substituting each impl's `type Elem := …` binding into its
+method signatures so the impl type-checks — not the dispatcher or a use-site cast. Until
+that lands, `Rian.Reach` keeps the associated-type dispatcher (and `fcount`) off `:jvm`,
+honestly: `JVM.compile(foldable)` raises, so claiming `:jvm` would be a matrix lie
+(ADR-0000). Uniform-return protocols (`Eq`/`Ord`/`Show`) are unaffected — no associated
+type, no gate mismatch — and reach `:jvm` today.
 
 ## Alternatives considered
 
