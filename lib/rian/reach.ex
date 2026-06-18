@@ -533,9 +533,21 @@ defmodule Rian.Reach do
         do: [pin_blocker()],
         else: []
 
+    # a generated runtime protocol DISPATCHER (`dispatch: :dispatcher`, ADR-0042) is a
+    # guarded runtime type-test that selects an impl by the value's shape. The BEAM
+    # (guarded clauses) and JS (`typeof`/tag dispatcher) lower it, and Rust monomorphises
+    # the impls behind a trait — so it reaches `:rs` too (a sum dispatcher like `show`
+    # compiles, rustc-verified). But the JVM emitter has no protocol lowering yet and
+    # *rejects* every dispatcher (`Rian.JVM.compile` drops them), which would leave a
+    # consumer's `eq(h, x)` call unresolved — so a dispatcher pins off `:jvm`, and its
+    # callers inherit the pin through the reach fixpoint. (Modelled directly against the
+    # emitter, not via the dispatcher's constructor-tag atoms — ADR-0000 honesty.)
+    disp = if Map.get(f, :dispatch) == :dispatcher, do: [dispatch_blocker()], else: []
+
     Enum.reduce(
       f.clauses,
-      {ref ++ int ++ width ++ owned_gen ++ param ++ as_pat ++ bit_pat ++ pin, MapSet.new()},
+      {ref ++ int ++ width ++ owned_gen ++ param ++ as_pat ++ bit_pat ++ pin ++ disp,
+       MapSet.new()},
       fn c, acc ->
         acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
         if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
@@ -646,6 +658,12 @@ defmodule Rian.Reach do
   # a pin pins the function BEAM-only (honest until the guard form lands).
   defp pin_blocker,
     do: %{construct: "pin (`^x`)", kind: :pin, kills: [:rs, :js, :jvm]}
+
+  # A runtime protocol dispatcher (`dispatch: :dispatcher`, ADR-0042): BEAM/JS lower it
+  # and Rust monomorphises the impls behind a trait, but the JVM emitter has no protocol
+  # lowering yet (`Rian.JVM.compile` drops every dispatcher), so it pins off `:jvm`.
+  defp dispatch_blocker,
+    do: %{construct: "runtime protocol dispatch", kind: :dispatch, kills: [:jvm]}
 
   defp map_update_blocker(pairs) do
     if Enum.any?(pairs, &computed_key_pair?/1),

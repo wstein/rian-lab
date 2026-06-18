@@ -75,6 +75,7 @@ Per-target idiomatic, the "same source, two idiomatic shapes" model (ADR-0041):
 | **BEAM** | direct call; consolidated protocol dispatch | Elixir protocol runtime dispatch |
 | **Rust** | **monomorphized** (the ADR-0030 comptime mechanism) | `dyn`-style vtable |
 | **JS** | direct function call | vtable object keyed by the value's runtime tag |
+| **JVM** | *not yet lowered* — the Tier-2 emitter (ADR-0049) drops dispatchers, so `Rian.Reach` pins a dispatcher (and its callers) off `:jvm` until protocol lowering lands | — |
 
 Dispatch is **static where the type is known** — the target is predictable from the source (ADR-0035).
 **Dynamic dispatch happens only through an explicitly protocol-typed binding**, so it is never silent.

@@ -197,6 +197,44 @@ defmodule Rian.ReachTest do
     end
   end
 
+  describe "runtime protocol dispatch is off `:jvm` (the JVM emitter drops dispatchers)" do
+    # A minimal `Eq` protocol: the generated `eq/2` dispatcher selects an impl by the
+    # value's runtime shape, and `both/3` is a bounded-generic consumer that calls it.
+    @proto """
+    protocol Eq do
+      def eq(a Self, b Self) Bool
+    end
+
+    impl Eq for Int53 do
+      def eq(a, b) := a == b
+    end
+
+    def both(x T, y T, z T) Bool forall T: Eq := eq(x, y) and eq(y, z)
+    """
+
+    test "the dispatcher reaches `:ex`+`:js`+`:rs` but is off `:jvm`" do
+      rep = reach(@proto)
+      # BEAM guards / JS tag-dispatch / Rust monomorphised trait all lower it; the JVM
+      # emitter rejects every dispatcher (`Rian.JVM.compile` drops it), so a consumer's
+      # `eq(h, x)` would be an unresolved Kotlin reference — hence off `:jvm`.
+      assert targets(rep, "eq") == [:ex, :js, :rs]
+      assert [%{kind: :dispatch, kills: [:jvm]}] = entry(rep, "eq").blockers
+    end
+
+    test "a consumer of the dispatcher inherits the `:jvm` pin through the call graph" do
+      rep = reach(@proto)
+      assert targets(rep, "both") == [:ex, :js, :rs]
+      # the pin is inherited, not direct — `both` carries no dispatch blocker of its own
+      refute Enum.any?(entry(rep, "both").blockers, &(&1.kind == :dispatch))
+    end
+
+    test "a concrete impl is an ordinary function — it still reaches `:jvm`" do
+      rep = reach(@proto)
+      # only the *dispatcher* is dropped; the impl lowers like any other function.
+      assert :jvm in targets(rep, "impl_eq_int53_eq")
+    end
+  end
+
   describe "atoms/Result are honest against the emitters (ADR-0041 vs emitter)" do
     test "a bare value atom reaches `:ex`+`:js` but is off `:rs`/`:jvm`" do
       rep = reach("def f(s Symbol) Bool := s == :foo")
