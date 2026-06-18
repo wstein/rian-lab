@@ -57,7 +57,7 @@ unary `-`/`not`; colons hug their key (`host: 8080`, `:lists`).
 
 A bracketed group collapses to one line when it fits, else breaks **one item per
 line**. Declaration heads (`def` params, `when` guards) **never reflow** — a head
-too long to fit is a design smell (see §13), not a wrap. Operator chains break
+too long to fit is a design smell (see §15), not a wrap. Operator chains break
 **leading-operator, one stage per line** at the loosest precedence:
 
 ```rian
