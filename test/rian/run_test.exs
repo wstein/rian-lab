@@ -79,6 +79,45 @@ defmodule Rian.RunTest do
       assert {:error, msg} = Run.run_file("/no/such/file.rian")
       assert msg =~ "cannot read"
     end
+
+    test "bundles a `@external(:ex)` file-reference and runs the call end-to-end" do
+      # the full build pipeline through `run`: the foreign `.ffi.ex` is resolved,
+      # compiled+loaded, the external rewritten to a module-reference, and the entry
+      # (which calls the external) actually executes (ADR-0080 §7 / ADR-0068).
+      dir = Path.join(System.tmp_dir!(), "rian_run_ffi_#{System.unique_integer([:positive])}")
+      File.mkdir_p!(dir)
+      on_exit(fn -> File.rm_rf(dir) end)
+
+      File.write!(
+        Path.join(dir, "RunFfiCodec.ffi.ex"),
+        "defmodule RunFfiCodec do\n  def twice(x), do: x * 2\nend\n"
+      )
+
+      path = Path.join(dir, "prog.rian")
+
+      File.write!(
+        path,
+        ~S|@external(:ex, "./RunFfiCodec.ffi.ex", "twice") pub def twice(x Int53) Int53| <>
+          "\npub def main() Int53 := twice(21)\n"
+      )
+
+      on_exit(fn ->
+        for atom <- [:"Elixir.RianCompiled", :"Elixir.RunFfiCodec"] do
+          :code.purge(atom) && :code.delete(atom)
+        end
+      end)
+
+      assert Run.run_file(path) == {:ok, 42}
+    end
+
+    test "a file-reference with no usable base dir (string eval) is a clear error" do
+      src =
+        ~S|@external(:ex, "./x.ffi.ex", "go") pub def go(x Int53) Int53| <>
+          "\npub def main() Int53 := go(1)\n"
+
+      assert {:error, msg} = Run.eval(src)
+      assert msg =~ "needs a source file path"
+    end
   end
 
   describe "cli/1 (the `rian run` escript adapter) — exit codes" do
