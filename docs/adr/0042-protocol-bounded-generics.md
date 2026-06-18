@@ -75,7 +75,7 @@ Per-target idiomatic, the "same source, two idiomatic shapes" model (ADR-0041):
 | **BEAM** | direct call; consolidated protocol dispatch | Elixir protocol runtime dispatch |
 | **Rust** | **monomorphized** (the ADR-0030 comptime mechanism) | `dyn`-style vtable |
 | **JS** | direct function call | vtable object keyed by the value's runtime tag |
-| **JVM** | *not yet lowered* — the Tier-2 emitter (ADR-0049) drops dispatchers, so `Rian.Reach` pins a dispatcher (and its callers) off `:jvm` until protocol lowering lands | — |
+| **JVM** | a `when (a0)` over the receiver's runtime type — one `is <Type> -> impl_…(…)` arm per impl (the `is` smart-casts the receiver, other `Self` args `as`-cast); a bounded-generic consumer (`forall T: Eq`) calls it and the bound erases. **Exception:** a dispatcher returning an *associated type* (ADR-0074, `Vec(Elem)`) has no single concrete Kotlin return, so it is dropped and `Rian.Reach` pins it (+ callers) off `:jvm`. | (the same `when` — dispatch is dynamic on the JVM) |
 
 Dispatch is **static where the type is known** — the target is predictable from the source (ADR-0035).
 **Dynamic dispatch happens only through an explicitly protocol-typed binding**, so it is never silent.

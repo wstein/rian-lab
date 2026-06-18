@@ -46,8 +46,13 @@ defmodule Rian.JVM do
   `acc.drop(n)`. The `Str`/`Char` prims over codepoint lists are lowered
   (`str_chars`/`str_from_chars`/`str_concat`/`char_code`). A `Symbol`/atom (`:foo`)
   lowers to a Kotlin `String` — its interned name (ADR-0041) — as a value, a pattern
-  test (`a0 == "ok"`), and a param/return type. **Not yet** (raise
-  `Rian.JVM.Unsupported`): tuples, maps, structs, `with`, lambdas, protocols, general FFI.
+  test (`a0 == "ok"`), and a param/return type. **Protocols** (ADR-0042) lower: a
+  `dispatch: :dispatcher` becomes a `when (a0)` over the receiver's runtime type
+  (`is Long`/`is Bag` → the matching `impl_…`, the other `Self` args `as`-cast), and a
+  bounded-generic consumer (`forall T: Eq`) calls it — the bound erases (dispatch is
+  dynamic). **Not yet** (raise `Rian.JVM.Unsupported`): tuples, maps, structs, `with`,
+  lambdas, general FFI; and a dispatcher returning an **associated type** (ADR-0074,
+  `Foldable.to_list() Vec(Elem)`) is dropped (no single concrete Kotlin return).
 
   ## Capabilities
 
@@ -119,9 +124,19 @@ defmodule Rian.JVM do
     # Erase abstract types to their base after the gate (ADR-0067): `opaque Token
     # := String` emits as the underlying `String`, and `Token.of(x)` -> `x`.
     prog = Rian.Opaque.erase(prog)
-    # the BEAM `:dispatcher` is a guarded runtime type-test, not the Kotlin shape;
-    # protocol lowering for the JVM is a later increment.
-    funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
+    # A protocol **dispatcher** (`dispatch: :dispatcher`, ADR-0042) lowers to a Kotlin
+    # `when (a0)` over the receiver's runtime type (`is Long`/`is Bag` → the matching
+    # `impl_…`). A dispatcher whose return mentions an **associated type** (ADR-0074 —
+    # `Foldable.to_list() Vec(Elem)`) can't be given a single concrete Kotlin return, so
+    # it is dropped (and `Rian.Reach` keeps it + its consumers off `:jvm`).
+    all = all_funcs(prog)
+
+    impl_first_type =
+      for f <- all, f.dispatch == :impl, into: %{}, do: {f.name, hd(f.params).type}
+
+    assoc_names = jvm_assoc_names(prog)
+    {dispatchers, funcs} = Enum.split_with(all, &(&1.dispatch == :dispatcher))
+    dispatchers = Enum.reject(dispatchers, &ret_mentions_assoc?(&1.ret, assoc_names))
     Core.reject_unsupported!(funcs, @jvm_unsupported, :jvm, Unsupported)
     type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
     # `const NAME := value` (ADR-0033) lowers to a top-level `val`, and a reference
@@ -133,14 +148,26 @@ defmodule Rian.JVM do
     ic = Rian.Check.program_ic(prog) |> Map.put(:consts, MapSet.new(consts, & &1.name))
     const_decls = Enum.map_join(consts, "\n", &const_kt(&1, ic))
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt(&1, ic))
+    disp_decls = Enum.map_join(dispatchers, "\n\n", &dispatcher_kt(&1, impl_first_type))
     # inject the float-repr helper only when the program lowers `__prim_float_repr`.
     runtime =
       if String.contains?(fn_decls, "__rian_float_repr("), do: float_repr_helper(), else: ""
 
-    [runtime, type_decls, const_decls, fn_decls]
+    [runtime, type_decls, const_decls, fn_decls, disp_decls]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
+
+  # the associated-type names declared across the program's protocols (ADR-0074) — a
+  # dispatcher returning one (`Foldable.to_list() Vec(Elem)`) has no single concrete
+  # Kotlin return type, so it stays off `:jvm`.
+  defp jvm_assoc_names(prog),
+    do: prog |> Map.get(:protocols, []) |> Enum.flat_map(&Map.get(&1, :assoc, [])) |> MapSet.new()
+
+  defp ret_mentions_assoc?(nil, _assoc), do: false
+
+  defp ret_mentions_assoc?(ret, assoc),
+    do: Enum.any?(assoc, &Regex.match?(~r/\b#{Regex.escape(&1)}\b/, ret))
 
   defp all_consts(prog),
     do:
@@ -324,6 +351,57 @@ defmodule Rian.JVM do
     "#{vis}fun #{generics_kt(f)}#{name}(#{sig_params}): #{kt_type(ret)} {\n#{lines}#{tail}}"
   end
 
+  # A runtime protocol dispatcher (`dispatch: :dispatcher`, ADR-0042) lowers to a
+  # `when (a0)` over the receiver's runtime type: one `is <KotlinType> -> impl_…(…)`
+  # arm per impl, ending in an `else -> throw`. The dispatch parameter(s) are typed
+  # `Any` (the dispatch is dynamic); the `is` test smart-casts the receiver `a0`, and a
+  # further `Self`-typed argument is `as`-cast to the matched type (every `Self` arg has
+  # the same runtime type as the receiver). The `is`-test type is `impl_…`'s first
+  # parameter type rendered through `kt_type` (`Int53` → `Long`, a sum/struct → its
+  # class), recovered from the clause's `impl_…(…)` call.
+  defp dispatcher_kt(disp, impl_first_type) do
+    params =
+      disp.params
+      |> Enum.with_index()
+      |> Enum.map_join(", ", fn {p, i} ->
+        "a#{i}: #{if p.type == "Self", do: "Any", else: kt_type(p.type)}"
+      end)
+
+    arms =
+      Enum.map_join(disp.clauses, "\n", fn c ->
+        impl = dispatch_impl_name(c.body)
+        kt_dtype = kt_type(impl_first_type[impl])
+        args = dispatch_args(disp.params, kt_dtype)
+        "    is #{kt_dtype} -> #{impl}(#{args})"
+      end)
+
+    vis = if Map.get(disp, :pub?, true), do: "", else: "private "
+    miss = inspect("#{disp.name}: no matching impl")
+
+    "#{vis}fun #{disp.name}(#{params}): #{kt_type(disp.ret)} = when (a0) {\n#{arms}\n" <>
+      "    else -> throw RuntimeException(#{miss})\n}"
+  end
+
+  # the impl call's arguments: the receiver `a0` is smart-cast by the `is` test; any
+  # other `Self`-typed argument is `as`-cast to the matched type; non-`Self` args pass
+  # through. (`Rian` dispatches on the first argument — ADR-0042 — so `a0` is the receiver.)
+  defp dispatch_args(params, kt_dtype) do
+    params
+    |> Enum.with_index()
+    |> Enum.map_join(", ", fn
+      {_p, 0} -> "a0"
+      {%{type: "Self"}, i} -> "a#{i} as #{kt_dtype}"
+      {_p, i} -> "a#{i}"
+    end)
+  end
+
+  # recover the impl function name from a dispatcher clause body (`impl_eq_int53_eq(v0,
+  # v1)`); the arguments are reconstructed from the dispatcher's own params (`a0`, `a1`).
+  defp dispatch_impl_name(body) do
+    [_, name] = Regex.run(~r/^\s*([a-z_][\w]*)\s*\(/, body)
+    name
+  end
+
   # a generic function (`forall T`, ADR-0042) declares its type variables as Kotlin
   # generics: `def len_l(Vec(T)) … forall T` -> `fun <T> len_l(a0: List<T>): Long`.
   # Without the `<T>` declaration a `T` in the signature is an unresolved reference
@@ -332,8 +410,14 @@ defmodule Rian.JVM do
   # `when (v0)` over the value's type), not a Kotlin `where` clause.
   defp generics_kt(f) do
     case Map.get(f, :tvars, []) do
-      [] -> ""
-      tvars -> "<#{Enum.join(tvars, ", ")}> "
+      [] ->
+        ""
+
+      tvars ->
+        # bound each tvar `: Any` (non-null): Rian values are never null, and an
+        # unbounded Kotlin `<T>` is `T : Any?`, which would not fit a protocol
+        # dispatcher's non-null `Any` parameter (`eq(a0: Any, …)`).
+        "<#{Enum.map_join(tvars, ", ", &"#{&1} : Any")}> "
     end
   end
 

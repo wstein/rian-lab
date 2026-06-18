@@ -534,15 +534,16 @@ defmodule Rian.Reach do
         else: []
 
     # a generated runtime protocol DISPATCHER (`dispatch: :dispatcher`, ADR-0042) is a
-    # guarded runtime type-test that selects an impl by the value's shape. The BEAM
-    # (guarded clauses) and JS (`typeof`/tag dispatcher) lower it, and Rust monomorphises
-    # the impls behind a trait — so it reaches `:rs` too (a sum dispatcher like `show`
-    # compiles, rustc-verified). But the JVM emitter has no protocol lowering yet and
-    # *rejects* every dispatcher (`Rian.JVM.compile` drops them), which would leave a
-    # consumer's `eq(h, x)` call unresolved — so a dispatcher pins off `:jvm`, and its
-    # callers inherit the pin through the reach fixpoint. (Modelled directly against the
-    # emitter, not via the dispatcher's constructor-tag atoms — ADR-0000 honesty.)
-    disp = if Map.get(f, :dispatch) == :dispatcher, do: [dispatch_blocker()], else: []
+    # guarded runtime type-test that selects an impl by the value's shape. Every target
+    # now lowers it — BEAM (guarded clauses), JS (`typeof`/tag), Rust (monomorphised
+    # trait), and JVM (a `when (a0)` over `is <Type>`, ADR-0042). The ONE exception is a
+    # dispatcher whose return mentions an **associated type** (ADR-0074 — `Foldable`'s
+    # `to_list() Vec(Elem)`): it has no single concrete Kotlin return, so `Rian.JVM` drops
+    # it and it pins off `:jvm` (callers inherit through the reach fixpoint).
+    disp =
+      if Map.get(f, :dispatch) == :dispatcher and ret_mentions_assoc?(f.ret, pctx.assoc),
+        do: [dispatch_blocker()],
+        else: []
 
     Enum.reduce(
       f.clauses,
@@ -650,11 +651,17 @@ defmodule Rian.Reach do
   defp pin_blocker,
     do: %{construct: "pin (`^x`)", kind: :pin, kills: [:rs, :js, :jvm]}
 
-  # A runtime protocol dispatcher (`dispatch: :dispatcher`, ADR-0042): BEAM/JS lower it
-  # and Rust monomorphises the impls behind a trait, but the JVM emitter has no protocol
-  # lowering yet (`Rian.JVM.compile` drops every dispatcher), so it pins off `:jvm`.
+  # does a (return) type mention an associated-type name (`Vec(Elem)` over `{"Elem"}`)?
+  defp ret_mentions_assoc?(nil, _assoc), do: false
+
+  defp ret_mentions_assoc?(ret, assoc),
+    do: Enum.any?(assoc, &Regex.match?(~r/\b#{Regex.escape(&1)}\b/, ret))
+
+  # An **associated-type-returning** protocol dispatcher (`Foldable.to_list() Vec(Elem)`,
+  # ADR-0074): every target lowers an ordinary dispatcher now, but this one has no single
+  # concrete Kotlin return type, so `Rian.JVM` drops it and it pins off `:jvm`.
   defp dispatch_blocker,
-    do: %{construct: "runtime protocol dispatch", kind: :dispatch, kills: [:jvm]}
+    do: %{construct: "associated-type protocol dispatch", kind: :dispatch, kills: [:jvm]}
 
   defp map_update_blocker(pairs) do
     if Enum.any?(pairs, &computed_key_pair?/1),
@@ -733,7 +740,13 @@ defmodule Rian.Reach do
           into: %{},
           do: {v.ctor, Enum.map(v.fields, &Map.get(&1, :type))}
         ),
-      generics: MapSet.new(for f <- funs, Map.get(f, :tvars, []) != [], do: f.name)
+      generics: MapSet.new(for f <- funs, Map.get(f, :tvars, []) != [], do: f.name),
+      # associated-type names (ADR-0074): a dispatcher returning one can't be given a
+      # concrete Kotlin return type, so it stays off `:jvm` (`Rian.JVM` drops it).
+      assoc:
+        Map.get(prog, :protocols, [])
+        |> Enum.flat_map(&Map.get(&1, :assoc, []))
+        |> MapSet.new()
     }
   end
 

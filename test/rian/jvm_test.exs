@@ -144,6 +144,25 @@ defmodule Rian.JVMTest do
       """,
       probe: ~s|println(first(listOf("a", "b"))); println(len_l(listOf(1L, 2L, 3L)))|
     },
+    %{
+      id: :protocol_dispatch,
+      src: """
+      protocol Eq do
+        def eq(a Self, b Self) Bool
+      end
+      impl Eq for Int53 do
+        def eq(a, b) := a == b
+      end
+      impl Eq for String do
+        def eq(a, b) := a == b
+      end
+      def contains(Vec(T), T) Bool forall T: Eq
+      def contains([], _) := false
+      def contains([h | t], x) := if eq(h, x) do true else contains(t, x) end
+      """,
+      probe:
+        ~s|println(contains(listOf(1L, 2L, 3L), 2L)); println(contains(listOf("a", "b"), "z"))|
+    },
     %{id: :interp_int, src: ~S|def f(n Int64) String := "v${n}"|, probe: ~S|println(f(42L))|},
     %{
       id: :symbol_tag,
@@ -714,14 +733,27 @@ defmodule Rian.JVMTest do
     end
 
     @tag :jvm
+    test "a protocol dispatcher lowers to `when (a0)` over `is <Type>` and runs (ADR-0042)", %{
+      jvm_batch: jvm
+    } do
+      # the `eq/2` dispatcher selects an impl by the receiver's runtime type; the
+      # bounded-generic consumer `contains forall T: Eq` calls it. Verified end-to-end.
+      kt = jvm_kt(jvm, :protocol_dispatch)
+      assert kt =~ "fun eq(a0: Any, a1: Any): Boolean = when (a0) {"
+      assert kt =~ "is Long -> impl_eq_int53_eq(a0, a1 as Long)"
+      assert kt =~ ~S|is String -> impl_eq_string_eq(a0, a1 as String)|
+      expect_jvm(jvm, :protocol_dispatch, "true\nfalse")
+    end
+
+    @tag :jvm
     test "a generic function (`forall T`) declares Kotlin generics and runs (ADR-0042)", %{
       jvm_batch: jvm
     } do
       # `forall T` lowers to a `<T>` declaration on the function; without it `T` in the
       # signature is an unresolved Kotlin reference (a `:jvm` reach lie before this).
       kt = jvm_kt(jvm, :generic_fn)
-      assert kt =~ "fun <T> first(a0: List<T>): T"
-      assert kt =~ "fun <T> len_l(a0: List<T>): Long"
+      assert kt =~ "fun <T : Any> first(a0: List<T>): T"
+      assert kt =~ "fun <T : Any> len_l(a0: List<T>): Long"
       expect_jvm(jvm, :generic_fn, "a\n3")
     end
 
