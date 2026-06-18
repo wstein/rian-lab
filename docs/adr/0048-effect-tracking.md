@@ -56,6 +56,12 @@ would attach — a `@rian_host`-tagged function becomes one whose inferred effec
 composed and declared by the §3 rules. Until then, `@rian_host` is the honest, greppable placeholder; it
 is **not** a new exception mechanism, just a marker for where the effect will live.
 
+Because the boundary is *sanctioned* (not unfinished work), `mix rian.transpile` renders a
+`@rian_host`-tagged def as its **portable happy path** under a `# @rian_host: <reason>` note — the
+recovery clause lives host-side, so emitting a `TODO_PORT("… restructure to Result/Option")` for it
+would falsely imply a pending port. An *un*-tagged `rescue`/`catch`/`after` still surfaces as that
+marker. (`@rian_host` is not a Rian surface annotation, so the note is a comment.)
+
 ### 3. Composition mirrors error sets (ADR-0040 §4)
 
 Effect sets compose exactly like error sets, on the same infer-local/declare-public line (ADR-0034 §1):

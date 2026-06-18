@@ -130,9 +130,11 @@ defmodule Rian.TranspileTest do
       assert out =~
                "# (dropped Elixir exception `Unsupported`: errors are values in Rian, ADR-0035)"
 
-      refute out =~ "mod Unsupported"
-      refute out =~ "defexception"
-      refute out =~ "TODO[port]: defexception"
+      # refute against the body only — the draft header legend names `defexception`.
+      body = out |> String.split("mod Beam do") |> List.last()
+      refute body =~ "mod Unsupported"
+      refute body =~ "defexception"
+      refute body =~ "TODO[port]: defexception"
     end
 
     test "nested struct modules (the `ir.ex` shape) flatten to `struct` decls" do
@@ -953,11 +955,13 @@ end|) =~ ~S|"v=${x}!"|
       # (ADR-0035/0048: the errors-as-values twin of a raising function). The recovery
       # has no Rian image, but the def is NOT unfinished work — so the draft emits the
       # portable happy path under a greppable host-boundary note, never a TODO_PORT.
+      # a `when` guard on the tagged head must be preserved (it names the boundary
+      # function the same way `Rian.Ann.host_funcs/1` does).
       out =
         rian("""
         defmodule M do
           @rian_host "compile boundary: load/2 raises into a value"
-          def load_result(src) do
+          def load_result(src) when is_binary(src) do
             load(src)
           rescue
             e -> {:error, Exception.message(e)}
@@ -966,7 +970,7 @@ end|) =~ ~S|"v=${x}!"|
         """)
 
       assert out =~ "# @rian_host: compile boundary: load/2 raises into a value"
-      assert out =~ ":= load(src)"
+      assert out =~ "pub def load_result(src) when is_binary(src) := load(src)"
       body = out |> String.split("mod M do") |> List.last()
       refute body =~ "TODO_PORT"
     end
@@ -1099,6 +1103,15 @@ end|) =~ ~S|"v=${x}!"|
       assert out =~ "pub def f(x _Unk) _Unk := x"
       refute out =~ "quote"
       refute out =~ "TODO[port]: defmacro"
+    end
+
+    test "a zero-arity `defmacro` notes `name/0`" do
+      out = rian("defmodule M do\n  defmacro __using__(_), do: :ok\n  defmacro now, do: 1\nend")
+
+      assert out =~
+               "# (dropped Elixir `defmacro __using__/1`: host metaprogramming, no Rian image)"
+
+      assert out =~ "# (dropped Elixir `defmacro now/0`: host metaprogramming, no Rian image)"
     end
 
     test "`use Application` (OTP) drops with a note (ADR-0057), not a marker" do

@@ -26,16 +26,30 @@ defmodule Rian.Transpile do
       flattens to module-less `@test def`s (ADR-0060: tests are top-level), with
       `assert`/`refute` rewritten to the assertion macros (`assert_eq`/`assert_neq` for
       `==`/`!=`) and a multi-assertion body `and`-combined; `Rian.Test` runs the result;
-    * documentation / compile-metadata / conformance attributes with **no runtime
-      semantics** are *dropped* (not flagged): `@typedoc`, `@doc false`, `@impl`,
-      `@external_resource`, `@enforce_keys`, `@rian`/`use Rian.Ann` — emitting a
+    * constructs with **no runtime semantics** or **no Rian image** are *dropped*
+      with an honest note (not flagged as work): documentation / compile-metadata /
+      conformance attributes (`@typedoc`, `@doc false`, `@impl`, `@external_resource`,
+      `@enforce_keys`, `@rian`/`use Rian.Ann`); an **exception-only `defmodule`**
+      (`defexception` — errors are values in Rian, ADR-0035); `defmacro`/`defmacrop`
+      (host metaprogramming — Rian has no syntax macros); `use Application` (OTP is
+      native-per-target, ADR-0057); and a `Code.ensure_loaded?` integration guard
+      (an optional host module, e.g. the Livebook/Kino smart cell). Emitting a
       `# TODO[port]` for these would falsely imply lost behaviour;
+    * a **`@rian_host`-tagged** def is a sanctioned host boundary (ADR-0035/0048: the
+      errors-as-values twin of a raising function), whose `rescue`/`catch`/`after`
+      lives host-side on purpose — so it renders as the **portable happy path** under a
+      greppable `# @rian_host:` note, not a marker. **Dynamic dispatch** on a runtime
+      module value (`mod.fun(args)`) lowers to its faithful BEAM-FFI form
+      `apply(mod, :fun, [args])` (reflection / runtime module selection — non-portable,
+      Reach pins it off `:rs`/`:js`), and a **module attribute in pattern position**
+      (`{:ok, @c, x} = …`) becomes a pin `^c` of the const (ADR A2);
     * everything else is left **in place** as a greppable `TODO_PORT("…")`
       sentinel (carrying the original Elixir) or a `# TODO[port]: …` line comment,
       so nothing untranslated can masquerade as done — notably the constructs with
-      **no Rian image**: exception flow (`def … rescue`/`catch`/`after`, ADR-0035/0040
-      — restructure to a `Result`/`Option`) and the truthy, value-returning `&&`/`||`
-      (Rian's `and`/`or` are boolean-only — restructure to `case`/`Option`);
+      **no Rian image**: an *un-sanctioned* (un-`@rian_host`) exception flow
+      (`def … rescue`/`catch`/`after`, ADR-0035/0040 — restructure to a
+      `Result`/`Option`) and the truthy, value-returning `&&`/`||` (Rian's `and`/`or`
+      are boolean-only — restructure to `case`/`Option`);
     * **types are holes** (`_Unk`) by default — Elixir is untyped, so the human
       supplies the sums and signatures. With `--infer` (ADR-0075) the engine fills
       every *provable* slot, **harvesting any `@spec`** as a cross-checked hint (a
@@ -55,13 +69,17 @@ defmodule Rian.Transpile do
   @header [
     "# ─────────────────────────────────────────────────────────────────────────",
     "# DRAFT skeleton — transpiled from Elixir by `mix rian.transpile`. NOT done.",
-    "# Translated: defs/clauses (+guards), defstruct→struct, if/case, operators",
-    "#   (precedence-parenthesized),",
+    "# Translated: defs/clauses (+guards, +defaults), defstruct→struct, if/case,",
+    "#   operators (precedence-parenthesized),",
     "#   pipes (|>), single- & multi-clause lambdas (multi → `(p) -> case p do …`),",
     "#   ctor/struct patterns, tuples, lists, maps, atoms, literals, local/sibling calls,",
-    "#   word sigils (~w → list), referenced @attrs → const, as-patterns (var @ pat),",
-    "#   field access (r.f), string interpolation (${e}), nil→None,",
+    "#   word sigils (~w → list), referenced @attrs → const (a const in a pattern → ^pin),",
+    "#   as-patterns (var @ pat), field access (r.f), string interpolation (${e}), nil→None,",
     "#   ExUnit `test` blocks → `@test def`, assert/refute → assertion macros.",
+    "# Dropped (no Rian image — an honest note, never a marker): defexception modules,",
+    "#   defmacro, use Application, Code.ensure_loaded? guards, doc/metadata attrs.",
+    "# A `@rian_host` def → its happy path under a `# @rian_host:` note; dynamic",
+    "#   dispatch `mod.f(a)` → `apply(mod, :f, [a])` (BEAM FFI).",
     "# You must still: (1) fill type holes `_Unk`, (2) resolve every",
     "#   `TODO_PORT(...)` / `# TODO[port]` marker, (3) make matches exhaustive,",
     "#   (4) equiv-lock against the Elixir oracle with a fixpoint test.",
