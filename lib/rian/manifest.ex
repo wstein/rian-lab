@@ -208,10 +208,12 @@ defmodule Rian.Manifest do
     end
   end
 
-  # the constrained subset has no escape sequences, so a string value contains no `"`;
-  # `[^"]*` (not greedy `.*`) rejects a malformed `"a"b"` instead of capturing `a"b`.
+  # the constrained subset has no escape sequences, so a string value contains neither
+  # `"` nor `\`; `[^"\\]*` (not greedy `.*`) rejects a malformed `"a"b"` instead of
+  # capturing `a"b`, and rejects a stray backslash (which has no meaning here and would
+  # only break a generated `Cargo.toml`/`.app.src`/`build.gradle.kts` downstream).
   defp parse_value(<<?", _::binary>> = s) do
-    case Regex.run(~r/^"([^"]*)"$/, s) do
+    case Regex.run(~r/^"([^"\\]*)"$/, s) do
       [_, inner] -> {:ok, inner}
       _ -> :error
     end
@@ -236,10 +238,10 @@ defmodule Rian.Manifest do
     if trimmed == "" do
       {:ok, []}
     else
-      items = Regex.scan(~r/"([^"]*)"/, trimmed) |> Enum.map(fn [_, v] -> v end)
+      items = Regex.scan(~r/"([^"\\]*)"/, trimmed) |> Enum.map(fn [_, v] -> v end)
 
       residue =
-        Regex.replace(~r/"[^"]*"/, trimmed, "") |> String.replace(",", "") |> String.trim()
+        Regex.replace(~r/"[^"\\]*"/, trimmed, "") |> String.replace(",", "") |> String.trim()
 
       if items != [] and residue == "", do: {:ok, items}, else: :error
     end
@@ -253,6 +255,7 @@ defmodule Rian.Manifest do
     targets = Map.get(project, "targets", [])
 
     with {:ok, name} <- require_field(project, "name"),
+         :ok <- validate_name(name),
          {:ok, version} <- require_field(project, "version"),
          :ok <- validate_kind(kind),
          {:ok, target_atoms} <- validate_targets(targets) do
@@ -275,6 +278,19 @@ defmodule Rian.Manifest do
       v when is_binary(v) and v != "" -> {:ok, v}
       _ -> {:error, "rian.toml: `[project]` is missing a non-empty `#{key}`"}
     end
+  end
+
+  # the project name becomes a crate name, an npm package, a Gradle `rootProject.name`,
+  # and an Erlang application atom (`{application, <name>, …}`) — so it must be a safe
+  # lowercase identifier (ADR-0080 §2 "snake_case"). Enforcing it here, at the single
+  # source, is what lets every backend interpolate `name` without escaping.
+  defp validate_name(name) do
+    if Regex.match?(~r/^[a-z][a-z0-9_-]*$/, name),
+      do: :ok,
+      else:
+        {:error,
+         "rian.toml: `name` must be a lowercase identifier matching " <>
+           "`[a-z][a-z0-9_-]*` (snake/kebab-case), got #{inspect(name)}"}
   end
 
   defp validate_kind(kind) when kind in @kinds, do: :ok

@@ -36,7 +36,7 @@ defmodule Rian.Pkg.Rebar do
   @spec app_src(Manifest.t(), [atom()]) :: String.t()
   def app_src(%Manifest{} = m, modules) do
     """
-    {application, #{app_name(m)},
+    {application, '#{app_name(m)}',
      [{description, "#{m.name}"},
       {vsn, "#{m.version}"},
       {registered, []},

@@ -124,6 +124,32 @@ defmodule Rian.ManifestTest do
 
       assert msg =~ "malformed entry"
     end
+
+    test "a backslash in a string value is rejected (the subset has no escape sequences)" do
+      # a stray `\` is meaningless here and would only break a generated Cargo.toml /
+      # .app.src / build.gradle.kts; reject it at the single source.
+      assert {:error, msg} = Manifest.parse(~S|[project]
+      name = "x"
+      version = "1"
+      license = "a\b"|)
+
+      assert msg =~ "malformed entry"
+    end
+
+    test "a name that is not a lowercase identifier is rejected" do
+      # the name becomes a crate / npm package / Gradle root / Erlang app atom, so it
+      # must be safe to interpolate into every backend without escaping (ADR-0080 §2).
+      for bad <- [~s|"My_App"|, ~s|"my app"|, ~s|"my.app"|, ~s|"1up"|] do
+        assert {:error, msg} =
+                 Manifest.parse("[project]\nname = #{bad}\nversion = \"1\"")
+
+        assert msg =~ "`name` must be a lowercase identifier", "expected rejection for #{bad}"
+      end
+
+      # snake_case and kebab-case are both accepted
+      assert {:ok, _} = Manifest.parse(~s|[project]\nname = "my_app"\nversion = "1"|)
+      assert {:ok, _} = Manifest.parse(~s|[project]\nname = "my-app"\nversion = "1"|)
+    end
   end
 
   describe "read/1" do
