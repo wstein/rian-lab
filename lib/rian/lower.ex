@@ -73,6 +73,10 @@ defmodule Rian.Lower do
   # `proto` is the protocol-method -> trait-name map for the Rust UFCS call-site
   # rewrite (ADR-0061 §2). `Decl.compile` passes it (a function unit's body may
   # call a protocol method); a direct caller that uses no protocols omits it.
+  @rian_sig "pub def compile(types Vec(Type), func Func) _Unk"
+  @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct)) _Unk"
+  @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range)) _Unk"
+  @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), proto _Unk) _Unk"
   @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), proto _Unk, ic _Unk) _Unk"
   @spec compile(list(), map(), list(), list(), map(), map()) :: map()
   def compile(types, func, structs \\ [], ranges \\ [], proto \\ %{}, ic \\ %{}) do
@@ -93,6 +97,9 @@ defmodule Rian.Lower do
   BEAM-only, and Rust gets traits instead (ADR-0061), so emitting their Rust is
   both wrong and a hard error.
   """
+  @rian_sig "pub def compile_elixir(types Vec(Type), func Func) _Unk"
+  @rian_sig "pub def compile_elixir(types Vec(Type), func Func, structs Vec(Struct)) _Unk"
+  @rian_sig "pub def compile_elixir(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range)) _Unk"
   @rian_sig "pub def compile_elixir(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), ic _Unk) _Unk"
   @spec compile_elixir(list(), map(), list(), list(), map()) :: map()
   def compile_elixir(types, func, structs \\ [], ranges \\ [], ic \\ %{}) do
@@ -106,6 +113,9 @@ defmodule Rian.Lower do
   The BEAM text view is exactly the Elixir one, so this delegates to
   `compile_elixir/4` — a distinct entry point kept for call-site intent.
   """
+  @rian_sig "pub def compile_beam(types Vec(Type), func Func) _Unk"
+  @rian_sig "pub def compile_beam(types Vec(Type), func Func, structs Vec(Struct)) _Unk"
+  @rian_sig "pub def compile_beam(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range)) _Unk"
   @rian_sig "pub def compile_beam(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), ic _Unk) _Unk"
   @spec compile_beam(list(), map(), list(), list(), map()) :: map()
   def compile_beam(types, func, structs \\ [], ranges \\ [], ic \\ %{}),
@@ -314,6 +324,9 @@ defmodule Rian.Lower do
   end
 
   # ── Elixir backend ─────────────────────────────────────────────────────
+  @rian_sig "pub def to_elixir(func Func, types Vec(Type)) _Unk"
+  @rian_sig "pub def to_elixir(func Func, types Vec(Type), structs Vec(Struct)) _Unk"
+  @rian_sig "pub def to_elixir(func Func, types Vec(Type), structs Vec(Struct), smeta _Unk) _Unk"
   @rian_sig "pub def to_elixir(func Func, types Vec(Type), structs Vec(Struct), smeta _Unk, ic _Unk) _Unk"
   @spec to_elixir(map(), list(), list(), map(), map()) :: term()
   def to_elixir(func, types, structs \\ [], smeta \\ %{}, ic \\ %{}) do
@@ -963,6 +976,10 @@ defmodule Rian.Lower do
   end
 
   # ── Rust backend ───────────────────────────────────────────────────────
+  @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk) _Unk"
+  @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct)) _Unk"
+  @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct), smeta _Unk) _Unk"
+  @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct), smeta _Unk, proto _Unk) _Unk"
   @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct), smeta _Unk, proto _Unk, ic _Unk) _Unk"
   @spec to_rust(map(), list(), term(), list(), map(), map(), map()) :: term()
   def to_rust(func, types, meta, structs \\ [], smeta \\ %{}, proto \\ %{}, ic \\ %{}) do
@@ -985,6 +1002,7 @@ defmodule Rian.Lower do
   Rust traits + impls from the protocol IR (ADR-0061 §2), as a self-contained
   unit: the `enum`/`struct` defs the impls reference are emitted alongside.
   """
+  @rian_sig "pub def rust_protocols(protocols _Unk, impl_decls _Unk, types Vec(Type), structs Vec(Struct)) _Unk"
   @spec rust_protocols(list(), list(), list(), list()) :: term()
   def rust_protocols(protocols, impl_decls, types, structs) do
     c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new())
