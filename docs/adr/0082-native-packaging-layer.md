@@ -1,7 +1,7 @@
 # ADR-0082 — Native packaging layer: generate native build files from `rian.toml`
 
 **Status:** Proposed
-**Implemented:** partial — staging **step 1 landed**: `Rian.Pkg.Cargo` generates a deterministic `Cargo.toml` from `rian.toml`, and `rian build --rust -o ROOT` writes a self-contained crate under `ROOT/_build/rs/` with the `@external(:rs)` FFI wired into `src/`, gated by a `cargo build` toolchain test (`Rian.Pkg.CargoTest`, `Rian.BuildTest`); a non-empty `[deps]` / a `kind="app"` bin crate fail closed (invariant 4). Steps 2–6 (BEAM/Gradle/npm backends, PULL plugins, `rian eject`) pending. Closes (in part) the ADR-0026 "Hex/Cargo/npm metadata mapping from a Rian manifest" open item and the ADR-0080 §2 "packaging layer" / `[deps]` defer
+**Implemented:** partial — staging **steps 1–2 landed**. Step 1: `Rian.Pkg.Cargo` generates a deterministic `Cargo.toml`, and `rian build --rust -o ROOT` writes a self-contained crate under `ROOT/_build/rs/` with the `@external(:rs)` FFI wired into `src/`, gated by a `cargo build` test. Step 2: `Rian.Pkg.Rebar` generates `rebar.config` + an OTP `<app>.app.src` (the default Erlang-native BEAM flavor), and `rian build -o ROOT` packages an OTP app under `ROOT/_build/ex/` (`ebin/*.beam` incl. bundled `@external(:ex)` FFI via `Rian.External.lower_beam`), proven by loading+running the package and a `rebar3 compile` test (`@tag :rebar`). A non-empty `[deps]` (both backends) and a `kind="app"` Cargo bin crate fail closed (invariant 4). Tests: `Rian.Pkg.{CargoTest,RebarTest}`, `Rian.BuildTest`. Steps 3–6 (Gradle/npm backends, the opt-in `mix.exs`, PULL plugins, `rian eject`) pending. Closes (in part) the ADR-0026 "Hex/Cargo/npm metadata mapping from a Rian manifest" open item and the ADR-0080 §2 "packaging layer" / `[deps]` defer
 **Refs:** ADR-0026 (ecosystem integration — rebar3 plugin + Mix compiler, no fork), ADR-0080 (project layout — `_build/<target>/`, the `rian.toml` manifest), ADR-0057/0058 (one source → a target *set*; portability inferred), ADR-0068/ADR-0080 §7 (`@external` foreign files), ADR-0000 (honesty bar), ADR-0050 (per-target emitter structure the generator mirrors)
 **Owners:** Maya Lin (architecture) · Liam Davis (ecosystem) · Kira Neri (honesty/toolchain) · Elena Rostova (FFI) · Samir Patel (rigor) · Rachel Okafor (PM) · Arthur Pendelton (disambiguation)
 
@@ -151,10 +151,12 @@ a backend yet keeps the flat `-o`/stdout path until then.
   targets carry no packaging code.
 - `rian build`'s output layout changes from flat `-o DIR` to `_build/<target>/`; the
   `-o` flag selects the root, the target subdir is implied. This rolls out per target with
-  its backend — **Rust is live** (`--rust -o ROOT` → `ROOT/_build/rs/`); JS/JVM keep the
-  flat `-o`/stdout path until their backends land.
-- `mix test.all` gains real native-build steps (`cargo build`, …) — slower but the only
-  honest signal (Invariant 4). These are `:rust`/`:jvm`/`:js` tagged, excluded from the
+  its backend — **Rust and BEAM are live** (`-o ROOT` → `ROOT/_build/rs/` resp.
+  `ROOT/_build/ex/`); BEAM without `-o` still writes flat `.beam` into the cwd, and JS/JVM
+  keep the flat `-o`/stdout path until their backends land.
+- `mix test.all` gains real native-build steps (`cargo build`, `rebar3 compile`, …) —
+  slower but the only honest signal (Invariant 4). These are `:rust`/`:jvm`/`:js`/`:rebar`
+  tagged, excluded from the
   fast inner loop like the existing toolchain tests.
 - `Rian.Manifest` gains the project metadata the backends read; `[deps]` stays a
   **loud-error stub** until the resolver lands.

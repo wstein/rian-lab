@@ -18,39 +18,64 @@ defmodule Rian.BuildTest do
     dir
   end
 
-  describe "build/1 — BEAM" do
-    test "writes one loadable `.beam` per module into -o DIR" do
+  describe "build/1 — BEAM OTP package (ADR-0082 step 2)" do
+    test "-o ROOT packages an OTP app under _build/ex/ — loadable beams + valid rebar.config/.app.src" do
       # a unique module name so loading the built artifact can't collide with a
       # module another test already loaded into the shared VM.
       file = tmp_file("mod RbBeamProbe do\n  pub def main() Int53 := 21 * 2\nend\n")
       dir = tmp_dir()
 
       out = capture_io(fn -> assert Build.build([file, "-o", dir]) == 0 end)
-      beam = Path.join(dir, "Elixir.RbBeamProbe.beam")
+      ex = Path.join([dir, "_build", "ex"])
+      ebin = Path.join(ex, "ebin")
+      beam = Path.join(ebin, "Elixir.RbBeamProbe.beam")
 
       assert out =~ "Elixir.RbBeamProbe.beam"
       assert File.exists?(beam)
 
-      # the emitted bytecode is real: load it and run the entry
+      # the generated manifests are well-formed Erlang terms
+      assert {:ok, [_ | _]} = :file.consult(String.to_charlist(Path.join(ex, "rebar.config")))
+      [app_src] = Path.wildcard(Path.join([ex, "src", "*.app.src"]))
+      assert {:ok, [{:application, _name, kw}]} = :file.consult(String.to_charlist(app_src))
+      assert :"Elixir.RbBeamProbe" in Keyword.fetch!(kw, :modules)
+
+      # the packaged bytecode is real: load it from ebin/ and run the entry
       :code.purge(:"Elixir.RbBeamProbe")
-      true = :code.add_path(String.to_charlist(dir))
+      true = :code.add_path(String.to_charlist(ebin))
       {:module, mod} = :code.load_file(:"Elixir.RbBeamProbe")
       assert mod.main() == 42
       on_exit(fn -> :code.purge(:"Elixir.RbBeamProbe") && :code.delete(:"Elixir.RbBeamProbe") end)
     end
 
-    test "a flat (top-level) file builds `Elixir.RianCompiled.beam`" do
+    test "a flat (top-level) file packages `Elixir.RianCompiled.beam` into _build/ex/ebin/" do
       file = tmp_file("pub def main() Int53 := 7\n")
       dir = tmp_dir()
       capture_io(fn -> assert Build.build([file, "-o", dir]) == 0 end)
-      assert File.exists?(Path.join(dir, "Elixir.RianCompiled.beam"))
+      assert File.exists?(Path.join([dir, "_build", "ex", "ebin", "Elixir.RianCompiled.beam"]))
     end
 
     test "a type error → exit 2, nothing written" do
       file = tmp_file("pub def main() Bool := 1 + 1\n")
       dir = tmp_dir()
       capture_io(:stderr, fn -> assert Build.build([file, "-o", dir]) == 2 end)
-      refute File.dir?(dir) and File.ls!(dir) != []
+      refute File.exists?(Path.join(dir, "_build"))
+    end
+
+    @tag :rebar
+    test "the generated OTP project builds through rebar3 (invariant 4)" do
+      case System.find_executable("rebar3") do
+        nil ->
+          :ok
+
+        rebar3 ->
+          file = tmp_file("mod RbRebarProbe do\n  pub def answer() Int53 := 42\nend\n")
+          dir = tmp_dir()
+          capture_io(fn -> assert Build.build([file, "-o", dir]) == 0 end)
+
+          ex = Path.join([dir, "_build", "ex"])
+          {res, code} = System.cmd(rebar3, ["compile"], cd: ex, stderr_to_stdout: true)
+          assert code == 0, "rebar3 compile failed:\n#{res}"
+      end
     end
   end
 
@@ -85,15 +110,16 @@ defmodule Rian.BuildTest do
 
       dir = tmp_dir()
       out = capture_io(fn -> assert Build.build([rian, "-o", dir]) == 0 end)
+      ebin = Path.join([dir, "_build", "ex", "ebin"])
 
-      # both the Rian module and the bundled foreign module are written
+      # both the Rian module and the bundled foreign module are packaged into ebin/
       assert out =~ "Elixir.RianCompiled.beam"
-      assert File.exists?(Path.join(dir, "Elixir.RianCompiled.beam"))
-      assert File.exists?(Path.join(dir, "Elixir.RbFfiCodec.beam"))
+      assert File.exists?(Path.join(ebin, "Elixir.RianCompiled.beam"))
+      assert File.exists?(Path.join(ebin, "Elixir.RbFfiCodec.beam"))
 
       # the bundled artifact is real: load both and run the entry through the FFI
       for atom <- [:"Elixir.RbFfiCodec", :"Elixir.RianCompiled"], do: :code.purge(atom)
-      true = :code.add_path(String.to_charlist(dir))
+      true = :code.add_path(String.to_charlist(ebin))
       {:module, _} = :code.load_file(:"Elixir.RbFfiCodec")
       {:module, mod} = :code.load_file(:"Elixir.RianCompiled")
       assert mod.main(21) == 42

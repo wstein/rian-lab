@@ -13,9 +13,12 @@ defmodule Rian.Build do
   """
 
   @doc """
-  `rian build FILE [-o DIR] [--rust|--js|--jvm]` — default emits BEAM bytecode,
-  one `Elixir.<Mod>.beam` per module into DIR (default `.`); a target flag prints
-  that target's source to stdout instead. Returns an exit code.
+  `rian build FILE [-o ROOT] [--rust|--js|--jvm]` — compile a `.rian`. With `-o ROOT`,
+  PUSH-packages a native project under `ROOT/_build/<target>/` (ADR-0082): BEAM → an OTP
+  app (`rebar.config` + `src/<app>.app.src` + `ebin/*.beam`), Rust → a Cargo crate; JS/JVM
+  write their source plus any copied `@external` FFI into `ROOT` (their backends pending).
+  Without `-o`, BEAM writes flat `.beam` into the cwd and a source target prints to stdout.
+  Returns an exit code.
   """
   @spec build([String.t()]) :: non_neg_integer()
   def build(argv) do
@@ -75,7 +78,10 @@ defmodule Rian.Build do
         emit_source(:jvm, ".kt", opts, file, prog, src_dir, Rian.JVM.compile(src))
 
       true ->
-        build_beam(prog, src, src_dir, Keyword.get(opts, :out, "."))
+        # ADR-0082 step 2: `-o ROOT` packages an OTP app under ROOT/_build/ex/
+        # (rebar.config + src/<app>.app.src + ebin/*.beam); no `-o` writes flat `.beam`
+        # into the cwd (the quick compile/run path).
+        build_beam(opts, file, src, prog, src_dir)
     end
   rescue
     e -> err(Exception.message(e))
@@ -151,29 +157,64 @@ defmodule Rian.Build do
     end
   end
 
-  # compile to BEAM and write one `<module>.beam` per module into `dir`. A program with
-  # a `:ex` file-reference `@external` is bundled (ADR-0080 §7 b): the foreign `.ffi.ex`
-  # is compiled and shipped beside the app; everything else takes the unchanged path.
-  defp build_beam(prog, src, src_dir, dir) do
-    if Rian.External.has_beam_file_ref?(prog) do
-      build_beam_bundled(prog, src_dir, dir)
-    else
-      File.mkdir_p!(dir)
-      compile_modules(src) |> Enum.each(&write_beam(&1, dir))
-      0
-    end
-  end
-
-  defp build_beam_bundled(prog, src_dir, dir) do
-    case Rian.External.lower_beam(prog, src_dir) do
+  # Compile to BEAM, then either write flat `.beam` into the cwd (no `-o`, the quick
+  # compile/run path) or package an OTP application under ROOT/_build/ex/ (`-o ROOT`,
+  # ADR-0082 step 2). A `:ex` file-reference `@external` is bundled (ADR-0080 §7 b): the
+  # foreign `.ffi.ex` is compiled and shipped as a real module beside the app.
+  defp build_beam(opts, file, src, prog, src_dir) do
+    case beam_modules(prog, src, src_dir) do
       {:error, msg} ->
         err(msg)
 
-      {:ok, lowered, ffi_beams} ->
-        File.mkdir_p!(dir)
-        (compile_modules_ir(lowered) ++ ffi_beams) |> Enum.each(&write_beam(&1, dir))
-        0
+      {:ok, beams} ->
+        case Keyword.get(opts, :out) do
+          nil ->
+            Enum.each(beams, &write_beam(&1, "."))
+            0
+
+          root ->
+            build_otp(root, project_manifest(file, src_dir), beams)
+        end
     end
+  end
+
+  # the `[{module_atom, beam_binary}]` for `prog`, bundling any `:ex` file-reference FFI.
+  defp beam_modules(prog, src, src_dir) do
+    if Rian.External.has_beam_file_ref?(prog) do
+      case Rian.External.lower_beam(prog, src_dir) do
+        {:error, _} = e -> e
+        {:ok, lowered, ffi_beams} -> {:ok, compile_modules_ir(lowered) ++ ffi_beams}
+      end
+    else
+      {:ok, compile_modules(src)}
+    end
+  end
+
+  # package a self-contained OTP application (ADR-0082 step 2): `rebar.config` +
+  # `src/<app>.app.src` (generated from the manifest, `Rian.Pkg.Rebar`) + the compiled
+  # `ebin/*.beam`, all under ROOT/_build/ex/ — `rebar3 compile` builds straight through
+  # it. Manifest-generation runs first, so a non-empty `[deps]` fails before any write.
+  defp build_otp(root, manifest, beams) do
+    rebar = Rian.Pkg.Rebar.rebar_config(manifest)
+    appsrc = Rian.Pkg.Rebar.app_src(manifest, Enum.map(beams, &elem(&1, 0)))
+
+    app = Path.join([root, "_build", "ex"])
+    File.mkdir_p!(Path.join(app, "src"))
+    File.mkdir_p!(Path.join(app, "ebin"))
+
+    write_file(Path.join(app, "rebar.config"), rebar)
+    write_file(Path.join([app, "src", "#{Rian.Pkg.Rebar.app_name(manifest)}.app.src"]), appsrc)
+
+    Enum.each(beams, fn {atom, bin} ->
+      write_file(Path.join([app, "ebin", "#{atom}.beam"]), bin)
+    end)
+
+    0
+  end
+
+  defp write_file(path, content) do
+    File.write!(path, content)
+    IO.puts(path)
   end
 
   defp write_beam({atom, bin}, dir) do
