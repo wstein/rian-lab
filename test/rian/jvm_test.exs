@@ -188,6 +188,25 @@ defmodule Rian.JVMTest do
       probe:
         ~s|println(fcount(Bag(listOf(1L, 2L, 3L)))); println(fcount(Words(listOf("a", "b"))))|
     },
+    %{
+      id: :foldable_typed,
+      src: """
+      protocol Foldable do
+        type Elem
+        def to_list(self Self) Vec(Elem)
+      end
+      type Bag := Bag(items Vec(Int53))
+      impl Foldable for Bag do
+        type Elem := Int53
+        def to_list(b) := case b do Bag(xs) -> xs end
+      end
+      def sum_l(Vec(Int53)) Int53
+      def sum_l([]) := 0
+      def sum_l([h | t]) := h + sum_l(t)
+      def bag_sum(b Bag) Int53 := sum_l(to_list(b))
+      """,
+      probe: ~s|println(bag_sum(Bag(listOf(1L, 2L, 3L))))|
+    },
     %{id: :interp_int, src: ~S|def f(n Int64) String := "v${n}"|, probe: ~S|println(f(42L))|},
     %{
       id: :symbol_tag,
@@ -755,6 +774,19 @@ defmodule Rian.JVMTest do
       kt = jvm_kt(jvm, :interp_bool)
       assert kt =~ ~S|if (b) "true" else "false"|
       expect_jvm(jvm, :interp_bool, "true\nfalse")
+    end
+
+    @tag :jvm
+    test "an element-TYPED consumer casts the erased dispatcher result `as List<T>` (ADR-0074)",
+         %{
+           jvm_batch: jvm
+         } do
+      # `sum_l` takes a concrete `Vec(Int53)` = `List<Long>`, but `to_list(b)` is the
+      # erased dispatcher (`List<Any>`). The coercion pass inserts `as List<Long>` so it
+      # type-checks; `bag_sum(Bag([1,2,3]))` sums to 6.
+      kt = jvm_kt(jvm, :foldable_typed)
+      assert kt =~ "sum_l((to_list(b) as List<Long>))"
+      expect_jvm(jvm, :foldable_typed, "6")
     end
 
     @tag :jvm

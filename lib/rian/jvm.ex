@@ -50,9 +50,13 @@ defmodule Rian.JVM do
   `dispatch: :dispatcher` becomes a `when (a0)` over the receiver's runtime type
   (`is Long`/`is Bag` → the matching `impl_…`, the other `Self` args `as`-cast), and a
   bounded-generic consumer (`forall T: Eq`) calls it — the bound erases (dispatch is
-  dynamic). **Not yet** (raise `Rian.JVM.Unsupported`): tuples, maps, structs, `with`,
-  lambdas, general FFI; and a dispatcher returning an **associated type** (ADR-0074,
-  `Foldable.to_list() Vec(Elem)`) is dropped (no single concrete Kotlin return).
+  dynamic). An **associated type** (ADR-0074) in a covariant `Vec(...)` return erases to
+  `List<Any>` (`Foldable.to_list() Vec(Elem)`), and a type-directed coercion pass
+  (`coerce_casts`) inserts `as List<T>` where that `List<Any>` flows into a concrete
+  `List<T>` callee param (an element-*typed* consumer). **Not yet** (raise
+  `Rian.JVM.Unsupported`): tuples, maps, structs, `with`, lambdas, general FFI; and an
+  associated type in a *non*-covariant position (a bare `Elem` return / an `Elem`
+  parameter), which stays off `:jvm`.
 
   ## Capabilities
 
@@ -138,6 +142,19 @@ defmodule Rian.JVM do
     {dispatchers, funcs} = Enum.split_with(all, &(&1.dispatch == :dispatcher))
     dispatchers = Enum.reject(dispatchers, &assoc_blocks_jvm?(&1, assoc_names))
     Core.reject_unsupported!(funcs, @jvm_unsupported, :jvm, Unsupported)
+    # the type-directed coercion pass (ADR-0074) needs: which lowered dispatchers were
+    # erased to `List<Any>` (an associated type in a covariant `Vec(...)` return), and
+    # each callee's parameter types — so a `List<Any>` flowing into a concrete `List<T>`
+    # param gets an `as List<T>` cast. Threaded via `ic` (already passed everywhere).
+    erased =
+      for(
+        d <- dispatchers,
+        type_mentions_assoc?(d.ret, assoc_names),
+        into: MapSet.new(),
+        do: d.name
+      )
+
+    sigs = Map.new(all, fn f -> {{f.name, length(f.params)}, Enum.map(f.params, & &1.type)} end)
     type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
     # `const NAME := value` (ADR-0033) lowers to a top-level `val`, and a reference
     # resolves to it — threaded through `ic[:consts]` (parity with `Rian.Beam`/
@@ -145,7 +162,12 @@ defmodule Rian.JVM do
     # identifier (a silent miscompile).
     consts = all_consts(prog)
     # the program inference context types each clause body's core IR (ADR-0050 §3).
-    ic = Rian.Check.program_ic(prog) |> Map.put(:consts, MapSet.new(consts, & &1.name))
+    ic =
+      Rian.Check.program_ic(prog)
+      |> Map.put(:consts, MapSet.new(consts, & &1.name))
+      |> Map.put(:jvm_sigs, sigs)
+      |> Map.put(:jvm_erased, erased)
+
     const_decls = Enum.map_join(consts, "\n", &const_kt(&1, ic))
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt(&1, ic))
 
@@ -589,10 +611,89 @@ defmodule Rian.JVM do
       |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
       |> Rian.Check.annotate(tenv, ic)
 
-    block_value(Rian.Shadow.dedup(stmts, params, &kt_fresh/2))
+    stmts
+    |> Rian.Shadow.dedup(params, &kt_fresh/2)
+    |> Enum.map(&coerce_stmt(&1, ic))
+    |> block_value()
   end
 
   defp kt_fresh(base, count), do: "`" <> base <> "$" <> Integer.to_string(count) <> "`"
+
+  # ── JVM type-directed coercion pass (the seed of a general pass, ADR-0074) ──────────
+  # An erased associated-type dispatcher returns `List<Any>`, but a concrete-typed callee
+  # param expects `List<T>` — `sum_l(to_list(b))` where `to_list` is erased and `sum_l`
+  # takes `Vec(Int53)`; Kotlin `List<Any>` is not a `List<Long>`, so insert `as List<T>`.
+  # The cast target is read from the CALLEE's parameter type (the conservative checker
+  # leaves the erased call `:unknown`). Runs over the annotated body before `expr_kt`;
+  # today it carries the one rule the associated-type story needs, structured so further
+  # rules slot in. (`ic` carries `:jvm_sigs` / `:jvm_erased`, set in `compile/1`.)
+  defp coerce_stmt({:bind, n, e}, ic), do: {:bind, n, coerce_casts(e, ic)}
+  defp coerce_stmt({:typed_bind, n, t, e}, ic), do: {:typed_bind, n, t, coerce_casts(e, ic)}
+  defp coerce_stmt({:expr, e}, ic), do: {:expr, coerce_casts(e, ic)}
+
+  defp coerce_casts(%ECall{args: args} = call, ic) do
+    args = Enum.map(args, &coerce_casts(&1, ic))
+    args = if match?(%EId{}, call.fun), do: cast_args(call.fun.name, args, ic), else: args
+    %{call | args: args}
+  end
+
+  defp coerce_casts(%EBin{left: l, right: r} = n, ic),
+    do: %{n | left: coerce_casts(l, ic), right: coerce_casts(r, ic)}
+
+  defp coerce_casts(%EUnary{arg: a} = n, ic), do: %{n | arg: coerce_casts(a, ic)}
+
+  defp coerce_casts(%EIf{cond: c, then: t, else: e} = n, ic),
+    do: %{n | cond: coerce_casts(c, ic), then: coerce_casts(t, ic), else: coerce_casts(e, ic)}
+
+  defp coerce_casts(%EList{elems: elems, tail: tail} = n, ic),
+    do: %{
+      n
+      | elems: Enum.map(elems, &coerce_casts(&1, ic)),
+        tail: if(tail == :close, do: :close, else: coerce_casts(tail, ic))
+    }
+
+  defp coerce_casts(%ECase{scrut: s, arms: arms} = n, ic),
+    do: %{
+      n
+      | scrut: coerce_casts(s, ic),
+        arms: Enum.map(arms, fn {p, g, b} -> {p, g, coerce_casts(b, ic)} end)
+    }
+
+  defp coerce_casts(%EDot{head: h} = n, ic), do: %{n | head: coerce_casts(h, ic)}
+
+  defp coerce_casts(%EBlock{stmts: stmts} = n, ic),
+    do: %{n | stmts: Enum.map(stmts, &coerce_stmt(&1, ic))}
+
+  defp coerce_casts(leaf, _ic), do: leaf
+
+  # cast each erased-dispatcher arg flowing into a concrete `Vec(...)` param of callee `f`.
+  defp cast_args(f, args, ic) do
+    erased = Map.get(ic, :jvm_erased, MapSet.new())
+
+    case Map.get(ic, :jvm_sigs, %{})[{f, length(args)}] do
+      nil -> args
+      ptypes -> Enum.zip(args, ptypes) |> Enum.map(fn {a, pt} -> maybe_cast(a, pt, erased) end)
+    end
+  end
+
+  defp maybe_cast(%ECall{fun: %EId{name: g}} = arg, "Vec(" <> _ = pt, erased) do
+    inner = vec_inner(pt)
+
+    # cast only into a CONCRETE element type: a `Vec(T)` param where `T` is a type
+    # variable already accepts the erased `List<Any>` (Kotlin infers `T = Any`), and
+    # `as List<T>` would reference an undeclared `T` at the call site.
+    if MapSet.member?(erased, g) and not tvar_kt?(inner),
+      do: {:jvm_cast, arg, "List<#{kt_type(inner)}>"},
+      else: arg
+  end
+
+  defp maybe_cast(arg, _pt, _erased), do: arg
+
+  # the element type of a `Vec(T)` type string (`Vec(Int53)` -> `Int53`).
+  defp vec_inner("Vec(" <> rest), do: String.replace_suffix(rest, ")", "")
+
+  # a bare type variable (`T`, `C`, `U2`) — single uppercase letter + optional digits.
+  defp tvar_kt?(t), do: String.match?(t, ~r/^[A-Z][0-9]*$/)
 
   defp block_value([{:expr, e}]), do: expr_kt(e)
 
@@ -718,6 +819,10 @@ defmodule Rian.JVM do
     # statements are newline-separated (Kotlin does not accept space-separated ones)
     "run rcase@{\n" <> Enum.join(decl ++ arm_lines ++ tail, "\n") <> "\n}"
   end
+
+  # a type-directed cast inserted by `coerce_casts` (ADR-0074): bridge an erased
+  # dispatcher's `List<Any>` to the concrete `List<T>` a callee expects.
+  defp expr_kt({:jvm_cast, inner, t}), do: "(#{expr_kt(inner)} as #{t})"
 
   defp expr_kt(other), do: raise(Unsupported, "jvm: expression #{inspect(other)}")
 
