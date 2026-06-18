@@ -155,9 +155,26 @@ the FFI-resolution fragility of `copy_foreign`.
 
 ## Open items
 
-- **`[deps]` resolver + `rian.lock`** (ADR-0026's standing open item) — per-target
-  source mapping (Hex vs Cargo vs npm). This is the boundary where PUSH must defer to
-  PULL or to `eject`; it must **not** become a Rian-owned resolver (rated 1/5 above).
+- **`[deps]` resolver + `rian.lock`** (ADR-0026's standing open item). Two **kinds** of
+  dependency, two sourcing paths — the distinction the "must not become Cargo" rule
+  actually rests on:
+  - **Native deps** (a Rust crate, a Hex package, an npm module) are **per-target** and
+    are **delegated to the native build system** (PULL / `eject`); Rian never reimplements
+    Cargo's/Hex's/npm's resolver (rated 1/5 above). They live in the native manifest the
+    user owns, not in `rian.toml`.
+  - **Rian-source deps** (another Rian package — portable, lowering to the *same* target
+    set) inherently cannot be delegated to one native build system, so Rian must fetch
+    them itself. The directive: **source them from online version-control repositories —
+    git, fossil, mercurial, … — not a single centralized registry.** VCS sourcing is
+    decentralized and registry-agnostic, which is the same host-decoupling stance that
+    made the manifest `rian.toml` rather than `mix.exs` (ADR-0080) and rejected forking a
+    host ecosystem (ADR-0026): no gatekeeper, the same source reachable for every target.
+    Reproducibility (Samir's bar) comes from **commit-hash pinning in `rian.lock`**, not a
+    registry's mutable version index. A registry, if ever added, is an *optional* index in
+    front of VCS URLs, never the only way in.
+  This split is the boundary where PUSH defers to PULL/`eject` (native deps) versus where
+  Rian owns a *minimal, VCS-only* fetcher (Rian-source deps) — deliberately not a general
+  package resolver.
 - **`[workspace]`** (ADR-0080 open item) — multi-package repos; cargo-style.
 - **Incremental/caching** — the strongest long-term argument for PULL; PUSH must not
   try to out-cache the native tools.
