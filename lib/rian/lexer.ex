@@ -48,6 +48,19 @@ defmodule Rian.Lexer do
   # lexes as `a`, `!=`, `b`.
   @id_re ~r/^[A-Za-z_]\w*(?:\?|!(?!=))?/
 
+  use Rian.Ann
+
+  # The lexer token, as a Rian sum (the self-hosted lexer's `Token`). The Elixir
+  # reference stores tokens as tagged tuples (`{:str, s}`); the surface type names
+  # the intent every emitter/the self-host port shares. `TIstr`'s payload (a list of
+  # `lit`/`hole` parts) stays `_Unk` until interpolation parts are modelled.
+  @rian_sig """
+  type Token := TNl | TLparen | TRparen | TLbracket | TRbracket | TLbrace | TRbrace
+              | TMapopen | TComma | TSemi | TStr(String) | TChar(Int53) | TNum(String)
+              | TOp(String) | TKw(String) | TId(String) | TAnnot(String)
+              | TComment(String) | THeredoc(String) | TIstr(_Unk)
+  """
+
   @typedoc "A lexer token (see the `## Tokens` section above)."
   @type token ::
           {:nl}
@@ -72,10 +85,12 @@ defmodule Rian.Lexer do
           | {:istr, [{:lit, String.t()} | {:hole, String.t()}]}
 
   @doc "Full token stream, with collapsed `{:nl}` separators (comments stripped)."
+  @rian_sig "pub def tokenize(src String) Vec(Token)"
   @spec tokenize(String.t()) :: [token()]
   def tokenize(src), do: src |> lex([]) |> strip_trivia() |> collapse_nl()
 
   @doc "Newline-free token stream for the expression grammar (`Rian.Pratt`)."
+  @rian_sig "pub def expr_tokens(src String) Vec(Token)"
   @spec expr_tokens(String.t()) :: [token()]
   def expr_tokens(src),
     do: src |> lex([]) |> strip_trivia() |> Enum.reject(&(&1 == {:nl}))
@@ -102,6 +117,7 @@ defmodule Rian.Lexer do
   line, recoverable by the formatter. Nothing downstream consumes this; it exists
   solely so `Rian.Format` can re-print without losing comments or paragraphing.
   """
+  @rian_sig "pub def tokenize_trivia(src String) Vec(Token)"
   @spec tokenize_trivia(String.t()) :: [token()]
   def tokenize_trivia(src), do: lex(src, [])
 
@@ -112,6 +128,7 @@ defmodule Rian.Lexer do
   statement-separators into the `;` the block grammar expects, `" "` joins a
   continued declaration onto one line.
   """
+  @rian_sig "pub def detokenize(tokens Vec(Token), nl_as String) String"
   @spec detokenize([token()], String.t()) :: String.t()
   def detokenize(tokens, nl_as \\ " ") do
     tokens |> Enum.map_join(" ", &tok_str(&1, nl_as))
