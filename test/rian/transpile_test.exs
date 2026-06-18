@@ -109,6 +109,32 @@ defmodule Rian.TranspileTest do
       assert out =~ "# TODO[port]: defstruct @fields"
     end
 
+    test "an exception-only module (`defexception`) is dropped with a note, not a marker" do
+      # A host exception struct (an emitter's `Unsupported`, a parser's `Error`) backs
+      # a `@rian_host` raise/rescue boundary. Errors are values in Rian (ADR-0035), so
+      # it has no Rian image — drop it (no `mod` shell, no `TODO[port]`), with an honest
+      # note recording what was dropped and why.
+      src = """
+      defmodule Beam do
+        defmodule Unsupported do
+          @moduledoc "Raised on an unsupported construct."
+          defexception [:message]
+        end
+
+        def f(x), do: x
+      end
+      """
+
+      out = rian(src)
+
+      assert out =~
+               "# (dropped Elixir exception `Unsupported`: errors are values in Rian, ADR-0035)"
+
+      refute out =~ "mod Unsupported"
+      refute out =~ "defexception"
+      refute out =~ "TODO[port]: defexception"
+    end
+
     test "nested struct modules (the `ir.ex` shape) flatten to `struct` decls" do
       src = """
       defmodule IR do

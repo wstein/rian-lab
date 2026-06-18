@@ -279,8 +279,13 @@ defmodule Rian.Transpile do
     [parent | Enum.flat_map(hoist, &flatten_modules/1)]
   end
 
-  defp hoistable_submodule?({:defmodule, _, [_, [do: b]]}),
-    do: not struct_only_module?(block_stmts(b))
+  defp hoistable_submodule?({:defmodule, _, [_, [do: b]]}) do
+    stmts = block_stmts(b)
+    # Hoist only function-bearing submodules. A struct-only wrapper flattens to its
+    # `struct` decl in place; an exception-only wrapper has no Rian image and is
+    # dropped in place (both via `render_items`) — neither becomes a sibling `mod`.
+    not struct_only_module?(stmts) and not exception_only_module?(stmts)
+  end
 
   defp hoistable_submodule?(_), do: false
 
@@ -706,6 +711,14 @@ defmodule Rian.Transpile do
             {acc ++ flush(open, sigmap) ++ ["# (dropped Elixir `#{what}`: #{snippet(node)})"],
              doc, nil}
 
+          {:drop_exception, name} ->
+            # an exception-only `defmodule` has no Rian image (errors are values,
+            # ADR-0035); drop with an honest note instead of a porting marker.
+            {acc ++
+               flush(open, sigmap) ++
+               ["# (dropped Elixir exception `#{name}`: errors are values in Rian, ADR-0035)"],
+             doc, nil}
+
           {:test, name, body} ->
             {acc ++ flush(open, sigmap) ++ test_def(name, body, ""), doc, nil}
 
@@ -803,8 +816,11 @@ defmodule Rian.Transpile do
   # no Rian analog — `@test def` is the whole surface (ADR-0060). Drop it silently.
   defp classify({:use, _, [{:__aliases__, _, [:ExUnit, :Case]} | _]}), do: :skip
 
-  defp classify({:defmodule, _, [{:__aliases__, _, _} = al, [do: body]]}),
-    do: {:submodule, short_name(al), body}
+  defp classify({:defmodule, _, [{:__aliases__, _, _} = al, [do: body]]}) do
+    if exception_only_module?(block_stmts(body)),
+      do: {:drop_exception, short_name(al)},
+      else: {:submodule, short_name(al), body}
+  end
 
   defp classify({:defstruct, _, [fields]} = n) when is_list(fields) do
     if Enum.all?(fields, &struct_field?/1), do: {:defstruct, fields}, else: {:other, n}
@@ -846,6 +862,14 @@ defmodule Rian.Transpile do
   # `@enforce_keys` / `@type`) — its `mod` shell is noise in Rian.
   defp struct_only_module?(stmts) do
     match?([{:defstruct, _, _}], Enum.reject(stmts, &struct_mod_noise?/1))
+  end
+
+  # a wrapper whose only real declaration is a `defexception` — a host exception
+  # struct (e.g. an emitter's `Unsupported`) backing a `@rian_host` raise/rescue
+  # boundary. It has no Rian image: errors are values (ADR-0035), so it is dropped
+  # in place with an honest note rather than a porting marker.
+  defp exception_only_module?(stmts) do
+    match?([{:defexception, _, _}], Enum.reject(stmts, &struct_mod_noise?/1))
   end
 
   defp struct_mod_noise?({:@, _, [{a, _, _}]})
