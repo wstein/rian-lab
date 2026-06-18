@@ -329,6 +329,7 @@ defmodule Rian.Core do
   end
 
   @doc "Translate a surface expression (the `Rian.Pratt` tuple AST) into the typed core."
+  @rian_sig "pub def from_expr(surface _Unk) Expr"
   @spec from_expr(tuple()) :: struct()
   def from_expr({:num, n}), do: %ENum{text: n}
   def from_expr({:str, s}), do: %EStr{value: s}
@@ -453,6 +454,7 @@ defmodule Rian.Core do
   @doc "Translate a surface pattern (the `Rian.Pratt` tuple AST) into the typed core."
   # `{:rpat, str}` is a pre-rendered Rust pattern baked by `Rian.Lower`'s
   # Rust-only pass (it carries the type meta); pass it through unchanged.
+  @rian_sig "pub def from_pat(surface _Unk) Pat"
   @spec from_pat(tuple() | :wild) :: struct() | tuple()
   def from_pat({:rpat, _} = baked), do: baked
   def from_pat(:wild), do: %PWild{}
