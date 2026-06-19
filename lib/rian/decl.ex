@@ -336,7 +336,11 @@ defmodule Rian.Decl do
         Map.new(assembled_funcs, fn f ->
           {{f.name, length(f.params)},
            %{params: Enum.map(f.params, & &1.type), ret: f.ret, tvars: f.tvars}}
-        end)
+        end),
+      # `:fields` lets a `${p.name}` field-access hole resolve to the field's declared type
+      # (ADR-0069). Seeded from this scope's own `types` (not the prelude — same reason as
+      # above); a struct defined in another file is not visible here and stays `:unknown`.
+      fields: Check.field_table(types)
     }
 
     funcs = lower_meta(assembled_funcs, decls, targets, interp_ic)

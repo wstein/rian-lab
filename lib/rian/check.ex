@@ -286,6 +286,11 @@ defmodule Rian.Check do
   # `:unknown` (unifies with whatever the context expects, no provable mismatch).
   def infer(%ECall{fun: %EId{name: "__prim_panic"}, args: [_]}, _env, _ic), do: :unknown
 
+  # `inspect/1` is the host's universal value→text function: whatever its argument, it
+  # returns a `String`. (It is host-coupled — a function using it pins to `:ex` via Reach —
+  # but its *return type* is unambiguous, so an `${inspect(x)}` hole resolves.)
+  def infer(%ECall{fun: %EId{name: "inspect"}, args: [_]}, _env, _ic), do: "String"
+
   def infer(%ECall{fun: %EId{name: f}, args: as}, env, ic) do
     cond do
       fn_type?(ft = Map.get(env, f)) ->
@@ -380,6 +385,25 @@ defmodule Rian.Check do
   # a `with` yields its do-block value on the happy path (clause-bound vars are
   # not tracked yet -> they infer `:unknown`, keeping the checker conservative)
   def infer(%EWith{body: body}, env, ic), do: infer(body, env, ic)
+
+  # Named field access `p.field` (not a call): look the field up in the head's struct type.
+  # A `_Unk` head is a draft hole — the access is itself a draft hole, so it stays `_Unk`
+  # (the interpolation resolver then *defers* it, consistent with the draft-marker rule);
+  # an unknown/foreign head, or a field absent from the table, is `:unknown`.
+  def infer(%EDot{head: h, name: field}, env, ic) do
+    case infer(h, env, ic) do
+      "_Unk" ->
+        "_Unk"
+
+      ht when is_binary(ht) ->
+        base = ht |> String.split("(") |> hd()
+        ic |> Map.get(:fields, %{}) |> Map.get(base, %{}) |> Map.get(field, :unknown)
+
+      _ ->
+        :unknown
+    end
+  end
+
   def infer(_other, _env, _ic), do: :unknown
 
   # ── annotation (ADR-0050 §3: fill each node's inferred `type`) ──────────
@@ -2064,6 +2088,7 @@ defmodule Rian.Check do
 
     %{
       tdefs: type_table(types),
+      fields: field_table(types),
       funs: Map.new(all_funcs, fn f -> {{f.name, length(f.params)}, f.ret} end),
       fsigs: Map.new(all_funcs, fn f -> {{f.name, length(f.params)}, fsig(f)} end),
       ctors: ctor_types(types, prog),
@@ -2198,6 +2223,20 @@ defmodule Rian.Check do
   defp type_table(types) do
     for t <- types, v <- t.variants, into: %{} do
       {v.ctor, Enum.map(v.fields, & &1.type)}
+    end
+  end
+
+  @doc """
+  Field table for **named field access** (`p.name`): a single-variant struct/record's ctor
+  name -> `%{field_name => field_type}`. (A multi-variant sum is omitted — `.f` on a value
+  whose variant is not statically known is ambiguous; narrow with `case` first.) Public so
+  `Rian.Decl` can seed its inline interpolation `ic` without pulling in the whole prelude.
+  """
+  @spec field_table([map()]) :: map()
+  def field_table(types) do
+    for t <- types, [v] <- [t.variants], into: %{} do
+      named = for fld <- v.fields, fld.label != nil, into: %{}, do: {fld.label, fld.type}
+      {v.ctor, named}
     end
   end
 

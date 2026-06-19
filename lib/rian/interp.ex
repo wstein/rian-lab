@@ -38,9 +38,12 @@ defmodule Rian.Interp do
   `Float32`, a user type with **no** `impl Show`, and a hole whose type cannot be
   inferred are a **compile error at the hole** — never a silent `inspect`-style
   fallback (ADR-0035). (`Float32` has no portable formatter; widen to `Float64` and
-  interpolate that.) NB: a field-access hole (`${p.x}`) over a pattern/field-bound
-  value still infers `:unknown` — interpolate the **whole** value (`${p}`, routed
-  through its `Show`) or build the string with explicit calls.
+  interpolate that.) A hole whose type is the `_Unk` transpiler-draft marker is
+  **deferred** (passed through unchanged), not errored — a genuine `:unknown` is not.
+  A **field-access hole** (`${p.name}`) now resolves to the field's declared type when
+  `p`'s type is a single-variant struct (`Rian.Check` `:fields` table); over a `_Unk`
+  draft value the access stays `_Unk` (and so defers), and `.f` on a value whose sum
+  variant is not statically known still infers `:unknown` (narrow with `case` first).
   """
   alias Rian.Check
 

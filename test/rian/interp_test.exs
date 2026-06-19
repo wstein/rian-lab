@@ -113,6 +113,24 @@ defmodule Rian.InterpTest do
       {:ok, m} = Beam.load(src, :interp_generic_call)
       assert m.f() == "id=7"
     end
+
+    test "a `${p.field}` field-access hole resolves to the field's declared type" do
+      src = ~S"""
+      type P := P(name String, age Int53)
+      def greet(p P) String := "${p.name} is ${p.age}"
+      """
+
+      {:ok, m} = Beam.load(src, :interp_field)
+      assert m.greet(%{__struct__: :P, name: "Ann", age: 30}) == "Ann is 30"
+    end
+
+    test "an `${inspect(x)}` hole resolves to String (host inspect — no `no Show` error)" do
+      # `inspect` is host-coupled (the function pins to `:ex`), but its return type is
+      # unambiguously String, so the hole resolves instead of erroring at parse. (Execution
+      # is the emitter's concern, not the resolver's — this asserts the resolution.)
+      [{_, %{elixir: elixir}}] = Decl.compile(~S|def dbg(x _Unk) String := "got ${inspect(x)}"|)
+      assert elixir =~ "inspect"
+    end
   end
 
   describe "the same source lowers to JS and Rust (ADR-0069 §3 — portable, no FFI)" do
