@@ -101,6 +101,7 @@ defmodule Rian.Transpile do
     :!= => "!=",
     :and => "and",
     :or => "or",
+    :in => "in",
     :div => "div",
     :rem => "rem"
   }
