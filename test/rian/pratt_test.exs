@@ -23,6 +23,28 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "lambda bodies — single-expression, `do … end` for multi-statement" do
+    test "a single-expression body parses bare" do
+      assert p("(x) -> x + 1") == "(lambda (x) (+ x 1))"
+    end
+
+    test "a multi-statement body uses an explicit `do … end` block" do
+      assert p("map(xs, (x) -> do y := x + 1; y * 2 end)") ==
+               "(call map xs (lambda (x) (block (:= y (+ x 1)) (* y 2))))"
+    end
+
+    test "a top-level lambda bind does not swallow the following statement" do
+      # `;` here separates the bind from `h(a)` — the lambda body is just `g(x)`,
+      # NOT a greedy block that eats `h(a)` (the ambiguity the `do … end` rule avoids).
+      assert Pratt.parse_body("a := (x) -> g(x); h(a)") ==
+               {:block,
+                [
+                  {:bind, "a", {:lambda, [{"x", nil}], {:call, {:id, "g"}, [id: "x"]}}},
+                  {:expr, {:call, {:id, "h"}, [id: "a"]}}
+                ]}
+    end
+  end
+
   describe "with / tuples (ADR-0040 surface)" do
     test "tuple literal and `{:ok, _}` parse" do
       assert p("{1, 2}") == "{1 2}"

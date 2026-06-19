@@ -1630,7 +1630,10 @@ end|)
         end
         """)
 
-      assert multi =~ "(x) -> y := x + 1; y * 2"
+      # a multi-statement lambda body is `do … end`-delimited — a bare `;`-block lambda
+      # body is ambiguous at statement position, so Rian requires the explicit block
+      # (Rian.Pratt lambda rule). A single-expression body stays bare (above).
+      assert multi =~ "(x) -> do y := x + 1; y * 2 end"
     end
 
     test "ExUnit `describe`/`test` blocks and `refute a != b` lower to a @test def" do

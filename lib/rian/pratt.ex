@@ -313,9 +313,23 @@ defmodule Rian.Pratt do
   defp parse_lambda([{:lparen} | rest]) do
     {params, rest} = parse_params(rest)
     rest = expect_op(rest, "->")
-    {body, rest} = parse_expr(rest, 0)
+    {body, rest} = parse_lambda_body(rest)
     {{:lambda, params, body}, rest}
   end
+
+  # A lambda body is a SINGLE expression (`(x) -> x + 1`); a multi-statement body
+  # (binds before a value) is written with an explicit `do … end` block, mirroring
+  # `if … do … end`. The explicit delimiter is deliberate: a bare `;`-block body
+  # (`(x) -> a; b`) is ambiguous at statement position — `pb := (f) -> e; next` could
+  # not tell the lambda's `;` from the enclosing block's — so `;` continuation requires
+  # the `do … end` bounds. (The hand-written compiler/examples corpus uses only
+  # single-expression lambdas; multi-statement logic lives in named helpers.)
+  defp parse_lambda_body([{:kw, "do"} | rest]) do
+    {block, rest} = parse_block(rest)
+    {block, expect_kw(rest, "end")}
+  end
+
+  defp parse_lambda_body(tokens), do: parse_expr(tokens, 0)
 
   defp parse_params([{:rparen} | rest]), do: {[], rest}
 

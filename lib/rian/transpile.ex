@@ -1510,6 +1510,15 @@ defmodule Rian.Transpile do
   defp render_body({:__block__, _, [one]}), do: expr(one)
   defp render_body(node), do: expr(node)
 
+  # A lambda body, unlike a clause body, is a single expression unless wrapped in an
+  # explicit `do … end` block (the `;`-block ambiguity decision in `Rian.Pratt`). So a
+  # multi-statement lambda body is emitted block-delimited; a single expression stays
+  # bare. Eta-expanded captures (`&…`) and `fn`-case desugars are already single-expr.
+  defp lambda_body({:__block__, _, stmts} = b) when length(stmts) > 1,
+    do: "do #{render_body(b)} end"
+
+  defp lambda_body(body), do: render_body(body)
+
   # a block statement: an Elixir bind `x = e` → Rian bind `x := e`; anything else
   # (incl. the final return expression) is a bare expression.
   defp stmt({:=, _, [lhs, rhs]}), do: "#{pat(lhs)} := #{expr(rhs)}"
@@ -1718,7 +1727,7 @@ defmodule Rian.Transpile do
   # the same shape as a multi-clause fn.
   defp expr({:fn, _, [{:->, _, [args, body]} = arrow]}) do
     if Enum.all?(args, &simple_var?/1),
-      do: "(#{Enum.map_join(args, ", ", &pat/1)}) -> #{render_body(body)}",
+      do: "(#{Enum.map_join(args, ", ", &pat/1)}) -> #{lambda_body(body)}",
       else: fn_case_desugar([arrow])
   end
 

@@ -29,6 +29,16 @@ grade :=
   else "C" end
 
 # match (see rian-spec-types-match.md)
+
+# lambda — body is a SINGLE expression
+inc := (x) -> x + 1
+ys  := map(xs, (x) -> x * 2)
+
+# lambda — multi-statement body needs an explicit `do … end` block
+f := map(xs, (x) -> do
+  y := x + 1
+  y * 2
+end)
 ```
 
 - A block's value is its **final expression**. A block whose last statement is a *binding*
@@ -40,6 +50,12 @@ grade :=
   `if` whose value is used (return / binding RHS / argument / a branch feeding a used value) is a
   compile error without `else`. An `else`-less `if` is legal only as a unit-typed effect statement
   — a non-final statement of a block whose value is discarded (matches Rust's `if` typing).
+- A **lambda** `(params) -> body` has a **single-expression** body. A multi-statement body
+  (binds before a value) requires an explicit `do … end` block — `(x) -> do a := …; a end` —
+  mirroring `if … do … end`. A bare `;`-block body (`(x) -> a; b`) is **not** allowed: at
+  statement position it is ambiguous (`f := (x) -> e; next` cannot tell the lambda's `;` from
+  the enclosing block's), so the block delimiter is mandatory. Idiomatic Rian keeps lambdas
+  single-expression and puts multi-statement logic in named helpers.
 - `:=` bindings are **single-assignment** and **irrefutable** (tuple/struct destructuring is
   fine; `Some(x) := opt` is refutable → compile error, use `match`). Rebinding a name is
   shadowing, not mutation. Mutation is `<~` (capability-gated; BEAM-illegal unless local).
