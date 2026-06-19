@@ -81,6 +81,16 @@ defmodule Rian.Interp do
   defp stringify(expr, "Bool", _show),
     do: {:if, expr, {:block, [expr: {:str, "true"}]}, {:block, [expr: {:str, "false"}]}}
 
+  # The `_Unk` **transpiler-draft marker** is an explicit "type not yet supplied" hole, not
+  # a stringifiability verdict — so the resolver **defers** it (the value passes through the
+  # `<>` chain unchanged: no `to_string`, no coercion) rather than erroring, letting a draft
+  # parse. This is distinct from a genuine `:unknown` (the checker actually *failed* to infer
+  # a real program's type — e.g. an un-pinned matcher arg, an unbound var): that stays a hard
+  # error below, as does a *determined* non-stringifiable type (`Float32`, a user type with
+  # no `impl Show`) — the cases ADR-0069 actually targets. (2026-06 design debate consensus,
+  # refined: defer the deliberate draft placeholder, keep strictness for real inference gaps.)
+  defp stringify(expr, "_Unk", _show), do: expr
+
   defp stringify(expr, type, show) do
     cond do
       int_type?(type) ->

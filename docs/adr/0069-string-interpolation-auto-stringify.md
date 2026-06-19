@@ -80,6 +80,21 @@ hole `${e}` type-checks iff `typeof(e)` has an `impl Show`. A type with no `Show
 error at the hole** (`no impl Show for <T> — interpolation requires it`), never a silent
 `inspect`-style fallback.
 
+**Undetermined vs determined (2026-06 debate, refining the rule).** The error above is correct only for
+a type the resolver has *determined* and proven non-stringifiable (`Float32`, a user type with no `impl
+Show`). It must **not** fire when the type is merely *undetermined* — the resolver hasn't inferred it, so
+it cannot prove non-stringifiability, and erroring there violates the checker's own contract ("infer
+`:unknown`, error only on a **provable** mismatch"). Two undetermined cases, handled differently
+(`Rian.Interp.stringify/3`):
+
+- the **`_Unk` transpiler-draft marker** (a deliberately-unsupplied type in `mix rian.transpile` output)
+  → **defer**: the value passes through the `<>` chain unchanged (no coercion), so a draft *parses* and
+  the hole resolves once the type is hand-filled. It was a layering bug that an unfinished draft failed
+  at *parse* on a not-yet-typed hole.
+- a genuine **`:unknown`** (the checker actually failed to infer a real program's type — an un-pinned
+  generic, an unbound name) → **still a hard error**: a real inference gap is worth surfacing, and the
+  guarantee (no value reaches a string without a known stringification) holds for finished code.
+
 ### 3. The portable `Show` protocol (the actual work)
 
 Promote `Show` from tour toy to prelude protocol, with **portable impls for every primitive**, backed

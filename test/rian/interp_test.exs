@@ -321,10 +321,25 @@ defmodule Rian.InterpTest do
   end
 
   describe "un-stringifiable holes are a compile error, never a silent fallback (ADR-0035)" do
-    test "a hole whose type cannot be statically inferred is rejected" do
+    test "a genuine `:unknown` (real inference gap) is rejected" do
       assert_raise ArgumentError, ~r/no `Show` for|statically-known/, fn ->
         Beam.load(~S|def f(x Int64) String := "v=${g(x)}"|, :interp_unknown_err)
       end
+    end
+
+    test "a determined non-stringifiable type is rejected" do
+      assert_raise ArgumentError, ~r/no `Show` for `Box`/, fn ->
+        Decl.compile(~S|type Box := B(Int64)| <> "\n" <> ~S|def f(b val Box) String := "v=${b}"|)
+      end
+    end
+  end
+
+  describe "the `_Unk` draft marker defers, not errors (ADR-0069, 2026-06 debate)" do
+    test "a hole over a `_Unk`-typed value passes through (a transpiler draft can parse)" do
+      # `_Unk` is a deliberately-unsupplied type, not a proven-non-stringifiable one — the
+      # resolver defers (value passes through) rather than failing the parse.
+      [{_, %{elixir: elixir}}] = Decl.compile(~S|def f(x _Unk) String := "v=${x}"|)
+      assert elixir =~ "v="
     end
   end
 end
