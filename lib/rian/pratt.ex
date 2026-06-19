@@ -625,7 +625,9 @@ defmodule Rian.Pratt do
   # invariant is then the checker's job over the resulting `case`). Sugar over the
   # same Result match `with` desugars to; no new semantics.
   defp desugar_propagation(stmts) do
-    if Enum.any?(stmts, &match?({:bind_arrow, _, _}, &1)),
+    special? = fn s -> match?({:bind_arrow, _, _}, s) or match?({:bind_pat, _, _}, s) end
+
+    if Enum.any?(stmts, special?),
       do: desugar_prop(stmts, 0),
       else: {:block, stmts}
   end
@@ -635,11 +637,28 @@ defmodule Rian.Pratt do
   # without a non-deterministic gensym, which would break bit-identical re-parse
   # (ADR-0063 §3 determinism). The `__`-prefix keeps it out of the user namespace.
   defp desugar_prop(stmts, depth) do
-    {before, rest} = Enum.split_while(stmts, &(not match?({:bind_arrow, _, _}, &1)))
+    {before, rest} =
+      Enum.split_while(
+        stmts,
+        &(not match?({:bind_arrow, _, _}, &1) and not match?({:bind_pat, _, _}, &1))
+      )
 
     case rest do
       [] ->
         {:block, before}
+
+      # a destructuring bind `pat := e` wraps the *rest* of the block in a single-arm
+      # `case e do pat -> … end` — the bound vars scope over the continuation. A trailing
+      # one has no continuation (nothing uses the binding), so it is a mistake, like a
+      # trailing simple bind.
+      [{:bind_pat, _pat, _e}] ->
+        raise ArgumentError,
+              "a destructuring bind (`… := …`) must be followed by an expression that " <>
+                "uses the bound values; nothing may follow it as the block's last statement"
+
+      [{:bind_pat, pat, e} | after_bind] ->
+        bind_case = {:case, e, [{pat, nil, desugar_prop(after_bind, depth)}]}
+        {:block, before ++ [{:expr, bind_case}]}
 
       [{:bind_arrow, name, _e}] ->
         # A bare `<-` "binds and continues" (ADR-0066): it must be followed by an
@@ -715,9 +734,39 @@ defmodule Rian.Pratt do
     end
   end
 
+  # A destructuring bind `{a, b} := e` / `[h | t] := e` — a tuple/list pattern on the LHS
+  # of `:=` (a simple `name := e` is handled by the first clause above). The pattern is
+  # matched against `e`, binding its vars for the rest of the block; `parse_block` desugars
+  # it to a single-arm `case` so there is no new Core node and the exhaustiveness gate sees
+  # it (a refutable list pattern is the writer's assertion, exactly as Elixir's `=`). We
+  # *speculatively* parse a pattern and commit only when `:=` follows — otherwise it is an
+  # ordinary expression statement (a tuple/list *value*).
+  defp parse_stmt([{tag} | _] = tokens) when tag in [:lbrace, :lbracket],
+    do: pat_bind_or_expr(tokens)
+
   defp parse_stmt(tokens) do
     {e, rest} = parse_expr(tokens, 0)
     {{:expr, e}, rest}
+  end
+
+  defp pat_bind_or_expr(tokens) do
+    speculative =
+      try do
+        {pat, rest} = parse_pat(tokens)
+        {:pat, pat, rest}
+      rescue
+        _ -> :no
+      end
+
+    case speculative do
+      {:pat, pat, [{:op, ":="} | rest]} ->
+        {e, rest} = parse_expr(rest, 0)
+        {{:bind_pat, pat, e}, rest}
+
+      _ ->
+        {e, rest} = parse_expr(tokens, 0)
+        {{:expr, e}, rest}
+    end
   end
 
   # A type phrase in annotation position: `Name` with an optional parenthesized,

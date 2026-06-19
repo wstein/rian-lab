@@ -53,6 +53,13 @@ Rian adopts **No Hidden Control Flow** as a standing design principle. Concretel
    single-expression body. This is the ML-family discipline — OCaml/Haskell/F#/Rust all require a
    trailing expression, never a bare `let`.
 
+   A **destructuring bind** — a tuple/list *pattern* on the left of `:=` (`{a, b} := e`,
+   `[h | t] := e`) — is sugar over a single-arm `case`: `Rian.Pratt` desugars `{a, b} := e ; rest`
+   to `case e do {a, b} -> rest end`, so the bound vars scope over the continuation, the refutable
+   list shape is the writer's assertion (exactly as Elixir's `=`), and the exhaustiveness gate sees
+   it like any `case`. No new Core node; same trailing-bind rule applies (a destructuring bind may
+   not be a block's last statement). A simple `name := e` stays a plain `{:bind, …}`.
+
    > **A unit-yielding expression may not appear in value position (enforced 2026-06-17).**
    > Where a value is **used** — return, binding RHS, function argument, or a branch that itself
    > feeds a used value — the expression must actually yield one. Two constructs yield unit and are

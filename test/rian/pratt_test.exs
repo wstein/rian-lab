@@ -251,6 +251,30 @@ defmodule Rian.PrattTest do
       assert {:block, [{:typed_bind, "v", "Vec(Vec(Int64))", _}]} =
                Pratt.parse_body("v Vec(Vec(Int64)) := xss")
     end
+
+    test "a destructuring bind `{a, b} := e` desugars to a single-arm `case` over the rest" do
+      # the tuple pattern binds `a`/`b` for the continuation, lowered to `case e do {a,b} -> … end`
+      assert Pratt.parse_body("{a, b} := p ; a + b") ==
+               {:block,
+                [
+                  expr:
+                    {:case, {:id, "p"},
+                     [
+                       {{:tuple, [{:var, "a"}, {:var, "b"}]}, nil,
+                        {:block, [expr: {:bin, "+", {:id, "a"}, {:id, "b"}}]}}
+                     ]}
+                ]}
+
+      # a tuple/list *value* statement (no `:=`) is still an ordinary expression
+      assert Pratt.parse_body("{a, b}") ==
+               {:block, [expr: {:tuple, [{:id, "a"}, {:id, "b"}]}]}
+    end
+
+    test "a trailing destructuring bind (nothing uses the binding) is rejected" do
+      assert_raise ArgumentError, ~r/must be followed by an expression/, fn ->
+        Pratt.parse_body("x := 1 ; {a, b} := p")
+      end
+    end
   end
 
   describe "string literals" do
