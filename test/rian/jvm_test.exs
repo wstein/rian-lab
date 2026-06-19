@@ -705,8 +705,9 @@ defmodule Rian.JVMTest do
     end
 
     test "an operator outside the Tier-2 subset raises" do
+      # (`|>` is no longer an example — it desugars to a plain call in Core)
       assert_raise JVM.Unsupported, fn ->
-        JVM.compile("def pipe(a Int64) Int64 := a |> id")
+        JVM.compile("def member(a Int64, b Vec(Int64)) Bool := a in b")
       end
     end
   end

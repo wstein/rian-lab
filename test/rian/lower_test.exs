@@ -111,8 +111,10 @@ defmodule Rian.LowerTest do
       assert Lower.emit_expr("a / b", :rust) == "(a as f64) / (b as f64)"
     end
 
-    test "pipe is native on Elixir, structural call on Rust" do
-      assert Lower.emit_expr("x |> f(y) |> g", :elixir) == "x |> f(y) |> g"
+    test "pipe desugars to a structural call on every target (Core lowers `|>`, BEAM can't)" do
+      # `|>` is desugared to a plain call in `Core.from_expr` so every backend — incl.
+      # the abstract-forms BEAM emitter — lowers it as a call, not a `|>` operator.
+      assert Lower.emit_expr("x |> f(y) |> g", :elixir) == "g(f(x, y))"
       assert Lower.emit_expr("x |> f(y) |> g", :rust) == "g(f(x, y))"
     end
 

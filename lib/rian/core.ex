@@ -348,6 +348,13 @@ defmodule Rian.Core do
   def from_expr({:id, x}), do: %EId{name: x}
   def from_expr({:atom, a}), do: %EAtom{name: a}
   def from_expr({:unary, op, x}), do: %EUnary{op: op, arg: from_expr(x)}
+
+  # the pipe `a |> f(b, …)` desugars to a plain call `f(a, b, …)` at the surface→Core
+  # boundary, so every Core backend (`Beam`/`JS`/`JVM`) lowers it as an ordinary call —
+  # there is no `|>` EBin downstream. A bare callee (`a |> f` / `a |> M.f`) gets `a` as
+  # its sole argument.
+  def from_expr({:bin, "|>", l, r}), do: from_expr(pipe_into(l, r))
+
   def from_expr({:bin, op, l, r}), do: %EBin{op: op, left: from_expr(l), right: from_expr(r)}
 
   def from_expr({:call, f, args}),
@@ -409,6 +416,10 @@ defmodule Rian.Core do
       els: Enum.map(els, &from_arm/1)
     }
   end
+
+  # `a |> f(args)` → `f(a, args)`; `a |> f` / `a |> M.f` → `f(a)` (bare callee).
+  defp pipe_into(l, {:call, fun, args}), do: {:call, fun, [l | args]}
+  defp pipe_into(l, callee), do: {:call, callee, [l]}
 
   defp from_tail(nil), do: :close
   defp from_tail(:close), do: :close
