@@ -35,6 +35,14 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "keyword-spelled atoms (`:if`/`:case`/…)" do
+    test "a leading `:` makes a keyword an atom, in expr and tuple positions" do
+      assert p(":if") == ":if"
+      assert p(":when") == ":when"
+      assert p("{:case, scrut}") == "{:case scrut}"
+    end
+  end
+
   describe "as-patterns (`name @ pat`)" do
     test "an as-pattern in a case arm parses to a PAs node" do
       assert p("case x do n @ {a, b} -> n end") == "(case x ((@ n {a, b}) -> n))"

@@ -187,7 +187,11 @@ defmodule Rian.Pratt do
     end
   end
 
-  defp parse_path([{:op, ":"}, {:id, name} | rest]), do: collect_dots({:atom, name}, rest)
+  # a leading `:` is unambiguously an atom prefix — the name may be an identifier OR a
+  # keyword (`:if`/`:case`/`:type`/…, the Elixir-AST tags the transpiler emits).
+  defp parse_path([{:op, ":"}, {tag, name} | rest]) when tag in [:id, :kw],
+    do: collect_dots({:atom, name}, rest)
+
   defp parse_path([{:op, ":"}, {:str, s} | rest]), do: collect_dots({:atom, s}, rest)
   defp parse_path([{:id, name} | rest]), do: collect_dots({:id, name}, rest)
   defp parse_path(other), do: raise(ArgumentError, "bad capture path: #{inspect(other)}")
@@ -218,7 +222,9 @@ defmodule Rian.Pratt do
     end
   end
 
-  defp parse_primary([{:op, ":"}, {:id, name} | rest]), do: parse_postfix({:atom, name}, rest)
+  defp parse_primary([{:op, ":"}, {tag, name} | rest]) when tag in [:id, :kw],
+    do: parse_postfix({:atom, name}, rest)
+
   # a quoted atom `:"+"` / `:"hello world"` (Elixir-style): any atom whose name is
   # not a bare identifier — operators, mixed case, reserved words. The lexer emits
   # `:` + a plain string; an *interpolated* `:"${x}"` is not a literal and falls
@@ -464,7 +470,10 @@ defmodule Rian.Pratt do
   # a `Char` literal pattern (ADR-0036) — a distinct node so a clause head can
   # match a `Char` by value (codepoint on BEAM/JS, native `char` on Rust)
   defp parse_pat([{:char, cp} | rest]), do: {{:char_lit, cp}, rest}
-  defp parse_pat([{:op, ":"}, {:id, name} | rest]), do: {{:atom, name}, rest}
+
+  defp parse_pat([{:op, ":"}, {tag, name} | rest]) when tag in [:id, :kw],
+    do: {{:atom, name}, rest}
+
   defp parse_pat([{:op, ":"}, {:str, s} | rest]), do: {{:atom, s}, rest}
   defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
   defp parse_pat([{:lbrace} | rest]), do: parse_pat_tuple(rest, [])
