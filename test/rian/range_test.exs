@@ -39,17 +39,19 @@ defmodule Rian.RangeTest do
       assert compiles?(@covered)
     end
 
-    test "missing a member is non-exhaustive — the gate refuses to emit" do
-      refute compiles?("range Bit := 0..1\ndef flip(b Bit) Bit\ndef flip(0) := 1")
+    test "missing a member lowers with a runtime fallthrough, not a refusal (ADR-0082)" do
+      # `flip` covers only `0`; `1` is uncovered. Rather than refuse, Lower stamps the
+      # function partial and Rust gets a `_ => panic!(…)` arm (BEAM/JS/JVM behaviour).
+      assert compiles?("range Bit := 0..1\ndef flip(b Bit) Bit\ndef flip(0) := 1")
     end
 
-    test "a catch-all after full coverage is an unreachable (dead) clause" do
+    test "a catch-all after full coverage is an unreachable (dead) clause — still refused" do
       refute compiles?(@covered <> "\ndef flip(_) := 0")
     end
 
-    test "the same literal heads over a bare Int64 stay non-exhaustive (no range)" do
-      # without the `range` declaration, `0`/`1` leave the witness `_` open
-      refute compiles?("def flip(b Int64) Int64\ndef flip(0) := 1\ndef flip(1) := 0")
+    test "the same literal heads over a bare Int64 also lower (panic fallthrough)" do
+      # `0`/`1` leave the witness `_` open; the fallthrough makes it lower anyway.
+      assert compiles?("def flip(b Int64) Int64\ndef flip(0) := 1\ndef flip(1) := 0")
     end
   end
 

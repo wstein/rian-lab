@@ -127,6 +127,13 @@ emitting **Rust**, where the base `i64`/`char` is open to *its* checker, a total
 "insert the arm the target needs" move ADR-0033/03-clauses already uses for guards. **Elixir** leans
 on the `@type` spec and first-match clauses; no shim needed.
 
+The same mechanism handles a **non-exhaustive function** (a partial clause set, BEAM-idiomatic — a
+list helper that assumes a non-empty input). `Rian.Lower` no longer *refuses* it; it stamps the
+function partial and Rust gets a `_ => panic!(…)` arm, Elixir a natural `FunctionClauseError` — the
+runtime no-match behaviour `Rian.Beam`/`Rian.JS`/`Rian.JVM` already have, so one source lowers to every
+target (ADR-0082). Still refused everywhere: dead/unreachable clauses, and a non-exhaustive `case`
+*inside* a body (no clause-fallthrough position).
+
 ## Consequences
 
 - **Fourth declaration keyword.** Parser (ADR-0031 Stage 0.1) gains `range Name := lo..hi`. The

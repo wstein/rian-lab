@@ -422,10 +422,11 @@ defmodule Rian.DeclTest do
       assert UoO.uo(:none, 0) == 0
     end
 
-    test "a non-exhaustive Option match is refused (None missing) — prelude is known to the gate" do
-      assert_raise RuntimeError, ~r/non-exhaustive/, fn ->
-        Decl.compile_beam("def uo(o Option) Int64\ndef uo(Some(x)) := x")
-      end
+    test "a non-exhaustive Option match lowers (None missing) — runtime no-match, not refused" do
+      # `uo` covers only `Some`; `None` is uncovered. Elixir clauses are total-by-
+      # `FunctionClauseError`, so this lowers rather than being refused (ADR-0082).
+      [{_, %{elixir: elixir}}] = Decl.compile_beam("def uo(o Option) Int64\ndef uo(Some(x)) := x")
+      assert elixir =~ "def uo"
     end
   end
 
@@ -666,8 +667,8 @@ defmodule Rian.DeclTest do
     end
   end
 
-  describe "the exhaustiveness gate fires on parsed source" do
-    test "a missing variant clause is refused at lowering" do
+  describe "a non-exhaustive function lowers with a runtime fallthrough (ADR-0082)" do
+    test "a missing variant clause lowers (Rust gets a panic arm), not refused" do
       src = """
       type Shape := Circle(radius Float64) | Square(side Float64)
 
@@ -675,7 +676,10 @@ defmodule Rian.DeclTest do
       def area(Circle(r)) := pi * r * r
       """
 
-      assert_raise RuntimeError, ~r/non-exhaustive/, fn -> Decl.compile(src) end
+      # `Square` is uncovered; rather than refusing, Lower stamps the function partial
+      # and the Rust match gets a `_ => panic!(…)` arm (BEAM/JS/JVM runtime no-match).
+      [{_, %{rust: rust}}] = Decl.compile(src)
+      assert rust =~ ~s|_ => panic!("area: no clause matched"),|
     end
   end
 

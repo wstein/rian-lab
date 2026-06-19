@@ -66,7 +66,7 @@ defmodule Rian.IR do
               is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)),
               doc Option(String), synthetic Bool, is_test Bool,
               dispatch Option(Symbol), externals Map(Symbol, String),
-              effects Vec(Symbol))
+              effects Vec(Symbol), partial Bool)
   """
 
   defmodule Field do
@@ -234,6 +234,12 @@ defmodule Rian.IR do
     `effects` is the declared `@effects(...)` set (ADR-0048/0081): a list of effect
     atoms (`[:host]`, …). `Rian.Check` verifies it equals the inferred set exactly
     (`Rian.Reach.effect_sets/1`); `[]` means undeclared (inferred, not forced).
+
+    `partial` is set by `Rian.Lower`'s exhaustiveness check when the clause heads are
+    **not** total (a function relying on a runtime no-match error, BEAM-style). The
+    Rust emitter then appends a `_ => panic!(…)` fallthrough arm — the totality Rust's
+    `match` requires — matching the BEAM `FunctionClauseError` / JS-JVM `throw` (so a
+    partial function lowers to every target instead of being refused, ADR-0049/0082).
     """
     @enforce_keys [:name, :params, :ret, :clauses]
     defstruct name: nil,
@@ -248,7 +254,8 @@ defmodule Rian.IR do
               test?: false,
               dispatch: nil,
               externals: %{},
-              effects: []
+              effects: [],
+              partial: false
 
     @type t :: %__MODULE__{}
   end

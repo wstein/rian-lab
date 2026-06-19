@@ -3,7 +3,10 @@ defmodule Rian.Lower do
   End-to-end **text** backend lowering for a single Rian function. Wires together:
     * type env             (Rian.Exhaustiveness)
     * pattern lowering     (Rian.PatternLower)
-    * exhaustiveness gate  (Rian.Exhaustiveness.analyze)  -- refuses to emit if it fails
+    * exhaustiveness       (Rian.Exhaustiveness.analyze)  -- gates dead/unreachable clauses
+      and non-exhaustive `case` bodies; a non-exhaustive **function** lowers with a
+      runtime fallthrough (Rust `_ => panic!(…)`, Elixir `FunctionClauseError`), matching
+      `Rian.Beam`/`Rian.JS`/`Rian.JVM` (ADR-0082) rather than being refused
     * expression parsing   (Rian.Pratt)                    -- precedence-aware
   and emits idiomatic Rust **and** Elixir text.
 
@@ -81,7 +84,7 @@ defmodule Rian.Lower do
   @spec compile(list(), map(), list(), list(), map(), map()) :: map()
   def compile(types, func, structs \\ [], ranges \\ [], proto \\ %{}, ic \\ %{}) do
     env = build_env(types, structs, ranges)
-    :ok = check!(func, env)
+    func = check!(func, env)
     meta = build_meta(types)
     smeta = build_struct_meta(structs)
 
@@ -104,7 +107,7 @@ defmodule Rian.Lower do
   @spec compile_elixir(list(), map(), list(), list(), map()) :: map()
   def compile_elixir(types, func, structs \\ [], ranges \\ [], ic \\ %{}) do
     env = build_env(types, structs, ranges)
-    :ok = check!(func, env)
+    func = check!(func, env)
     %{elixir: to_elixir(func, types, structs, build_struct_meta(structs), ic)}
   end
 
@@ -139,7 +142,9 @@ defmodule Rian.Lower do
 
   defp module_elixir(%{name: name, types: types, structs: structs, funcs: funcs} = m, ic) do
     env = build_env(types, structs, Map.get(m, :ranges, []))
-    Enum.each(funcs, &(:ok = check!(&1, env)))
+    # Elixir clauses are total-by-`FunctionClauseError`, so the partiality stamp is
+    # unused here; check! still runs for its hard gates (dead clauses, `case` bodies).
+    Enum.each(funcs, &check!(&1, env))
     consts = Map.get(m, :consts, [])
     ctx = ctx(build_meta(types), build_struct_meta(structs), const_set(consts), %{}, ic)
 
@@ -171,7 +176,9 @@ defmodule Rian.Lower do
 
   defp module_rust(%{name: name, types: types, structs: structs, funcs: funcs} = m, ic) do
     env = build_env(types, structs, Map.get(m, :ranges, []))
-    Enum.each(funcs, &(:ok = check!(&1, env)))
+    # stamp each func's `partial` flag so `rust_fn` appends a panic fallthrough for a
+    # non-total match (Rust's `match` must be total); use the stamped funcs downstream.
+    funcs = Enum.map(funcs, &check!(&1, env))
     consts = Map.get(m, :consts, [])
     # a signature table ({name, arity} -> func) lets the Rust call-site borrow pass
     # see which params are `&[T]`/`&str` and which calls return owned values
@@ -295,10 +302,15 @@ defmodule Rian.Lower do
     end
   end
 
-  # Exhaustiveness GATE — emission only proceeds if the match is total & has no dead clauses.
-  # A synthetic protocol dispatcher (ADR-0042 §3/§6) is exempt: protocol dispatch
-  # is open by design (no case-arms, no totality requirement), unlike a user match.
-  defp check!(%{synthetic: true}, _env), do: :ok
+  # Exhaustiveness check — returns the func, **stamping `partial: true`** when the clause
+  # heads are not total (rather than refusing to emit). A partial function lowers
+  # everywhere: Elixir/BEAM clauses are total-by-`FunctionClauseError`, and the Rust
+  # emitter appends a `_ => panic!(…)` fallthrough (`rust_fn`) — the same runtime no-match
+  # behaviour as the other backends (ADR-0049/0082, the JS/JVM `throw`). Still a HARD
+  # error: dead (`unreachable`) clauses, and a non-exhaustive `case` inside a body (which
+  # has no clause-fallthrough shim). A synthetic protocol dispatcher is exempt (ADR-0042
+  # §3/§6): protocol dispatch is open by design.
+  defp check!(%{synthetic: true} = func, _env), do: func
 
   defp check!(func, env) do
     arity = length(hd(func.clauses).pats)
@@ -310,17 +322,14 @@ defmodule Rian.Lower do
 
     r = E.analyze(clauses, arity, env)
 
-    cond do
-      not r.exhaustive? ->
-        raise "non-exhaustive `#{func.name}`: pattern `#{E.render(r.missing)}` not covered"
-
-      r.unreachable != [] ->
-        raise "unreachable clauses in `#{func.name}`: #{inspect(r.unreachable)}"
-
-      true ->
-        # clause HEADS are total — now gate every `case` reachable in the body too.
-        E.check_case_bodies!([func], env)
+    if r.unreachable != [] do
+      raise "unreachable clauses in `#{func.name}`: #{inspect(r.unreachable)}"
     end
+
+    # clause heads checked — now gate every `case` reachable in the body (no shim there).
+    E.check_case_bodies!([func], env)
+    # `Map.put` (not `%{… | …}`) so a hand-built map func (tests) without the field works.
+    Map.put(func, :partial, not r.exhaustive?)
   end
 
   # ── Elixir backend ─────────────────────────────────────────────────────
@@ -1606,12 +1615,24 @@ defmodule Rian.Lower do
         "        #{pat}#{guard_str(c, :rust, ec, deref)} => #{arm},"
       end)
 
-    # Per-target exhaustiveness shim (ADR-0036): a `range`-total match has literal
-    # arms over an *open* base primitive (`i64`/`char`), which `rustc` sees as
-    # non-exhaustive. The Rian gate already proved totality, so append an
-    # `unreachable!()` arm — never reached, satisfies rustc. (Sum-type matches are
-    # closed and need no shim; a `_`/var clause already provides the fallthrough.)
-    shim = if rust_total_shim?(func), do: "\n        _ => unreachable!(),", else: ""
+    # Fallthrough arm. A `partial` function (non-total clause heads, stamped by
+    # `check!`) gets a `_ => panic!(…)` — the totality Rust's `match` requires, matching
+    # the BEAM `FunctionClauseError` / JS-JVM `throw` (ADR-0049/0082). Otherwise the
+    # per-target exhaustiveness shim (ADR-0036): a `range`-total match has literal arms
+    # over an *open* base primitive (`i64`/`char`) that `rustc` sees as non-exhaustive,
+    # so append an `unreachable!()` arm (the Rian gate proved totality). A closed sum
+    # match needs neither (a `_`/var clause already covers the rest).
+    shim =
+      cond do
+        Map.get(func, :partial, false) ->
+          "\n        _ => panic!(#{inspect("#{func.name}: no clause matched")}),"
+
+        rust_total_shim?(func) ->
+          "\n        _ => unreachable!(),"
+
+        true ->
+          ""
+      end
 
     fn_str =
       "#{vis}fn #{func.name}#{rust_generics(gen_func)}(#{param_decls}) -> " <>

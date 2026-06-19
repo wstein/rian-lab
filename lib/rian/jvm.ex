@@ -198,7 +198,7 @@ defmodule Rian.JVM do
   # `Vec(...)` wrapper is stripped before the check so its assoc occurrences don't count.
   defp assoc_blocks_jvm?(func, assoc) do
     param_types = func |> Map.get(:params, []) |> Enum.map(& &1.type)
-    ret_bare = (func.ret || "") |> String.replace(~r/Vec\([^()]*\)/, "")
+    ret_bare = func.ret |> to_string() |> String.replace(~r/Vec\([^()]*\)/, "")
     Enum.any?([ret_bare | param_types], &type_mentions_assoc?(&1, assoc))
   end
 

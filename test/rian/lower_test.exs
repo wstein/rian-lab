@@ -45,12 +45,48 @@ defmodule Rian.LowerTest do
     end
   end
 
-  describe "exhaustiveness gate" do
-    test "refuses to emit a non-exhaustive function, naming the witness" do
+  describe "exhaustiveness" do
+    test "a non-exhaustive function lowers with a panic fallthrough (ADR-0082)" do
+      # only the `Circle` clause — `Square` is uncovered. Rather than refuse to emit
+      # (the old gate), Lower stamps `partial` and Rust gets a `_ => panic!(…)` arm —
+      # the totality Rust's `match` needs, matching the BEAM/JS/JVM runtime no-match.
       bad = %{area() | clauses: [hd(area().clauses)]}
 
-      assert_raise RuntimeError, ~r/non-exhaustive.*Square\(_\)/, fn ->
-        Lower.compile(types(), bad)
+      out = Lower.compile(types(), bad)
+      assert out.rust =~ ~s|_ => panic!("area: no clause matched"),|
+      # Elixir clauses are total-by-`FunctionClauseError`, so no fallthrough arm.
+      assert out.elixir =~ "def area"
+    end
+
+    @tag :rust
+    test "a partial function's panic fallthrough compiles + runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          src =
+            "mod M do\n  pub def init_of(xs val Vec(Int53)) Vec(Int53)\n" <>
+              "  pub def init_of([_]) := []\n" <>
+              "  pub def init_of([x | rest]) := [x | init_of(rest)]\nend\n"
+
+          rust = Lower.rust_program(Rian.Decl.parse(src))
+          assert rust =~ ~s|_ => panic!("init_of: no clause matched"),|
+
+          dir = Path.join(System.tmp_dir!(), "rian_partial_#{System.unique_integer([:positive])}")
+          File.mkdir_p!(dir)
+          on_exit(fn -> File.rm_rf(dir) end)
+          rs = Path.join(dir, "p.rs")
+          # the covered path returns; the `_` arm exists only to satisfy rustc's totality
+          File.write!(
+            rs,
+            rust <> "\nfn main() { assert_eq!(m::init_of(&[1,2,3]), vec![1,2]); }\n"
+          )
+
+          bin = Path.join(dir, "p")
+          {out, code} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", rs, "-o", bin])
+          assert code == 0, "rustc failed:\n#{out}"
+          assert {_, 0} = System.cmd(bin, [])
       end
     end
 

@@ -658,7 +658,7 @@ defmodule Rian.Reach do
   # wrapper is stripped before the check. Mirrors `Rian.JVM.assoc_blocks_jvm?`.
   defp assoc_blocks_jvm?(f, assoc) do
     param_types = Enum.map(Map.get(f, :params, []), & &1.type)
-    ret_bare = (Map.get(f, :ret) || "") |> String.replace(~r/Vec\([^()]*\)/, "")
+    ret_bare = f |> Map.get(:ret) |> to_string() |> String.replace(~r/Vec\([^()]*\)/, "")
 
     Enum.any?([ret_bare | param_types], fn t ->
       Enum.any?(assoc, &Regex.match?(~r/\b#{Regex.escape(&1)}\b/, t))
