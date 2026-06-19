@@ -1078,6 +1078,28 @@ defmodule Rian.DeclTest do
       end
     end
 
+    test "a value-union parameter `name A | B` parses to a canonical `Union(...)` (ADR-0083)" do
+      f = Decl.parse("def f(x A | B) Int64 := x") |> Map.fetch!(:funcs) |> hd()
+      assert hd(f.params) |> Map.take([:name, :type]) == %{name: "x", type: "Union(A, B)"}
+
+      # an anonymous (name-less) union param, and the no-space spelling, normalize too
+      g = Decl.parse("def g(Vec(Int) | Str) Int64 := 1") |> Map.fetch!(:funcs) |> hd()
+      assert hd(g.params).type == "Union(Str, Vec(Int))"
+      h = Decl.parse("def h(x A|B) Int64 := x") |> Map.fetch!(:funcs) |> hd()
+      assert hd(h.params).type == "Union(A, B)"
+    end
+
+    test "a union struct field `label A | B` parses to a canonical `Union(...)` (ADR-0083)" do
+      field =
+        Decl.parse("struct P(a A | B)")
+        |> Map.fetch!(:structs)
+        |> hd()
+        |> Map.fetch!(:fields)
+        |> hd()
+
+      assert Map.take(field, [:label, :type]) == %{label: "a", type: "Union(A, B)"}
+    end
+
     test "a PUBLIC function with no return type is rejected (declare-public, ADR-0034)" do
       assert_raise Decl.Error, ~r/public function `f` needs a return type/, fn ->
         Decl.parse("pub def f(n Int64) := n")

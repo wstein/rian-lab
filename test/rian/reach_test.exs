@@ -31,6 +31,18 @@ defmodule Rian.ReachTest do
       assert entry(rep, "add").blockers == []
     end
 
+    test "a value-union signature pins the function off every target (Phase 1, no emitter yet — ADR-0083)" do
+      rep = reach("def f(x A | B) Int64 := x")
+
+      assert targets(rep, "f") == []
+
+      assert Enum.any?(
+               entry(rep, "f").blockers,
+               &(&1.kind == :typed and &1.construct =~ "value union" and
+                   Enum.sort(&1.kills) == [:ex, :js, :jvm, :rs])
+             )
+    end
+
     test "a portable-prelude call (`List.map`) reaches every target; a stdlib FFI does not" do
       rep =
         reach("""

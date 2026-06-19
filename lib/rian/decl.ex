@@ -1432,9 +1432,17 @@ defmodule Rian.Decl do
          |> collapse_parens()
          |> String.split(~r/\s+/, trim: true)
          |> Enum.reject(&(&1 in @caps)) do
-      [type] -> %Field{type: type}
-      [label, type] -> %Field{label: label, type: type}
-      _ -> raise Error, "bad field `#{f}`"
+      [type] ->
+        %Field{type: Rian.TypeStr.normalize(type)}
+
+      # ≥2 tokens: a labelled field, OR an unlabelled multi-token (union) type
+      # (ADR-0083). A leading *type* token means the whole thing is the type;
+      # otherwise the first token labels it. A multi-token type is valid only as
+      # a union (`union_type!` rejects garbage like `a b c`).
+      [first | more] ->
+        if type_token?(first),
+          do: %Field{type: union_type!([first | more], f, "field")},
+          else: %Field{label: first, type: union_type!(more, f, "field")}
     end
   end
 
@@ -1616,10 +1624,32 @@ defmodule Rian.Decl do
       end
 
     case rest do
-      [tok] -> if type_token?(tok), do: {nil, cap, tok}, else: {tok, cap, :infer}
-      [name, type] -> {name, cap, type}
-      _ -> raise Error, "bad parameter `#{p}`"
+      [tok] ->
+        if type_token?(tok), do: {nil, cap, Rian.TypeStr.normalize(tok)}, else: {tok, cap, :infer}
+
+      # ≥2 tokens: a name + type, OR a multi-token (union) type. A leading
+      # *type* token means the whole `rest` is an anonymous type (a value union
+      # `A | B`, ADR-0083); a leading lowercase name splits name from its type.
+      # A multi-token type is valid only as a union (`union_type!` rejects `a b c`).
+      [first | more] ->
+        if type_token?(first),
+          do: {nil, cap, union_type!(rest, p, "parameter")},
+          else: {first, cap, union_type!(more, p, "parameter")}
     end
+  end
+
+  # A type-token sequence → its canonical type string. A single token normalizes
+  # (so the no-space `A|B` becomes `Union(A, B)`); a multi-token sequence is valid
+  # ONLY when it carries a top-level `|` (a value union) — anything else (`a b c`,
+  # `A B`) is malformed and raised, preserving the pre-union validation.
+  defp union_type!([tok], _raw, _what), do: Rian.TypeStr.normalize(tok)
+
+  defp union_type!(toks, raw, what) do
+    joined = Enum.join(toks, " ")
+
+    if length(Rian.TypeStr.split_top_pipes(joined)) > 1,
+      do: Rian.TypeStr.normalize(joined),
+      else: raise(Error, "bad #{what} `#{raw}`")
   end
 
   # A lone parameter token is a TYPE when it looks like one — type names and

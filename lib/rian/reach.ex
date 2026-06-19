@@ -494,6 +494,11 @@ defmodule Rian.Reach do
     # but unimplemented), so `Any` honestly pins off `:rs`/`:js`/`:jvm` until those land. This
     # is distinct from `_Unk`, an *unfinished* hole — `Any` is a real, reported reach contract.
     any = if Enum.any?(sig_types, &type_mentions_any?/1), do: [any_blocker()], else: []
+    # a value-union type `A | B` (canonical `Union(...)`, ADR-0083) in the signature.
+    # Phase 1 only parses + represents it — no emitter narrows it yet — so it honestly
+    # pins the function off EVERY target. Phase 2 (BEAM/JS type-pattern lowering) lifts
+    # the `:ex`/`:js` pin; Phases 4/5 (Rust enum synthesis, JVM `Any`) lift the rest.
+    union = if Enum.any?(sig_types, &type_mentions_union?/1), do: [union_blocker()], else: []
     # Two Rust-generic emitter gaps (ADR-0061/0047) the reach matrix must own up to,
     # or `mix rian.targets`/the conformance gate green-lights `:rs` for code `rustc`
     # then rejects (the gate lying). It pins the function off `:rs` only — generics the
@@ -558,7 +563,8 @@ defmodule Rian.Reach do
 
     Enum.reduce(
       f.clauses,
-      {ref ++ int ++ width ++ any ++ owned_gen ++ param ++ as_pat ++ bit_pat ++ pin ++ disp,
+      {ref ++
+         int ++ width ++ any ++ union ++ owned_gen ++ param ++ as_pat ++ bit_pat ++ pin ++ disp,
        MapSet.new()},
       fn c, acc ->
         acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
@@ -604,6 +610,15 @@ defmodule Rian.Reach do
   # false hits on user types that merely contain the substring (`AnyThing`).
   defp type_mentions_any?(t) when is_binary(t), do: Regex.match?(~r/\bAny\b/, t)
   defp type_mentions_any?(_), do: false
+
+  defp union_blocker,
+    do: %{construct: "value union (A | B)", kind: :typed, kills: [:ex, :rs, :js, :jvm]}
+
+  # a signature type that is a value union (`Union(...)`, the canonical form `A | B`
+  # normalizes to). Matches the head anywhere so a union nested in a generic
+  # (`Vec(Union(A, B))`) is caught too.
+  defp type_mentions_union?(t) when is_binary(t), do: String.contains?(t, "Union(")
+  defp type_mentions_union?(_), do: false
 
   defp width_blocker,
     do: %{

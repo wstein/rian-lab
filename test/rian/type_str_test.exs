@@ -4,6 +4,46 @@ defmodule Rian.TypeStrTest do
 
   alias Rian.TypeStr
 
+  describe "normalize/1 — value-union canonicalization (ADR-0083)" do
+    test "a top-level `|` becomes a sorted, de-duplicated `Union(...)`" do
+      assert TypeStr.normalize("Int53 | String") == "Union(Int53, String)"
+      assert TypeStr.normalize("String | Int53") == "Union(Int53, String)"
+      assert TypeStr.normalize("B | A | B") == "Union(A, B)"
+    end
+
+    test "members keep their own structure; a parametric member is intact" do
+      assert TypeStr.normalize("Vec(Int) | Str") == "Union(Str, Vec(Int))"
+      # the wrapping `)` is dropped, not every trailing one
+      assert TypeStr.normalize("Union(Vec(Int)) | Str") == "Union(Str, Vec(Int))"
+    end
+
+    test "nested unions flatten (named and parenthesised)" do
+      assert TypeStr.normalize("(A | B) | C") == "Union(A, B, C)"
+      assert TypeStr.normalize("Union(A, B) | C") == "Union(A, B, C)"
+    end
+
+    test "the no-space form `A|B` canonicalizes identically" do
+      assert TypeStr.normalize("A|B") == "Union(A, B)"
+    end
+
+    test "a non-union type is returned trimmed, unchanged" do
+      assert TypeStr.normalize("Vec(Int53)") == "Vec(Int53)"
+      assert TypeStr.normalize("Result(Int53, E)") == "Result(Int53, E)"
+      assert TypeStr.normalize("  Int53  ") == "Int53"
+    end
+  end
+
+  describe "split_top_pipes/1 — top-level (paren-depth-0) pipe split" do
+    test "a parametric member is not split internally" do
+      assert TypeStr.split_top_pipes("Vec(Int) | Str") == ["Vec(Int)", "Str"]
+      assert TypeStr.split_top_pipes("Int53") == ["Int53"]
+    end
+
+    test "components are trimmed and empties dropped" do
+      assert TypeStr.split_top_pipes("A | B | ") == ["A", "B"]
+    end
+  end
+
   describe "split_top_commas/1 — top-level (paren-depth-0) comma split" do
     test "nested generics stay intact" do
       assert TypeStr.split_top_commas("Map(K, V), Bool") == ["Map(K, V)", "Bool"]

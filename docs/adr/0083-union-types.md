@@ -52,16 +52,23 @@ end
 
 This is a **new pattern form** (`{:typed, name, Type}` in `Rian.Pratt.parse_pat`). It lowers to exactly the runtime discriminator the protocol dispatcher already emits (ADR-0042): a `when is_integer(_)`/`is_binary(_)` guard on the BEAM, a `typeof`/tag test on JS, an `if let`/`match` on the Rust enum, an `is T` smart-cast on the JVM. Inside an arm, the binding is **narrowed** to the arm's type (ADR-0034 §"refined after a `case` arm"), so member operations type-check. The checker reuses the discriminator-coherence rule from ADR-0042 §5 — two members that share a runtime discriminator (`Int32 | Char`, both `is_integer`) are rejected in a union *that must reach a runtime-dispatch target*, same as overlapping impls.
 
-### 3. The `|` overload — resolved by **position**, staged
+### 3. The `|` overload — resolved by **dropping the `T | E` return sugar**
 
-To avoid a breaking change to error handling, `|` keeps two readings, disambiguated by position (this is the cheap, non-breaking resolution; §"Alternatives" records the unifying one):
+`|` means **exactly one thing — a value union — in every position, including return.** The ADR-0040 `T | E` *return sugar* is **retired**; a fallible function writes its result type **explicitly** as `Result(T, E)`:
 
-| Position | `A | B` means | Why |
-|---|---|---|
-| **parameter / field / binding / type-arg** | a **value union** (this ADR) | the `|`-as-union conflict does not exist here — ADR-0040's sugar was return-position only |
-| **return** | **unchanged** — `Result(ok, error)` sugar (ADR-0040) when the tail is an error set | preserves `with`/`<-` propagation (ADR-0039), which relies on the `{:ok}/{:error}` tagging; no break |
+```rian
+def find(id Int64) Result(User, NotFound) := …    # was:  …) User | NotFound
+```
 
-So **the user's stated pain (multi-type *parameters*) is solved immediately and with zero conflict.** A value union in *return* position is intentionally **not** introduced in the first increments — it would force a decision between the tagged `Result` and an untagged union, which ripples into ADR-0039/0040. That decision is split out (see Alternatives → "Unify errors and unions") and is **not** a prerequisite for the parameter/field win.
+The **Result *model* is kept in full** — it is *not* redundant with unions (decided in discussion):
+
+- `Result(T, E)` is `Ok(T) | Err(E)`, a **tagged** union; the tag distinguishes `Ok`/`Err` even when `T = E` (`Result(Int, Int)`), which a structural union cannot.
+- The **happy/error asymmetry** is what `<-`/`with` propagation (ADR-0039) rides on — a symmetric value union has no inherent "ok" side to bind vs "error" side to short-circuit.
+- The tag carries **error *intent*** (this member is the sad path) and drives **error-set composition** (ADR-0040 §4) — both lost by a bare union.
+
+So unions and `Result` are **complementary tools**, and the only thing dropped is the *syntactic shortcut* that overloaded `|`. The checker's error-set machinery (`check_error_set`/`solve_error_sets`, ADR-0040 §4) **re-keys from a `T | E` return onto the explicit `Result(T, E)` form**; `with`/`<-` are unchanged. This is a small, mechanical **breaking change** (migrate `T | E` returns → `Result(T, E)`); the self-host corpus has one site (`11_wire_formats.rian`) plus a handful of tests.
+
+**Staging note:** the parser adopts `|` = value union in **param/field/binding** first (non-breaking — return still reads the `T | E` sugar during the transition), and the sugar is retired in a final, isolated step that carries the error-set re-key + corpus migration. The end state is `|` uniform.
 
 ### 4. Per-target lowering (the honest cost)
 
