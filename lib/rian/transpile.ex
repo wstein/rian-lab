@@ -1666,7 +1666,7 @@ defmodule Rian.Transpile do
   defp expr({name, _, args}) when is_atom(name) and is_list(args),
     do: "#{name}(#{Enum.map_join(args, ", ", &expr/1)})"
 
-  defp expr({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: to_string(name)
+  defp expr({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: rian_ident(name)
 
   # anonymous-function application `f.(args)` → Rian variable application `f(args)`
   # (Rian distinguishes calling a fn-valued variable from a local call by scope).
@@ -2079,7 +2079,19 @@ defmodule Rian.Transpile do
 
   defp underscore_var(name) do
     s = to_string(name)
-    if String.starts_with?(s, "_"), do: "_", else: s
+    if String.starts_with?(s, "_"), do: "_", else: rian_ident(s)
+  end
+
+  # The Rian reserved words (mirrors `Rian.Lexer`'s `@keywords`). An Elixir identifier
+  # spelling one (`type`, `range`, `mod`, …) is a valid var/name in Elixir but lexes as a
+  # keyword in Rian, so a `{type, x}` pattern or a `type` reference breaks. Rename it with
+  # a trailing `_` — a pure function of the name, so a binding and its uses stay in sync.
+  @rian_keywords ~w(if do else end def type range case when struct alias mod pub const
+                    macro use with for protocol impl opaque abstract)
+
+  defp rian_ident(name) do
+    s = to_string(name)
+    if s in @rian_keywords, do: s <> "_", else: s
   end
 
   # ── helpers ─────────────────────────────────────────────────────────────────
