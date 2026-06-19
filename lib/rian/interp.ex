@@ -3,18 +3,20 @@ defmodule Rian.Interp do
   String-interpolation resolution (ADR-0069).
 
   `Rian.Pratt` parses `"… ${expr} …"` into a `{:str_interp, parts}` surface node.
-  This pass — run in the `Rian.Decl` metaprogramming stage, *with the enclosing
-  clause's parameter types in scope* — rewrites each node into a plain `<>`/
+  This pass — run **program-wide** after assembly (`Rian.Decl.resolve_interp/1`, once
+  macro/`comptime` have fired per scope) — rewrites each node into a plain `<>`/
   stringify chain *before* the checker and every emitter see it. So there is **no
   new Core node and no per-emitter `{:str_interp}` handling**: the result is an
   ordinary `{:bin, "<>", …}` tree the existing machinery already lowers.
 
   Each hole is stringified by its **statically inferred type** (interpolation is
   monomorphic per call site, ADR-0069 §4 — so no runtime `Show` dispatch and none
-  of the BEAM/JS dispatch-guard collision the ADR flags). The pass runs with the
-  enclosing clause's parameter types **and the scope's function signatures** in
-  scope, so a hole over a *call result* (`${double(2)}`, a generic `${id(7)}`)
-  resolves its declared/instantiated return type — not only literals and params:
+  of the BEAM/JS dispatch-guard collision the ADR flags). Because the pass runs
+  program-wide, its `ic` carries **every module's** signatures, types, structs and
+  ctors (not just the enclosing scope's) plus the clause's parameter types — so a
+  hole over a *call result* (`${double(2)}`, a generic `${id(7)}`), a **cross-module**
+  call (`${OtherMod.f(x)}`), or a cross-module struct field resolves its declared/
+  instantiated return type — not only literals and same-scope params:
 
     * `String`            → the value itself (identity)
     * `Int`/`Int*`/`UInt*`→ `__prim_int_to_string(value)` (lowered natively per target)

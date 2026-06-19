@@ -339,6 +339,14 @@ defmodule Rian.Check do
     end
   end
 
+  # a cross-module call `Mod.fun(args)`: the program-wide `:funs` table is keyed by
+  # `{name, arity}` (module-flattened, as on the BEAM), so resolve the callee's declared
+  # return type by name+arity. Unknown when no such function is in scope (a foreign/stdlib
+  # call). Comes after the `.of`/zero-arg/cast clauses above, which are more specific.
+  def infer(%ECall{fun: %EDot{head: %EId{}, name: fun}, args: as}, _env, ic) do
+    Map.get(Map.get(ic, :funs, %{}), {fun, length(as)}, :unknown)
+  end
+
   # a call to any other callable (a lambda result, a returned function) infers
   # its return type when the callee is known to be a function, else `:unknown`
   def infer(%ECall{fun: fun}, env, ic) do

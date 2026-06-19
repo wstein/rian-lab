@@ -151,11 +151,65 @@ defmodule Rian.Decl do
     |> Map.put(:impls, all_impls(decls))
     |> Map.put(:protocols, protocols)
     |> Map.put(:impl_decls, impl_decls)
+    # String-interpolation resolution (ADR-0069), program-wide: every module's signatures,
+    # types, structs and ctors are in scope, so a `${OtherMod.f(x)}` / cross-module
+    # `${p.field}` hole resolves instead of erroring. Runs before `inject_stdlib`, which
+    # detects the resolved `Show.float`/`show` calls it may need to inject.
+    |> resolve_interp()
     |> inject_stdlib()
     # infer-local (ADR-0034): fill undeclared private-function return types so the
     # rest of the pipeline sees fully-typed functions. A no-op unless a private
     # function omitted its return.
     |> Rian.InferLocal.fill_returns()
+  end
+
+  # Program-wide string-interpolation resolution (ADR-0069). Builds one inference context
+  # from *all* modules' (and the top level's) function signatures, types, structs and
+  # ctors — so a hole referencing another module resolves — then rewrites every clause's
+  # `${…}` holes to a `<>`/stringify chain. Kept out of `Check.program_ic` to avoid the
+  # prelude compile-time cycle (`:funs`/`:fsigs`/`:fields`/`:ctors` are all the resolver
+  # needs). A `_Unk`/`:unknown` hole still defers/errors exactly as before; only the *scope*
+  # of what's resolvable widens.
+  defp resolve_interp(prog) do
+    mods = Map.get(prog, :mods, [])
+    all_funcs = Map.get(prog, :funcs, []) ++ Enum.flat_map(mods, & &1.funcs)
+    all_types = Map.get(prog, :types, []) ++ Enum.flat_map(mods, &Map.get(&1, :types, []))
+    all_structs = Map.get(prog, :structs, []) ++ Enum.flat_map(mods, &Map.get(&1, :structs, []))
+
+    ic = %{
+      funs: Map.new(all_funcs, fn f -> {{f.name, length(f.params)}, f.ret} end),
+      fsigs:
+        Map.new(all_funcs, fn f ->
+          {{f.name, length(f.params)},
+           %{params: Enum.map(f.params, & &1.type), ret: f.ret, tvars: f.tvars}}
+        end),
+      fields: Check.field_table(all_types),
+      ctors:
+        Map.merge(
+          Map.new(for(t <- all_types, v <- t.variants, do: {v.ctor, t.name})),
+          Map.new(for(s <- all_structs, do: {s.name, s.name}))
+        )
+    }
+
+    show = MapSet.new(for {"Show", t} <- Map.get(prog, :impls, []), do: t)
+    resolve = fn funcs -> Enum.map(funcs, &resolve_func_interp(&1, ic, show)) end
+
+    prog
+    |> Map.put(:funcs, resolve.(Map.get(prog, :funcs, [])))
+    |> Map.put(:mods, Enum.map(mods, fn m -> %{m | funcs: resolve.(m.funcs)} end))
+  end
+
+  defp resolve_func_interp(%Func{synthetic: true} = f, _ic, _show), do: f
+
+  defp resolve_func_interp(%Func{clauses: cs, params: ps} = f, ic, show),
+    do: %{f | clauses: Enum.map(cs, &resolve_clause_interp(&1, ps, ic, show))}
+
+  defp resolve_clause_interp(%Clause{body: nil} = c, _params, _ic, _show), do: c
+
+  defp resolve_clause_interp(%Clause{body: body} = c, params, ic, show) do
+    ast = Pratt.parse_body(body)
+    out = Rian.Interp.resolve(ast, clause_env(c, params), ic, show)
+    if out == ast, do: c, else: %{c | body: out}
   end
 
   @doc """
@@ -323,36 +377,11 @@ defmodule Rian.Decl do
       |> Enum.map(&build_func/1)
       |> Enum.map(&subst_func(&1, aliases))
 
-    # Inference context for the interpolation pass (ADR-0069): with the scope's
-    # function signatures in hand, a `${call()}` hole resolves the callee's declared
-    # return type, not just literals/params — so an interpolated call result (e.g. a
-    # matcher's `"expected ${want}, got ${got()}"`) stringifies instead of erroring.
-    # Built inline (not `Check.program_ic`, which pulls in `Rian.Prelude` and would
-    # cycle at compile time when the prelude module itself parses); `:funs`/`:fsigs`
-    # are all `Check.infer` needs to type a sibling call.
-    interp_ic = %{
-      funs: Map.new(assembled_funcs, fn f -> {{f.name, length(f.params)}, f.ret} end),
-      fsigs:
-        Map.new(assembled_funcs, fn f ->
-          {{f.name, length(f.params)},
-           %{params: Enum.map(f.params, & &1.type), ret: f.ret, tvars: f.tvars}}
-        end),
-      # `:fields` lets a `${p.name}` field-access hole resolve to the field's declared type
-      # (ADR-0069). Seeded from this scope's own `types` (not the prelude — same reason as
-      # above); a struct defined in another file is not visible here and stays `:unknown`.
-      fields: Check.field_table(types),
-      # `:ctors` (ctor name -> its sum/struct type) lets a `${B(1)}` constructor-call hole
-      # infer its concrete type — so a macro-monomorphized matcher (`expect_eq(B(1), B(2))`
-      # expands its args into the holes) reports `no Show for Box`, not `… for unknown`, and
-      # a constructor of a `Show`-having type resolves.
-      ctors:
-        Map.merge(
-          Map.new(for(t <- types, v <- t.variants, do: {v.ctor, t.name})),
-          Map.new(for(s <- structs, do: {s.name, s.name}))
-        )
-    }
-
-    funcs = lower_meta(assembled_funcs, decls, targets, interp_ic)
+    # Macro expansion + `comptime` folding run per-scope here; string-interpolation
+    # resolution is a separate **program-wide** post-assembly pass (`resolve_interp/1`,
+    # called from `parse/1`) so a `${OtherMod.f(x)}` / `${p.field}` hole resolves against
+    # *every* module's signatures, not just this scope's (ADR-0069 cross-module inference).
+    funcs = lower_meta(assembled_funcs, decls, targets)
 
     consts =
       for({:const, c, pub?, doc} <- decls, do: parse_const(c, pub?, doc))
@@ -381,39 +410,30 @@ defmodule Rian.Decl do
   # template introducing a failable bind is then rejected (ADR-0035). Synthetic
   # funcs (protocol dispatchers/impls) carry no user `macro`/`comptime`, so they
   # are skipped to keep their generated bodies as the emitters produced them.
-  defp lower_meta(funcs, decls, targets, ic) do
+  defp lower_meta(funcs, decls, targets) do
     env = collect_macros(decls)
     portable? = targets != nil
-    # types with an `impl Show for T` (ADR-0069 §6, user `Show`) — a hole of such a
-    # type lowers to `show(value)` instead of erroring.
-    show_types = MapSet.new(for {"Show", t} <- all_impls(decls), do: t)
 
     Enum.map(funcs, fn
       %Func{synthetic: true} = f ->
         f
 
-      %Func{clauses: cs, params: ps} = f ->
-        %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?, ps, show_types, ic))}
+      %Func{clauses: cs} = f ->
+        %{f | clauses: Enum.map(cs, &meta_clause(&1, env, portable?))}
     end)
   end
 
-  defp meta_clause(%Clause{body: nil} = c, _env, _p, _params, _show, _ic), do: c
+  defp meta_clause(%Clause{body: nil} = c, _env, _p), do: c
 
-  defp meta_clause(%Clause{body: body} = c, env, portable?, params, show, ic)
-       when is_binary(body) do
+  defp meta_clause(%Clause{body: body} = c, env, portable?) when is_binary(body) do
     ast = Pratt.parse_body(body)
     expanded = if env == %{}, do: ast, else: Rian.Macro.expand(env, ast, portable: portable?)
     folded = Rian.Comptime.fold(expanded)
-    # ADR-0069: resolve `\(expr)` interpolation here, where the clause's parameter
-    # types AND the scope's function signatures (`ic`) are in scope, so each hole
-    # stringifies by its static type — incl. a `${call()}` hole — before the checker
-    # and emitters see a plain `<>`/stringify chain.
-    out = Rian.Interp.resolve(folded, clause_env(c, params), ic, show)
 
-    # Only swap the source-string body for an AST when a transform actually fired;
-    # bodies with no macro/`comptime`/interpolation keep their string form (and the
-    # invariant that an untouched clause body is its source text).
-    if out == ast, do: c, else: %{c | body: out}
+    # Only swap the source-string body for an AST when macro/`comptime` actually fired;
+    # bodies they don't touch keep their string form (and the invariant that an untouched
+    # clause body is its source text). Interpolation is resolved later, program-wide.
+    if folded == ast, do: c, else: %{c | body: folded}
   end
 
   # name->type for a clause's variable parameters, by zipping its argument

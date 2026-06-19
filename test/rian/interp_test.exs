@@ -124,6 +124,22 @@ defmodule Rian.InterpTest do
       assert m.greet(%{__struct__: :P, name: "Ann", age: 30}) == "Ann is 30"
     end
 
+    test "interpolation resolves across modules (program-wide ic, ADR-0069)" do
+      # `mod B`'s hole references `mod A`'s struct field and function — resolvable because
+      # interpolation runs as a program-wide pass, not per-module.
+      src = ~S"""
+      mod A do
+        type S := S(name String)
+        pub def label(n Int53) String := "L"
+      end
+      mod B do
+        pub def f(s S, n Int53) String := "${s.name}/${A.label(n)}"
+      end
+      """
+
+      {:ok, _} = Beam.load(src, :interp_xmod)
+    end
+
     test "an `${inspect(x)}` hole resolves to String (host inspect — no `no Show` error)" do
       # `inspect` is host-coupled (the function pins to `:ex`), but its return type is
       # unambiguously String, so the hole resolves instead of erroring at parse. (Execution
