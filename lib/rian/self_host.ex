@@ -262,6 +262,7 @@ defmodule Rian.SelfHost do
   end
 
   @doc "Count of stages in a given status."
+  @rian_sig "pub def count(status Symbol) Int53"
   @spec count(status()) :: non_neg_integer()
   def count(status), do: Enum.count(@stages, &(&1.status == status))
 

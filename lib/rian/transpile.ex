@@ -70,6 +70,7 @@ defmodule Rian.Transpile do
   "annotated draft", and the TODO summary that quantifies the remaining work per
   module before you commit to porting it.
   """
+  use Rian.Ann
 
   # `@test def` slug length budget (ExUnit `test`/`describe` → `@test def`, ADR-0060):
   # the whole identifier stays ≤ `@max_slug`, but a `describe` group prefix is capped
@@ -204,6 +205,8 @@ defmodule Rian.Transpile do
   annotation replaces the holes the `defstruct`/`@type` emission leaves. A heredoc gives
   multi-line struct/type decls; `use Rian.Ann` keeps the `.ex` warning-free.
   """
+  @rian_sig "pub def transpile(source String) _Unk"
+  @rian_sig "pub def transpile(source String, opts _Unk) _Unk"
   @spec transpile(String.t(), keyword()) :: term()
   def transpile(source, opts \\ []) when is_binary(source) do
     body = body_lines(source, opts)
@@ -590,6 +593,8 @@ defmodule Rian.Transpile do
   calls, and (with `infer: true`) `holes`/`filled` count remaining vs filled
   type slots.
   """
+  @rian_sig "pub def transpile_with_stats(source String) _Unk"
+  @rian_sig "pub def transpile_with_stats(source String, opts _Unk) _Unk"
   @spec transpile_with_stats(String.t(), keyword()) :: term()
   def transpile_with_stats(source, opts \\ []) when is_binary(source) do
     # Render the body once and count it directly — the report header is derived FROM
@@ -619,6 +624,7 @@ defmodule Rian.Transpile do
   honest non-portability (ADR-0040), not a concept clash. `Mix.Tasks.Rian.Transpile`'s
   `--check` gates a codebase against regressions in what remains.
   """
+  @rian_sig "pub def incompatible(source String) Vec(String)"
   @spec incompatible(String.t()) :: [String.t()]
   def incompatible(source) when is_binary(source) do
     host = MapSet.new(Rian.Ann.host_funcs(source))
@@ -670,6 +676,7 @@ defmodule Rian.Transpile do
   defp infer_sigs(_, _), do: %{}
 
   @doc "The Elixir→Rian stdlib call-mapping table (for type inference)."
+  @rian_sig "pub def stdlib_map() _Unk"
   @spec stdlib_map() :: map()
   def stdlib_map, do: @stdlib
 
@@ -677,6 +684,7 @@ defmodule Rian.Transpile do
   Per-def inference ledger for `--infer-report`: `[{ {name, arity}, ledger }]`
   where each ledger lists the remaining holes and why (`:unresolved`, …).
   """
+  @rian_sig "pub def infer_report(source String) _Unk"
   @spec infer_report(String.t()) :: term()
   def infer_report(source) when is_binary(source) do
     stmts = source |> Code.string_to_quoted!() |> toplevel_stmts()
@@ -693,6 +701,7 @@ defmodule Rian.Transpile do
   Elixir sources, so a subsequent `transpile(_, infer: true)` resolves
   cross-module calls (`OtherMod.fun(…)`). Call once before folder-mode rendering.
   """
+  @rian_sig "pub def prime_xmod(sources Vec(String)) _Unk"
   @spec prime_xmod(list()) :: term()
   def prime_xmod(sources) when is_list(sources) do
     sources
@@ -743,6 +752,7 @@ defmodule Rian.Transpile do
   (no defs). The ratio is the honest cost signal: a struct-reflection module
   (many markers per def) sorts last; a near-portable one sorts first.
   """
+  @rian_sig "pub def rank(entries Vec(_Unk)) _Unk"
   @spec rank(list()) :: term()
   def rank(entries) do
     entries

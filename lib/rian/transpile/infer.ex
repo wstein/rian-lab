@@ -45,6 +45,8 @@ defmodule Rian.Transpile.Infer do
   `examples/rian/prelude_*.rian`), plus the transpiler's stdlib mapping and an
   optional sibling-signature table for intra-module calls.
   """
+  @rian_sig "pub def build_ctx(stdlib_map _Unk) _Unk"
+  @rian_sig "pub def build_ctx(stdlib_map _Unk, siblings _Unk) _Unk"
   @spec build_ctx(map(), map()) :: term()
   def build_ctx(stdlib_map, siblings \\ %{}) do
     %{prelude: prelude_sigs(), stdlib: stdlib_map, siblings: siblings, xmod: xmod_cache()}
@@ -125,6 +127,7 @@ defmodule Rian.Transpile.Infer do
   where an unresolved slot is the literal hole `"_Unk"` and `ledger`
   records why each hole was left (for `--infer-report`).
   """
+  @rian_sig "pub def infer_group(group _Unk, ctx _Unk) _Unk"
   @spec infer_group(map(), term()) :: term()
   def infer_group(%{clauses: clauses}, ctx) do
     arity = hd(clauses).arity
@@ -191,6 +194,8 @@ defmodule Rian.Transpile.Infer do
   `@spec`s are *documentary* in Elixir (unenforced, possibly stale), so these are
   hints, cross-checked against the body in `seed_spec/6`, never ground truth.
   """
+  @rian_sig "pub def collect_specs(stmts _Unk) _Unk"
+  @rian_sig "pub def collect_specs(stmts _Unk, type_env _Unk) _Unk"
   def collect_specs(stmts, type_env \\ %{})
 
   def collect_specs(stmts, type_env) when is_list(stmts) do
@@ -346,6 +351,8 @@ defmodule Rian.Transpile.Infer do
   (a tuple/map/atom-literal — a porting decision a human must make). `type_env` resolves
   local `@type` refs. Used to convert `@spec` into a native `@rian_sig` annotation.
   """
+  @rian_sig "pub def spec_type_to_rian(ast _Unk) String"
+  @rian_sig "pub def spec_type_to_rian(ast _Unk, type_env _Unk) String"
   @spec spec_type_to_rian(Macro.t(), map()) :: String.t()
   def spec_type_to_rian(ast, type_env \\ %{}) do
     case translate_spec(ast, type_env) do
@@ -1112,6 +1119,7 @@ defmodule Rian.Transpile.Infer do
   # ── type-string → term (for prelude sig instantiation) ────────────────────
 
   @doc false
+  @rian_sig "pub def parse_type(str String, fmap _Unk) _Unk"
   @spec parse_type(String.t(), map()) :: term()
   def parse_type(str, fmap) when is_binary(str) do
     str = String.trim(str)

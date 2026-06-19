@@ -219,6 +219,7 @@ defmodule Rian.Decl do
   malformed source (the REPL, `rian build`/`run`, the transpiler's `@rian_sig`
   annotation reader) pattern-match the result rather than `try/rescue`.
   """
+  @rian_sig "pub def parse_result(src String) _Unk"
   @spec parse_result(String.t()) :: {:ok, map()} | {:error, String.t()}
   @rian_host "parser boundary: parse/1 raises a malformed-input error into a value"
   def parse_result(src) do

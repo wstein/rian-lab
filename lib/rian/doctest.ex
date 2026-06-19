@@ -152,6 +152,7 @@ defmodule Rian.Doctest do
   Run every ` ```rian ` fence in a Markdown string as a self-contained program,
   returning `[{expr, :pass | {:fail, got, expected}}]` across all fences.
   """
+  @rian_sig "pub def run_markdown(md String) Vec(_Unk)"
   @spec run_markdown(String.t()) :: list()
   def run_markdown(md), do: md |> fences() |> Enum.flat_map(&run/1)
 

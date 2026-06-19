@@ -108,6 +108,7 @@ defmodule Rian.Ann do
   defp def_name(_), do: nil
 
   @doc "Extract every `@rian_sig` annotation STRING from Elixir source (via its AST)."
+  @rian_sig "pub def from_source(source String) Vec(String)"
   @spec from_source(String.t()) :: [String.t()]
   def from_source(source) when is_binary(source) do
     case Code.string_to_quoted(source) do
@@ -121,6 +122,7 @@ defmodule Rian.Ann do
   re-parse. The live-source path: the transpiler already holds the module AST, so it
   reads annotations from it rather than parsing the text a second time.
   """
+  @rian_sig "pub def from_ast(ast _Unk) Vec(String)"
   @spec from_ast(Macro.t()) :: [String.t()]
   def from_ast(ast), do: collect(ast)
 
@@ -138,6 +140,7 @@ defmodule Rian.Ann do
   Extract every `@rian_sig` annotation STRING from a compiled module's persisted attributes —
   a loaded module atom or a `.beam` file path. The roundtrip / no-source reader.
   """
+  @rian_sig "pub def from_beam(module _Unk) Vec(String)"
   @spec from_beam(module() | String.t()) :: [String.t()]
   def from_beam(module) when is_atom(module) do
     # guard the reflective `__info__/1` with an explicit load check instead of
