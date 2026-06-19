@@ -505,9 +505,9 @@ defmodule Rian.DeclTest do
     end
   end
 
-  describe "`T | E` return-type sugar (ADR-0040 §2)" do
+  describe "`Result(T, E)` error returns (ADR-0040; the `T | E` sugar was removed, ADR-0083)" do
     test "lowers to Rust Result<T, E>; the BEAM body carries the tagged tuple" do
-      [{_, out}] = Decl.compile("def find(id Int64) User | NotFound := {:ok, id}")
+      [{_, out}] = Decl.compile("def find(id Int64) Result(User, NotFound) := {:ok, id}")
       assert out.rust =~ "fn find(id: i64) -> Result<User, NotFound>"
       assert out.elixir =~ "def find(id) do {:ok, id} end"
     end
@@ -516,16 +516,10 @@ defmodule Rian.DeclTest do
       [{_, out}] =
         Decl.compile("""
         alias Id := Int64
-        def f(x Id) Id | NotFound := {:ok, x}
+        def f(x Id) Result(Id, NotFound) := {:ok, x}
         """)
 
       assert out.rust =~ "-> Result<i64, NotFound>"
-    end
-
-    test "an inline multi-tag error set is rejected (must be a named set)" do
-      assert_raise RuntimeError, ~r/must be named/, fn ->
-        Decl.compile("def f(x Int64) User | A | B := {:ok, x}")
-      end
     end
   end
 

@@ -440,7 +440,7 @@ defmodule Rian.JSTest do
       js =
         JS.compile("""
         type DivErr := Bad
-        def half(n Int53) Int53 | DivErr
+        def half(n Int53) Result(Int53, DivErr)
         def half(0) := {:error, Bad}
         def half(n) := {:ok, n}
 

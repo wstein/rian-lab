@@ -171,7 +171,7 @@ defmodule Rian.ReplTest do
       # a body that proves a different type than the declared return
       "def f(n Int64) Bool\ndef f(n) := n + 1",
       # an error constructed outside the declared error set (ADR-0040)
-      "def find(id Int64) User | NotFound := {:error, Timeout}"
+      "def find(id Int64) Result(User, NotFound) := {:error, Timeout}"
     ]
 
     for src <- @rejected_decls do

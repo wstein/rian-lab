@@ -32,14 +32,14 @@ defmodule Rian.ComposeErrorSetGateFixpointTest do
 
   describe "the `T | E` error-set gate is WIRED into build" do
     test "a function returning an OUT-OF-SET error tag is REFUSED", %{drv: drv} do
-      src = @types <> "def bad() Int53 | DivErr := {:error, NotFound}"
+      src = @types <> "def bad() Result(Int53, DivErr) := {:error, NotFound}"
 
       assert catch_error(drv.build(src, uniq(:ESBad))) == {:type_error, "bad"},
              "the error-set gate did not refuse an out-of-set tag"
     end
 
     test "an in-set error tag compiles + runs", %{drv: drv} do
-      src = @types <> "def good() Int53 | DivErr := {:error, DivByZero}"
+      src = @types <> "def good() Result(Int53, DivErr) := {:error, DivByZero}"
       m = drv.build(src, uniq(:ESGood))
       assert m.good() == {:error, :div_by_zero}
     end

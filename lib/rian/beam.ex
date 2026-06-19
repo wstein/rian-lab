@@ -463,22 +463,45 @@ defmodule Rian.Beam do
 
   defp type_form(t, tctx) when is_binary(t) do
     cond do
-      t == "Bool" -> {:type, @ln, :boolean, []}
-      t == "String" -> {:type, @ln, :binary, []}
+      t == "Bool" ->
+        {:type, @ln, :boolean, []}
+
+      t == "String" ->
+        {:type, @ln, :binary, []}
+
       # `Char` is a codepoint integer on the BEAM (ADR-0036)
-      t == "Char" -> int_t()
-      t == "Int53" or String.match?(t, ~r/^U?Int\d*$/) -> int_t()
-      String.match?(t, ~r/^Float\d*$/) -> {:type, @ln, :float, []}
-      String.starts_with?(t, "Vec(") -> {:type, @ln, :list, [type_form(inner_of(t), tctx)]}
-      String.starts_with?(t, "Fn(") -> fn_form(t, tctx)
-      # `T | E` (error-set sugar / a union) — union of the parts
-      top_level_union?(t) -> union_t(Enum.map(split_top(t, "|"), &type_form(&1, tctx)))
-      Map.has_key?(tctx.ranges, t) -> type_form(tctx.ranges[t], tctx)
+      t == "Char" ->
+        int_t()
+
+      t == "Int53" or String.match?(t, ~r/^U?Int\d*$/) ->
+        int_t()
+
+      String.match?(t, ~r/^Float\d*$/) ->
+        {:type, @ln, :float, []}
+
+      String.starts_with?(t, "Vec(") ->
+        {:type, @ln, :list, [type_form(inner_of(t), tctx)]}
+
+      String.starts_with?(t, "Fn(") ->
+        fn_form(t, tctx)
+
+      # a value union `Union(A, B)` (ADR-0083) -> an Erlang `-spec` type union
+      String.starts_with?(t, "Union(") ->
+        union_t(Enum.map(union_members(t), &type_form(&1, tctx)))
+
+      Map.has_key?(tctx.ranges, t) ->
+        type_form(tctx.ranges[t], tctx)
+
       # a sum / struct value -> a reference to its named `-type` (defined above)
-      Map.has_key?(tctx.sums, t) -> {:user_type, @ln, tag(t), []}
-      MapSet.member?(tctx.structs, t) -> {:user_type, @ln, tag(t), []}
+      Map.has_key?(tctx.sums, t) ->
+        {:user_type, @ln, tag(t), []}
+
+      MapSet.member?(tctx.structs, t) ->
+        {:user_type, @ln, tag(t), []}
+
       # a type variable (`forall T`) or an unknown type -> `any()` (sound)
-      true -> any_t()
+      true ->
+        any_t()
     end
   end
 
@@ -534,7 +557,9 @@ defmodule Rian.Beam do
 
   defp inner_of("Vec(" <> rest), do: String.trim_trailing(rest, ")")
 
-  defp top_level_union?(t), do: length(split_top(t, "|")) > 1
+  # members of a canonical `Union(A, B)` type string (drops the one wrapping `)`)
+  defp union_members("Union(" <> rest),
+    do: split_top(binary_part(rest, 0, byte_size(rest) - 1), ",")
 
   # split on a separator at bracket depth 0 (so `Vec(A | B)` / `Fn(A, B)` are atomic)
   defp split_top(s, sep) do

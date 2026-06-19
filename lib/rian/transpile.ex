@@ -566,7 +566,7 @@ defmodule Rian.Transpile do
 
   # Is the declared sig type a *provable* lie vs the inferred type? Tvar-aware and
   # subtype-safe, so the conservative inferer never trips a false alarm:
-  #   * either side mentions a type VARIABLE (`T`/`Vec(T)`/`T | E`) → compatible (a tvar
+  #   * either side mentions a type VARIABLE (`T`/`Vec(T)`/`Result(T, E)`) → compatible (a tvar
   #     unifies with anything: inference using `T` where a sig pins `Doc` is fine);
   #   * two scalar PRIMITIVES → conflict only across KINDS (`String` vs `Int*`, `Bool` vs
   #     `Float*`); same-kind width differences (`Int53` vs `Int64`) are intentional;
@@ -599,7 +599,7 @@ defmodule Rian.Transpile do
     Map.get(ctor_to_sum, base, base)
   end
 
-  # a standalone uppercase single-letter component is a type variable (`T`, `Vec(T)`, `T | E`).
+  # a standalone uppercase single-letter component is a type variable (`T`, `Vec(T)`, `Result(T, E)`).
   defp has_tvar?(t), do: is_binary(t) and Regex.match?(~r/\b[A-Z]\b/, t)
   defp prim?(t), do: prim_kind(base_name(t)) != nil
   defp base_name(t) when is_binary(t), do: t |> String.split("(") |> hd() |> String.trim()
@@ -679,7 +679,9 @@ defmodule Rian.Transpile do
         sigmap
       else
         Map.new(sigmap, fn {k, v} ->
-          if Map.get(v, :result, false), do: {k, %{v | ret: "#{v.ret} | Errors"}}, else: {k, v}
+          if Map.get(v, :result, false),
+            do: {k, %{v | ret: "Result(#{v.ret}, Errors)"}},
+            else: {k, v}
         end)
       end
 

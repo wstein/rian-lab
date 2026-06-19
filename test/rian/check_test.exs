@@ -308,13 +308,13 @@ defmodule Rian.CheckTest do
       # the function's declared `Int64 | RangeError` matches the constructor's type
       assert Check.check("""
              range Digit := 0..9
-             def of_d(n Int64) Int64 | RangeError := Digit.of(n)
+             def of_d(n Int64) Result(Int64, RangeError) := Digit.of(n)
              """) == :ok
 
       # a `Char`-based range constructs `Char | RangeError`
       assert Check.check("""
              range Up := 'A'..'Z'
-             def of_u(c Char) Char | RangeError := Up.of(c)
+             def of_u(c Char) Result(Char, RangeError) := Up.of(c)
              """) == :ok
     end
   end
@@ -381,12 +381,12 @@ defmodule Rian.CheckTest do
 
   describe "error-set composition (ADR-0040 §4)" do
     test "an error tag in the declared `T | E` set passes" do
-      assert Check.check("def find(id Int64) User | NotFound := {:error, NotFound}") == :ok
+      assert Check.check("def find(id Int64) Result(User, NotFound) := {:error, NotFound}") == :ok
     end
 
     test "constructing an error outside the declared set is rejected" do
       assert {:error, msg} =
-               Check.check("def find(id Int64) User | NotFound := {:error, Timeout}")
+               Check.check("def find(id Int64) Result(User, NotFound) := {:error, Timeout}")
 
       assert msg =~ "Timeout"
       assert msg =~ "declared set `NotFound`"
@@ -395,7 +395,7 @@ defmodule Rian.CheckTest do
     test "a named error set expands to its tags (subset is allowed)" do
       assert Check.check("""
              type LookupError := NotFound | Timeout
-             def look(id Int64) User | LookupError := {:error, Timeout}
+             def look(id Int64) Result(User, LookupError) := {:error, Timeout}
              """) == :ok
     end
 
@@ -403,7 +403,7 @@ defmodule Rian.CheckTest do
       assert {:error, msg} =
                Check.check("""
                type LookupError := NotFound | Timeout
-               def look(id Int64) User | LookupError := {:error, Other}
+               def look(id Int64) Result(User, LookupError) := {:error, Other}
                """)
 
       assert msg =~ "Other"
@@ -412,7 +412,7 @@ defmodule Rian.CheckTest do
 
     test "the error-set gate fires through Decl.compile" do
       assert_raise Check.Error, ~r/not in its declared set/, fn ->
-        Rian.Decl.compile("def f(n Int64) Int64 | NotFound := {:error, Nope}")
+        Rian.Decl.compile("def f(n Int64) Result(Int64, NotFound) := {:error, Nope}")
       end
     end
 
@@ -425,8 +425,8 @@ defmodule Rian.CheckTest do
       # which must therefore appear in `outer`'s declared set.
       assert Check.check("""
              type E := A | B
-             def inner(n Int64) Int64 | E := {:error, A}
-             def outer(n Int64) Int64 | E
+             def inner(n Int64) Result(Int64, E) := {:error, A}
+             def outer(n Int64) Result(Int64, E)
                with {:ok, x} <- inner(n) do
                  {:ok, x}
                end
@@ -438,8 +438,8 @@ defmodule Rian.CheckTest do
       assert {:error, msg} =
                Check.check("""
                type E := A | B
-               def inner(n Int64) Int64 | A := {:error, A}
-               def outer(n Int64) Int64 | B
+               def inner(n Int64) Result(Int64, A) := {:error, A}
+               def outer(n Int64) Result(Int64, B)
                  with {:ok, x} <- inner(n) do
                    {:ok, x}
                  end
@@ -461,9 +461,9 @@ defmodule Rian.CheckTest do
                Check.check("""
                type E := A | B
                mod M do
-                 pub def inner(n Int64) Int64 | A := {:error, A}
+                 pub def inner(n Int64) Result(Int64, A) := {:error, A}
                end
-               def outer(n Int64) Int64 | B
+               def outer(n Int64) Result(Int64, B)
                  with {:ok, x} <- M.inner(n) do
                    {:ok, x}
                  end
@@ -481,7 +481,7 @@ defmodule Rian.CheckTest do
       # the dot-call fix against spurious "returns error not in declared set".
       assert Check.check("""
              type Oops := Oops
-             def caller(s Str) Str | Oops
+             def caller(s Str) Result(Str, Oops)
                with {:ok, x} <- String.upcase(s) do
                  {:ok, x}
                end
@@ -494,8 +494,8 @@ defmodule Rian.CheckTest do
       # `outer` produces `{B}` ⊆ its declared `{B}`.
       assert Check.check("""
              type E := A | B
-             def inner(n Int64) Int64 | A := {:error, A}
-             def outer(n Int64) Int64 | B
+             def inner(n Int64) Result(Int64, A) := {:error, A}
+             def outer(n Int64) Result(Int64, B)
                with {:ok, x} <- inner(n) do
                  {:ok, x}
                else
@@ -999,13 +999,13 @@ defmodule Rian.CheckTest do
       # over callees in the call-graph fixpoint must carry A all the way to outer.
       assert Check.check("""
              type E := A | B
-             def inner(n Int64) Int64 | E := {:error, A}
-             def mid(n Int64) Int64 | E
+             def inner(n Int64) Result(Int64, E) := {:error, A}
+             def mid(n Int64) Result(Int64, E)
                with {:ok, x} <- inner(n) do
                  {:ok, x}
                end
              end
-             def outer(n Int64) Int64 | E
+             def outer(n Int64) Result(Int64, E)
                with {:ok, x} <- mid(n) do
                  {:ok, x}
                end
@@ -1014,10 +1014,11 @@ defmodule Rian.CheckTest do
     end
 
     test "a constructor-call error tag (`DivByZero(x)`) is named for the set check" do
-      assert Check.check("def f(n Int64) Int64 | DivByZero := {:error, DivByZero(n)}") == :ok
+      assert Check.check("def f(n Int64) Result(Int64, DivByZero) := {:error, DivByZero(n)}") ==
+               :ok
 
       assert {:error, msg} =
-               Check.check("def f(n Int64) Int64 | NotFound := {:error, DivByZero(n)}")
+               Check.check("def f(n Int64) Result(Int64, NotFound) := {:error, DivByZero(n)}")
 
       assert msg =~ "DivByZero"
       assert msg =~ "declared set `NotFound`"
@@ -1027,7 +1028,7 @@ defmodule Rian.CheckTest do
       # the `<-` source `n` is a bare variable, not a `f(...)` call, so `call_name`
       # contributes nothing and the function produces an empty error set.
       assert Check.check("""
-             def f(n Int64) Int64 | NotFound
+             def f(n Int64) Result(Int64, NotFound)
                with {:ok, x} <- n do
                  {:ok, x}
                end
@@ -1040,13 +1041,13 @@ defmodule Rian.CheckTest do
       # union over its callees (`inner`'s `A`) rather than reading a declared one.
       assert Check.check("""
              type E := A | B
-             def inner(n Int64) Int64 | E := {:error, A}
+             def inner(n Int64) Result(Int64, E) := {:error, A}
              def helper(n Int64) Int64
                with {:ok, x} <- inner(n) do
                  {:ok, x}
                end
              end
-             def outer(n Int64) Int64 | E
+             def outer(n Int64) Result(Int64, E)
                with {:ok, x} <- helper(n) do
                  {:ok, x}
                end
@@ -1057,8 +1058,12 @@ defmodule Rian.CheckTest do
     test "check_func/3 with a non-`%{tsets,table}` eset skips the error-set check" do
       # the default `check_error_set/2` clause: an eset that is not the expected
       # context map leaves the error-set check a no-op (return type still checked).
-      %{funcs: [f]} = Rian.Decl.parse("def f(n Int64) Int64 | NotFound := {:error, Anything}")
-      ic = Check.program_ic(Rian.Decl.parse("def f(n Int64) Int64 | NotFound := {:error, X}"))
+      %{funcs: [f]} =
+        Rian.Decl.parse("def f(n Int64) Result(Int64, NotFound) := {:error, Anything}")
+
+      ic =
+        Check.program_ic(Rian.Decl.parse("def f(n Int64) Result(Int64, NotFound) := {:error, X}"))
+
       assert Check.check_func(f, ic, %{}) == :ok
     end
   end

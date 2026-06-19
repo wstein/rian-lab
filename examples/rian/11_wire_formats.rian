@@ -58,7 +58,7 @@ struct Frame(version UInt8, kind UInt8, reserved UInt16, payload Message)
 # Streaming: `decode_prefix` returns the value PLUS the unconsumed tail, so a
 # byte stream can be peeled one frame at a time. (Contrast strict `decode`,
 # which rejects any trailing bytes.)
-def first_frame(stream val Bytes) Frame | DecodeError
+def first_frame(stream val Bytes) Result(Frame, DecodeError)
 def first_frame(stream)
   case Frame.decode_prefix(stream) do
     {frame, _rest} -> frame

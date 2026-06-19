@@ -515,7 +515,7 @@ defmodule Rian.Reach do
     # whether the `Fn` mentions a tvar or not (`adder() Fn(Int53, Int53)`,
     # `apply_twice(f Fn(Int53, Int53), …)`, generic `map(f Fn(T, U), …)` all fail), so
     # the gate pins any `Fn(`-bearing signature off `:rs`. (The owned↔borrow coercion
-    # for bare `T`/`Vec(T)` returns and `Option(T)`/`T | E`/sum-over-`T` landed
+    # for bare `T`/`Vec(T)` returns and `Option(T)`/`Result(T, E)`/sum-over-`T` landed
     # 2026-06-14, so those are *not* blocked — only `Fn` remains unlowerable.)
     owned_gen = if sig_uses_fn_type?(f), do: [fn_type_blocker()], else: []
     # A function whose signature touches a *parametric* user type (`Pair`, `enum

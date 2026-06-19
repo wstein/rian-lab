@@ -83,7 +83,7 @@ defmodule Rian.TranspileInferTest do
 
       out = Transpile.transpile(src, infer: true)
       assert out =~ "type Errors := DivByZero"
-      assert out =~ "pub def checked_div(a Int53, b Int53) Int53 | Errors :="
+      assert out =~ "pub def checked_div(a Int53, b Int53) Result(Int53, Errors) :="
     end
 
     test "the inferred Result draft type-checks (accident-free)" do

@@ -1,14 +1,15 @@
 # ===========================================================================
-# 12 — Error handling: Result, the `T | E` sugar, `with` propagation
+# 12 — Error handling: Result(T, E), `with` propagation
 # ===========================================================================
 # Character: errors are ORDINARY VALUES (ADR-0035, no exceptions). A fallible
-# function returns a `Result(T, E)` whose `E` is a sealed ERROR SET; the `T | E`
-# return sugar spells it; `with` threads the happy path and short-circuits on the
+# function returns a `Result(T, E)` whose `E` is a sealed ERROR SET, written
+# EXPLICITLY (the `T | E` return sugar was removed — ADR-0083 makes `|` a value
+# union everywhere); `with` threads the happy path and short-circuits on the
 # first error. Same source, two idiomatic shapes — tagged tuples on the BEAM,
 # `Result<T, E>` (with `?`-style flow) on Rust.
 #
 #   {:ok, v} / {:error, tag}  -> BEAM tagged tuples | Rust Ok(v) / Err(tag)
-#   T | E                     -> Result(T, E)        | Rust Result<T, E>
+#   Result(T, E)              -> Result(T, E)        | Rust Result<T, E>
 #   with p <- e, … do … else  -> BEAM native `with`  | Rust nested match (`?`)
 #
 # ADRs: 0040 (error handling) · 0039 (`<-` failable-bind) · 0034 §2 (error sets)
@@ -18,10 +19,10 @@ mod Math do
   # An error set is just a sealed sum whose variants are error tags (ADR-0040 §1).
   type DivError := DivByZero | Overflow
 
-  # `T | E` return type = Result(T, E): the ok-type, then the error set. The body
+  # `Result(T, E)` return type: the ok-type, then the error set. The body
   # constructs `{:ok, v}` / `{:error, tag}` directly; the checker proves every
   # error tag it builds is in the declared set `DivError` (ADR-0040 §4).
-  pub def checked_div(a Int53, b Int53) Int53 | DivError
+  pub def checked_div(a Int53, b Int53) Result(Int53, DivError)
     case b do
       0 -> {:error, DivByZero}
       _ -> {:ok, a div b}
@@ -31,7 +32,7 @@ mod Math do
   # `with` binds each `{:ok, _}` and continues; the first `{:error, _}` short-
   # circuits to `else`. Drop the `else` and an unmatched error propagates
   # unchanged — the per-call `?` generalized to a block (ADR-0040 §3).
-  pub def ratio(a Int53, b Int53, c Int53) Int53 | DivError
+  pub def ratio(a Int53, b Int53, c Int53) Result(Int53, DivError)
     with {:ok, x} <- checked_div(a, b),
          {:ok, y} <- checked_div(x, c) do
       {:ok, y}

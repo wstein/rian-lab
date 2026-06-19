@@ -273,7 +273,7 @@ defmodule Rian.BeamModuleFixpointTest do
      true},
     {"if-expression", "def maxi(a Int53, b Int53) Int53 := if a > b do a else b end", true},
     {"case", "def chk(x Int53) Int53 := case {:ok, x} do\n  {:ok, v} -> v\n  _ -> 0\nend", true},
-    {"tuples (Result)", "type E := Bad\ndef ok(x Int53) Int53 | E := {:ok, x}", true},
+    {"tuples (Result)", "type E := Bad\ndef ok(x Int53) Result(Int53, E) := {:ok, x}", true},
     {"atoms", "def y() Symbol := :yes", true},
     {"cons lists",
      "def hd(xs Vec(Int53), d Int53) Int53\ndef hd([], d) := d\ndef hd([h | t], _) := h", true},
@@ -290,7 +290,7 @@ defmodule Rian.BeamModuleFixpointTest do
     {"structs", "struct P(x Int53, y Int53)\ndef getx(p P) Int53 := p.x", false},
     {"lambdas", "def ap(x Int53) Int53 := ((y) -> y + 1)(x)", false},
     {"with",
-     "type E := Bad\ndef g(x Int53) Int53 | E := {:ok, x}\n" <>
+     "type E := Bad\ndef g(x Int53) Result(Int53, E) := {:ok, x}\n" <>
        "def f(x Int53) Int53 := with {:ok, v} <- g(x) do v else _ -> 0 end", false}
   ]
 

@@ -25,20 +25,25 @@ type LookupError = NotFound | Timeout
 type DecodeError = Truncated(needed Int64, got Int64) | TrailingBytes(extra Int64)
 ```
 
-### 2. `Result(T, E)` and the `T | E` return sugar
+### 2. `Result(T, E)` — explicit (the `T | E` return sugar was **removed**, ADR-0083)
 
-A fallible function returns `Result(T, E)`. Surface sugar in **return position**:
+A fallible function returns `Result(T, E)` **explicitly**:
 
 ```elixir
-def find(id Int64) User | NotFound          # = Result(User, NotFound)
-def lookup(id Int64) User | LookupError      # error set may be named
+def find(id Int64) Result(User, NotFound)        # ok-type, then the error set
+def lookup(id Int64) Result(User, LookupError)   # error set may be named
 ```
+
+> **Superseded.** This ADR originally introduced a return-position **`T | E` sugar**
+> for `Result(T, E)`. **ADR-0083 removed it:** `|` is now a *value union* in **every**
+> position (Crystal-style), so a fallible return is spelled `Result(T, E)`. The Result
+> *model* below is unchanged — only the `|` shorthand is gone.
 
 | Rule | Decision |
 |---|---|
-| `\|` in **return position** | sugar for `Result(ok, error)`: first operand is the ok-type, the remainder the error set |
-| `\|` elsewhere | **not** general union syntax (consistent with ADR-0034 nominal-sums-canonical) |
-| inline multi-tag error | must be a **named** error set (`User \| LookupError`), not `User \| NotFound \| Timeout` — keeps the sugar unambiguous |
+| fallible return | written **explicitly** as `Result(ok, error)` — first arg the ok-type, second the error set |
+| `\|` in a type | a **value union** (ADR-0083), in every position — never `Result` sugar |
+| inline multi-tag | a value union `User \| NotFound \| Timeout` is now *legal* (it's a union, not an error set); a `Result` error set stays a **named** sealed sum |
 | lowering | BEAM `{:ok, v}` / `{:error, tag}` tagged tuples; Rust `Result<T, E>` |
 
 ### 3. Propagation = `with` (Elixir) — the `?` successor

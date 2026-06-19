@@ -30,18 +30,18 @@ defmodule Rian.CheckerErrorSetFixpointTest do
   # {label, body src (for the port), declared return, full program source (for the reference)}.
   # NEGATIVE = a tag not in the declared set → BOTH the port and Rian.Check must flag it.
   @negative [
-    {"NotFound ∉ DivErr", "{:error, NotFound}", "Int53 | DivErr",
-     @types <> "def bad() Int53 | DivErr := {:error, NotFound}"},
-    {"applied-ctor tag ∉ DivErr", "{:error, NotFound(5)}", "Int53 | DivErr",
-     @types <> "def bad() Int53 | DivErr := {:error, NotFound(5)}"}
+    {"NotFound ∉ DivErr", "{:error, NotFound}", "Result(Int53, DivErr)",
+     @types <> "def bad() Result(Int53, DivErr) := {:error, NotFound}"},
+    {"applied-ctor tag ∉ DivErr", "{:error, NotFound(5)}", "Result(Int53, DivErr)",
+     @types <> "def bad() Result(Int53, DivErr) := {:error, NotFound(5)}"}
   ]
 
   # POSITIVE = NO extra tag → BOTH must pass: a tag in the set, or a non-`T | E` return.
   @positive [
-    {"DivByZero ∈ DivErr", "{:error, DivByZero}", "Int53 | DivErr",
-     @types <> "def good() Int53 | DivErr := {:error, DivByZero}"},
-    {"Overflow ∈ DivErr", "{:error, Overflow}", "Int53 | DivErr",
-     @types <> "def good() Int53 | DivErr := {:error, Overflow}"},
+    {"DivByZero ∈ DivErr", "{:error, DivByZero}", "Result(Int53, DivErr)",
+     @types <> "def good() Result(Int53, DivErr) := {:error, DivByZero}"},
+    {"Overflow ∈ DivErr", "{:error, Overflow}", "Result(Int53, DivErr)",
+     @types <> "def good() Result(Int53, DivErr) := {:error, Overflow}"},
     {"non-Result return (no declared set)", "5", "Int53", @types <> "def plain() Int53 := 5"}
   ]
 

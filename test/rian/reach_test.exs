@@ -320,7 +320,7 @@ defmodule Rian.ReachTest do
       rep =
         reach("""
         type DivErr := Bad
-        def half(n Int53) Int53 | DivErr
+        def half(n Int53) Result(Int53, DivErr)
         def half(0) := {:error, Bad}
         def half(n) := {:ok, n}
         """)

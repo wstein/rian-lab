@@ -268,7 +268,7 @@ defmodule Rian.BeamTest do
         Beam.load(
           """
           range Digit := 0..9
-          def of_digit(n Int64) Int64 | RangeError := Digit.of(n)
+          def of_digit(n Int64) Result(Int64, RangeError) := Digit.of(n)
           """,
           :rian_beam_range_of
         )
@@ -286,7 +286,7 @@ defmodule Rian.BeamTest do
         Beam.load(
           """
           range Up := 'A'..'Z'
-          def of_up(c Char) Char | RangeError := Up.of(c)
+          def of_up(c Char) Result(Char, RangeError) := Up.of(c)
           """,
           :rian_beam_range_of_char
         )
@@ -691,7 +691,7 @@ defmodule Rian.BeamTest do
       {:ok, mod} =
         Beam.load(
           """
-          def parse(n Int64) Int64 | E
+          def parse(n Int64) Result(Int64, E)
           def parse(0) := {:error, Bad}
           def parse(n) := {:ok, n}
 

@@ -11,7 +11,7 @@ defmodule Rian.Range do
       Digit.of(n)  ~>  if 0 <= n and n <= 9 do {:ok, n} else {:error, RangeError} end
 
   So the value is `{:ok, n}` when in range and `{:error, RangeError}` otherwise —
-  a `T | E` Result (ADR-0040). The rewrite is target-agnostic; an emitter only
+  a `Result(T, E)` (ADR-0040). The rewrite is target-agnostic; an emitter only
   needs the range table threaded to its body-parse point.
 
   The argument is referenced more than once (two bound checks + the `:ok` branch);

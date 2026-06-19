@@ -1148,11 +1148,13 @@ defmodule Rian.Decl do
     {head, tvars, bounds} = split_forall(Lexer.detokenize(Enum.reverse(head_rev)))
     {ret, guard} = parse_head(head)
     # normalize parenthesized type spacing (`Vec ( Int64 )` -> `Vec(Int64)`) so the
-    # declared return type matches inferred parametric types (ADR-0042 checking)
+    # declared return type matches inferred parametric types (ADR-0042 checking), and
+    # canonicalize a value-union return `A | B` -> `Union(A, B)` (ADR-0083 — `|` is a
+    # value union in EVERY position; a fallible return is the explicit `Result(T, E)`).
     ret =
       case ret do
         nil -> nil
-        r -> collapse_parens(r)
+        r -> r |> collapse_parens() |> Rian.TypeStr.normalize()
       end
 
     %{

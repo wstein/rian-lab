@@ -109,7 +109,7 @@ defmodule Rian.JsModuleFixpointTest do
     "type Opt := None | Some(Int53)\npub def mk(n Int53) Opt\ndef mk(0) := None\ndef mk(n) := Some(n)",
     "type Opt := None | Some(Int53)\ndef get(o Opt, d Int53) Int53\ndef get(None, d) := d\ndef get(Some(v), _) := v",
     # tuple construction (Result) + tuple patterns in a case
-    "type E := Bad\ndef ok(x Int53) Int53 | E := {:ok, x}",
+    "type E := Bad\ndef ok(x Int53) Result(Int53, E) := {:ok, x}",
     "def chk(x Int53) Int53 := case {:ok, x} do\n  {:ok, v} -> v\n  _ -> 0\nend",
     # list construction + cons dispatch
     "def hd(xs Vec(Int53), d Int53) Int53\ndef hd([], d) := d\ndef hd([h | t], _) := h",
@@ -169,7 +169,7 @@ defmodule Rian.JsModuleFixpointTest do
      "type Opt := None | Some(Int53)\ndef get(o Opt, d Int53) Int53\n" <>
        "def get(None, d) := d\ndef get(Some(v), _) := v", true},
     {"Result + tuple",
-     "type E := Bad\ndef half(n Int53) Int53 | E\ndef half(0) := {:error, Bad}\ndef half(n) := {:ok, n}",
+     "type E := Bad\ndef half(n Int53) Result(Int53, E)\ndef half(0) := {:error, Bad}\ndef half(n) := {:ok, n}",
      true},
     {"case (IIFE)", "def classify(n Int53) Int53 := case n do\n  0 -> 10\n  m -> m + 1\nend",
      true},

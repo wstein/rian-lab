@@ -1172,14 +1172,19 @@ mod Checker do
     end
   end
 
-  # `T | E` -> the declared error-tag set (`tsets[E]`, else `[E]`); else `EsNone`. The OK
-  # type must be non-empty (a leading `| E` is malformed -> EsNone).
+  # `Result(T, E)` -> the declared error-tag set (`tsets[E]`, else `[E]`); else `EsNone`
+  # (the `T | E` return sugar was removed — ADR-0083). `parse_parametric` splits
+  # `Result(ok, err)` on its top-level comma; a non-`Result` / wrong-arity return is `EsNone`.
   def declared_set(ret String, tsets Dict(String, Vec(String))) EsOpt
-  def declared_set(ret, tsets) := decl_parts(split_pipe(ret), tsets)
+  def declared_set(ret, tsets) := decl_from_pp(parse_parametric(ret), tsets)
 
-  def decl_parts(Vec(String), Dict(String, Vec(String))) EsOpt
-  def decl_parts([ok_str, err_str], tsets) := decl_when(first_tok(ok_str), first_tok(err_str), tsets)
-  def decl_parts(_, _) := EsNone
+  def decl_from_pp(PpRes, Dict(String, Vec(String))) EsOpt
+  def decl_from_pp(Pp(name, args), tsets) := decl_args(name, args, tsets)
+  def decl_from_pp(_, _) := EsNone
+
+  def decl_args(String, Vec(String), Dict(String, Vec(String))) EsOpt
+  def decl_args("Result", [ok_str, err_str], tsets) := decl_when(first_tok(ok_str), first_tok(err_str), tsets)
+  def decl_args(_, _, _) := EsNone
 
   def decl_when(String, String, Dict(String, Vec(String))) EsOpt
   def decl_when("", _, _) := EsNone

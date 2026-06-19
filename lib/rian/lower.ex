@@ -1336,7 +1336,7 @@ defmodule Rian.Lower do
   end
 
   # the payload of `Ok(_)`/`Err(_)` must be owned: a borrowed `&T` (a generic ok-type,
-  # `def f() T | E := {:ok, x}`) is `.clone()`d like any owned-position value
+  # `def f() Result(T, E) := {:ok, x}`) is `.clone()`d like any owned-position value
   # (`rust_owned_elem`), and a `&str` for a `String` ok/err-type additionally `.to_string()`s.
   defp result_payload(val, string?, ec) do
     s = rust_owned_elem(val, ec)
@@ -1918,8 +1918,8 @@ defmodule Rian.Lower do
 
   defp all_pat_vars(_), do: []
 
-  # `T | E` in return position is sugar for `Result(T, E)` (ADR-0040 §2) — the ok
-  # type then the (single, possibly-named) error set. It lowers to Rust
+  # A fallible function returns `Result(T, E)` explicitly (the `T | E` sugar was
+  # removed — ADR-0083) — the ok-type then the error set. It lowers to Rust
   # `Result<T, E>`; on the BEAM the value shape `{:ok,_}`/`{:error,_}` carries it.
   defp rust_ret(ret) do
     case result_parts(ret) do
@@ -1928,18 +1928,17 @@ defmodule Rian.Lower do
     end
   end
 
-  defp result_parts(ret) do
-    case ret |> String.split("|") |> Enum.map(&String.trim/1) do
-      [_single] ->
-        {:plain, ret}
-
-      [ok, err] ->
-        {:result, ok, err}
-
-      parts ->
-        raise "inline multi-tag error set must be named (ADR-0040): #{Enum.join(parts, " | ")}"
+  # parse an explicit `Result(ok, err)` -> `{:result, ok, err}`; any other type is
+  # `{:plain, ret}`. (Keyed on the `Result(` head + top-level comma now, not the
+  # retired `|` sugar.)
+  defp result_parts("Result(" <> rest) do
+    case Rian.TypeStr.split_top_commas(binary_part(rest, 0, byte_size(rest) - 1)) do
+      [ok, err] -> {:result, ok, err}
+      _ -> {:plain, "Result(" <> rest}
     end
   end
+
+  defp result_parts(ret), do: {:plain, ret}
 
   defp rust_struct(s, vis \\ "") do
     # a `pub` struct exposes its fields too (so cross-module field access works)

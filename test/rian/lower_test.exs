@@ -752,7 +752,7 @@ end|
     @res_src ~S"""
     mod R do
       type Oops := Bad
-      pub def get(n Int64) String | Oops
+      pub def get(n Int64) Result(String, Oops)
       pub def get(0) := {:error, Bad}
       pub def get(_) := {:ok, "hi"}
     end

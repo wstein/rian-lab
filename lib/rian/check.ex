@@ -17,7 +17,7 @@ defmodule Rian.Check do
   `:unknown`.
 
   **Error sets (ADR-0034 pillar 2 / ADR-0040 §4)** are checked at the declared
-  boundary: a `T | E` return type declares the error set `E`; the function's
+  boundary: a `Result(T, E)` return type declares the error set `E`; the function's
   *produced* set — directly-built `{:error, Tag}` tags **plus** the sets it
   propagates from callees (a `with`-clause source whose error isn't handled by an
   `else`) — must be a *subset* of `E` (over-declaration is allowed). A named `E`
@@ -330,8 +330,8 @@ defmodule Rian.Check do
   end
 
   # `Name.of(n)` — range construction (ADR-0036): the checked constructor of a
-  # `range` type returns `base | RangeError` (a `T | E` Result, ADR-0040). The
-  # argument must be assignable to the range's ordinal base.
+  # `range` type returns `Result(base, RangeError)` (ADR-0040; the `T | E` sugar
+  # was removed in ADR-0083). The argument must be assignable to the range's base.
   def infer(%ECall{fun: %EDot{head: %EId{name: n}, name: "of"}} = call, env, ic) do
     cond do
       # `opaque Name := Base` (ADR-0067/ADR-0043): the constructor is *total* —
@@ -341,7 +341,9 @@ defmodule Rian.Check do
         n
 
       base = range_base(ic, n) ->
-        "#{base} | RangeError"
+        # collapsed form (no comma space), matching how declared return types are
+        # stored (`Decl` runs `collapse_parens`), so `check_return` assignability holds
+        "Result(#{base},RangeError)"
 
       true ->
         ft = infer(call.fun, env, ic)
@@ -811,7 +813,7 @@ defmodule Rian.Check do
     * **return type** — no clause body's inferred concrete type may *contradict*
       the declared return type (now including parametric `Vec(T)` and a body's
       sum-variant / function-call result, ADR-0042 — concrete generics);
-    * **error set** — when the return type is `T | E`, the function's *produced*
+    * **error set** — when the return type is `Result(T, E)`, the function's *produced*
       set — directly-built `{:error, Tag}` ∪ propagated callee sets — must be a
       subset of `E` (over-declaration allowed; ADR-0040 §4).
 
@@ -1662,7 +1664,7 @@ defmodule Rian.Check do
   defp generic_ret?(_ret, []), do: false
   defp generic_ret?(ret, tvars), do: Enum.any?(tvars, &Regex.match?(~r/\b#{&1}\b/, ret))
 
-  # ADR-0040 §4: a `T | E` return type declares the error set `E`; the function's
+  # ADR-0040 §4: a `Result(T, E)` return type declares the error set `E`; the function's
   # *produced* set — the tags it builds directly **plus** the error sets it
   # propagates from callees (a `with`-clause source whose error isn't handled by
   # an `else`) — must be a subset of `E`. The propagated part is read from `table`
@@ -1733,13 +1735,17 @@ defmodule Rian.Check do
     "`#{name}`: " <> Enum.join(parts, "; ")
   end
 
-  # `T | E` -> `{E, MapSet of E's tags}` (a named `E` expands to its variants); else nil.
-  defp declared_set(ret, tsets) do
-    case String.split(ret, "|") |> Enum.map(&String.trim/1) do
+  # `Result(T, E)` -> `{E, MapSet of E's tags}` (a named `E` expands to its variants);
+  # else nil. The `T | E` return *sugar* was removed (ADR-0083 — `|` is a value union
+  # everywhere); a fallible function declares its result type explicitly as `Result(T, E)`.
+  defp declared_set("Result(" <> rest, tsets) do
+    case rest |> binary_part(0, byte_size(rest) - 1) |> Rian.TypeStr.split_top_commas() do
       [ok_t, err_t] when ok_t != "" -> {err_t, MapSet.new(Map.get(tsets, err_t, [err_t]))}
       _ -> nil
     end
   end
+
+  defp declared_set(_ret, _tsets), do: nil
 
   # the tags a function actually produces: directly-built `{:error, Tag}` ∪ the
   # error sets of the callees whose errors it propagates (from `table`)
@@ -2375,7 +2381,7 @@ defmodule Rian.Check do
   end
 
   # Error-set table (ADR-0040 §4): a sum type's name -> its tag (variant) names,
-  # so a declared `T | E` can be expanded when `E` is a named set.
+  # so a declared `Result(T, E)` can be expanded when `E` is a named set.
   defp error_sets(types) do
     for t <- types, into: %{} do
       {t.name, Enum.map(t.variants, & &1.ctor)}

@@ -81,7 +81,7 @@ defmodule Rian.ReachRustHonestyTest do
 
     test "a `T | E`-returning generic reaches :rs (the Ok payload is cloned)" do
       rep =
-        reach_src("type E := Bad\ndef ok1(x T) T | E forall T := {:ok, x}")
+        reach_src("type E := Bad\ndef ok1(x T) Result(T, E) forall T := {:ok, x}")
 
       assert :rs in targets(rep, "ok1")
     end
@@ -145,7 +145,7 @@ defmodule Rian.ReachRustHonestyTest do
           for src <- [
                 "def wrap(x T) Option(T) forall T\n  y := x\n  Some(y)\nend",
                 "def wrap(x T) Vec(Option(T)) forall T := [Some(x)]",
-                "type E := Bad\ndef ok1(x T) T | E forall T\n  y := x\n  {:ok, y}\nend"
+                "type E := Bad\ndef ok1(x T) Result(T, E) forall T\n  y := x\n  {:ok, y}\nend"
               ] do
             rust = Rian.Lower.rust_program(Decl.parse(src))
             base = Path.join(System.tmp_dir!(), "rian_pos_#{System.unique_integer([:positive])}")
@@ -445,7 +445,7 @@ defmodule Rian.ReachRustHonestyTest do
         def first([]) := None
         def first([h | t]) := Some(h)
 
-        def ok1(x T) T | E forall T := {:ok, x}
+        def ok1(x T) Result(T, E) forall T := {:ok, x}
 
         @test def first_some() Bool
           case first([7, 8, 9]) do

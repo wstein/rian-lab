@@ -1068,9 +1068,15 @@ mod Decl do
   # a type: simple `Id`, or single-arg parametric `Base(Arg)` rebuilt as the string
   # `"Base(Arg)"` (matches Rian.Decl's collapsed spacing).
   def parse_ptype(ts Vec(Tok)) PType
-  def parse_ptype([TId(base), TLP, TId(arg), TRP | rest]) := PT(Prim.str_concat(base, Prim.str_concat("(", Prim.str_concat(arg, ")"))), rest)
+  def parse_ptype([TId(base), TLP | rest]) := pt_paren(base, take_parens(rest, 0, []))
   def parse_ptype([TId(t) | rest]) := PT(t, rest)
   def parse_ptype(ts) := PT("", ts)
+
+  # a parametric type `Base(arg, …)` — collect the WHOLE paren group (depth-aware,
+  # so a multi-arg `Result(T, E)` and a nested `Vec(Pair(K, V))` both parse, not just
+  # the single-arg `Vec(Int53)`). The inner tokens detokenize back to the arg string.
+  def pt_paren(String, Paren) PType
+  def pt_paren(base, Paren(inside, after)) := PT(Prim.str_concat(base, Prim.str_concat("(", Prim.str_concat(detok(inside), ")"))), after)
 
   # ── clause patterns ───────────────────────────────────────────────────────
   def parse_pats(ts Vec(Tok)) Vec(Pat)
