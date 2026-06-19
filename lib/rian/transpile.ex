@@ -1515,6 +1515,22 @@ defmodule Rian.Transpile do
     end)
   end
 
+  # `with pat <- expr, … do body [else arms] end` (ADR-0040) — the Rian form. Each
+  # `{:<-, …}` clause renders `pat <- expr`; a bare-expr clause is a filter. The trailing
+  # keyword list carries `:do` (+ optional `:else` arms, rendered like `case` arms).
+  defp expr({:with, _, args}) when is_list(args) and args != [] do
+    {clauses, [kw]} = Enum.split(args, -1)
+    clause_text = Enum.map_join(clauses, ", ", &with_clause/1)
+    body = render_body(Keyword.fetch!(kw, :do))
+
+    else_text =
+      if Keyword.has_key?(kw, :else),
+        do: " else\n" <> Enum.map_join(Keyword.get(kw, :else), "\n", &indent(case_arm(&1))),
+        else: ""
+
+    "with #{clause_text} do #{body}#{else_text} end"
+  end
+
   # a comprehension `for clauses…, <tail>` (ADR-0079). Generators bind a full pattern
   # (a non-match skips the element). The trailing keyword selects the shape:
   #   `do:`            → a list comprehension (the surface `for … do … end`);
@@ -1836,6 +1852,10 @@ defmodule Rian.Transpile do
 
   defp wrap_tuple([p]), do: p
   defp wrap_tuple(pats), do: {:{}, [], pats}
+
+  # a `with` clause: a failable bind `pat <- expr`, or a bare-expr filter.
+  defp with_clause({:<-, _, [pat, e]}), do: "#{pat(pat)} <- #{expr(e)}"
+  defp with_clause(filter), do: expr(filter)
 
   # fresh-param lambda whose body `case`-matches the params (arity > 1 matches the tuple
   # of params); guards and per-clause patterns are preserved via `case_arm`. Used for

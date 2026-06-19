@@ -113,6 +113,21 @@ defmodule Rian.TranspileTest do
     end
   end
 
+  describe "with → Rian `with … do … else … end`" do
+    test "a multi-clause with + else renders the Rian surface form, not an AST dump" do
+      out =
+        rian("""
+        defmodule M do
+          def f(x), do: (with {:ok, a} <- g(x), {:ok, b} <- h(x) do a + b else e -> 0 end)
+        end
+        """)
+
+      assert out =~ "with {:ok, a} <- g(x), {:ok, b} <- h(x) do"
+      assert out =~ "else"
+      refute out =~ "with(<-"
+    end
+  end
+
   describe "cond → nested if/else (Rian has no `cond`)" do
     test "a cond with a `true ->` catch-all lowers to a right-nested if/else chain" do
       out =
