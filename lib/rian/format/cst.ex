@@ -40,6 +40,7 @@ defmodule Rian.Format.Cst do
 
   # seq/2 → {nodes, rest}: consume tokens into nodes until a closer/`end`-less
   # EOF; `rest` begins at the first unconsumed closing bracket (left for `open/4`).
+  @spec seq([tuple()], [tuple()]) :: {[tuple()], [tuple()]}
   defp seq([], acc), do: {Enum.reverse(acc), []}
 
   defp seq([{:lparen} = o | rest], acc), do: open(o, {:rparen}, rest, acc)

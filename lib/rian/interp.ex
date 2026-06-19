@@ -77,6 +77,7 @@ defmodule Rian.Interp do
 
   def resolve(other, _env, _ic, _show), do: other
 
+  @spec resolve_part(tuple(), map(), map(), term()) :: tuple()
   defp resolve_part({:lit, s}, _env, _ic, _show), do: {:str, s}
 
   defp resolve_part({:hole, expr}, env, ic, show) do

@@ -117,6 +117,7 @@ defmodule Rian.Capability do
 
   # `Name(A, B, …)` -> `{name, [A, B, …]}` splitting on top-level commas only
   # (so nested generics like `Map(String, Vec(Int64))` parse); `nil` otherwise
+  @spec parametric(String.t()) :: {String.t(), [String.t()]} | nil
   defp parametric(t) do
     case Regex.run(~r/^([A-Za-z_]\w*)\((.*)\)$/, t) do
       [_, name, inner] -> {name, split_top_level(inner)}

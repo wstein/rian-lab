@@ -35,6 +35,7 @@ defmodule Rian.Shadow do
   @spec dedup(list(), list(), fun()) :: term()
   def dedup(stmts, params, fresh), do: ded_block(stmts, %{}, Map.new(params, &{&1, 1}), fresh)
 
+  @spec ded_block([tuple()], term(), term(), term()) :: {[tuple()], term(), term()}
   defp ded_block(stmts, r, ver, fresh) do
     {rev, _r, _ver} =
       Enum.reduce(stmts, {[], r, ver}, fn

@@ -79,6 +79,7 @@ defmodule Rian.Repl.History do
     _ -> :ok
   end
 
+  @spec load_strings() :: [String.t()]
   defp load_strings, do: Enum.map(load(), &List.to_string/1)
 
   # Collapse runs of an identical line into one (consecutive dedup).
