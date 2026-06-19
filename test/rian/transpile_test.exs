@@ -92,6 +92,27 @@ defmodule Rian.TranspileTest do
     end
   end
 
+  describe "lambda with a pattern param → fresh param + case (Rian lambdas take plain names)" do
+    test "a `fn {k, v} -> …` desugars to `(p1) -> case p1 do {k, v} -> … end`" do
+      out =
+        rian("""
+        defmodule M do
+          def f(xs), do: Enum.map(xs, fn {k, v} -> k <> v end)
+        end
+        """)
+
+      assert out =~ "(p1) -> case p1 do"
+      assert out =~ "{k, v} ->"
+      refute out =~ "({k, v}) ->"
+    end
+
+    test "a plain-name lambda is unchanged (no case wrapper)" do
+      out = rian("defmodule M do\n  def f(xs), do: Enum.map(xs, fn x -> x + 1 end)\nend")
+      assert out =~ "(x) -> x + 1"
+      refute out =~ "case"
+    end
+  end
+
   describe "cond → nested if/else (Rian has no `cond`)" do
     test "a cond with a `true ->` catch-all lowers to a right-nested if/else chain" do
       out =

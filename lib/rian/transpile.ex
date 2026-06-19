@@ -1549,22 +1549,18 @@ defmodule Rian.Transpile do
   end
 
   # single-clause anonymous fn `fn a, b -> body end` → Rian lambda `(a, b) -> body`
-  # (ADR-0042).
-  defp expr({:fn, _, [{:->, _, [args, body]}]}) do
-    params = Enum.map_join(args, ", ", &pat/1)
-    "(#{params}) -> #{render_body(body)}"
+  # (ADR-0042). A **pattern** param (`fn {k, v} -> …`) — which a Rian lambda does not
+  # take (its params are plain names) — desugars to a fresh param + a single-arm `case`,
+  # the same shape as a multi-clause fn.
+  defp expr({:fn, _, [{:->, _, [args, body]} = arrow]}) do
+    if Enum.all?(args, &simple_var?/1),
+      do: "(#{Enum.map_join(args, ", ", &pat/1)}) -> #{render_body(body)}",
+      else: fn_case_desugar([arrow])
   end
 
   # multi-clause `fn` → a single-clause lambda over fresh params that `case`-matches
-  # on them (Rian lambdas are single-clause, ADR-0042). Arity > 1 matches on the
-  # tuple of params; guards and per-clause patterns are preserved via `case_arm`.
-  defp expr({:fn, _, [_ | _] = clauses}) do
-    n = fn_arity(hd(clauses))
-    params = Enum.map(1..n, &"p#{&1}")
-    subject = if n == 1, do: hd(params), else: "{#{Enum.join(params, ", ")}}"
-    arms = Enum.map_join(clauses, "\n", &indent(case_arm(fn_clause_to_arm(&1, n))))
-    "(#{Enum.join(params, ", ")}) -> case #{subject} do\n#{arms}\nend"
-  end
+  # on them (Rian lambdas are single-clause, ADR-0042).
+  defp expr({:fn, _, [_ | _] = clauses}), do: fn_case_desugar(clauses)
 
   # function captures (ADR-0042) → eta-expanded Rian lambdas.
   # `&name/arity` → `(p1,…) -> name(p1,…)`
@@ -1840,6 +1836,22 @@ defmodule Rian.Transpile do
 
   defp wrap_tuple([p]), do: p
   defp wrap_tuple(pats), do: {:{}, [], pats}
+
+  # fresh-param lambda whose body `case`-matches the params (arity > 1 matches the tuple
+  # of params); guards and per-clause patterns are preserved via `case_arm`. Used for
+  # multi-clause fns AND single-clause fns with pattern params.
+  defp fn_case_desugar(clauses) do
+    n = fn_arity(hd(clauses))
+    params = Enum.map(1..n, &"p#{&1}")
+    subject = if n == 1, do: hd(params), else: "{#{Enum.join(params, ", ")}}"
+    arms = Enum.map_join(clauses, "\n", &indent(case_arm(fn_clause_to_arm(&1, n))))
+    "(#{Enum.join(params, ", ")}) -> case #{subject} do\n#{arms}\nend"
+  end
+
+  # a plain variable AST node (`{name, meta, ctx}` with atom name + atom context) — as
+  # opposed to a pattern (tuple/list/map/struct), which a Rian lambda param can't be.
+  defp simple_var?({name, _, ctx}) when is_atom(name) and is_atom(ctx), do: true
+  defp simple_var?(_), do: false
 
   # ── patterns ────────────────────────────────────────────────────────────────
 
