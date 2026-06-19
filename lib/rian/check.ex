@@ -1327,12 +1327,31 @@ defmodule Rian.Check do
   defp assignable?(_from, :unknown), do: true
 
   defp assignable?(from, to) do
-    case {num_kind(from), num_kind(to)} do
-      {nil, _} -> unify(from, to) != :mismatch
-      {_, nil} -> unify(from, to) != :mismatch
-      {a, b} -> num_widens?(a, b)
+    cond do
+      # a constructor whose payload type the inference didn't track yields the **bare
+      # sum head** (`Some(x)` -> `Option`); that is *under-specified*, not a provable
+      # mismatch against the same head parameterized (`Option(Vec(Char))`), so the
+      # conservative checker must accept it (CLAUDE.md). Differing heads (`Option` vs
+      # `Vec`) still mismatch — the `(` boundary pins the head exactly.
+      bare_head_of?(from, to) ->
+        true
+
+      true ->
+        case {num_kind(from), num_kind(to)} do
+          {nil, _} -> unify(from, to) != :mismatch
+          {_, nil} -> unify(from, to) != :mismatch
+          {a, b} -> num_widens?(a, b)
+        end
     end
   end
+
+  # `from` is the bare head (no params) of the parameterized `to` — `"Option"` of
+  # `"Option(Vec(Char))"`. The `(` after the head rules out a prefix collision
+  # (`"Option"` is not the head of `"Optional(X)"`).
+  defp bare_head_of?(from, to) when is_binary(from) and is_binary(to),
+    do: not String.contains?(from, "(") and String.starts_with?(to, from <> "(")
+
+  defp bare_head_of?(_from, _to), do: false
 
   # a numeric type string -> {:int | :uint | :float, bit-width}, else nil
   defp num_kind("UInt" <> w), do: num_bits(:uint, w)

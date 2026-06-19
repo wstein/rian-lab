@@ -120,6 +120,17 @@ defmodule Rian.CheckTest do
     test "a String return with a literal string body passes" do
       assert Check.check(~s|def name(n Int64) String := "n"|) == :ok
     end
+
+    test "a bare inferred sum head is assignable to the same head parameterized (conservative)" do
+      # `Some(rest)` infers the bare head `Option` (the payload type is not tracked); it
+      # is under-specified, NOT a provable mismatch against `Option(Vec(Char))`, so the
+      # conservative checker accepts it (the self-host `strip_prefix` shape, ADR-0034).
+      assert Check.check("def strip(rest Vec(Char)) Option(Vec(Char)) := Some(rest)") == :ok
+
+      # but a DIFFERENT head still mismatches — the relaxation pins the head exactly
+      assert {:error, msg} = Check.check("def g() Vec(Int64) := Some(1)")
+      assert msg =~ "declared return type is `Vec(Int64)`"
+    end
   end
 
   describe "typed bindings (ADR-0034 §1)" do
