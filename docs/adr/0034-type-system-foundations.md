@@ -130,6 +130,13 @@ type *pushed down* into the value:
   `assignable?` rule governs a function body against its declared **return** type. Widening is
   lossless and never silent at runtime (each `Intₙ` is a representation-intent floor, ADR-0035); an
   `:unknown` RHS is left unchecked (the gate reports only provable clashes).
+- a **bare constructor head is assignable to the same head parameterized** (added 2026-06-19): a
+  variant value whose payload type the inference did not track yields the bare sum head — `Some(x)`
+  and `None` both infer `Option`, not `Option(T)` — and that is *under-specified*, not a *provable*
+  clash against a declared `Option(Vec(Char))`. So `Option ⊑ Option(Vec(Char))` (the `(` after the
+  head pins it exactly — `Option` is **not** the head of `Optional(X)`), while a **different** head
+  (`Some(1)` against `Vec(Int64)`) stays a proven mismatch. This keeps the conservative checker from
+  rejecting valid `Option`/sum-returning code such as the self-host `strip_prefix` (`Rian.Check`).
 
 The binding then carries its **declared** type downstream (display, `-spec`, later checks), not the
 inferred one. Every backend **erases** the annotation when lowering — consistent with native-per-target
