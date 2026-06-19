@@ -353,7 +353,7 @@ defmodule Rian.TranspileInferTest do
       assert Transpile.transpile(src, infer: true) =~ "pub def cur(s Session) Session := s"
     end
 
-    test "an untranslatable @type (tuple) yields no resolution — no decl, no spec fill" do
+    test "a tuple @type resolves to a Rian tuple type (Rian has `(A, B)`)" do
       src = """
       defmodule M do
         @type pair :: {integer(), integer()}
@@ -363,11 +363,9 @@ defmodule Rian.TranspileInferTest do
       """
 
       out = Transpile.transpile(src, infer: true)
-      # no synthesized decl (untranslatable), and the tuple ref gives no hint
-      refute out =~ "type Pair :="
-      assert out =~ "# type: @type pair"
-      # the spec adds nothing, so identity inference still generalizes (not a wrong fill)
-      assert out =~ "pub def mk(p T) T forall T := p"
+      # Rian has tuple types, so `{integer(), integer()}` has a clean image — the spec fills
+      # both param and return with `(Int53, Int53)` instead of leaving a generic/hole.
+      assert out =~ "pub def mk(p (Int53, Int53)) (Int53, Int53) := p"
     end
 
     test "a synthesized union-type draft compiles (the decl + its use are valid Rian)" do
@@ -402,8 +400,9 @@ defmodule Rian.TranspileInferTest do
       assert rian_t("f() :: boolean()") == "Bool"
     end
 
-    test "an Elixir type with no clean Rian image renders `_Unk`" do
-      assert rian_t("f() :: {:ok, integer()}") == "_Unk"
+    test "a tuple renders a Rian tuple type; a map (no clean image) stays `_Unk`" do
+      # Rian has tuple types — `{:ok, integer()}` → `(Symbol, Int53)`; `map()` has no image.
+      assert rian_t("f() :: {:ok, integer()}") == "(Symbol, Int53)"
       assert rian_t("f() :: map()") == "_Unk"
     end
   end
@@ -634,9 +633,15 @@ defmodule Rian.TranspileInferTest do
 
     test "types with no clean Rian image are an honest `_Unk` (never guessed)" do
       assert Infer.spec_type_to_rian(quote(do: any())) == "_Unk"
-      assert Infer.spec_type_to_rian(quote(do: {integer(), atom()})) == "_Unk"
+      # a *shapeless* `tuple()` element has no Rian image (Rian tuple types are shaped)
       assert Infer.spec_type_to_rian(quote(do: [tuple()])) == "_Unk"
-      assert Infer.spec_type_to_rian(quote(do: integer() | {a, b})) == "_Unk"
+    end
+
+    test "shaped tuples translate to Rian tuple types `(A, B)`" do
+      assert Infer.spec_type_to_rian(quote(do: {integer(), atom()})) == "(Int53, Symbol)"
+
+      assert Infer.spec_type_to_rian(quote(do: {String.t(), [integer()]})) ==
+               "(String, Vec(Int53))"
     end
 
     test "a local @type ref resolves through the type_env" do

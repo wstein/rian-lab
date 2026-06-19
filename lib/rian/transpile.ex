@@ -582,6 +582,9 @@ defmodule Rian.Transpile do
       # compatible with everything; a confident declared type vs inferred `_Unk` just means the
       # human knows more than the conservative inferer — never a conflict.
       declared in ["_Unk", "Any"] or inferred in ["_Unk", "Any"] -> false
+      # a union (`A | B`) is structural — inference often yields the variant shape of a nominal
+      # sum (`Outcome` ≈ `Symbol | (Symbol, _Unk)`); not nominally comparable, so skip.
+      String.contains?(declared, "|") or String.contains?(inferred, "|") -> false
       has_tvar?(declared) or has_tvar?(inferred) -> false
       prim?(declared) and prim?(inferred) -> prim_kind(declared) != prim_kind(inferred)
       prim?(declared) or prim?(inferred) -> false

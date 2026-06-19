@@ -314,6 +314,13 @@ defmodule Rian.Transpile.Infer do
   defp translate_spec({:list, _, [elem]}, e), do: vec_spec(elem, e)
   defp translate_spec({:|, _, [a, b]}, e), do: union_spec(a, b, e)
 
+  # tuple types → Rian `(A, B, …)`: an n-tuple is `{:{}, _, elems}`; a 2-tuple is a literal
+  # 2-element tuple (`{a, b}`). An untranslatable element keeps the tuple shape with a `_Unk`
+  # slot, so the type stays concrete (a private's return resolves instead of staying a hole).
+  # Placed before the `{name, _, args}` clause, which would otherwise capture `{:{}, …}`.
+  defp translate_spec({:{}, _, elems}, e), do: tuple_spec(elems, e)
+  defp translate_spec({a, b}, e), do: tuple_spec([a, b], e)
+
   defp translate_spec({:%, _, [{:__aliases__, _, parts}, _]}, _e),
     do: con(to_string(List.last(parts)))
 
@@ -331,6 +338,22 @@ defmodule Rian.Transpile.Infer do
       nil -> nil
       t -> app("Vec", [t])
     end
+  end
+
+  # A tuple type renders to a ground `{:con, "(A, B)"}` — Rian has tuple types, so a shaped
+  # tuple DOES have a clean image (unlike the old "tuples are always _Unk" assumption). Using a
+  # `con` (not a new term shape) means the inference engine's unify/occurs? need no changes; an
+  # untranslatable element keeps the shape with a `_Unk` slot.
+  defp tuple_spec(elems, e) do
+    parts =
+      Enum.map(elems, fn el ->
+        case translate_spec(el, e) do
+          nil -> "_Unk"
+          t -> spec_str(t)
+        end
+      end)
+
+    con("(" <> Enum.join(parts, ", ") <> ")")
   end
 
   defp union_spec(a, b, e) do
