@@ -22,6 +22,11 @@ defmodule Rian.BeamTest do
       assert mod.kind(42) == "plain"
     end
 
+    test "`elem(t, i)` lowers to the 1-indexed `:erlang.element` BIF (not undefined_function)" do
+      {:ok, mod} = Beam.load("def snd(t _Unk) _Unk := elem(t, 1)", :rian_beam_elem)
+      assert mod.snd({:a, :b, :c}) == :b
+    end
+
     test "a bitstring `<<…>>` compiles to native binary forms and runs (ADR-0078)" do
       {:ok, mod} =
         Beam.load(

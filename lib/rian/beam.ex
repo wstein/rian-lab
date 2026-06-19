@@ -108,6 +108,7 @@ defmodule Rian.Beam do
     defexception [:message]
   end
 
+  @rian_sig "pub def load(src String, module Symbol) _Unk"
   @doc """
   Compile every top-level function in `src` into one Erlang module named `module`
   and load it. Returns `{:ok, module}` (the loaded module atom) or raises
@@ -136,6 +137,7 @@ defmodule Rian.Beam do
     {:ok, module}
   end
 
+  @rian_sig "pub def load_result(src String, module Symbol) _Unk"
   @doc """
   Errors-as-values twin of `load/2` (ADR-0035/0040): `{:ok, module} | {:error,
   message}` instead of raising on a parse/gate/codegen failure — the boundary
@@ -149,6 +151,7 @@ defmodule Rian.Beam do
     e -> {:error, Exception.message(e)}
   end
 
+  @rian_sig "pub def load_program_result(src String) _Unk"
   @doc "Errors-as-values twin of `load_program/1`: `{:ok, [module]} | {:error, message}`."
   @spec load_program_result(String.t()) :: {:ok, [module()]} | {:error, String.t()}
   @rian_host "compile boundary: load_program/1 raises into a value"
@@ -185,6 +188,7 @@ defmodule Rian.Beam do
     :ok
   end
 
+  @rian_sig "pub def compile(src String, module Symbol) _Unk"
   @doc "Compile `src`'s functions to `{:ok, module, beam_binary}` via `:compile.forms`."
   @spec compile(String.t(), module()) :: {:ok, module(), binary()}
   def compile(src, module) when is_atom(module) do
@@ -205,6 +209,7 @@ defmodule Rian.Beam do
     )
   end
 
+  @rian_sig "pub def compile_program(src String) _Unk"
   @doc """
   Compile a **multi-module** program: every top-level `mod Name` in `src`
   becomes its own BEAM module named `Elixir.Name`, so a Rian cross-module call
@@ -833,6 +838,16 @@ defmodule Rian.Beam do
 
     {:op, @ln, :andalso, {:call, @ln, {:atom, @ln, :is_map}, [xf]},
      {:call, @ln, {:atom, @ln, :is_map_key}, [{:atom, @ln, :__struct__}, xf]}}
+  end
+
+  # `elem(t, i)` — tuple element access (0-indexed, Elixir convention) — is a Kernel function,
+  # not auto-imported into Erlang, so a bare emit is an `undefined_function`. Lower it to the
+  # Erlang BIF `:erlang.element(i + 1, t)` (1-indexed).
+  defp expr_form(%ECall{fun: %EId{name: "elem"}, args: [t, i]}, s) do
+    idx = {:op, @ln, :+, expr_form(i, s), {:integer, @ln, 1}}
+
+    {:call, @ln, {:remote, @ln, {:atom, @ln, :erlang}, {:atom, @ln, :element}},
+     [idx, expr_form(t, s)]}
   end
 
   defp expr_form(%ECall{fun: %EId{name: f}, args: args}, s) do
