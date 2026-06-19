@@ -278,6 +278,7 @@ defmodule Rian.SelfHost do
   The list parameter is the test seam that exercises every status badge (incl.
   `:not_started`, which no real stage currently carries) without faking the data.
   """
+  @rian_sig "pub def status_markdown(stages Vec(_Unk)) String"
   @spec status_markdown([map()]) :: String.t()
   def status_markdown(stages) do
     rows =

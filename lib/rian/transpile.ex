@@ -519,6 +519,74 @@ defmodule Rian.Transpile do
     end)
   end
 
+  @doc """
+  Verify each `@rian_sig` against the transpiler's own inference for the same function
+  (ADR-0081 safety): a declared CONCRETE type that *provably* conflicts with the inferred
+  CONCRETE type (`Rian.Check.unify/2` → `:mismatch`) is a lying signature — a silent
+  miscompile to every target, Rust included, which `rustc` would never allow. Returns a list
+  of human-readable conflicts (empty = sound). `_Unk`/`_Infer`/un-inferred slots make no
+  claim and are skipped — only concrete-vs-concrete disagreement is flagged, so the
+  conservative inferer never raises a false alarm.
+  """
+  @rian_sig "pub def verify_sigs(source String) Vec(String)"
+  @spec verify_sigs(String.t()) :: [String.t()]
+  def verify_sigs(source) when is_binary(source) do
+    ast = Code.string_to_quoted!(source)
+    {sigmap, _types} = infer_program(ast)
+    {def_anns, _structs, _types} = classify_annotations(Rian.Ann.from_ast(ast))
+
+    for {{name, ar} = key, declared} <- def_anns,
+        inferred = Map.get(sigmap, key),
+        inferred != nil,
+        msg <- sig_conflicts(name, ar, declared, inferred) do
+      msg
+    end
+  end
+
+  defp sig_conflicts(name, ar, declared, inferred) do
+    ret =
+      if type_conflict?(declared.ret, inferred.ret),
+        do: ["#{name}/#{ar} return: sig `#{declared.ret}` vs inferred `#{inferred.ret}`"],
+        else: []
+
+    params =
+      declared.params
+      |> Enum.zip(Map.get(inferred, :params, []))
+      |> Enum.with_index()
+      |> Enum.filter(fn {{d, i}, _} -> type_conflict?(d, i) end)
+      |> Enum.map(fn {{d, i}, idx} ->
+        "#{name}/#{ar} param #{idx}: sig `#{d}` vs inferred `#{i}`"
+      end)
+
+    ret ++ params
+  end
+
+  # A conflict is flagged ONLY between two scalar primitives of DIFFERENT kinds
+  # (`String` vs `Int53`, `Bool` vs `Float64`) — an unambiguous lie. We deliberately do NOT
+  # flag tvar-vs-concrete (inference uses `T` where a sig pins `Doc` — compatible), nor
+  # differing user-type names (`Symbol` is broader than `Effect`/`Status` — a legit widening),
+  # nor int-width differences (`Int53` vs `Int64` — intentional). The conservative inferer
+  # legitimately diverges from a human sig in those ways; only kind-level disagreement is a bug.
+  defp type_conflict?(declared, inferred) do
+    kd = prim_kind(declared)
+    ki = prim_kind(inferred)
+    kd != nil and ki != nil and kd != ki
+  end
+
+  defp prim_kind(t) when is_binary(t) do
+    cond do
+      t == "String" -> :string
+      t == "Bool" -> :bool
+      t == "Char" -> :char
+      t == "Symbol" -> :symbol
+      Regex.match?(~r/^U?Int\d*$/, t) -> :int
+      Regex.match?(~r/^Float\d+$/, t) -> :float
+      true -> nil
+    end
+  end
+
+  defp prim_kind(_), do: nil
+
   # Parse a declaration annotation, returning nil instead of raising when the
   # string is not a complete declaration (e.g. a bodiless `def` head).
   defp safe_decl(str) do

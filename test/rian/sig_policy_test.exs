@@ -1,25 +1,78 @@
 defmodule Rian.SigPolicyTest do
   use ExUnit.Case, async: true
 
-  # Stability rule (ADR-0081): **every public function defined in `lib/rian` carries a
-  # `@rian_sig`** — the authoritative native-Rian signature. `@spec` is not a substitute
-  # (it is documentary and Elixir-shaped); `@rian_sig` is the stable contract the
-  # Elixir→Rian transpiler reads, so a public function without one would regenerate with
-  # `_Unk` holes. This gate makes the rule self-enforcing instead of a convention that rots.
+  # Stability + safety rules (ADR-0081), enforced so they cannot rot:
   #
-  # Scope + exclusions are deliberate:
-  #   * scoped to modules whose SOURCE is under `lib/rian/` (not `dev/` tools, not Mix tasks);
-  #   * generated/reflection functions (`__struct__`, `__info__`, `module_info`, `child_spec`,
-  #     `__*__`) and `defexception` callbacks (`exception/1`, `message/1`) are not Rian functions;
-  #   * `@behaviour` callbacks (OTP `Application`, Kino `SmartCell`, …) are host-framework
-  #     integration, exempt from the Rian-signature rule.
+  #   1. COVERAGE — every public function defined in `lib/rian` carries a `@rian_sig`.
+  #      Checked per distinct `def` HEAD (default-arg arities collapse — one head, one sig
+  #      covering its `required..total` arity range), so it is strict (a wrong arity, like
+  #      `status_markdown() ` for `status_markdown(stages)`, is caught) without forcing a
+  #      noisy sig per auto-generated default arity.
+  #
+  #   2. SOUNDNESS — every `@rian_sig` must AGREE with the transpiler's own inference for the
+  #      same function: a concrete declared type that provably conflicts with a concrete
+  #      inferred type is a lying signature (a silent miscompile to Rust et al.). This is the
+  #      Rust-like "signature checked against the implementation" property `rustc` enforces.
+  #
+  # Scope: modules whose SOURCE is under `lib/rian/` (not `dev/` tools, not Mix tasks).
+  # Exclusions are structural: generated functions (`__struct__`, `defexception` callbacks,
+  # `child_spec`, …) are not `def`s in source, so a source-based head scan never sees them;
+  # `@behaviour` callbacks (OTP/Kino) are excluded via `behaviour_info/1`.
 
-  @generated [:__struct__, :__info__, :child_spec, :module_info, :exception, :message]
+  defp lib_rian_modules do
+    Application.spec(:rian_lab, :modules)
+    |> Enum.filter(fn mod ->
+      source = mod.module_info(:compile)[:source]
 
-  defp lib_rian?(mod) do
-    source = mod.module_info(:compile)[:source]
-    is_list(source) and String.contains?(to_string(source), "/lib/rian/")
+      String.starts_with?(Atom.to_string(mod), "Elixir.Rian.") and
+        is_list(source) and String.contains?(to_string(source), "/lib/rian/")
+    end)
   end
+
+  defp source_of(mod), do: mod.module_info(:compile)[:source] |> to_string()
+
+  # public `def` heads of THIS module (a file can hold several modules — e.g. `Rian.Repl`
+  # and a nested `Rian.Repl.Session` — so defs are attributed to their enclosing module),
+  # each `{name, required_arity, total_arity}`, deduped.
+  defp def_heads(mod) do
+    with {:ok, src} <- File.read(source_of(mod)),
+         {:ok, ast} <- Code.string_to_quoted(src) do
+      collect_module_defs(ast, [], %{})
+      |> Map.get(Atom.to_string(mod), [])
+      |> Enum.reject(&is_nil/1)
+      |> Enum.uniq()
+    else
+      _ -> []
+    end
+  end
+
+  defp collect_module_defs({:defmodule, _, [aliases, [do: body]]}, prefix, acc) do
+    collect_module_defs(body, prefix ++ alias_parts(aliases), acc)
+  end
+
+  defp collect_module_defs({:__block__, _, stmts}, prefix, acc),
+    do: Enum.reduce(stmts, acc, &collect_module_defs(&1, prefix, &2))
+
+  defp collect_module_defs({:def, _, [head | _]}, prefix, acc) when prefix != [] do
+    key = "Elixir." <> Enum.join(prefix, ".")
+    Map.update(acc, key, [head_arity(head)], &[head_arity(head) | &1])
+  end
+
+  defp collect_module_defs(_node, _prefix, acc), do: acc
+
+  defp alias_parts({:__aliases__, _, parts}), do: Enum.map(parts, &to_string/1)
+  defp alias_parts(_), do: []
+
+  defp head_arity({:when, _, [call | _]}), do: head_arity(call)
+
+  defp head_arity({name, _, args}) when is_atom(name) and is_list(args) do
+    total = length(args)
+    defaults = Enum.count(args, &match?({:\\, _, _}, &1))
+    {to_string(name), total - defaults, total}
+  end
+
+  defp head_arity({name, _, _}) when is_atom(name), do: {to_string(name), 0, 0}
+  defp head_arity(_), do: nil
 
   defp behaviour_callbacks(mod) do
     mod.__info__(:attributes)
@@ -33,39 +86,55 @@ defmodule Rian.SigPolicyTest do
     |> MapSet.new()
   end
 
-  # the `def` names declared by a module's `@rian_sig` annotations (struct/type sigs have no
-  # `def`, so they contribute nothing — exactly right).
-  defp sig_def_names(mod) do
+  # {name, arity} declared by a module's `@rian_sig` def annotations (struct/type sigs add none).
+  defp sig_arities(mod) do
     mod
     |> Rian.Ann.from_beam()
-    |> Enum.flat_map(fn s ->
-      Regex.scan(~r/\bdef\s+([a-z_][a-zA-Z0-9_?!]*)/, s) |> Enum.map(fn [_, n] -> n end)
+    |> Enum.map(fn s ->
+      case Rian.Decl.parse_result(s <> " := nil") do
+        {:ok, %{funcs: [f | _]}} -> {to_string(f.name), length(f.params)}
+        _ -> nil
+      end
     end)
+    |> Enum.reject(&is_nil/1)
     |> MapSet.new()
   end
 
-  defp lib_rian_modules do
-    Application.spec(:rian_lab, :modules)
-    |> Enum.filter(&(String.starts_with?(Atom.to_string(&1), "Elixir.Rian.") and lib_rian?(&1)))
-  end
-
-  test "every public function in lib/rian declares a @rian_sig (ADR-0081 stability rule)" do
+  test "every public function in lib/rian declares a @rian_sig (coverage, per def head)" do
     missing =
       Enum.flat_map(lib_rian_modules(), fn mod ->
+        sigs = sig_arities(mod)
         callbacks = behaviour_callbacks(mod)
-        sigs = sig_def_names(mod)
 
-        mod.__info__(:functions)
-        |> Enum.reject(fn {name, _ar} ->
-          name in @generated or String.starts_with?(Atom.to_string(name), "__")
+        mod
+        |> def_heads()
+        |> Enum.reject(fn {name, _req, total} ->
+          MapSet.member?(callbacks, {String.to_atom(name), total})
         end)
-        |> Enum.reject(fn {name, ar} -> MapSet.member?(callbacks, {name, ar}) end)
-        |> Enum.reject(fn {name, _ar} -> MapSet.member?(sigs, Atom.to_string(name)) end)
-        |> Enum.map(fn {name, ar} -> "#{inspect(mod)}.#{name}/#{ar}" end)
+        |> Enum.reject(fn {name, req, total} ->
+          Enum.any?(req..total, &MapSet.member?(sigs, {name, &1}))
+        end)
+        |> Enum.map(fn {name, _req, total} -> "#{inspect(mod)}.#{name}/#{total}" end)
       end)
 
     assert missing == [],
-           "public functions in lib/rian missing a @rian_sig (add one, or `_Infer`/`_Unk` " <>
-             "params + the return type):\n  " <> Enum.join(missing, "\n  ")
+           "public functions in lib/rian missing a @rian_sig:\n  " <> Enum.join(missing, "\n  ")
+  end
+
+  test "every @rian_sig agrees with the transpiler's inference (soundness, no lying sigs)" do
+    conflicts =
+      lib_rian_modules()
+      |> Enum.map(&source_of/1)
+      |> Enum.uniq()
+      |> Enum.flat_map(fn path ->
+        case File.read(path) do
+          {:ok, src} -> Rian.Transpile.verify_sigs(src)
+          _ -> []
+        end
+      end)
+
+    assert conflicts == [],
+           "@rian_sig annotations that provably conflict with inference:\n  " <>
+             Enum.join(conflicts, "\n  ")
   end
 end
