@@ -39,6 +39,7 @@ defmodule Rian.TypeStr do
   # since a type string carries no string/char literal that could hide a comma —
   # so the components are sliced verbatim from the source and keep their exact
   # spelling (a token-reconstruction would normalize `Map(K,V)` → `Map(K, V)`).
+  @spec top_comma_cuts(String.t()) :: [non_neg_integer()]
   defp top_comma_cuts(s) do
     top = top_comma_ordinals(Rian.Lexer.expr_tokens(s))
     commas = :binary.matches(s, ",") |> Enum.map(&elem(&1, 0))
@@ -47,6 +48,7 @@ defmodule Rian.TypeStr do
 
   # 0-based ordinal (among all commas) of each comma token sitting at paren
   # depth 0. Only `(`/`)` nest — brackets/braces are content, as before.
+  @spec top_comma_ordinals([tuple()]) :: [non_neg_integer()]
   defp top_comma_ordinals(tokens) do
     {ords, _i, _d} =
       Enum.reduce(tokens, {[], 0, 0}, fn
@@ -62,6 +64,7 @@ defmodule Rian.TypeStr do
 
   # cut `s` into pieces at the given comma byte positions (the commas themselves
   # are dropped).
+  @spec slice([non_neg_integer()], String.t()) :: [String.t()]
   defp slice(cuts, s) do
     {pieces, last} =
       Enum.reduce(cuts, {[], 0}, fn pos, {acc, start} ->
