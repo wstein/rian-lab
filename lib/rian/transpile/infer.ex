@@ -194,8 +194,8 @@ defmodule Rian.Transpile.Infer do
   `@spec`s are *documentary* in Elixir (unenforced, possibly stale), so these are
   hints, cross-checked against the body in `seed_spec/6`, never ground truth.
   """
-  @rian_sig "pub def collect_specs(stmts _Unk) _Unk"
-  @rian_sig "pub def collect_specs(stmts _Unk, type_env _Unk) _Unk"
+  @rian_sig "pub def collect_specs(stmts Any) _Unk"
+  @rian_sig "pub def collect_specs(stmts Any, type_env _Unk) _Unk"
   def collect_specs(stmts, type_env \\ %{})
 
   def collect_specs(stmts, type_env) when is_list(stmts) do
@@ -212,7 +212,7 @@ defmodule Rian.Transpile.Infer do
   resolves to the module's own struct; a remote `Mod.t()` to `Mod`. Untranslatable
   `@type`s (tuples/maps) are dropped — no hint, no decl.
   """
-  @rian_sig "pub def collect_types(stmts _Unk, mod_name String) _Unk"
+  @rian_sig "pub def collect_types(stmts Any, mod_name String) _Unk"
   def collect_types(stmts, mod_name) when is_list(stmts) do
     raw =
       for {:@, _, [{:type, _, [body]}]} <- stmts,

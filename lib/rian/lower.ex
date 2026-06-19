@@ -80,7 +80,7 @@ defmodule Rian.Lower do
   @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct)) _Unk"
   @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range)) _Unk"
   @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), proto _Unk) _Unk"
-  @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), proto _Unk, ic _Unk) _Unk"
+  @rian_sig "pub def compile(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), proto _Unk, ic Ic) _Unk"
   @spec compile(list(), map(), list(), list(), map(), map()) :: map()
   def compile(types, func, structs \\ [], ranges \\ [], proto \\ %{}, ic \\ %{}) do
     env = build_env(types, structs, ranges)
@@ -103,7 +103,7 @@ defmodule Rian.Lower do
   @rian_sig "pub def compile_elixir(types Vec(Type), func Func) _Unk"
   @rian_sig "pub def compile_elixir(types Vec(Type), func Func, structs Vec(Struct)) _Unk"
   @rian_sig "pub def compile_elixir(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range)) _Unk"
-  @rian_sig "pub def compile_elixir(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), ic _Unk) _Unk"
+  @rian_sig "pub def compile_elixir(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), ic Ic) _Unk"
   @spec compile_elixir(list(), map(), list(), list(), map()) :: map()
   def compile_elixir(types, func, structs \\ [], ranges \\ [], ic \\ %{}) do
     env = build_env(types, structs, ranges)
@@ -119,7 +119,7 @@ defmodule Rian.Lower do
   @rian_sig "pub def compile_beam(types Vec(Type), func Func) _Unk"
   @rian_sig "pub def compile_beam(types Vec(Type), func Func, structs Vec(Struct)) _Unk"
   @rian_sig "pub def compile_beam(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range)) _Unk"
-  @rian_sig "pub def compile_beam(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), ic _Unk) _Unk"
+  @rian_sig "pub def compile_beam(types Vec(Type), func Func, structs Vec(Struct), ranges Vec(Range), ic Ic) _Unk"
   @spec compile_beam(list(), map(), list(), list(), map()) :: map()
   def compile_beam(types, func, structs \\ [], ranges \\ [], ic \\ %{}),
     do: compile_elixir(types, func, structs, ranges, ic)
@@ -129,14 +129,14 @@ defmodule Rian.Lower do
   `mod` (Rust), with its types/structs emitted once and each function wrapped at
   its declared visibility (`pub?` -> `def`/`pub fn`, else `defp`/private `fn`).
   """
-  @rian_sig "pub def compile_module(m Mod, ic _Unk) _Unk"
+  @rian_sig "pub def compile_module(m Mod, ic Ic) _Unk"
   @spec compile_module(struct(), map()) :: map()
   def compile_module(%Rian.IR.Mod{} = m, ic \\ %{}) do
     %{elixir: module_elixir(m, ic), rust: module_rust(m, ic)}
   end
 
   @doc "Compile a module to the BEAM target only."
-  @rian_sig "pub def compile_module_beam(m Mod, ic _Unk) _Unk"
+  @rian_sig "pub def compile_module_beam(m Mod, ic Ic) _Unk"
   @spec compile_module_beam(struct(), map()) :: map()
   def compile_module_beam(%Rian.IR.Mod{} = m, ic \\ %{}), do: %{elixir: module_elixir(m, ic)}
 
@@ -336,7 +336,7 @@ defmodule Rian.Lower do
   @rian_sig "pub def to_elixir(func Func, types Vec(Type)) _Unk"
   @rian_sig "pub def to_elixir(func Func, types Vec(Type), structs Vec(Struct)) _Unk"
   @rian_sig "pub def to_elixir(func Func, types Vec(Type), structs Vec(Struct), smeta _Unk) _Unk"
-  @rian_sig "pub def to_elixir(func Func, types Vec(Type), structs Vec(Struct), smeta _Unk, ic _Unk) _Unk"
+  @rian_sig "pub def to_elixir(func Func, types Vec(Type), structs Vec(Struct), smeta _Unk, ic Ic) _Unk"
   @spec to_elixir(map(), list(), list(), map(), map()) :: term()
   def to_elixir(func, types, structs \\ [], smeta \\ %{}, ic \\ %{}) do
     typespecs = Enum.map_join(types, "\n", &ex_typespec/1)
@@ -1068,7 +1068,7 @@ defmodule Rian.Lower do
   @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct)) _Unk"
   @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct), smeta _Unk) _Unk"
   @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct), smeta _Unk, proto _Unk) _Unk"
-  @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct), smeta _Unk, proto _Unk, ic _Unk) _Unk"
+  @rian_sig "pub def to_rust(func Func, types Vec(Type), meta _Unk, structs Vec(Struct), smeta _Unk, proto _Unk, ic Ic) _Unk"
   @spec to_rust(map(), list(), term(), list(), map(), map(), map()) :: term()
   def to_rust(func, types, meta, structs \\ [], smeta \\ %{}, proto \\ %{}, ic \\ %{}) do
     enums = Enum.map_join(types, "\n\n", &rust_enum/1)
@@ -1131,7 +1131,7 @@ defmodule Rian.Lower do
   `to_rust` cannot (it repeats type defs per unit).
   """
   @rian_sig "pub def rust_program(prog Prog) _Unk"
-  @rian_sig "pub def rust_program(prog Prog, ic _Unk) _Unk"
+  @rian_sig "pub def rust_program(prog Prog, ic Ic) _Unk"
   @spec rust_program(map(), map()) :: term()
   def rust_program(prog, ic \\ %{}) do
     # Erase abstract types to their base (ADR-0067) — a whole-program Rust emit

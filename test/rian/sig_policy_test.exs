@@ -121,6 +121,31 @@ defmodule Rian.SigPolicyTest do
            "public functions in lib/rian missing a @rian_sig:\n  " <> Enum.join(missing, "\n  ")
   end
 
+  # `_Unk` is a TRANSIENT placeholder ("type still to be defined"), not `any` (ADR-0034). This
+  # ratchet enforces "drive it to zero": the count may only DROP. New `_Unk` fails the gate —
+  # type it concretely, or write `Any` if the value is genuinely dynamic. When you reduce it,
+  # lower @unk_baseline to lock the gain (same discipline as priv/transpile_check_baseline.txt).
+  @unk_baseline 271
+
+  defp unk_count do
+    lib_rian_modules()
+    |> Enum.flat_map(&Rian.Ann.from_beam/1)
+    |> Enum.map(fn s -> length(String.split(s, "_Unk")) - 1 end)
+    |> Enum.sum()
+  end
+
+  test "`_Unk` placeholders only ratchet DOWN (ADR-0034)" do
+    count = unk_count()
+
+    assert count <= @unk_baseline,
+           "#{count - @unk_baseline} new `_Unk` placeholder(s) introduced (#{count} > " <>
+             "#{@unk_baseline}). `_Unk` is transient — give it a concrete type, or `Any` if it " <>
+             "genuinely accepts any value."
+
+    assert count == @unk_baseline,
+           "`_Unk` dropped to #{count} (good) — lower @unk_baseline to #{count} to lock the gain."
+  end
+
   test "every @rian_sig agrees with the transpiler's inference (soundness, no lying sigs)" do
     conflicts =
       lib_rian_modules()

@@ -163,7 +163,7 @@ defmodule Rian.Check do
   accepted too and translated, so existing callers keep working (ADR-0050 — the
   checker consumes the core, one inference, no second representation).
   """
-  @rian_sig "pub def infer(ast _Unk, env _Unk, ic _Unk) String"
+  @rian_sig "pub def infer(ast _Unk, env _Unk, ic Ic) String"
   @spec infer(term(), map(), map()) :: ty()
   def infer(ast, env \\ %{}, ic \\ %{})
   def infer(ast, env, ic) when is_tuple(ast), do: infer(Core.from_expr(ast), env, ic)
@@ -429,7 +429,7 @@ defmodule Rian.Check do
   of type rules), so an emitter can read representation choices off `node.type`
   (ADR-0041/0043/0046). Nodes inference can't pin down keep `type: nil`.
   """
-  @rian_sig "pub def annotate(ast _Unk, env _Unk, ic _Unk) Expr"
+  @rian_sig "pub def annotate(ast _Unk, env _Unk, ic Ic) Expr"
   @spec annotate(term(), map(), map()) :: term()
   def annotate(ast, env \\ %{}, ic \\ %{})
   def annotate(ast, env, ic) when is_tuple(ast), do: annotate(Core.from_expr(ast), env, ic)
@@ -765,8 +765,8 @@ defmodule Rian.Check do
   to enable it.
   """
   @rian_sig "pub def check_func(func Func) _Unk"
-  @rian_sig "pub def check_func(func Func, ic _Unk) _Unk"
-  @rian_sig "pub def check_func(func Func, ic _Unk, table _Unk) _Unk"
+  @rian_sig "pub def check_func(func Func, ic Ic) _Unk"
+  @rian_sig "pub def check_func(func Func, ic Ic, table _Unk) _Unk"
   @spec check_func(struct(), map(), map()) :: term()
   def check_func(func, ic \\ %{}, eset \\ %{tsets: %{}, table: %{}})
 
@@ -1791,7 +1791,7 @@ defmodule Rian.Check do
   build the same per-clause env the checker uses, to annotate the typed Core IR
   (ADR-0050 §3).
   """
-  @rian_sig "pub def clause_env(pats _Unk, params Vec(Param), ic _Unk) _Unk"
+  @rian_sig "pub def clause_env(pats _Unk, params Vec(Param), ic Ic) _Unk"
   @spec clause_env([term()], [map()], map()) :: map()
   def clause_env(pats, params, ic) do
     pats
@@ -1801,7 +1801,7 @@ defmodule Rian.Check do
     end)
   end
 
-  @rian_sig "pub def infer_return_type(func Func, ic _Unk) String"
+  @rian_sig "pub def infer_return_type(func Func, ic Ic) String"
   @doc """
   Infer a private function's RETURN type from its clause bodies — the join of each
   clause's inferred body type, given the inference context `ic` (`program_ic/1`).
@@ -1848,7 +1848,7 @@ defmodule Rian.Check do
     end)
   end
 
-  @rian_sig "pub def infer_param_type(func Func, i Int53, ic _Unk) String"
+  @rian_sig "pub def infer_param_type(func Func, i Int53, ic Ic) String"
   @doc """
   Infer a private function parameter's type at position `i`, bidirectionally
   (Dunfield–Krishnaswami "checking", realized locally): an arithmetic/compare
