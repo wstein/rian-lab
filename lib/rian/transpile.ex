@@ -1375,7 +1375,11 @@ defmodule Rian.Transpile do
   end
 
   defp name_str(n), do: to_string(n)
-  defp var_name({n, _, ctx}) when is_atom(n) and is_atom(ctx), do: to_string(n)
+  # A bound variable's name, keyword-escaped (`mod` -> `mod_`) so an inline def head
+  # param or an as-pattern binder matches the body's reference (which escapes via
+  # `rian_ident`) AND does not collide with a Rian keyword. Without this an Elixir var
+  # named `mod`/`type`/… emits the bare keyword in the head but `mod_` in the body.
+  defp var_name({n, _, ctx}) when is_atom(n) and is_atom(ctx), do: rian_ident(n)
   defp var_name(other), do: snippet(other)
 
   # ── ExUnit test blocks (ADR-0060) ─────────────────────────────────────────
@@ -1937,6 +1941,9 @@ defmodule Rian.Transpile do
 
   defp mod_str({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
   defp mod_str(a) when is_atom(a), do: ":#{a}"
+  # a runtime module VALUE (`apply(mod, …)`): keyword-escape so it matches the head
+  # binder (`mod` -> `mod_`), not the bare keyword that `snippet` would emit.
+  defp mod_str({n, _, ctx}) when is_atom(n) and is_atom(ctx), do: rian_ident(n)
   defp mod_str(other), do: snippet(other)
 
   # An `{:__aliases__, …}` capitalized module that isn't Elixir stdlib — treated

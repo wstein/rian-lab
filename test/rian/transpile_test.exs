@@ -1165,8 +1165,10 @@ end|) =~ ~S|"v=${x}!"|
       # `mod.fun(args)` with a variable receiver IS `apply(mod, :fun, [args])` in
       # Elixir — a faithful BEAM-FFI lowering (reflection / runtime-selected module),
       # non-portable but honest, so it lowers rather than flagging a marker.
+      # the receiver var is named `mod` — a Rian keyword — so it is keyword-escaped to
+      # `mod_` consistently in both the head binder and the `apply/3` lowering.
       out = rian("defmodule M do\n  def call(mod, x), do: mod.tokenize(x)\nend")
-      assert out =~ "apply(mod, :tokenize, [x])"
+      assert out =~ "apply(mod_, :tokenize, [x])"
       refute out =~ ~s|TODO_PORT("remote/stdlib call|
     end
 
