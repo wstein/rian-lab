@@ -10,6 +10,7 @@ defmodule Rian.TypeStr do
   rejected empty components, some did not), which is exactly how a latent bug
   hides. This module is the single source of truth.
   """
+  use Rian.Ann
 
   @doc """
   Split `s` on its **top-level commas only**, so nested generics stay intact:
@@ -22,6 +23,7 @@ defmodule Rian.TypeStr do
   Each component is trimmed; empty components (and `""`) are dropped, so a
   trailing comma or an empty argument list yields no spurious `""` entries.
   """
+  @rian_sig "pub def split_top_commas(s String) Vec(String)"
   @spec split_top_commas(String.t()) :: [String.t()]
   def split_top_commas(""), do: []
 

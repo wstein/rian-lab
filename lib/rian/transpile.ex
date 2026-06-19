@@ -222,8 +222,32 @@ defmodule Rian.Transpile do
     # second parse of the source text); `Rian.Ann.from_beam/1` is the no-source reader.
     {def_anns, struct_anns, type_anns} = classify_annotations(Rian.Ann.from_ast(ast))
 
-    toplevel(ast, Map.merge(sigmap, def_anns), types ++ type_anns, struct_anns)
+    # `@rian_sig` is authoritative, but a **bare-name param** (`nil` type, "infer this") falls
+    # back per-position to the inferred sig rather than overriding it with a hole — so a
+    # return-only `@rian_sig "pub def f(s) Ret"` pins the return and lets inference type `s`.
+    merged =
+      Map.merge(sigmap, def_anns, fn _k, inferred, declared ->
+        %{declared | params: merge_infer_params(Map.get(inferred, :params, []), declared.params)}
+      end)
+
+    toplevel(ast, merged, types ++ type_anns, struct_anns)
   end
+
+  # Per-position: a declared `nil` (an `_Infer` "infer this") takes the inferred type at that
+  # slot; an explicit declared type wins. Trailing declared params with no inferred counterpart
+  # stay `nil` and render `_Unk` downstream.
+  defp merge_infer_params(inferred, declared) do
+    declared
+    |> Enum.with_index()
+    |> Enum.map(fn
+      {nil, i} -> Enum.at(inferred, i)
+      {t, _i} -> t
+    end)
+  end
+
+  # an unresolved `_Infer`/bare slot (`nil`) renders an honest `_Unk` hole.
+  defp unk_if_nil(nil), do: "_Unk"
+  defp unk_if_nil(type), do: type
 
   # The DRAFT banner — a **per-file report** computed from the rendered body, not a
   # static capability legend: what this transpilation produced (def count) and what
@@ -507,12 +531,22 @@ defmodule Rian.Transpile do
     case Rian.Decl.parse_result(sig <> " := nil") do
       {:ok, %{funcs: [f | _]}} ->
         {{to_string(f.name), length(f.params)},
-         %{params: Enum.map(f.params, & &1.type), ret: f.ret, tvars: f.tvars}}
+         %{params: Enum.map(f.params, &sig_param_type/1), ret: f.ret, tvars: f.tvars}}
 
       _ ->
         nil
     end
   end
+
+  # `@rian_sig` distinguishes two underscore markers in param position (2026-06 design):
+  #   * `_Infer` — "fill this param from inference" → `nil` here; the merge takes the inferred
+  #     type at that slot, and an unresolved slot renders an honest `_Unk` hole. This lets a
+  #     return-only sig (`pub def f(s _Infer) Ret`) pin the return without writing `_Unk` filler.
+  #   * `_Unk` — *genuinely opaque* (no knowable type) → kept verbatim.
+  # Any real type (`String`, a `Capitalized` name, a tvar) is kept too. So `_Unk` is reserved
+  # for true opacity and never overloaded as "param I skipped".
+  defp sig_param_type(%{type: "_Infer"}), do: nil
+  defp sig_param_type(%{type: type}), do: type
 
   # Phase B: assemble Result returns (`Payload | Errors`) and synthesize the
   # `type Errors := Tag | …` declaration from the error tags the inferer collected.
@@ -1127,7 +1161,11 @@ defmodule Rian.Transpile do
 
     # inferred sig (or all-holes when inference is off / the slot is unresolved).
     sig = Map.get(sigmap, {to_string(name), arity})
-    ptypes = if sig, do: sig.params, else: List.duplicate("_Unk", arity)
+    # a `nil` slot is a bare-name "infer" param the merge couldn't resolve — render it as an
+    # honest `_Unk` hole (inference genuinely had no type), never silently dropped.
+    ptypes =
+      if sig, do: Enum.map(sig.params, &unk_if_nil/1), else: List.duplicate("_Unk", arity)
+
     ret = if sig, do: sig.ret, else: "_Unk"
 
     forall =

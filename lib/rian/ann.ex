@@ -26,6 +26,17 @@ defmodule Rian.Ann do
   `def` / `pub def` / `struct` / `type` declaration head. Read it with `from_source/1`
   (Elixir text) or `from_beam/1` (a loaded module or a `.beam` path).
 
+  ## Param type markers — `_Infer` vs `_Unk`
+
+  A `@rian_sig` param slot takes one of three forms, so `_Unk` is never overloaded as filler:
+
+    * a **concrete type** (`String`, `Vec(Int53)`, a tvar `T`, …) — pinned, authoritative;
+    * **`_Infer`** — "fill this from inference"; the transpiler takes the inferred type at that
+      slot (an unresolved slot renders an honest `_Unk` hole). This is how a *return-only* sig
+      pins just the return: `@rian_sig "pub def split_top_commas(s _Infer) Vec(String)"`;
+    * **`_Unk`** — a *genuinely opaque* param (no knowable type: a raw map, Erlang forms, a host
+      handle). Reserved for true opacity, not "a param I skipped" — write `_Infer` for that.
+
   ## Two annotation layers (ADR-0081)
 
   `@rian_sig` and `@rian_host` are **Elixir-bridge** annotations: they live only in
@@ -35,6 +46,11 @@ defmodule Rian.Ann do
   `@effects(host)` the host effect, ADR-0048). The bridge marker `@rian_host` *transpiles to*
   the surface effect `@effects(host)`; they intentionally never share a file.
   """
+
+  # This module *defines* `use Rian.Ann`, so it cannot `use` itself (the macro isn't compiled
+  # yet) — register the attribute directly so its own public functions can still carry the
+  # mandatory `@rian_sig` (the "every pub declares its signature" rule applies here too).
+  Module.register_attribute(__MODULE__, :rian_sig, accumulate: true, persist: true)
 
   @doc """
   Register `@rian_sig` as an accumulating, **persisted** attribute — so it compiles
@@ -58,8 +74,7 @@ defmodule Rian.Ann do
   excludes these — they are honest non-portability, not a Rian-concept clash. The
   attribute tags the **next** `def`/`defp` in its block (like `@doc`).
   """
-  # NB: no `@rian_sig` here — this module *defines* the annotation, so it cannot register the
-  # accumulating attribute on itself (bootstrapping); a `@rian_sig` would be "set but never used".
+  @rian_sig "pub def host_funcs(source String) Vec(String)"
   @spec host_funcs(String.t()) :: [String.t()]
   def host_funcs(source) when is_binary(source) do
     case Code.string_to_quoted(source) do

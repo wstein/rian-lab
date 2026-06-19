@@ -1492,6 +1492,7 @@ defmodule Rian.Decl do
     end
   end
 
+  @rian_sig "pub def build_func(group Vec(_Unk)) Func"
   def build_func([%{body: nil} = sig | [_ | _] = clauses]) do
     params = parse_params(sig.params)
     params = if sig[:pub] == true, do: boundary_params(params), else: params
