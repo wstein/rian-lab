@@ -56,6 +56,7 @@ defmodule Rian.Check do
   alias Rian.{Core, Pratt}
 
   alias Rian.Core.{
+    EAtom,
     EBin,
     EBlock,
     ECall,
@@ -166,7 +167,16 @@ defmodule Rian.Check do
   @rian_sig "pub def infer(ast _Unk, env Dict(String, String), ic Ic) String"
   @spec infer(term(), map(), map()) :: ty()
   def infer(ast, env \\ %{}, ic \\ %{})
-  def infer(ast, env, ic) when is_tuple(ast), do: infer(Core.from_expr(ast), env, ic)
+
+  # A still-surface `${…}` interpolation node (not yet rewritten by `Rian.Interp`)
+  # is always `String` — it desugars to a `<>`/concat chain. Typed directly so
+  # inference over an un-resolved body (e.g. `fill_local_rets/2` runs before the
+  # resolution pass) never trips `Core.from_expr`, which rejects a surviving
+  # interpolation. ADR-0069 §4.
+  def infer({:str_interp, _}, _env, _ic), do: "String"
+
+  def infer(ast, env, ic) when is_tuple(ast),
+    do: infer(Core.from_expr(strip_interp_surface(ast)), env, ic)
 
   def infer(%ENum{text: n}, _env, _ic),
     do: if(String.contains?(n, ".") or String.match?(n, ~r/[eE]/), do: "Float64", else: "Int53")
@@ -305,8 +315,16 @@ defmodule Rian.Check do
 
       true ->
         case ctor_type(ic, f) do
-          nil -> called_ret_with(ic, f, as, env)
-          v -> v
+          nil ->
+            case called_ret_with(ic, f, as, env) do
+              # a bare call that is no local function may be a `Kernel` auto-import
+              # (`map_size/1`, `inspect/1`) — type it from the foreign registry.
+              :unknown -> builtin_or_unknown(nil, f, length(as))
+              v -> v
+            end
+
+          v ->
+            v
         end
     end
   end
@@ -350,8 +368,19 @@ defmodule Rian.Check do
   # `{name, arity}` (module-flattened, as on the BEAM), so resolve the callee's declared
   # return type by name+arity. Unknown when no such function is in scope (a foreign/stdlib
   # call). Comes after the `.of`/zero-arg/cast clauses above, which are more specific.
-  def infer(%ECall{fun: %EDot{head: %EId{}, name: fun}, args: as}, _env, ic) do
-    Map.get(Map.get(ic, :funs, %{}), {fun, length(as)}, :unknown)
+  def infer(%ECall{fun: %EDot{head: %EId{name: mod}, name: fun}, args: as}, _env, ic) do
+    case Map.get(Map.get(ic, :funs, %{}), {fun, length(as)}, :unknown) do
+      # not a program function of that name/arity — try the foreign registry
+      # (`String.replace/3 -> String`, …); host-only, but enough to type the call.
+      :unknown -> builtin_or_unknown(mod, fun, length(as))
+      v -> v
+    end
+  end
+
+  # an Erlang-BIF FFI call `:erlang.phash2(x)` / `:file.format_error(r)` — typed
+  # purely from the foreign registry (there is no Rian function behind an atom module).
+  def infer(%ECall{fun: %EDot{head: %EAtom{name: mod}, name: fun}, args: as}, _env, _ic) do
+    builtin_or_unknown(mod, fun, length(as))
   end
 
   # a call to any other callable (a lambda result, a returned function) infers
@@ -527,6 +556,30 @@ defmodule Rian.Check do
 
       _ ->
         called_ret(ic, f, length(args_ast))
+    end
+  end
+
+  # Replace every surface `${…}` node with an empty String literal before `from_expr`
+  # translates a body for *inference*. Interpolation always yields `String`, so this
+  # is type-correct; it lets inference run over an un-resolved body (`fill_local_rets`
+  # runs before the resolution pass) without `Core.from_expr` rejecting a nested
+  # surviving interpolation — that emit-time safety net stays in place for the real
+  # codegen path, which calls `from_expr` directly (not through `infer`). ADR-0069 §4.
+  defp strip_interp_surface({:str_interp, _}), do: {:str, ""}
+
+  defp strip_interp_surface(t) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.map(&strip_interp_surface/1) |> List.to_tuple()
+
+  defp strip_interp_surface(l) when is_list(l), do: Enum.map(l, &strip_interp_surface/1)
+  defp strip_interp_surface(x), do: x
+
+  # the foreign-registry return type of a host call, or `:unknown` when unregistered
+  # (`Rian.Builtins` — declared signatures for the Erlang/Elixir stdlib calls the
+  # transpiler emits verbatim; ADR-0068 FFI).
+  defp builtin_or_unknown(mod, fun, arity) do
+    case Rian.Builtins.ret(mod, fun, arity) do
+      nil -> :unknown
+      t -> t
     end
   end
 

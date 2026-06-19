@@ -161,6 +161,19 @@ defmodule Rian.InterpTest do
       {:ok, _} = Beam.load(src, :interp_callresult)
     end
 
+    test "a hole over a host foreign call resolves via the builtin registry (ADR-0068)" do
+      # `String.replace/3 -> String` and `:erlang.phash2/1 -> Int53` are declared host
+      # signatures (`Rian.Builtins`), so these holes resolve instead of `no Show`.
+      src = ~S"""
+      mod M do
+        pub def a(s String) String := "e=${String.replace(s, "x", "y")}"
+        pub def b(s String) String := "h=${:erlang.phash2(s)}"
+      end
+      """
+
+      {:ok, _} = Beam.load(src, :interp_foreign)
+    end
+
     test "a hole bound by a `case` arm resolves to the scrutinee type (scope-aware)" do
       # `other` is introduced by the arm pattern, typed by the scrutinee (`String`);
       # the resolver threads that binding into the arm body's hole.
