@@ -380,13 +380,25 @@ over time. The proof is a four-stage ladder:
   sources in Rian; the Elixir host compiles them → gen0, gen0 compiles the same sources →
   gen1, gen1 recompiles them → gen2, assert **gen1 == gen2** (identical canonical forms
   AND bit-identical `.beam` under `:deterministic`). The honest claim is **self-COMPILING
-  (BEAM, forms-level)**, *not* bare "self-hosting": the loop is only **partially**
-  self-CHECKING (the structural exhaustiveness + capability gates, plus the first two
-  `Rian.Check` error sets — numeric mix and return-type mismatch, ADR-0035/0064/P3 — are
-  in `build`; the rest are not), it is BEAM-only (the portable Rust/JS terminus is
-  unstarted), and
-  it compiles the compiler's own *subset* of Rian, not arbitrary Rian. Three real gaps,
-  none hidden. See [`test/rian/selfhost_v1_v2_fixpoint_test.exs`](test/rian/selfhost_v1_v2_fixpoint_test.exs).
+  (BEAM, forms-level)**, *not* bare "self-hosting", and the loop is **not** self-CHECKING:
+  it compiles the sources through `Rian.Beam.compile`/`load`, which gate on **`Rian.Reach`
+  only** — the BEAM emit is a low-level forms primitive that skips both `Check.gate!` and
+  clause-exhaustiveness (those run at `Decl.compile` and in the portable emitters). So the
+  bootstrap, on its own, neither type-checks nor totality-checks the compiler; it silently
+  accepts non-total and return-type-mismatched functions that every gated target rejects.
+  Two of those gaps are now closed/tracked separately
+  ([`test/rian/selfhost_gate_test.exs`](test/rian/selfhost_gate_test.exs)):
+  - **Type-correctness is enforced** — `Check.gate!` runs over every `compiler/*.rian` and
+    is clean (it surfaced two real bugs the lax BEAM path hid: `rev`/`cat` declared
+    monomorphic but used polymorphically, now `forall T`).
+  - **Totality is ratcheted, not yet met** — the Rust emitter's exhaustiveness gate flags
+    **9** non-total self-host functions (`i64_project`, `scalar`, `bin_ty`, `parse_fldpats`,
+    `init_of`×2, `scan_hole`, `parse_paren`, `named_fields`) that BEAM accepts; the test
+    asserts the set can only shrink — each is a blocker on the road to a Rust terminus.
+
+  It is also BEAM-only (the portable Rust/JS terminus is unstarted) and compiles the
+  compiler's own *subset* of Rian, not arbitrary Rian. The gaps are measured, none hidden.
+  See [`test/rian/selfhost_v1_v2_fixpoint_test.exs`](test/rian/selfhost_v1_v2_fixpoint_test.exs).
   The canonical BEAM terminus; the portable one is further still.
 
 **Next:** the *full* Stage 2 — port `Rian.Decl`'s declaration parsing in Rian
