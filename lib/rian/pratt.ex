@@ -261,7 +261,9 @@ defmodule Rian.Pratt do
     {:str_interp, resolved}
   end
 
-  defp parse_postfix(node, [{:op, "."}, {:id, name} | rest]),
+  # `.field` — the field name may be a reserved keyword (`p.type`, `m.def`), exactly as a
+  # keyword is a valid construction/map label (ADR-0033); the `word .` shape is unambiguous.
+  defp parse_postfix(node, [{:op, "."}, {tag, name} | rest]) when tag in [:id, :kw],
     do: parse_postfix({:dot, node, name}, rest)
 
   defp parse_postfix(node, [{:lparen} | rest]) do
@@ -453,17 +455,18 @@ defmodule Rian.Pratt do
       end
 
     tokens = expect_op(tokens, "->")
-    {body, tokens} = parse_arm_body(tokens)
+    {body, tokens} = parse_block_value(tokens)
     parse_arms(tokens, [{pat, guard, body} | acc])
   end
 
-  # A `case`/`with`-else arm body is a block — a `;`-separated statement sequence (so it
-  # may carry binds and destructuring binds) ending in a value expression. `parse_stmts`
-  # stops at the next arm's pattern (no leading `;`) or the closing `end`, exactly as a
-  # single-expression body already self-delimits. The common single-expression arm is
-  # unwrapped back to a bare expression so the arm AST (and every existing test) is
-  # unchanged; only a genuinely multi-statement arm becomes an `{:block, …}`.
-  defp parse_arm_body(tokens) do
+  # A `->` body (a `case`/`with`-else arm, or a lambda) is a block — a `;`-separated
+  # statement sequence (so it may carry binds and destructuring binds) ending in a value
+  # expression. `parse_stmts` stops where there is no leading `;`: the next arm's pattern,
+  # the closing `end`, or the enclosing `)`/`,` of a lambda — exactly as a single-expression
+  # body already self-delimits. The common single-expression body is unwrapped back to a
+  # bare expression so the AST (and every existing test) is unchanged; only a genuinely
+  # multi-statement body becomes an `{:block, …}`.
+  defp parse_block_value(tokens) do
     case parse_block(tokens) do
       {{:block, [{:expr, e}]}, rest} -> {e, rest}
       {block, rest} -> {block, rest}
