@@ -246,6 +246,18 @@ defmodule Rian.TranspileInferTest do
       assert sig(body, "half") =~ "pub def half(x Float64) Float64"
     end
 
+    test "X | nil translates to Option(X) — the Elixir optional idiom (ADR-0064)" do
+      # body return is an unknown callee, so inference can't override the spec.
+      body = "  @spec head(String.t()) :: String.t() | nil\n  def head(s), do: lookup(s)"
+      assert sig(body, "head") =~ "Option(String)"
+      refute sig(body, "head") =~ "Symbol"
+    end
+
+    test "a `module() | nil` param also becomes Option(Symbol)" do
+      body = "  @spec run(String.t(), module() | nil) :: integer()\n  def run(s, m), do: s"
+      assert sig(body, "run") =~ "m Option(Symbol)"
+    end
+
     test "any()/term() carries no concrete type -> no hint (slot left to inference)" do
       # `any()` gives no hint; the body here is identity, so inference generalizes the
       # unpinned slot to a tvar — a human still owns any genuinely-open type.

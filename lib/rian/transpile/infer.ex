@@ -356,12 +356,25 @@ defmodule Rian.Transpile.Infer do
     con("(" <> Enum.join(parts, ", ") <> ")")
   end
 
+  # `X | nil` is Elixir's idiom for an optional — translate to Rian `Option(X)`
+  # (ADR-0064), not a `X | Symbol` union (`nil` is not a Rian value). Handles the
+  # nested case `A | B | nil` (right-associative: nil is the rightmost arm).
+  defp union_spec(a, nil, e), do: option_spec(a, e)
+  defp union_spec(nil, b, e), do: option_spec(b, e)
+
   defp union_spec(a, b, e) do
     with ta when ta != nil <- translate_spec(a, e),
          tb when tb != nil <- translate_spec(b, e) do
       con("#{spec_str(ta)} | #{spec_str(tb)}")
     else
       _ -> nil
+    end
+  end
+
+  defp option_spec(inner, e) do
+    case translate_spec(inner, e) do
+      nil -> nil
+      t -> con("Option(#{spec_str(t)})")
     end
   end
 
