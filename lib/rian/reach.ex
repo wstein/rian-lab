@@ -488,6 +488,12 @@ defmodule Rian.Reach do
     # (JS `Number`, `i64` elsewhere) and `Int32`/smaller stay JS-native — neither
     # blocks.
     width = if Enum.any?(sig_types, &js_wide_int?/1), do: [width_blocker()], else: []
+    # `Any` is the deliberate top type (ADR-0034) — a value of genuinely-dynamic shape. The
+    # BEAM erases type annotations, so it's native there; but the typed emitters have no
+    # mapping yet (Rust has no ergonomic top value; JS `any` / Kotlin `Any` are representable
+    # but unimplemented), so `Any` honestly pins off `:rs`/`:js`/`:jvm` until those land. This
+    # is distinct from `_Unk`, an *unfinished* hole — `Any` is a real, reported reach contract.
+    any = if Enum.any?(sig_types, &type_mentions_any?/1), do: [any_blocker()], else: []
     # Two Rust-generic emitter gaps (ADR-0061/0047) the reach matrix must own up to,
     # or `mix rian.targets`/the conformance gate green-lights `:rs` for code `rustc`
     # then rejects (the gate lying). It pins the function off `:rs` only — generics the
@@ -552,7 +558,7 @@ defmodule Rian.Reach do
 
     Enum.reduce(
       f.clauses,
-      {ref ++ int ++ width ++ owned_gen ++ param ++ as_pat ++ bit_pat ++ pin ++ disp,
+      {ref ++ int ++ width ++ any ++ owned_gen ++ param ++ as_pat ++ bit_pat ++ pin ++ disp,
        MapSet.new()},
       fn c, acc ->
         acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
@@ -589,6 +595,15 @@ defmodule Rian.Reach do
 
   defp int_blocker,
     do: %{construct: "Int (arbitrary precision)", kind: :numeric, kills: [:rs, :jvm]}
+
+  defp any_blocker,
+    do: %{construct: "Any (top type)", kind: :typed, kills: [:rs, :js, :jvm]}
+
+  # a signature type that *is* `Any` or mentions it inside a generic (`Vec(Any)`, `Dict(String,
+  # Any)`): the dynamic value flows through, so the pin applies. Word-boundary match avoids
+  # false hits on user types that merely contain the substring (`AnyThing`).
+  defp type_mentions_any?(t) when is_binary(t), do: Regex.match?(~r/\bAny\b/, t)
+  defp type_mentions_any?(_), do: false
 
   defp width_blocker,
     do: %{

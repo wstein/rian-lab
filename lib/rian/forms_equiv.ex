@@ -43,7 +43,7 @@ defmodule Rian.FormsEquiv do
 
   use Rian.Ann
 
-  @rian_sig "pub def normalize(forms _Unk) _Unk"
+  @rian_sig "pub def normalize(forms Any) Any"
   @doc """
   The normalized, sorted list of function forms for a module's abstract code —
   the canonical value two modules must share to be forms-equivalent. Accepts a
@@ -59,7 +59,7 @@ defmodule Rian.FormsEquiv do
     |> Enum.sort_by(fn {:function, _, name, arity, _} -> {name, arity} end)
   end
 
-  @rian_sig "pub def equivalent?(a _Unk, b _Unk) Bool"
+  @rian_sig "pub def equivalent?(a Any, b Any) Bool"
   @doc """
   `true` iff the two inputs (each a `.beam` binary or abstract-code form list)
   share the same normalized function forms.
@@ -67,7 +67,7 @@ defmodule Rian.FormsEquiv do
   @spec equivalent?(binary() | list(), binary() | list()) :: boolean()
   def equivalent?(a, b), do: normalize(a) == normalize(b)
 
-  @rian_sig "pub def diff(a _Unk, b _Unk) _Unk"
+  @rian_sig "pub def diff(a Any, b Any) Any"
   @doc """
   Structured diff for debugging: `:equal`, or `{:diff, forms_only_in_a,
   forms_only_in_b}` over the normalized function forms (matched by name/arity).
@@ -98,7 +98,7 @@ defmodule Rian.FormsEquiv do
 
   A port passes iff every entry is `:equiv` (see `verified?/2`).
   """
-  @rian_sig "pub def verify(oracle _Unk, port _Unk) Vec(_Unk)"
+  @rian_sig "pub def verify(oracle Any, port Any) Vec(Any)"
   @spec verify(term(), term()) :: [{term(), atom()}]
   def verify(oracle, port) do
     na = Map.new(normalize(oracle), &{key(&1), &1})
@@ -120,14 +120,14 @@ defmodule Rian.FormsEquiv do
     end)
   end
 
-  @rian_sig "pub def verified?(oracle _Unk, port _Unk) Bool"
+  @rian_sig "pub def verified?(oracle Any, port Any) Bool"
   @doc "True iff every function in the oracle is matched `:equiv` by the port."
   @spec verified?(term(), term()) :: boolean()
   def verified?(oracle, port), do: Enum.all?(verify(oracle, port), &(elem(&1, 1) == :equiv))
 
   defp key({:function, _, name, arity, _}), do: {name, arity}
 
-  @rian_sig "pub def abstract_code(beam _Unk) _Unk"
+  @rian_sig "pub def abstract_code(beam Any) Any"
   @doc "Extract the Erlang abstract code from a `.beam` binary (raises if absent)."
   @spec abstract_code(binary()) :: list()
   def abstract_code(beam) when is_binary(beam) do

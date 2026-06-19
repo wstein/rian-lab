@@ -95,6 +95,19 @@ ADR does not yet have (target-aware enforcement or union types):
 The Elixir→Rian transpiler emits private `defp`s without a return hole (one fewer `_Unk` per private
 function).
 
+**`Any` (the top type) vs `_Unk` (a placeholder) — never conflated.** Since the same source lowers to
+Rust, which has no untyped values, an *unknown* type and a *deliberately-dynamic* type must be distinct:
+
+- **`_Unk`** is a **transient placeholder** — "this type still needs to be defined." It is an
+  inference hole / draft TODO to be driven to zero, **not** a synonym for `any`. The checker treats it
+  as `:unknown` (unifies with anything, errors only on a *provable* clash).
+- **`Any`** is the **deliberate top type** — "this legitimately accepts any value," for genuinely
+  dynamic host artifacts (Elixir quoted AST, Erlang abstract forms, a `.beam` binary). It is a real,
+  named type: `Rian.Check.unify` makes it the top (`unify(Any, t) = t`), and `Rian.Reach` reports its
+  reach honestly — emittable on the BEAM (`term()`, types erased) but pinned off `:rs`/`:js`/`:jvm`
+  until those emitters map it (`Box<dyn Any>` / `any` / Kotlin `Any`). **If you want `any`, write
+  `Any`** — overloading `_Unk` as `any` hides a real type behind a placeholder and is rejected.
+
 **Integer-literal width:** a bare integer literal defaults to **`Int64`** (ADR-0033 vocabulary);
 other widths require an annotation (`n Int32`). **Overflow/precision is native-per-target**
 (decision-lock 2026-06-12): `Int*` types declare representation *intent* / minimum precision, **not

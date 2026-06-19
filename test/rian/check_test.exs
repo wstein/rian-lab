@@ -12,6 +12,18 @@ defmodule Rian.CheckTest do
       assert Check.unify("String", :unknown) == "String"
       assert Check.unify("Int64", "Bool") == :mismatch
     end
+
+    test "`Any` is the top type — unifies with anything, narrowing to the concrete operand" do
+      # distinct from `:unknown`/`_Unk` (an unfinished hole): `Any` is a deliberate, named
+      # top type. It never conflicts, and it pins off `:rs`/`:js`/`:jvm` (Rian.Reach) while
+      # the BEAM erases it — a *real* reach contract, not an inference gap.
+      assert Check.unify("Any", "Int53") == "Int53"
+      assert Check.unify("String", "Any") == "String"
+      assert Check.unify("Any", "Any") == "Any"
+
+      reach = Rian.Reach.analyze(Rian.Decl.parse("def f(x Any) String := \"v\""))
+      assert Enum.sort(reach["f/1"].reach) == [:ex]
+    end
   end
 
   describe "literal and operator inference" do

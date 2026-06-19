@@ -26,16 +26,23 @@ defmodule Rian.Ann do
   `def` / `pub def` / `struct` / `type` declaration head. Read it with `from_source/1`
   (Elixir text) or `from_beam/1` (a loaded module or a `.beam` path).
 
-  ## Param type markers — `_Infer` vs `_Unk`
+  ## Param type markers — concrete vs `Any` vs `_Infer` vs `_Unk`
 
-  A `@rian_sig` param slot takes one of three forms, so `_Unk` is never overloaded as filler:
+  A `@rian_sig` slot is one of four things; the two underscore markers are **transient**, the
+  two real types are **permanent**:
 
     * a **concrete type** (`String`, `Vec(Int53)`, a tvar `T`, …) — pinned, authoritative;
-    * **`_Infer`** — "fill this from inference"; the transpiler takes the inferred type at that
-      slot (an unresolved slot renders an honest `_Unk` hole). This is how a *return-only* sig
-      pins just the return: `@rian_sig "pub def split_top_commas(s _Infer) Vec(String)"`;
-    * **`_Unk`** — a *genuinely opaque* param (no knowable type: a raw map, Erlang forms, a host
-      handle). Reserved for true opacity, not "a param I skipped" — write `_Infer` for that.
+    * **`Any`** — the deliberate **top type** (ADR-0034): "this legitimately accepts *any*
+      value." A real, named type, used for genuinely-dynamic host artifacts (Elixir quoted AST,
+      Erlang abstract forms, a `.beam` binary). It is emittable (BEAM `term()`; JS/JVM/Rust
+      mappings TBD, so `Rian.Reach` honestly pins it off `:rs`/`:js`/`:jvm` for now). **If you
+      want `any`, write `Any`** — never overload `_Unk`;
+    * **`_Infer`** — "fill this from inference" (transient); the transpiler takes the inferred
+      type at that slot. How a return-only sig pins just the return:
+      `@rian_sig "pub def split_top_commas(s _Infer) Vec(String)"`;
+    * **`_Unk`** — "this type still needs to be defined" (transient): an *unfinished* hole, a
+      TODO to drive to zero — NOT a synonym for `any`. A value that is truly dynamic is `Any`;
+      a value you merely haven't typed yet is `_Unk` (and should become concrete/`Any`).
 
   ## Two annotation layers (ADR-0081)
 
@@ -122,7 +129,7 @@ defmodule Rian.Ann do
   re-parse. The live-source path: the transpiler already holds the module AST, so it
   reads annotations from it rather than parsing the text a second time.
   """
-  @rian_sig "pub def from_ast(ast _Unk) Vec(String)"
+  @rian_sig "pub def from_ast(ast Any) Vec(String)"
   @spec from_ast(Macro.t()) :: [String.t()]
   def from_ast(ast), do: collect(ast)
 

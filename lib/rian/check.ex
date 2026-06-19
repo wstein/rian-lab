@@ -100,6 +100,12 @@ defmodule Rian.Check do
   def unify(t, t), do: t
   def unify(:unknown, t), do: t
   def unify(t, :unknown), do: t
+  # `Any` is the **top type** (ADR-0034): a deliberate, named "accepts anything" — distinct
+  # from `:unknown`/`_Unk`, which is an *unfinished* inference hole. It unifies with every
+  # type (narrowing to the more specific operand), so a value flowing into an `Any` slot never
+  # conflicts. (If we want dynamic, we name it `Any`; we never overload the placeholder.)
+  def unify("Any", t), do: t
+  def unify(t, "Any"), do: t
   def unify("Fn(" <> _ = a, "Fn(" <> _ = b), do: unify_fn(a, b)
   def unify(_, _), do: :mismatch
 

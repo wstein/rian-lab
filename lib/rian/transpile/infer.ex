@@ -351,8 +351,8 @@ defmodule Rian.Transpile.Infer do
   (a tuple/map/atom-literal — a porting decision a human must make). `type_env` resolves
   local `@type` refs. Used to convert `@spec` into a native `@rian_sig` annotation.
   """
-  @rian_sig "pub def spec_type_to_rian(ast _Unk) String"
-  @rian_sig "pub def spec_type_to_rian(ast _Unk, type_env _Unk) String"
+  @rian_sig "pub def spec_type_to_rian(ast Any) String"
+  @rian_sig "pub def spec_type_to_rian(ast Any, type_env _Unk) String"
   @spec spec_type_to_rian(Macro.t(), map()) :: String.t()
   def spec_type_to_rian(ast, type_env \\ %{}) do
     case translate_spec(ast, type_env) do
