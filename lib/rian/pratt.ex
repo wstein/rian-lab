@@ -453,8 +453,21 @@ defmodule Rian.Pratt do
       end
 
     tokens = expect_op(tokens, "->")
-    {body, tokens} = parse_expr(tokens, 0)
+    {body, tokens} = parse_arm_body(tokens)
     parse_arms(tokens, [{pat, guard, body} | acc])
+  end
+
+  # A `case`/`with`-else arm body is a block — a `;`-separated statement sequence (so it
+  # may carry binds and destructuring binds) ending in a value expression. `parse_stmts`
+  # stops at the next arm's pattern (no leading `;`) or the closing `end`, exactly as a
+  # single-expression body already self-delimits. The common single-expression arm is
+  # unwrapped back to a bare expression so the arm AST (and every existing test) is
+  # unchanged; only a genuinely multi-statement arm becomes an `{:block, …}`.
+  defp parse_arm_body(tokens) do
+    case parse_block(tokens) do
+      {{:block, [{:expr, e}]}, rest} -> {e, rest}
+      {block, rest} -> {block, rest}
+    end
   end
 
   # integer value of a numeric lexeme — strips `_` separators the lexer preserves
@@ -734,20 +747,14 @@ defmodule Rian.Pratt do
     end
   end
 
-  # A destructuring bind `{a, b} := e` / `[h | t] := e` — a tuple/list pattern on the LHS
-  # of `:=` (a simple `name := e` is handled by the first clause above). The pattern is
-  # matched against `e`, binding its vars for the rest of the block; `parse_block` desugars
-  # it to a single-arm `case` so there is no new Core node and the exhaustiveness gate sees
-  # it (a refutable list pattern is the writer's assertion, exactly as Elixir's `=`). We
-  # *speculatively* parse a pattern and commit only when `:=` follows — otherwise it is an
-  # ordinary expression statement (a tuple/list *value*).
-  defp parse_stmt([{tag} | _] = tokens) when tag in [:lbrace, :lbracket],
-    do: pat_bind_or_expr(tokens)
-
-  defp parse_stmt(tokens) do
-    {e, rest} = parse_expr(tokens, 0)
-    {{:expr, e}, rest}
-  end
+  # A destructuring bind `{a, b} := e` / `[h | t] := e` / `:ok := e` / `Ctor(x) := e` — any
+  # *pattern* (other than a bare name, handled by the first clause above) on the LHS of `:=`.
+  # The pattern is matched against `e`, binding its vars for the rest of the block;
+  # `parse_block` desugars it to a single-arm `case` so there is no new Core node and the
+  # exhaustiveness gate sees it (a refutable pattern is the writer's assertion, exactly as
+  # Elixir's `=`). We *speculatively* parse a pattern and commit only when `:=` follows —
+  # otherwise it is an ordinary expression statement (a tuple/list/atom *value*).
+  defp parse_stmt(tokens), do: pat_bind_or_expr(tokens)
 
   defp pat_bind_or_expr(tokens) do
     speculative =

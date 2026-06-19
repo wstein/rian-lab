@@ -275,6 +275,26 @@ defmodule Rian.PrattTest do
         Pratt.parse_body("x := 1 ; {a, b} := p")
       end
     end
+
+    test "an atom/pin pattern bind is a destructuring bind too" do
+      # `:ok := e` asserts the result is `:ok`; `^m` pins an already-bound value
+      assert {:block, [{:expr, {:case, {:id, "f"}, [{{:atom, "ok"}, nil, _}]}}]} =
+               Pratt.parse_body(":ok := f ; 1")
+
+      assert {:block,
+              [
+                {:expr,
+                 {:case, {:id, "g"}, [{{:tuple, [{:atom, "ok"}, {:pin, {:id, "m"}}]}, nil, _}]}}
+              ]} =
+               Pratt.parse_body("{:ok, ^m} := g ; m")
+    end
+
+    test "a `case` arm body may be a multi-statement block (binds + final expr)" do
+      # the destructuring bind in the arm body desugars to a nested case; a single-expression
+      # arm (`_ -> 0`) stays a bare expr, unwrapped from its one-statement block.
+      assert Pratt.parse_sexpr("case p do ps -> {a, b} := ps; a + b\n_ -> 0 end") ==
+               "(case p (ps -> (case ps ({a, b} -> (block (+ a b))))) (_ -> 0))"
+    end
   end
 
   describe "string literals" do
