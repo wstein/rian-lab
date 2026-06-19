@@ -38,7 +38,7 @@ defmodule Rian.Core do
   # `value`, a cons `tail`, `case` arms, `with` clauses, block `stmts`, map/struct/
   # bitstring `pairs`/`fields`/`segments`, lambda `params` — stay `_Unk` honestly (no
   # single Rian type; they need their own node types a later pass can model).
-  @rian_sig "type Pat := PWild | PVar | PLit | PChar | PAtom | PTuple | PList | PCtor | PAs | PPin | PStruct | PMap | PBitstr"
+  @rian_sig "type Pat := PWild | PVar | PLit | PChar | PAtom | PTuple | PList | PCtor | PAs | PPin | PStruct | PMap | PBitstr | PTyped"
   @rian_sig "type Expr := ENum | EStr | EChar | EId | EAtom | EUnary | EBin | ECall | EDot | EIf | ECase | EWith | EBlock | EList | EMap | EMapUpdate | EBitstr | ETuple | ELambda | ECapture | ECaptureNamed | ECapArg | ELabel | EVariant | EStruct | EConstRef"
   @rian_sig "struct PWild(type String)"
   @rian_sig "struct PVar(name String, type String)"
@@ -53,6 +53,7 @@ defmodule Rian.Core do
   @rian_sig "struct PStruct(name String, fields _Unk, type String)"
   @rian_sig "struct PMap(pairs _Unk, type String)"
   @rian_sig "struct PBitstr(segments _Unk, type String)"
+  @rian_sig "struct PTyped(name String, tname String, type String)"
   @rian_sig "struct ENum(text String, type String)"
   @rian_sig "struct EStr(value String, type String)"
   @rian_sig "struct EChar(value Int53, type String)"
@@ -134,6 +135,16 @@ defmodule Rian.Core do
     @moduledoc "An as-pattern `name @ pat` (binds `name` to the whole match)."
     @enforce_keys [:name, :pat]
     defstruct [:name, :pat, type: nil]
+  end
+
+  defmodule PTyped do
+    @moduledoc """
+    A type-pattern `name Type` (ADR-0083) — binds `name`, matching only when the
+    scrutinee's runtime type is `tname`. The narrowing form for a value union;
+    after a match the binding is narrowed to `tname`.
+    """
+    @enforce_keys [:name, :tname]
+    defstruct [:name, :tname, type: nil]
   end
 
   defmodule PPin do
@@ -481,6 +492,7 @@ defmodule Rian.Core do
     do: %PList{elems: Enum.map(ps, &from_pat/1), tail: from_pat(t)}
 
   def from_pat({:as, name, p}), do: %PAs{name: name, pat: from_pat(p)}
+  def from_pat({:typed, name, tname}), do: %PTyped{name: name, tname: tname}
   # the pinned expression is carried verbatim — it is matched at runtime, not
   # destructured, and the exhaustiveness lowerer treats a pin as a guard
   def from_pat({:pin, e}), do: %PPin{expr: e}

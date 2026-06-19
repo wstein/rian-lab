@@ -530,6 +530,16 @@ defmodule Rian.Pratt do
     {{:as, name, p}, rest}
   end
 
+  # a TYPE-pattern `name Type` (ADR-0083): bind `name`, matching only when the
+  # scrutinee's runtime type is `Type` — the narrowing form for a value union, in
+  # a `case` arm (`n Int53 -> …`). The byte guard (lowercase binder + uppercase
+  # type head) keeps a ctor head (`Foo …`) and a bare var falling through to the
+  # clause below; a parametric type head `Vec(…)` is left to later union-member work.
+  defp parse_pat([{:id, <<nc, _::binary>> = name}, {:id, <<tc, _::binary>> = type} | rest])
+       when nc in ?a..?z and tc in ?A..?Z do
+    {{:typed, name, type}, rest}
+  end
+
   defp parse_pat([{:id, name} | rest]) do
     if pascal?(name) do
       case rest do

@@ -71,6 +71,18 @@ defmodule Rian.PrattTest do
     end
   end
 
+  describe "type-patterns (`name Type`, ADR-0083)" do
+    test "a type-pattern parses to a `{:typed, name, type}` node" do
+      assert Pratt.parse_pats("n Int53") == [{:typed, "n", "Int53"}]
+      assert Pratt.parse_pats("s String") == [{:typed, "s", "String"}]
+    end
+
+    test "a ctor head and a bare var still fall through (no false type-pattern)" do
+      assert Pratt.parse_pats("Foo") == [{:ctor, "Foo", []}]
+      assert Pratt.parse_pats("x") == [{:var, "x"}]
+    end
+  end
+
   describe "reserved keywords are valid field labels (ADR-0033)" do
     test "a keyword labels a construction field (`type:`, `def:`)" do
       assert p("Foo(type: 1, def: 2)") == "(call Foo type: 1 def: 2)"
