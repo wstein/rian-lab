@@ -362,7 +362,9 @@ mod ComposeRealSum do
   def subst_decls(env, [{:d_mod, n, inner} | rest]) := [{:d_mod, n, subst_decls(env, inner)} | subst_decls(env, rest)]
   def subst_decls(env, [d | rest]) := [d | subst_decls(env, rest)]
 
-  def cat(Vec(NClause), Vec(NClause)) Vec(NClause)
+  # concatenate two lists (cons recursion) — generic in the element so it serves both
+  # `NClause` lists and the `Tuple` decl-lists `with_protocols` concatenates
+  def cat(Vec(T), Vec(T)) Vec(T) forall T
   def cat([], ys) := ys
   def cat([x | xs], ys) := [x | cat(xs, ys)]
 

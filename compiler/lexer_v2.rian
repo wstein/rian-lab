@@ -233,8 +233,9 @@ mod LexerV2 do
   def classify("abstract") := TKw("abstract")
   def classify(name) := TId(name)
 
-  # reverse a Char list onto an accumulator (pure Rian, cons recursion)
-  def rev(xs Vec(Char), acc Vec(Char)) Vec(Char)
+  # reverse a list onto an accumulator (pure Rian, cons recursion) — generic in the
+  # element so it serves both Char lists and token (`Tok`) lists (`drop_trailing_nl`)
+  def rev(xs Vec(T), acc Vec(T)) Vec(T) forall T
   def rev([], acc) := acc
   def rev([x | xs], acc) := rev(xs, [x | acc])
 end
