@@ -11,6 +11,17 @@ defmodule Rian.BeamTest do
       assert {:file, _} = :code.is_loaded(:rian_beam_double)
     end
 
+    test "`is_struct/1` in a guard lowers to a guard-legal map check (not illegal_guard_expr)" do
+      {:ok, mod} =
+        Beam.load(
+          "def kind(x _Unk) String\ndef kind(x) when is_struct(x) := \"struct\"\ndef kind(x) := \"plain\"",
+          :rian_beam_is_struct
+        )
+
+      assert mod.kind(%Rian.IR.Range{name: "D", lo: 0, hi: 9, base: 10}) == "struct"
+      assert mod.kind(42) == "plain"
+    end
+
     test "a bitstring `<<…>>` compiles to native binary forms and runs (ADR-0078)" do
       {:ok, mod} =
         Beam.load(

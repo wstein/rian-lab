@@ -824,6 +824,17 @@ defmodule Rian.Beam do
   # a PascalCase call is sum-variant construction -> a tagged tuple `{tag, args…}`
   # (labels erased, positional); a lowercase call is either a *variable*
   # application (the name is a fun-valued binding) or a local function call
+  # `is_struct/1` is an Elixir-only guard macro — not an Erlang guard BIF — so emitting it
+  # raw is an `illegal_guard_expr`. Lower it to the guard-legal `is_map(x) andalso
+  # is_map_key(:__struct__, x)` (`is_map_key/2` is a guard BIF since OTP 21). `x` is
+  # re-evaluated, which is fine in a guard (pure) and the usual `is_struct(<var>)` shape.
+  defp expr_form(%ECall{fun: %EId{name: "is_struct"}, args: [x]}, s) do
+    xf = expr_form(x, s)
+
+    {:op, @ln, :andalso, {:call, @ln, {:atom, @ln, :is_map}, [xf]},
+     {:call, @ln, {:atom, @ln, :is_map_key}, [{:atom, @ln, :__struct__}, xf]}}
+  end
+
   defp expr_form(%ECall{fun: %EId{name: f}, args: args}, s) do
     arg_forms = Enum.map(args, &expr_form(&1, s))
 
