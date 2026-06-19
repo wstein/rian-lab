@@ -526,11 +526,13 @@ defmodule Rian.Transpile do
   miscompile to every target, Rust included, which `rustc` would never allow. Returns a list
   of human-readable conflicts (empty = sound). `_Unk`/`_Infer`/un-inferred slots make no
   claim and are skipped — only concrete-vs-concrete disagreement is flagged, so the
-  conservative inferer never raises a false alarm.
+  conservative inferer never raises a false alarm. `ctor_to_sum` (a `ctor → sum-type` map, e.g.
+  `%{"ENum" => "Expr"}`) makes the check **subtype-aware**: a variant inferred where its sum is
+  declared (`ENum` vs `Expr`) is compatible, not a lie.
   """
-  @rian_sig "pub def verify_sigs(source String) Vec(String)"
-  @spec verify_sigs(String.t()) :: [String.t()]
-  def verify_sigs(source) when is_binary(source) do
+  @rian_sig "pub def verify_sigs(source String, ctor_to_sum Dict(String, String)) Vec(String)"
+  @spec verify_sigs(String.t(), map()) :: [String.t()]
+  def verify_sigs(source, ctor_to_sum \\ %{}) when is_binary(source) do
     ast = Code.string_to_quoted!(source)
     {sigmap, _types} = infer_program(ast)
     {def_anns, _structs, _types} = classify_annotations(Rian.Ann.from_ast(ast))
@@ -538,14 +540,14 @@ defmodule Rian.Transpile do
     for {{name, ar} = key, declared} <- def_anns,
         inferred = Map.get(sigmap, key),
         inferred != nil,
-        msg <- sig_conflicts(name, ar, declared, inferred) do
+        msg <- sig_conflicts(name, ar, declared, inferred, ctor_to_sum) do
       msg
     end
   end
 
-  defp sig_conflicts(name, ar, declared, inferred) do
+  defp sig_conflicts(name, ar, declared, inferred, ctor_to_sum) do
     ret =
-      if type_conflict?(declared.ret, inferred.ret),
+      if type_conflict?(declared.ret, inferred.ret, ctor_to_sum),
         do: ["#{name}/#{ar} return: sig `#{declared.ret}` vs inferred `#{inferred.ret}`"],
         else: []
 
@@ -553,7 +555,7 @@ defmodule Rian.Transpile do
       declared.params
       |> Enum.zip(Map.get(inferred, :params, []))
       |> Enum.with_index()
-      |> Enum.filter(fn {{d, i}, _} -> type_conflict?(d, i) end)
+      |> Enum.filter(fn {{d, i}, _} -> type_conflict?(d, i, ctor_to_sum) end)
       |> Enum.map(fn {{d, i}, idx} ->
         "#{name}/#{ar} param #{idx}: sig `#{d}` vs inferred `#{i}`"
       end)
@@ -561,17 +563,43 @@ defmodule Rian.Transpile do
     ret ++ params
   end
 
-  # A conflict is flagged ONLY between two scalar primitives of DIFFERENT kinds
-  # (`String` vs `Int53`, `Bool` vs `Float64`) — an unambiguous lie. We deliberately do NOT
-  # flag tvar-vs-concrete (inference uses `T` where a sig pins `Doc` — compatible), nor
-  # differing user-type names (`Symbol` is broader than `Effect`/`Status` — a legit widening),
-  # nor int-width differences (`Int53` vs `Int64` — intentional). The conservative inferer
-  # legitimately diverges from a human sig in those ways; only kind-level disagreement is a bug.
-  defp type_conflict?(declared, inferred) do
-    kd = prim_kind(declared)
-    ki = prim_kind(inferred)
-    kd != nil and ki != nil and kd != ki
+  # Is the declared sig type a *provable* lie vs the inferred type? Tvar-aware and
+  # subtype-safe, so the conservative inferer never trips a false alarm:
+  #   * either side mentions a type VARIABLE (`T`/`Vec(T)`/`T | E`) → compatible (a tvar
+  #     unifies with anything: inference using `T` where a sig pins `Doc` is fine);
+  #   * two scalar PRIMITIVES → conflict only across KINDS (`String` vs `Int*`, `Bool` vs
+  #     `Float*`); same-kind width differences (`Int53` vs `Int64`) are intentional;
+  #   * PRIMITIVE vs USER type → skip — a user sum can refine a primitive (`Effect`/`Status`
+  #     are atom sums, narrower than `Symbol`); not a lie;
+  #   * a variant inferred where its SUM is declared (`ENum` vs `Expr`, via `ctor_to_sum`) →
+  #     compatible (subtype), not a lie;
+  #   * two USER types with different (sum-resolved) base constructors (`Expr` vs `Pat`, `Vec`
+  #     vs `Dict`) → conflict — nominally distinct, so a genuine miscompile.
+  defp type_conflict?(declared, inferred, ctor_to_sum) do
+    cond do
+      # `_Unk` (unknown — the inferer gave up, or the sig makes no claim) and `Any` (top) are
+      # compatible with everything; a confident declared type vs inferred `_Unk` just means the
+      # human knows more than the conservative inferer — never a conflict.
+      declared in ["_Unk", "Any"] or inferred in ["_Unk", "Any"] -> false
+      has_tvar?(declared) or has_tvar?(inferred) -> false
+      prim?(declared) and prim?(inferred) -> prim_kind(declared) != prim_kind(inferred)
+      prim?(declared) or prim?(inferred) -> false
+      true -> resolve_sum(declared, ctor_to_sum) != resolve_sum(inferred, ctor_to_sum)
+    end
   end
+
+  # a constructor name resolves to its sum type (`ENum` → `Expr`); a sum or unknown name is
+  # itself. So a variant and its sum compare equal (subtype-compatible).
+  defp resolve_sum(t, ctor_to_sum) do
+    base = base_name(t)
+    Map.get(ctor_to_sum, base, base)
+  end
+
+  # a standalone uppercase single-letter component is a type variable (`T`, `Vec(T)`, `T | E`).
+  defp has_tvar?(t), do: is_binary(t) and Regex.match?(~r/\b[A-Z]\b/, t)
+  defp prim?(t), do: prim_kind(base_name(t)) != nil
+  defp base_name(t) when is_binary(t), do: t |> String.split("(") |> hd() |> String.trim()
+  defp base_name(_), do: ""
 
   defp prim_kind(t) when is_binary(t) do
     cond do

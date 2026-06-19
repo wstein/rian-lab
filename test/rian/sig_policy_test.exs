@@ -146,14 +146,37 @@ defmodule Rian.SigPolicyTest do
            "`_Unk` dropped to #{count} (good) — lower @unk_baseline to #{count} to lock the gain."
   end
 
+  # ctor → sum-type map from every `@rian_sig "type X := A | B | …"` across lib/rian, so the
+  # soundness check is subtype-aware (a variant inferred where its sum is declared is fine).
+  defp ctor_to_sum do
+    lib_rian_modules()
+    |> Enum.flat_map(&Rian.Ann.from_beam/1)
+    |> Enum.flat_map(fn s ->
+      case Regex.run(~r/^\s*type\s+(\w+)\s*:=\s*(.+)$/s, s) do
+        [_, sum, rhs] ->
+          rhs
+          |> String.split("|")
+          |> Enum.map(&(&1 |> String.trim() |> String.split("(") |> hd() |> String.trim()))
+          |> Enum.reject(&(&1 == ""))
+          |> Enum.map(&{&1, sum})
+
+        _ ->
+          []
+      end
+    end)
+    |> Map.new()
+  end
+
   test "every @rian_sig agrees with the transpiler's inference (soundness, no lying sigs)" do
+    cts = ctor_to_sum()
+
     conflicts =
       lib_rian_modules()
       |> Enum.map(&source_of/1)
       |> Enum.uniq()
       |> Enum.flat_map(fn path ->
         case File.read(path) do
-          {:ok, src} -> Rian.Transpile.verify_sigs(src)
+          {:ok, src} -> Rian.Transpile.verify_sigs(src, cts)
           _ -> []
         end
       end)
