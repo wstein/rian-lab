@@ -536,6 +536,10 @@ defmodule Rian.Check do
   # never a lie. Function-typed params (`Fn(...)`) contribute no bindings here
   # (a real piece of work for a later pass); concrete params are also inert,
   # which is correct (they can only confirm, not instantiate, the tvars).
+  # An unannotated callee (no declared return — `ret` is nil) can't be instantiated;
+  # its result type is simply unknown. Guard before the tvar regexes, which need a string.
+  defp instantiate_ret(%{ret: nil}, _arg_types), do: :unknown
+
   defp instantiate_ret(%{params: ps, ret: ret, tvars: tvars}, arg_types) do
     subs =
       ps
