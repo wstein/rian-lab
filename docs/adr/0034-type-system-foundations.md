@@ -86,7 +86,9 @@ ADR does not yet have (target-aware enforcement or union types):
   a param rather than inventing a false conflict. A sound version would enforce the conflict **only for
   functions required to reach a statically-typed target** (`:rs`/`:js`/`:jvm` via an `@targets`
   contract / `Rian.Reach`) and leave BEAM-only code alone, or introduce union types — either is a
-  larger design step, deferred.
+  larger design step, deferred. **The union-type path is taken up by ADR-0083** (anonymous
+  structural `A | B`, narrowed by a type-pattern), which makes exactly this `lower_body`-shaped
+  multi-shape param spellable.
 - **A generic param introduced via a *destructuring* clause head is not surfaced to return inference**
   (`bind_tvar_params` re-binds only bare-variable params to their tvar). This is the same
   incomplete-coverage family — its principled resolution depends on the structural-pattern typing
