@@ -495,10 +495,13 @@ defmodule Rian.Reach do
     # is distinct from `_Unk`, an *unfinished* hole — `Any` is a real, reported reach contract.
     any = if Enum.any?(sig_types, &type_mentions_any?/1), do: [any_blocker()], else: []
     # a value-union type `A | B` (canonical `Union(...)`, ADR-0083) in the signature.
-    # Phase 1 only parses + represents it — no emitter narrows it yet — so it honestly
-    # pins the function off EVERY target. Phase 2 (BEAM/JS type-pattern lowering) lifts
-    # the `:ex`/`:js` pin; Phases 4/5 (Rust enum synthesis, JVM `Any`) lift the rest.
-    union = if Enum.any?(sig_types, &type_mentions_union?/1), do: [union_blocker()], else: []
+    # The BEAM/JS type-pattern lowering (Phase 2) narrows a union of PRIMITIVE members
+    # (`is_integer`/`typeof`), so such a union reaches `:ex`/`:js` and pins only the
+    # nominal targets `:rs`/`:jvm` (pending Phase 4/5 enum synthesis). A union with a
+    # non-primitive member (a sum/struct — no discriminator wired yet) or nested in a
+    # generic still pins off EVERY target, honestly.
+    union_kills = sig_types |> Enum.flat_map(&union_kill_targets/1) |> Enum.uniq()
+    union = if union_kills == [], do: [], else: [union_blocker(union_kills)]
     # Two Rust-generic emitter gaps (ADR-0061/0047) the reach matrix must own up to,
     # or `mix rian.targets`/the conformance gate green-lights `:rs` for code `rustc`
     # then rejects (the gate lying). It pins the function off `:rs` only — generics the
@@ -611,14 +614,37 @@ defmodule Rian.Reach do
   defp type_mentions_any?(t) when is_binary(t), do: Regex.match?(~r/\bAny\b/, t)
   defp type_mentions_any?(_), do: false
 
-  defp union_blocker,
-    do: %{construct: "value union (A | B)", kind: :typed, kills: [:ex, :rs, :js, :jvm]}
+  defp union_blocker(kills),
+    do: %{construct: "value union (A | B)", kind: :typed, kills: kills}
 
-  # a signature type that is a value union (`Union(...)`, the canonical form `A | B`
-  # normalizes to). Matches the head anywhere so a union nested in a generic
-  # (`Vec(Union(A, B))`) is caught too.
-  defp type_mentions_union?(t) when is_binary(t), do: String.contains?(t, "Union(")
-  defp type_mentions_union?(_), do: false
+  # the targets a value-union signature type kills. A top-level `Union(...)` of
+  # primitive members narrows on BEAM/JS (Phase 2) → kills only the nominal targets
+  # `:rs`/`:jvm`. Anything else carrying `Union(` (a non-primitive member, or a union
+  # nested in a generic where no type-pattern can narrow it) kills every target.
+  defp union_kill_targets(t) when is_binary(t) do
+    cond do
+      not String.contains?(t, "Union(") -> []
+      primitive_union?(t) -> [:rs, :jvm]
+      true -> [:ex, :rs, :js, :jvm]
+    end
+  end
+
+  defp union_kill_targets(_), do: []
+
+  # the type is EXACTLY a top-level `Union(...)` whose every member is a primitive
+  # with a runtime discriminator (`is_integer`/`typeof`) — the narrowable shape.
+  defp primitive_union?("Union(" <> rest) do
+    String.ends_with?(rest, ")") and
+      rest
+      |> binary_part(0, byte_size(rest) - 1)
+      |> Rian.TypeStr.split_top_commas()
+      |> Enum.all?(&primitive_discriminable?/1)
+  end
+
+  defp primitive_union?(_), do: false
+
+  defp primitive_discriminable?(t),
+    do: t in ["Bool", "String", "Char"] or Regex.match?(~r/^(U?Int\d*|Float\d*)$/, t)
 
   defp width_blocker,
     do: %{

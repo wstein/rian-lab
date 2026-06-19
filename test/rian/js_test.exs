@@ -31,6 +31,24 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a value-union type-pattern narrows by `typeof` and runs (ADR-0083)" do
+      js =
+        JS.compile("""
+        def describe(x Int53 | String) Int53 := case x do
+          n Int53 -> n + 1
+          s String -> 0
+        end
+        """)
+
+      assert js =~ ~s(typeof _s === "number")
+      assert js =~ ~s(typeof _s === "string")
+
+      case node_eval(js, "[describe(41), describe('hi')].join(',')") do
+        :no_node -> :ok
+        out -> assert out == "42,0"
+      end
+    end
+
     test "a `const` reference resolves to the emitted top-level const, not a bare identifier" do
       js = JS.compile("mod M do\n  const Answer := 42\n  pub def get() Int53 := Answer\nend")
       assert js =~ "const Answer = 42;"

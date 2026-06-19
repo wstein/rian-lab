@@ -156,6 +156,22 @@ defmodule Rian.DeclTest do
       assert apply(mod, :classify, [7]) == 200
     end
 
+    test "a value-union type-pattern narrows by runtime type and runs on the BEAM (ADR-0083)" do
+      src = """
+      def describe(x Int53 | String) Int53 := case x do
+        n Int53 -> n + 1
+        s String -> 0
+      end
+      """
+
+      {:ok, mod, bin} =
+        Rian.Beam.compile(src, :"rian_union_#{System.unique_integer([:positive])}")
+
+      {:module, ^mod} = :code.load_binary(mod, ~c"#{mod}.beam", bin)
+      assert apply(mod, :describe, [41]) == 42
+      assert apply(mod, :describe, ["hi"]) == 0
+    end
+
     test "a block body's statement split tracks bracket depth, not just `do`/`end`" do
       # Regression: `block_seps` split statements on newlines by `do`/`end` depth
       # only, so a single expression wrapped across lines inside `(`/`[`/`{` took a

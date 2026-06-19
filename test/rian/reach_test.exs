@@ -31,7 +31,25 @@ defmodule Rian.ReachTest do
       assert entry(rep, "add").blockers == []
     end
 
-    test "a value-union signature pins the function off every target (Phase 1, no emitter yet — ADR-0083)" do
+    test "a PRIMITIVE value union narrows on BEAM/JS — reaches :ex/:js, pinned off the nominal targets (ADR-0083)" do
+      rep =
+        reach("""
+        def describe(x Int53 | String) Int53 := case x do
+          n Int53 -> n + 1
+          s String -> 0
+        end
+        """)
+
+      assert targets(rep, "describe") == [:ex, :js]
+
+      assert Enum.any?(
+               entry(rep, "describe").blockers,
+               &(&1.kind == :typed and &1.construct =~ "value union" and
+                   Enum.sort(&1.kills) == [:jvm, :rs])
+             )
+    end
+
+    test "a NON-primitive value union (no discriminator wired) stays pinned off every target (ADR-0083)" do
       rep = reach("def f(x A | B) Int64 := x")
 
       assert targets(rep, "f") == []

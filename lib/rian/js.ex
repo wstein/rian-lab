@@ -96,6 +96,7 @@ defmodule Rian.JS do
     PLit,
     PStruct,
     PTuple,
+    PTyped,
     PVar,
     PWild
   }
@@ -293,6 +294,21 @@ defmodule Rian.JS do
     end
   end
 
+  # the JS runtime type-test for a value-union type-pattern (ADR-0083), over an
+  # arbitrary scrutinee expression `acc` (the dispatcher's `js_guard!` is the same
+  # mapping fixed to `a0`). Primitive discriminators only — a sum/struct member is
+  # deferred (Reach pins such a union off `:js` until it lands).
+  defp type_test_js(t, acc, i53) do
+    cond do
+      t == "Bool" -> ~s(typeof #{acc} === "boolean")
+      t == "String" -> ~s(typeof #{acc} === "string")
+      t == "Char" -> ~s(typeof #{acc} === "#{int_typeof(i53)}")
+      String.match?(t, ~r/^U?Int\d*$/) -> ~s(typeof #{acc} === "#{int_typeof(i53)}")
+      String.match?(t, ~r/^Float\d*$/) -> ~s(typeof #{acc} === "number")
+      true -> raise(Unsupported, "JS type-pattern over non-primitive `#{t}`")
+    end
+  end
+
   defp struct_name_set(prog) do
     structs =
       Map.get(prog, :structs, []) ++ for(m <- Map.get(prog, :mods, []), s <- m.structs, do: s)
@@ -482,6 +498,12 @@ defmodule Rian.JS do
   # pattern checks the tag and recurses into each positional field.
   defp pat_match(%PWild{}, _acc, _i53), do: {[], []}
   defp pat_match(%PVar{name: n}, acc, _i53), do: {[], [{n, acc}]}
+
+  # a type-pattern `n Type` (ADR-0083): bind `n` and test the scrutinee's runtime
+  # type with the same JS-native discriminator the dispatcher uses (`typeof`).
+  defp pat_match(%PTyped{name: n, tname: t}, acc, i53),
+    do: {[type_test_js(t, acc, i53)], [{n, acc}]}
+
   defp pat_match(%PLit{value: v}, acc, i53), do: {["#{acc} === #{lit_js(v, i53)}"], []}
   # a `Char` is its codepoint integer, in the program's integer mode (number or
   # BigInt) so it never mixes with the surrounding codepoints

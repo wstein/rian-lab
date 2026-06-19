@@ -906,6 +906,9 @@ defmodule Rian.Beam do
   defp expr_form(%ECase{scrut: scrut, arms: arms}, s) do
     {:case, @ln, expr_form(scrut, s),
      Enum.map(arms, fn {pat, g, body} ->
+       # a type-pattern `n Type` (ADR-0083) lowers to a var bind guarded by a
+       # runtime type-test (`is_integer(n)` …), reusing the dispatcher discriminator
+       {pat, g} = desugar_typed(pat, g)
        # arm-pattern bindings extend the scope for the arm guard and body
        arm = pat_vars(pat, s)
        {:clause, @ln, [pat_form(pat)], guard_form(g, arm), body_seq(body, arm)}
@@ -930,6 +933,30 @@ defmodule Rian.Beam do
 
   defp expr_form(other, _s),
     do: raise(Unsupported, "abstract-forms: expression #{inspect(other)}")
+
+  # `n Type` → `{PVar n, is_<Type>(n) [and existing-guard]}` (ADR-0083). The type-test
+  # BIF is the same runtime discriminator the protocol dispatcher emits (ADR-0042); a
+  # type with no primitive discriminator (a sum/struct/tvar) is not yet supported here.
+  defp desugar_typed(%Core.PTyped{name: name, tname: tname}, g) do
+    test = type_test_call(tname, name)
+    {%Core.PVar{name: name}, if(g, do: %EBin{op: "and", left: test, right: g}, else: test)}
+  end
+
+  defp desugar_typed(pat, g), do: {pat, g}
+
+  defp type_test_call(tname, var) do
+    bif =
+      cond do
+        tname == "Bool" -> "is_boolean"
+        tname == "String" -> "is_binary"
+        tname == "Char" -> "is_integer"
+        String.match?(tname, ~r/^U?Int\d*$/) -> "is_integer"
+        String.match?(tname, ~r/^Float\d*$/) -> "is_float"
+        true -> raise(Unsupported, "abstract-forms: type-pattern over non-primitive `#{tname}`")
+      end
+
+    %ECall{fun: %EId{name: bif}, args: [%EId{name: var}]}
+  end
 
   # the happy path: no clauses left, evaluate the `with` body
   defp with_form([], body, _els, s, _d), do: {:block, @ln, body_seq(body, s)}
