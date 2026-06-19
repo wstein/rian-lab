@@ -362,6 +362,21 @@ defmodule Rian.CheckTest do
              end
              """) == :ok
     end
+
+    test "a value-union type-pattern narrows its binding to the matched member type (ADR-0083)" do
+      alias Rian.Core
+
+      typed =
+        Check.annotate(
+          Pratt.parse("case x do\n  n Int53 -> n\n  s String -> s\nend"),
+          %{"x" => "Union(Int53, String)"}
+        )
+
+      assert %Core.ECase{arms: [{_, _, b1}, {_, _, b2}]} = typed
+      # each arm body is the bound var, narrowed to its arm's member type
+      assert b1.type == "Int53"
+      assert b2.type == "String"
+    end
   end
 
   describe "error-set composition (ADR-0040 §4)" do

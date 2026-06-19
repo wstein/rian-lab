@@ -74,7 +74,7 @@ defmodule Rian.Check do
   }
 
   alias Rian.Core.{ECaptureNamed, ELambda}
-  alias Rian.Core.{PChar, PCtor, PLit, PVar}
+  alias Rian.Core.{PChar, PCtor, PLit, PTyped, PVar}
   alias Rian.IR.Func
 
   defmodule Error do
@@ -701,6 +701,10 @@ defmodule Rian.Check do
   # A `PVar` takes the matched type directly; a `PCtor` looks up its field types
   # and narrows each argument in turn. Unknown ctor / no `tdefs` -> `:unknown`.
   defp narrow(%PVar{name: name}, type, _ic, env), do: Map.put(env, name, concretize(type))
+
+  # a type-pattern `n Type` (ADR-0083) narrows its binding to the MATCHED type, not
+  # the scrutinee's (union) type — so member operations type-check inside the arm.
+  defp narrow(%PTyped{name: name, tname: tname}, _type, _ic, env), do: Map.put(env, name, tname)
 
   defp narrow(%PCtor{ctor: ctor, args: args}, _type, ic, env) do
     field_types = Map.get(Map.get(ic, :tdefs, %{}), ctor, [])
@@ -1422,6 +1426,16 @@ defmodule Rian.Check do
   defp assignable?(:unknown, _to), do: true
   defp assignable?(_from, :unknown), do: true
 
+  # value unions (`Union(...)`, ADR-0083). A union flows where ALL its members do;
+  # a value of a member type flows INTO a union. (The from-union clause is first so
+  # union→union takes the all-members reading, not any-member.) An `:unknown` member
+  # keeps it assignable via the base clauses — the conservative bar (CLAUDE.md).
+  defp assignable?("Union(" <> _ = from, to),
+    do: Enum.all?(union_members_of(from), &assignable?(&1, to))
+
+  defp assignable?(from, "Union(" <> _ = to),
+    do: Enum.any?(union_members_of(to), &assignable?(from, &1))
+
   defp assignable?(from, to) do
     cond do
       # a constructor whose payload type the inference didn't track yields the **bare
@@ -1448,6 +1462,10 @@ defmodule Rian.Check do
     do: not String.contains?(from, "(") and String.starts_with?(to, from <> "(")
 
   defp bare_head_of?(_from, _to), do: false
+
+  # the member type strings of a canonical `Union(...)` (ADR-0083).
+  defp union_members_of("Union(" <> rest),
+    do: rest |> binary_part(0, byte_size(rest) - 1) |> Rian.TypeStr.split_top_commas()
 
   # a numeric type string -> {:int | :uint | :float, bit-width}, else nil
   defp num_kind("UInt" <> w), do: num_bits(:uint, w)

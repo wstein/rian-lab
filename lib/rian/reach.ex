@@ -632,19 +632,33 @@ defmodule Rian.Reach do
   defp union_kill_targets(_), do: []
 
   # the type is EXACTLY a top-level `Union(...)` whose every member is a primitive
-  # with a runtime discriminator (`is_integer`/`typeof`) — the narrowable shape.
+  # with a runtime discriminator (`is_integer`/`typeof`) AND those discriminators are
+  # all DISTINCT — `Int32 | Char` (both `is_integer`) can't narrow at runtime (its
+  # second arm would be dead), so it is not narrowable and must not claim `:ex`/`:js`.
   defp primitive_union?("Union(" <> rest) do
-    String.ends_with?(rest, ")") and
-      rest
-      |> binary_part(0, byte_size(rest) - 1)
-      |> Rian.TypeStr.split_top_commas()
-      |> Enum.all?(&primitive_discriminable?/1)
+    if String.ends_with?(rest, ")") do
+      members = rest |> binary_part(0, byte_size(rest) - 1) |> Rian.TypeStr.split_top_commas()
+      discs = Enum.map(members, &discriminator/1)
+      Enum.all?(discs, &(&1 != nil)) and length(Enum.uniq(discs)) == length(discs)
+    else
+      false
+    end
   end
 
   defp primitive_union?(_), do: false
 
-  defp primitive_discriminable?(t),
-    do: t in ["Bool", "String", "Char"] or Regex.match?(~r/^(U?Int\d*|Float\d*)$/, t)
+  # the runtime discriminator a primitive type tests under (`is_integer`/`typeof`),
+  # or nil for a type with none. `Char`/`Int*`/`UInt*` share `:integer` (a clash).
+  defp discriminator(t) do
+    cond do
+      t == "Bool" -> :boolean
+      t == "String" -> :binary
+      t == "Char" -> :integer
+      Regex.match?(~r/^U?Int\d*$/, t) -> :integer
+      Regex.match?(~r/^Float\d*$/, t) -> :float
+      true -> nil
+    end
+  end
 
   defp width_blocker,
     do: %{

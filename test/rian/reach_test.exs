@@ -49,6 +49,13 @@ defmodule Rian.ReachTest do
              )
     end
 
+    test "a discriminator-CLASH union (`Int32 | Char`, both is_integer) is not claimed narrowable (ADR-0083)" do
+      # both members test `is_integer`/`typeof === number`, so the second arm would be
+      # dead — the union can't narrow at runtime, so it must reach no dynamic target.
+      rep = reach("def f(x Int32 | Char) Int32 := x")
+      assert targets(rep, "f") == []
+    end
+
     test "a NON-primitive value union (no discriminator wired) stays pinned off every target (ADR-0083)" do
       rep = reach("def f(x A | B) Int64 := x")
 
