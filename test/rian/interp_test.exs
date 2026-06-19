@@ -147,6 +147,34 @@ defmodule Rian.InterpTest do
       [{_, %{elixir: elixir}}] = Decl.compile(~S|def dbg(x _Unk) String := "got ${inspect(x)}"|)
       assert elixir =~ "inspect"
     end
+
+    test "a hole over an un-annotated local call resolves (call-result inference)" do
+      # `tag` declares no return; its body (`<>`) is String, inferred and folded into
+      # the resolver's `:funs`, so `${tag(n)}` resolves instead of erroring `no Show`.
+      src = ~S"""
+      mod M do
+        pub def greet(n String) String := "count: ${tag(n)}"
+        def tag(s) := s <> "!"
+      end
+      """
+
+      {:ok, _} = Beam.load(src, :interp_callresult)
+    end
+
+    test "a hole bound by a `case` arm resolves to the scrutinee type (scope-aware)" do
+      # `other` is introduced by the arm pattern, typed by the scrutinee (`String`);
+      # the resolver threads that binding into the arm body's hole.
+      src = ~S"""
+      mod M do
+        pub def f(s String) String := case s do
+          "" -> "empty"
+          other -> "got ${other}"
+        end
+      end
+      """
+
+      {:ok, _} = Beam.load(src, :interp_casearm)
+    end
   end
 
   describe "the same source lowers to JS and Rust (ADR-0069 §3 — portable, no FFI)" do

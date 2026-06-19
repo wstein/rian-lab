@@ -2111,7 +2111,7 @@ defmodule Rian.Check do
     all_funcs =
       Map.get(prog, :funcs, []) ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
 
-    %{
+    base = %{
       tdefs: type_table(types),
       fields: field_table(types),
       funs: Map.new(all_funcs, fn f -> {{f.name, length(f.params)}, f.ret} end),
@@ -2122,6 +2122,43 @@ defmodule Rian.Check do
       impls: impl_table(prog),
       fbounds: fbound_table(all_funcs)
     }
+
+    %{base | funs: fill_local_rets(all_funcs, base)}
+  end
+
+  @rian_sig "pub def fill_local_rets(funcs Vec(Func), ic Ic) Dict(String, String)"
+  @doc """
+  Call-result return inference (ADR-0034 infer-local, ADR-0069 §4): return the `ic`'s
+  `:funs` table with every un-annotated (`f.ret == nil`) *non-generic* function's
+  return INFERRED from its body, so a caller — including a `${f(x)}` interpolation
+  hole — resolves the call's type instead of degrading to `:unknown`. Generic callees
+  route through `:fsigs`/`instantiate_ret`, not `:funs`, so they are left alone.
+
+  A bounded fixpoint (untyped helpers may call other untyped helpers); each pass can
+  only *fill* a `nil`, never change a filled entry, so it converges monotonically.
+  Shared by `program_ic/1` (the gates) and `Rian.Decl`'s interpolation resolver.
+  """
+  @spec fill_local_rets([Rian.IR.Func.t()], map()) :: map()
+  def fill_local_rets(all_funcs, ic) do
+    untyped = Enum.filter(all_funcs, &(is_nil(&1.ret) and &1.tvars == []))
+
+    Enum.reduce_while(1..length(untyped)//1, ic.funs, fn _, funs ->
+      next =
+        Enum.reduce(untyped, funs, fn f, acc ->
+          key = {f.name, length(f.params)}
+
+          if is_nil(Map.get(acc, key)) do
+            case infer_return_type(f, %{ic | funs: acc}) do
+              t when is_binary(t) -> Map.put(acc, key, t)
+              _ -> acc
+            end
+          else
+            acc
+          end
+        end)
+
+      if next == funs, do: {:halt, next}, else: {:cont, next}
+    end)
   end
 
   # protocol name -> the set of types that `impl` it (ADR-0042 §2), from the

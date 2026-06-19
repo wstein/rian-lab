@@ -245,7 +245,14 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
   Char/Int53 dispatch-guard collision (the sharpest open cost) does not arise**,
   and Rust gets the monomorphic concrete `impl` for free. There is **no new Core
   node and no per-emitter `{:str_interp}` handling** — the checker and all four
-  emitters see an ordinary call tree.
+  emitters see an ordinary call tree. The resolver's inference scope is the *whole
+  program*: its `ic` is built once over every module's signatures, types, structs and
+  ctors (so a cross-module `${A.f(x)}` resolves), it folds in **call-result return
+  inference** (`Rian.Check.fill_local_rets/2` — an un-annotated local function's
+  return is inferred from its body, so `${tag(n)}` over `def tag(s) := s <> "!"`
+  resolves to `String`), and it is **scope-aware**: a hole inside a `case` arm or
+  after a block `:=` bind sees those names typed (an arm pattern binds against the
+  scrutinee's type), exactly as `Rian.Check.annotate` threads its env.
 - **Single-shot join (§6).** The stringified parts are combined by *one*
   `__prim_str_concat_all(parts…)` intrinsic, not a left-nested `<>` cascade that
   would build N−1 intermediate strings. It lowers to one allocation where it pays

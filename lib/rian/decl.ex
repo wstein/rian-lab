@@ -191,6 +191,13 @@ defmodule Rian.Decl do
         )
     }
 
+    # Fold in call-result return inference (ADR-0034): an un-annotated local function
+    # gets its return inferred from its body, so a `${f(x)}` hole over such a call
+    # resolves instead of degrading to `:unknown` (ADR-0069 §4). Same engine the
+    # checker uses; kept additive here to preserve the resolver's minimal ic (no
+    # prelude compile-time cycle).
+    ic = %{ic | funs: Check.fill_local_rets(all_funcs, ic)}
+
     show = MapSet.new(for {"Show", t} <- Map.get(prog, :impls, []), do: t)
     resolve = fn funcs -> Enum.map(funcs, &resolve_func_interp(&1, ic, show)) end
 

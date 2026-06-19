@@ -16,7 +16,13 @@ defmodule Rian.Interp do
   ctors (not just the enclosing scope's) plus the clause's parameter types — so a
   hole over a *call result* (`${double(2)}`, a generic `${id(7)}`), a **cross-module**
   call (`${OtherMod.f(x)}`), or a cross-module struct field resolves its declared/
-  instantiated return type — not only literals and same-scope params:
+  instantiated return type — not only literals and same-scope params. The `ic` also
+  folds in **call-result return inference** (`Rian.Check.fill_local_rets/2`): an
+  un-annotated local function's return is inferred from its body, so `${tag(n)}` over
+  `def tag(s) := s <> "!"` resolves to `String` without an explicit return type. And
+  the resolver is **scope-aware** — a hole inside a `case` arm or after a block `:=`
+  bind sees those names typed (an arm pattern binds against the scrutinee's type),
+  the same env-threading `Rian.Check.annotate` does:
 
     * `String`            → the value itself (identity)
     * `Int`/`Int*`/`UInt*`→ `__prim_int_to_string(value)` (lowered natively per target)
@@ -75,6 +81,48 @@ defmodule Rian.Interp do
     |> concat_chain()
   end
 
+  # Scope-aware descent (ADR-0069 §4): a hole inside a `case` arm or after a block
+  # `:=` bind must see the names those scopes introduce, typed, or it degrades to
+  # `:unknown`. Thread the env the same way `Rian.Check.annotate` does — each arm
+  # pattern binds against the scrutinee's inferred type; each `:=` extends the env
+  # for the statements that follow. Placed before the generic tuple/list walk, which
+  # would otherwise descend with the *outer* env and lose these bindings.
+  def resolve({:case, scrut, arms}, env, ic, show) do
+    scrut2 = resolve(scrut, env, ic, show)
+    st = Check.infer(scrut2, env, ic)
+
+    arms2 =
+      Enum.map(arms, fn {pat, guard, body} ->
+        env2 = Map.merge(env, pat_bindings(pat, st))
+        guard2 = if guard, do: resolve(guard, env2, ic, show), else: guard
+        {pat, guard2, resolve(body, env2, ic, show)}
+      end)
+
+    {:case, scrut2, arms2}
+  end
+
+  def resolve({:block, stmts}, env, ic, show) do
+    {rev, _env} =
+      Enum.reduce(stmts, {[], env}, fn stmt, {acc, e} ->
+        case stmt do
+          {:bind, n, ex} ->
+            ex2 = resolve(ex, e, ic, show)
+            {[{:bind, n, ex2} | acc], Map.put(e, n, Check.infer(ex2, e, ic))}
+
+          {:typed_bind, n, t, ex} ->
+            {[{:typed_bind, n, t, resolve(ex, e, ic, show)} | acc], Map.put(e, n, t)}
+
+          {:expr, ex} ->
+            {[{:expr, resolve(ex, e, ic, show)} | acc], e}
+
+          other ->
+            {[resolve(other, e, ic, show) | acc], e}
+        end
+      end)
+
+    {:block, Enum.reverse(rev)}
+  end
+
   def resolve(ast, env, ic, show) when is_tuple(ast),
     do: ast |> Tuple.to_list() |> Enum.map(&resolve(&1, env, ic, show)) |> List.to_tuple()
 
@@ -82,6 +130,24 @@ defmodule Rian.Interp do
     do: Enum.map(list, &resolve(&1, env, ic, show))
 
   def resolve(other, _env, _ic, _show), do: other
+
+  # Names a surface `case`-arm pattern introduces, typed for interpolation. A bare
+  # variable binds to the whole scrutinee type (`alts -> …${alts}` where the
+  # scrutinee is `String`); an `x @ pat` alias binds `x` likewise and descends. Any
+  # destructuring pattern's inner vars are bound `:unknown` (their component types
+  # aren't recovered here — sound: a hole over one still errors/defers as before, no
+  # worse than the prior constant-env behaviour).
+  defp pat_bindings({:var, x}, st), do: %{x => st}
+  defp pat_bindings({:as, x, pat}, st), do: Map.put(pat_bindings(pat, :unknown), x, st)
+  defp pat_bindings({:bind, x, pat}, st), do: Map.put(pat_bindings(pat, :unknown), x, st)
+
+  defp pat_bindings(pat, _st) when is_tuple(pat),
+    do: pat |> Tuple.to_list() |> Enum.reduce(%{}, &Map.merge(&2, pat_bindings(&1, :unknown)))
+
+  defp pat_bindings(pats, _st) when is_list(pats),
+    do: Enum.reduce(pats, %{}, &Map.merge(&2, pat_bindings(&1, :unknown)))
+
+  defp pat_bindings(_pat, _st), do: %{}
 
   @spec resolve_part(tuple(), map(), map(), term()) :: tuple()
   defp resolve_part({:lit, s}, _env, _ic, _show), do: {:str, s}
