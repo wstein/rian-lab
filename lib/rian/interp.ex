@@ -51,8 +51,14 @@ defmodule Rian.Interp do
 
   alias Rian.Check
 
-  @rian_sig "pub def resolve(ast Expr, env _Unk, ic Ic) Expr"
-  @rian_sig "pub def resolve(ast Expr, env _Unk, ic Ic, show _Unk) Expr"
+  # `env` is the checker's type environment (name -> type), the same `Dict(String,
+  # String)` threaded through `Rian.Check.infer/3`. `show` is genuinely a *set* of
+  # type names (a `MapSet`); Rian has no `Set(T)` type yet, so it is an honest
+  # `_Unk` ("type still to be defined", ADR-0034) — not `Any`, and not a `Vec`,
+  # which would imply order/duplicates it does not have. (The self-hosted
+  # `compiler/interp.rian` models it as `Vec(String)` pending a portable `Set`.)
+  @rian_sig "pub def resolve(ast Expr, env Dict(String, String), ic Ic) Expr"
+  @rian_sig "pub def resolve(ast Expr, env Dict(String, String), ic Ic, show _Unk) Expr"
   @doc """
   Rewrite every `{:str_interp, …}` in `ast` to a `<>`/stringify chain.
 

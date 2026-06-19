@@ -163,7 +163,7 @@ defmodule Rian.Check do
   accepted too and translated, so existing callers keep working (ADR-0050 — the
   checker consumes the core, one inference, no second representation).
   """
-  @rian_sig "pub def infer(ast _Unk, env _Unk, ic Ic) String"
+  @rian_sig "pub def infer(ast _Unk, env Dict(String, String), ic Ic) String"
   @spec infer(term(), map(), map()) :: ty()
   def infer(ast, env \\ %{}, ic \\ %{})
   def infer(ast, env, ic) when is_tuple(ast), do: infer(Core.from_expr(ast), env, ic)
@@ -429,7 +429,7 @@ defmodule Rian.Check do
   of type rules), so an emitter can read representation choices off `node.type`
   (ADR-0041/0043/0046). Nodes inference can't pin down keep `type: nil`.
   """
-  @rian_sig "pub def annotate(ast _Unk, env _Unk, ic Ic) Expr"
+  @rian_sig "pub def annotate(ast _Unk, env Dict(String, String), ic Ic) Expr"
   @spec annotate(term(), map(), map()) :: term()
   def annotate(ast, env \\ %{}, ic \\ %{})
   def annotate(ast, env, ic) when is_tuple(ast), do: annotate(Core.from_expr(ast), env, ic)
