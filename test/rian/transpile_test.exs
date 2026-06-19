@@ -92,6 +92,26 @@ defmodule Rian.TranspileTest do
     end
   end
 
+  describe "cond → nested if/else (Rian has no `cond`)" do
+    test "a cond with a `true ->` catch-all lowers to a right-nested if/else chain" do
+      out =
+        rian("""
+        defmodule M do
+          def f(n) do
+            cond do
+              n > 0 -> :pos
+              n < 0 -> :neg
+              true -> :zero
+            end
+          end
+        end
+        """)
+
+      assert out =~ "if n > 0 do :pos else if n < 0 do :neg else :zero end end"
+      refute out =~ "cond("
+    end
+  end
+
   describe "defstruct → a Rian `struct` record (named for the module)" do
     test "an atom-list defstruct becomes `struct Mod(field _Unk, …)`" do
       out = rian("defmodule Point do\n  defstruct [:x, :y]\nend")

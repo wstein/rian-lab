@@ -1498,6 +1498,23 @@ defmodule Rian.Transpile do
     "case #{expr(subj)} do\n#{rendered}\nend"
   end
 
+  # Rian has no `cond` — lower `cond do g1 -> e1 … true -> en end` to a right-nested
+  # `if/else` chain (the shape the hand-written compiler sources use). The trailing
+  # `true ->` clause becomes the bare `else` value; a non-`true` last guard yields an
+  # `if … do … end` with no `else` (a fall-through, as `cond` itself would raise).
+  defp expr({:cond, _, [[do: clauses]]}) do
+    Enum.reduce(Enum.reverse(clauses), nil, fn
+      {:->, _, [[true], body]}, nil ->
+        render_body(body)
+
+      {:->, _, [[guard], body]}, nil ->
+        "if #{expr(guard)} do #{render_body(body)} end"
+
+      {:->, _, [[guard], body]}, acc ->
+        "if #{expr(guard)} do #{render_body(body)} else #{acc} end"
+    end)
+  end
+
   # a comprehension `for clauses…, <tail>` (ADR-0079). Generators bind a full pattern
   # (a non-match skips the element). The trailing keyword selects the shape:
   #   `do:`            → a list comprehension (the surface `for … do … end`);
