@@ -130,9 +130,11 @@ defmodule Rian.JVM do
     prog = Rian.Opaque.erase(prog)
     # A protocol **dispatcher** (`dispatch: :dispatcher`, ADR-0042) lowers to a Kotlin
     # `when (a0)` over the receiver's runtime type (`is Long`/`is Bag` → the matching
-    # `impl_…`). A dispatcher whose return mentions an **associated type** (ADR-0074 —
-    # `Foldable.to_list() Vec(Elem)`) can't be given a single concrete Kotlin return, so
-    # it is dropped (and `Rian.Reach` keeps it + its consumers off `:jvm`).
+    # `impl_…`). An **associated type** (ADR-0074) in a covariant `Vec(...)` return erases
+    # to `List<Any>` (`Foldable.to_list() Vec(Elem)` reaches `:jvm`); only an assoc in a
+    # *non*-covariant position (a bare `Elem` return / an `Elem` parameter) has no Kotlin
+    # shape, so that dispatcher is dropped and `Rian.Reach` keeps it + its consumers off
+    # `:jvm` (`assoc_blocks_jvm?`, mirrored in `Rian.Reach`).
     all = all_funcs(prog)
 
     impl_first_type =
@@ -613,7 +615,7 @@ defmodule Rian.JVM do
 
     stmts
     |> Rian.Shadow.dedup(params, &kt_fresh/2)
-    |> Enum.map(&coerce_stmt(&1, ic))
+    |> coerce_stmts(ic)
     |> block_value()
   end
 
@@ -627,67 +629,116 @@ defmodule Rian.JVM do
   # leaves the erased call `:unknown`). Runs over the annotated body before `expr_kt`;
   # today it carries the one rule the associated-type story needs, structured so further
   # rules slot in. (`ic` carries `:jvm_sigs` / `:jvm_erased`, set in `compile/1`.)
-  defp coerce_stmt({:bind, n, e}, ic), do: {:bind, n, coerce_casts(e, ic)}
-  defp coerce_stmt({:typed_bind, n, t, e}, ic), do: {:typed_bind, n, t, coerce_casts(e, ic)}
-  defp coerce_stmt({:expr, e}, ic), do: {:expr, coerce_casts(e, ic)}
+  defp coerce_stmts(stmts, ic), do: coerce_stmts(stmts, ic, MapSet.new())
 
-  defp coerce_casts(%ECall{args: args} = call, ic) do
-    args = Enum.map(args, &coerce_casts(&1, ic))
-    args = if match?(%EId{}, call.fun), do: cast_args(call.fun.name, args, ic), else: args
+  # thread `env` — the set of locals bound to an (uncast) erased dispatcher result
+  # (`List<Any>`) — across the statement sequence, so a later concrete-typed consumer of
+  # one (`xs := to_list(b) ; sum_l(xs)`) gets the same `as List<T>` cast a direct
+  # dispatcher-call argument would. Without it the bound `List<Any>` flows into a
+  # `List<Long>` param uncast and kotlinc rejects it — yet Reach claims `:jvm`, an
+  # honesty gap; the cast keeps the claim true for the bound form too.
+  defp coerce_stmts(stmts, ic, env) do
+    {rev, _env} =
+      Enum.reduce(stmts, {[], env}, fn s, {acc, env} ->
+        {s2, env2} = coerce_stmt(s, ic, env)
+        {[s2 | acc], env2}
+      end)
+
+    Enum.reverse(rev)
+  end
+
+  defp coerce_stmt({:bind, n, e}, ic, env),
+    do: {{:bind, n, coerce_casts(e, ic, env)}, bind_env(n, e, ic, env)}
+
+  defp coerce_stmt({:typed_bind, n, t, e}, ic, env),
+    do: {{:typed_bind, n, t, coerce_casts(e, ic, env)}, bind_env(n, e, ic, env)}
+
+  defp coerce_stmt({:expr, e}, ic, env), do: {{:expr, coerce_casts(e, ic, env)}, env}
+
+  # a binding whose RHS is a bare erased-dispatcher call holds a `List<Any>` — track the
+  # name; any other RHS clears a prior tracking (`:=` rebind, shadow-deduped already).
+  defp bind_env(n, %ECall{fun: %EId{name: g}}, ic, env) do
+    if MapSet.member?(Map.get(ic, :jvm_erased, MapSet.new()), g),
+      do: MapSet.put(env, n),
+      else: MapSet.delete(env, n)
+  end
+
+  defp bind_env(n, _e, _ic, env), do: MapSet.delete(env, n)
+
+  defp coerce_casts(%ECall{args: args} = call, ic, env) do
+    args = Enum.map(args, &coerce_casts(&1, ic, env))
+    args = if match?(%EId{}, call.fun), do: cast_args(call.fun.name, args, ic, env), else: args
     %{call | args: args}
   end
 
-  defp coerce_casts(%EBin{left: l, right: r} = n, ic),
-    do: %{n | left: coerce_casts(l, ic), right: coerce_casts(r, ic)}
+  defp coerce_casts(%EBin{left: l, right: r} = n, ic, env),
+    do: %{n | left: coerce_casts(l, ic, env), right: coerce_casts(r, ic, env)}
 
-  defp coerce_casts(%EUnary{arg: a} = n, ic), do: %{n | arg: coerce_casts(a, ic)}
+  defp coerce_casts(%EUnary{arg: a} = n, ic, env), do: %{n | arg: coerce_casts(a, ic, env)}
 
-  defp coerce_casts(%EIf{cond: c, then: t, else: e} = n, ic),
-    do: %{n | cond: coerce_casts(c, ic), then: coerce_casts(t, ic), else: coerce_casts(e, ic)}
-
-  defp coerce_casts(%EList{elems: elems, tail: tail} = n, ic),
+  defp coerce_casts(%EIf{cond: c, then: t, else: e} = n, ic, env),
     do: %{
       n
-      | elems: Enum.map(elems, &coerce_casts(&1, ic)),
-        tail: if(tail == :close, do: :close, else: coerce_casts(tail, ic))
+      | cond: coerce_casts(c, ic, env),
+        then: coerce_casts(t, ic, env),
+        else: coerce_casts(e, ic, env)
     }
 
-  defp coerce_casts(%ECase{scrut: s, arms: arms} = n, ic),
+  defp coerce_casts(%EList{elems: elems, tail: tail} = n, ic, env),
     do: %{
       n
-      | scrut: coerce_casts(s, ic),
-        arms: Enum.map(arms, fn {p, g, b} -> {p, g, coerce_casts(b, ic)} end)
+      | elems: Enum.map(elems, &coerce_casts(&1, ic, env)),
+        tail: if(tail == :close, do: :close, else: coerce_casts(tail, ic, env))
     }
 
-  defp coerce_casts(%EDot{head: h} = n, ic), do: %{n | head: coerce_casts(h, ic)}
+  defp coerce_casts(%ECase{scrut: s, arms: arms} = n, ic, env),
+    do: %{
+      n
+      | scrut: coerce_casts(s, ic, env),
+        arms: Enum.map(arms, fn {p, g, b} -> {p, g, coerce_casts(b, ic, env)} end)
+    }
 
-  defp coerce_casts(%EBlock{stmts: stmts} = n, ic),
-    do: %{n | stmts: Enum.map(stmts, &coerce_stmt(&1, ic))}
+  defp coerce_casts(%EDot{head: h} = n, ic, env), do: %{n | head: coerce_casts(h, ic, env)}
 
-  defp coerce_casts(leaf, _ic), do: leaf
+  defp coerce_casts(%EBlock{stmts: stmts} = n, ic, env),
+    do: %{n | stmts: coerce_stmts(stmts, ic, env)}
 
-  # cast each erased-dispatcher arg flowing into a concrete `Vec(...)` param of callee `f`.
-  defp cast_args(f, args, ic) do
+  defp coerce_casts(leaf, _ic, _env), do: leaf
+
+  # cast each erased value (a direct dispatcher call, or a local bound to one) flowing
+  # into a concrete `Vec(...)` param of callee `f`.
+  defp cast_args(f, args, ic, env) do
     erased = Map.get(ic, :jvm_erased, MapSet.new())
 
     case Map.get(ic, :jvm_sigs, %{})[{f, length(args)}] do
-      nil -> args
-      ptypes -> Enum.zip(args, ptypes) |> Enum.map(fn {a, pt} -> maybe_cast(a, pt, erased) end)
+      nil ->
+        args
+
+      ptypes ->
+        Enum.zip(args, ptypes) |> Enum.map(fn {a, pt} -> maybe_cast(a, pt, erased, env) end)
     end
   end
 
-  defp maybe_cast(%ECall{fun: %EId{name: g}} = arg, "Vec(" <> _ = pt, erased) do
+  # a direct erased-dispatcher call flowing into a concrete `Vec(...)` param.
+  defp maybe_cast(%ECall{fun: %EId{name: g}} = arg, "Vec(" <> _ = pt, erased, _env),
+    do: cast_if_concrete(arg, pt, MapSet.member?(erased, g))
+
+  # a local bound to an erased dispatcher result (`xs := to_list(b)`) used the same way.
+  defp maybe_cast(%EId{name: v} = arg, "Vec(" <> _ = pt, _erased, env),
+    do: cast_if_concrete(arg, pt, MapSet.member?(env, v))
+
+  defp maybe_cast(arg, _pt, _erased, _env), do: arg
+
+  # cast to `List<elem>` only when the param's element type is CONCRETE: a `Vec(T)` param
+  # with a tvar `T` already accepts the erased `List<Any>` (Kotlin infers `T = Any`), and
+  # `as List<T>` would reference an undeclared `T` at the call site.
+  defp cast_if_concrete(arg, pt, erased?) do
     inner = vec_inner(pt)
 
-    # cast only into a CONCRETE element type: a `Vec(T)` param where `T` is a type
-    # variable already accepts the erased `List<Any>` (Kotlin infers `T = Any`), and
-    # `as List<T>` would reference an undeclared `T` at the call site.
-    if MapSet.member?(erased, g) and not tvar_kt?(inner),
+    if erased? and not tvar_kt?(inner),
       do: {:jvm_cast, arg, "List<#{kt_type(inner)}>"},
       else: arg
   end
-
-  defp maybe_cast(arg, _pt, _erased), do: arg
 
   # the element type of a `Vec(T)` type string (`Vec(Int53)` -> `Int53`).
   defp vec_inner("Vec(" <> rest), do: String.replace_suffix(rest, ")", "")

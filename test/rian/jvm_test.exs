@@ -207,6 +207,28 @@ defmodule Rian.JVMTest do
       """,
       probe: ~s|println(bag_sum(Bag(listOf(1L, 2L, 3L))))|
     },
+    %{
+      id: :foldable_bound,
+      src: """
+      protocol Foldable do
+        type Elem
+        def to_list(self Self) Vec(Elem)
+      end
+      type Bag := Bag(items Vec(Int53))
+      impl Foldable for Bag do
+        type Elem := Int53
+        def to_list(b) := case b do Bag(xs) -> xs end
+      end
+      def sum_l(Vec(Int53)) Int53
+      def sum_l([]) := 0
+      def sum_l([h | t]) := h + sum_l(t)
+      def bag_sum(b Bag) Int53
+        xs := to_list(b)
+        sum_l(xs)
+      end
+      """,
+      probe: ~s|println(bag_sum(Bag(listOf(1L, 2L, 3L))))|
+    },
     %{id: :interp_int, src: ~S|def f(n Int64) String := "v${n}"|, probe: ~S|println(f(42L))|},
     %{
       id: :symbol_tag,
@@ -787,6 +809,19 @@ defmodule Rian.JVMTest do
       kt = jvm_kt(jvm, :foldable_typed)
       assert kt =~ "sum_l((to_list(b) as List<Long>))"
       expect_jvm(jvm, :foldable_typed, "6")
+    end
+
+    @tag :jvm
+    test "the cast follows a BOUND erased result into a typed consumer (ADR-0074)", %{
+      jvm_batch: jvm
+    } do
+      # binding the erased dispatcher first (`xs := to_list(b)`) must still cast at the
+      # typed use (`sum_l(xs)`) — otherwise `xs : List<Any>` flows into `List<Long>`
+      # uncast and kotlinc rejects it, while Reach claims `:jvm` (the honesty gap this
+      # closes). The coercion pass flow-tracks `xs` through the bind.
+      kt = jvm_kt(jvm, :foldable_bound)
+      assert kt =~ "sum_l((xs as List<Long>))"
+      expect_jvm(jvm, :foldable_bound, "6")
     end
 
     @tag :jvm

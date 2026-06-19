@@ -294,7 +294,10 @@ defmodule Rian.Protocol do
   defp subst_assoc(nil, _assoc), do: nil
 
   defp subst_assoc(t, assoc),
-    do: Enum.reduce(assoc, t, fn {a, conc}, acc -> Regex.replace(~r/\b#{a}\b/, acc, conc) end)
+    do:
+      Enum.reduce(assoc, t, fn {a, conc}, acc ->
+        Regex.replace(~r/\b#{Regex.escape(a)}\b/, acc, conc)
+      end)
 
   # ── helpers ──────────────────────────────────────────────────────────────
   defp mangle(proto, type, method),
