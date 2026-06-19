@@ -618,13 +618,14 @@ defmodule Rian.Reach do
     do: %{construct: "value union (A | B)", kind: :typed, kills: kills}
 
   # the targets a value-union signature type kills. A top-level `Union(...)` of
-  # primitive members narrows on BEAM/JS (Phase 2) → kills only the nominal targets
-  # `:rs`/`:jvm`. Anything else carrying `Union(` (a non-primitive member, or a union
-  # nested in a generic where no type-pattern can narrow it) kills every target.
+  # primitive members narrows on BEAM/JS (Phase 2) AND JVM (Phase 5, `Any` + `when is`)
+  # → kills only `:rs` (Rust enum synthesis, Phase 4, pending). Anything else carrying
+  # `Union(` (a non-primitive member, or a union nested in a generic where no
+  # type-pattern can narrow it) kills every target.
   defp union_kill_targets(t) when is_binary(t) do
     cond do
       not String.contains?(t, "Union(") -> []
-      primitive_union?(t) -> [:rs, :jvm]
+      primitive_union?(t) -> [:rs]
       true -> [:ex, :rs, :js, :jvm]
     end
   end

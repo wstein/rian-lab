@@ -56,7 +56,10 @@ defmodule Rian.JVM do
   `List<T>` callee param (an element-*typed* consumer). **Not yet** (raise
   `Rian.JVM.Unsupported`): tuples, maps, structs, `with`, lambdas, general FFI; and an
   associated type in a *non*-covariant position (a bare `Elem` return / an `Elem`
-  parameter), which stays off `:jvm`.
+  parameter), which stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
+  `Any` — a member value *is-a* `Any`, so construction needs no wrapping — and a
+  type-pattern `n Int53 ->` narrows it back with `is Long`/`is String` (Kotlin
+  smart-cast), the same discriminator the dispatcher uses.
 
   ## Capabilities
 
@@ -90,6 +93,7 @@ defmodule Rian.JVM do
     PCtor,
     PList,
     PLit,
+    PTyped,
     PVar,
     PWild
   }
@@ -549,6 +553,13 @@ defmodule Rian.JVM do
   # recurses into positional fields `acc.f0`, `acc.f1`, ….
   defp pat_match(%PWild{}, _acc), do: {[], []}
   defp pat_match(%PVar{name: n}, acc), do: {[], [{n, acc}]}
+
+  # a type-pattern `n Type` (ADR-0083): test the runtime type (`is Long`/`is String`,
+  # the dispatcher discriminator) and bind the scrutinee — Kotlin smart-casts it to
+  # the tested type inside the `is` block (the dispatcher relies on the same).
+  defp pat_match(%PTyped{name: n, tname: t}, acc),
+    do: {["#{acc} is #{kt_type(t)}"], [{n, acc}]}
+
   defp pat_match(%PLit{value: v}, acc), do: {["#{acc} == #{lit_kt(v)}"], []}
   # a `Symbol` pattern (`:ok`) tests the interned name as a Kotlin `String` (ADR-0041).
   defp pat_match(%PAtom{name: a}, acc), do: {["#{acc} == #{kt_str(a)}"], []}
@@ -982,6 +993,11 @@ defmodule Rian.JVM do
 
       m = Regex.run(~r/^Vec\((.+)\)$/, t) ->
         "List<#{kt_type(Enum.at(m, 1))}>"
+
+      # a value union `Union(A, B)` (ADR-0083) erases to `Any` — a member value
+      # *is-a* `Any` (no wrapping needed, unlike Rust); a type-pattern narrows it back.
+      String.starts_with?(t, "Union(") ->
+        "Any"
 
       String.match?(t, ~r/^[A-Z]/) ->
         t

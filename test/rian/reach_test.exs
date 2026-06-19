@@ -31,7 +31,7 @@ defmodule Rian.ReachTest do
       assert entry(rep, "add").blockers == []
     end
 
-    test "a PRIMITIVE value union narrows on BEAM/JS — reaches :ex/:js, pinned off the nominal targets (ADR-0083)" do
+    test "a PRIMITIVE value union narrows on BEAM/JS/JVM — reaches all but :rs (ADR-0083)" do
       rep =
         reach("""
         def describe(x Int53 | String) Int53 := case x do
@@ -40,12 +40,11 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      assert targets(rep, "describe") == [:ex, :js]
+      assert targets(rep, "describe") == [:ex, :js, :jvm]
 
       assert Enum.any?(
                entry(rep, "describe").blockers,
-               &(&1.kind == :typed and &1.construct =~ "value union" and
-                   Enum.sort(&1.kills) == [:jvm, :rs])
+               &(&1.kind == :typed and &1.construct =~ "value union" and &1.kills == [:rs])
              )
     end
 

@@ -19,6 +19,16 @@ defmodule Rian.JVMTest do
   @exec_cases [
     %{id: :half, src: "def half(x Float64) Float64 := x / 2.0", probe: ~s|println(half(7.0))|},
     %{
+      id: :union,
+      src: """
+      def describe(x Int53 | String) Int53 := case x do
+        n Int53 -> n + 1
+        s String -> 0
+      end
+      """,
+      probe: ~S|println("${describe(41L)},${describe("hi")}")|
+    },
+    %{
       id: :fib,
       src: """
       def fib(n Int64) Int64
@@ -414,6 +424,17 @@ defmodule Rian.JVMTest do
       kt = JVM.compile("def double(n Int64) Int64 := n * 2")
       assert kt =~ "fun double(a0: Long): Long"
       assert kt =~ "(n * 2L)"
+    end
+
+    @tag :jvm
+    test "a value union erases to `Any`, narrowed by `is` (ADR-0083 Phase 5)", %{jvm_batch: jvm} do
+      kt = jvm_kt(jvm, :union)
+      # the union param erases to `Any`; the type-pattern narrows via `is`
+      assert kt =~ "describe(a0: Any)"
+      assert kt =~ "x is Long"
+      assert kt =~ "x is String"
+      # describe(41L) -> 42 ; describe("hi") -> 0
+      expect_jvm(jvm, :union, "42,0")
     end
 
     test "a type error is caught by the gate, not emitted as malformed Kotlin (parity)" do
