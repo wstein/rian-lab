@@ -6,7 +6,7 @@ defmodule Rian.Lower do
     * exhaustiveness       (Rian.Exhaustiveness.analyze)  -- gates dead/unreachable clauses
       and non-exhaustive `case` bodies; a non-exhaustive **function** lowers with a
       runtime fallthrough (Rust `_ => panic!(…)`, Elixir `FunctionClauseError`), matching
-      `Rian.Beam`/`Rian.JS`/`Rian.JVM` (ADR-0082) rather than being refused
+      `Rian.Beam`/`Rian.JS`/`Rian.JVM` (ADR-0036) rather than being refused
     * expression parsing   (Rian.Pratt)                    -- precedence-aware
   and emits idiomatic Rust **and** Elixir text.
 
@@ -306,7 +306,7 @@ defmodule Rian.Lower do
   # heads are not total (rather than refusing to emit). A partial function lowers
   # everywhere: Elixir/BEAM clauses are total-by-`FunctionClauseError`, and the Rust
   # emitter appends a `_ => panic!(…)` fallthrough (`rust_fn`) — the same runtime no-match
-  # behaviour as the other backends (ADR-0049/0082, the JS/JVM `throw`). Still a HARD
+  # behaviour as the other backends (ADR-0036, the JS/JVM `throw`). Still a HARD
   # error: dead (`unreachable`) clauses, and a non-exhaustive `case` inside a body (which
   # has no clause-fallthrough shim). A synthetic protocol dispatcher is exempt (ADR-0042
   # §3/§6): protocol dispatch is open by design.
@@ -1617,7 +1617,7 @@ defmodule Rian.Lower do
 
     # Fallthrough arm. A `partial` function (non-total clause heads, stamped by
     # `check!`) gets a `_ => panic!(…)` — the totality Rust's `match` requires, matching
-    # the BEAM `FunctionClauseError` / JS-JVM `throw` (ADR-0049/0082). Otherwise the
+    # the BEAM `FunctionClauseError` / JS-JVM `throw` (ADR-0036). Otherwise the
     # per-target exhaustiveness shim (ADR-0036): a `range`-total match has literal arms
     # over an *open* base primitive (`i64`/`char`) that `rustc` sees as non-exhaustive,
     # so append an `unreachable!()` arm (the Rian gate proved totality). A closed sum

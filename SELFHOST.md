@@ -44,10 +44,15 @@ construction, and cons-list building all compose and lower correctly.
   spine" (ADR-0046 §1), the checker adds ~no value to realistic recursive code
   until generics + list inference land. **This is the single strongest piece of
   evidence for prioritising ADR-0042.**
-- **Exhaustiveness is the check that paid off.** It *forced* the final
-  `def lex([_ | rest])` catch-all — without it the match is non-exhaustive and
-  emission is (correctly) refused. The totality gate is real, useful, and already
-  carries its weight on self-hosting-shaped code.
+- **Exhaustiveness is the check that paid off.** It surfaced the missing
+  `def lex([_ | rest])` catch-all — the gate reports the uncovered pattern, the
+  signal that drives a real catch-all rather than a silent partial function. *(Since
+  2026-06-19 a non-total top-level function is no longer **refused**: `Rian.Lower`
+  stamps it `partial` and emits a `_ => panic!(…)` fallthrough, matching the BEAM
+  `FunctionClauseError` the other backends already have — ADR-0036. A non-exhaustive
+  `case` inside a body and dead/unreachable clauses are still hard-refused.)* The
+  totality gate is real, useful, and already carries its weight on
+  self-hosting-shaped code.
 
 ## String-emit fragility (Maya's criterion)
 

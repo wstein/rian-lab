@@ -239,7 +239,7 @@ defmodule Rian.IR do
     **not** total (a function relying on a runtime no-match error, BEAM-style). The
     Rust emitter then appends a `_ => panic!(…)` fallthrough arm — the totality Rust's
     `match` requires — matching the BEAM `FunctionClauseError` / JS-JVM `throw` (so a
-    partial function lowers to every target instead of being refused, ADR-0049/0082).
+    partial function lowers to every target instead of being refused, ADR-0036).
     """
     @enforce_keys [:name, :params, :ret, :clauses]
     defstruct name: nil,

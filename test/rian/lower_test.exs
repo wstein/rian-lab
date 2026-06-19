@@ -46,7 +46,7 @@ defmodule Rian.LowerTest do
   end
 
   describe "exhaustiveness" do
-    test "a non-exhaustive function lowers with a panic fallthrough (ADR-0082)" do
+    test "a non-exhaustive function lowers with a panic fallthrough (ADR-0036)" do
       # only the `Circle` clause — `Square` is uncovered. Rather than refuse to emit
       # (the old gate), Lower stamps `partial` and Rust gets a `_ => panic!(…)` arm —
       # the totality Rust's `match` needs, matching the BEAM/JS/JVM runtime no-match.
