@@ -111,9 +111,12 @@ defmodule Rian.TestRunnerTest do
              ]
     end
 
-    test "a matcher over a value with no `Show` is an honest compile error (ADR-0069)" do
+    test "a matcher over a value with no `Show` is an honest compile error, naming the type (ADR-0069)" do
+      # `expect_eq` is a macro: its args are substituted into the `${…}` holes (monomorphized)
+      # before interpolation resolves, and the constructor call infers its concrete sum type —
+      # so the error names `Box`, not the unhelpful `unknown`.
       src = "type Box := B(Int53)\n@test def t() Outcome := expect_eq(B(1), B(2))"
-      assert_raise ArgumentError, ~r/no `Show`/, fn -> RT.run(src) end
+      assert_raise ArgumentError, ~r/no `Show` for `Box`/, fn -> RT.run(src) end
     end
 
     test "the loop closes: an ExUnit module transpiles to a draft that runs as Rian" do

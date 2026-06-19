@@ -340,7 +340,16 @@ defmodule Rian.Decl do
       # `:fields` lets a `${p.name}` field-access hole resolve to the field's declared type
       # (ADR-0069). Seeded from this scope's own `types` (not the prelude — same reason as
       # above); a struct defined in another file is not visible here and stays `:unknown`.
-      fields: Check.field_table(types)
+      fields: Check.field_table(types),
+      # `:ctors` (ctor name -> its sum/struct type) lets a `${B(1)}` constructor-call hole
+      # infer its concrete type — so a macro-monomorphized matcher (`expect_eq(B(1), B(2))`
+      # expands its args into the holes) reports `no Show for Box`, not `… for unknown`, and
+      # a constructor of a `Show`-having type resolves.
+      ctors:
+        Map.merge(
+          Map.new(for(t <- types, v <- t.variants, do: {v.ctor, t.name})),
+          Map.new(for(s <- structs, do: {s.name, s.name}))
+        )
     }
 
     funcs = lower_meta(assembled_funcs, decls, targets, interp_ic)
