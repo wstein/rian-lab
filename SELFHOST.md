@@ -386,15 +386,17 @@ over time. The proof is a four-stage ladder:
   clause-exhaustiveness (those run at `Decl.compile` and in the portable emitters). So the
   bootstrap, on its own, neither type-checks nor totality-checks the compiler; it silently
   accepts non-total and return-type-mismatched functions that every gated target rejects.
-  Two of those gaps are now closed/tracked separately
+  Both of those gaps are now closed/guarded
   ([`test/rian/selfhost_gate_test.exs`](test/rian/selfhost_gate_test.exs)):
   - **Type-correctness is enforced** — `Check.gate!` runs over every `compiler/*.rian` and
     is clean (it surfaced two real bugs the lax BEAM path hid: `rev`/`cat` declared
     monomorphic but used polymorphically, now `forall T`).
-  - **Totality is ratcheted, not yet met** — the Rust emitter's exhaustiveness gate flags
-    **9** non-total self-host functions (`i64_project`, `scalar`, `bin_ty`, `parse_fldpats`,
-    `init_of`×2, `scan_hole`, `parse_paren`, `named_fields`) that BEAM accepts; the test
-    asserts the set can only shrink — each is a blocker on the road to a Rust terminus.
+  - **Totality is met (2026-06-19)** — `Rian.Lower` now lowers a non-total *top-level*
+    function with a runtime fallthrough (`_ => panic!(…)`, matching the BEAM/JS/JVM
+    backends' `FunctionClauseError`/`throw`) instead of refusing it, so the self-host
+    corpus has **zero** totality refusals; the test guards that it stays so. Still refused
+    everywhere — and caught if one appears — a non-exhaustive `case` *inside a body* and
+    dead/unreachable clauses.
 
   It is also BEAM-only (the portable Rust/JS terminus is unstarted) and compiles the
   compiler's own *subset* of Rian, not arbitrary Rian. The gaps are measured, none hidden.

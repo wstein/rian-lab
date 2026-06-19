@@ -34,33 +34,21 @@ defmodule Rian.SelfhostGateTest do
     end
   end
 
-  describe "totality — the exhaustiveness gate only the Rust emitter enforces" do
-    # The BEAM path accepts these non-total functions; the Rust emitter (`Rian.Lower`)
-    # rejects them, so each is a blocker on the road to Rust self-hosting. Listed as a
-    # ratchet: the set may only SHRINK (make a function total, then drop it here).
-    @known_non_total MapSet.new([
-                       {"beam.rian", "i64_project"},
-                       {"cap.rian", "scalar"},
-                       {"checker.rian", "bin_ty"},
-                       {"decl.rian", "parse_fldpats"},
-                       {"js.rian", "init_of"},
-                       {"jvm.rian", "init_of"},
-                       {"lexer_v2.rian", "scan_hole"},
-                       {"parse.rian", "parse_paren"},
-                       {"rust.rian", "named_fields"}
-                     ])
+  describe "totality — non-total functions lower with a fallthrough, none refused (ADR-0034)" do
+    # `Rian.Lower` (2da702a) now lowers a non-total TOP-LEVEL function with a runtime
+    # fallthrough (`_ => panic!(…)`), matching how BEAM/JS/JVM throw at runtime, instead
+    # of refusing it — so the self-host corpus has ZERO totality refusals (the prior
+    # 9-entry ratchet bottomed out). This guards that it STAYS closed and catches the
+    # cases still refused everywhere: a non-exhaustive `case` *inside a body* and dead /
+    # unreachable clauses (`non_total_fn` matches the "non-exhaustive `…`" refusal).
+    test "no compiler/*.rian function is refused for non-exhaustiveness" do
+      refused =
+        for f <- @sources, name = non_total_fn(f), name, do: {Path.basename(f), name}
 
-    test "no NEW non-total self-host function appears (ratchet toward Rust-total)" do
-      found =
-        MapSet.new(
-          for f <- @sources, fn_name = non_total_fn(f), fn_name, do: {Path.basename(f), fn_name}
-        )
-
-      new = MapSet.difference(found, @known_non_total)
-
-      assert MapSet.size(new) == 0,
-             "new non-total self-host function(s) — make them total or update the baseline: " <>
-               inspect(MapSet.to_list(new))
+      assert refused == [],
+             "a self-host function is refused for non-exhaustiveness — give its `case` a " <>
+               "total set of arms (a top-level `def` lowers with a fallthrough): " <>
+               inspect(refused)
     end
   end
 
