@@ -83,6 +83,7 @@ defmodule Rian.Manifest do
   anchor for the build-default target set (`Rian.Reach`) and `@external` file-reference
   resolution (ADR-0080 §2/§7).
   """
+  @rian_sig "pub def locate(start_dir String) Option(String)"
   @spec locate(Path.t()) :: Path.t() | nil
   def locate(start_dir \\ ".") do
     start_dir |> Path.expand() |> walk_up()
@@ -105,6 +106,7 @@ defmodule Rian.Manifest do
   `@external` file-reference resolves against this base, so it is stable regardless of
   which entry file inside the project is built/run (ADR-0080 §7).
   """
+  @rian_sig "pub def root(start_dir String) String"
   @spec root(Path.t()) :: Path.t()
   def root(start_dir) do
     case locate(start_dir) do
@@ -122,6 +124,7 @@ defmodule Rian.Manifest do
   could leak into an unrelated compile. A no-op (beyond running `fun`) when no manifest
   is found. Returns `fun`'s result.
   """
+  @rian_sig "pub def with_project(start_dir String, fun Fn() _Unk) _Unk"
   @spec with_project(Path.t(), (-> result)) :: result when result: var
   def with_project(start_dir \\ ".", fun) when is_function(fun, 0) do
     prev = Application.fetch_env(:rian_lab, :rian_manifest)

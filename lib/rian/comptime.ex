@@ -9,8 +9,11 @@ defmodule Rian.Comptime do
   never run FFI or perform build-time effects unless a build capability is
   explicitly granted (deferred). Runs as an AST -> AST pass.
   """
+  use Rian.Ann
+
   alias Rian.Macro
 
+  @rian_sig "pub def fold(node Expr) Expr"
   @spec fold(term()) :: term()
   def fold({:call, {:id, "comptime"}, [e]}) do
     case eval(e) do

@@ -73,6 +73,7 @@ defmodule Rian.Protocol do
   BEAM desugar erases. Raises `Error`; the analogue of the method-set coherence in
   `check_impl/3`, for the type side. A protocol with no associated types is unaffected.
   """
+  @rian_sig "pub def check_assoc!(protocols Vec(_Unk), impl_decls Vec(_Unk)) _Unk"
   @spec check_assoc!(list(), list()) :: term()
   def check_assoc!(protocols, impl_decls) do
     declared = Map.new(protocols, fn p -> {p.name, MapSet.new(Map.get(p, :assoc, []))} end)

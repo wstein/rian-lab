@@ -37,6 +37,7 @@ defmodule Rian.Exhaustiveness do
 
   # ── Environment helpers ────────────────────────────────────────────────
 
+  @rian_sig "pub def base_env() _Unk"
   @doc "Base env with built-in bool, list, and the infinite primitive types."
   @spec base_env() :: map()
   def base_env do
@@ -135,6 +136,7 @@ defmodule Rian.Exhaustiveness do
 
   # ── Usefulness U(P, q) ─────────────────────────────────────────────────
 
+  @rian_sig "pub def useful?(rows Vec(_Unk), q Vec(_Unk), env _Unk) Bool"
   @doc "Is pattern vector `q` useful w.r.t. matrix `rows`?"
   @spec useful?(list(), list(), map()) :: boolean()
   def useful?(rows, [], _env), do: rows == []
@@ -204,6 +206,7 @@ defmodule Rian.Exhaustiveness do
 
   # ── Top-level analysis ─────────────────────────────────────────────────
 
+  @rian_sig "pub def analyze(arms Vec(_Unk), n Int53, env _Unk) _Unk"
   @doc """
   Analyze clauses. `arms` is `[%{pat: [pattern], guard: boolean}]`, `n` is the
   scrutinee arity (1 for `match`, the param count for a multi-clause `fn`).
@@ -240,6 +243,7 @@ defmodule Rian.Exhaustiveness do
 
   # ── Rendering (for diagnostics) ────────────────────────────────────────
 
+  @rian_sig "pub def render(node _Unk) String"
   @spec render(term()) :: String.t()
   def render(:wild), do: "_"
   def render({:ctor, {:lit, v}, []}), do: inspect(v)

@@ -650,6 +650,7 @@ defmodule Rian.Decl do
     Enum.map(fs, fn %Field{} = fl -> %Field{fl | type: subst_type_str(fl.type, aliases)} end)
   end
 
+  @rian_sig "pub def compile(src String) Vec(_Unk)"
   @doc """
   Parse and lower to both targets: `[{name, %{elixir, rust}}]`. Top-level
   functions lower one entry each; a `mod` lowers to one entry (its module text)
@@ -711,6 +712,7 @@ defmodule Rian.Decl do
     end
   end
 
+  @rian_sig "pub def compile_beam(src String) Vec(_Unk)"
   @doc "Parse and lower to the BEAM target only (FFI / BEAM-only bodies)."
   @spec compile_beam(String.t()) :: [{String.t(), term()}]
   def compile_beam(src) do
@@ -1447,6 +1449,7 @@ defmodule Rian.Decl do
 
   # multi-clause: bodiless signature followed by >=1 pattern clauses. `pub` (if
   # any) sits on the signature; the clause defs that follow are not re-marked.
+  @rian_sig "pub def build_func(group Vec(_Unk)) Func"
   @spec build_func([map()]) :: map()
   # arity for grouping — a top-level-comma count at the TOKEN level, so a char/string
   # literal (a single token) never contributes a stray comma (`[',' | rest]`) and all

@@ -576,6 +576,7 @@ defmodule Rian.Core do
     if MapSet.member?(used, cand), do: fresh_id_n(base, n + 1, used), else: cand
   end
 
+  @rian_sig "pub def first_unsupported(node Expr, unsup Dict(_Unk, _Unk)) _Unk"
   @doc """
   Generic typed-core walk used by the partial emitters (`Rian.JS`, `Rian.JVM`):
   the friendly label of the first node whose struct is a key in `unsup`, else
@@ -604,6 +605,7 @@ defmodule Rian.Core do
 
   def first_unsupported(_node, _unsup), do: nil
 
+  @rian_sig "pub def reject_unsupported!(funcs Vec(Func), unsup Dict(_Unk, _Unk), target Symbol, exception Symbol) Symbol"
   @doc """
   Reject any function whose body uses a construct a partial emitter cannot lower.
   For each clause, parse the body, find the first node whose struct is in `unsup`

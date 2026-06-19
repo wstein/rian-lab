@@ -36,6 +36,8 @@ defmodule Rian.Macro do
     end)
   end
 
+  @rian_sig "pub def expand(env _Unk, ast _Unk) _Unk"
+  @rian_sig "pub def expand(env _Unk, ast _Unk, opts _Unk) _Unk"
   @doc """
   Expand all macro calls in `ast`. `opts[:portable]` (default `false`) enforces
   the portable-core discipline above — a template that introduces a failable bind

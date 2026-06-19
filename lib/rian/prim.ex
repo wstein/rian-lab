@@ -56,6 +56,7 @@ defmodule Rian.Prim do
   @spec overflow_ops() :: [String.t()]
   def overflow_ops, do: @overflow_ops
 
+  @rian_sig "pub def normalize(node _Unk) _Unk"
   @doc """
   Walk a tuple-form expression AST and rewrite `Prim.<name>(args)` calls into
   `__prim_<name>(args)`. Idempotent; non-`Prim` calls pass through unchanged; an

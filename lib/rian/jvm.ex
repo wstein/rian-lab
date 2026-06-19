@@ -278,6 +278,8 @@ defmodule Rian.JVM do
   `kotlinc` is absent or the emitted Kotlin does not compile (and the emitter
   itself raises `Rian.JVM.Unsupported` for a not-yet-lowered construct).
   """
+  @rian_sig "pub def to_jar(src String, jar_path String) _Unk"
+  @rian_sig "pub def to_jar(src String, jar_path String, opts _Unk) _Unk"
   @spec to_jar(String.t(), String.t(), keyword()) :: {:ok, String.t()}
   def to_jar(src, jar_path, opts \\ []) do
     kotlinc =

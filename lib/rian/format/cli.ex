@@ -9,8 +9,11 @@ defmodule Rian.Format.CLI do
   (`--check`/`--diff`) · `2` usage error.
   """
 
+  use Rian.Ann
+
   alias Rian.Format
 
+  @rian_sig "pub def run(argv Vec(String)) Int53"
   @doc "Run the fmt CLI over `argv` (already stripped of any `fmt` subcommand)."
   @spec run([String.t()]) :: 0 | 1 | 2
   def run(argv) do

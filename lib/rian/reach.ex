@@ -93,10 +93,12 @@ defmodule Rian.Reach do
   # Elixir modules that are concurrency/process/state
   @conc_ex ~w(GenServer Task Process Agent Supervisor DynamicSupervisor Registry GenStage GenEvent Node)
 
+  @rian_sig "pub def targets() Vec(Symbol)"
   @doc "The closed target vocabulary (emitter-backed). Extends only when an emitter lands."
   @spec targets() :: [target()]
   def targets, do: @targets
 
+  @rian_sig "pub def effect_names() Vec(Symbol)"
   @doc "The effect names a function may declare today (inferable + Reach-gating, ADR-0048 §2)."
   @spec effect_names() :: [effect()]
   def effect_names, do: @effect_names
@@ -236,6 +238,7 @@ defmodule Rian.Reach do
   name is absent or overloaded (ambiguous), naming the available keys. Pass the
   full `"name/arity"` key to disambiguate an overload.
   """
+  @rian_sig "pub def entry(report Dict(String, _Unk), key String) _Unk"
   @spec entry(map(), String.t()) :: map()
   def entry(report, key) when is_map_key(report, key), do: report[key]
 
@@ -256,6 +259,7 @@ defmodule Rian.Reach do
     end
   end
 
+  @rian_sig "pub def bare_name(key String) String"
   @doc "The bare function name of a `\"name/arity\"` report key (drops `/arity`)."
   @spec bare_name(String.t()) :: String.t()
   def bare_name(key), do: key |> String.split("/") |> hd()

@@ -24,6 +24,7 @@ defmodule Rian.Pratt do
   # e.g. a clause guard parsed in Rian — so they can re-`parse` it idempotently.
   # Still run `Prim.normalize` (idempotent): a front-end-built AST may carry raw
   # `Prim.*` calls that must be rewritten to `__prim_*`, exactly as the string path.
+  @rian_sig "pub def parse(src String) _Unk"
   @spec parse(String.t() | tuple()) :: tuple()
   def parse(ast) when is_tuple(ast), do: Rian.Prim.normalize(ast)
 
@@ -37,6 +38,7 @@ defmodule Rian.Pratt do
   @spec parse_sexpr(String.t()) :: String.t()
   def parse_sexpr(str), do: sexpr(parse(str))
 
+  @rian_sig "pub def parse_pats(str String) Vec(Pat)"
   @doc """
   Parse a comma-separated pattern list (a clause head's parameters) into surface
   patterns. The single pattern parser (`parse_pat`) — shared with `case` arms —
@@ -60,6 +62,7 @@ defmodule Rian.Pratt do
     end
   end
 
+  @rian_sig "pub def parse_body(src String) _Unk"
   @doc """
   Parse a function body — a block of `;`-separated statements with a final
   value expression (a single `:= expr` body is the one-statement case). Always
@@ -79,6 +82,7 @@ defmodule Rian.Pratt do
     Rian.Prim.normalize(block)
   end
 
+  @rian_sig "pub def parse_body_result(src String) _Unk"
   @doc """
   Errors-as-values entry point (ADR-0035/0040): parse a body, returning
   `{:ok, ast} | {:error, message}` instead of raising. The single boundary that

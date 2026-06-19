@@ -58,6 +58,8 @@ defmodule Rian.Ann do
   excludes these — they are honest non-portability, not a Rian-concept clash. The
   attribute tags the **next** `def`/`defp` in its block (like `@doc`).
   """
+  # NB: no `@rian_sig` here — this module *defines* the annotation, so it cannot register the
+  # accumulating attribute on itself (bootstrapping); a `@rian_sig` would be "set but never used".
   @spec host_funcs(String.t()) :: [String.t()]
   def host_funcs(source) when is_binary(source) do
     case Code.string_to_quoted(source) do

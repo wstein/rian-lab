@@ -26,11 +26,14 @@ defmodule Rian.Format.Cst do
   than raising, so a malformed file still produces a (best-effort) tree.
   """
 
+  use Rian.Ann
+
   @typedoc "A CST node: a single token, or a bracket-delimited group of nodes."
   @type node_t ::
           {:tok, Rian.Lexer.token()}
           | {:group, Rian.Lexer.token(), [node_t()], Rian.Lexer.token()}
 
+  @rian_sig "pub def build(tokens Vec(_Unk)) Vec(_Unk)"
   @doc "Build the bracket-structured node list for a trivia token stream."
   @spec build([Rian.Lexer.token()]) :: [node_t()]
   def build(tokens), do: elem(seq(tokens, []), 0)

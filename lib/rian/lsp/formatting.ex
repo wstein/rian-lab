@@ -27,12 +27,15 @@ defmodule Rian.LSP.Formatting do
   boundary still produces valid output but may indent oddly.
   """
 
+  use Rian.Ann
+
   alias Rian.Format
 
   @type position :: %{line: non_neg_integer(), character: non_neg_integer()}
   @type text_edit :: %{range: %{start: position(), end: position()}, new_text: String.t()}
 
   @doc "Edits to format the whole document (empty list if already formatted)."
+  @rian_sig "pub def formatting(text String) Vec(_Unk)"
   @spec formatting(String.t()) :: [text_edit()]
   def formatting(text) when is_binary(text) do
     hunks(text, Format.format(text))
@@ -42,6 +45,7 @@ defmodule Rian.LSP.Formatting do
   Edits to format the lines in `[start_line, end_line]` (0-based, inclusive), as a
   fragment. Returns a single line-replacement edit, or `[]` if already formatted.
   """
+  @rian_sig "pub def range_formatting(text String, start_line Int53, end_line Int53) Vec(_Unk)"
   @spec range_formatting(String.t(), integer(), integer()) :: [text_edit()]
   def range_formatting(text, start_line, end_line)
       when is_integer(start_line) and is_integer(end_line) do
@@ -87,6 +91,7 @@ defmodule Rian.LSP.Formatting do
   defp leading_spaces(line), do: String.length(line) - String.length(String.trim_leading(line))
 
   @doc "Apply line-granular `edits` to `text` (right-to-left). The test oracle."
+  @rian_sig "pub def apply_edits(src String, edits Vec(_Unk)) String"
   @spec apply_edits(String.t(), [text_edit()]) :: String.t()
   def apply_edits(text, edits) do
     lines = String.split(text, "\n")

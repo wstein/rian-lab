@@ -38,6 +38,7 @@ defmodule Rian.Doctest do
   Extract `{expr, expected}` example pairs from a source's `@doc`s — top-level
   functions and functions inside a single `mod`.
   """
+  @rian_sig "pub def extract(src String) Vec(_Unk)"
   @spec extract(String.t()) :: list()
   def extract(src) do
     prog = Decl.parse(src)
@@ -67,6 +68,8 @@ defmodule Rian.Doctest do
   Compile `src` with its doctests and run them. Returns
   `[{expr, :pass | {:fail, got, expected}}]`, one per example.
   """
+  @rian_sig "pub def run(src String) Vec(_Unk)"
+  @rian_sig "pub def run(src String, mod _Unk) Vec(_Unk)"
   @spec run(String.t(), module() | nil) :: [{String.t(), :pass | {:fail, term(), term()}}]
   def run(src, mod \\ nil) do
     case extract(src) do

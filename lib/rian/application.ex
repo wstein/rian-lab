@@ -1,7 +1,9 @@
 defmodule Rian.Application do
   @moduledoc false
   use Application
+  use Rian.Ann
 
+  @rian_sig "pub def start(type _Unk, args _Unk) _Unk"
   @impl true
   def start(_type, _args) do
     maybe_register_smart_cell()

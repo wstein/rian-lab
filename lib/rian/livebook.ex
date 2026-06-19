@@ -26,6 +26,7 @@ defmodule Rian.Livebook do
   Evaluate a cell's worth of Rian `source` against the notebook's shared session,
   returning a `Kino` output of the rendered results. Advances the shared session.
   """
+  @rian_sig "pub def eval(source String) _Unk"
   @spec eval(String.t()) :: term()
   def eval(source) when is_binary(source) do
     {lines, _session} =
@@ -42,6 +43,7 @@ defmodule Rian.Livebook do
   Returns `{rendered_lines, session'}` — one rendered string per non-empty entry,
   in order, and the advanced session. Pure; the engine seam the surfaces share.
   """
+  @rian_sig "pub def run(session _Unk, source String) _Unk"
   @spec run(Repl.t(), String.t()) :: {[String.t()], Repl.t()}
   def run(session, source) do
     {rendered, session} =

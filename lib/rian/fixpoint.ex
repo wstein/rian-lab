@@ -27,6 +27,7 @@ defmodule Rian.Fixpoint do
   @typedoc "A loaded BEAM module exposing `tokenize/1` (a compiled Rian lexer)."
   @type lexer_mod :: module()
 
+  @rian_sig "pub def load_lexer(source String, mod Symbol) Symbol"
   @doc """
   Compile a Rian lexer `source` (a module with a `pub tokenize/1`) to real
   bytecode under `mod`, returning the loaded module or raising on failure.

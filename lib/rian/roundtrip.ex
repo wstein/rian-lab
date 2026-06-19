@@ -56,6 +56,7 @@ defmodule Rian.Roundtrip do
           equiv_vs_origin: :equiv | :diverges | :skipped
         }
 
+  @rian_sig "pub def run(ex_src String) _Unk"
   @doc "Run the full roundtrip on one Elixir source string, returning a `t:report/0`."
   @spec run(String.t()) :: report()
   def run(ex_src) when is_binary(ex_src) do
@@ -94,6 +95,7 @@ defmodule Rian.Roundtrip do
   artifacts under `stem` (a relative path without extension, so sources that share
   a basename — e.g. `cli.ex` and `format/cli.ex` — do not collide).
   """
+  @rian_sig "pub def run_file(file String, out_dir String, stem String) _Unk"
   @spec run_file(Path.t(), Path.t(), String.t()) :: report()
   def run_file(file, out_dir, stem) do
     report = run(File.read!(file))

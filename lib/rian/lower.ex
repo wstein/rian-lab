@@ -1401,6 +1401,7 @@ defmodule Rian.Lower do
   # `Trait::m(recv, …)`) auto-refs the receiver, so it works whether `recv` is a
   # `&T` parameter or an owned `T` (a cloned slice-element binder) — both reach
   # the `&self` method. Non-protocol calls pass through.
+  @rian_sig "pub def rewrite_proto_calls(node _Unk, methods _Unk) _Unk"
   @spec rewrite_proto_calls(term(), term()) :: term()
   def rewrite_proto_calls({:call, {:id, m}, [recv | rest]}, methods)
       when is_map_key(methods, m) do
@@ -2070,11 +2071,13 @@ defmodule Rian.Lower do
     do: raise("Rust cons tail must be a variable or `_`: #{inspect(other)}")
 
   # ── Expression emission (precedence-aware, target-specific) ────────────
+  @rian_sig "pub def emit_expr(src String, target Symbol) _Unk"
   @doc "Emit a single Rian expression string to :elixir or :rust."
   @spec emit_expr(String.t(), atom()) :: term()
   def emit_expr(src, target),
     do: emit(Rian.Check.annotate(Rian.Pratt.parse(src), %{}, %{}), target, emit_ctx()) |> elem(0)
 
+  @rian_sig "pub def emit_ast(ast _Unk, target Symbol) _Unk"
   @doc "Emit an already-built AST (e.g. after macro expansion / comptime folding)."
   @spec emit_ast(term(), atom()) :: term()
   def emit_ast(ast, target),

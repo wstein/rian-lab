@@ -20,6 +20,7 @@ defmodule Rian.Build do
   Without `-o`, BEAM writes flat `.beam` into the cwd and a source target prints to stdout.
   Returns an exit code.
   """
+  @rian_sig "pub def build(argv Vec(String)) Int53"
   @spec build([String.t()]) :: non_neg_integer()
   def build(argv) do
     case OptionParser.parse(argv,
@@ -291,6 +292,7 @@ defmodule Rian.Build do
   end
 
   @doc "`rian check FILE` — run the gates; print `ok` (exit 0) or the error (exit 1)."
+  @rian_sig "pub def check(argv Vec(String)) Int53"
   @spec check([String.t()]) :: non_neg_integer()
   def check([file]) do
     with {:ok, src} <- File.read(file),
@@ -312,6 +314,7 @@ defmodule Rian.Build do
   `--require`, the listed targets are required: a function missing any is reported
   and the exit code is non-zero (the CI portability gate, toolchain-free).
   """
+  @rian_sig "pub def targets(argv Vec(String)) Int53"
   @spec targets([String.t()]) :: non_neg_integer()
   def targets(argv) do
     case OptionParser.parse(argv, strict: [require: :string]) do
@@ -338,6 +341,7 @@ defmodule Rian.Build do
   it becomes a normal project the user maintains, with Rian a PULL codegen step. Fails
   closed: the source must exist and DEST must not (eject never overwrites).
   """
+  @rian_sig "pub def eject(argv Vec(String)) Int53"
   @spec eject([String.t()]) :: non_neg_integer()
   def eject(argv) do
     case OptionParser.parse(argv, strict: [out: :string], aliases: [o: :out]) do
@@ -355,6 +359,7 @@ defmodule Rian.Build do
   @doc false
   # the testable core: promote `<root>/_build/<target>/` to `dest` (resolved against
   # `root`). The CLI passes `root = File.cwd!()`.
+  @rian_sig "pub def eject_at(root String, target String, dest String) Int53"
   @spec eject_at(Path.t(), String.t(), Path.t()) :: non_neg_integer()
   def eject_at(root, target, dest) do
     src = Path.join([root, "_build", target])

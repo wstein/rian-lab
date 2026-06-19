@@ -48,6 +48,7 @@ defmodule Rian.External do
   the order/types; a target that reorders or retypes its params will match arity yet be
   miswired silently. (Same trust boundary as any FFI — ADR-0068: this is FFI, not magic.)
   """
+  @rian_sig "pub def render(spec _Unk, params Vec(_Unk)) String"
   @spec render(spec(), [map()]) :: String.t()
   def render(spec, _params) when is_binary(spec), do: spec
 

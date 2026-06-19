@@ -40,6 +40,7 @@ defmodule Rian.PatternLower do
     }
   end
 
+  @rian_sig "pub def lower_clause(clause _Unk, env _Unk) _Unk"
   @doc "Lower one clause: %{pats: [surface], guard: boolean} -> %{pat: [checker], guard: boolean}."
   @spec lower_clause(map(), map()) :: map()
   def lower_clause(%{pats: surface, guard: explicit?}, env) do

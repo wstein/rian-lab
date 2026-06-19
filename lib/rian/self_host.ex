@@ -236,13 +236,16 @@ defmodule Rian.SelfHost do
   isolation; composition verifies that stages connect end-to-end with no glue. The
   bootstrap loop (Stage 3) is gated on composition, not on the per-stage number.
   """
+  @rian_sig "pub def composition() _Unk"
   @spec composition() :: map()
   def composition, do: @composition
 
+  @rian_sig "pub def stages() Vec(_Unk)"
   @doc "The declared pipeline stages with their self-host state."
   @spec stages() :: [map()]
   def stages, do: @stages
 
+  @rian_sig "pub def passes() Vec(_Unk)"
   @doc "The auxiliary self-hosted passes (not pipeline stages; excluded from `percent/0`)."
   @spec passes() :: [map()]
   def passes, do: @passes
@@ -404,6 +407,7 @@ defmodule Rian.SelfHost do
     ]
   }
 
+  @rian_sig "pub def ffi_ledger() Dict(String, Vec(String))"
   @doc "The declared host-FFI crutch ledger: self-host file basename -> sorted constructs."
   @spec ffi_ledger() :: %{String.t() => [String.t()]}
   def ffi_ledger, do: @ffi_ledger

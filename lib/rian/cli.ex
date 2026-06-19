@@ -26,7 +26,10 @@ defmodule Rian.CLI do
   (the testable half), and `main/1` is just `run/1` piped into `System.halt/1`.
   """
 
+  use Rian.Ann
+
   @doc "escript entry point."
+  @rian_sig "pub def main(argv Vec(String)) _Unk"
   @spec main([String.t()]) :: no_return()
   def main(argv) do
     # establish the project context at the escript boundary (not in `run/1`): the
@@ -41,6 +44,7 @@ defmodule Rian.CLI do
   **without halting** — the testable half of `main/1` (same split as
   `Rian.Format.CLI.run/1`). `main/1` is just `run/1` piped into `System.halt/1`.
   """
+  @rian_sig "pub def run(argv Vec(String)) Int53"
   @spec run([String.t()]) :: non_neg_integer()
   def run(["fmt" | rest]), do: Rian.Format.CLI.run(rest)
   def run(["run" | rest]), do: Rian.Run.cli(rest)

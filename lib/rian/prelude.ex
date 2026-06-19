@@ -19,8 +19,11 @@ defmodule Rian.Prelude do
   function (an unimplemented one still falls through to Elixir as FFI). `Rian.Reach`
   treats such a call as portable, so it reaches all four targets.
   """
+  use Rian.Ann
+
   alias Rian.IR.{Field, Type, Variant}
 
+  @rian_sig "pub def types() Vec(Type)"
   @doc "The built-in prelude types (known everywhere, never re-emitted as user types)."
   @spec types() :: [struct()]
   def types do
@@ -35,6 +38,7 @@ defmodule Rian.Prelude do
     ]
   end
 
+  @rian_sig "pub def with_prelude(types Vec(Type)) Vec(Type)"
   @doc "Prepend the prelude types to a program's user types (for env/meta/inference)."
   @spec with_prelude([struct()]) :: [struct()]
   def with_prelude(types), do: types() ++ types
@@ -72,18 +76,22 @@ defmodule Rian.Prelude do
                          do: {m.name, to_string(f.name)}
                    )
 
+  @rian_sig "pub def module_names() Vec(String)"
   @doc "The portable-prelude module names redirected to their linked `Rian.Prelude.*` atoms."
   @spec module_names() :: [String.t()]
   def module_names, do: @prelude_names
 
+  @rian_sig "pub def defines?(mod String, fun String) Bool"
   @doc "Whether the portable prelude defines `Mod.fun` (only these calls redirect/are portable)."
   @spec defines?(String.t(), String.t()) :: boolean()
   def defines?(mod, fun), do: MapSet.member?(@prelude_exports, {mod, fun})
 
+  @rian_sig "pub def atom(name String) Symbol"
   @doc "The linked BEAM atom a prelude module call resolves to (`List` → `Rian.Prelude.List`)."
   @spec atom(String.t()) :: module()
   def atom(name), do: :"Elixir.Rian.Prelude.#{name}"
 
+  @rian_sig "pub def beams() Vec(_Unk)"
   @doc "Compile the bundled prelude sources to `[{linked_atom, beam_binary}]`."
   @spec beams() :: [{module(), binary()}]
   def beams do
@@ -93,6 +101,7 @@ defmodule Rian.Prelude do
     end)
   end
 
+  @rian_sig "pub def load() Symbol"
   @doc "Load the linked prelude modules into the VM (idempotent), so calls to them run."
   @spec load() :: :ok
   def load do

@@ -14,12 +14,15 @@ defmodule Rian.Run do
   foreign `.ffi.ex` so the calls resolve before the entry runs (ADR-0080 §7).
   """
 
+  use Rian.Ann
+
   @doc """
   Evaluate Rian source: gate it, load every module, and apply the zero-arg entry
   `main` (or `name`). Returns `{:ok, value}` or `{:error, message}`. A *compile*
   error (parse/check/exhaustiveness) becomes `{:error, …}`; a *runtime* error in the
   entry function propagates (its real stacktrace is more useful than a swallowed one).
   """
+  @rian_sig "pub def eval(src String, main String) _Unk"
   @spec eval(String.t(), String.t()) :: {:ok, term()} | {:error, String.t()}
   def eval(src, main \\ "main") when is_binary(src) do
     with {:ok, mod, fun} <- resolve(src, main, nil) do
@@ -33,6 +36,7 @@ defmodule Rian.Run do
   **bundled**: the `.ffi.ex` is compiled+loaded and the external calls resolve before
   the entry runs (ADR-0080 §7 / ADR-0068).
   """
+  @rian_sig "pub def run_file(path String, main String) _Unk"
   @spec run_file(Path.t(), String.t()) :: {:ok, term()} | {:error, String.t()}
   def run_file(path, main \\ "main") do
     case File.read(path) do
@@ -126,6 +130,7 @@ defmodule Rian.Run do
   Escript `rian run` adapter: `argv → exit code`, printing the entry's value to
   stdout (0) or an error to stderr (1; usage error 2).
   """
+  @rian_sig "pub def cli(argv Vec(String)) Int53"
   @spec cli([String.t()]) :: non_neg_integer()
   def cli(argv) do
     case OptionParser.parse(argv, strict: [main: :string]) do

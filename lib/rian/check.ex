@@ -86,6 +86,7 @@ defmodule Rian.Check do
   @arith ~w(+ - *)
 
   # ── unification kernel ─────────────────────────────────────────────────
+  @rian_sig "pub def unify(t String, u String) String"
   @doc """
   Unify two types: equal -> itself; `:unknown` -> the other; differ -> `:mismatch`.
   Function types `Fn(A.., R)` (ADR-0042) unify *structurally* — same arity and
@@ -1429,6 +1430,7 @@ defmodule Rian.Check do
   # declaration); here `:unknown` is ABSORBING (top), so an uninferable arm
   # poisons the join and `node.type` never over-claims. `:bottom` is the fold
   # identity (the empty set of branches). Commutative and associative.
+  @rian_sig "pub def join(from String, to String) String"
   @doc false
   @spec join(ty(), ty()) :: ty()
   def join(t, t), do: t
@@ -1793,6 +1795,7 @@ defmodule Rian.Check do
     end)
   end
 
+  @rian_sig "pub def infer_return_type(func Func, ic _Unk) String"
   @doc """
   Infer a private function's RETURN type from its clause bodies — the join of each
   clause's inferred body type, given the inference context `ic` (`program_ic/1`).
@@ -1839,6 +1842,7 @@ defmodule Rian.Check do
     end)
   end
 
+  @rian_sig "pub def infer_param_type(func Func, i Int53, ic _Unk) String"
   @doc """
   Infer a private function parameter's type at position `i`, bidirectionally
   (Dunfield–Krishnaswami "checking", realized locally): an arithmetic/compare
@@ -2039,6 +2043,7 @@ defmodule Rian.Check do
   defp var?(%EId{name: n}, n), do: true
   defp var?(_, _), do: false
 
+  @rian_sig "pub def check(src String) _Unk"
   @doc "Parse source and check every function; returns `:ok` or the first `{:error, message}`."
   @spec check(String.t()) :: term()
   def check(src), do: src |> Rian.Decl.parse() |> check_program()
@@ -2069,8 +2074,9 @@ defmodule Rian.Check do
   # its ctor names) is the one cleanly typed bucket; the rest are tuple-keyed or
   # nested tables left `_Unk` until each is modelled.
   @rian_sig """
-  type Ic := Ic(tdefs Dict(String, Vec(String)), funs _Unk, fsigs _Unk, ctors _Unk,
-                ranges _Unk, opaques _Unk, impls _Unk, fbounds _Unk)
+  type Ic := Ic(tdefs Dict(String, Vec(String)), fields Dict(String, Dict(String, String)),
+                funs _Unk, fsigs _Unk, ctors _Unk, ranges _Unk, opaques _Unk, impls _Unk,
+                fbounds _Unk)
   """
 
   @doc """
@@ -2083,6 +2089,7 @@ defmodule Rian.Check do
   @rian_sig "pub def program_ic(prog Prog) Ic"
   @spec program_ic(map()) :: %{
           tdefs: map(),
+          fields: map(),
           funs: map(),
           fsigs: map(),
           ctors: map(),
@@ -2244,6 +2251,7 @@ defmodule Rian.Check do
   whose variant is not statically known is ambiguous; narrow with `case` first.) Public so
   `Rian.Decl` can seed its inline interpolation `ic` without pulling in the whole prelude.
   """
+  @rian_sig "pub def field_table(types Vec(Type)) Dict(String, Dict(String, String))"
   @spec field_table([map()]) :: map()
   def field_table(types) do
     for t <- types, [v] <- [t.variants], into: %{} do

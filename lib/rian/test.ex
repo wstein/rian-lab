@@ -78,6 +78,7 @@ defmodule Rian.Test do
   @external_resource "examples/rian/prelude_test.rian"
 
   @doc "The canonical assertion-macro lib prepended to every test source."
+  @rian_sig "pub def assert_prelude() String"
   @spec assert_prelude() :: String.t()
   def assert_prelude, do: @assert_prelude
 
@@ -115,6 +116,7 @@ defmodule Rian.Test do
   variants to `:pass` and `{:fail, msg}` on the BEAM, so a matcher's failure message
   flows straight through; a bare `false` becomes `{:fail, false}`.
   """
+  @rian_sig "pub def outcome(raw _Unk) Outcome"
   @spec outcome(term()) :: :pass | {:fail, term()}
   def outcome(true), do: :pass
   def outcome(:pass), do: :pass
@@ -126,6 +128,8 @@ defmodule Rian.Test do
   A test passes iff it returns `true` (Bool surface) or `Pass` (matcher `Outcome`);
   a matcher's `Fail(msg)` surfaces as `{:fail, msg}`.
   """
+  @rian_sig "pub def run(src String) Vec((String, Outcome))"
+  @rian_sig "pub def run(src String, mod Symbol) Vec((String, Outcome))"
   @spec run(String.t(), module() | nil) :: [{String.t(), :pass | {:fail, term()}}]
   def run(src, mod \\ nil) do
     mod =

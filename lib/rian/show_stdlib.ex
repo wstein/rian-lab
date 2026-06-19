@@ -1,5 +1,6 @@
 defmodule Rian.ShowStdlib do
   @moduledoc false
+  use Rian.Ann
   # The canonical `Show` stdlib module (ADR-0069 §6 — `${float}` interpolation),
   # parsed ONCE at compile time from the documented source and baked into the BEAM
   # as a literal. `Rian.Decl.inject_stdlib/1` injects it when a program interpolates
@@ -22,6 +23,7 @@ defmodule Rian.ShowStdlib do
           |> Enum.find(&(&1.name == "Show"))
 
   @doc "The parsed `Show` stdlib `%Rian.IR.Mod{}`, evaluated at compile time."
+  @rian_sig "pub def module() Mod"
   @spec module() :: struct()
   def module, do: @module
 end

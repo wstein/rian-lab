@@ -47,8 +47,12 @@ defmodule Rian.Interp do
   draft value the access stays `_Unk` (and so defers), and `.f` on a value whose sum
   variant is not statically known still infers `:unknown` (narrow with `case` first).
   """
+  use Rian.Ann
+
   alias Rian.Check
 
+  @rian_sig "pub def resolve(ast Expr, env _Unk, ic Ic) Expr"
+  @rian_sig "pub def resolve(ast Expr, env _Unk, ic Ic, show _Unk) Expr"
   @doc """
   Rewrite every `{:str_interp, …}` in `ast` to a `<>`/stringify chain.
 

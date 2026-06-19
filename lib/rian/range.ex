@@ -19,13 +19,17 @@ defmodule Rian.Range do
   would be evaluated more than once — bind it first if that matters.)
   """
 
+  use Rian.Ann
+
   alias Rian.Core.{EAtom, EBin, ECall, EDot, EId, EIf, ENum, ETuple}
 
+  @rian_sig "pub def table(ranges Vec(Range)) Dict(String, _Unk)"
   @doc "Build the `name -> %{lo, hi, base}` table from a list of `%Rian.IR.Range{}`."
   @spec table([map()]) :: map()
   def table(ranges),
     do: Map.new(ranges, fn r -> {r.name, %{lo: r.lo, hi: r.hi, base: r.base}} end)
 
+  @rian_sig "pub def expand_of(node T, table Dict(String, _Unk)) T forall T"
   @doc "Rewrite every `Name.of(n)` (for a `Name` in `table`) in a core AST; identity when the table is empty."
   @spec expand_of(term(), map()) :: term()
   def expand_of(node, table) when map_size(table) == 0, do: node

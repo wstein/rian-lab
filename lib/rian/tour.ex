@@ -19,6 +19,8 @@ defmodule Rian.Tour do
   `tour.json` compares equal to `generate/0` directly.
   """
 
+  use Rian.Ann
+
   alias Rian.{Decl, JS, JVM, Lower, Reach}
 
   @targets ~w(ex rs js jvm)
@@ -155,6 +157,7 @@ defmodule Rian.Tour do
   @doc """
   Build the full tour dataset as JSON-shaped Elixir terms (string keys).
   """
+  @rian_sig "pub def generate() _Unk"
   @spec generate() :: map()
   def generate do
     %{
@@ -165,6 +168,7 @@ defmodule Rian.Tour do
   end
 
   @doc "Render `generate/0` as deterministic, pretty-printed JSON (sorted keys)."
+  @rian_sig "pub def to_json() String"
   @spec to_json() :: String.t()
   def to_json, do: generate() |> encode(0) |> IO.iodata_to_binary()
 

@@ -20,9 +20,12 @@ defmodule Rian.Opaque do
   `opaque Token := String` reaches every target exactly as `String` would. A
   program with no opaques is returned unchanged (the common, zero-overhead case).
   """
+  use Rian.Ann
+
   alias Rian.{Check, IR, Pratt}
   alias Rian.IR.{Clause, Const, Func, Struct, Type, Variant}
 
+  @rian_sig "pub def erase(prog Prog) Prog"
   @doc "Erase all opaque types from a parsed program. A no-op when it has none."
   @spec erase(map()) :: map()
   def erase(%{} = prog) do

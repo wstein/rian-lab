@@ -19,6 +19,7 @@ defmodule Rian.Repl.History do
   @max_lines 1000
 
   @doc "The history file path (app env / `RIAN_HISTORY` / `~/.rian_history`)."
+  @rian_sig "pub def path() String"
   @spec path() :: String.t()
   def path do
     case Application.get_env(:rian_lab, :history_file) do
@@ -38,6 +39,7 @@ defmodule Rian.Repl.History do
   `group_history` expects when seeding the line editor. Missing/unreadable files
   yield `[]` rather than failing the REPL.
   """
+  @rian_sig "pub def load() Vec(_Unk)"
   @spec load() :: [charlist()]
   def load do
     case File.read(path()) do
@@ -57,6 +59,7 @@ defmodule Rian.Repl.History do
   repeat of the previous entry are dropped; the file is trimmed to its cap. Any
   IO error is swallowed so persistence can never take down a REPL session.
   """
+  @rian_sig "pub def add(line String) Symbol"
   @spec add(iodata()) :: :ok
   @rian_host "best-effort host boundary: history file I/O must never crash the REPL"
   def add(line) do

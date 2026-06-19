@@ -99,6 +99,7 @@ defmodule Rian.Repl do
           | {:error, String.t()}
 
   @doc "A fresh, empty session."
+  @rian_sig "pub def new() _Unk"
   @spec new() :: t()
   def new, do: %Session{base: :erlang.unique_integer([:positive])}
 
@@ -108,6 +109,7 @@ defmodule Rian.Repl do
 
   This function performs no IO — see the engine contract in the module doc.
   """
+  @rian_sig "pub def eval(s _Unk, input String) _Unk"
   @spec eval(t(), String.t()) :: {result(), t()}
   def eval(%Session{} = s, input) do
     cond do
@@ -118,6 +120,7 @@ defmodule Rian.Repl do
   end
 
   @doc "Render a `result` for display — the print phase (ADR-0053 §1)."
+  @rian_sig "pub def render(result _Unk) String"
   @spec render(result()) :: String.t()
   def render(:empty), do: ""
   def render({:value, v, nil}), do: inspect(v)
@@ -133,6 +136,7 @@ defmodule Rian.Repl do
   deduplicated (a redefinition or rebind appears once). Surface introspection
   behind a `\\env` command; performs no IO and does not change the session.
   """
+  @rian_sig "pub def info(s _Unk) _Unk"
   @spec info(t()) :: %{defined: [String.t()], bound: [String.t()]}
   def info(%Session{units: units, binds: binds}) do
     %{
@@ -151,6 +155,7 @@ defmodule Rian.Repl do
   session. Returns the inferred type string, or `nil` when no type can be
   inferred (an unknown or malformed form).
   """
+  @rian_sig "pub def type_of(s _Unk, input String) _Unk"
   @spec type_of(t(), String.t()) :: String.t() | nil
   def type_of(%Session{} = s, input) do
     ic = session_ic(s)
@@ -169,6 +174,7 @@ defmodule Rian.Repl do
           },
           binds: %{optional(String.t()) => String.t() | nil}
         }
+  @rian_sig "pub def describe(s _Unk) _Unk"
   def describe(%Session{units: units, binds: binds} = s) do
     functions =
       case safe_decl(units) do
@@ -200,6 +206,7 @@ defmodule Rian.Repl do
   the `--completions` word list fed to `rlwrap -f`). Session-aware completion
   goes through `complete/2`.
   """
+  @rian_sig "pub def vocabulary() Vec(String)"
   @spec vocabulary() :: [String.t()]
   def vocabulary, do: @keywords ++ @word_ops ++ @meta_commands
 
@@ -216,6 +223,7 @@ defmodule Rian.Repl do
       iex> Rian.Repl.split_entries("x := 1\\ny := 2\\nx + y")
       ["x := 1\\n", "y := 2\\n", "x + y\\n"]
   """
+  @rian_sig "pub def split_entries(source String) Vec(String)"
   @spec split_entries(String.t()) :: [String.t()]
   def split_entries(source) do
     source
@@ -262,6 +270,7 @@ defmodule Rian.Repl do
   own `defined`/`bound` names (`info/1`). Pure and no-IO — the `expand_fun` a
   line-editing surface installs is a thin wrapper over this.
   """
+  @rian_sig "pub def complete(before_cursor String, s _Unk) _Unk"
   @spec complete(String.t(), t()) :: {[String.t()], String.t()}
   def complete(before_cursor, %Session{} = s) do
     word = trailing_token(before_cursor)
