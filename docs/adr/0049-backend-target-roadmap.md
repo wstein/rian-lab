@@ -93,9 +93,11 @@ lowers to Kotlin, compiles with `kotlinc`, and folds correctly under `java`). **
 `run rcase@{ … }`), **lists/`Vec`** (`listOf`/cons, with `size`/index/`drop` clause+`case` patterns),
 the **`Str`/`Char` codepoint prims**, **`Symbol`/atoms** (→ a Kotlin `String`, ADR-0041), **generic
 functions** (`forall T` → `fun <T : Any>`), and **protocols** (a `dispatch: :dispatcher` → a
-`when (a0)` over `is <Type>`; bounded-generic consumers call it, ADR-0042) now lower too. Still raising
-`Rian.JVM.Unsupported` (the next increments): tuples, maps, structs, `with`, lambdas, general FFI, and a
-dispatcher returning an associated type (ADR-0074 — no concrete Kotlin return). Per ADR-0026
+`when (a0)` over `is <Type>`; bounded-generic consumers call it, ADR-0042), and **lambdas**
+(`(a) -> body` → a Kotlin lambda `{ a -> body }`, `Fn(arg…, ret)` → a function type `(arg…) -> ret`,
+capturing natively — ADR-0061) now lower too. Still raising
+`Rian.JVM.Unsupported` (the next increments): tuples, maps, structs, `with`, captures (`&(…)`),
+general FFI, and a dispatcher returning an associated type (ADR-0074 — no concrete Kotlin return). Per ADR-0026
 parity, JVM CI stays **non-blocking** until promoted: CI installs `kotlinc` and runs the JVM
 execution tests in a dedicated `continue-on-error` lane (the blocking `mix test.all` gate keeps
 `kotlinc` off its PATH, so it stays Tier-1 only). A JVM regression surfaces on CI without failing the
