@@ -676,26 +676,22 @@ defmodule Rian.Lower do
   # Resolve every `case` arm pattern in a body to its Rust spelling using the
   # type meta, storing it back into the IR as `{:rpat, str}`. After this pass the
   # Rust emitter needs no ambient meta — the IR carries the resolution.
-  defp resolve_rust_pats(node, meta, us \\ %{})
+  defp resolve_rust_pats(node, meta, us \\ %{scope: %{}, funcs: %{}})
 
-  # a `case` over a value-union param (ADR-0083 Phase 4): each type-pattern arm
-  # resolves to the synthesized enum's variant pattern `Enum::Variant(binder)`.
-  defp resolve_rust_pats({:case, {:id, name} = scrut, arms}, meta, us)
-       when is_map_key(us, name) do
-    enum = union_enum_name(Map.fetch!(us, name))
-
-    {:case, resolve_rust_pats(scrut, meta, us),
-     Enum.map(arms, fn {pt, g, b} ->
-       {{:rpat, union_pat_rs(pt, enum, meta)}, resolve_guard(g, meta, us),
-        resolve_rust_pats(b, meta, us)}
-     end)}
-  end
-
+  # a `case` over a value-union SCRUTINEE (ADR-0083): a union-typed local (a param or
+  # a `x := <union>` binding) OR a union-returning call. Each type-pattern arm resolves
+  # to the synthesized enum's variant pattern `Enum::Variant(binder)`; a non-union
+  # scrutinee resolves its arms normally.
   defp resolve_rust_pats({:case, scrut, arms}, meta, us) do
+    resolved =
+      case union_enum_of(scrut, us) do
+        nil -> fn pt -> {:rpat, core_pat_rs(pt, meta)} end
+        enum -> fn pt -> {:rpat, union_pat_rs(pt, enum, meta)} end
+      end
+
     {:case, resolve_rust_pats(scrut, meta, us),
      Enum.map(arms, fn {pt, g, b} ->
-       {{:rpat, core_pat_rs(pt, meta)}, resolve_guard(g, meta, us),
-        resolve_rust_pats(b, meta, us)}
+       {resolved.(pt), resolve_guard(g, meta, us), resolve_rust_pats(b, meta, us)}
      end)}
   end
 
@@ -722,6 +718,46 @@ defmodule Rian.Lower do
     do: "#{enum}::#{variant_name(tname)}(#{name})"
 
   defp union_pat_rs(pt, _enum, meta), do: core_pat_rs(pt, meta)
+
+  # the synthesized enum a union `case` scrutinee narrows over, or nil: a union-typed
+  # local id (`us.scope`), or a call to a union-returning function (`us.funcs`).
+  defp union_enum_of({:id, name}, us), do: us.scope |> Map.get(name) |> maybe_enum()
+  defp union_enum_of({:call, {:id, f}, _args}, us), do: us.funcs |> Map.get(f) |> maybe_enum()
+  defp union_enum_of(_scrut, _us), do: nil
+
+  defp maybe_enum(nil), do: nil
+  defp maybe_enum(t), do: union_enum_name(t)
+
+  # the union-typed locals in a clause body: union params + a binding `x := e` whose
+  # `e` is a union-returning call or a reference to a union local (forward scan of the
+  # top-level block — the common case; a binding nested in a branch is not tracked).
+  defp union_locals(pre, params, union_funcs) do
+    base = for(p <- params, union_type?(p.type), into: %{}, do: {p.name, p.type})
+
+    case pre do
+      {:block, stmts} -> Enum.reduce(stmts, base, &add_union_bind(&1, union_funcs, &2))
+      _ -> base
+    end
+  end
+
+  defp add_union_bind({tag, name, expr}, uf, acc) when tag in [:bind, :typed_bind],
+    do: add_union_bind({tag, name, nil, expr}, uf, acc)
+
+  defp add_union_bind({_tag, name, _t, {:call, {:id, f}, _}}, uf, acc) do
+    case Map.get(uf, f) do
+      nil -> acc
+      t -> Map.put(acc, name, t)
+    end
+  end
+
+  defp add_union_bind({_tag, name, _t, {:id, y}}, _uf, acc) do
+    case Map.get(acc, y) do
+      nil -> acc
+      t -> Map.put(acc, name, t)
+    end
+  end
+
+  defp add_union_bind(_stmt, _uf, acc), do: acc
 
   # Rust call-site borrow pass (ADR-0047): when an argument *produces* an owned
   # value (a `Vec`/`String` from a constructor or a value-returning call) but the
@@ -1625,16 +1661,23 @@ defmodule Rian.Lower do
             ic: ctx.ic
         }
 
-        # value-union params (ADR-0083 Phase 4): a `case` over one narrows to a
-        # `match` on the synthesized enum (type-pattern arms → `Enum::Variant(binder)`);
-        # the scope also guards construction wrapping (a union-typed arg is already the
-        # enum, so it is NOT re-wrapped in `::from`). Threaded into `ec` for `borrow_arg`.
-        union_scope = for(p <- func.params, union_type?(p.type), into: %{}, do: {p.name, p.type})
-        ec = Map.put(ec, :union_scope, union_scope)
+        # value unions (ADR-0083): the union-typed LOCALS in scope (params + a binding
+        # `x := <union call/var>`) and the program's union-RETURNING functions. A `case`
+        # over a union local OR a union-returning call narrows to a `match` on the enum
+        # (type-pattern arms → `Enum::Variant(binder)`); the locals also guard
+        # construction wrapping (a union-typed value is already the enum, not re-wrapped).
+        union_funcs =
+          for {{n, _a}, sf} <- Map.get(ctx, :funs, %{}),
+              union_type?(sf.ret),
+              into: %{},
+              do: {n, sf.ret}
+
+        union_locals = union_locals(pre, func.params, union_funcs)
+        ec = Map.put(ec, :union_scope, union_locals)
 
         surface =
           pre
-          |> resolve_rust_pats(ctx.meta, union_scope)
+          |> resolve_rust_pats(ctx.meta, %{scope: union_locals, funcs: union_funcs})
           |> insert_borrows(Map.get(ctx, :funs, %{}), ec, borrowed)
 
         ast = Rian.Check.annotate(surface, tenv, ctx.ic)

@@ -153,7 +153,10 @@ defmodule Rian.ReachRustHonestyTest do
                 "type Box := BoxV(Int53)\ntype Bag := BagV(Int53)\ndef kind(x Box | Bag) Int53 := case x do\n  a Box -> 1\n  b Bag -> 2\nend\ndef cb() Int53 := kind(BoxV(5))",
                 # a value-union RETURN: each member-producing tail leaf wraps via
                 # `Enum::from`, pushed into the `if` branches (ADR-0083)
-                "def mk(b Bool) Int53 | String := if b do 1 else 33 end"
+                "def mk(b Bool) Int53 | String := if b do 1 else 33 end",
+                # a non-param union SCRUTINEE: a `case` over a union binding AND a
+                # union-returning call narrow to the synthesized `enum` (ADR-0083)
+                "def mk(b Bool) Int53 | String := if b do 1 else 33 end\ndef viaBind(b Bool) Int53\n  x := mk(b)\n  case x do\n    n Int53 -> n\n    s String -> 0\n  end\nend\ndef viaCall(b Bool) Int53 := case mk(b) do\n  n Int53 -> n\n  s String -> 0\nend"
               ] do
             rust = Rian.Lower.rust_program(Decl.parse(src))
             base = Path.join(System.tmp_dir!(), "rian_pos_#{System.unique_integer([:positive])}")
