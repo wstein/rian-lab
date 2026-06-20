@@ -356,6 +356,16 @@ defmodule Rian.JVMTest do
       end
       """,
       probe: ~s|println("${getx(mk(3L, 4L))},${sumxy(mk(3L, 4L))}")|
+    },
+    %{
+      id: :map,
+      src: """
+      def origin() Dict(Symbol, Int53) := %{x: 1, y: 2}
+      def getx(m Dict(Symbol, Int53)) Int53 := Map.get(m, :x)
+      def bumped(m Dict(Symbol, Int53)) Int53 := Map.get(Map.put(m, :x, 9), :x)
+      def hasx(m Dict(Symbol, Int53)) Bool := Map.has(m, :x)
+      """,
+      probe: ~s|println("${getx(origin())},${bumped(origin())},${hasx(origin())}")|
     }
   ]
 
@@ -631,6 +641,17 @@ defmodule Rian.JVMTest do
       assert kt =~ "p.x"
       assert kt =~ "p is Point"
       expect_jvm(jvm, :struct, "3,7")
+    end
+
+    @tag :jvm
+    test "a map lowers to a Kotlin Map: mapOf literal, getValue, +, containsKey", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :map)
+      assert kt =~ ~s|mapOf("x" to 1L, "y" to 2L)|
+      assert kt =~ ~s|getValue("x")|
+      assert kt =~ "Map<String, Long>"
+      expect_jvm(jvm, :map, "1,9,true")
     end
 
     @tag :jvm

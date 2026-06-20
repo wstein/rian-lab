@@ -61,10 +61,13 @@ defmodule Rian.JVM do
   **tuple** `{a, b}` / `{a, b, c}` lowers to a Kotlin `Pair`/`Triple` (type
   `(A, B)` → `Pair<A, B>`), destructured in a pattern via `componentN()`. A
   **struct** `struct Name(f T, …)` lowers to a Kotlin `data class` (named-arg
-  construction `Name(f = v)`, field access `p.f`, and `is Name` patterns).
-  **Not yet** (raise `Rian.JVM.Unsupported`): arity-≥4 tuples (use a struct),
-  tagged tuples (`{:ok, v}` — a Result, BEAM-only), maps, `with`, general
-  FFI; and an associated type in a *non*-covariant position (a bare `Elem`
+  construction `Name(f = v)`, field access `p.f`, and `is Name` patterns). A
+  **map** `%{k: v}` (atom keys → `String`) lowers to a Kotlin `Map` (`mapOf("k" to
+  v)`, type `Dict(K, V)` → `Map<K, V>`), with `Map.get`→`getValue`, `Map.put`→`+
+  (k to v)`, `Map.has`→`containsKey`. **Not yet** (raise `Rian.JVM.Unsupported`):
+  arity-≥4 tuples (use a struct), tagged tuples (`{:ok, v}` — a Result, BEAM-only),
+  non-atom map keys (BEAM-only), map update (`%{m | …}`), map patterns, `with`,
+  general FFI; and an associated type in a *non*-covariant position (a bare `Elem`
   return / an `Elem` parameter), which stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
   `Any` — a member value *is-a* `Any`, so construction needs no wrapping — and a
   type-pattern `n Int53 ->` narrows it back with `is Long`/`is String` (Kotlin
@@ -99,6 +102,7 @@ defmodule Rian.JVM do
     ELabel,
     ELambda,
     EList,
+    EMap,
     ENum,
     EStr,
     EStruct,
@@ -129,7 +133,6 @@ defmodule Rian.JVM do
   # `Core.reject_unsupported!` runs the shared walk; this map is the JVM-specific set.
   @jvm_unsupported %{
     Core.EWith => "a `with` expression",
-    Core.EMap => "a map",
     Core.EMapUpdate => "a map update",
     Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)"
   }
@@ -893,6 +896,36 @@ defmodule Rian.JVM do
   # a `Char`'s codepoint — identity, since a `Char` *is* a codepoint `Long`.
   defp expr_kt(%ECall{fun: %EId{name: "__prim_char_code"}, args: [c]}), do: expr_kt(c)
 
+  # ── `Dict`/`Map` ops (ADR-0047) — Kotlin immutable `Map` ─────────────────
+  # `Map.get` returns `V` (the prelude contract, not `V?`), so use `getValue`
+  # (throws on a missing key, matching the BEAM/JS "assume present" semantics — a
+  # caller guards with `has`/`get_or`). `put` returns a NEW map (`m + (k to v)`).
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_map_new"}, args: []}), do: "mapOf()"
+
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_map_get"}, args: [m, k]}),
+    do: "(#{expr_kt(m)}).getValue(#{expr_kt(k)})"
+
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_map_put"}, args: [m, k, v]}),
+    do: "((#{expr_kt(m)}) + (#{expr_kt(k)} to #{expr_kt(v)}))"
+
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_map_has"}, args: [m, k]}),
+    do: "(#{expr_kt(m)}).containsKey(#{expr_kt(k)})"
+
+  # direct `Map.get`/`Map.put`/`Map.has` calls (the prelude `Dict` wrappers route
+  # through the prims above; user code may call `Map.*` directly — ADR-0047).
+  defp expr_kt(%ECall{fun: %EDot{head: %EId{name: "Map"}, name: "get"}, args: [m, k]}),
+    do: "(#{expr_kt(m)}).getValue(#{expr_kt(k)})"
+
+  defp expr_kt(%ECall{fun: %EDot{head: %EId{name: "Map"}, name: "put"}, args: [m, k, v]}),
+    do: "((#{expr_kt(m)}) + (#{expr_kt(k)} to #{expr_kt(v)}))"
+
+  defp expr_kt(%ECall{fun: %EDot{head: %EId{name: "Map"}, name: "has"}, args: [m, k]}),
+    do: "(#{expr_kt(m)}).containsKey(#{expr_kt(k)})"
+
+  # a map literal `%{k: v, …}` (atom keys → `String` keys, ADR-0033/0041) → `mapOf`.
+  defp expr_kt(%EMap{pairs: pairs}),
+    do: "mapOf(#{Enum.map_join(pairs, ", ", &kt_map_pair/1)})"
+
   # binary String concat (`Prim.str_concat`): Kotlin `+`.
   defp expr_kt(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}),
     do: "(#{expr_kt(a)} + #{expr_kt(b)})"
@@ -1040,6 +1073,14 @@ defmodule Rian.JVM do
   defp guarded_arm(body_kt, nil), do: "return@rcase #{body_kt}"
   defp guarded_arm(body_kt, g), do: "if (#{expr_kt(g)}) { return@rcase #{body_kt} }"
 
+  # one `mapOf` pair. An atom-key shorthand `k: v` → `"k" to v` (the key is the
+  # interned atom name as a `String`, ADR-0041); a non-atom key has no faithful
+  # Kotlin-map lowering and is BEAM-only (ADR-0033).
+  defp kt_map_pair({{:key, _k}, _v}),
+    do: raise(Unsupported, "a non-atom map key (`%{expr => v}`) is BEAM-only (ADR-0033)")
+
+  defp kt_map_pair({k, v}), do: "#{kt_str(to_string(k))} to #{expr_kt(v)}"
+
   # ── helpers ─────────────────────────────────────────────────────────────
   # Int64 -> a Kotlin `Long` literal (`42L`); a Float64 literal is a Kotlin Double
   defp num_kt(n), do: if(float?(n), do: n, else: "#{n}L")
@@ -1119,6 +1160,12 @@ defmodule Rian.JVM do
 
       m = Regex.run(~r/^Vec\((.+)\)$/, t) ->
         "List<#{kt_type(Enum.at(m, 1))}>"
+
+      # a `Dict(K, V)` (ADR-0047 map type) → a Kotlin `Map<K, V>`. Atom keys lower to
+      # `String` (ADR-0041), so a `Dict(Symbol, V)` is a `Map<String, V>`.
+      m = Regex.run(~r/^Dict\((.+)\)$/, t) ->
+        [k, v] = Rian.TypeStr.split_top_commas(Enum.at(m, 1))
+        "Map<#{kt_type(k)}, #{kt_type(v)}>"
 
       # a function type `Fn(arg…, ret)` (ADR-0061) → a Kotlin function type
       # `(arg…) -> ret`; the LAST top-level component is the return, the rest are
