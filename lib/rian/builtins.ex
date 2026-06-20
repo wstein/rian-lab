@@ -165,6 +165,10 @@ defmodule Rian.Builtins do
     {"Enum", "reverse", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
     {"Enum", "sort", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
     {"Enum", "to_list", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
+    # `map_reduce` returns a `(mapped_list, final_acc)` pair (ADR-0079 comprehensions /
+    # accumulating folds); the head is the contract, both elements deferred.
+    {"Enum", "map_reduce", 3} => {["Vec(T)", "A", "Fn(T,A,(U,A))"], "(Vec(_Unk),_Unk)", []},
+    {"List", "map_reduce", 3} => {["Vec(T)", "A", "Fn(T,A,(U,A))"], "(Vec(_Unk),_Unk)", []},
     {"Map", "new", 0} => {[], "Dict(_Unk,_Unk)", []},
     {"Map", "new", 1} => {["Vec(T)"], "Dict(_Unk,_Unk)", ["T"]},
     {"Map", "new", 2} => {["Vec(T)", "Fn(T,U)"], "Dict(_Unk,_Unk)", ["T", "U"]},

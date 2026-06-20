@@ -712,7 +712,11 @@ defmodule Rian.Check do
   defp infer_tail(tail, env, ic), do: infer(tail, env, ic)
 
   # `Vec(T)` string helpers (types are strings; concrete generics unify by ==).
-  defp list_of(:unknown), do: :unknown
+  # a list whose element type can't be pinned (an empty list, or `[x]` with `x` unknown)
+  # is still a `Vec` — `Vec(_Unk)`, the head a fact, the element a deferred hole — so it
+  # joins with concrete `Vec(T)` arms (`_Unk` is a structural wildcard) instead of
+  # poisoning the join to `:unknown`. Matches tuple/map literal inference (ADR-0050).
+  defp list_of(:unknown), do: "Vec(_Unk)"
   defp list_of(t), do: "Vec(#{t})"
 
   defp list_elem("Vec(" <> rest), do: String.trim_trailing(rest, ")")
