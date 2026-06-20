@@ -109,6 +109,7 @@ defmodule Rian.JS do
     PCtor,
     PList,
     PLit,
+    PMap,
     PPin,
     PStruct,
     PTuple,
@@ -613,6 +614,21 @@ defmodule Rian.JS do
     {["#{acc}.__struct__ === #{inspect(to_string(name))}" | ts], bs}
   end
 
+  # a map pattern `%{k: p, …}` over a JS object: each atom key tests presence and
+  # matches its value (`acc["k"]`); an empty `%{}` matches any map (no test). A
+  # non-atom (computed) key has no JS-object lowering (ADR-0033), so it raises.
+  defp pat_match(%PMap{pairs: pairs}, acc, i53) do
+    Enum.reduce(pairs, {[], []}, fn
+      {{:key, _k}, _p}, _acc ->
+        raise(Unsupported, "a non-atom map key (`%{expr => v}`) is BEAM-only (ADR-0033)")
+
+      {key, p}, {ts, bs} ->
+        ks = inspect(to_string(key))
+        {t, b} = pat_match(p, "#{acc}[#{ks}]", i53)
+        {ts ++ ["Object.hasOwn(#{acc}, #{ks})" | t], bs ++ b}
+    end)
+  end
+
   defp pat_match(other, _acc, _i53),
     do: raise(Unsupported, "ecmascript: clause pattern #{inspect(other)}")
 
@@ -952,6 +968,10 @@ defmodule Rian.JS do
     ps = Enum.map_join(0..(a - 1)//1, ", ", &"_a#{&1}")
     "(#{ps}) => #{expr_js(path, i53)}(#{ps})"
   end
+
+  # a block in expression position (a `do…end` as an arg/arm value) -> an IIFE,
+  # the same form `branch_js` produces for `if`/`case` branches.
+  defp expr_js(%EBlock{} = b, i53), do: branch_js(b, i53)
 
   defp expr_js(other, _i53), do: raise(Unsupported, "ecmascript: expression #{inspect(other)}")
 

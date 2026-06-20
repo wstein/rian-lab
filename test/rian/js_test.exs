@@ -444,6 +444,37 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a map pattern `%{k: p}` tests presence and binds the value; runs under node" do
+      js =
+        JS.compile("""
+        mod M do
+          pub def getx(m Dict(Symbol, Int53)) Int53 := case m do
+            %{x: v} -> v
+          end
+        end
+        """)
+
+      assert js =~ ~s|Object.hasOwn(_s, "x")|
+
+      case node_eval(js, "getx({x: 7})") do
+        :no_node -> :ok
+        out -> assert out == "7"
+      end
+    end
+
+    test "a block in expression position (a comprehension body) lowers to an IIFE" do
+      # `for x <- xs do <multi-stmt block> end` puts an `EBlock` in a value position
+      # (the desugared `flat_map` callback body) — it lowers to an IIFE, not a raise.
+      js =
+        JS.compile("""
+        mod M do
+          pub def f(xs Vec(Int53)) Vec(Int53) := for x <- xs do y := x * 2; y + 1 end
+        end
+        """)
+
+      assert js =~ "(() => {"
+    end
+
     test "a not-yet-implemented construct fails early with a clear message (naming the fn)" do
       # the emitter-capability pre-check raises ONE clear error up front (Reach stays
       # architectural per ADR-0041 — this is an implementation-status check).
@@ -940,10 +971,10 @@ defmodule Rian.JSTest do
     end
 
     test "a clause pattern the emitter cannot lower raises a clear Unsupported (pat_match default)" do
-      # a map pattern `%{a: x}` in a clause head has no `pat_match` clause yet, so it
-      # must raise rather than emit garbage (mirrors the expression/operator defaults).
+      # a bitstring pattern `<<a, _::binary>>` is BEAM-only (ADR-0078), so it has no
+      # `pat_match` clause and must raise rather than emit garbage.
       assert_raise JS.Unsupported, ~r/clause pattern/, fn ->
-        JS.compile("def f(m Map) Int\ndef f(%{a: x}) := x")
+        JS.compile("def f(x String) Int53\ndef f(<<a, _::binary>>) := a")
       end
     end
 

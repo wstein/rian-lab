@@ -104,7 +104,7 @@ now lower too. A **`with`** expression desugars to nested `case`s (ADR-0040, sha
 `Core.desugar_with`, so JS gets it too). Still raising
 `Rian.JVM.Unsupported` (the next increments): arity-≥4 tuples (use a struct), tagged tuples
 (`{:ok, v}` — a Result, BEAM-only), non-atom map keys (BEAM-only), map update (`%{m | …}`),
-map patterns, bitstrings,
+bitstrings,
 general FFI, and a dispatcher returning an associated type (ADR-0074 — no concrete Kotlin return). Per ADR-0026
 parity, JVM CI stays **non-blocking** until promoted: CI installs `kotlinc` and runs the JVM
 execution tests in a dedicated `continue-on-error` lane (the blocking `mix test.all` gate keeps

@@ -68,7 +68,7 @@ defmodule Rian.JVM do
   `case`s (ADR-0040, via `Core.desugar_with`). **Not yet** (raise
   `Rian.JVM.Unsupported`): arity-≥4 tuples (use a struct), tagged tuples
   (`{:ok, v}` — a Result, BEAM-only), non-atom map keys (BEAM-only), map update
-  (`%{m | …}`), map patterns, bitstrings, general FFI; and an associated type in a
+  (`%{m | …}`), bitstrings, general FFI; and an associated type in a
   *non*-covariant position (a bare `Elem` return / an `Elem` parameter), which
   stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
   `Any` — a member value *is-a* `Any`, so construction needs no wrapping — and a
@@ -117,6 +117,7 @@ defmodule Rian.JVM do
     PCtor,
     PList,
     PLit,
+    PMap,
     PPin,
     PStruct,
     PTuple,
@@ -689,6 +690,21 @@ defmodule Rian.JVM do
     {["#{acc} is #{name}" | ts], bs}
   end
 
+  # a map pattern `%{k: p, …}` over a Kotlin `Map`: each atom key tests `containsKey`
+  # and matches its value (`getValue`); an empty `%{}` matches any map. A non-atom
+  # (computed) key is BEAM-only (ADR-0033).
+  defp pat_match(%PMap{pairs: pairs}, acc) do
+    Enum.reduce(pairs, {[], []}, fn
+      {{:key, _k}, _p}, _a ->
+        raise(Unsupported, "jvm: a non-atom map key (`%{expr => v}`) is BEAM-only (ADR-0033)")
+
+      {key, p}, {ts, bs} ->
+        ks = kt_str(to_string(key))
+        {t, b} = pat_match(p, "(#{acc}).getValue(#{ks})")
+        {ts ++ ["(#{acc}).containsKey(#{ks})" | t], bs ++ b}
+    end)
+  end
+
   defp pat_match(other, _acc), do: raise(Unsupported, "jvm: clause pattern #{inspect(other)}")
 
   defp bind_str([]), do: ""
@@ -1066,6 +1082,10 @@ defmodule Rian.JVM do
   # bare struct field access `value.field` (a remote call `Mod.fun(…)` is an `ECall`
   # over an `EDot`, handled above; a standalone `EDot` here is data-class field access).
   defp expr_kt(%EDot{head: head, name: field}), do: "#{expr_kt(head)}.#{field}"
+
+  # a block in expression position (a `do…end` as an arg/arm value) -> a `run { … }`,
+  # the same form `branch_kt` produces for `if`/`case` branches.
+  defp expr_kt(%EBlock{} = b), do: branch_kt(b)
 
   defp expr_kt(other), do: raise(Unsupported, "jvm: expression #{inspect(other)}")
 
