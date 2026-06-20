@@ -172,6 +172,25 @@ defmodule Rian.DeclTest do
       assert apply(mod, :describe, ["hi"]) == 0
     end
 
+    test "a value union of SUM members narrows by tag and runs on the BEAM (ADR-0083)" do
+      src = """
+      type Box := BoxV(Int53)
+      type Bag := BagV(Int53)
+      def kind(x Box | Bag) Int53 := case x do
+        a Box -> 1
+        b Bag -> 2
+      end
+      """
+
+      {:ok, mod, bin} =
+        Rian.Beam.compile(src, :"rian_sumunion_#{System.unique_integer([:positive])}")
+
+      {:module, ^mod} = :code.load_binary(mod, ~c"#{mod}.beam", bin)
+      # BoxV(5) lowers to {:box_v, 5}; BagV(9) to {:bag_v, 9}
+      assert apply(mod, :kind, [{:box_v, 5}]) == 1
+      assert apply(mod, :kind, [{:bag_v, 9}]) == 2
+    end
+
     test "a block body's statement split tracks bracket depth, not just `do`/`end`" do
       # Regression: `block_seps` split statements on newlines by `do`/`end` depth
       # only, so a single expression wrapped across lines inside `(`/`[`/`{` took a

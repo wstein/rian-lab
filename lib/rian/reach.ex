@@ -504,7 +504,8 @@ defmodule Rian.Reach do
     param_types = Enum.map(Map.get(f, :params, []), & &1.type)
 
     union_kills =
-      (Enum.flat_map(param_types, &union_param_kills/1) ++ union_ret_kills(Map.get(f, :ret)))
+      (Enum.flat_map(param_types, &union_param_kills(&1, pctx)) ++
+         union_ret_kills(Map.get(f, :ret), pctx))
       |> Enum.uniq()
 
     union = if union_kills == [], do: [], else: [union_blocker(union_kills)]
@@ -623,61 +624,92 @@ defmodule Rian.Reach do
   defp union_blocker(kills),
     do: %{construct: "value union (A | B)", kind: :typed, kills: kills}
 
-  # the targets a value-union PARAMETER type kills. A top-level `Union(...)` of
-  # distinct primitive members narrows on every target — BEAM/JS (Phase 2), JVM
-  # (Phase 5), and Rust (Phase 4, synthesized `enum` + `match` + `From`-construction at
-  # the call site) — so it kills nothing. Anything else carrying `Union(` (a
-  # non-primitive member, a discriminator clash, or a union nested in a generic where no
-  # type-pattern can narrow it) kills every target.
-  defp union_param_kills(t) when is_binary(t) do
-    cond do
-      not String.contains?(t, "Union(") -> []
-      primitive_union?(t) -> []
-      true -> [:ex, :rs, :js, :jvm]
+  # the targets a value-union PARAMETER type kills, by member kind (ADR-0083):
+  #   * `:primitive` (all members primitive, distinct discriminators) narrows on EVERY
+  #     target (BEAM/JS Phase 2, JVM Phase 5, Rust Phase 4) — kills nothing.
+  #   * `:discriminable` (members primitive/sum/struct, distinct) narrows on BEAM (tag/
+  #     `__struct__` test), JVM (`is Type`), and Rust (synthesized `enum`) — kills `:js`
+  #     only (the JS type-pattern handles primitive discriminators, not sum/struct yet).
+  #   * `:neither` (a tvar member, a discriminator clash, or a nested union) kills all.
+  defp union_param_kills(t, pctx) when is_binary(t) do
+    case union_class(t, pctx) do
+      :none -> []
+      :primitive -> []
+      :discriminable -> [:js]
+      :neither -> [:ex, :rs, :js, :jvm]
     end
   end
 
-  defp union_param_kills(_), do: []
+  defp union_param_kills(_, _), do: []
 
-  # the targets a value-union RETURN type kills. The dynamic targets (BEAM/JS) and JVM
-  # (`Any`) return a union value natively, but the Rust return-body construction
-  # wrapping is not built — so a primitive union return kills `:rs` only. A
-  # non-primitive / clash / nested union still kills every target.
-  defp union_ret_kills(t) when is_binary(t) do
-    cond do
-      not String.contains?(t, "Union(") -> []
-      primitive_union?(t) -> [:rs]
-      true -> [:ex, :rs, :js, :jvm]
+  # the targets a value-union RETURN type kills. BEAM/JS/JVM return a union value
+  # natively, but the Rust return-body construction wrapping is not built — so a
+  # narrowable union return additionally kills `:rs` (and `:js` for a sum/struct member,
+  # as in the parameter case).
+  defp union_ret_kills(t, pctx) when is_binary(t) do
+    case union_class(t, pctx) do
+      :none -> []
+      :primitive -> [:rs]
+      :discriminable -> [:rs, :js]
+      :neither -> [:ex, :rs, :js, :jvm]
     end
   end
 
-  defp union_ret_kills(_), do: []
+  defp union_ret_kills(_, _), do: []
 
-  # the type is EXACTLY a top-level `Union(...)` whose every member is a primitive
-  # with a runtime discriminator (`is_integer`/`typeof`) AND those discriminators are
-  # all DISTINCT — `Int32 | Char` (both `is_integer`) can't narrow at runtime (its
-  # second arm would be dead), so it is not narrowable and must not claim `:ex`/`:js`.
-  defp primitive_union?("Union(" <> rest) do
+  # classify a union type string: `:none` (not a union), `:primitive` (every member a
+  # primitive, all discriminators DISTINCT — `Int32 | Char` both test `is_integer`, a
+  # dead-arm clash, so it is `:neither`), `:discriminable` (members primitive/sum/struct,
+  # distinct), or `:neither` (a tvar member, a clash, or a nested/malformed union).
+  defp union_class(t, pctx) do
+    if String.contains?(t, "Union(") do
+      case union_members(t) do
+        nil ->
+          :neither
+
+        members ->
+          discs = Enum.map(members, &discriminator(&1, pctx))
+          distinct? = Enum.all?(discs, &(&1 != nil)) and length(Enum.uniq(discs)) == length(discs)
+
+          cond do
+            not distinct? -> :neither
+            Enum.all?(members, &primitive_member?/1) -> :primitive
+            true -> :discriminable
+          end
+      end
+    else
+      :none
+    end
+  end
+
+  # the members of a TOP-LEVEL `Union(...)`, or nil if malformed or nested (a member
+  # mentioning `Union(` can't be narrowed by a flat type-pattern).
+  defp union_members("Union(" <> rest) do
     if String.ends_with?(rest, ")") do
       members = rest |> binary_part(0, byte_size(rest) - 1) |> Rian.TypeStr.split_top_commas()
-      discs = Enum.map(members, &discriminator/1)
-      Enum.all?(discs, &(&1 != nil)) and length(Enum.uniq(discs)) == length(discs)
+      if Enum.any?(members, &String.contains?(&1, "Union(")), do: nil, else: members
     else
-      false
+      nil
     end
   end
 
-  defp primitive_union?(_), do: false
+  defp union_members(_), do: nil
 
-  # the runtime discriminator a primitive type tests under (`is_integer`/`typeof`),
-  # or nil for a type with none. `Char`/`Int*`/`UInt*` share `:integer` (a clash).
-  defp discriminator(t) do
+  defp primitive_member?(m), do: discriminator(m, %{}) in [:boolean, :binary, :integer, :float]
+
+  # the runtime discriminator a member narrows under: a primitive's `is_*`/`typeof`
+  # class, a UNIQUE `{:sum, name}`/`{:struct, name}` for a user type (distinct ctors
+  # make distinct sums distinguishable), or nil for a tvar / unknown type. `Char`/`Int*`/
+  # `UInt*` share `:integer` (a clash).
+  defp discriminator(t, pctx) do
     cond do
       t == "Bool" -> :boolean
       t == "String" -> :binary
       t == "Char" -> :integer
       Regex.match?(~r/^U?Int\d*$/, t) -> :integer
       Regex.match?(~r/^Float\d*$/, t) -> :float
+      MapSet.member?(Map.get(pctx, :sum_names, MapSet.new()), t) -> {:sum, t}
+      MapSet.member?(Map.get(pctx, :struct_names, MapSet.new()), t) -> {:struct, t}
       true -> nil
     end
   end
@@ -834,8 +866,17 @@ defmodule Rian.Reach do
 
     ptypes = Enum.filter(types, &parametric_type?/1)
 
+    structs =
+      Map.get(prog, :structs, []) ++
+        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :structs, []))
+
     %{
       names: MapSet.new(ptypes, & &1.name),
+      # all sum + struct type names — a value-union member of one of these is
+      # runtime-discriminable (a tag / `__struct__` test), so it narrows on
+      # `:ex`/`:jvm`/`:rs` (ADR-0083). A non-parametric sum is included (a tvar is not).
+      sum_names: MapSet.new(types, & &1.name),
+      struct_names: MapSet.new(structs, & &1.name),
       emittable: Map.new(ptypes, fn t -> {t.name, emittable_parametric?(t)} end),
       ctors:
         for(

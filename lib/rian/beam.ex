@@ -344,6 +344,9 @@ defmodule Rian.Beam do
     # own value — resolve sibling consts.
     consts = Map.get(ic, :const_decls, [])
     ic = Map.put(ic, :consts, MapSet.new(consts, & &1.name))
+    # the sum/struct type registry, carried so a value-union type-pattern `s Box ->`
+    # (ADR-0083) can build its runtime discriminator (tag/`__struct__` test) at emit.
+    ic = Map.merge(ic, %{tinfo_sums: tctx.sums, tinfo_structs: MapSet.new(structs, & &1.name)})
 
     exports =
       Enum.map(funcs, &{String.to_atom(&1.name), arity(&1)}) ++
@@ -585,8 +588,17 @@ defmodule Rian.Beam do
   defp clause_form(%{pats: pats, body: body, guard: guard}, params, rtable, ic) do
     core_pats = Enum.map(pats, &Core.from_pat/1)
     # the names bound by the clause head are in scope for the body — so a call to
-    # one of them is a *variable application* (a fun value), not a local call
-    scope = Enum.reduce(core_pats, %{}, &pat_vars/2)
+    # one of them is a *variable application* (a fun value), not a local call. The
+    # `:__tinfo` key carries the sum/struct registry for a value-union type-pattern
+    # discriminator (ADR-0083); a `__`-prefixed key never collides with a Rian var.
+    scope =
+      core_pats
+      |> Enum.reduce(%{}, &pat_vars/2)
+      |> Map.put(
+        :__tinfo,
+        {Map.get(ic, :tinfo_sums, %{}), Map.get(ic, :tinfo_structs, MapSet.new())}
+      )
+
     # the per-clause typing env (params narrowed by the head patterns) lets us emit
     # from the **typed** core IR: every node carries its inferred type (ADR-0050 §3).
     tenv = Rian.Check.clause_env(pats, params, ic)
@@ -932,8 +944,9 @@ defmodule Rian.Beam do
     {:case, @ln, expr_form(scrut, s),
      Enum.map(arms, fn {pat, g, body} ->
        # a type-pattern `n Type` (ADR-0083) lowers to a var bind guarded by a
-       # runtime type-test (`is_integer(n)` …), reusing the dispatcher discriminator
-       {pat, g} = desugar_typed(pat, g)
+       # runtime type-test (`is_integer(n)` / a sum-tag / `__struct__` test), reusing
+       # the dispatcher discriminator; the scope carries the sum/struct registry
+       {pat, g} = desugar_typed(pat, g, s)
        # arm-pattern bindings extend the scope for the arm guard and body
        arm = pat_vars(pat, s)
        {:clause, @ln, [pat_form(pat)], guard_form(g, arm), body_seq(body, arm)}
@@ -962,25 +975,71 @@ defmodule Rian.Beam do
   # `n Type` → `{PVar n, is_<Type>(n) [and existing-guard]}` (ADR-0083). The type-test
   # BIF is the same runtime discriminator the protocol dispatcher emits (ADR-0042); a
   # type with no primitive discriminator (a sum/struct/tvar) is not yet supported here.
-  defp desugar_typed(%Core.PTyped{name: name, tname: tname}, g) do
-    test = type_test_call(tname, name)
+  defp desugar_typed(%Core.PTyped{name: name, tname: tname}, g, s) do
+    {sums, structs} = Map.get(s, :__tinfo, {%{}, MapSet.new()})
+    test = type_test(tname, name, sums, structs)
     {%Core.PVar{name: name}, if(g, do: %EBin{op: "and", left: test, right: g}, else: test)}
   end
 
-  defp desugar_typed(pat, g), do: {pat, g}
+  defp desugar_typed(pat, g, _s), do: {pat, g}
 
-  defp type_test_call(tname, var) do
-    bif =
-      cond do
-        tname == "Bool" -> "is_boolean"
-        tname == "String" -> "is_binary"
-        tname == "Char" -> "is_integer"
-        String.match?(tname, ~r/^U?Int\d*$/) -> "is_integer"
-        String.match?(tname, ~r/^Float\d*$/) -> "is_float"
-        true -> raise(Unsupported, "abstract-forms: type-pattern over non-primitive `#{tname}`")
-      end
+  # the runtime type-test for a value-union type-pattern (ADR-0083), as a core guard
+  # over `var`: a primitive BIF, or — reusing the dispatcher's discriminator — a sum's
+  # tag-membership / a struct's `__struct__` test (parsed from the guard string).
+  defp type_test(tname, var, sums, structs) do
+    cond do
+      tname == "Bool" ->
+        bif_call("is_boolean", var)
 
-    %ECall{fun: %EId{name: bif}, args: [%EId{name: var}]}
+      tname == "String" ->
+        bif_call("is_binary", var)
+
+      tname == "Char" ->
+        bif_call("is_integer", var)
+
+      String.match?(tname, ~r/^U?Int\d*$/) ->
+        bif_call("is_integer", var)
+
+      String.match?(tname, ~r/^Float\d*$/) ->
+        bif_call("is_float", var)
+
+      variants = Map.get(sums, tname) ->
+        parse_guard(sum_guard_str(variants, var))
+
+      MapSet.member?(structs, tname) ->
+        parse_guard(struct_guard_str(tname, var))
+
+      true ->
+        raise(Unsupported, "abstract-forms: type-pattern over `#{tname}` (no discriminator)")
+    end
+  end
+
+  defp bif_call(bif, var), do: %ECall{fun: %EId{name: bif}, args: [%EId{name: var}]}
+
+  defp parse_guard(str), do: Core.from_expr(Pratt.parse(str))
+
+  # mirrors `Rian.Protocol.sum_guard`, over `var`: a tag-tuple variant tests
+  # `element(1, var) == :tag`, a nullary variant tests `var == :tag`.
+  defp sum_guard_str(variants, var) do
+    {nullary, tupled} = Enum.split_with(variants, &(&1.fields == []))
+
+    parts =
+      maybe_part(tupled, "is_tuple(#{var}) and (", ")", &"element(1, #{var}) == :#{tag(&1.ctor)}") ++
+        maybe_part(nullary, "", "", &"#{var} == :#{tag(&1.ctor)}")
+
+    Enum.join(parts, " or ")
+  end
+
+  defp maybe_part([], _pre, _post, _fmt), do: []
+
+  defp maybe_part(vs, pre, post, fmt),
+    do: ["(#{pre}#{Enum.map_join(vs, " or ", fmt)}#{post})"]
+
+  defp struct_guard_str(tname, var) do
+    t = tag(tname)
+
+    "(is_map(#{var}) and is_map_key(:__struct__, #{var}) and " <>
+      ":erlang.map_get(:__struct__, #{var}) == :#{t})"
   end
 
   # the happy path: no clauses left, evaluate the `with` body

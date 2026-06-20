@@ -29,6 +29,18 @@ defmodule Rian.JVMTest do
       probe: ~S|println("${describe(41L)},${describe("hi")}")|
     },
     %{
+      id: :sum_union,
+      src: """
+      type Box := BoxV(Int53)
+      type Bag := BagV(Int53)
+      def kind(x Box | Bag) Int53 := case x do
+        a Box -> 1
+        b Bag -> 2
+      end
+      """,
+      probe: ~S|println("${kind(BoxV(5L))},${kind(BagV(9L))}")|
+    },
+    %{
       id: :fib,
       src: """
       def fib(n Int64) Int64
@@ -435,6 +447,17 @@ defmodule Rian.JVMTest do
       assert kt =~ "x is String"
       # describe(41L) -> 42 ; describe("hi") -> 0
       expect_jvm(jvm, :union, "42,0")
+    end
+
+    @tag :jvm
+    test "a value union of SUM members narrows by `is <sealed interface>` (ADR-0083)", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :sum_union)
+      assert kt =~ "x is Box"
+      assert kt =~ "x is Bag"
+      # kind(BoxV(5L)) -> 1 ; kind(BagV(9L)) -> 2
+      expect_jvm(jvm, :sum_union, "1,2")
     end
 
     test "a type error is caught by the gate, not emitted as malformed Kotlin (parity)" do

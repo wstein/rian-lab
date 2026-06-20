@@ -44,6 +44,25 @@ defmodule Rian.ReachTest do
       assert entry(rep, "describe").blockers == []
     end
 
+    test "a value union of SUM members reaches :ex/:jvm/:rs — pins :js (JS sum-narrowing deferred; ADR-0083)" do
+      rep =
+        reach("""
+        type Box := BoxV(Int53)
+        type Bag := BagV(Int53)
+        def kind(x Box | Bag) Int53 := case x do
+          a Box -> 1
+          b Bag -> 2
+        end
+        """)
+
+      assert targets(rep, "kind") == [:ex, :jvm, :rs]
+
+      assert Enum.any?(
+               entry(rep, "kind").blockers,
+               &(&1.kind == :typed and &1.construct =~ "value union" and &1.kills == [:js])
+             )
+    end
+
     test "a value-union RETURN pins :rs (Rust return-wrapping not built; ADR-0083)" do
       rep = reach("def mk(b Bool) Int53 | String := if b do 1 else 0 end")
 

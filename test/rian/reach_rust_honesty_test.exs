@@ -148,7 +148,9 @@ defmodule Rian.ReachRustHonestyTest do
                 "type E := Bad\ndef ok1(x T) Result(T, E) forall T\n  y := x\n  {:ok, y}\nend",
                 # a primitive value-union PARAMETER (ADR-0083 Phase 4): the synthesized
                 # `enum` + `From` + `match` narrowing + call-site `::from` construction
-                "def describe(x Int53 | String) Int53 := case x do\n  n Int53 -> n + 1\n  s String -> 0\nend\ndef caller() Int53 := describe(41)"
+                "def describe(x Int53 | String) Int53 := case x do\n  n Int53 -> n + 1\n  s String -> 0\nend\ndef caller() Int53 := describe(41)",
+                # a value union of SUM members (the enum wraps user enums; ADR-0083)
+                "type Box := BoxV(Int53)\ntype Bag := BagV(Int53)\ndef kind(x Box | Bag) Int53 := case x do\n  a Box -> 1\n  b Bag -> 2\nend\ndef cb() Int53 := kind(BoxV(5))"
               ] do
             rust = Rian.Lower.rust_program(Decl.parse(src))
             base = Path.join(System.tmp_dir!(), "rian_pos_#{System.unique_integer([:positive])}")
