@@ -1033,6 +1033,93 @@ end|
     end
   end
 
+  describe "anonymous tuples — paren values/patterns + Rust tuple lowering (ADR-0036)" do
+    test "paren `(a, b)` parses to the same surface node as curly `{a, b}`" do
+      assert Rian.Pratt.parse("(a, b)") == {:tuple, [{:id, "a"}, {:id, "b"}]}
+      # a single `(e)` is grouping, NOT a 1-tuple
+      assert Rian.Pratt.parse("(x + 1)") == {:bin, "+", {:id, "x"}, {:num, "1"}}
+    end
+
+    @tup_src """
+    def swap(p (T, U)) (U, T) forall T, U := case p do
+      (a, b) -> (b, a)
+    end
+    def mk(a Int53, b String) (Int53, String) := (a, b)
+    """
+
+    test "a tuple type lowers element-wise; a borrowed binder is cloned, a `String` to_string'd" do
+      rust = Rian.Lower.rust_program(Rian.Decl.parse(@tup_src))
+      assert rust =~ "fn swap<T: Clone, U: Clone>(p: &(T,U)) -> (U, T)"
+      # case-arm binders over the borrowed tuple param are cloned in the returned tuple
+      assert rust =~ "(a, b) => (b.clone(), a.clone())"
+      # a `String` param element is `&str` → `.to_string()` (clone of `&str` is `&str`)
+      assert rust =~ "fn mk(a: i64, b: &str) -> (i64, String)"
+      assert rust =~ "(a, b.to_string())"
+    end
+
+    @tag :rust
+    test "tuple values/patterns compile and run under rustc (generic + non-generic)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust = Rian.Lower.rust_program(Rian.Decl.parse(@tup_src))
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_tup_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <>
+              "\nfn main() { let s = swap(&(1i64, \"x\".to_string())); " <>
+              "let m = mk(3, \"y\"); println!(\"{} {} {} {}\", s.0, s.1, m.0, m.1); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", path, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "x 1 3 y"
+      end
+    end
+
+    @tag :rust
+    test "a case-arm binder over a borrowed scrutinee is cloned (cons too — fixes a prior over-claim)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          # `firstc` returns `Some(h)` where `h` is a `&T` slice binder in a CASE arm; the
+          # arm-level borrow now clones it (`Some(h.clone())`), so it compiles like the
+          # clause-head `first`. Previously Reach claimed :rs but rustc rejected it.
+          src =
+            "def firstc(xs Vec(T)) Option(T) forall T := case xs do\n" <>
+              "  [] -> None\n  [h | _] -> Some(h)\nend"
+
+          rust = Rian.Lower.rust_program(Rian.Decl.parse(src))
+          assert rust =~ "Option::Some(h.clone())"
+
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_firstc_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <>
+              "\nfn main() { println!(\"{:?} {:?}\", firstc(&[5i64, 6]), firstc::<i64>(&[])); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", path, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "Some(5) None"
+      end
+    end
+  end
+
   describe "Result-of-String coerces the Ok payload to owned String (ADR-0040/0061)" do
     @res_src ~S"""
     mod R do

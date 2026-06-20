@@ -97,6 +97,17 @@ defmodule Rian.Capability do
   # at the construction site). Covers a bare `Fn(...)` return and a nested `Option(Fn(...))`.
   def owned("Fn(" <> _ = t), do: "Box<dyn " <> fn_trait(t) <> ">"
 
+  # an anonymous tuple type `(A, B, …)` -> a native Rust tuple `(owned(A), owned(B), …)`,
+  # each element lowered in turn (`(Int53, String)` -> `(i64, String)`).
+  def owned("(" <> rest = t) do
+    if String.ends_with?(t, ")") do
+      elems = rest |> String.replace_suffix(")", "") |> Rian.TypeStr.split_top_commas()
+      "(" <> Enum.map_join(elems, ", ", &owned/1) <> ")"
+    else
+      rust_name(t)
+    end
+  end
+
   def owned("Vec(" <> rest) do
     # strip exactly the one `)` that closes this `Vec(`, not every trailing paren —
     # `trim_trailing/2` would eat both in `Vec(Option(T))`, leaving `Option(T` and

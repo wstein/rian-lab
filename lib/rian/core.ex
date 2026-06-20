@@ -522,6 +522,9 @@ defmodule Rian.Core do
   @rian_sig "pub def from_pat(surface _Unk) Pat"
   @spec from_pat(tuple() | :wild) :: struct() | tuple()
   def from_pat({:rpat, _} = baked), do: baked
+  # a case-arm baked pattern also carries its binder names (`Rian.Lower`), so the Rust
+  # `match` can clone them when the scrutinee is borrowed; passed through unchanged.
+  def from_pat({:rpat, _, _} = baked), do: baked
   def from_pat(:wild), do: %PWild{}
   def from_pat({:var, name}), do: %PVar{name: name}
   def from_pat({:lit, value}), do: %PLit{value: value}

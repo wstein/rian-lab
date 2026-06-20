@@ -583,6 +583,7 @@ defmodule Rian.Lower do
   # a resolved Rust arm pattern that is a list/slice pattern (`[…]`) — its `case`
   # scrutinee must be matched as a slice (`&(scrut)[..]`).
   defp list_rpat?({:rpat, s}), do: String.starts_with?(String.trim_leading(s), "[")
+  defp list_rpat?({:rpat, s, _}), do: String.starts_with?(String.trim_leading(s), "[")
   defp list_rpat?(_), do: false
 
   # Emit a Rust `match`, with `body_fn` rendering each arm's body (the default emits
@@ -590,18 +591,32 @@ defmodule Rian.Lower do
   # patterns must match a slice: `&(scrut)[..]` coerces both an owned `Vec<T>` and an
   # already-borrowed `&[T]` to `&[T]` uniformly (binders stay `&T`/`&[T]`).
   defp rust_case(scrut, arms, body_fn, ec) do
+    sliced? = Enum.any?(arms, fn {pt, _, _} -> list_rpat?(pt) end)
+    # the scrutinee is borrowed (so arm binders are references into it, needing a `.clone()`
+    # in an owned position) when it is matched as a slice (`&(scrut)[..]`, every cons case) OR
+    # when it is a borrowed local (a `&`-param/binder in `ec.borrowed`, e.g. a generic tuple
+    # param). The arm binders are then added to `ec.borrowed` so `rust_owned_elem` clones them.
+    scrut_b? = sliced? or scrut_borrowed?(scrut, ec)
+
     body =
       Enum.map_join(arms, " ", fn {pt, g, b} ->
-        "#{rpat(pt)}#{case_guard(g, :rust, ec)} => #{body_fn.(b)},"
+        arm_ec =
+          if scrut_b?,
+            do: %{ec | borrowed: MapSet.union(ec.borrowed, MapSet.new(rpat_binders(pt)))},
+            else: ec
+
+        "#{rpat(pt)}#{case_guard(g, :rust, arm_ec)} => #{body_fn.(b, arm_ec)},"
       end)
 
-    scrut_rs =
-      if Enum.any?(arms, fn {pt, _, _} -> list_rpat?(pt) end),
-        do: "&(#{p(scrut, 0, :rust, ec)})[..]",
-        else: p(scrut, 0, :rust, ec)
-
+    scrut_rs = if sliced?, do: "&(#{p(scrut, 0, :rust, ec)})[..]", else: p(scrut, 0, :rust, ec)
     "match #{scrut_rs} { #{body} }"
   end
+
+  # is a `case` scrutinee a borrowed value? A bare var that is a `&`-typed local (in
+  # `ec.borrowed` — a `val` non-`Copy`/`Vec`/`String` param of a generic function, or a
+  # cons-tail binder). Conservative: anything else is treated as owned (no spurious clone).
+  defp scrut_borrowed?(%EId{name: n}, ec), do: MapSet.member?(ec.borrowed, n)
+  defp scrut_borrowed?(_scrut, _ec), do: false
 
   # Gap B (ADR-0061): a `String`-returning body that is an `if`/`case` cannot mix a
   # `&str`-literal arm with a `String` arm — Rust requires both to agree. Push the
@@ -612,7 +627,7 @@ defmodule Rian.Lower do
       "if #{p(c, 0, :rust, ec)} { #{coerce_string_branch(t, ec)} } else { #{coerce_string_branch(e, ec)} }"
 
   defp coerce_string_ast(%ECase{scrut: scrut, arms: arms}, ec),
-    do: rust_case(scrut, arms, &coerce_string_branch(&1, ec), ec)
+    do: rust_case(scrut, arms, fn b, aec -> coerce_string_branch(b, aec) end, ec)
 
   defp coerce_string_ast(%EBlock{stmts: [{:expr, e}]}, ec), do: coerce_string_ast(e, ec)
 
@@ -637,7 +652,7 @@ defmodule Rian.Lower do
       "if #{p(c, 0, :rust, ec)} { #{coerce_union_ret_ast(t, enum, ec)} } else { #{coerce_union_ret_ast(e, enum, ec)} }"
 
   defp coerce_union_ret_ast(%ECase{scrut: scrut, arms: arms}, enum, ec),
-    do: rust_case(scrut, arms, &coerce_union_ret_ast(&1, enum, ec), ec)
+    do: rust_case(scrut, arms, fn b, aec -> coerce_union_ret_ast(b, enum, aec) end, ec)
 
   defp coerce_union_ret_ast(%EBlock{stmts: [{:expr, e}]}, enum, ec),
     do: coerce_union_ret_ast(e, enum, ec)
@@ -666,7 +681,7 @@ defmodule Rian.Lower do
       "if #{p(c, 0, :rust, ec)} { #{coerce_owned_vec_ast(t, ec)} } else { #{coerce_owned_vec_ast(e, ec)} }"
 
   defp coerce_owned_vec_ast(%ECase{scrut: scrut, arms: arms}, ec),
-    do: rust_case(scrut, arms, &coerce_owned_vec_ast(&1, ec), ec)
+    do: rust_case(scrut, arms, fn b, aec -> coerce_owned_vec_ast(b, aec) end, ec)
 
   defp coerce_owned_vec_ast(%EBlock{stmts: [{:expr, e}]}, ec), do: coerce_owned_vec_ast(e, ec)
 
@@ -692,10 +707,14 @@ defmodule Rian.Lower do
   # to the synthesized enum's variant pattern `Enum::Variant(binder)`; a non-union
   # scrutinee resolves its arms normally.
   defp resolve_rust_pats({:case, scrut, arms}, meta, us) do
+    # A resolved case-arm pattern carries its binders (3rd elem) so `rust_case` can clone
+    # them when the scrutinee is borrowed (`case p do (a, b) -> (b, a)` over a `&`-tuple, or
+    # the slice cons `[h | _] -> Some(h)`): the binders are references into the scrutinee, so
+    # an owned-position use needs `.clone()`. A union arm binds an owned enum value (no clone).
     resolved =
       case union_enum_of(scrut, us) do
-        nil -> fn pt -> {:rpat, core_pat_rs(pt, meta)} end
-        enum -> fn pt -> {:rpat, union_pat_rs(pt, enum, meta)} end
+        nil -> fn pt -> {:rpat, core_pat_rs(pt, meta), core_pat_vars(Core.from_pat(pt))} end
+        enum -> fn pt -> {:rpat, union_pat_rs(pt, enum, meta), []} end
       end
 
     resolved_arms =
@@ -1032,6 +1051,11 @@ defmodule Rian.Lower do
   # destructured element/field binders are cloned to owned, so excluded.
   defp borrowed_in_pat(%PVar{name: n}, true), do: [n]
   defp borrowed_in_pat(%PList{tail: %PVar{name: n}}, _ref?), do: [n]
+  # a tuple pattern over a `&`-tuple binds each element by-reference (match ergonomics),
+  # so the element binders are borrowed too — `(a, b)` over `&(T, U)` makes `a: &T`, `b: &U`.
+  defp borrowed_in_pat(%Core.PTuple{elems: es}, ref?),
+    do: Enum.flat_map(es, &borrowed_in_pat(&1, ref?))
+
   defp borrowed_in_pat(_pat, _ref?), do: []
 
   # the clause vars that are a `&[T]` SLICE (a `Vec`-typed `val` param, or a cons-tail
@@ -1106,7 +1130,13 @@ defmodule Rian.Lower do
   defp owned_rtype?(_), do: false
 
   defp rpat({:rpat, s}), do: s
+  defp rpat({:rpat, s, _binders}), do: s
   defp rpat(pat), do: pat_rs(pat, %{})
+
+  # the binders a resolved case-arm pattern introduces (empty for a 2-tuple baked pat or a
+  # Core pattern reaching `rust_case` directly) — used to clone them under a borrowed scrutinee.
+  defp rpat_binders({:rpat, _s, binders}), do: binders
+  defp rpat_binders(_), do: []
 
   # Rust `with` lowering: a right-nested `match` chain. Each clause matches its
   # ok-pattern and continues, or falls through to the `else` arms (or yields the
@@ -2699,7 +2729,7 @@ defmodule Rian.Lower do
   end
 
   defp emit(%ECase{scrut: scrut, arms: arms}, :rust, ec),
-    do: {rust_case(scrut, arms, &p(&1, 0, :rust, ec), ec), 0}
+    do: {rust_case(scrut, arms, fn b, aec -> p(b, 0, :rust, aec) end, ec), 0}
 
   # with expression — Elixir native `with`/`else`; Rust nested `match` chain that
   # short-circuits to the `else` arms (or yields the non-matching value).
@@ -2783,8 +2813,11 @@ defmodule Rian.Lower do
   defp emit(%ETuple{elems: [%EAtom{name: "error"}, e]}, :rust, ec),
     do: {"Err(#{result_payload(e, ec.err_string, ec)})", 12}
 
+  # a tuple value owns its elements (like a `Vec`), so a borrowed binder element is cloned
+  # and a string/symbol literal `.to_string()`d (`rust_owned_elem`) — e.g. a generic
+  # `(b, a)` returning `(U, T)` from `&U`/`&T` binders becomes `(b.clone(), a.clone())`.
   defp emit(%ETuple{elems: es}, :rust, ec),
-    do: {"(#{Enum.map_join(es, ", ", &p(&1, 0, :rust, ec))})", 12}
+    do: {"(#{Enum.map_join(es, ", ", &rust_owned_elem(&1, ec))})", 12}
 
   defp emit(%ETuple{elems: es}, :elixir, ec),
     do: {"{#{Enum.map_join(es, ", ", &p(&1, 0, :elixir, ec))}}", 12}
@@ -2894,12 +2927,15 @@ defmodule Rian.Lower do
   # an element stored into an owned `Vec<T>` must be owned `T`; a borrowed `&T`
   # element (a var bound to a `&`-param, in a generic function — `ec.borrowed`)
   # is `.clone()`d. Literals and cloned binders are already owned (no clone).
-  defp rust_owned_elem(%EId{name: n} = e, ec) do
+  defp rust_owned_elem(%EId{name: n, type: t} = e, ec) do
     s = p(e, 0, :rust, ec)
 
     cond do
       # a `&[T]` slice → `Vec<T>` (a `.clone()` would clone the reference, Gap D)
       slice_var?(e, ec) -> "#{s}.to_vec()"
+      # a `String`/`Symbol` value is a `&str` borrow in an owned position → `.to_string()`
+      # (`.clone()` on a `&str` yields `&str`, not `String` — `str` is not `Clone`).
+      t in ["String", "Symbol"] -> "#{s}.to_string()"
       MapSet.member?(ec.borrowed, n) -> "#{s}.clone()"
       true -> s
     end

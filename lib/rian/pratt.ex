@@ -225,8 +225,17 @@ defmodule Rian.Pratt do
       {e, rest} = parse_expr(rest, 0)
 
       case rest do
-        [{:rparen} | r2] -> parse_postfix(e, r2)
-        _ -> raise ArgumentError, "expected `)`, got #{here(rest)}"
+        [{:rparen} | r2] ->
+          parse_postfix(e, r2)
+
+        # `(a, b, …)` is a tuple literal (the paren form of `{a, b}`, matching the `(T, U)`
+        # tuple TYPE syntax); a single `(e)` stays grouping. Same `{:tuple, …}` surface node.
+        [{:comma} | r2] ->
+          {tup, r3} = parse_paren_tuple(r2, [e])
+          parse_postfix(tup, r3)
+
+        _ ->
+          raise ArgumentError, "expected `)`, got #{here(rest)}"
       end
     end
   end
@@ -516,6 +525,19 @@ defmodule Rian.Pratt do
   defp parse_pat([{:op, ":"}, {:str, s} | rest]), do: {{:atom, s}, rest}
   defp parse_pat([{:str, s} | rest]), do: {{:lit, s}, rest}
   defp parse_pat([{:lbrace} | rest]), do: parse_pat_tuple(rest, [])
+
+  # a paren pattern: `(a, b, …)` is a tuple pattern (matches the `(a, b)` value form and the
+  # `(T, U)` type); a single `(p)` is just grouping. Same `{:tuple, …}` node as `{a, b}`.
+  defp parse_pat([{:lparen} | rest]) do
+    {p, rest} = parse_pat(rest)
+
+    case rest do
+      [{:rparen} | r] -> {p, r}
+      [{:comma} | r] -> parse_paren_pat_tuple(r, [p])
+      other -> raise ArgumentError, "expected `)` or `,` in pattern, got #{inspect(other)}"
+    end
+  end
+
   defp parse_pat([{:lbracket} | rest]), do: parse_pat_list(rest, [])
   # map pattern `%{k: p, …}` — matches any map carrying those keys (ADR-0043)
   defp parse_pat([{:mapopen} | rest]), do: parse_pat_map(rest, [])
@@ -622,6 +644,17 @@ defmodule Rian.Pratt do
       [{:comma} | rest] -> parse_pat_tuple(rest, [p | acc])
       [{:rbrace} | rest] -> {{:tuple, Enum.reverse([p | acc])}, rest}
       other -> raise ArgumentError, "bad tuple pattern: #{inspect(other)}"
+    end
+  end
+
+  # the tail of a paren tuple pattern `(a, b, …)` — first element already parsed.
+  defp parse_paren_pat_tuple(tokens, acc) do
+    {p, tokens} = parse_pat(tokens)
+
+    case tokens do
+      [{:comma} | rest] -> parse_paren_pat_tuple(rest, [p | acc])
+      [{:rparen} | rest] -> {{:tuple, Enum.reverse([p | acc])}, rest}
+      other -> raise ArgumentError, "expected `,` or `)` in tuple pattern, got #{inspect(other)}"
     end
   end
 
@@ -866,6 +899,18 @@ defmodule Rian.Pratt do
       [{:comma} | rest] -> parse_tuple(rest, [e | acc])
       [{:rbrace} | rest] -> {{:tuple, Enum.reverse([e | acc])}, rest}
       other -> raise ArgumentError, "bad tuple: #{inspect(other)}"
+    end
+  end
+
+  # the tail of a paren tuple `(a, b, …)` — the first element is already parsed (the
+  # `(e, …` was consumed in `parse_primary`); collect the rest up to the closing `)`.
+  defp parse_paren_tuple(tokens, acc) do
+    {e, tokens} = parse_expr(tokens, 0)
+
+    case tokens do
+      [{:comma} | rest] -> parse_paren_tuple(rest, [e | acc])
+      [{:rparen} | rest] -> {{:tuple, Enum.reverse([e | acc])}, rest}
+      other -> raise ArgumentError, "expected `,` or `)` in tuple, got #{here(other)}"
     end
   end
 

@@ -146,8 +146,18 @@ Consequences of target-relativity:
        needs the re-borrow, not just a return clone). **`17_stdlib_eq_ord` now compiles to and runs on
        Rust** (`rustc --test`, `reach_rust_honesty_test`); Reach claims `:rs` for it. `Test.rust` routes
        through the whole-program assembly (`rust_program`) so the cross-function signature table the
-       borrow pass needs is present. The Reach blocker now fires only for a **compound** owned-tvar return
-       (a tuple/`Fn` mentioning a tvar) — still uncoerced.
+       borrow pass needs is present. **Case-arm binders now coerce too (2026-06):** a binder in a `case`
+       arm whose **scrutinee is borrowed** (a slice cons `[h | _]`, or a `&`-typed param/tuple) is a
+       reference into the scrutinee, so an owned-position use clones it — `rust_case` extends the
+       borrowed-var set with the arm's binders (carried on the resolved `{:rpat, str, binders}`), and
+       `rust_owned_elem` clones them (`Some(h.clone())`, `(b.clone(), a.clone())`). This **fixed a
+       pre-existing over-claim**: `case xs do [h|_] -> Some(h)` reported `:rs` but rustc rejected it, since
+       only *clause-head* cons binders had been cloned. **Anonymous tuples reach `:rs`:** `(a, b)` values
+       and patterns parse (`Rian.Pratt`, the paren form of `{a, b}`), a tuple type `(A, B)` lowers
+       element-wise (`Capability.owned` → `(owned(A), owned(B))`), and a tuple value owns its elements
+       (`rust_owned_elem`: a `&T` binder cloned, a `String`/`&str` element `.to_string()`d — `str` is not
+       `Clone`). So a generic `swap(p (T,U)) (U,T)` and a `(Int53, String)` builder compile + run on Rust
+       (`lower_test`). `Fn` mentioning a tvar in a tuple/nested position is the remaining uncoerced case.
     2. **parametric user types — DONE.** `type Pair := P(k K, v V)` lowers to `enum Pair<K, V>`
        (`enum_generics`/`parametric_param_map`). Rian writes the type bare (`Vec(Pair)`), so `Rian.Lower`
        rewrites each signature/return to its instantiation (`rustify_parametric`): a **generic** function

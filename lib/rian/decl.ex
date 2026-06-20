@@ -1455,6 +1455,17 @@ defmodule Rian.Decl do
   # them back so a parenthesized type is one whitespace-split token (`Vec(Int64)`).
   defp collapse_parens(s), do: Regex.replace(~r/\s*([(),])\s*/, s, "\\1")
 
+  # like `collapse_parens`, but keeps the space between a lowercase param NAME and a `(`
+  # that opens an anonymous tuple type (`p (T, U)` — the space is the name/type boundary;
+  # gluing it to `p(T,U)` loses the split). A type constructor (`Vec (Int)`, uppercase) is
+  # still glued to `Vec(Int)`, so only the bare-tuple-type param differs.
+  defp collapse_param_parens(s) do
+    s
+    |> then(&Regex.replace(~r/\s*([),])\s*/, &1, "\\1"))
+    |> then(&Regex.replace(~r/\(\s+/, &1, "("))
+    |> then(&Regex.replace(~r/([A-Z]\w*)\s+\(/, &1, "\\1("))
+  end
+
   defp variant(v) do
     case extract_parens(v) do
       {ctor, inside, ""} -> %Variant{ctor: String.trim(ctor), fields: fields(inside)}
@@ -1734,7 +1745,7 @@ defmodule Rian.Decl do
   defp param(p) do
     {caps, rest} =
       p
-      |> collapse_parens()
+      |> collapse_param_parens()
       |> String.split(~r/\s+/, trim: true)
       |> Enum.split_with(&(&1 in @caps))
 
