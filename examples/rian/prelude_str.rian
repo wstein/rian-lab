@@ -54,4 +54,35 @@ mod Str do
   def rev_onto(Vec(Char), Vec(Char)) Vec(Char)
   def rev_onto([], acc) := acc
   def rev_onto([h | t], acc) := rev_onto(t, [h | acc])
+
+  # replace — substitute every (non-overlapping) occurrence of `pat` in `s` with
+  # `rep`, the portable image of `String.replace/3`. A char-list scan: at each
+  # position, if `pat` is a prefix, emit `rep` and skip past it, else emit one char.
+  # Self-contained (local prefix/drop/length/append, no cross-module dependency).
+  # An empty `pat` is a no-op (avoids a non-terminating match).
+  pub def replace(String, String, String) String
+  pub def replace(s, "", _) := s
+  pub def replace(s, pat, rep) := from_chars(repl(chars(s), chars(pat), chars(rep)))
+
+  def repl(Vec(Char), Vec(Char), Vec(Char)) Vec(Char)
+  def repl([], _, _) := []
+  def repl([h | t], pat, rep) := if starts([h | t], pat) do app(rep, repl(drop_n([h | t], len_c(pat)), pat, rep)) else [h | repl(t, pat, rep)] end
+
+  def starts(Vec(Char), Vec(Char)) Bool
+  def starts(_, []) := true
+  def starts([], _) := false
+  def starts([h | t], [ph | pt]) := if h == ph do starts(t, pt) else false end
+
+  def drop_n(Vec(Char), Int53) Vec(Char)
+  def drop_n(cs, 0) := cs
+  def drop_n([], _) := []
+  def drop_n([_ | t], n) := drop_n(t, n - 1)
+
+  def len_c(Vec(Char)) Int53
+  def len_c([]) := 0
+  def len_c([_ | t]) := 1 + len_c(t)
+
+  def app(Vec(Char), Vec(Char)) Vec(Char)
+  def app([], ys) := ys
+  def app([h | t], ys) := [h | app(t, ys)]
 end

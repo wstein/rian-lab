@@ -89,6 +89,17 @@ defmodule Rian.PreludeListTest do
       assert s.trim("\t a \n") == "a"
       assert s.trim("none") == "none"
     end
+
+    test "Str.replace substitutes every occurrence (the portable String.replace/3)" do
+      {:ok, s} =
+        Rian.Beam.load(File.read!("examples/rian/prelude_str.rian"), :"Elixir.RianPreludeStrR")
+
+      assert s.replace("a-b-c", "-", "_") == "a_b_c"
+      assert s.replace(~s|"x"|, "\"", "\\\"") == ~s|\\"x\\"|
+      assert s.replace("none", "z", "Q") == "none"
+      # empty pattern is a no-op (terminates)
+      assert s.replace("abc", "", "X") == "abc"
+    end
   end
 
   describe "the additions are portable (reach + run on JS via node)" do
