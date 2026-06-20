@@ -1523,11 +1523,38 @@ defmodule Rian.Transpile do
   # multi-statement body → Rian `;`-separated block: `x := e; …; final` (Pratt
   # parses a function body as a block of statements with a final expression).
   defp render_body({:__block__, _, stmts}) when length(stmts) > 1 do
-    Enum.map_join(stmts, "; ", &stmt/1)
+    stmts |> value_tail() |> Enum.map_join("; ", &stmt/1)
   end
 
-  defp render_body({:__block__, _, [one]}), do: expr(one)
+  defp render_body({:__block__, _, [one]}), do: render_body(one)
+  # a bare bind as a whole body (`def f := (x = e)`, or a comprehension/lambda body that is
+  # just `pat = e`) — route through the trailing-bind fixer so it ends in a value, not a bind.
+  defp render_body({:=, _, _} = bind), do: [bind] |> value_tail() |> Enum.map_join("; ", &stmt/1)
   defp render_body(node), do: expr(node)
+
+  # A Rian block must end in an EXPRESSION, never a bind (a destructuring bind desugars to a
+  # single-arm `case` and needs a continuation — `Rian.Pratt`). Elixir blocks may end in
+  # `pat = e` (value = `e`). So when a body's last statement is a bind, append its bound
+  # value: a simple `x = e` → keep the bind, return `x`; a destructuring `pat = e` → bind a
+  # fresh temp to `e` once, assert `pat` against it, return the temp (single eval, assertion
+  # preserved). Reach still pins the function by its body's FFI, exactly as before.
+  defp value_tail(stmts) do
+    case List.last(stmts) do
+      {:=, _, [pat, _e]} = bind ->
+        if var?(pat) do
+          stmts ++ [pat]
+        else
+          {:=, m, [^pat, e]} = bind
+          # a non-`_`-prefixed temp (a leading `_` would render as the wildcard `_`,
+          # `underscore_var/1`); `rian_bv` is internal and collision-unlikely.
+          tmp = {:rian_bv, [], Elixir}
+          List.replace_at(stmts, -1, {:=, m, [tmp, e]}) ++ [{:=, m, [pat, tmp]}, tmp]
+        end
+
+      _ ->
+        stmts
+    end
+  end
 
   # A lambda body, unlike a clause body, is a single expression unless wrapped in an
   # explicit `do … end` block (the `;`-block ambiguity decision in `Rian.Pratt`). So a
@@ -1540,6 +1567,17 @@ defmodule Rian.Transpile do
 
   # a block statement: an Elixir bind `x = e` → Rian bind `x := e`; anything else
   # (incl. the final return expression) is a bare expression.
+  #
+  # A **chained** match `lhs = mid = rhs` (Elixir) has no Rian chained `:=`; unchain it to
+  # two statements — bind `rhs` to `mid`, then `lhs` to `mid` — when `mid` is a variable
+  # (the compiler idiom `%{…} = prog = erase(prog)`). A non-var intermediate is left to the
+  # chained form (vanishingly rare); the block renderer joins these with `; ` like any stmt.
+  defp stmt({:=, _, [lhs, {:=, _, [mid, _]} = chain]}) when is_tuple(mid) do
+    if var?(mid),
+      do: "#{stmt(chain)}; #{pat(lhs)} := #{expr(mid)}",
+      else: "#{pat(lhs)} := #{expr(chain)}"
+  end
+
   defp stmt({:=, _, [lhs, rhs]}), do: "#{pat(lhs)} := #{expr(rhs)}"
   defp stmt(other), do: expr(other)
 
@@ -1793,7 +1831,17 @@ defmodule Rian.Transpile do
   defp expr({:&, _, [{:/, _, [{name, _, ctx}, arity]}]})
        when is_atom(name) and is_atom(ctx) and is_integer(arity) do
     ps = capture_params(arity)
-    "(#{Enum.join(ps, ", ")}) -> #{name}(#{Enum.join(ps, ", ")})"
+    # a 2-arity capture of an operator (`&div/2`, `&+/2`) eta-expands to the INFIX form
+    # `p1 div p2` — `div`/`rem`/… are reserved operators in Rian, not callable as `div(…)`.
+    body =
+      if arity == 2 and is_map_key(@binops, name) do
+        [a, b] = ps
+        "#{a} #{@binops[name]} #{b}"
+      else
+        "#{name}(#{Enum.join(ps, ", ")})"
+      end
+
+    "(#{Enum.join(ps, ", ")}) -> #{body}"
   end
 
   # `&Mod.fun/arity` → `(p1,…) -> Mod.fun(p1,…)` (reusing the remote-call lowering)

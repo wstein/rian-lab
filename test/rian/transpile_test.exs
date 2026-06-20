@@ -839,6 +839,28 @@ end|) =~ ~S|"v=${x}!"|
       assert down =~ "List.reverse(1..n)"
     end
 
+    test "a chained match `a = b = c` unchains to `b := c; a := b` (no chained `:=`)" do
+      out = rian("defmodule M do\n  def f(p) do\n    %{x: x} = q = g(p)\n    {x, q}\n  end\nend")
+      assert out =~ "q := g(p)"
+      assert out =~ "%{x: x} := q"
+      refute out =~ ":= q := "
+    end
+
+    test "a block ending in a bind gets its value appended (Rian blocks end in an expr)" do
+      # simple var tail → return the var
+      simple = rian("defmodule M do\n  def f(p) do\n    x = g(p)\n  end\nend")
+      assert simple =~ "x := g(p); x"
+      # destructuring tail → temp-bind once, assert, return the temp (single eval)
+      destr = rian("defmodule M do\n  def f(p) do\n    {:ok, v} = g(p)\n  end\nend")
+      assert destr =~ "rian_bv := g(p); {:ok, v} := rian_bv; rian_bv"
+    end
+
+    test "an operator capture `&div/2` eta-expands to the infix form (not a `div(…)` call)" do
+      out = rian("defmodule M do\n  def f(a, b), do: h(a, b, &div/2)\nend")
+      assert out =~ "(p1, p2) -> p1 div p2"
+      refute out =~ "div(p1, p2)"
+    end
+
     test "an Elixir comprehension bind clause `x = e` → a singleton-list generator" do
       out = rian("defmodule M do\n  def f(xs), do: for(x <- xs, y = x + 1, y > 0, do: y)\nend")
       assert out =~ "y <- [x + 1]"
