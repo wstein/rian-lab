@@ -31,7 +31,7 @@ defmodule Rian.ReachTest do
       assert entry(rep, "add").blockers == []
     end
 
-    test "a PRIMITIVE value union narrows on BEAM/JS/JVM — reaches all but :rs (ADR-0083)" do
+    test "a PRIMITIVE value-union PARAMETER narrows on every target — reaches all four (ADR-0083)" do
       rep =
         reach("""
         def describe(x Int53 | String) Int53 := case x do
@@ -40,10 +40,17 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      assert targets(rep, "describe") == [:ex, :js, :jvm]
+      assert targets(rep, "describe") == [:ex, :js, :jvm, :rs]
+      assert entry(rep, "describe").blockers == []
+    end
+
+    test "a value-union RETURN pins :rs (Rust return-wrapping not built; ADR-0083)" do
+      rep = reach("def mk(b Bool) Int53 | String := if b do 1 else 0 end")
+
+      assert targets(rep, "mk") == [:ex, :js, :jvm]
 
       assert Enum.any?(
-               entry(rep, "describe").blockers,
+               entry(rep, "mk").blockers,
                &(&1.kind == :typed and &1.construct =~ "value union" and &1.kills == [:rs])
              )
     end

@@ -145,7 +145,10 @@ defmodule Rian.ReachRustHonestyTest do
           for src <- [
                 "def wrap(x T) Option(T) forall T\n  y := x\n  Some(y)\nend",
                 "def wrap(x T) Vec(Option(T)) forall T := [Some(x)]",
-                "type E := Bad\ndef ok1(x T) Result(T, E) forall T\n  y := x\n  {:ok, y}\nend"
+                "type E := Bad\ndef ok1(x T) Result(T, E) forall T\n  y := x\n  {:ok, y}\nend",
+                # a primitive value-union PARAMETER (ADR-0083 Phase 4): the synthesized
+                # `enum` + `From` + `match` narrowing + call-site `::from` construction
+                "def describe(x Int53 | String) Int53 := case x do\n  n Int53 -> n + 1\n  s String -> 0\nend\ndef caller() Int53 := describe(41)"
               ] do
             rust = Rian.Lower.rust_program(Decl.parse(src))
             base = Path.join(System.tmp_dir!(), "rian_pos_#{System.unique_integer([:positive])}")

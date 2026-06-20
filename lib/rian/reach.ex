@@ -494,13 +494,19 @@ defmodule Rian.Reach do
     # but unimplemented), so `Any` honestly pins off `:rs`/`:js`/`:jvm` until those land. This
     # is distinct from `_Unk`, an *unfinished* hole — `Any` is a real, reported reach contract.
     any = if Enum.any?(sig_types, &type_mentions_any?/1), do: [any_blocker()], else: []
-    # a value-union type `A | B` (canonical `Union(...)`, ADR-0083) in the signature.
-    # The BEAM/JS type-pattern lowering (Phase 2) narrows a union of PRIMITIVE members
-    # (`is_integer`/`typeof`), so such a union reaches `:ex`/`:js` and pins only the
-    # nominal targets `:rs`/`:jvm` (pending Phase 4/5 enum synthesis). A union with a
-    # non-primitive member (a sum/struct — no discriminator wired yet) or nested in a
-    # generic still pins off EVERY target, honestly.
-    union_kills = sig_types |> Enum.flat_map(&union_kill_targets/1) |> Enum.uniq()
+    # a value-union type `A | B` (canonical `Union(...)`, ADR-0083). A PRIMITIVE,
+    # distinct-discriminator union narrows on every target (BEAM/JS `is`/`typeof`,
+    # Phase 2; JVM `Any`+`when is`, Phase 5; Rust synthesized `enum`+`match`+`From`,
+    # Phase 4) — so in PARAMETER position it kills nothing. In RETURN position it kills
+    # `:rs`: the Rust return-body construction wrapping is not built (BEAM/JS/JVM return
+    # a union value natively). A non-primitive member, a discriminator clash, or a union
+    # nested in a generic still pins off EVERY target, honestly.
+    param_types = Enum.map(Map.get(f, :params, []), & &1.type)
+
+    union_kills =
+      (Enum.flat_map(param_types, &union_param_kills/1) ++ union_ret_kills(Map.get(f, :ret)))
+      |> Enum.uniq()
+
     union = if union_kills == [], do: [], else: [union_blocker(union_kills)]
     # Two Rust-generic emitter gaps (ADR-0061/0047) the reach matrix must own up to,
     # or `mix rian.targets`/the conformance gate green-lights `:rs` for code `rustc`
@@ -617,12 +623,27 @@ defmodule Rian.Reach do
   defp union_blocker(kills),
     do: %{construct: "value union (A | B)", kind: :typed, kills: kills}
 
-  # the targets a value-union signature type kills. A top-level `Union(...)` of
-  # primitive members narrows on BEAM/JS (Phase 2) AND JVM (Phase 5, `Any` + `when is`)
-  # → kills only `:rs` (Rust enum synthesis, Phase 4, pending). Anything else carrying
-  # `Union(` (a non-primitive member, or a union nested in a generic where no
+  # the targets a value-union PARAMETER type kills. A top-level `Union(...)` of
+  # distinct primitive members narrows on every target — BEAM/JS (Phase 2), JVM
+  # (Phase 5), and Rust (Phase 4, synthesized `enum` + `match` + `From`-construction at
+  # the call site) — so it kills nothing. Anything else carrying `Union(` (a
+  # non-primitive member, a discriminator clash, or a union nested in a generic where no
   # type-pattern can narrow it) kills every target.
-  defp union_kill_targets(t) when is_binary(t) do
+  defp union_param_kills(t) when is_binary(t) do
+    cond do
+      not String.contains?(t, "Union(") -> []
+      primitive_union?(t) -> []
+      true -> [:ex, :rs, :js, :jvm]
+    end
+  end
+
+  defp union_param_kills(_), do: []
+
+  # the targets a value-union RETURN type kills. The dynamic targets (BEAM/JS) and JVM
+  # (`Any`) return a union value natively, but the Rust return-body construction
+  # wrapping is not built — so a primitive union return kills `:rs` only. A
+  # non-primitive / clash / nested union still kills every target.
+  defp union_ret_kills(t) when is_binary(t) do
     cond do
       not String.contains?(t, "Union(") -> []
       primitive_union?(t) -> [:rs]
@@ -630,7 +651,7 @@ defmodule Rian.Reach do
     end
   end
 
-  defp union_kill_targets(_), do: []
+  defp union_ret_kills(_), do: []
 
   # the type is EXACTLY a top-level `Union(...)` whose every member is a primitive
   # with a runtime discriminator (`is_integer`/`typeof`) AND those discriminators are

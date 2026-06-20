@@ -650,32 +650,52 @@ defmodule Rian.Lower do
   # Resolve every `case` arm pattern in a body to its Rust spelling using the
   # type meta, storing it back into the IR as `{:rpat, str}`. After this pass the
   # Rust emitter needs no ambient meta — the IR carries the resolution.
-  defp resolve_rust_pats({:case, scrut, arms}, meta) do
-    {:case, resolve_rust_pats(scrut, meta),
+  defp resolve_rust_pats(node, meta, us \\ %{})
+
+  # a `case` over a value-union param (ADR-0083 Phase 4): each type-pattern arm
+  # resolves to the synthesized enum's variant pattern `Enum::Variant(binder)`.
+  defp resolve_rust_pats({:case, {:id, name} = scrut, arms}, meta, us)
+       when is_map_key(us, name) do
+    enum = union_enum_name(Map.fetch!(us, name))
+
+    {:case, resolve_rust_pats(scrut, meta, us),
      Enum.map(arms, fn {pt, g, b} ->
-       {{:rpat, core_pat_rs(pt, meta)},
-        case g do
-          nil -> nil
-          g -> resolve_rust_pats(g, meta)
-        end, resolve_rust_pats(b, meta)}
+       {{:rpat, union_pat_rs(pt, enum, meta)}, resolve_guard(g, meta, us),
+        resolve_rust_pats(b, meta, us)}
      end)}
   end
 
-  defp resolve_rust_pats({:with, clauses, body, els}, meta) do
+  defp resolve_rust_pats({:case, scrut, arms}, meta, us) do
+    {:case, resolve_rust_pats(scrut, meta, us),
+     Enum.map(arms, fn {pt, g, b} ->
+       {{:rpat, core_pat_rs(pt, meta)}, resolve_guard(g, meta, us),
+        resolve_rust_pats(b, meta, us)}
+     end)}
+  end
+
+  defp resolve_rust_pats({:with, clauses, body, els}, meta, us) do
     {:with,
      Enum.map(clauses, fn {pt, e} ->
-       {{:rpat, core_pat_rs(pt, meta)}, resolve_rust_pats(e, meta)}
-     end), resolve_rust_pats(body, meta),
+       {{:rpat, core_pat_rs(pt, meta)}, resolve_rust_pats(e, meta, us)}
+     end), resolve_rust_pats(body, meta, us),
      Enum.map(els, fn {pt, g, b} ->
-       {{:rpat, core_pat_rs(pt, meta)},
-        case g do
-          nil -> nil
-          g -> resolve_rust_pats(g, meta)
-        end, resolve_rust_pats(b, meta)}
+       {{:rpat, core_pat_rs(pt, meta)}, resolve_guard(g, meta, us),
+        resolve_rust_pats(b, meta, us)}
      end)}
   end
 
-  defp resolve_rust_pats(node, meta), do: Rian.Macro.map_node(node, &resolve_rust_pats(&1, meta))
+  defp resolve_rust_pats(node, meta, us),
+    do: Rian.Macro.map_node(node, &resolve_rust_pats(&1, meta, us))
+
+  defp resolve_guard(nil, _meta, _us), do: nil
+  defp resolve_guard(g, meta, us), do: resolve_rust_pats(g, meta, us)
+
+  # a value-union arm pattern: a type-pattern `n Type` -> `Enum::Variant(n)`; any
+  # other arm (a catch-all `_`/var) falls back to the ordinary resolution.
+  defp union_pat_rs({:typed, name, tname}, enum, _meta),
+    do: "#{enum}::#{variant_name(tname)}(#{name})"
+
+  defp union_pat_rs(pt, _enum, meta), do: core_pat_rs(pt, meta)
 
   # Rust call-site borrow pass (ADR-0047): when an argument *produces* an owned
   # value (a `Vec`/`String` from a constructor or a value-returning call) but the
@@ -720,6 +740,11 @@ defmodule Rian.Lower do
   # an owned *var* (a cloned binder, not a `&`-ref) does too.
   defp borrow_arg(a, pt, funs, borrowed, ec) do
     cond do
+      # a value-union param (ADR-0083 Phase 4): wrap the member arg into the
+      # synthesized enum via its `From` impl — `Enum::from(arg)` (the variant is
+      # selected by the arg's Rust type). A union-typed arg (already the enum) is
+      # passed through, not re-wrapped.
+      String.starts_with?(pt, "RUnion_") -> union_from_arg(a, pt, ec)
       not borrow_type?(pt) -> a
       # a `&impl Fn(...)` callback param (ADR-0061): a closure/expression argument is referenced
       # (`&|x| …`), but a bare variable is already a `&impl Fn` — a caller's own param or the
@@ -744,6 +769,16 @@ defmodule Rian.Lower do
   # (`String::from`/`.to_string()`) need ident/method emit the `::`-path lowering and
   # identifier snake-casing get wrong, so the empty-concat is the portable route.
   defp owned_str_arg(s), do: {:unary, "&", {:bin, "<>", {:str, s}, {:str, ""}}}
+
+  # wrap a member arg into a synthesized union enum (`Enum::from(arg)`), UNLESS the
+  # arg is already a union value (a union-param id), which passes through unchanged.
+  defp union_from_arg({:id, name} = a, pt, ec) do
+    if Map.has_key?(Map.get(ec, :union_scope, %{}), name),
+      do: a,
+      else: {:call, {:id, "#{pt}::from"}, [a]}
+  end
+
+  defp union_from_arg(a, pt, _ec), do: {:call, {:id, "#{pt}::from"}, [a]}
 
   # a borrowed bare type variable (`&K`, not `&str`/`&[T]`): the param is generic.
   defp generic_tvar_borrow?("&" <> rest), do: tvar_name?(rest)
@@ -884,7 +919,7 @@ defmodule Rian.Lower do
     direct =
       Enum.zip(params, pats)
       |> Enum.flat_map(fn {p, pat} ->
-        ref? = borrow_type?(Rian.Capability.rust_param(p.cap, p.type))
+        ref? = borrow_type?(cap_param(p))
         borrowed_in_pat(Core.from_pat(pat), ref?)
       end)
 
@@ -904,7 +939,7 @@ defmodule Rian.Lower do
   defp slice_binders(params, pats) do
     param_slices =
       params
-      |> Enum.filter(&String.starts_with?(Rian.Capability.rust_param(&1.cap, &1.type), "&["))
+      |> Enum.filter(&String.starts_with?(cap_param(&1), "&["))
       |> Enum.map(& &1.name)
 
     tails = Enum.flat_map(pats, fn pat -> cons_tail_names(Core.from_pat(pat)) end)
@@ -927,7 +962,7 @@ defmodule Rian.Lower do
   # external/primitive call — leave its args untouched)
   defp param_rtypes(name, arity, funs) do
     case Map.get(funs, {name, arity}) do
-      %{params: ps} -> Enum.map(ps, fn p -> Rian.Capability.rust_param(p.cap, p.type) end)
+      %{params: ps} -> Enum.map(ps, fn p -> cap_param(p) end)
       _ -> nil
     end
   end
@@ -1163,6 +1198,8 @@ defmodule Rian.Lower do
       rust_foreign_mods(prog),
       Enum.map_join(structs, "\n\n", &rust_struct/1),
       Enum.map_join(types, "\n\n", &rust_enum(&1, "", parametric)),
+      # synthesized value-union enums (ADR-0083 Phase 4): one per distinct `A | B`
+      synth_union_enums(prog),
       trait_impl_block(protocols, impl_decls, c, base_ec),
       Enum.map_join(funcs, "\n\n", &rust_fn(&1, c, "", base_ec)),
       # sibling `mod`s become Rust `mod snake { … }` (each self-contained — see
@@ -1476,7 +1513,7 @@ defmodule Rian.Lower do
 
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
-        "#{p.name}: #{Rian.Capability.rust_param(p.cap, p.type)}"
+        "#{p.name}: #{cap_param(p)}"
       end)
 
     "#{vis}fn #{func.name}(#{param_decls}) -> #{rust_ret(func.ret)} { #{host} }"
@@ -1500,7 +1537,7 @@ defmodule Rian.Lower do
 
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
-        "#{p.name}: #{rustify_parametric(Rian.Capability.rust_param(p.cap, p.type), pinst)}"
+        "#{p.name}: #{rustify_parametric(cap_param(p), pinst)}"
       end)
 
     # One param matches the value directly; N>1 match the tuple of arguments
@@ -1562,9 +1599,16 @@ defmodule Rian.Lower do
             ic: ctx.ic
         }
 
+        # value-union params (ADR-0083 Phase 4): a `case` over one narrows to a
+        # `match` on the synthesized enum (type-pattern arms → `Enum::Variant(binder)`);
+        # the scope also guards construction wrapping (a union-typed arg is already the
+        # enum, so it is NOT re-wrapped in `::from`). Threaded into `ec` for `borrow_arg`.
+        union_scope = for(p <- func.params, union_type?(p.type), into: %{}, do: {p.name, p.type})
+        ec = Map.put(ec, :union_scope, union_scope)
+
         surface =
           pre
-          |> resolve_rust_pats(ctx.meta)
+          |> resolve_rust_pats(ctx.meta, union_scope)
           |> insert_borrows(Map.get(ctx, :funs, %{}), ec, borrowed)
 
         ast = Rian.Check.annotate(surface, tenv, ctx.ic)
@@ -1973,6 +2017,59 @@ defmodule Rian.Lower do
       rs_doc(Map.get(t, :doc), "///"),
       "#[derive(Clone, Debug, PartialEq)]\n#{vis}enum #{t.name}#{enum_generics(t.name, parametric)} {\n#{variants}\n}"
     )
+  end
+
+  # ── synthesized value-union enums (ADR-0083 Phase 4) ──────────────────────
+  # A structural union `A | B` has no native Rust type, so each DISTINCT union in
+  # the program lowers to a name-mangled, de-duplicated `enum` + a `From<member>`
+  # per member: construction is a member `.into()` (the call-site coercion adds it),
+  # narrowing a `match` arm. A `String` member also gets `From<&str>` so a string
+  # literal arg wraps without a separate `.to_string()`.
+  defp synth_union_enums(prog) do
+    prog |> collect_union_types() |> Enum.map_join("\n\n", &union_enum_decl/1)
+  end
+
+  defp collect_union_types(prog) do
+    funcs = Map.get(prog, :funcs, []) ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
+
+    funcs
+    |> Enum.flat_map(fn f -> [f.ret | Enum.map(f.params, & &1.type)] end)
+    |> Enum.filter(&union_type?/1)
+    |> Enum.uniq()
+    |> Enum.sort()
+  end
+
+  defp union_type?(t), do: is_binary(t) and String.starts_with?(t, "Union(")
+
+  defp union_members_of("Union(" <> rest),
+    do: rest |> binary_part(0, byte_size(rest) - 1) |> Rian.TypeStr.split_top_commas()
+
+  defp union_enum_name(t),
+    do: "RUnion_" <> Enum.map_join(union_members_of(t), "_", &variant_name/1)
+
+  defp variant_name(m), do: String.replace(m, ~r/[^A-Za-z0-9]/, "_")
+
+  defp union_enum_decl(t) do
+    members = union_members_of(t)
+    name = union_enum_name(t)
+    variants = Enum.map_join(members, " ", fn m -> "#{variant_name(m)}(#{prim_rust(m)})," end)
+
+    froms =
+      Enum.flat_map(members, fn m ->
+        v = variant_name(m)
+        rt = prim_rust(m)
+        base = "impl From<#{rt}> for #{name} { fn from(x: #{rt}) -> Self { Self::#{v}(x) } }"
+
+        if rt == "String",
+          do: [
+            base,
+            "impl From<&str> for #{name} { fn from(x: &str) -> Self { Self::#{v}(x.to_string()) } }"
+          ],
+          else: [base]
+      end)
+      |> Enum.join("\n")
+
+    "#[derive(Clone, Debug, PartialEq)]\nenum #{name} { #{variants} }\n#{froms}"
   end
 
   # `<K, V>` for a parametric type (its variant fields are typed by type variables),
@@ -2642,7 +2739,15 @@ defmodule Rian.Lower do
   defp pascal?(s), do: String.match?(s, ~r/^[A-Z]/)
 
   # Crystal source name -> Rust (owned form) / Elixir typespec (ADR-0033).
+  defp prim_rust("Union(" <> _ = t), do: union_enum_name(t)
   defp prim_rust(t), do: Rian.Capability.owned(t)
+
+  # the Rust parameter type. A value union (ADR-0083) is an OWNED synthesized enum
+  # (not a borrow — it carries the moved value); everything else goes through the
+  # capability mapping (`&[T]` / owned `Vec<T>` / `&T`).
+  defp cap_param(%{type: t} = p) do
+    if union_type?(t), do: union_enum_name(t), else: Rian.Capability.rust_param(p.cap, p.type)
+  end
 
   defp prim_ex("Bool"), do: "boolean()"
   defp prim_ex("String"), do: "String.t()"
