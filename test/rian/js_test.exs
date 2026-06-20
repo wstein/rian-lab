@@ -384,6 +384,27 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "an as-pattern `name @ pat` binds the whole value and matches the inner pattern" do
+      js =
+        JS.compile("""
+        mod M do
+          type Box := Box(Int53)
+          pub def inner(b Box) Int53 := case b do
+            whole @ Box(n) -> n
+          end
+        end
+        """)
+
+      # `whole` binds the scrutinee; the inner `Box(n)` still matches + binds `n`
+      assert js =~ "const whole = _s;"
+      assert js =~ "const n = _s[1];"
+
+      case node_eval(js, "inner(['Box', 7])") do
+        :no_node -> :ok
+        out -> assert out == "7"
+      end
+    end
+
     test "a type error is caught by the gate, not emitted as malformed JS (parity)" do
       # JS.compile now runs `Check.gate!` before emitting (parity with the BEAM
       # `Decl.compile` path) — a proven type mismatch raises here, not downstream.

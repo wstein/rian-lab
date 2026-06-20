@@ -366,6 +366,16 @@ defmodule Rian.JVMTest do
       def hasx(m Dict(Symbol, Int53)) Bool := Map.has(m, :x)
       """,
       probe: ~s|println("${getx(origin())},${bumped(origin())},${hasx(origin())}")|
+    },
+    %{
+      id: :as_pat,
+      src: """
+      type Box := Box(Int64)
+      def inner(b Box) Int64 := case b do
+        whole @ Box(n) -> n
+      end
+      """,
+      probe: ~s|println(inner(Box(7L)))|
     }
   ]
 
@@ -652,6 +662,14 @@ defmodule Rian.JVMTest do
       assert kt =~ ~s|getValue("x")|
       assert kt =~ "Map<String, Long>"
       expect_jvm(jvm, :map, "1,9,true")
+    end
+
+    @tag :jvm
+    test "an as-pattern `name @ pat` binds the whole value and matches the inner", %{
+      jvm_batch: jvm
+    } do
+      assert jvm_kt(jvm, :as_pat) =~ "val whole ="
+      expect_jvm(jvm, :as_pat, "7")
     end
 
     @tag :jvm

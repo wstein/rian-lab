@@ -108,6 +108,7 @@ defmodule Rian.JVM do
     EStruct,
     ETuple,
     EUnary,
+    PAs,
     PAtom,
     PChar,
     PCtor,
@@ -585,6 +586,13 @@ defmodule Rian.JVM do
   defp pat_match(%PWild{}, _acc), do: {[], []}
   defp pat_match(%PVar{name: n}, acc), do: {[], [{n, acc}]}
 
+  # an as-pattern `name @ pat` (ADR-0050): bind `name` to the whole scrutinee AND
+  # match the inner pattern against it.
+  defp pat_match(%PAs{name: n, pat: p}, acc) do
+    {ts, bs} = pat_match(p, acc)
+    {ts, [{n, acc} | bs]}
+  end
+
   # a type-pattern `n Type` (ADR-0083): test the runtime type (`is Long`/`is String`,
   # the dispatcher discriminator) and bind the scrutinee — Kotlin smart-casts it to
   # the tested type inside the `is` block (the dispatcher relies on the same).
@@ -941,7 +949,7 @@ defmodule Rian.JVM do
   # interop namespaces have no JVM lowering, so they are excluded and raise via the
   # `Unsupported` fallback (FFI is off `:jvm`).
   defp expr_kt(%ECall{fun: %EDot{head: %EId{name: mod}, name: fun}, args: args})
-       when mod not in ~w(Map String List),
+       when mod not in ~w(Map String),
        do: "#{fun}(#{Enum.map_join(args, ", ", &expr_kt/1)})"
 
   # struct construction `Name(f: v, …)` (ADR-0043): labelled call args → a Kotlin

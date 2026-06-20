@@ -100,6 +100,7 @@ defmodule Rian.JS do
     ELabel,
     ETuple,
     EUnary,
+    PAs,
     PAtom,
     PChar,
     PCtor,
@@ -530,6 +531,13 @@ defmodule Rian.JS do
   defp pat_match(%PWild{}, _acc, _i53), do: {[], []}
   defp pat_match(%PVar{name: n}, acc, _i53), do: {[], [{n, acc}]}
 
+  # an as-pattern `name @ pat` (ADR-0050): bind `name` to the whole scrutinee AND
+  # match the inner pattern against it.
+  defp pat_match(%PAs{name: n, pat: p}, acc, i53) do
+    {ts, bs} = pat_match(p, acc, i53)
+    {ts, [{n, acc} | bs]}
+  end
+
   # a type-pattern `n Type` (ADR-0083): bind `n` and test the scrutinee's runtime
   # type with the same JS-native discriminator the dispatcher uses. A primitive
   # (`disc: nil`) tests `typeof`; a sum/struct member's discriminator was baked into
@@ -861,7 +869,7 @@ defmodule Rian.JS do
   # module injected for `${float}` interpolation resolves through here.) The three
   # built-in interop namespaces above keep their special lowering and are excluded.
   defp expr_js(%ECall{fun: %EDot{head: %EId{name: mod}, name: fun}, args: args}, i53)
-       when mod not in ~w(Map String List),
+       when mod not in ~w(Map String),
        do: "#{fun}(#{Enum.map_join(args, ", ", &expr_js(&1, i53))})"
 
   # `case scrut do pat -> body … end` -> an IIFE: bind the scrutinee, then an
