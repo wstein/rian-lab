@@ -191,6 +191,26 @@ defmodule Rian.DeclTest do
       assert apply(mod, :kind, [{:bag_v, 9}]) == 2
     end
 
+    test "a value union of STRUCT members narrows by `__struct__` and runs on the BEAM (ADR-0083)" do
+      src = """
+      struct Box(v Int53)
+      struct Widget(n Int53)
+      def pick(x Box | Widget) Int53 := case x do
+        b Box -> b.v
+        w Widget -> w.n
+      end
+      def go(b Bool) Int53 := if b do pick(Box(v: 7)) else pick(Widget(n: 9)) end
+      """
+
+      {:ok, mod, bin} =
+        Rian.Beam.compile(src, :"rian_structunion_#{System.unique_integer([:positive])}")
+
+      {:module, ^mod} = :code.load_binary(mod, ~c"#{mod}.beam", bin)
+      # the `__struct__` tag discriminates `Box` from `Widget` at the narrowing arm
+      assert apply(mod, :go, [true]) == 7
+      assert apply(mod, :go, [false]) == 9
+    end
+
     test "a block body's statement split tracks bracket depth, not just `do`/`end`" do
       # Regression: `block_seps` split statements on newlines by `do`/`end` depth
       # only, so a single expression wrapped across lines inside `(`/`[`/`{` took a

@@ -70,6 +70,29 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a value union of STRUCT members narrows by `__struct__` and runs (ADR-0083)" do
+      js =
+        JS.compile("""
+        struct Box(v Int53)
+        struct Widget(n Int53)
+        def pick(x Box | Widget) Int53 := case x do
+          b Box -> b.v
+          w Widget -> w.n
+        end
+        """)
+
+      # a struct value is `{ __struct__: "Box", … }`, so "is a Box" tests that tag
+      assert js =~ ~s|__struct__ === "Box"|
+
+      case node_eval(
+             js,
+             "[pick({__struct__:'Box',v:7}), pick({__struct__:'Widget',n:9})].join(',')"
+           ) do
+        :no_node -> :ok
+        out -> assert out == "7,9"
+      end
+    end
+
     test "a `const` reference resolves to the emitted top-level const, not a bare identifier" do
       js = JS.compile("mod M do\n  const Answer := 42\n  pub def get() Int53 := Answer\nend")
       assert js =~ "const Answer = 42;"
