@@ -135,6 +135,50 @@ defmodule Rian.LowerTest do
       end
     end
 
+    @tag :rust
+    test "a union binding nested in a branch passed to a union param compiles + runs (ADR-0083)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          # `y := mk(b)` is bound INSIDE the `if` branch, so `union_locals` doesn't track
+          # it and the `describe(y)` call gets a redundant `Enum::from(y)`. That is an
+          # identity via Rust's reflexive `From<T> for T` — so it compiles and runs (no
+          # `:rs` residual, contrary to the earlier ADR note).
+          src = """
+          mod M do
+            pub def mk(b Bool) Int53 | String := if b do 41 else "x" end
+            pub def describe(x Int53 | String) Int53 := case x do
+              n Int53 -> n + 1
+              s String -> 0
+            end
+            pub def f(b Bool) Int53 := if b do y := mk(b) ; describe(y) else 0 end
+          end
+          """
+
+          rust = Lower.rust_program(Rian.Decl.parse(src))
+          # the redundant identity wrap is present (and harmless)
+          assert rust =~ "describe(RUnion_Int53_String::from(y))"
+
+          dir = Path.join(System.tmp_dir!(), "rian_nestuni_#{System.unique_integer([:positive])}")
+          File.mkdir_p!(dir)
+          on_exit(fn -> File.rm_rf(dir) end)
+          rs = Path.join(dir, "n.rs")
+
+          File.write!(
+            rs,
+            rust <>
+              ~s|\nfn main() { assert_eq!(m::f(true), 42); assert_eq!(m::f(false), 0); println!("ok"); }\n|
+          )
+
+          bin = Path.join(dir, "n")
+          {out, code} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", rs, "-o", bin])
+          assert code == 0, "nested-union rustc failed:\n#{out}"
+          assert {"ok\n", 0} = System.cmd(bin, [])
+      end
+    end
+
     test "refuses to emit when a clause is unreachable" do
       dead = %{
         area()
