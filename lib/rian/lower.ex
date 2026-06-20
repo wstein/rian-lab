@@ -2298,8 +2298,10 @@ defmodule Rian.Lower do
     |> Enum.uniq()
   end
 
-  # a bare type variable name: a single uppercase letter optionally followed by digits
-  defp tvar_name?(t) when is_binary(t), do: String.match?(t, ~r/^[A-Z][0-9]*$/)
+  # a bare type-variable name — a single capital optionally followed by ONE digit, matching
+  # the `Rian.Check`/`Rian.Reach` `tvar?` convention so the emitter and the reach gate agree
+  # on what counts as a tvar (a `T12`-style field would otherwise diverge between them).
+  defp tvar_name?(t) when is_binary(t), do: String.match?(t, ~r/^[A-Z][0-9]?$/)
   defp tvar_name?(_), do: false
 
   # every type-variable token MENTIONED in a type string, in order of first appearance:
@@ -2628,7 +2630,14 @@ defmodule Rian.Lower do
   defp emit(%EUnary{op: "-", arg: x}, t, ec), do: {"-" <> p(x, 11, t, ec), 11}
   defp emit(%EUnary{op: "not", arg: x}, :elixir, ec), do: {"not " <> p(x, 11, :elixir, ec), 11}
   defp emit(%EUnary{op: "not", arg: x}, :rust, ec), do: {"!" <> p(x, 11, :rust, ec), 11}
-  # `&` is injected by the call-site borrow pass (Rust only) — never parsed
+  # `&` is injected by the call-site borrow pass (Rust only) — never parsed. A `&<closure>`
+  # is a CALLBACK reference (`&impl Fn`, ADR-0061), never a value-position boxed closure — so
+  # clear `fn_box` for it: in a `Fn(...)`-returning function the returned closure boxes, but a
+  # lambda it passes to a HOF must stay a bare `|…| …` (boxing it would be `&Box::new(…)`, a
+  # borrow of a temporary — rustc E0716).
+  defp emit(%EUnary{op: "&", arg: %ELambda{} = x}, :rust, ec),
+    do: {"&" <> p(x, 11, :rust, %{ec | fn_box: nil}), 11}
+
   defp emit(%EUnary{op: "&", arg: x}, :rust, ec), do: {"&" <> p(x, 11, :rust, ec), 11}
 
   # lambdas — Elixir anonymous fn, Rust closure

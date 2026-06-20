@@ -886,6 +886,48 @@ end|
           assert String.trim(out) == "7 7 hi z"
       end
     end
+
+    test "a HOF callback lambda inside a Fn-returning function stays a bare `&impl Fn` (not boxed)" do
+      # the returned closure boxes, but the lambda passed to `hof` is a CALLBACK — boxing it
+      # would emit `&Box::new(…)`, a borrow of a temporary (rustc E0716). `fn_box` is cleared
+      # under a `&<closure>` (callback reference), so only the value-position closure boxes.
+      src =
+        "def hof(f Fn(Int53, Int53), x Int53) Int53 := f(x)\n" <>
+          "def make(lo Int53) Fn(Int53, Int53) := (x) -> hof((n) -> n + lo, x)"
+
+      rust = Rian.Lower.rust_program(Rian.Decl.parse(src))
+      assert rust =~ "Box::new(move |x| hof(&|n| n + lo, x))"
+      refute rust =~ "&Box::new(move |n|"
+    end
+
+    @tag :rust
+    test "the HOF-callback-in-Fn-return shape compiles and runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          src =
+            "def hof(f Fn(Int53, Int53), x Int53) Int53 := f(x)\n" <>
+              "def make(lo Int53) Fn(Int53, Int53) := (x) -> hof((n) -> n + lo, x)"
+
+          rust = Rian.Lower.rust_program(Rian.Decl.parse(src))
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_hofret_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <> "\nfn main() { let a = make(10); println!(\"{} {}\", a(5), a(7)); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", path, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "15 17"
+      end
+    end
   end
 
   describe "a parametric type with a `Vec`/`Option` tvar field monomorphizes on :rs (ADR-0061)" do
