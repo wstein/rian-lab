@@ -88,9 +88,11 @@ it cannot prove non-stringifiability, and erroring there violates the checker's 
 (`Rian.Interp.stringify/3`):
 
 - the **`_Unk` transpiler-draft marker** (a deliberately-unsupplied type in `mix rian.transpile` output)
-  → **defer**: the value passes through the `<>` chain unchanged (no coercion), so a draft *parses* and
-  the hole resolves once the type is hand-filled. It was a layering bug that an unfinished draft failed
-  at *parse* on a not-yet-typed hole.
+  — **superseded.** This originally *deferred* (the value passed through `<>` so a draft parsed). Per the
+  ADR-0034 revision, a **declared `_Unk` in a signature is now REJECTED by the gate** (`Check.check_unk`):
+  `_Unk` is a *fill-me* marker, not a deferrable type — a draft must be completed before it compiles
+  (use `Any` for a genuinely-dynamic value). The defer below applies only to a genuine inferred
+  `:unknown`, not a declared `_Unk`.
 - a genuine **`:unknown`** (the checker actually failed to infer a real program's type — an un-pinned
   generic, an unbound name, a host/pipe-chain return) → **falls through to runtime `Show`** (2026-06
   reversal of the earlier "still a hard error" rule). The hole lowers to **`Prim.to_string`**, the host's

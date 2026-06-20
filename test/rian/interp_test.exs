@@ -144,7 +144,7 @@ defmodule Rian.InterpTest do
       # `inspect` is host-coupled (the function pins to `:ex`), but its return type is
       # unambiguously String, so the hole resolves instead of erroring at parse. (Execution
       # is the emitter's concern, not the resolver's — this asserts the resolution.)
-      [{_, %{elixir: elixir}}] = Decl.compile(~S|def dbg(x _Unk) String := "got ${inspect(x)}"|)
+      [{_, %{elixir: elixir}}] = Decl.compile(~S|def dbg(x Any) String := "got ${inspect(x)}"|)
       assert elixir =~ "inspect"
     end
 
@@ -420,12 +420,13 @@ defmodule Rian.InterpTest do
     end
   end
 
-  describe "the `_Unk` draft marker defers, not errors (ADR-0069, 2026-06 debate)" do
-    test "a hole over a `_Unk`-typed value passes through (a transpiler draft can parse)" do
-      # `_Unk` is a deliberately-unsupplied type, not a proven-non-stringifiable one — the
-      # resolver defers (value passes through) rather than failing the parse.
-      [{_, %{elixir: elixir}}] = Decl.compile(~S|def f(x _Unk) String := "v=${x}"|)
-      assert elixir =~ "v="
+  describe "`_Unk` is a fill-me marker — the gate rejects it (ADR-0034; reverses the ADR-0069 defer)" do
+    test "a declared `_Unk` in a signature is a hard compile error (use `Any` for a dynamic value)" do
+      # `_Unk` is an unfinished hole, not a type — the gated path refuses it rather than
+      # deferring (the prior ADR-0069 behaviour), pointing at the fix (`Any` is dynamic).
+      err = assert_raise Rian.Check.Error, fn -> Decl.compile(~S|def f(x _Unk) String := "v"|) end
+      assert Exception.message(err) =~ "_Unk"
+      assert Exception.message(err) =~ "Any"
     end
   end
 end

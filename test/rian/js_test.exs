@@ -49,6 +49,16 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "an `Any` parameter is a dynamic untyped value and runs (ADR-0034)" do
+      js = JS.compile("def pick(b Bool, x Any, y Any) Any := if b do x else y end")
+      assert js =~ "function pick(a0, a1, a2)"
+
+      case node_eval(js, "[pick(true, 7, 9), pick(false, 'a', 'b')].join(',')") do
+        :no_node -> :ok
+        out -> assert out == "7,b"
+      end
+    end
+
     test "a value union of SUM members narrows by the tagged-array head and runs (ADR-0083)" do
       js =
         JS.compile("""

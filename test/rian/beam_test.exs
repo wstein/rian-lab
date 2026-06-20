@@ -14,7 +14,7 @@ defmodule Rian.BeamTest do
     test "`is_struct/1` in a guard lowers to a guard-legal map check (not illegal_guard_expr)" do
       {:ok, mod} =
         Beam.load(
-          "def kind(x _Unk) String\ndef kind(x) when is_struct(x) := \"struct\"\ndef kind(x) := \"plain\"",
+          "def kind(x Any) String\ndef kind(x) when is_struct(x) := \"struct\"\ndef kind(x) := \"plain\"",
           :rian_beam_is_struct
         )
 
@@ -23,7 +23,7 @@ defmodule Rian.BeamTest do
     end
 
     test "`elem(t, i)` lowers to the 1-indexed `:erlang.element` BIF (not undefined_function)" do
-      {:ok, mod} = Beam.load("def snd(t _Unk) _Unk := elem(t, 1)", :rian_beam_elem)
+      {:ok, mod} = Beam.load("def snd(t Any) Any := elem(t, 1)", :rian_beam_elem)
       assert mod.snd({:a, :b, :c}) == :b
     end
 

@@ -907,7 +907,8 @@ defmodule Rian.Check do
   def check_func(func, ic \\ %{}, eset \\ %{tsets: %{}, table: %{}})
 
   def check_func(%Func{} = f, ic, eset) do
-    with :ok <- check_external_caps(f),
+    with :ok <- check_unk(f),
+         :ok <- check_external_caps(f),
          :ok <- check_labels(f),
          :ok <- check_union_clash(f),
          :ok <- check_return(f, ic),
@@ -918,6 +919,27 @@ defmodule Rian.Check do
          :ok <- check_effects(f, eset),
          do: check_error_set(f, eset)
   end
+
+  # `_Unk` is an UNFINISHED inference hole, not a type — a "fill me" marker the
+  # transpiler leaves (ADR-0034). A declared `_Unk` in a signature must be resolved
+  # before compiling, so the gated path rejects it with a clear fix (a genuinely-
+  # dynamic value is `Any`, which lowers on every target but Rust). The raw `Beam.load`
+  # path skips `Check.gate!` by design, so BEAM-only draft code is unaffected.
+  defp check_unk(%Func{name: name, params: ps, ret: ret}) do
+    case Enum.find(Enum.map(ps, & &1.type) ++ [ret], &has_unk?/1) do
+      nil ->
+        :ok
+
+      t ->
+        {:error,
+         "`#{name}`: unresolved `_Unk` hole in its signature (`#{t}`) — `_Unk` is a " <>
+           "fill-me marker, not a type. Give it a concrete type, or `Any` if the value " <>
+           "is genuinely dynamic (`Any` reaches every target but `:rs`)."}
+    end
+  end
+
+  defp has_unk?(t) when is_binary(t), do: String.contains?(t, "_Unk")
+  defp has_unk?(_), do: false
 
   # A value union (`A | B`, ADR-0083) narrows by runtime type, so two members that
   # share a runtime discriminator (`Int32 | Char` — both `is_integer`/`number`) can

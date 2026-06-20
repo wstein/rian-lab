@@ -8,8 +8,8 @@ defmodule Rian.Application do
   # type: `type` is `Application.start_type()`, `args` the start argument, and the
   # result an `{:ok, pid}`/`{:error, reason}` supervisor handle. So they are `Any`
   # (the deliberate top type, ADR-0034), not `_Unk` placeholders — there is nothing
-  # left "to be defined" here. `Any` also pins this off `:rs`/`:js`/`:jvm` (Reach),
-  # which is correct: OTP application start is not portable.
+  # left "to be defined" here. (`Any` reaches every target but `:rs`; this function is
+  # BEAM-only regardless — OTP application start is host FFI, not portable.)
   @rian_sig "pub def start(type Any, args Any) Any"
   @impl true
   def start(_type, _args) do

@@ -29,6 +29,11 @@ defmodule Rian.JVMTest do
       probe: ~S|println("${describe(41L)},${describe("hi")}")|
     },
     %{
+      id: :any_param,
+      src: "def pick(b Bool, x Any, y Any) Any := if b do x else y end",
+      probe: ~S|println("${pick(true, 7L, 9L)},${pick(false, "a", "b")}")|
+    },
+    %{
       id: :sum_union,
       src: """
       type Box := BoxV(Int53)
@@ -436,6 +441,12 @@ defmodule Rian.JVMTest do
       kt = JVM.compile("def double(n Int64) Int64 := n * 2")
       assert kt =~ "fun double(a0: Long): Long"
       assert kt =~ "(n * 2L)"
+    end
+
+    @tag :jvm
+    test "an `Any` parameter maps to Kotlin `Any` and runs (ADR-0034)", %{jvm_batch: jvm} do
+      assert jvm_kt(jvm, :any_param) =~ "pick(a0: Boolean, a1: Any, a2: Any): Any"
+      expect_jvm(jvm, :any_param, "7,b")
     end
 
     @tag :jvm

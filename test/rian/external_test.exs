@@ -159,7 +159,7 @@ defmodule Rian.ExternalTest do
     test "an erlang reference parses to a tagged ref and lowers to a positional call" do
       f =
         hd(
-          Decl.parse(~S|@external(:ex, :erlang.binary_to_list) pub def to_list(s String) _Unk|).funcs
+          Decl.parse(~S|@external(:ex, :erlang.binary_to_list) pub def to_list(s String) Any|).funcs
         )
 
       assert f.externals == %{ex: {:ref, ["erlang", "binary_to_list"], true}}
@@ -170,9 +170,7 @@ defmodule Rian.ExternalTest do
     test "a dotted Elixir/Rian reference lowers to `Mod.fun(args)`" do
       f =
         hd(
-          Decl.parse(
-            ~S|@external(:ex, Rian.Beam.load_result) pub def lr(s String, m Symbol) _Unk|
-          ).funcs
+          Decl.parse(~S|@external(:ex, Rian.Beam.load_result) pub def lr(s String, m Symbol) Any|).funcs
         )
 
       assert f.externals == %{ex: {:ref, ["Rian", "Beam", "load_result"], false}}
@@ -180,22 +178,22 @@ defmodule Rian.ExternalTest do
     end
 
     test "a reference to a non-existent host function/arity is a compile error (no silent stub)" do
-      bad = ~S|@external(:ex, :erlang.no_such_fun_xyz) pub def b(s String) _Unk|
+      bad = ~S|@external(:ex, :erlang.no_such_fun_xyz) pub def b(s String) Any|
       {:error, msg} = Check.check(bad)
       assert msg =~ "no `no_such_fun_xyz/1` is exported"
     end
 
     test "a resolvable erlang reference passes the check; the string form still works" do
-      assert Check.check(~S|@external(:ex, :erlang.binary_to_list) pub def t(s String) _Unk|) ==
+      assert Check.check(~S|@external(:ex, :erlang.binary_to_list) pub def t(s String) Any|) ==
                :ok
 
-      assert Check.check(~S|@external(:ex, ":erlang.binary_to_list(s)") pub def t(s String) _Unk|) ==
+      assert Check.check(~S|@external(:ex, ":erlang.binary_to_list(s)") pub def t(s String) Any|) ==
                :ok
     end
 
     test "Reach reads the target set identically for a reference (spec form is irrelevant)" do
       rep =
-        Decl.parse(~S|@external(:ex, :erlang.binary_to_list) pub def t(s String) _Unk|)
+        Decl.parse(~S|@external(:ex, :erlang.binary_to_list) pub def t(s String) Any|)
         |> Reach.analyze()
 
       assert Reach.entry(rep, "t").reach |> MapSet.to_list() == [:ex]
@@ -217,7 +215,7 @@ defmodule Rian.ExternalTest do
     end
 
     test "a program with no file-references resolves trivially", %{dir: dir} do
-      prog = Decl.parse(~S|@external(:ex, :erlang.length) pub def f(x _Unk) Int53|)
+      prog = Decl.parse(~S|@external(:ex, :erlang.length) pub def f(x Any) Int53|)
       assert External.resolve(prog, dir) == :ok
     end
 

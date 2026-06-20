@@ -489,10 +489,10 @@ defmodule Rian.Reach do
     # blocks.
     width = if Enum.any?(sig_types, &js_wide_int?/1), do: [width_blocker()], else: []
     # `Any` is the deliberate top type (ADR-0034) — a value of genuinely-dynamic shape. The
-    # BEAM erases type annotations, so it's native there; but the typed emitters have no
-    # mapping yet (Rust has no ergonomic top value; JS `any` / Kotlin `Any` are representable
-    # but unimplemented), so `Any` honestly pins off `:rs`/`:js`/`:jvm` until those land. This
-    # is distinct from `_Unk`, an *unfinished* hole — `Any` is a real, reported reach contract.
+    # BEAM erases type annotations (native), JS is dynamic (an untyped value), and JVM maps it
+    # to Kotlin `Any` — so `Any` reaches those three. Only Rust has no ergonomic top value, so
+    # `Any` pins off `:rs` alone. This is distinct from `_Unk`, an *unfinished* hole that
+    # `Rian.Check` rejects outright — `Any` is a real, reported reach contract.
     any = if Enum.any?(sig_types, &type_mentions_any?/1), do: [any_blocker()], else: []
     # a value-union type `A | B` (canonical `Union(...)`, ADR-0083). A NARROWABLE union
     # (every member primitive/sum/struct with a DISTINCT runtime discriminator) narrows
@@ -606,7 +606,7 @@ defmodule Rian.Reach do
     do: %{construct: "Int (arbitrary precision)", kind: :numeric, kills: [:rs, :jvm]}
 
   defp any_blocker,
-    do: %{construct: "Any (top type)", kind: :typed, kills: [:rs, :js, :jvm]}
+    do: %{construct: "Any (top type)", kind: :typed, kills: [:rs]}
 
   # a signature type that *is* `Any` or mentions it inside a generic (`Vec(Any)`, `Dict(String,
   # Any)`): the dynamic value flows through, so the pin applies. Word-boundary match avoids

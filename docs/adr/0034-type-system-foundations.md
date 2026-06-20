@@ -100,15 +100,22 @@ function).
 **`Any` (the top type) vs `_Unk` (a placeholder) — never conflated.** Since the same source lowers to
 Rust, which has no untyped values, an *unknown* type and a *deliberately-dynamic* type must be distinct:
 
-- **`_Unk`** is a **transient placeholder** — "this type still needs to be defined." It is an
-  inference hole / draft TODO to be driven to zero, **not** a synonym for `any`. The checker treats it
-  as `:unknown` (unifies with anything, errors only on a *provable* clash).
+- **`_Unk`** is a **fill-me marker**, not a type — "this still needs to be defined" (an inference hole
+  the transpiler leaves). It is a TODO to be driven to zero, **not** a synonym for `any`. Internally the
+  checker carries un-inferable *expression* results as `:unknown` (unifies with anything, errors only on
+  a *provable* clash), but a **declared `_Unk` in a signature is REJECTED by the gate** (`Rian.Check`
+  `check_unk`) with a clear fix — you must give it a concrete type or `Any`. (This reverses the earlier
+  ADR-0069 "a `_Unk` draft defers" leniency: a draft no longer *compiles*; it must be filled first. The
+  raw `Beam.load` bootstrap path skips the gate, so BEAM-only draft loading is unaffected.)
 - **`Any`** is the **deliberate top type** — "this legitimately accepts any value," for genuinely
   dynamic host artifacts (Elixir quoted AST, Erlang abstract forms, a `.beam` binary). It is a real,
   named type: `Rian.Check.unify` makes it the top (`unify(Any, t) = t`), and `Rian.Reach` reports its
-  reach honestly — emittable on the BEAM (`term()`, types erased) but pinned off `:rs`/`:js`/`:jvm`
-  until those emitters map it (`Box<dyn Any>` / `any` / Kotlin `Any`). **If you want `any`, write
-  `Any`** — overloading `_Unk` as `any` hides a real type behind a placeholder and is rejected.
+  reach honestly — it **reaches every target but `:rs`**: BEAM erases it (`term()`), JS is dynamic (an
+  untyped value), JVM maps it to Kotlin `Any`; only Rust has no ergonomic top value, so `Any` pins off
+  `:rs` alone (node/kotlinc-verified). Capabilities don't gate it — they're a Rust-ownership mechanism,
+  and `Any` is exactly the Rust-excluded type, so a capability on an `Any` param is a no-op on its
+  reachable targets. **If you want `any`, write `Any`** — overloading `_Unk` as `any` hides a real type
+  behind a placeholder and is rejected.
 
 **Integer-literal width:** a bare integer literal defaults to **`Int64`** (ADR-0033 vocabulary);
 other widths require an annotation (`n Int32`). **Overflow/precision is native-per-target**

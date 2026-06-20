@@ -14,15 +14,15 @@ defmodule Rian.CheckTest do
     end
 
     test "`Any` is the top type — unifies with anything, narrowing to the concrete operand" do
-      # distinct from `:unknown`/`_Unk` (an unfinished hole): `Any` is a deliberate, named
-      # top type. It never conflicts, and it pins off `:rs`/`:js`/`:jvm` (Rian.Reach) while
-      # the BEAM erases it — a *real* reach contract, not an inference gap.
+      # distinct from `:unknown`/`_Unk` (an unfinished hole the gate rejects): `Any` is a
+      # deliberate, named top type. It never conflicts, and it reaches every target but `:rs`
+      # — BEAM erases it, JS is dynamic, JVM maps it to Kotlin `Any` (Rian.Reach).
       assert Check.unify("Any", "Int53") == "Int53"
       assert Check.unify("String", "Any") == "String"
       assert Check.unify("Any", "Any") == "Any"
 
       reach = Rian.Reach.analyze(Rian.Decl.parse("def f(x Any) String := \"v\""))
-      assert Enum.sort(reach["f/1"].reach) == [:ex]
+      assert Enum.sort(reach["f/1"].reach) == [:ex, :js, :jvm]
     end
   end
 
