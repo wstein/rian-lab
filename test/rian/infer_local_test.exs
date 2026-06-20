@@ -56,10 +56,12 @@ defmodule Rian.InferLocalTest do
     assert ret_of(out, "f") == nil
   end
 
-  test "an un-inferable return (self-recursion) raises 'annotate it', not a guess" do
-    assert_raise Rian.Decl.Error, ~r/cannot infer the return type of private `loop`/, fn ->
-      infer("mod M do\n  def loop(n Int53) Int53 := loop(n)\nend", ["loop"])
-    end
+  test "an un-inferable return (self-recursion) renders `Any`, not a guess or an error" do
+    # `Any` is the dynamic top (ADR-0034) — a valid type that reaches every target but `:rs`,
+    # so an un-pinnable private return is honestly dynamic rather than a parse error (this lets
+    # a `mix rian.transpile` draft parse without a hand pass).
+    out = infer("mod M do\n  def loop(n Int53) Int53 := loop(n)\nend", ["loop"])
+    assert ret_of(out, "loop") == "Any"
   end
 
   test "an already-declared private return is left exactly as written" do

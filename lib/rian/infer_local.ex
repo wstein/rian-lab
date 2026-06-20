@@ -37,8 +37,9 @@ defmodule Rian.InferLocal do
   Fill undeclared private-function return types by local inference (ADR-0034). A
   no-op (no inference context built) unless some private function omitted its return.
   A return that cannot be inferred — self-recursion, an `@external` with no body, a
-  body touching something unmodelled — raises a clear "annotate it" error rather than
-  letting a `nil` return reach the checker.
+  body touching something unmodelled — renders `Any` (the dynamic top, ADR-0034): a valid
+  type that reaches every target but `:rs`, so the function is honestly dynamic rather than
+  a parse-time error (and a `mix rian.transpile` draft parses without a hand pass).
   """
   @rian_sig "pub def fill_returns(prog Prog) Prog"
   @spec fill_returns(map()) :: map()
@@ -64,15 +65,11 @@ defmodule Rian.InferLocal do
         |> generalize_params()
         |> fixpoint("Int53")
 
-      case Enum.filter(all_funcs(prog), &untyped_ret?/1) do
-        [] ->
-          prog
-
-        [%IR.Func{name: n} | _] ->
-          raise Rian.Decl.Error,
-                "cannot infer the return type of private `#{n}` — annotate it " <>
-                  "(`def #{n}(…) <Type> := …`)"
-      end
+      # A private return inference still can't pin renders `Any` (the dynamic top, ADR-0034):
+      # it is a real type — valid, reaches every target but `:rs` — so the function is honestly
+      # dynamic rather than a parse-time error. (`Any` pins `:rs` via `Rian.Reach`, the honest
+      # portability signal.) This lets a `mix rian.transpile` draft parse without a hand pass.
+      fill_untyped_any(prog)
     else
       prog
     end
@@ -97,6 +94,20 @@ defmodule Rian.InferLocal do
 
   defp untyped_ret?(%IR.Func{pub?: false, ret: nil}), do: true
   defp untyped_ret?(_), do: false
+
+  # fill every still-untyped private return with `Any` (across top-level + module functions).
+  defp fill_untyped_any(prog) do
+    prog
+    |> Map.update(:funcs, [], fn fs -> Enum.map(fs, &any_if_untyped/1) end)
+    |> Map.update(:mods, [], fn mods ->
+      Enum.map(mods, fn m ->
+        Map.update(m, :funcs, [], fn fs -> Enum.map(fs, &any_if_untyped/1) end)
+      end)
+    end)
+  end
+
+  defp any_if_untyped(%IR.Func{pub?: false, ret: nil} = f), do: %{f | ret: "Any"}
+  defp any_if_untyped(f), do: f
 
   defp has_infer_param?(%IR.Func{pub?: false, params: ps}),
     do: Enum.any?(ps, &(&1.type == :infer))
