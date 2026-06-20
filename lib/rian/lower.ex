@@ -1577,7 +1577,12 @@ defmodule Rian.Lower do
   # construction occurs" bound is a future refinement.)
   defp rust_generics(%{tvars: []}), do: ""
 
-  defp rust_generics(%{tvars: tvars, bounds: bounds}) do
+  defp rust_generics(%{tvars: tvars, bounds: bounds} = gf) do
+    # a tvar mentioned in a `Fn(...)` return is captured by a boxed `dyn Fn` that outlives
+    # the frame, so it needs a `'static` bound (alongside `Clone` for the per-call copy).
+    ret = to_string(Map.get(gf, :ret, ""))
+    fn_ret? = String.contains?(ret, "Fn(")
+
     inner =
       Enum.map_join(tvars, ", ", fn tv ->
         bounds_map =
@@ -1586,7 +1591,8 @@ defmodule Rian.Lower do
             b -> b
           end
 
-        traits = Enum.map(Map.get(bounds_map, tv, []), &"Rian#{&1}") ++ ["Clone"]
+        static = if fn_ret? and String.match?(ret, ~r/\b#{tv}\b/), do: ["'static"], else: []
+        traits = Enum.map(Map.get(bounds_map, tv, []), &"Rian#{&1}") ++ ["Clone"] ++ static
         "#{tv}: #{Enum.join(traits, " + ")}"
       end)
 
@@ -1594,6 +1600,36 @@ defmodule Rian.Lower do
   end
 
   defp rust_generics(_), do: ""
+
+  # Does a `Fn(arg, …, ret)` type return a bare type variable? (its last top-level
+  # component is a tvar) — the case that needs a per-call `.clone()` in the closure body.
+  defp fn_returns_tvar?("Fn(" <> rest, tvars) do
+    rest |> String.replace_suffix(")", "") |> top_args() |> List.last() |> Kernel.in(tvars)
+  end
+
+  defp fn_returns_tvar?(_, _), do: false
+
+  # split a comma list at paren-depth 0: `"Int53, Pair(K, V)"` → `["Int53", "Pair(K, V)"]`.
+  defp top_args(s) do
+    {acc, cur, _} =
+      Enum.reduce(String.graphemes(s), {[], "", 0}, fn
+        ",", {acc, cur, 0} -> {acc ++ [cur], "", 0}
+        "(", {acc, cur, d} -> {acc, cur <> "(", d + 1}
+        ")", {acc, cur, d} -> {acc, cur <> ")", d - 1}
+        g, {acc, cur, d} -> {acc, cur <> g, d}
+      end)
+
+    Enum.map(acc ++ [cur], &String.trim/1)
+  end
+
+  # rewrite a bare closure arm `|params| body` → `|params| (body).clone()` (the boxed
+  # `Fn` closure returns its captured owned tvar, which it must clone rather than move out).
+  defp clone_closure_tail(arm) do
+    case String.split(arm, "|", parts: 3) do
+      ["", params, body] -> "|#{params}| (#{String.trim(body)}).clone()"
+      _ -> arm
+    end
+  end
 
   # paren-aware top-level comma split of a parameter string
   defp pcommas(s), do: Rian.TypeStr.split_top_commas(s)
@@ -1644,9 +1680,19 @@ defmodule Rian.Lower do
     pinst = pair_inst(func, base_ec)
     gen_func = Map.put(func, :tvars, fn_all_tvars(func, pinst, base_ec))
 
+    # a closure-RETURNING function (`… Fn(args, ret) := (x) -> …`) boxes a `move`-capturing
+    # closure that must OWN any type-variable param it captures (a `&T` borrow can't satisfy
+    # the boxed `dyn Fn`'s `'static`) — so a tvar param lowers owned (`x: T`, not `&T`) here.
+    closure_ret? = match?("Fn(" <> _, to_string(func.ret))
+
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
-        "#{p.name}: #{rustify_parametric(cap_param(p), pinst)}"
+        ptype =
+          if closure_ret? and p.type in gen_func.tvars,
+            do: prim_rust(p.type),
+            else: cap_param(p)
+
+        "#{p.name}: #{rustify_parametric(ptype, pinst)}"
       end)
 
     # One param matches the value directly; N>1 match the tuple of arguments
@@ -1785,10 +1831,17 @@ defmodule Rian.Lower do
         # return type lowered to `Box<dyn Fn…>` (see `Capability.owned`), so the returned
         # closure is boxed and `move`-captures (it outlives the function frame). Applies
         # when the arm is a bare closure (`|…| …`); a more complex tail stays off `:rs`.
+        # When the closure RETURNS a type variable (`Fn(Int53, T)`), its body returns the
+        # captured owned `T`; a `Fn` (reusable) closure can't move it out, so clone per call.
         arm =
-          if match?("Fn(" <> _, func.ret) and String.starts_with?(arm, "|"),
-            do: "Box::new(move #{arm})",
-            else: arm
+          if match?("Fn(" <> _, func.ret) and String.starts_with?(arm, "|") do
+            body =
+              if fn_returns_tvar?(func.ret, func.tvars), do: clone_closure_tail(arm), else: arm
+
+            "Box::new(move #{body})"
+          else
+            arm
+          end
 
         # binders bound inside a list/slice element are `&T` — a guard over them
         # must deref (`*c`); the arm body's arithmetic works on `&T` directly

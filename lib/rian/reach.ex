@@ -803,26 +803,23 @@ defmodule Rian.Reach do
   defp result_value_blocker,
     do: %{construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: :result, kills: [:jvm]}
 
-  # Closure-as-value lowering landed (ADR-0061, 2026-06-17): a `Fn(...)` callback
-  # PARAMETER lowers to `&impl Fn(...)` and a CONCRETE returned closure to a
-  # `Box<dyn Fn(...)>` (`Box::new(move …)`), both rustc-verified. What still has no
-  # Rust lowering — and so still pins `:rs` — is a returned closure that mentions a
-  # TYPE VARIABLE (`mk(x T) Fn(Int53, T)`) or is NESTED in another type
-  # (`Option(Fn(Int53, T))`): the boxed `dyn Fn` there needs owned capture of a
-  # borrowed param plus a `T: 'static` bound, not yet emitted. Param-`Fn` and concrete
-  # top-level `Fn(...)` returns are NOT blocked.
+  # Closure-as-value lowering (ADR-0061): a `Fn(...)` callback PARAMETER lowers to
+  # `&impl Fn(...)` and a TOP-LEVEL returned closure to a `Box<dyn Fn(...)>`
+  # (`Box::new(move …)`), both rustc-verified. A top-level `Fn(...)` return over a TYPE
+  # VARIABLE (`mk(x T) Fn(Int53, T)`) is now supported too: `Rian.Lower` owns the captured
+  # tvar param, adds a `T: Clone + 'static` bound, and clones the captured value per call.
+  # What still has no Rust lowering — and so pins `:rs` — is a `Fn` NESTED in another type
+  # (`Option(Fn(Int53, T))`), which needs an owned-capture closure inside a constructor.
   defp sig_uses_fn_type?(f) do
     ret = Map.get(f, :ret)
 
-    is_binary(ret) and String.contains?(ret, "Fn(") and
-      not concrete_fn_return?(ret, Map.get(f, :tvars, []))
+    is_binary(ret) and String.contains?(ret, "Fn(") and not top_level_fn_return?(ret)
   end
 
-  # a bare top-level `Fn(args, ret)` return with no type variable — lowered to a concrete
-  # `Box<dyn Fn(...)>` + `Box::new(move …)` (e.g. `adder`); supported on `:rs`.
-  defp concrete_fn_return?(ret, tvars) do
-    String.starts_with?(ret, "Fn(") and not Enum.any?(tvars, &String.match?(ret, ~r/\b#{&1}\b/))
-  end
+  # a top-level `Fn(args, ret)` return — concrete (`adder`) OR over a type variable — is
+  # lowered to a boxed `dyn Fn` (the tvar case adds owned capture + `'static` + per-call
+  # clone). Only a `Fn` nested in another type is still unsupported.
+  defp top_level_fn_return?(ret), do: String.starts_with?(ret, "Fn(")
 
   # Does a type string contain a type-variable token? `tvar?` is the compiler-wide
   # convention (`Rian.Check`): a single capital optionally followed by a digit.

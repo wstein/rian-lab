@@ -152,10 +152,12 @@ architectural cost.
   `rustc --test`). `Option(T)`/`T | E`/user-sum-over-`T` generic returns also reach `:rs` (the payload is
   cloned at construction). **`Fn(...)` closures now reach `:rs`** (ADR-0061): a callback **parameter**
   lowers to `&impl Fn(...)` (by-reference, so a recursive HOF calls + re-passes it; closure-call args
-  `.clone()` into owned), and a **concrete** returned closure to `Box<dyn Fn(...)>` + `Box::new(move …)`
-  — so `map`/`filter`/`reduce` and `adder() Fn(Int53,Int53)` are `:rs`-portable (rustc-verified). The
-  one narrow residual still pinned off `:rs` is a returned closure mentioning a **tvar** (`mk(x T)
-  Fn(Int53,T)`) or **nested** (`Option(Fn(…,T))`) — it needs owned capture + a `T: 'static` bound.
+  `.clone()` into owned), and a returned closure to `Box<dyn Fn(...)>` + `Box::new(move …)` — concrete
+  (`adder() Fn(Int53,Int53)`) **and over a type variable** (`mk(x T) Fn(Int53,T)`: the captured tvar
+  param lowers owned, gains a `T: Clone + 'static` bound, and the closure clones it per call) — so
+  `map`/`filter`/`reduce` and both `adder`/`mk` are `:rs`-portable (rustc-verified). The one residual
+  still pinned off `:rs` is a `Fn` **nested** in another type (`Option(Fn(…,T))`), which needs an
+  owned-capture closure inside a constructor.
 - **Self-hosting** (`SELFHOST.md`, `compiler/*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.

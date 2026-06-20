@@ -837,6 +837,51 @@ end|
     end
   end
 
+  describe "a returned closure over a type variable lowers to a boxed `dyn Fn` (ADR-0061)" do
+    @clo_src """
+    def adder(x T) Fn(T, T) forall T := (n) -> x
+    def mk(x T) Fn(Int53, T) forall T := (n) -> x
+    """
+
+    test "owns the captured tvar, bounds it `Clone + 'static`, and clones the body per call" do
+      rust = Rian.Lower.rust_program(Rian.Decl.parse(@clo_src))
+      # owned param `x: T` (not `&T`), `'static` bound, `Box<dyn Fn>`, and a per-call clone
+      assert rust =~ "fn adder<T: Clone + 'static>(x: T) -> Box<dyn Fn(T) -> T>"
+      assert rust =~ "fn mk<T: Clone + 'static>(x: T) -> Box<dyn Fn(i64) -> T>"
+      assert rust =~ "Box::new(move |n| (x).clone())"
+    end
+
+    @tag :rust
+    test "the emitted Rust compiles and runs under rustc (a reusable `Fn`)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust = Rian.Lower.rust_program(Rian.Decl.parse(@clo_src))
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_clo_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <>
+              "\nfn main() { let f = adder(7i64); let g = mk(String::from(\"hi\")); " <>
+              "println!(\"{} {} {}\", f(0), f(0), g(99)); }"
+          )
+
+          {_, 0} =
+            System.cmd(rustc, ["--edition", "2021", path, "-o", bin], stderr_to_stdout: true)
+
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          # `f` is called twice — the closure clones its captured `T`, so it is a reusable `Fn`
+          assert String.trim(out) == "7 7 hi"
+      end
+    end
+  end
+
   describe "Result-of-String coerces the Ok payload to owned String (ADR-0040/0061)" do
     @res_src ~S"""
     mod R do
