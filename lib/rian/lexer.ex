@@ -46,6 +46,9 @@ defmodule Rian.Lexer do
   # operator (the Erlang/Elixir-AST operator tables the transpiler emits). The bare
   # bind `:=` (run is exactly `=`) and the bitstring `::` are NOT atoms.
   @atom_op_chars ~w(+ - * / < > = !)
+  # operator-WORD atoms (`:and`/`:or`/`:not`/…) — `op_word_name/1`'s set; like the symbolic
+  # ops they must glue to their `:` on detokenize, else `: not` re-lexes as a `not` keyword.
+  @atom_op_words ~w(and or not in rem div)
 
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/
   # Identifiers may carry a single trailing `?` or `!` — the Elixir/Ruby/Crystal
@@ -137,8 +140,23 @@ defmodule Rian.Lexer do
   @rian_sig "pub def detokenize(tokens Vec(Token), nl_as String) String"
   @spec detokenize([token()], String.t()) :: String.t()
   def detokenize(tokens, nl_as \\ " ") do
-    tokens |> Enum.map_join(" ", &tok_str(&1, nl_as))
+    # space-join, EXCEPT an operator-name atom (`:-`, `:<>`, …) — emitted by the lexer as
+    # `{:op, ":"}` then `{:id, name}` — must glue (`:-`, no space), or the re-lex of a
+    # detokenized range (a body/pattern re-parse) reads `: -` as a colon + a `-` operator and
+    # the atom is lost. A plain `:foo` keeps its space (the parser tolerates `: foo`).
+    tokens
+    |> Enum.chunk_every(2, 1, [nil])
+    |> Enum.map_join(fn
+      [tok, next] -> tok_str(tok, nl_as) <> if glue_after?(tok, next), do: "", else: " "
+      [tok] -> tok_str(tok, nl_as)
+    end)
+    |> String.trim_trailing()
   end
+
+  defp glue_after?({:op, ":"}, {:id, name}),
+    do: String.first(name) in @atom_op_chars or name in @atom_op_words
+
+  defp glue_after?(_, _), do: false
 
   defp tok_str({:nl}, nl_as), do: nl_as
   defp tok_str({:id, x}, _), do: x
