@@ -944,13 +944,20 @@ defmodule Rian.CheckTest do
       assert %Core.EUnary{type: "Int53", arg: %Core.ENum{type: "Int53"}} = typed
     end
 
-    test "a tuple annotates each element; the tuple itself is :unknown" do
+    test "a tuple annotates each element and infers the structural tuple type" do
       typed = Check.annotate(Pratt.parse("{1, 2}"))
 
       assert %Core.ETuple{
-               type: :unknown,
+               type: "(Int53,Int53)",
                elems: [%Core.ENum{type: "Int53"}, %Core.ENum{type: "Int53"}]
              } = typed
+    end
+
+    test "an atom-tagged tuple (Result/sum sugar) stays :unknown, not a structural type" do
+      # `{:ok, 1}` is a `Result` value, not a raw `(Symbol,Int53)` tuple — claiming the
+      # structural type would clash with a declared `Result(T,E)` return.
+      typed = Check.annotate(Pratt.parse("{:ok, 1}"))
+      assert %Core.ETuple{type: :unknown} = typed
     end
 
     test "a cons-tail list annotates head and tail and is typed Vec(T)" do

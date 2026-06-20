@@ -427,6 +427,22 @@ defmodule Rian.Check do
     end
   end
 
+  # a tuple literal `{a, b, …}` infers the structural tuple type `(Ta,Tb,…)` — not a
+  # guess but the shape itself. An element the checker can't pin becomes a `_Unk` hole
+  # (compatible with everything, deferred like a draft marker), so the tuple still yields
+  # a concrete return type instead of collapsing the whole thing to `:unknown`. Stored
+  # comma-collapsed (`(Int53,String)`), matching how `Decl` canonicalizes declared types.
+  #
+  # **Exception — atom-tagged tuples stay `:unknown`.** A tuple whose head is an atom
+  # literal (`{:ok, v}`, `{:error, e}`, an AST sum variant `{:typed_bind, n, e}`) is a
+  # *tagged value* — `Result`/`Option`/a sum — not a raw structural tuple. Claiming a
+  # `(Symbol,…)` type for it would clash with a declared `Result(T,E)` return (the surface
+  # sugar for exactly these tuples), so the tagged case defers as before.
+  def infer(%ETuple{elems: [%EAtom{} | _]}, _env, _ic), do: :unknown
+
+  def infer(%ETuple{elems: es}, env, ic),
+    do: "(" <> Enum.map_join(es, ",", &(infer(&1, env, ic) |> conservative_unk())) <> ")"
+
   def infer(%EBlock{stmts: stmts}, env, ic), do: infer_block(stmts, env, ic, :unknown)
   # a `with` yields its do-block value on the happy path (clause-bound vars are
   # not tracked yet -> they infer `:unknown`, keeping the checker conservative)
@@ -733,6 +749,12 @@ defmodule Rian.Check do
   # fully yet) rather than rejecting; only the body-vs-return check rejects
   defp conservative(:mismatch), do: :unknown
   defp conservative(t), do: t
+
+  # a tuple/structural element type that the checker couldn't pin becomes a `_Unk`
+  # hole (compatible with everything, deferred), so the enclosing tuple type stays
+  # concrete rather than collapsing to `:unknown`.
+  defp conservative_unk(t) when is_binary(t), do: t
+  defp conservative_unk(_), do: "_Unk"
 
   # ordinal arithmetic widens to the base (ADR-0036): `Char ± _` is `Int64`, not
   # `Char` (`'9' - '0' = 9 ∉ Char`). A `Char` operand contributes its codepoint
@@ -1503,6 +1525,15 @@ defmodule Rian.Check do
       bare_head_of?(from, to) ->
         true
 
+      # a structural tuple type (`(A,B)`, from the literal `{a, b}`) declared against an
+      # *opaque nominal* return — a user type the checker can't resolve to a concrete
+      # shape (an undeclared / alias type like `Pair`, `Tup`) — is not a provable
+      # mismatch, so it is assignable (CLAUDE.md conservative bar; matches the prior
+      # behaviour when a tuple inferred `:unknown`). A *scalar primitive* `to` (`Int64`,
+      # `String`, …) or another structural type IS refutable and falls through below.
+      tuple_type?(from) and opaque_nominal?(to) ->
+        true
+
       true ->
         case {num_kind(from), num_kind(to)} do
           {nil, _} -> unify(from, to) != :mismatch
@@ -1519,6 +1550,23 @@ defmodule Rian.Check do
     do: not String.contains?(from, "(") and String.starts_with?(to, from <> "(")
 
   defp bare_head_of?(_from, _to), do: false
+
+  # a structural tuple type string (`(A,B)` — leading paren, the form `infer/3` emits
+  # for a non-tagged tuple literal).
+  defp tuple_type?(t), do: is_binary(t) and String.starts_with?(t, "(")
+
+  # an opaque nominal type: a bare capitalized name (no params/structure) that is not a
+  # scalar primitive — i.e. a user type the checker can't resolve here (an undeclared or
+  # alias type). Used to keep a structural tuple assignable to such a return (conservative).
+  defp opaque_nominal?(t) when is_binary(t),
+    do: Regex.match?(~r/^[A-Z][A-Za-z0-9_]*$/, t) and not scalar_prim?(t)
+
+  defp opaque_nominal?(_), do: false
+
+  defp scalar_prim?(t),
+    do:
+      t in ~w(Bool String Char Symbol) or Regex.match?(~r/^U?Int\d*$/, t) or
+        Regex.match?(~r/^Float\d*$/, t)
 
   # the member type strings of a canonical `Union(...)` (ADR-0083).
   defp union_members_of("Union(" <> rest),

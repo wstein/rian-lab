@@ -467,10 +467,13 @@ defmodule Rian.JVMTest do
 
     test "a not-yet-implemented construct fails early with a clear message (naming the fn)" do
       # the emitter-capability pre-check: tuples aren't on the Tier-2 JVM subset
-      # yet, so a tuple raises ONE clear error up front (naming `f`).
+      # yet, so a tuple raises ONE clear error up front (naming `f`). The return is an
+      # opaque nominal type (`Pair`) so the tuple body type-checks and the failure is
+      # the JVM emitter's, not the return-type gate (a structural tuple vs `Int64` is now
+      # a Check error — ADR-0050 tuple inference).
       err =
         assert_raise JVM.Unsupported, fn ->
-          JVM.compile("def f() Int64 := {1, 2}")
+          JVM.compile("def f() Pair := {1, 2}")
         end
 
       assert Exception.message(err) =~ "`f`: a tuple is not yet supported on :jvm"
