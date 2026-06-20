@@ -91,7 +91,16 @@ defmodule Rian.PatternLower do
 
   def lower(%Core.PStruct{name: name, fields: field_pats}, env) do
     s = to_snake(name)
-    order = Map.fetch!(Map.get(env, :structs, %{}), s)
+
+    # The struct's field order is needed to lower a labelled pattern positionally.
+    # A struct not in `env.structs` is one whose type is not in scope (e.g. imported
+    # from another module not assembled into this program) — raise a clear error
+    # naming it rather than the cryptic `KeyError` a bare `Map.fetch!` would throw.
+    order =
+      case Map.get(env, :structs, %{}) do
+        %{^s => order} -> order
+        _ -> raise "struct pattern over `#{name}`: its type is not in scope"
+      end
 
     in_order =
       Enum.map(order, fn f ->

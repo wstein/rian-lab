@@ -122,4 +122,22 @@ defmodule Rian.PatternLowerTest do
       assert E.analyze(clauses, 1, env_opt()).exhaustive?
     end
   end
+
+  describe "struct pattern over a type not in scope" do
+    test "raises a clear, named error instead of a cryptic KeyError" do
+      # a labelled struct pattern whose type was never registered (e.g. imported
+      # from a module not assembled into this program) used to crash with a
+      # `KeyError` from `Map.fetch!`; it now names the offending struct.
+      pat = %Rian.Core.PStruct{name: "Ghost", fields: [{:x, %Rian.Core.PWild{}}]}
+
+      assert_raise RuntimeError, ~r/struct pattern over `Ghost`: its type is not in scope/, fn ->
+        L.lower(pat, E.base_env())
+      end
+    end
+
+    test "still lowers when the struct IS in scope" do
+      pat = %Rian.Core.PStruct{name: "Point", fields: [{:x, %Rian.Core.PWild{}}]}
+      assert {{:ctor, :point, [:wild, :wild]}, false} = L.lower(pat, env_point())
+    end
+  end
 end
