@@ -1765,6 +1765,14 @@ defmodule Rian.Transpile do
   # (not the trailing `__STACKTRACE__`, which `raise_msg/1`'s 2-arg arm would otherwise pick).
   defp expr({:reraise, _, [exc | _]}), do: "panic(#{raise_msg([exc])})"
 
+  # `if x = e do … end` (Elixir's assign-in-condition, nil/false-falsy) has no faithful Rian
+  # image: a `:=` bind is a statement, not an expression, and Rian's `if` needs a `Bool`
+  # condition — so it must be restructured to a `case`/Option by hand. Emit an honest marker
+  # (like the truthy `&&`/`||` above) rather than spill an invalid `if x := e do`.
+  defp expr({:if, _, [{:=, _, [pat, _e]}, _kw]} = n) do
+    ~s|TODO_PORT("if-assign condition (truthy bind of `#{pat(pat)}`) — restructure to case/Option: #{escape(snippet(n))}")|
+  end
+
   defp expr({:if, _, [c, kw]}) do
     t = render_body(Keyword.get(kw, :do))
     e = if Keyword.has_key?(kw, :else), do: render_body(Keyword.get(kw, :else)), else: nil
@@ -1797,10 +1805,10 @@ defmodule Rian.Transpile do
         render_body(body)
 
       {:->, _, [[guard], body]}, nil ->
-        "if #{expr(guard)} do #{render_body(body)} end"
+        "if #{cond_guard(guard)} do #{render_body(body)} end"
 
       {:->, _, [[guard], body]}, acc ->
-        "if #{expr(guard)} do #{render_body(body)} else #{acc} end"
+        "if #{cond_guard(guard)} do #{render_body(body)} else #{acc} end"
     end)
   end
 
@@ -1973,6 +1981,15 @@ defmodule Rian.Transpile do
     do: "#{expr(f)}(#{Enum.map_join(args, ", ", &expr/1)})"
 
   defp expr(other), do: ~s|TODO_PORT(#{inspect(snippet(other))})|
+
+  # a `cond` clause whose guard is an assign (`x = e ->`, Elixir's nil/false-falsy truthy
+  # bind) has no faithful Rian image — a `:=` is a statement, not a `Bool` condition. Emit an
+  # honest marker for that guard (restructure to `case`/Option by hand), as for `if x = e do`.
+  defp cond_guard({:=, _, [pat, _e]} = g),
+    do:
+      ~s|TODO_PORT("truthy-bind cond guard `#{pat(pat)}` — restructure to case/Option: #{escape(snippet(g))}")|
+
+  defp cond_guard(g), do: expr(g)
 
   # the panic message for an Elixir `raise`: `raise Mod, msg` / `raise msg` use the
   # message expression; a bare `raise Mod` uses the error name; a no-arg raise the

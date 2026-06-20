@@ -363,6 +363,10 @@ defmodule Rian.Lexer do
   # quote must be escaped; control codepoints fall back to `\u{HEX}`.
   defp str_cp_source(?\\), do: "\\\\"
   defp str_cp_source(?"), do: "\\\""
+  # `$` re-escapes to `\$` so a literal `${…}` in a string survives the detokenize→re-lex
+  # round-trip (a body re-parse) instead of being re-read as an interpolation hole. Escaping
+  # every `$` is safe — `\$` lexes back to a literal `$` whether or not a `{` follows.
+  defp str_cp_source(?$), do: "\\$"
   defp str_cp_source(?\n), do: "\\n"
   defp str_cp_source(?\t), do: "\\t"
   defp str_cp_source(?\r), do: "\\r"
