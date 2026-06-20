@@ -1120,6 +1120,53 @@ end|
     end
   end
 
+  describe "a user type with an `Fn(...)` field lowers to a `Rc<dyn Fn>` field (ADR-0061)" do
+    @cellsrc """
+    type Cell := C(f Fn(Int53, T))
+    def mk(x T) Cell forall T := C((n) -> x)
+    def run(c Cell, n Int53) T forall T := case c do
+      C(g) -> g(n)
+    end
+    """
+
+    test "the field is `Rc<dyn Fn>`, the enum derives only `Clone`, construction is `Rc::new`" do
+      rust = Rian.Lower.rust_program(Rian.Decl.parse(@cellsrc))
+      # a closure field is shared (`Rc`), so the enum can `#[derive(Clone)]` (a `Box` can't);
+      # Debug/PartialEq are dropped (a closure has no portable show/eq)
+      assert rust =~ "#[derive(Clone)]\nenum Cell<T: Clone + 'static>"
+      assert rust =~ "f: std::rc::Rc<dyn Fn(i64) -> T>"
+      assert rust =~ "std::rc::Rc::new(move |n| (x).clone())"
+      # a consumer of `Cell<T>` also needs `T: 'static`
+      assert rust =~ "fn run<T: Clone + 'static>(c: &Cell<T>"
+    end
+
+    @tag :rust
+    test "construct + clone (shared) + call the stored closure compile and run under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust = Rian.Lower.rust_program(Rian.Decl.parse(@cellsrc))
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_cell_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+          # `c.clone()` shares the `Rc` closure; both calls return the captured `7`
+          File.write!(
+            path,
+            rust <>
+              "\nfn main() { let c = mk(7i64); println!(\"{} {}\", run(&c, 0), run(&c.clone(), 0)); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", path, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "7 7"
+      end
+    end
+  end
+
   describe "the `Dict`/`Map(K,V)` prelude lowers to Rust `HashMap` (ADR-0047)" do
     @dict_src """
     def empty() Map(K, V) forall K, V := Prim.map_new()

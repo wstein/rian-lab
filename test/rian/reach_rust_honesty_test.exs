@@ -307,13 +307,25 @@ defmodule Rian.ReachRustHonestyTest do
       assert :rs in targets(rep, "wrap")
     end
 
-    test "F2: a `Dict`/`Fn` tvar field is STILL pinned off :rs (separate lowering gaps)" do
+    test "F2: a `Dict` tvar field is STILL pinned off :rs (separate lowering gap)" do
       dict = analyze("type Map := M(d Dict(K, V))\ndef mk(d Dict(K, V)) Map forall K, V := M(d)")
       refute :rs in targets(dict, "mk")
       assert :generic in blocker_kinds(dict, "mk")
+    end
 
-      fnf = analyze("type Cell := C(f Fn(Int53, T))\ndef mk(x T) Cell forall T := C((n) -> x)")
-      refute :rs in targets(fnf, "mk")
+    test "F2: an `Fn` field NOW reaches :rs for data-flow; a comparison of it is pinned" do
+      cell = "type Cell := C(f Fn(Int53, T))\ndef mk(x T) Cell forall T := C((n) -> x)"
+      # construct/store/call lower (`Rc<dyn Fn>` field + `#[derive(Clone)]`, ADR-0061)
+      assert :rs in targets(analyze(cell), "mk")
+
+      call =
+        analyze(cell <> "\ndef run(c Cell, n Int53) T forall T := case c do\n  C(g) -> g(n)\nend")
+
+      assert :rs in targets(call, "run")
+
+      # but `==` on a closure-holding type has no portable equality → pinned
+      cmp = analyze(cell <> "\ndef same(a Cell, b Cell) Bool forall T := a == b")
+      refute :rs in targets(cmp, "same")
     end
 
     test "F2: a parametric type nesting another parametric type NOW reaches :rs (direct + chain)" do

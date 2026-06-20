@@ -175,12 +175,17 @@ Consequences of target-relativity:
        field tvar (`type_param_tvars`), not just bare-tvar fields. A field that is **(exactly) another
        parametric type's name** also lowers — `Wrap(p Pair)` → `enum Wrap<K,V> { W { p: Pair<K,V> } }` —
        its generics propagated by a fixpoint over the type graph (so a chain `Outer→Middle→Pair` resolves
-       too). A `Dict`/`Fn`/tuple tvar field still pins off `:rs` (separate lowering gaps — `Dict` has no
-       `HashMap` mapping, an `Fn` field's constructed closure isn't boxed), as does a **recursion cycle**
-       (self- or mutual — an infinitely-sized Rust type that would need `Box`) or a parametric type nested
-       in a **compound** (`Vec(Pair)` — no args surfaced): `Rian.Reach` gates these with a monotone
-       emittability fixpoint (`emittable_map` — a leaf resolves first, a cycle never bootstraps) over a
-       parametric-type set widened to include *referencing* types (`Bag(ps Vec(Pair))` is itself gated).
+       too). An **`Fn(...)` field** also reaches `:rs` (2026-06): it lowers to a *shared* `Rc<dyn Fn>`
+       field, so the enum can `#[derive(Clone)]` (a `Box<dyn Fn>` can't — closures aren't `Clone`), with
+       `Rc::new(move …)` construction, the captured tvar param owned + `T: 'static` (a consumer's
+       `&Cell<T>` too). Debug/PartialEq are dropped (a closure has no portable show/eq), so `Rian.Reach`
+       pins a function that `==`/`!=`s such a value (`compares_fn_field?`) — construction/storage/call
+       reach `:rs`. A **recursion cycle** (self- or mutual — an infinitely-sized Rust type that would need
+       `Box`) or a parametric type nested in a **compound** (`Vec(Pair)` — no args surfaced) still pins:
+       `Rian.Reach` gates these with a monotone emittability fixpoint (`emittable_map` — a leaf resolves
+       first, a cycle never bootstraps) over a parametric-type set widened to include *referencing* types
+       (`Bag(ps Vec(Pair))` is itself gated). (A `Map`/tuple type as a parametric FIELD is conservatively
+       pinned too, though it would lower — an honest under-claim.)
        A **generic** builder's construction
        into a *bare-tvar* field must still match positionally (`P(key, value)` with `key K`, `value V` —
        not `P(a, b)` with `a A`, `b B`), but construction into a *lowerable compound* field accepts any
@@ -216,7 +221,7 @@ Consequences of target-relativity:
   way. So **no `Fn`-bearing signature is pinned off `:rs`** any more (callback param, top-level return,
   nested return, HOF — all reach `:rs`); rustc-verified (`lower_test`, `reach_rust_honesty_test`). The
   remaining `:rs` gap is the **parametric** shapes still outside the (now-widened) monomorphic subset —
-  `Dict`/`Fn`/tuple tvar fields, recursion cycles and compound-nested parametric fields, and the
+  recursion cycles and compound-nested parametric fields, comparison of an `Fn`-field type, and the
   non-positional/non-tail-call builder shapes. (A
   Copy-primitive *protocol-impl receiver* used as a value — `Show for Bool`'s `if b` — now derefs
   correctly and reaches `:rs`.)

@@ -887,6 +887,16 @@ defmodule Rian.Reach do
           do: {v.ctor, Enum.map(v.fields, &Map.get(&1, :type))}
         ),
       generics: MapSet.new(for f <- funs, Map.get(f, :tvars, []) != [], do: f.name),
+      # user types with an `Fn(...)` field: their Rust `Rc<dyn Fn>` field is not `PartialEq`/
+      # `Debug`, so a function that `==`/`!=`s such a value can't lower (pinned off `:rs`).
+      fn_field_names:
+        MapSet.new(
+          for t <- types,
+              Enum.any?(t.variants, fn v ->
+                Enum.any?(v.fields, &String.contains?(to_string(Map.get(&1, :type)), "Fn("))
+              end),
+              do: t.name
+        ),
       # associated-type names (ADR-0074): a dispatcher returning one can't be given a
       # concrete Kotlin return type, so it stays off `:jvm` (`Rian.JVM` drops it).
       assoc:
@@ -971,6 +981,12 @@ defmodule Rian.Reach do
       tvar?(type) ->
         true
 
+      # an `Fn(...)` field lowers to a shared `Rc<dyn Fn>` field (ADR-0061): the type is
+      # `Clone` (not `Debug`/`PartialEq`), so construction/storage/call reach `:rs`; a
+      # function that `==`/interpolates such a value is pinned separately (`compares_fn_field?`).
+      String.starts_with?(type, "Fn(") ->
+        true
+
       true ->
         case compound_args(type) do
           nil -> false
@@ -1006,6 +1022,12 @@ defmodule Rian.Reach do
   # shape outside the verified subset pins off `:rs` so the matrix never oversells.
   defp parametric_rs_ok?(f, pctx) do
     cond do
+      # a type with an `Fn(...)` field lowers to an `Rc<dyn Fn>` field — `Clone` but NOT
+      # `PartialEq` (a closure has no portable equality), so a function that `==`/`!=`s such
+      # a value can't lower to Rust; pin it (the data-flow shapes still reach `:rs`).
+      compares_fn_field?(f, pctx) ->
+        false
+
       not uses_parametric?(f, pctx.names) ->
         true
 
@@ -1025,6 +1047,26 @@ defmodule Rian.Reach do
         parametric_constructions(f, pctx.ctors) == [] and builder_tail_ok?(f, pctx.generics)
     end
   end
+
+  # a function whose signature mentions a type with an `Fn(...)` field AND whose body does an
+  # equality (`==`/`!=`) — conservatively pinned off `:rs` (the `Rc<dyn Fn>` field is not
+  # `PartialEq`). Construction/storage/call of such a type are unaffected and reach `:rs`.
+  defp compares_fn_field?(f, pctx) do
+    uses_parametric?(f, pctx.fn_field_names) and body_has_eq?(f)
+  end
+
+  defp body_has_eq?(f) do
+    Enum.any?(Map.get(f, :clauses, []), fn c -> has_eq?(core(c.body, &Pratt.parse_body/1)) end)
+  end
+
+  defp has_eq?(%Core.EBin{op: op}) when op in ["==", "!="], do: true
+
+  defp has_eq?(node) when is_struct(node),
+    do: node |> Map.from_struct() |> Map.values() |> Enum.any?(&has_eq?/1)
+
+  defp has_eq?(list) when is_list(list), do: Enum.any?(list, &has_eq?/1)
+  defp has_eq?(tuple) when is_tuple(tuple), do: tuple |> Tuple.to_list() |> Enum.any?(&has_eq?/1)
+  defp has_eq?(_), do: false
 
   defp all_emittable?(f, pctx) do
     f

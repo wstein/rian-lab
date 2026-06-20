@@ -163,11 +163,15 @@ architectural cost.
   → `enum Stack<T> { S { items: Vec<T> } }`; the enum's generics are collected from every field tvar, and
   construction into a compound field clones the payload: `S([x|items])`, `B(Some(x))` — rustc-verified),
   OR a field that is (exactly) another parametric type's name (`Wrap(p Pair)` → `enum Wrap<K,V> { W { p:
-  Pair<K,V> } }`; generics propagated by a fixpoint over the type graph, chains too). Reach gates this with
-  a monotone `emittable_map` fixpoint over a parametric-set widened to include *referencing* types, so a
-  **recursion cycle** (needs `Box`) or a compound-nested parametric (`Vec(Pair)` — no args) never
-  bootstraps and stays pinned. The remaining `:rs` gap is a `Dict`/`Fn`/tuple tvar field, a recursion
-  cycle / compound-nested parametric field, and the non-positional/non-tail-call builder shapes.
+  Pair<K,V> } }`; generics propagated by a fixpoint over the type graph, chains too), OR an **`Fn(...)`
+  field** (→ a shared `Rc<dyn Fn>` field so the enum can `#[derive(Clone)]`; `Rc::new` construction, owned
+  captured param + `T: 'static`; Debug/PartialEq dropped — closures have no portable show/eq — so reach
+  pins a function that `==`s such a value). Reach gates the parametric subset with a monotone
+  `emittable_map` fixpoint over a parametric-set widened to include *referencing* types, so a **recursion
+  cycle** (needs `Box`) or a compound-nested parametric (`Vec(Pair)` — no args) never bootstraps and stays
+  pinned. The remaining `:rs` gap is a recursion cycle / compound-nested parametric field, comparison of an
+  `Fn`-field type, and the non-positional/non-tail-call builder shapes. Also: a `Map(K,V)` type → Rust
+  `std::collections::HashMap` (ADR-0047, the `Dict` prelude reaches `:rs`).
 - **Self-hosting** (`SELFHOST.md`, `compiler/*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.

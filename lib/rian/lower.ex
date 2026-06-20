@@ -385,6 +385,9 @@ defmodule Rian.Lower do
         # nested, e.g. `Option(Fn(…, T))`): a value-position closure then lowers to a
         # boxed `Box::new(move …)`, cloning its captured tvar body per call when `clone?`.
         fn_box: nil,
+        # user types carrying an `Fn(...)` field, name → that field's `Fn` type. Constructing
+        # one boxes the closure into the field via `Rc::new` (see the `ELambda` emit).
+        fn_field_types: %{},
         ex_scope: MapSet.new(),
         proto: %{},
         parametric: %{},
@@ -1367,7 +1370,12 @@ defmodule Rian.Lower do
     # the program-wide emitter context: the proto/parametric/sigs maps that the
     # per-function/per-clause ec extends. Threaded explicitly (no process dict).
     base_ec =
-      emit_ctx(%{proto: proto_method_traits(protocols), parametric: parametric, sigs: sigs})
+      emit_ctx(%{
+        proto: proto_method_traits(protocols),
+        parametric: parametric,
+        sigs: sigs,
+        fn_field_types: fn_field_type_map(types)
+      })
 
     c = ctx(build_meta(types), build_struct_meta(structs), MapSet.new(), sigs, ic)
 
@@ -1649,10 +1657,10 @@ defmodule Rian.Lower do
   defp rust_generics(%{tvars: []}), do: ""
 
   defp rust_generics(%{tvars: tvars, bounds: bounds} = gf) do
-    # a tvar mentioned in a `Fn(...)` return is captured by a boxed `dyn Fn` that outlives
-    # the frame, so it needs a `'static` bound (alongside `Clone` for the per-call copy).
-    ret = to_string(Map.get(gf, :ret, ""))
-    fn_ret? = String.contains?(ret, "Fn(")
+    # a tvar captured by a boxed/`Rc` `dyn Fn` that outlives the frame needs a `'static`
+    # bound (alongside `Clone`). `box_fn_type` is the relevant `Fn(...)` type — from a `Fn`
+    # return OR a constructed `Fn`-field (`mk(x T) Cell` returns `Cell<T>`, so `T: 'static`).
+    box = to_string(Map.get(gf, :box_fn_type, ""))
 
     # a tvar used as a `Map(K, V)` KEY lowers to a Rust `HashMap<K, V>` key, so it needs
     # `Eq + Hash` (the `HashMap::get`/`insert` bound) on top of `Clone` (ADR-0047).
@@ -1669,7 +1677,11 @@ defmodule Rian.Lower do
             b -> b
           end
 
-        static = if fn_ret? and String.match?(ret, ~r/\b#{tv}\b/), do: ["'static"], else: []
+        # `'static` for a tvar captured by a `dyn Fn`: in `box_fn_type` (a returned/constructed
+        # closure), OR anywhere the signature mentions a type with an `Fn(...)` field (its
+        # `Rc<dyn Fn>` field is `'static`, so a consumer's `&Cell<T>` needs `T: 'static`).
+        in_box? = box != "" and String.match?(box, ~r/\b#{tv}\b/)
+        static = if in_box? or Map.get(gf, :fn_field_sig?, false), do: ["'static"], else: []
         # fully-qualify `Hash` (bare `Hash` resolves to the derive macro, not the trait);
         # `Eq` is in the std prelude.
         key = if MapSet.member?(map_keys, tv), do: ["Eq", "std::hash::Hash"], else: []
@@ -1800,11 +1812,30 @@ defmodule Rian.Lower do
     pinst = pair_inst(func, base_ec)
     gen_func = Map.put(func, :tvars, fn_all_tvars(func, pinst, base_ec))
 
-    # a closure-RETURNING function (`… Fn(args, ret) := (x) -> …`, incl. a `Fn` NESTED in
-    # the return like `Option(Fn(…, T))`) boxes a `move`-capturing closure that must OWN any
-    # type-variable param it captures (a `&T` borrow can't satisfy the boxed `dyn Fn`'s
-    # `'static`) — so a tvar param lowers owned (`x: T`, not `&T`) here.
-    closure_ret? = String.contains?(to_string(func.ret), "Fn(")
+    # a function that produces a closure VALUE — a `Fn(...)` return (top-level or nested,
+    # `Option(Fn(…, T))`) OR a construction of a type with an `Fn(...)` FIELD (`Cell(f Fn(…,
+    # T))`) — must OWN any tvar param the closure captures (a `&T` borrow can't satisfy the
+    # `dyn Fn`'s `'static`), so a tvar param lowers owned. `box_fn_type` is the relevant `Fn`
+    # type (for the `'static`/clone decision); `fn_rc?` picks `Rc::new` (a shared FIELD
+    # closure, so the enum is `Clone`) over `Box::new` (a returned closure).
+    {box_fn_type, fn_rc?} =
+      cond do
+        String.contains?(to_string(func.ret), "Fn(") ->
+          {extract_fn_type(func.ret), false}
+
+        true ->
+          case Map.get(base_ec.fn_field_types, to_string(func.ret)) do
+            nil -> {nil, false}
+            ft -> {ft, true}
+          end
+      end
+
+    closure_ret? = box_fn_type != nil
+
+    gen_func =
+      gen_func
+      |> Map.put(:box_fn_type, box_fn_type)
+      |> Map.put(:fn_field_sig?, fn_field_in_sig?(func, base_ec.fn_field_types))
 
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
@@ -1830,8 +1861,11 @@ defmodule Rian.Lower do
     # value-position closures in a `Fn(...)`-returning function box (top-level OR nested in
     # the return type), cloning a captured tvar body per call (a reusable `Fn`, not FnOnce).
     fn_box =
-      if closure_ret?,
-        do: %{clone?: fn_returns_tvar?(extract_fn_type(func.ret), Map.get(func, :tvars, []))},
+      if box_fn_type,
+        do: %{
+          clone?: fn_returns_tvar?(box_fn_type, Map.get(func, :tvars, [])),
+          rc?: fn_rc?
+        },
         else: nil
 
     fn_ec = %{base_ec | ok_string: ok?, err_string: err?, fn_box: fn_box}
@@ -2332,17 +2366,34 @@ defmodule Rian.Lower do
 
     join_doc(
       rs_doc(Map.get(t, :doc), "///"),
-      "#[derive(Clone, Debug, PartialEq)]\n#{vis}enum #{t.name}#{enum_generics(t.name, parametric)} {\n#{variants}\n}"
+      "#{enum_derive(t)}\n#{vis}enum #{t.name}#{enum_generics(t, parametric)} {\n#{variants}\n}"
     )
   end
 
-  # an enum field's Rust type. A field that is (exactly) a parametric user type's name
-  # instantiates with that type's params (`p Pair` → `Pair<K, V>`), so the nested generic
-  # is declared, not bare; every other field lowers via `prim_rust`.
+  # The derive list. A type holding a CLOSURE field (`Fn(...)`) can derive only `Clone`
+  # (its field is an `Rc<dyn Fn>`, which is `Clone` but not `Debug`/`PartialEq` — a closure
+  # has no portable `Debug`/`Eq`). `Rian.Reach` pins a function that `==`/interpolates such a
+  # type. Every other type derives the full set.
+  defp enum_derive(t),
+    do: if(has_fn_field?(t), do: "#[derive(Clone)]", else: "#[derive(Clone, Debug, PartialEq)]")
+
+  defp has_fn_field?(t),
+    do: Enum.any?(field_types(t), &String.contains?(to_string(&1), "Fn("))
+
+  # an enum field's Rust type. A `Fn(...)` field is a SHARED closure — `Rc<dyn Fn>` (a `Box`
+  # isn't `Clone`, so the enum couldn't derive `Clone`); `Rc::new` constructs it. A field
+  # that is (exactly) a parametric user type's name instantiates with that type's params
+  # (`p Pair` → `Pair<K, V>`); every other field lowers via `prim_rust`.
   defp rust_field_type(ft, parametric) do
-    case Map.get(parametric, ft) do
-      nil -> prim_rust(ft)
-      params -> "#{ft}<#{Enum.join(params, ", ")}>"
+    cond do
+      String.starts_with?(to_string(ft), "Fn(") ->
+        String.replace_prefix(prim_rust(ft), "Box<dyn ", "std::rc::Rc<dyn ")
+
+      Map.has_key?(parametric, ft) ->
+        "#{ft}<#{Enum.join(Map.fetch!(parametric, ft), ", ")}>"
+
+      true ->
+        prim_rust(ft)
     end
   end
 
@@ -2401,12 +2452,35 @@ defmodule Rian.Lower do
 
   # `<K, V>` for a parametric type (its variant fields are typed by type variables),
   # else `""`. The params are the distinct field tvars in order of appearance.
-  defp enum_generics(name, parametric) do
-    case Map.get(parametric, name) do
-      nil -> ""
-      [] -> ""
-      params -> "<#{Enum.map_join(params, ", ", &"#{&1}: Clone")}>"
+  defp enum_generics(t, parametric) do
+    case Map.get(parametric, t.name) do
+      nil ->
+        ""
+
+      [] ->
+        ""
+
+      params ->
+        # a tvar appearing in a `Fn(...)` field is captured by the field's `Rc<dyn Fn>`,
+        # which is `'static`, so the param needs the `'static` bound too (besides `Clone`).
+        static = fn_field_tvars(t)
+
+        inner =
+          Enum.map_join(params, ", ", fn p ->
+            if MapSet.member?(static, p), do: "#{p}: Clone + 'static", else: "#{p}: Clone"
+          end)
+
+        "<#{inner}>"
     end
+  end
+
+  # the tvars a type mentions inside a `Fn(...)` field (they need a `'static` bound).
+  defp fn_field_tvars(t) do
+    t
+    |> field_types()
+    |> Enum.filter(&String.contains?(to_string(&1), "Fn("))
+    |> Enum.flat_map(&type_tvars/1)
+    |> MapSet.new()
   end
 
   # parametric user types: name -> ordered list of its field type-variable params. A field
@@ -2449,6 +2523,29 @@ defmodule Rian.Lower do
   end
 
   defp type_tvars(_), do: []
+
+  # the declared type strings of a user type's variant fields.
+  defp field_types(t),
+    do: t.variants |> Enum.flat_map(& &1.fields) |> Enum.map(&Map.get(&1, :type))
+
+  # user types carrying a (direct) `Fn(...)` field, name → that field's `Fn` type string —
+  # a function constructing one stores the closure in an `Rc<dyn Fn>` field (`Rc::new`).
+  defp fn_field_type_map(types) do
+    for t <- types,
+        ft = Enum.find(field_types(t), &String.contains?(to_string(&1), "Fn(")),
+        ft != nil,
+        into: %{},
+        do: {t.name, ft}
+  end
+
+  # does a function's signature mention a type that carries an `Fn(...)` field? Such a type
+  # lowers to an `Rc<dyn Fn>` (`'static`) field, so every tvar of a function touching it needs
+  # a `'static` bound — a CONSUMER (`run(c Cell)`) as much as a constructor.
+  defp fn_field_in_sig?(func, fn_field_types) do
+    names = Map.keys(fn_field_types)
+    sig = Enum.map(Map.get(func, :params, []), & &1.type) ++ [Map.get(func, :ret)]
+    Enum.any?(sig, fn t -> is_binary(t) and Enum.any?(names, &word_member?(t, &1)) end)
+  end
 
   # surface pattern -> typed core IR -> Rust (ADR-0050: emitter consumes the core)
   defp core_pat_rs(surface, meta), do: pat_rs(Core.from_pat(surface), meta)
@@ -2806,17 +2903,18 @@ defmodule Rian.Lower do
     ps = Enum.map_join(params, ", ", fn {n, _} -> n end)
     body_str = p(body, 0, :rust, ec)
 
-    # a value-position closure (in a `Fn(...)`-returning function) lowers to an owned
-    # `Box<dyn Fn>`: `move`-capture so it outlives the frame, and `.clone()` a captured
-    # tvar body per call (a reusable `Fn` can't move its capture out). A callback-arg
-    # closure (no `fn_box`) stays a bare `|…| …` borrowed as `&impl Fn` at the call site.
+    # a value-position closure lowers to an owned `move`-capturing trait object: `Box<dyn Fn>`
+    # for a returned closure, `Rc<dyn Fn>` for a constructed FIELD closure (`rc?` — shared, so
+    # the enum is `Clone`). The captured tvar body is `.clone()`d per call (a reusable `Fn`
+    # can't move its capture out). A callback-arg closure (no `fn_box`) stays a bare `|…| …`.
     case ec[:fn_box] do
       nil ->
         {"|#{ps}| #{body_str}", 12}
 
-      %{clone?: clone?} ->
+      %{clone?: clone?} = fb ->
         inner = if clone?, do: "(#{body_str}).clone()", else: body_str
-        {"Box::new(move |#{ps}| #{inner})", 12}
+        ctor = if Map.get(fb, :rc?), do: "std::rc::Rc::new", else: "Box::new"
+        {"#{ctor}(move |#{ps}| #{inner})", 12}
     end
   end
 
