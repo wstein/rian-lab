@@ -39,6 +39,27 @@ exactly one downstream representation.
 `Rian.Decl` **reuses `Rian.Pratt`** for pattern and expression parsing; the duplicate `Decl.pattern` /
 `Pratt.parse_pat` split is eliminated. Patterns/expressions are parsed in **one** place.
 
+**Clause head = pattern position (2026-06-20).** A consequence of "one parser": a clause head is parsed
+in *pattern* position, by `Pratt.parse_pat`, exactly like a `case` arm — for **both** the multi-clause
+form (a bodiless signature line carries the types; the clause lines carry patterns) and the
+**single-clause inline** form (`def f(pat) := body`). The single-clause path previously shortcut every
+head parameter to `{:var, name}`, which raised "bad parameter" on a tuple/list/atom/literal pattern and
+silently lost a constructor pattern's bindings; it now dispatches each head parameter:
+
+- a **structural pattern** (`{…}`/`[…]`/`%…`/`:atom`/literal/`^pin`/`_`) and a **constructor pattern**
+  `Foo(args)` whose arguments include a binding go through `Pratt.parse_pat`, with the signature type left
+  to inference (`:infer`);
+- a **typed / var / capability** parameter (`x`, `x Int53`, `iso xs Vec(T)`) keeps its signature reading
+  and binds itself as a `{:var, name}` pattern.
+
+The one irreducible ambiguity is a constructor head whose arguments are *all types* (`Foo(Vec, Func)`):
+in clause position it could be a constructor pattern (matching nullary constructors) or a typed
+parameter. The decl parser **rejects** it (`Rian.Decl.Error`, "name a variable or move the type to a
+signature line") rather than silently guessing — the no-silent-miscompile bar (ADR-0035). This case has
+zero occurrences across `compiler/*.rian` (~1000 clause heads); the constructor-pattern reading has ~673.
+Surveyed prior art (Elixir, Haskell, Rust, Crystal) introduces no keyword for this — the positional rule
+plus the case convention (PascalCase = type/constructor, lowercase = binding, ADR-0033) suffices.
+
 ### 3. The core IR is typed
 
 After checking, core-IR nodes **carry the inferred type** (ADR-0034). This is **required**, not

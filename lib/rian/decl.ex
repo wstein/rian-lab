@@ -1605,15 +1605,58 @@ defmodule Rian.Decl do
   # (the real type comes from inference); anything `param/1` reads as a typed/var/cap
   # parameter binds itself as a `{:var, name}` pattern.
   defp head_param({pstr, i}) do
-    if structural_pattern?(pstr) do
-      [pat] = Pratt.parse_pats(pstr)
-      {%Param{name: "arg#{i}", type: :infer, cap: :val}, pat}
-    else
-      {name, cap, type} = param(pstr)
-      nm = if is_nil(name), do: "arg#{i}", else: name
-      {%Param{name: nm, type: type, cap: cap}, {:var, nm}}
+    t = String.trim(pstr)
+
+    cond do
+      structural_pattern?(t) ->
+        pattern_param(t, i)
+
+      # a constructor-call head `Foo(args)` in clause position (the decl tokenizer
+      # spaces tokens, so allow whitespace before `(`).
+      Regex.match?(~r/^[A-Z]\w*\s*\(.*\)$/s, t) ->
+        ctor_head_param(t, i)
+
+      true ->
+        {name, cap, type} = param(t)
+        nm = if is_nil(name), do: "arg#{i}", else: name
+        {%Param{name: nm, type: type, cap: cap}, {:var, nm}}
     end
   end
+
+  defp pattern_param(pstr, i) do
+    [pat] = Pratt.parse_pats(pstr)
+    {%Param{name: "arg#{i}", type: :infer, cap: :val}, pat}
+  end
+
+  # A `Foo(args)` clause-head parameter. With ≥1 binding argument it is unambiguously a
+  # constructor PATTERN (ADR-0050 §2 — clause heads are pattern position). With ONLY
+  # type arguments (`Vec(Func)`) it is ambiguous between a pattern and a typed parameter
+  # — reject rather than silently guess (the no-silent-miscompile bar, ADR-0035).
+  defp ctor_head_param(t, i) do
+    case Pratt.parse_pats(t) do
+      [{:ctor, name, args} = pat] ->
+        if Enum.any?(args, &binding_pat?/1) do
+          {%Param{name: "arg#{i}", type: :infer, cap: :val}, pat}
+        else
+          raise Error,
+                "ambiguous clause-head parameter `#{t}`: a `#{name}(Type…)` form with only " <>
+                  "type arguments is ambiguous between a constructor pattern and a typed " <>
+                  "parameter. Bind a variable (`#{name}(x)`) or move the type to a signature " <>
+                  "line (`def … (p #{t}) …` + clauses)."
+        end
+
+      [pat] ->
+        {%Param{name: "arg#{i}", type: :infer, cap: :val}, pat}
+    end
+  end
+
+  # A surface pattern that introduces a BINDING (so a `Foo(…)` head carrying it is a
+  # constructor pattern, not a typed parameter). A NULLARY constructor (`Func`, `None`)
+  # is type-like; a non-nullary one is a binding iff one of its sub-patterns is. Every
+  # other pattern (var, wildcard, literal, atom, tuple, list, pin) binds.
+  defp binding_pat?({:ctor, _, []}), do: false
+  defp binding_pat?({:ctor, _, inner}), do: Enum.any?(inner, &binding_pat?/1)
+  defp binding_pat?(_), do: true
 
   # A head parameter that is unambiguously a destructuring PATTERN, not a `name Type`
   # signature parameter: a tuple/list/map literal, an atom, a numeric/string/char

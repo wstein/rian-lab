@@ -619,6 +619,40 @@ defmodule Rian.DeclTest do
       # are unconstrained); the typed param keeps `Int64`.
       assert [%{type: "T"}, %{type: "Int64"}] = f.params
     end
+
+    test "a SINGLE-clause constructor-pattern head binds its arguments (corpus shapes)" do
+      # `def owned(TScalar(s)) := …` and `def func_form(Func(name, arity, clauses)) := …`
+      # are the dominant compiler/*.rian head shape — `Foo(args)` with binding args is a
+      # constructor PATTERN in clause position, not a typed parameter.
+      one = fn src ->
+        Decl.parse(src)
+        |> Map.get(:mods)
+        |> hd()
+        |> Map.get(:funcs)
+        |> hd()
+        |> Map.get(:clauses)
+        |> hd()
+        |> Map.get(:pats)
+      end
+
+      assert one.("mod M do\n  def owned(TScalar(s)) := s <> \"x\"\nend") ==
+               [{:ctor, "TScalar", [{:var, "s"}]}]
+
+      assert one.("mod M do\n  def ff(Func(name, _, _)) := name <> \"/\"\nend") ==
+               [{:ctor, "Func", [{:var, "name"}, :wild, :wild]}]
+    end
+
+    test "an all-type-argument constructor head in clause position is a hard error" do
+      # `Foo(Type…)` with NO binding arg is ambiguous (pattern vs typed param) — reject
+      # with guidance, never silently guess (ADR-0035, ADR-0050 §2).
+      err =
+        assert_raise Rian.Decl.Error, fn ->
+          Decl.parse("mod M do\n  def size(Vec(Func)) := 0\nend")
+        end
+
+      assert err.message =~ "ambiguous clause-head parameter"
+      assert err.message =~ "Bind a variable"
+    end
   end
 
   describe "list patterns (B1 / self-hosting spike)" do
