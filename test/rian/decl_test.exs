@@ -582,6 +582,24 @@ defmodule Rian.DeclTest do
       assert NegT.f(-1) == 0
       assert NegT.f(7) == 7
     end
+
+    test "a SINGLE-clause def with a structural pattern head destructures (not lost)" do
+      # The single-clause inline form once shortcut every param to `{:var, name}`,
+      # losing a tuple/list pattern's bindings (or raising "bad parameter"). It now
+      # parses head params through `Pratt.parse_pat`, like the multi-clause path. The
+      # tuple param binds `a`/`b`; the typed param keeps its `param/1` signature read.
+      f =
+        Decl.parse("mod M do\n  def keep({a, b}, c Int64) := c\nend")
+        |> Map.get(:mods)
+        |> hd()
+        |> Map.get(:funcs)
+        |> hd()
+
+      assert hd(f.clauses).pats == [{:tuple, [{:var, "a"}, {:var, "b"}]}, {:var, "c"}]
+      # the tuple param's sig type is inferred (here generalized to a tvar, as `a`/`b`
+      # are unconstrained); the typed param keeps `Int64`.
+      assert [%{type: "T"}, %{type: "Int64"}] = f.params
+    end
   end
 
   describe "list patterns (B1 / self-hosting spike)" do

@@ -1531,16 +1531,24 @@ defmodule Rian.Decl do
     }
   end
 
-  # single typed clause — each parameter binds itself as the clause pattern
+  # single clause with a body — each head parameter is parsed per-param: a structural
+  # pattern (`{…}`/`[…]`/`:atom`/literal) is parsed by the shared `Pratt.parse_pat`
+  # (ADR-0050 §2 "one parser", same as the multi-clause path) with an inferred sig type;
+  # a typed/var/capability param (`x`, `x Int53`, `iso xs Vec(T)`) keeps `param/1`'s
+  # signature reading and binds itself as a var pattern. Without this, a structural
+  # pattern in a single-clause head either raised "bad parameter" or silently lost its
+  # bindings (the old `{:var, name}`-for-every-param shortcut).
   def build_func([%{body: body} = d]) when not is_nil(body) do
-    params = parse_params(d.params)
-    params = if d[:pub] == true, do: boundary_params(params), else: params
+    {params0, pats} =
+      d.params |> split_top(",") |> Enum.with_index() |> Enum.map(&head_param/1) |> Enum.unzip()
+
+    params = if d[:pub] == true, do: boundary_params(params0), else: params0
 
     %Func{
       name: d.name,
       params: params,
       ret: req_ret(d),
-      clauses: [%Clause{pats: Enum.map(params, &{:var, &1.name}), body: body, guard: d.guard}],
+      clauses: [%Clause{pats: pats, body: body, guard: d.guard}],
       pub?: d[:pub] == true,
       tvars: Map.get(d, :tvars, []),
       bounds: Map.get(d, :bounds, %{}),
@@ -1590,6 +1598,34 @@ defmodule Rian.Decl do
     end
 
     %Clause{pats: pats, body: body, guard: guard}
+  end
+
+  # One head parameter of a single-clause def → `{%Param{}, clause_pattern}`. A
+  # structural pattern is parsed by `Pratt.parse_pat` and carries an inferred sig type
+  # (the real type comes from inference); anything `param/1` reads as a typed/var/cap
+  # parameter binds itself as a `{:var, name}` pattern.
+  defp head_param({pstr, i}) do
+    if structural_pattern?(pstr) do
+      [pat] = Pratt.parse_pats(pstr)
+      {%Param{name: "arg#{i}", type: :infer, cap: :val}, pat}
+    else
+      {name, cap, type} = param(pstr)
+      nm = if is_nil(name), do: "arg#{i}", else: name
+      {%Param{name: nm, type: type, cap: cap}, {:var, nm}}
+    end
+  end
+
+  # A head parameter that is unambiguously a destructuring PATTERN, not a `name Type`
+  # signature parameter: a tuple/list/map literal, an atom, a numeric/string/char
+  # literal, a pinned var, or a wildcard. (A bare var, a typed var `x T`, and a
+  # PascalCase type/ctor keep the `param/1` signature reading.)
+  defp structural_pattern?(pstr) do
+    t = String.trim(pstr)
+
+    String.starts_with?(t, "{") or String.starts_with?(t, "[") or
+      String.starts_with?(t, "%") or String.starts_with?(t, ":") or
+      String.starts_with?(t, "\"") or String.starts_with?(t, "'") or
+      String.starts_with?(t, "^") or t == "_" or Regex.match?(~r/^-?\d/, t)
   end
 
   defp parse_params(str) do
