@@ -813,7 +813,7 @@ defmodule Rian.Reach do
       Map.get(prog, :types, []) ++
         Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :types, []))
 
-    ptypes = Enum.filter(types, &parametric_type?/1)
+    ptypes = expand_ptypes(types)
 
     structs =
       Map.get(prog, :structs, []) ++
@@ -826,7 +826,7 @@ defmodule Rian.Reach do
       # `:ex`/`:jvm`/`:rs` (ADR-0083). A non-parametric sum is included (a tvar is not).
       sum_names: MapSet.new(types, & &1.name),
       struct_names: MapSet.new(structs, & &1.name),
-      emittable: Map.new(ptypes, fn t -> {t.name, emittable_parametric?(t)} end),
+      emittable: emittable_map(ptypes, MapSet.new(ptypes, & &1.name)),
       ctors:
         for(
           t <- ptypes,
@@ -844,26 +844,73 @@ defmodule Rian.Reach do
     }
   end
 
-  # A user `type` is parametric iff some variant field's type mentions a tvar.
+  # The parametric user types: those with a tvar field, PLUS any type that references one
+  # (a `Wrap(p Pair)`/`Bag(ps Vec(Pair))` is itself generic over the nested type's params,
+  # so it needs its own emittability gating). A fixpoint outward from the tvar-bearing base.
+  defp expand_ptypes(types) do
+    base = MapSet.new(Enum.filter(types, &parametric_type?/1), & &1.name)
+    names = grow_ptypes(types, base)
+    Enum.filter(types, &MapSet.member?(names, &1.name))
+  end
+
+  defp grow_ptypes(types, names) do
+    next =
+      MapSet.union(names, MapSet.new(for t <- types, references?(t, names), do: t.name))
+
+    if next == names, do: names, else: grow_ptypes(types, next)
+  end
+
+  defp references?(t, names) do
+    t.variants
+    |> Enum.flat_map(& &1.fields)
+    |> Enum.any?(fn f ->
+      Enum.any?(type_idents(to_string(Map.get(f, :type))), &MapSet.member?(names, &1))
+    end)
+  end
+
+  # A user `type` is *directly* parametric iff some variant field's type mentions a tvar.
   defp parametric_type?(t) do
     Enum.any?(t.variants, fn v -> Enum.any?(v.fields, &type_has_tvar?(Map.get(&1, :type))) end)
   end
 
-  # The Rust emitter lowers a parametric type when every tvar-bearing field is *lowerable*:
-  # a bare tvar (`k K` → declared `enum Pair<K, V>` param) OR a tvar nested in one of the
-  # data compounds the emitter monomorphizes — `Vec`/`Option`/`Result`, recursively
-  # (`items Vec(T)` → `enum Stack<T> { S { items: Vec<T> } }`). `Dict`/`Fn`/tuple/nested
-  # user-type fields carrying a tvar have separate lowering gaps, so they stay off `:rs`
-  # (default-deny — the matrix never oversells, ADR-0061).
-  defp emittable_parametric?(t) do
+  # Which parametric types the Rust emitter can lower, as a name→bool map. A type is
+  # emittable when every field is lowerable: a non-reference tvar field (bare / `Vec` /
+  # `Option` / `Result`, via `lowerable_field?`), a concrete field, OR an exact-bare
+  # reference to ANOTHER parametric type that is itself emittable (`Wrap(p Pair)` →
+  # `enum Wrap<K,V> { W { p: Pair<K,V> } }`, ADR-0061). A monotone fixpoint from
+  # all-false: a leaf resolves first, a chain resolves outward, and a reference CYCLE
+  # (self- or mutual-recursion — an infinitely-sized Rust type that would need `Box`)
+  # never bootstraps, so it stays pinned. A parametric name nested in a compound
+  # (`Vec(Pair)`) surfaces no args and is likewise not lowerable.
+  defp emittable_map(ptypes, pnames) do
+    converge_emittable(ptypes, pnames, Map.new(ptypes, &{&1.name, false}))
+  end
+
+  defp converge_emittable(ptypes, pnames, acc) do
+    next = Map.new(ptypes, fn t -> {t.name, all_fields_emittable?(t, pnames, acc)} end)
+    if next == acc, do: next, else: converge_emittable(ptypes, pnames, next)
+  end
+
+  defp all_fields_emittable?(t, pnames, acc) do
     t.variants
     |> Enum.flat_map(& &1.fields)
     |> Enum.map(&Map.get(&1, :type))
-    |> Enum.filter(&type_has_tvar?/1)
-    |> Enum.all?(&lowerable_field?/1)
+    |> Enum.all?(&field_emittable?(&1, pnames, acc))
   end
 
-  # a tvar-bearing field type the Rust emitter lowers correctly (see `emittable_parametric?`).
+  defp field_emittable?(ft, pnames, acc) do
+    cond do
+      MapSet.member?(pnames, ft) -> Map.get(acc, ft, false)
+      mentions_any?(ft, pnames) -> false
+      type_has_tvar?(ft) -> lowerable_field?(ft)
+      true -> true
+    end
+  end
+
+  # does a type string name any of `pnames` among its identifier tokens?
+  defp mentions_any?(ft, pnames), do: Enum.any?(type_idents(ft), &MapSet.member?(pnames, &1))
+
+  # a tvar-bearing field type the Rust emitter lowers correctly (see `field_emittable?`).
   defp lowerable_field?(type) do
     cond do
       not type_has_tvar?(type) ->

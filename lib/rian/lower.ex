@@ -2208,11 +2208,15 @@ defmodule Rian.Lower do
             "    #{v.ctor},"
 
           named ->
-            fs = Enum.map_join(v.fields, ", ", fn f -> "#{f.label}: #{prim_rust(f.type)}" end)
+            fs =
+              Enum.map_join(v.fields, ", ", fn f ->
+                "#{f.label}: #{rust_field_type(f.type, parametric)}"
+              end)
+
             "    #{v.ctor} { #{fs} },"
 
           true ->
-            fs = Enum.map_join(v.fields, ", ", &prim_rust(&1.type))
+            fs = Enum.map_join(v.fields, ", ", &rust_field_type(&1.type, parametric))
             "    #{v.ctor}(#{fs}),"
         end
       end)
@@ -2221,6 +2225,16 @@ defmodule Rian.Lower do
       rs_doc(Map.get(t, :doc), "///"),
       "#[derive(Clone, Debug, PartialEq)]\n#{vis}enum #{t.name}#{enum_generics(t.name, parametric)} {\n#{variants}\n}"
     )
+  end
+
+  # an enum field's Rust type. A field that is (exactly) a parametric user type's name
+  # instantiates with that type's params (`p Pair` → `Pair<K, V>`), so the nested generic
+  # is declared, not bare; every other field lowers via `prim_rust`.
+  defp rust_field_type(ft, parametric) do
+    case Map.get(parametric, ft) do
+      nil -> prim_rust(ft)
+      params -> "#{ft}<#{Enum.join(params, ", ")}>"
+    end
   end
 
   # ── synthesized value-union enums (ADR-0083 Phase 4) ──────────────────────
@@ -2286,15 +2300,27 @@ defmodule Rian.Lower do
     end
   end
 
-  # parametric user types: name -> ordered list of its field type-variable params.
+  # parametric user types: name -> ordered list of its field type-variable params. A field
+  # that is (exactly) ANOTHER parametric type's name contributes THAT type's params
+  # (`Wrap(p Pair)` is generic over Pair's `K, V`), so the map is resolved to a fixpoint to
+  # propagate a chain. (`Rian.Reach` pins the un-emittable nesting shapes — self-recursion,
+  # a parametric type inside a compound — so this only ever runs for shapes that compile.)
   defp parametric_param_map(types) do
-    for t <- types, params = type_param_tvars(t), params != [], into: %{}, do: {t.name, params}
+    names = MapSet.new(types, & &1.name)
+    converge_params(types, names, %{}) |> Enum.reject(fn {_n, p} -> p == [] end) |> Map.new()
   end
 
-  defp type_param_tvars(t) do
+  defp converge_params(types, names, acc) do
+    next = Map.new(types, fn t -> {t.name, type_param_tvars(t, names, acc)} end)
+    if next == acc, do: next, else: converge_params(types, names, next)
+  end
+
+  defp type_param_tvars(t, names, acc) do
     t.variants
     |> Enum.flat_map(fn v -> Enum.map(v.fields, &Map.get(&1, :type)) end)
-    |> Enum.flat_map(&type_tvars/1)
+    |> Enum.flat_map(fn ft ->
+      if MapSet.member?(names, ft), do: Map.get(acc, ft, []), else: type_tvars(ft)
+    end)
     |> Enum.uniq()
   end
 

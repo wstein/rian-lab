@@ -161,9 +161,13 @@ architectural cost.
   signature is pinned off `:rs` any more**. A **parametric user type** reaches `:rs` when its tvar fields
   are each *lowerable* — a bare tvar (`k K`) OR a tvar nested in `Vec`/`Option`/`Result` (`items Vec(T)`
   → `enum Stack<T> { S { items: Vec<T> } }`; the enum's generics are collected from every field tvar, and
-  construction into a compound field clones the payload: `S([x|items])`, `B(Some(x))` — rustc-verified).
-  The remaining `:rs` gap is a `Dict`/`Fn`/tuple/nested-user-type tvar field (separate lowering gaps) and
-  the non-positional/non-tail-call builder shapes.
+  construction into a compound field clones the payload: `S([x|items])`, `B(Some(x))` — rustc-verified),
+  OR a field that is (exactly) another parametric type's name (`Wrap(p Pair)` → `enum Wrap<K,V> { W { p:
+  Pair<K,V> } }`; generics propagated by a fixpoint over the type graph, chains too). Reach gates this with
+  a monotone `emittable_map` fixpoint over a parametric-set widened to include *referencing* types, so a
+  **recursion cycle** (needs `Box`) or a compound-nested parametric (`Vec(Pair)` — no args) never
+  bootstraps and stays pinned. The remaining `:rs` gap is a `Dict`/`Fn`/tuple tvar field, a recursion
+  cycle / compound-nested parametric field, and the non-positional/non-tail-call builder shapes.
 - **Self-hosting** (`SELFHOST.md`, `compiler/*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.

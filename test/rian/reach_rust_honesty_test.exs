@@ -274,6 +274,42 @@ defmodule Rian.ReachRustHonestyTest do
       refute :rs in targets(fnf, "mk")
     end
 
+    test "F2: a parametric type nesting another parametric type NOW reaches :rs (direct + chain)" do
+      direct =
+        analyze(
+          "type Pair := P(k K, v V)\ntype Wrap := W(p Pair)\ndef mk(k K, v V) Wrap forall K, V := W(P(k, v))"
+        )
+
+      assert :rs in targets(direct, "mk")
+
+      chain =
+        analyze(
+          "type Pair := P(k K, v V)\ntype Mid := M(p Pair)\ntype Out := O(m Mid)\ndef mk(k K, v V) Out forall K, V := O(M(P(k, v)))"
+        )
+
+      assert :rs in targets(chain, "mk")
+    end
+
+    test "F2: a recursion CYCLE or a parametric type nested in a compound STAYS pinned (needs Box / no args surfaced)" do
+      # self-recursion is an infinitely-sized Rust type (would need `Box`) — the monotone
+      # emittability fixpoint never bootstraps it, so it stays off :rs.
+      rec =
+        analyze(
+          "type Tree := Leaf(v T) | Node(l Tree, r Tree)\ndef leaf(x T) Tree forall T := Leaf(x)"
+        )
+
+      refute :rs in targets(rec, "leaf")
+
+      # a parametric type inside a compound (`Vec(Pair)`) surfaces no args → `Vec<Pair>` is
+      # an undeclared generic; the enclosing `Bag` is gated parametric and pinned.
+      bag =
+        analyze(
+          "type Pair := P(k K, v V)\ntype Bag := B(ps Vec(Pair))\ndef mk(ps Vec(Pair)) Bag forall K, V := B(ps)"
+        )
+
+      refute :rs in targets(bag, "mk")
+    end
+
     test "F3: a generic builder whose construction args don't match the field tvars" do
       rep =
         analyze("type Pair := P(k K, v V)\ndef mk(a A, b B) Pair forall A, B := P(a, b)")

@@ -162,9 +162,16 @@ Consequences of target-relativity:
        never oversells a shape rustc rejects: a type's tvar fields must each be **lowerable** — a bare tvar
        (`k K`) OR a tvar nested in `Vec`/`Option`/`Result` (recursively): `items Vec(T)` now lowers to
        `enum Stack<T> { S { items: Vec<T> } }` because the enum's generic params are collected from every
-       field tvar (`type_param_tvars`), not just bare-tvar fields. A `Dict`/`Fn`/tuple/nested-user-type
-       tvar field still pins off `:rs` (separate lowering gaps — `Dict` has no `HashMap` mapping in that
-       position, an `Fn` field's constructed closure isn't boxed). A **generic** builder's construction
+       field tvar (`type_param_tvars`), not just bare-tvar fields. A field that is **(exactly) another
+       parametric type's name** also lowers — `Wrap(p Pair)` → `enum Wrap<K,V> { W { p: Pair<K,V> } }` —
+       its generics propagated by a fixpoint over the type graph (so a chain `Outer→Middle→Pair` resolves
+       too). A `Dict`/`Fn`/tuple tvar field still pins off `:rs` (separate lowering gaps — `Dict` has no
+       `HashMap` mapping, an `Fn` field's constructed closure isn't boxed), as does a **recursion cycle**
+       (self- or mutual — an infinitely-sized Rust type that would need `Box`) or a parametric type nested
+       in a **compound** (`Vec(Pair)` — no args surfaced): `Rian.Reach` gates these with a monotone
+       emittability fixpoint (`emittable_map` — a leaf resolves first, a cycle never bootstraps) over a
+       parametric-type set widened to include *referencing* types (`Bag(ps Vec(Pair))` is itself gated).
+       A **generic** builder's construction
        into a *bare-tvar* field must still match positionally (`P(key, value)` with `key K`, `value V` —
        not `P(a, b)` with `a A`, `b B`), but construction into a *lowerable compound* field accepts any
        well-typed arg (`S([x | items])`, `B(Some(x))` — the construction coercion clones the payload); a
@@ -199,7 +206,8 @@ Consequences of target-relativity:
   way. So **no `Fn`-bearing signature is pinned off `:rs`** any more (callback param, top-level return,
   nested return, HOF — all reach `:rs`); rustc-verified (`lower_test`, `reach_rust_honesty_test`). The
   remaining `:rs` gap is the **parametric** shapes still outside the (now-widened) monomorphic subset —
-  `Dict`/`Fn`/tuple/nested-user-type tvar fields, and the non-positional/non-tail-call builder shapes. (A
+  `Dict`/`Fn`/tuple tvar fields, recursion cycles and compound-nested parametric fields, and the
+  non-positional/non-tail-call builder shapes. (A
   Copy-primitive *protocol-impl receiver* used as a value — `Show for Bool`'s `if b` — now derefs
   correctly and reaches `:rs`.)
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with

@@ -989,6 +989,50 @@ end|
     end
   end
 
+  describe "a parametric type nesting another parametric type reaches :rs (ADR-0061)" do
+    @nest_src """
+    type Pair := P(k K, v V)
+    type Wrap := W(p Pair)
+    def mk(k K, v V) Wrap forall K, V := W(P(k, v))
+    def key(w Wrap) K forall K, V := case w do
+      W(P(k, _)) -> k
+    end
+    """
+
+    test "the outer enum inherits the inner type's generics and instantiates the field" do
+      rust = Rian.Lower.rust_program(Rian.Decl.parse(@nest_src))
+      # Wrap is generic over Pair's K, V, and the field is the instantiated `Pair<K, V>`
+      assert rust =~ "enum Wrap<K: Clone, V: Clone>"
+      assert rust =~ "W { p: Pair<K, V> }"
+      assert rust =~ "fn mk<K: Clone, V: Clone>(k: &K, v: &V) -> Wrap<K, V>"
+    end
+
+    @tag :rust
+    test "construction + nested pattern-match compile and run under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust = Rian.Lower.rust_program(Rian.Decl.parse(@nest_src))
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_nest_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <> "\nfn main() { println!(\"{}\", key(&mk(&7i64, &\"v\".to_string()))); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", path, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "7"
+      end
+    end
+  end
+
   describe "Result-of-String coerces the Ok payload to owned String (ADR-0040/0061)" do
     @res_src ~S"""
     mod R do
