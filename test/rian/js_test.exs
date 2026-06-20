@@ -374,6 +374,16 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "membership `x in xs` lowers to `xs.includes(x)` and runs under node" do
+      js = JS.compile("def has(x Int53, xs Vec(Int53)) Bool := x in xs")
+      assert js =~ "xs.includes(x)"
+
+      case node_eval(js, "[has(2, [1,2,3]), has(9, [1,2,3])].join(',')") do
+        :no_node -> :ok
+        out -> assert out == "true,false"
+      end
+    end
+
     test "a type error is caught by the gate, not emitted as malformed JS (parity)" do
       # JS.compile now runs `Check.gate!` before emitting (parity with the BEAM
       # `Decl.compile` path) — a proven type mismatch raises here, not downstream.
@@ -653,14 +663,6 @@ defmodule Rian.JSTest do
       neg = JS.compile("def f(b Bool) Bool := not b")
       assert neg =~ "return !b;"
       assert node_eval(neg, "f(false)") in [:no_node, "true"]
-    end
-
-    test "an operator with no JS equivalent raises Unsupported (js_op default)" do
-      # `in` (membership) has no js_op clause yet — it must raise rather than emit
-      # garbage. (Float `/` now *does* lower — see the float-division test above.)
-      assert_raise JS.Unsupported, ~r/operator `in`/, fn ->
-        JS.compile("def f(a Int, xs Vec(Int)) Bool := a in xs")
-      end
     end
   end
 

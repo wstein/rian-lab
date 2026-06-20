@@ -721,6 +721,11 @@ defmodule Rian.Beam do
   defp expr_form(%EBin{op: "<>", left: l, right: r}, s),
     do: {:bin, @ln, [bin_seg(expr_form(l, s)), bin_seg(expr_form(r, s))]}
 
+  # membership `x in xs` — Erlang has no `in` operator; lower to `lists:member/2`
+  # (a Bool). The portable surface op is list membership (ADR-0047).
+  defp expr_form(%EBin{op: "in", left: l, right: r}, s),
+    do: remote_call(:lists, "member", [l, r], s)
+
   defp expr_form(%EBin{op: op, left: l, right: r}, s),
     do: {:op, @ln, erl_op(op), expr_form(l, s), expr_form(r, s)}
 

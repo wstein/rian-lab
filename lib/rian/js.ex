@@ -725,6 +725,10 @@ defmodule Rian.JS do
       else: "(#{expr_js(l, i53)} / #{expr_js(r, i53)})"
   end
 
+  # membership `x in xs` -> `xs.includes(x)` (JS arrays + strings)
+  defp expr_js(%EBin{op: "in", left: l, right: r}, i53),
+    do: "#{expr_js(r, i53)}.includes(#{expr_js(l, i53)})"
+
   defp expr_js(%EBin{op: op, left: l, right: r}, i53),
     do: "(#{expr_js(l, i53)} #{js_op(op)} #{expr_js(r, i53)})"
 

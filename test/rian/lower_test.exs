@@ -91,6 +91,35 @@ defmodule Rian.LowerTest do
     end
 
     @tag :rust
+    test "membership `x in xs` lowers to `.contains(&x)` and runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          src = "mod M do\n  pub def has(x Int53, xs val Vec(Int53)) Bool := x in xs\nend\n"
+          rust = Lower.rust_program(Rian.Decl.parse(src))
+          assert rust =~ "xs.contains(&x)"
+
+          dir = Path.join(System.tmp_dir!(), "rian_in_#{System.unique_integer([:positive])}")
+          File.mkdir_p!(dir)
+          on_exit(fn -> File.rm_rf(dir) end)
+          rs = Path.join(dir, "p.rs")
+
+          File.write!(
+            rs,
+            rust <>
+              "\nfn main() { assert!(m::has(2, &[1,2,3])); assert!(!m::has(9, &[1,2,3])); }\n"
+          )
+
+          bin = Path.join(dir, "p")
+          {out, code} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", rs, "-o", bin])
+          assert code == 0, "rustc failed:\n#{out}"
+          assert {_, 0} = System.cmd(bin, [])
+      end
+    end
+
+    @tag :rust
     test "a value union inside a `mod` narrows + runs under rustc — param AND return (ADR-0083)" do
       case System.find_executable("rustc") do
         nil ->

@@ -565,6 +565,17 @@ defmodule Rian.BeamTest do
       assert opt.fold({:add, {:sub, {:num, 10}, {:num, 10}}, {:var, "y"}}) == {:var, "y"}
     end
 
+    test "membership `x in xs` runs on the BEAM (lowered to lists:member/2)" do
+      mods =
+        Beam.load_program(
+          "mod InCheck do\n  pub def has(x Int53, xs Vec(Int53)) Bool := x in xs\nend"
+        )
+
+      assert InCheck in mods
+      assert apply(InCheck, :has, [2, [1, 2, 3]]) == true
+      assert apply(InCheck, :has, [9, [1, 2, 3]]) == false
+    end
+
     test "a multi-module program: each `mod` is its own .beam, cross-module calls resolve" do
       mods = Beam.load_program(File.read!("test/fixtures/rian/modules.rian"))
 
@@ -895,10 +906,10 @@ defmodule Rian.BeamTest do
     end
 
     test "a construct outside the core raises a clear Unsupported (never a miscompile)" do
-      # the `in` membership operator has no simple Erlang operator form yet (it
-      # needs `lists:member`); it raises rather than silently miscompiling
-      assert_raise Beam.Unsupported, ~r/operator `in`/, fn ->
-        Beam.compile("def g(x Int64, ys Vec(Int64)) Bool := x in ys", :rian_beam_bad)
+      # only `^var` pins are lowered; a pin over a compound expression raises rather
+      # than silently miscompiling. (`x in ys` membership now lowers to `lists:member`.)
+      assert_raise Beam.Unsupported, ~r/only `\^var` is supported/, fn ->
+        Beam.compile("def f(g Int64) Int64\ndef f(^(g + 1)) := 1\ndef f(_) := 0", :rian_beam_bad)
       end
     end
 

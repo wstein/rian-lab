@@ -3110,6 +3110,12 @@ defmodule Rian.Lower do
   defp emit(%EBin{op: "/", left: l, right: r}, :rust, ec),
     do: {"(#{p(l, 0, :rust, ec)} as f64) / (#{p(r, 0, :rust, ec)} as f64)", 10}
 
+  # membership `x in xs` — Rust has no `in` operator; lower to `.contains(&x)` over
+  # the slice/Vec. (The Elixir-text path keeps `x in xs`, valid Elixir, via the
+  # generic clause below.)
+  defp emit(%EBin{op: "in", left: l, right: r}, :rust, ec),
+    do: {"#{p(r, 12, :rust, ec)}.contains(&#{p(l, 12, :rust, ec)})", 12}
+
   # generic binary (arith, comparison, and/or) — MUST be last
   defp emit(%EBin{op: op, left: l, right: r}, t, ec) do
     pr = prec(op)

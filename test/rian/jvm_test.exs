@@ -339,6 +339,11 @@ defmodule Rian.JVMTest do
       end
       """,
       probe: ~s|println("${fst_of(1L, 2L)},${sum3(1L, 2L, 3L)}")|
+    },
+    %{
+      id: :membership,
+      src: "def has(x Int64, xs Vec(Int64)) Bool := x in xs",
+      probe: ~s|println("${has(2L, listOf(1L, 2L, 3L))},${has(9L, listOf(1L, 2L, 3L))}")|
     }
   ]
 
@@ -599,6 +604,12 @@ defmodule Rian.JVMTest do
     end
 
     @tag :jvm
+    test "membership `x in xs` lowers to Kotlin's native `in` and runs", %{jvm_batch: jvm} do
+      assert jvm_kt(jvm, :membership) =~ "(x in xs)"
+      expect_jvm(jvm, :membership, "true,false")
+    end
+
+    @tag :jvm
     test "`:=` shadowing renames to a backtick-quoted fresh `val` (no Kotlin redeclaration)", %{
       jvm_batch: jvm
     } do
@@ -837,13 +848,6 @@ defmodule Rian.JVMTest do
       kt = JVM.compile("def md(a Int64, b Int64) Int64 := a rem b")
       # (jvm.ex:240)
       assert kt =~ "return (a % b)"
-    end
-
-    test "an operator outside the Tier-2 subset raises" do
-      # (`|>` is no longer an example — it desugars to a plain call in Core)
-      assert_raise JVM.Unsupported, fn ->
-        JVM.compile("def member(a Int64, b Vec(Int64)) Bool := a in b")
-      end
     end
   end
 
