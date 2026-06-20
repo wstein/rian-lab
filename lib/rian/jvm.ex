@@ -53,10 +53,13 @@ defmodule Rian.JVM do
   dynamic). An **associated type** (ADR-0074) in a covariant `Vec(...)` return erases to
   `List<Any>` (`Foldable.to_list() Vec(Elem)`), and a type-directed coercion pass
   (`coerce_casts`) inserts `as List<T>` where that `List<Any>` flows into a concrete
-  `List<T>` callee param (an element-*typed* consumer). **Not yet** (raise
-  `Rian.JVM.Unsupported`): tuples, maps, structs, `with`, lambdas, general FFI; and an
-  associated type in a *non*-covariant position (a bare `Elem` return / an `Elem`
-  parameter), which stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
+  `List<T>` callee param (an element-*typed* consumer). A **lambda** `(a) -> body`
+  lowers to a Kotlin lambda `{ a -> body }` and a `Fn(arg…, ret)` type to a Kotlin
+  function type `(arg…) -> ret`, capturing the environment natively (ADR-0061).
+  **Not yet** (raise `Rian.JVM.Unsupported`): tuples, maps, structs, `with`,
+  captures (`&(…)`/`&name/arity`), general FFI; and an associated type in a
+  *non*-covariant position (a bare `Elem` return / an `Elem` parameter), which
+  stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
   `Any` — a member value *is-a* `Any`, so construction needs no wrapping — and a
   type-pattern `n Int53 ->` narrows it back with `is Long`/`is String` (Kotlin
   smart-cast), the same discriminator the dispatcher uses.
@@ -84,6 +87,7 @@ defmodule Rian.JVM do
     EDot,
     EId,
     EIf,
+    ELambda,
     EList,
     ENum,
     EStr,
@@ -111,7 +115,6 @@ defmodule Rian.JVM do
   # `Core.reject_unsupported!` runs the shared walk; this map is the JVM-specific set.
   @jvm_unsupported %{
     Core.EWith => "a `with` expression",
-    Core.ELambda => "a lambda",
     Core.ECapture => "a function capture (`&(…)`)",
     Core.ECaptureNamed => "a function capture (`&name/arity`)",
     Core.ETuple => "a tuple",
@@ -894,6 +897,15 @@ defmodule Rian.JVM do
   # dispatcher's `List<Any>` to the concrete `List<T>` a callee expects.
   defp expr_kt({:jvm_cast, inner, t}), do: "(#{expr_kt(inner)} as #{t})"
 
+  # a lambda `(a, b) -> body` → a Kotlin lambda `{ a, b -> body }` (a zero-arg
+  # lambda is `{ body }`). The parameter types are inferred from the expected
+  # function type at the use site (a `Fn(...)` param/return → `(T) -> U`), so they
+  # stay implicit — idiomatic Kotlin. Closures capture their environment natively.
+  defp expr_kt(%ELambda{params: [], body: body}), do: "{ #{branch_kt(body)} }"
+
+  defp expr_kt(%ELambda{params: params, body: body}),
+    do: "{ #{Enum.map_join(params, ", ", fn {n, _} -> n end)} -> #{branch_kt(body)} }"
+
   defp expr_kt(other), do: raise(Unsupported, "jvm: expression #{inspect(other)}")
 
   defp branch_kt(%EBlock{stmts: [{:expr, e}]}), do: expr_kt(e)
@@ -999,6 +1011,13 @@ defmodule Rian.JVM do
 
       m = Regex.run(~r/^Vec\((.+)\)$/, t) ->
         "List<#{kt_type(Enum.at(m, 1))}>"
+
+      # a function type `Fn(arg…, ret)` (ADR-0061) → a Kotlin function type
+      # `(arg…) -> ret`; the LAST top-level component is the return, the rest are
+      # parameters (`Fn(Int53, Int53)` → `(Long) -> Long`, `Fn(Int53)` → `() -> Long`).
+      m = Regex.run(~r/^Fn\((.+)\)$/, t) ->
+        {params, [ret]} = Rian.TypeStr.split_top_commas(Enum.at(m, 1)) |> Enum.split(-1)
+        "(#{Enum.map_join(params, ", ", &kt_type/1)}) -> #{kt_type(ret)}"
 
       # a value union `Union(A, B)` (ADR-0083) erases to `Any` — a member value
       # *is-a* `Any` (no wrapping needed, unlike Rust); a type-pattern narrows it back.

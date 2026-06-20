@@ -307,6 +307,15 @@ defmodule Rian.JVMTest do
       """,
       probe:
         ~s|println(nested(A, A)); println(nested(A, B)); println(nested(B, A)); println(bumped(-1L)); println(bumped(4L))|
+    },
+    %{
+      id: :lambda,
+      src: """
+      def apply2(f Fn(Int64, Int64), x Int64) Int64 := f(x)
+      def adder(n Int64) Fn(Int64, Int64) := (x) -> x + n
+      def go(n Int64) Int64 := apply2(adder(n), n)
+      """,
+      probe: ~s|println(go(20L))|
     }
   ]
 
@@ -524,6 +533,19 @@ defmodule Rian.JVMTest do
       assert kt =~ "if (a0 == 0L)"
       assert kt =~ "if (a0 == 1L)"
       expect_jvm(jvm, :fib, "55")
+    end
+
+    @tag :jvm
+    test "a lambda lowers to a Kotlin lambda + function type, capturing natively (ADR-0061)", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :lambda)
+      # a `Fn(Int64, Int64)` param/return → a Kotlin function type `(Long) -> Long`
+      assert kt =~ "a0: (Long) -> Long"
+      assert kt =~ "): (Long) -> Long {"
+      # the closure captures `n` from the enclosing frame
+      assert kt =~ "{ x -> (x + n) }"
+      expect_jvm(jvm, :lambda, "40")
     end
 
     @tag :jvm
