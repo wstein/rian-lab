@@ -20,8 +20,8 @@ defmodule Rian.InferLocal do
   left *unconstrained* (a pass-through like `def id(x) := x`) is **generalized to a fresh
   `forall T`** type variable. A return that still cannot be inferred (self-recursion, an
   `@external` with no body, an unmodelled body) — or a param used at *conflicting* types —
-  raises a clear *"annotate it"* error rather than reaching the checker unresolved: sound
-  partiality, never a guess.
+  renders `Any` (the dynamic top, ADR-0034): a valid type that reaches every target but
+  `:rs`, so the function is honestly dynamic rather than a parse error — never a guess.
 
   `pub`/`@external` boundaries are untouched: a lone lowercase token there keeps its
   legacy permissive anonymous-typed reading (the token is the param's type) — the
@@ -168,9 +168,10 @@ defmodule Rian.InferLocal do
             {%{p | type: t}, true}
 
           :mismatch ->
-            raise Rian.Decl.Error,
-                  "parameter `#{p.name}` of private `#{f.name}` is used at conflicting " <>
-                    "types — annotate it (`def #{f.name}(#{p.name} <Type>) …`)"
+            # used at conflicting types — `Any` (the dynamic top, ADR-0034) accepts every
+            # usage rather than raising; the function is honestly dynamic (Reach pins `:rs`),
+            # mirroring the un-inferable-return fallback in `fill_returns`.
+            {%{p | type: "Any"}, true}
 
           _ ->
             {p, ch}

@@ -887,8 +887,17 @@ defmodule Rian.Transpile do
 
   # ── module ────────────────────────────────────────────────────────────────
 
-  defp short_name({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
+  defp short_name({:__aliases__, _, parts}),
+    do: parts |> List.last() |> to_string() |> reserved_mod()
+
   defp short_name(other), do: snippet(other)
+
+  # `Prim` is the reserved intrinsic namespace (ADR-0047), so the `Rian.Prim` module (and any
+  # qualified call to it) must rename — to `PrimNorm`, matching the self-host port. In lib
+  # Elixir `Rian.Prim.X` is always a real module call (`normalize`/`names`); the `Prim.map_get`
+  # intrinsic form only appears in `.rian` source, never here, so the rename can't shadow one.
+  defp reserved_mod("Prim"), do: "PrimNorm"
+  defp reserved_mod(name), do: name
 
   defp block_stmts({:__block__, _, stmts}), do: stmts
   defp block_stmts(single), do: [single]
@@ -1346,7 +1355,9 @@ defmodule Rian.Transpile do
   # (`head\n  stmt\n  …\n  final\nend`); a single expression stays the inline
   # `head := expr` form. The block reads far better than the `;`-joined one-liner.
   defp clause_lines(head, {:__block__, _, [_, _ | _] = stmts}),
-    do: [head] ++ Enum.map(stmts, &("  " <> stmt(&1))) ++ ["end"]
+    # `value_tail` makes the block end in an EXPRESSION (a trailing `_ = e`/`pat = e` bind is
+    # not a valid Rian block tail — ADR-0035), exactly as the inline `:=` path does.
+    do: [head] ++ Enum.map(value_tail(stmts), &("  " <> stmt(&1))) ++ ["end"]
 
   defp clause_lines(head, body), do: ["#{head} := #{render_body(body)}"]
 
@@ -1540,21 +1551,34 @@ defmodule Rian.Transpile do
   # preserved). Reach still pins the function by its body's FFI, exactly as before.
   defp value_tail(stmts) do
     case List.last(stmts) do
-      {:=, _, [pat, _e]} = bind ->
-        if var?(pat) do
-          stmts ++ [pat]
-        else
-          {:=, m, [^pat, e]} = bind
-          # a non-`_`-prefixed temp (a leading `_` would render as the wildcard `_`,
-          # `underscore_var/1`); `rian_bv` is internal and collision-unlikely.
-          tmp = {:rian_bv, [], Elixir}
-          List.replace_at(stmts, -1, {:=, m, [tmp, e]}) ++ [{:=, m, [pat, tmp]}, tmp]
+      {:=, m, [pat, e]} ->
+        cond do
+          # a trailing discard (`_ = e`, or a `_`-prefixed binder that renders as the wildcard
+          # `_`) carries no usable binding — the block's value is just `e`, so drop the bind.
+          discard_pat?(pat) ->
+            List.replace_at(stmts, -1, e)
+
+          var?(pat) ->
+            stmts ++ [pat]
+
+          true ->
+            # a non-`_`-prefixed temp (a leading `_` would render as the wildcard `_`,
+            # `underscore_var/1`); `rian_bv` is internal and collision-unlikely.
+            tmp = {:rian_bv, [], Elixir}
+            List.replace_at(stmts, -1, {:=, m, [tmp, e]}) ++ [{:=, m, [pat, tmp]}, tmp]
         end
 
       _ ->
         stmts
     end
   end
+
+  defp discard_pat?({:_, _, ctx}) when is_atom(ctx), do: true
+
+  defp discard_pat?({n, _, ctx}) when is_atom(n) and is_atom(ctx),
+    do: String.starts_with?(Atom.to_string(n), "_")
+
+  defp discard_pat?(_), do: false
 
   # A lambda body, unlike a clause body, is a single expression unless wrapped in an
   # explicit `do … end` block (the `;`-block ambiguity decision in `Rian.Pratt`). So a
@@ -1698,10 +1722,27 @@ defmodule Rian.Transpile do
   # is not emitted (the corpus uses the regex form).
   defp expr({:=~, _, [l, r]}), do: "Regex.match?(#{expr(r)}, #{expr(l)})"
 
+  # `l |> Kernel.<op>(r)` (and the direct `Kernel.<op>(l, r)` below) is a binary operator in
+  # qualified form — render it infix (`l <op> r`). `Kernel.in`/`Kernel.<>` are NOT Rian method
+  # calls (`.in`/`.<>` don't scan); lib code that pipes into `Kernel.in/2`, `Kernel.<>/2` hits this.
+  defp expr({:|>, _, [l, {{:., _, [{:__aliases__, _, [:Kernel]}, op]}, _, [r]}]})
+       when is_map_key(@binops, op),
+       do: expr({op, [], [l, r]})
+
+  # a piped `case`/`cond` head — `x |> case do … end` ≡ `case x do … end`. Inject the piped
+  # value as the scrutinee so it renders as a real `case`, not the prefix `case([{:do, …}])`
+  # (which spills bare `->` arms the parser rejects).
+  defp expr({:|>, _, [l, {:case, m, [[{:do, _}] = kw]}]}), do: expr({:case, m, [l, kw]})
+
   # The pipe is real Rian surface (`x |> f(y)` ≡ `f(x, y)`, ADR/01_basics) — render
   # it infix. Without this it falls through to the generic local-call clause and
   # mis-renders as the prefix `|>(l, r)`.
   defp expr({:|>, _, [l, r]}), do: "#{paren_operand(l, "|>", :left)} |> #{pipe_rhs(r)}"
+
+  # direct `Kernel.<op>(l, r)` → infix (see the piped clause above).
+  defp expr({{:., _, [{:__aliases__, _, [:Kernel]}, op]}, _, [l, r]})
+       when is_map_key(@binops, op),
+       do: expr({op, [], [l, r]})
 
   # A match `=` reached in expression position (a `with`/`case` arm, a nested
   # statement) is Rian's bind `:=`, same as the block-statement path (`stmt/1`).
@@ -1950,6 +1991,12 @@ defmodule Rian.Transpile do
   # render a Rian `a..b` range, parenthesizing each operand by `..`'s precedence.
   defp range_text(a, b), do: "#{paren_operand(a, "..", :left)}..#{paren_operand(b, "..", :right)}"
 
+  # Rian's `..` is non-associative: a range used as an operand of another binary operator
+  # (`c in 97..122`) MUST be parenthesized (`c in (97..122)`), unlike Elixir. A range in
+  # argument position is rendered via `expr` (no `paren_operand`), so this only wraps operands.
+  defp paren_operand({op, _, _} = node, _parent_op, _side) when op in [:.., :..//],
+    do: "(#{expr(node)})"
+
   defp paren_operand(node, parent_op, side) do
     s = expr(node)
     plevel = @op_level[parent_op]
@@ -2039,7 +2086,9 @@ defmodule Rian.Transpile do
   defp elixir_stdlib?({:__aliases__, _, _}, m), do: m in @elixir_stdlib
   defp elixir_stdlib?(_, _), do: false
 
-  defp mod_str({:__aliases__, _, parts}), do: parts |> List.last() |> to_string()
+  defp mod_str({:__aliases__, _, parts}),
+    do: parts |> List.last() |> to_string() |> reserved_mod()
+
   defp mod_str(a) when is_atom(a), do: ":#{a}"
   # a runtime module VALUE (`apply(mod, …)`): keyword-escape so it matches the head
   # binder (`mod` -> `mod_`), not the bare keyword that `snippet` would emit.

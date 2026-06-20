@@ -115,13 +115,13 @@ defmodule Rian.InferLocalTest do
       assert [%{type: "p"}] = f.params
     end
 
-    test "a provable parameter-type conflict raises 'annotate it'" do
-      # `x` is matched as an Int literal in one clause and a String literal in another
+    test "a provable parameter-type conflict renders `Any`, not an error" do
+      # `x` is matched as an Int literal in one clause and a String literal in another — the
+      # conflict makes `x` honestly dynamic (`Any`, ADR-0034 — accepts both, pinned off `:rs`)
+      # rather than a parse error, mirroring the un-inferable-return fallback.
       src = "def bad(x)\n  case x do\n    0 -> 1\n    \"a\" -> 2\n  end\nend"
-
-      assert_raise Rian.Decl.Error, ~r/parameter `x` of private `bad`.*conflicting/, fn ->
-        Decl.parse(src)
-      end
+      f = src |> Decl.parse() |> Map.get(:funcs) |> hd()
+      assert [%{name: "x", type: "Any"}] = f.params
     end
 
     test "a param used only inside a `with` infers from the callee, not `forall T`" do
