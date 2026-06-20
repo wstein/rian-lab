@@ -841,6 +841,7 @@ end|
     @clo_src """
     def adder(x T) Fn(T, T) forall T := (n) -> x
     def mk(x T) Fn(Int53, T) forall T := (n) -> x
+    def opt(x T) Option(Fn(Int53, T)) forall T := Some((n) -> x)
     """
 
     test "owns the captured tvar, bounds it `Clone + 'static`, and clones the body per call" do
@@ -849,6 +850,9 @@ end|
       assert rust =~ "fn adder<T: Clone + 'static>(x: T) -> Box<dyn Fn(T) -> T>"
       assert rust =~ "fn mk<T: Clone + 'static>(x: T) -> Box<dyn Fn(i64) -> T>"
       assert rust =~ "Box::new(move |n| (x).clone())"
+      # a `Fn` NESTED in the return type boxes the closure inside the constructor
+      assert rust =~ "fn opt<T: Clone + 'static>(x: T) -> Option<Box<dyn Fn(i64) -> T>>"
+      assert rust =~ "Option::Some(Box::new(move |n| (x).clone()))"
     end
 
     @tag :rust
@@ -867,7 +871,8 @@ end|
             path,
             rust <>
               "\nfn main() { let f = adder(7i64); let g = mk(String::from(\"hi\")); " <>
-              "println!(\"{} {} {}\", f(0), f(0), g(99)); }"
+              "let h = opt(String::from(\"z\")).unwrap(); " <>
+              "println!(\"{} {} {} {}\", f(0), f(0), g(99), h(0)); }"
           )
 
           {_, 0} =
@@ -876,8 +881,9 @@ end|
           {out, 0} = System.cmd(bin, [])
           File.rm(path)
           File.rm(bin)
-          # `f` is called twice — the closure clones its captured `T`, so it is a reusable `Fn`
-          assert String.trim(out) == "7 7 hi"
+          # `f` is called twice — the closure clones its captured `T`, so it is a reusable `Fn`;
+          # `h` is the closure unwrapped from the `Option` (the nested-`Fn` case)
+          assert String.trim(out) == "7 7 hi z"
       end
     end
   end

@@ -96,10 +96,9 @@ defmodule Rian.ReachRustHonestyTest do
       assert :rs in targets(rep, "mk")
     end
 
-    test "an `Fn(...)` *nested* in the return type is still off :rs (not just a prefix)" do
+    test "an `Fn(...)` *nested* in the return type NOW reaches :rs too — boxed at the value-position closure (ADR-0061)" do
       rep = reach_src("def mk(x T) Option(Fn(Int53, T)) forall T := Some((n) -> x)")
-      refute :rs in targets(rep, "mk")
-      assert :generic in blocker_kinds(rep, "mk")
+      assert :rs in targets(rep, "mk")
     end
 
     test "a *concrete* `Fn(...)` return (no tvar) NOW reaches :rs — `Box<dyn Fn>` + `Box::new(move …)` (ADR-0061)" do

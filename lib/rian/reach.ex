@@ -509,15 +509,13 @@ defmodule Rian.Reach do
     # `enum Pair<K,V>`) keep `:rs`.
     #
     # An `Fn(...)` function type anywhere in the signature (a parameter or the return)
-    # has no Rust lowering: a closure-as-value needs `impl Fn`/`Box<dyn Fn>` and the
-    # text emitter spells it as the bare trait `Fn<...>` (rustc E0782) — and an `Fn`
-    # *parameter* additionally mangles to an undeclared type (E0425). This holds
-    # whether the `Fn` mentions a tvar or not (`adder() Fn(Int53, Int53)`,
-    # `apply_twice(f Fn(Int53, Int53), …)`, generic `map(f Fn(T, U), …)` all fail), so
-    # the gate pins any `Fn(`-bearing signature off `:rs`. (The owned↔borrow coercion
-    # for bare `T`/`Vec(T)` returns and `Option(T)`/`Result(T, E)`/sum-over-`T` landed
-    # 2026-06-14, so those are *not* blocked — only `Fn` remains unlowerable.)
-    owned_gen = if sig_uses_fn_type?(f), do: [fn_type_blocker()], else: []
+    # `Fn(...)` lowering is complete (ADR-0061): a callback PARAMETER → `&impl Fn(...)`, a
+    # returned closure → `Box<dyn Fn(...)>` (`Box::new(move …)`) whether the `Fn` is
+    # top-level (`adder() Fn(Int53, Int53)`, `mk(x T) Fn(Int53, T)`) or NESTED in the return
+    # (`Option`/`Result`/`Vec(Fn(…, T))` — a value-position closure boxes at the `ELambda`
+    # emit), and HOFs (`map(f Fn(T, U), …)`). So no `Fn`-bearing signature is pinned off
+    # `:rs` any more. (The owned↔borrow coercion for bare `T`/`Vec(T)` returns and
+    # `Option(T)`/`Result(T, E)`/sum-over-`T` landed 2026-06-14 and is likewise not blocked.)
     # A function whose signature touches a *parametric* user type (`Pair`, `enum
     # Pair<K,V>`) reaches `:rs` only for the narrow shape the emitter actually lowers
     # (`Rian.Lower`): the type's tvar fields are all *bare* tvars, and the function
@@ -567,8 +565,7 @@ defmodule Rian.Reach do
     Enum.reduce(
       f.clauses,
       {ref ++
-         int ++ width ++ any ++ union ++ owned_gen ++ param ++ as_pat ++ bit_pat ++ pin ++ disp,
-       MapSet.new()},
+         int ++ width ++ any ++ union ++ param ++ as_pat ++ bit_pat ++ pin ++ disp, MapSet.new()},
       fn c, acc ->
         acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
         if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
@@ -715,14 +712,6 @@ defmodule Rian.Reach do
       kills: [:rs, :js, :jvm]
     }
 
-  defp fn_type_blocker,
-    do: %{
-      construct:
-        "returned closure over a type variable / nested Fn (no owned-capture + 'static yet)",
-      kind: :generic,
-      kills: [:rs]
-    }
-
   defp parametric_blocker,
     do: %{
       construct: "parametric user type beyond the Rust emitter's monomorphic subset",
@@ -802,24 +791,6 @@ defmodule Rian.Reach do
   # off `:jvm` only — honest against the emitters.
   defp result_value_blocker,
     do: %{construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: :result, kills: [:jvm]}
-
-  # Closure-as-value lowering (ADR-0061): a `Fn(...)` callback PARAMETER lowers to
-  # `&impl Fn(...)` and a TOP-LEVEL returned closure to a `Box<dyn Fn(...)>`
-  # (`Box::new(move …)`), both rustc-verified. A top-level `Fn(...)` return over a TYPE
-  # VARIABLE (`mk(x T) Fn(Int53, T)`) is now supported too: `Rian.Lower` owns the captured
-  # tvar param, adds a `T: Clone + 'static` bound, and clones the captured value per call.
-  # What still has no Rust lowering — and so pins `:rs` — is a `Fn` NESTED in another type
-  # (`Option(Fn(Int53, T))`), which needs an owned-capture closure inside a constructor.
-  defp sig_uses_fn_type?(f) do
-    ret = Map.get(f, :ret)
-
-    is_binary(ret) and String.contains?(ret, "Fn(") and not top_level_fn_return?(ret)
-  end
-
-  # a top-level `Fn(args, ret)` return — concrete (`adder`) OR over a type variable — is
-  # lowered to a boxed `dyn Fn` (the tvar case adds owned capture + `'static` + per-call
-  # clone). Only a `Fn` nested in another type is still unsupported.
-  defp top_level_fn_return?(ret), do: String.starts_with?(ret, "Fn(")
 
   # Does a type string contain a type-variable token? `tvar?` is the compiler-wide
   # convention (`Rian.Check`): a single capital optionally followed by a digit.

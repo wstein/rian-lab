@@ -381,6 +381,10 @@ defmodule Rian.Lower do
         borrowed_vec_fields: MapSet.new(),
         ok_string: false,
         err_string: false,
+        # set inside a function whose return type contains a `Fn(...)` (top-level or
+        # nested, e.g. `Option(Fn(…, T))`): a value-position closure then lowers to a
+        # boxed `Box::new(move …)`, cloning its captured tvar body per call when `clone?`.
+        fn_box: nil,
         ex_scope: MapSet.new(),
         proto: %{},
         parametric: %{},
@@ -1622,13 +1626,28 @@ defmodule Rian.Lower do
     Enum.map(acc ++ [cur], &String.trim/1)
   end
 
-  # rewrite a bare closure arm `|params| body` → `|params| (body).clone()` (the boxed
-  # `Fn` closure returns its captured owned tvar, which it must clone rather than move out).
-  defp clone_closure_tail(arm) do
-    case String.split(arm, "|", parts: 3) do
-      ["", params, body] -> "|#{params}| (#{String.trim(body)}).clone()"
-      _ -> arm
+  # the `Fn(...)` substring of a (possibly nested) return type — `Option(Fn(Int53, T))`
+  # → `"Fn(Int53, T)"`, `Fn(T, T)` → itself — the balanced-paren group from the first `Fn(`.
+  defp extract_fn_type(ret) do
+    case :binary.match(to_string(ret), "Fn(") do
+      :nomatch -> ""
+      {start, _} -> balanced_from(binary_part(ret, start, byte_size(ret) - start))
     end
+  end
+
+  # the leading `Ident(...)` whose parens balance: `"Fn(a, T)) | E"` → `"Fn(a, T)"`.
+  defp balanced_from(s) do
+    {head, _} =
+      s
+      |> String.graphemes()
+      |> Enum.reduce_while({"", 0}, fn
+        "(", {acc, d} -> {:cont, {acc <> "(", d + 1}}
+        ")", {acc, 1} -> {:halt, {acc <> ")", 0}}
+        ")", {acc, d} -> {:cont, {acc <> ")", d - 1}}
+        g, {acc, d} -> {:cont, {acc <> g, d}}
+      end)
+
+    head
   end
 
   # paren-aware top-level comma split of a parameter string
@@ -1680,10 +1699,11 @@ defmodule Rian.Lower do
     pinst = pair_inst(func, base_ec)
     gen_func = Map.put(func, :tvars, fn_all_tvars(func, pinst, base_ec))
 
-    # a closure-RETURNING function (`… Fn(args, ret) := (x) -> …`) boxes a `move`-capturing
-    # closure that must OWN any type-variable param it captures (a `&T` borrow can't satisfy
-    # the boxed `dyn Fn`'s `'static`) — so a tvar param lowers owned (`x: T`, not `&T`) here.
-    closure_ret? = match?("Fn(" <> _, to_string(func.ret))
+    # a closure-RETURNING function (`… Fn(args, ret) := (x) -> …`, incl. a `Fn` NESTED in
+    # the return like `Option(Fn(…, T))`) boxes a `move`-capturing closure that must OWN any
+    # type-variable param it captures (a `&T` borrow can't satisfy the boxed `dyn Fn`'s
+    # `'static`) — so a tvar param lowers owned (`x: T`, not `&T`) here.
+    closure_ret? = String.contains?(to_string(func.ret), "Fn(")
 
     param_decls =
       Enum.map_join(func.params, ", ", fn p ->
@@ -1706,7 +1726,14 @@ defmodule Rian.Lower do
     # a `String | E` return makes `Ok(payload)` need the payload coerced to owned
     # `String` (an `Ok("hi")` is `Result<&str, _>`); flag it for the `Ok`/`Err` emit.
     {ok?, err?} = result_str_flags(func.ret)
-    fn_ec = %{base_ec | ok_string: ok?, err_string: err?}
+    # value-position closures in a `Fn(...)`-returning function box (top-level OR nested in
+    # the return type), cloning a captured tvar body per call (a reusable `Fn`, not FnOnce).
+    fn_box =
+      if closure_ret?,
+        do: %{clone?: fn_returns_tvar?(extract_fn_type(func.ret), Map.get(func, :tvars, []))},
+        else: nil
+
+    fn_ec = %{base_ec | ok_string: ok?, err_string: err?, fn_box: fn_box}
 
     # A generic function (ADR-0061) borrows its `T`/`Vec(T)`/`String` params as
     # `&T`/`&[T]`/`&str`, so an *owned* value (a literal, a cloned slice/field binder,
@@ -1827,21 +1854,9 @@ defmodule Rian.Lower do
         # the arm already owns its `T`. `Vec(T)` returns are owned constructions already.
         arm = if generic? and func.ret in func.tvars, do: "(#{arm}).clone()", else: arm
 
-        # a closure-RETURNING function (`… Fn(args, ret) := (x) -> …`, ADR-0061): the
-        # return type lowered to `Box<dyn Fn…>` (see `Capability.owned`), so the returned
-        # closure is boxed and `move`-captures (it outlives the function frame). Applies
-        # when the arm is a bare closure (`|…| …`); a more complex tail stays off `:rs`.
-        # When the closure RETURNS a type variable (`Fn(Int53, T)`), its body returns the
-        # captured owned `T`; a `Fn` (reusable) closure can't move it out, so clone per call.
-        arm =
-          if match?("Fn(" <> _, func.ret) and String.starts_with?(arm, "|") do
-            body =
-              if fn_returns_tvar?(func.ret, func.tvars), do: clone_closure_tail(arm), else: arm
-
-            "Box::new(move #{body})"
-          else
-            arm
-          end
+        # (a value-position closure boxes at the `ELambda` emit, driven by `fn_ec.fn_box`,
+        # so it covers a top-level return AND a `Fn` nested in a constructor — `Some((n) ->
+        # x)` — uniformly; see `emit(%ELambda{}, :rust, …)`.)
 
         # binders bound inside a list/slice element are `&T` — a guard over them
         # must deref (`*c`); the arm body's arithmetic works on `&T` directly
@@ -2616,7 +2631,20 @@ defmodule Rian.Lower do
 
   defp emit(%ELambda{params: params, body: body}, :rust, ec) do
     ps = Enum.map_join(params, ", ", fn {n, _} -> n end)
-    {"|#{ps}| #{p(body, 0, :rust, ec)}", 12}
+    body_str = p(body, 0, :rust, ec)
+
+    # a value-position closure (in a `Fn(...)`-returning function) lowers to an owned
+    # `Box<dyn Fn>`: `move`-capture so it outlives the frame, and `.clone()` a captured
+    # tvar body per call (a reusable `Fn` can't move its capture out). A callback-arg
+    # closure (no `fn_box`) stays a bare `|…| …` borrowed as `&impl Fn` at the call site.
+    case ec[:fn_box] do
+      nil ->
+        {"|#{ps}| #{body_str}", 12}
+
+      %{clone?: clone?} ->
+        inner = if clone?, do: "(#{body_str}).clone()", else: body_str
+        {"Box::new(move |#{ps}| #{inner})", 12}
+    end
   end
 
   # if-expression

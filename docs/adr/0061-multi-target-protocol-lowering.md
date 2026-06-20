@@ -182,15 +182,17 @@ Consequences of target-relativity:
   Fn(Int53, Int53)` all reach `:rs` (rustc-verified, `reach_rust_honesty_test`); the whole
   `prelude_list.rian` is back on the full `ex,rs,js` CI gate.
 
-  A **top-level returned closure over a type variable** (`mk(x T) Fn(Int53, T)`) now reaches `:rs` too:
-  `Rian.Lower` lowers the captured tvar param **owned** (`x: T`, not `&T`, so the boxed `dyn Fn` is
-  `'static`), adds a `T: Clone + 'static` bound in `rust_generics`, and clones the captured value per
-  call in the closure body (`move |n| (x).clone()` — a reusable `Fn`, not a move-out `FnOnce`).
-  rustc-verified (`lower_test`, `reach_rust_honesty_test`). The remaining `Fn` residual is now **just
-  the nested case**: a `Fn` **nested** in another type (`Option(Fn(Int53, T))`), which needs an
-  owned-capture closure built inside a constructor — `sig_uses_fn_type?` pins exactly that off `:rs`
-  (and nothing else `Fn`-shaped). Plus every **parametric** shape outside the monomorphic subset above.
-  (A Copy-primitive *protocol-impl receiver* used as a value — `Show for Bool`'s `if b` — now derefs
+  A **returned closure over a type variable** reaches `:rs` too — **top-level OR nested** in the return
+  type (`mk(x T) Fn(Int53, T)`, `Option`/`Result`/`Vec(Fn(Int53, T))`). `Rian.Lower` lowers the captured
+  tvar param **owned** (`x: T`, not `&T`, so the boxed `dyn Fn` is `'static`), adds a `T: Clone + 'static`
+  bound in `rust_generics`, and boxes every **value-position** closure at the `ELambda` emit (driven by
+  `fn_ec.fn_box`) — `Box::new(move |n| (x).clone())` — cloning a captured tvar body per call (a reusable
+  `Fn`, not a move-out `FnOnce`). Because the boxing is at the closure (not the return tail), a `Fn`
+  nested inside a constructor — `Some((n) -> x)` → `Option::Some(Box::new(move …))` — lowers the same
+  way. So **no `Fn`-bearing signature is pinned off `:rs`** any more (callback param, top-level return,
+  nested return, HOF — all reach `:rs`); rustc-verified (`lower_test`, `reach_rust_honesty_test`). The
+  remaining `:rs` gap is every **parametric** shape outside the monomorphic subset above. (A
+  Copy-primitive *protocol-impl receiver* used as a value — `Show for Bool`'s `if b` — now derefs
   correctly and reaches `:rs`.)
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
   `Self`-returning methods (`def add(a Self, b Self) Self`) and associated types are a further Rust
