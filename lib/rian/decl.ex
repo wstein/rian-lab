@@ -1757,6 +1757,13 @@ defmodule Rian.Decl do
       end
 
     case rest do
+      # only capability word(s), no name/type — a bare `tag`/`val`/… read as a capability
+      # (a param needs a name after the cap, `tag x`). A clear error, not a `case` crash.
+      [] ->
+        raise Error,
+              "parameter `#{p}` has no name — a capability (`val`/`iso`/`ref`/`tag`) must be " <>
+                "followed by a parameter name (e.g. `tag x`)"
+
       [tok] ->
         if type_token?(tok), do: {nil, cap, Rian.TypeStr.normalize(tok)}, else: {tok, cap, :infer}
 

@@ -469,7 +469,9 @@ defmodule Rian.TranspileTest do
       '''
 
       out = rian(src)
-      assert out =~ "pub def rust_param(name Symbol, val String) String := val"
+      # `val` is a reserved capability word, so the param name escapes to `val_` (both in
+      # the signature and the body) — the @rian_sig supplies the TYPES (`Symbol`/`String`).
+      assert out =~ "pub def rust_param(name Symbol, val_ String) String := val_"
       # the @rian_sig attribute + use Rian.Ann are consumed, not re-emitted as markers
       refute out =~ "TODO[port]: @rian_sig"
       refute out =~ "use Rian.Ann"
@@ -823,6 +825,25 @@ end|) =~ ~S|"v=${x}!"|
       out = rian("defmodule M do\n  def j(a, b), do: a ++ b\nend")
       assert out =~ "List.concat(a, b)"
       refute out =~ "a ++ b"
+    end
+
+    test "a `$` in a docstring is escaped so `${…}` stays literal (not interpolation)" do
+      out =
+        rian(~S'''
+        defmodule M do
+          @doc "interpolate with ${expr}"
+          def f(x), do: x
+        end
+        ''')
+
+      # `${` must be `\${` in the emitted doc string, else Rian lexes it as interpolation
+      assert out =~ ~S|@doc "interpolate with \${expr}"|
+    end
+
+    test "a param named after a capability word (`tag`/`val`/…) is escaped" do
+      out = rian("defmodule M do\n  def g(tag), do: tag\nend")
+      assert out =~ "pub def g(tag_ Any) Any := tag_"
+      refute out =~ "g(tag)"
     end
 
     test "Elixir list subtraction `--` lowers to a portable `List.reject` over membership" do

@@ -2359,9 +2359,13 @@ defmodule Rian.Transpile do
   # includes Rian's **word operators** (`Rian.Lexer.@op_words`): an Elixir local named
   # `div`/`rem` (both valid Elixir identifiers) would otherwise emit bare and re-lex as an
   # operator token, not an identifier. Aligns with `bare_atom?`'s escape set below.
+  # also the **capability** words (`Rian.Decl.@caps`): an Elixir param/var named `tag`,
+  # `val`, `iso`, or `ref` would otherwise lex as a leading capability in a head param
+  # (`def f(tag)` → "a `tag`-capability param with no name") rather than the identifier.
   @rian_keywords ~w(if do else end def type range case when struct alias mod pub const
                     macro use with for protocol impl opaque abstract
-                    and or not in div rem)
+                    and or not in div rem
+                    val iso ref tag)
 
   defp rian_ident(name) do
     s = to_string(name)
@@ -2427,5 +2431,9 @@ defmodule Rian.Transpile do
     |> String.replace("\n", "\\n")
     |> String.replace("\t", "\\t")
     |> String.replace("\r", "\\r")
+    # `${` in literal content (a docstring describing Rian's own `${…}` syntax, a host
+    # body) would otherwise lex as interpolation — escape `$` so it stays literal. `escape`
+    # is only for verbatim text; the Elixir-`#{}`→Rian-`${}` conversion is a separate path.
+    |> String.replace("$", "\\$")
   end
 end
