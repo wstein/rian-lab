@@ -822,6 +822,25 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ "a ++ b"
     end
 
+    test "Elixir text/regex match `=~` lowers to `Regex.match?(regex, subject)`" do
+      out = rian("defmodule M do\n  def m(s), do: s =~ ~r/ab/\nend")
+      assert out =~ "Regex.match?(sigil_r(\"ab\", []), s)"
+      refute out =~ "=~"
+    end
+
+    test "an operator-name atom emits bare (`:==`); a bracket/percent atom is quoted" do
+      # `:==`/`:/=` are bare (the lexer's op-atom rule); `:%`/`:{}`/`:<<>>` are not
+      # operator runs, so they emit the quoted `:\"…\"` form the parser accepts.
+      out = rian(~S|defmodule M do
+  def t, do: {:"==", :"/=", :"%", :"{}", :"<<>>"}
+end|)
+      assert out =~ ":=="
+      assert out =~ ":/="
+      assert out =~ ~s|:"%"|
+      assert out =~ ~s|:"{}"|
+      assert out =~ ~s|:"<<>>"|
+    end
+
     test "Elixir `raise` → Rian `panic` (the diverging abort, ADR-0035/0040)" do
       out =
         rian("""

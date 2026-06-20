@@ -1540,7 +1540,7 @@ defmodule Rian.Transpile do
   # case is `None`. (A `nil` used as a non-Option sentinel will surface at the
   # type gate — that is the right place, not a transpile-time marker.)
   defp expr(nil), do: "None"
-  defp expr(a) when is_atom(a), do: ":#{a}"
+  defp expr(a) when is_atom(a), do: atom_lit(a)
 
   # a bare Capitalized identifier `Foo` (a nullary ctor / sum variant, e.g. an
   # error tag `{:error, DivByZero}`) → its name, not `__aliases__(:Foo)`.
@@ -1623,6 +1623,11 @@ defmodule Rian.Transpile do
   # Elixir list concat `l ++ r` → the portable prelude `List.concat/2` (Rian has no
   # `++` operator).
   defp expr({:++, _, [l, r]}), do: "List.concat(#{expr(l)}, #{expr(r)})"
+
+  # Elixir text/regex match `a =~ regex` → `Regex.match?(regex, a)` (host, typed `Bool`
+  # in `Rian.Builtins`); Rian has no `=~` operator. The string-`contains?` form of `=~`
+  # is not emitted (the corpus uses the regex form).
+  defp expr({:=~, _, [l, r]}), do: "Regex.match?(#{expr(r)}, #{expr(l)})"
 
   # The pipe is real Rian surface (`x |> f(y)` ≡ `f(x, y)`, ADR/01_basics) — render
   # it infix. Without this it falls through to the generic local-call clause and
@@ -2049,7 +2054,7 @@ defmodule Rian.Transpile do
   # generic atom clause and rendered the empty atom `:`, which no longer matches the
   # `None` a producer emits — silently breaking every guardless/`nil`-default match.
   defp pat(nil), do: "None"
-  defp pat(a) when is_atom(a), do: ":#{a}"
+  defp pat(a) when is_atom(a), do: atom_lit(a)
   defp pat({l, r}), do: "{#{pat(l)}, #{pat(r)}}"
   defp pat({:{}, _, elems}), do: "{#{Enum.map_join(elems, ", ", &pat/1)}}"
   defp pat({:|, _, [h, t]}), do: "#{pat(h)} | #{pat(t)}"
@@ -2258,6 +2263,39 @@ defmodule Rian.Transpile do
   defp rian_ident(name) do
     s = to_string(name)
     if s in @rian_keywords, do: s <> "_", else: s
+  end
+
+  # An atom literal: bare `:name` when the name is parseable unquoted, else the quoted
+  # `:"name"` form (which `Rian.Pratt` accepts for any name). A name is bare-safe when
+  # it is an identifier, a keyword (`:if`), an operator word (`:and`), or an operator
+  # run the lexer's op-atom rule scans (`:==`, `:/=`) — but NOT the bare `=` (that is
+  # the bind `:=`). Elixir-AST tags like `:%`/`:{}`/`:<<>>`/`:%{}` are thus quoted.
+  defp atom_lit(a) do
+    s = to_string(a)
+    if bare_atom?(s), do: ":#{s}", else: ~s|:"#{escape(s)}"|
+  end
+
+  defp bare_atom?(s) do
+    cond do
+      Regex.match?(~r/^[a-z_]\w*[?!]?$/, s) ->
+        true
+
+      s in ~w(and or not in rem div) ->
+        true
+
+      s in @rian_keywords ->
+        true
+
+      # an operator run the lexer's op-atom rule scans bare — but NOT the bind `=`,
+      # nor a run carrying the bitstring delimiters `<<`/`>>` (those lex as `{:bitopen}`/
+      # `{:bitclose}` before the op-atom rule, so e.g. `:<<>>` must be quoted).
+      Regex.match?(~r/^[+\-*\/<>=!]+$/, s) and s != "=" and
+        not String.contains?(s, "<<") and not String.contains?(s, ">>") ->
+        true
+
+      true ->
+        false
+    end
   end
 
   # ── helpers ─────────────────────────────────────────────────────────────────
