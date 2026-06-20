@@ -174,6 +174,7 @@ defmodule Rian.Doctest do
   end
 
   # build the per-example ExUnit `test` ASTs for one Rian source
+  @rian_host "host boundary: builds ExUnit `test` ASTs via `quote`/`unquote` — Elixir macro metaprogramming, :ex-only, no Rian image"
   defp exunit_cases(src, mod) do
     for {{expr, expected}, i} <- Enum.with_index(extract(src)) do
       label = "doctest: #{expr} #{@marker} #{expected}"
