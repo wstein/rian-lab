@@ -798,6 +798,11 @@ defmodule Rian.JVM do
   defp expr_kt(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}),
     do: "(#{expr_kt(n)}).toString()"
 
+  # runtime `Show` fallthrough for an `:unknown`-typed hole (ADR-0069 §2): Kotlin
+  # `.toString()` is universal (every value has it).
+  defp expr_kt(%ECall{fun: %EId{name: "__prim_to_string"}, args: [x]}),
+    do: "(#{expr_kt(x)}).toString()"
+
   # float → shortest-round-trip string (ADR-0069 Float64 unlock); `Rian.Show.float`
   # normalizes it to the ECMAScript canonical. Lowers to the injected
   # `__rian_float_repr` helper (below) rather than `Double.toString` directly: the

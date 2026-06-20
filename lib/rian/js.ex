@@ -776,6 +776,11 @@ defmodule Rian.JS do
   defp expr_js(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, i53),
     do: "String(#{expr_js(n, i53)})"
 
+  # runtime `Show` fallthrough for an `:unknown`-typed hole (ADR-0069 §2): `String(x)` is
+  # JS's universal runtime stringifier.
+  defp expr_js(%ECall{fun: %EId{name: "__prim_to_string"}, args: [x]}, i53),
+    do: "String(#{expr_js(x, i53)})"
+
   # float → its shortest-round-trip scientific form (ADR-0069 Float64 unlock): the
   # *digits* are unique across targets; `Rian.Show.float` (portable Rian) normalizes
   # this to the ECMAScript canonical. `toExponential()` (no arg) gives the shortest

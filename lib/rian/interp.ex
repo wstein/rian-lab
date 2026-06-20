@@ -166,12 +166,22 @@ defmodule Rian.Interp do
   # The `_Unk` **transpiler-draft marker** is an explicit "type not yet supplied" hole, not
   # a stringifiability verdict — so the resolver **defers** it (the value passes through the
   # `<>` chain unchanged: no `to_string`, no coercion) rather than erroring, letting a draft
-  # parse. This is distinct from a genuine `:unknown` (the checker actually *failed* to infer
-  # a real program's type — e.g. an un-pinned matcher arg, an unbound var): that stays a hard
-  # error below, as does a *determined* non-stringifiable type (`Float32`, a user type with
-  # no `impl Show`) — the cases ADR-0069 actually targets. (2026-06 design debate consensus,
-  # refined: defer the deliberate draft placeholder, keep strictness for real inference gaps.)
+  # parse.
   defp stringify(expr, "_Unk", _show), do: expr
+
+  # A genuine `:unknown` (the checker *failed* to infer a real program's type — an un-pinned
+  # matcher arg, an unbound var, a host/pipe-chain return) **falls through to runtime `Show`**
+  # rather than erroring: emit `Prim.to_string` (the host's native runtime stringifier —
+  # BEAM `String.Chars.to_string`, JS `String(x)`, JVM `x.toString()`). This honours the
+  # checker's own contract ("infer `:unknown`, error only on a *provable* mismatch", ADR-0069
+  # §2) — erroring on a merely-undetermined type proves nothing. There is no universal Rust
+  # `Display`, so `Rian.Reach` pins any caller off `:rs` (`to_string_prim_blocker`); the gate
+  # stays honest. A *determined* non-stringifiable type (`Float32`, a user type with no `impl
+  # Show`) still hard-errors below — that is a provable verdict. (2026-06 reversal of the
+  # earlier "`:unknown` is a hard error" consensus: a real inference gap deserves runtime
+  # dispatch, not a parse-time refusal, especially for transpiler-draft compiler sources.)
+  defp stringify(expr, :unknown, _show),
+    do: {:call, {:id, "__prim_to_string"}, [expr]}
 
   defp stringify(expr, type, show) do
     cond do

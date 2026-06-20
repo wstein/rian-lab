@@ -156,6 +156,27 @@ defmodule Rian.ReachTest do
              )
     end
 
+    test "a body that runtime-stringifies an `:unknown` hole is off :rs only (ADR-0069 §2)" do
+      # `a` is bound by a destructuring pattern → inferred `:unknown`, so the `${a}`
+      # interpolation falls through to `Prim.to_string` (runtime Show). BEAM/JS/JVM have a
+      # universal runtime stringifier; Rust has no universal `Display`, so the gate pins the
+      # function off `:rs` alone — matching the emitters, never lying.
+      rep =
+        reach("""
+        type Pair := P(String)
+        def f(p Pair) String := case p do
+          P(a) -> "v=${a}"
+        end
+        """)
+
+      assert targets(rep, "f") == [:ex, :js, :jvm]
+
+      assert Enum.any?(
+               entry(rep, "f").blockers,
+               &(&1.kind == :prim and &1.kills == [:rs])
+             )
+    end
+
     test "a Rian cross-module call is portable (not host FFI)" do
       rep =
         reach("""

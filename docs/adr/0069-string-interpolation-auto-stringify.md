@@ -92,8 +92,18 @@ it cannot prove non-stringifiability, and erroring there violates the checker's 
   the hole resolves once the type is hand-filled. It was a layering bug that an unfinished draft failed
   at *parse* on a not-yet-typed hole.
 - a genuine **`:unknown`** (the checker actually failed to infer a real program's type — an un-pinned
-  generic, an unbound name) → **still a hard error**: a real inference gap is worth surfacing, and the
-  guarantee (no value reaches a string without a known stringification) holds for finished code.
+  generic, an unbound name, a host/pipe-chain return) → **falls through to runtime `Show`** (2026-06
+  reversal of the earlier "still a hard error" rule). The hole lowers to **`Prim.to_string`**, the host's
+  native runtime stringifier (BEAM `String.Chars.to_string/1` · JS `String(x)` · JVM `x.toString()`),
+  which dispatches on the value's *actual* type at run time. Rationale: erroring on a merely-undetermined
+  type **proves nothing** and violates the checker's own contract — and the draft compiler sources whose
+  port this unblocks are full of legitimately-undetermined holes that a static refusal would freeze out.
+  The static guarantee weakens to a *runtime* one (a value with no runtime stringification fails at run
+  time, not compile time) — the trade the goal-clarification accepts. **Reach stays honest:** there is no
+  universal Rust `Display`, so a body that runtime-stringifies an unknown is pinned **off `:rs`** via the
+  `:prim` `to_string_prim_blocker` (`Rian.Reach`) — it reaches `:ex`/`:js`/`:jvm`, exactly the targets
+  whose emitters lower `__prim_to_string`. A *determined* non-stringifiable type (`Float32`, a user type
+  with no `impl Show`) is unchanged — **still a hard error**, because that is a *provable* verdict.
 
 ### 3. The portable `Show` protocol (the actual work)
 
@@ -104,6 +114,7 @@ by two new intrinsics in the `Prim.*` layer (ADR-0047 §2, `Rian.Prim.@prims`):
 |------|------|----|----|-----|
 | `__prim_int_to_string` | `erlang:integer_to_binary/1` | `String(n)` / `n.toString()` | `n.to_string()` | `n.toString()` |
 | `__prim_float_to_string` | `io_lib_format` shortest-round-trip | `String(n)` | `format!("{}", n)`† | `n.toString()`† |
+| `__prim_to_string` (runtime Show, §2) | `String.Chars.to_string/1` | `String(x)` | — (off `:rs`) | `x.toString()` |
 
 ```rian
 # stdlib_show.rian  (sketch)

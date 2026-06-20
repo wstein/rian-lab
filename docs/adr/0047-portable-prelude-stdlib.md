@@ -53,7 +53,10 @@ intentionally target-restricted and `Rian.Reach` pins a caller off the targets t
 — keeping the gate honest against the emitters (ADR-0058): the 64-bit overflow ops
 (`Prim.wrapping_add`/`saturating_add`/`checked_add`) are off `:js` (no `Int64` representation, ADR-0064 §2a),
 and `Prim.str_to_atom` (string→atom interning) is **BEAM-only** — atoms have no Rust/JS/JVM value, so a
-body that calls it reaches `:ex` alone. These power the BEAM self-hosting backends (`selfhost_compose*.rian`),
+body that calls it reaches `:ex` alone. `Prim.to_string` (the runtime-`Show` fallthrough for an
+`:unknown`-typed interpolation hole, ADR-0069 §2) is off `:rs` — BEAM `String.Chars.to_string`, JS
+`String(x)`, JVM `.toString()` are universal runtime stringifiers, but Rust has no universal `Display`,
+so it reaches `:ex`/`:js`/`:jvm`. These power the BEAM self-hosting backends (`selfhost_compose*.rian`),
 which emit Erlang abstract forms and are BEAM-pinned by construction.
 
 ### 3. No `nil` — absence is `Option(T) = Some(T) | None`

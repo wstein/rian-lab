@@ -2374,6 +2374,16 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_int_to_string"}, args: [n]}, :elixir, ec),
     do: {"Integer.to_string(#{p(n, 0, :elixir, ec)})", 12}
 
+  # runtime `Show` fallthrough for an `:unknown`-typed interpolation hole (ADR-0069 §2):
+  # Elixir `to_string/1` (String.Chars) is the native runtime stringifier. Rust has no
+  # universal `Display`, so `Rian.Reach` pins a caller off `:rs`; the Rust arm here is a
+  # best-effort `format!("{}", …)` for the rare case it is still selected.
+  defp emit(%ECall{fun: %EId{name: "__prim_to_string"}, args: [x]}, :elixir, ec),
+    do: {"to_string(#{p(x, 0, :elixir, ec)})", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_to_string"}, args: [x]}, :rust, ec),
+    do: {"format!(\"{}\", #{p(x, 0, :rust, ec)})", 12}
+
   # diverging abort (ADR-0035/0040): Rust `panic!` (type `!`, an expression) /
   # Elixir `raise`. Never returns, so it is well-typed in any position.
   defp emit(%ECall{fun: %EId{name: "__prim_panic"}, args: [msg]}, :rust, ec),

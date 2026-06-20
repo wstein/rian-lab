@@ -799,6 +799,13 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_char_to_string"}, args: [c]}, s),
     do: {:bin, @ln, [{:bin_element, @ln, expr_form(c, s), :default, [:utf8]}]}
 
+  # runtime `Show` fallthrough for an `:unknown`-typed interpolation hole (ADR-0069 §2):
+  # `String.Chars.to_string/1` is the BEAM's native runtime stringifier (dispatching on
+  # the value's actual type). No universal Rust `Display`, so `Rian.Reach` pins a caller
+  # off `:rs` — JS/JVM lower it natively, so it reaches `:ex`/`:js`/`:jvm`.
+  defp expr_form(%ECall{fun: %EId{name: "__prim_to_string"}, args: [x]}, s),
+    do: remote_call(:"Elixir.String.Chars", "to_string", [x], s)
+
   # diverging abort (ADR-0035/0040): `erlang:error/1` raises, never returns — the
   # uncatchable `panic`. Reason is the message binary so the BEAM crash names it.
   defp expr_form(%ECall{fun: %EId{name: "__prim_panic"}, args: [msg]}, s),

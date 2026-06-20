@@ -395,14 +395,25 @@ defmodule Rian.InterpTest do
     end
   end
 
-  describe "un-stringifiable holes are a compile error, never a silent fallback (ADR-0035)" do
-    test "a genuine `:unknown` (real inference gap) is rejected" do
-      assert_raise ArgumentError, ~r/no `Show` for|statically-known/, fn ->
-        Beam.load(~S|def f(x Int64) String := "v=${g(x)}"|, :interp_unknown_err)
+  describe "interpolation holes & stringifiability (ADR-0069 §2)" do
+    test "a genuine `:unknown` hole falls through to runtime `Show` and runs" do
+      # `a` is bound by a destructuring pattern, so the checker infers `:unknown`
+      # (component types aren't recovered) — but the value is a String at runtime, so
+      # `__prim_to_string` (BEAM `String.Chars.to_string`) stringifies it rather than the
+      # resolver erroring at compile time (2026-06 reversal of the prior hard-error rule).
+      src = ~S"""
+      type Pair := P(String)
+      def f(p Pair) String := case p do
+        P(a) -> "v=${a}"
       end
+      def demo() String := f(P("hi"))
+      """
+
+      {:ok, m} = Beam.load(src, :interp_unknown_runtime)
+      assert m.demo() == "v=hi"
     end
 
-    test "a determined non-stringifiable type is rejected" do
+    test "a determined non-stringifiable type is still rejected" do
       assert_raise ArgumentError, ~r/no `Show` for `Box`/, fn ->
         Decl.compile(~S|type Box := B(Int64)| <> "\n" <> ~S|def f(b val Box) String := "v=${b}"|)
       end

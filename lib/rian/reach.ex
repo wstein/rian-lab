@@ -693,6 +693,18 @@ defmodule Rian.Reach do
   defp wide_prim_blocker,
     do: %{construct: "64-bit overflow op (no JS representation)", kind: :numeric, kills: [:js]}
 
+  # `__prim_to_string` is the runtime `Show` fallthrough for an `:unknown`-typed
+  # interpolation hole (ADR-0069 §2). BEAM/JS/JVM have a universal runtime stringifier
+  # (`String.Chars.to_string` / `String(x)` / `.toString()`), but Rust has no universal
+  # `Display`, so a body that runtime-stringifies an unknown value is off `:rs` — the gate
+  # matches the emitters (the Rust arm is best-effort and not selected for a portable fn).
+  defp to_string_prim_blocker,
+    do: %{
+      construct: "`Prim.to_string` (runtime Show — no universal Rust Display)",
+      kind: :prim,
+      kills: [:rs]
+    }
+
   # `__prim_str_to_atom` interns a string to a BEAM atom — only the BEAM emitter
   # lowers it (Rust/JS/JVM have no atom value). A body that calls it is BEAM-only,
   # so the gate matches the emitters (off `:rs`/`:js`/`:jvm`), never lying.
@@ -1055,6 +1067,11 @@ defmodule Rian.Reach do
   # Must precede the generic `EId` local-call edge below (no local def of that name).
   defp classify(%Core.ECall{fun: %Core.EId{name: "__prim_str_to_atom"}}, _modnames, {bl, ca}),
     do: {[atom_prim_blocker() | bl], ca}
+
+  # `__prim_to_string` — runtime Show fallthrough (ADR-0069 §2). Off `:rs` (no universal
+  # Display); reaches `:ex`/`:js`/`:jvm`. Must precede the generic `EId` local-call edge.
+  defp classify(%Core.ECall{fun: %Core.EId{name: "__prim_to_string"}}, _modnames, {bl, ca}),
+    do: {[to_string_prim_blocker() | bl], ca}
 
   # local function application — a call-graph edge
   defp classify(%Core.ECall{fun: %Core.EId{name: f}}, _modnames, {bl, ca}),
