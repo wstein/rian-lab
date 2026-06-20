@@ -100,10 +100,11 @@ capturing natively — ADR-0061), **captures** (`&(&1 * 2)` → `{ _1 -> … }`,
 `Pair<A, B>`, destructured via `componentN()`), and **structs** (`struct Name(f T, …)` →
 a Kotlin `data class`, named-arg construction + field access + `is Name` patterns), and
 **maps** (`%{k: v}` atom-keyed → `mapOf("k" to v)`, `Dict(K, V)` → `Map<K, V>`, get/put/has)
-now lower too. Still raising
+now lower too. A **`with`** expression desugars to nested `case`s (ADR-0040, shared via
+`Core.desugar_with`, so JS gets it too). Still raising
 `Rian.JVM.Unsupported` (the next increments): arity-≥4 tuples (use a struct), tagged tuples
 (`{:ok, v}` — a Result, BEAM-only), non-atom map keys (BEAM-only), map update (`%{m | …}`),
-map patterns, `with`,
+map patterns, bitstrings,
 general FFI, and a dispatcher returning an associated type (ADR-0074 — no concrete Kotlin return). Per ADR-0026
 parity, JVM CI stays **non-blocking** until promoted: CI installs `kotlinc` and runs the JVM
 execution tests in a dedicated `continue-on-error` lane (the blocking `mix test.all` gate keeps

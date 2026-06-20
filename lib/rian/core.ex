@@ -471,6 +471,35 @@ defmodule Rian.Core do
 
   defp cap_arity_list(es), do: Enum.reduce(es, 0, &max(cap_arity(&1), &2))
 
+  @doc """
+  Desugar an `EWith` into a nest of `ECase`s (the same lowering `Rian.Beam`'s
+  `with_form` does, but as Core, so the `ECase`-capable emitters — `Rian.JS`,
+  `Rian.JVM` — get `with` for free). Each clause `p <- e` becomes `case e do p ->
+  <rest> ; _withN -> <else> end`; a non-matching value either falls through to the
+  case-style `else` arms or, with no `else`, is the `with`'s result.
+  """
+  @rian_sig "pub def desugar_with(clauses Vec((Pat, Expr)), body Expr, els Vec((Pat, Any, Expr))) Expr"
+  @spec desugar_with([{struct(), struct()}], struct(), list()) :: struct()
+  def desugar_with(clauses, body, els), do: desugar_with(clauses, body, els, 0)
+
+  defp desugar_with([], body, _els, _d), do: body
+
+  defp desugar_with([{pat, expr} | rest], body, els, d) do
+    cv = "_with#{d}"
+
+    %ECase{
+      scrut: expr,
+      arms: [
+        {pat, nil, desugar_with(rest, body, els, d + 1)},
+        {%PVar{name: cv}, nil, with_else(els, cv)}
+      ]
+    }
+  end
+
+  # no `else`: the non-matching value IS the result; otherwise match it case-style.
+  defp with_else([], cv), do: %EId{name: cv}
+  defp with_else(els, cv), do: %ECase{scrut: %EId{name: cv}, arms: els}
+
   # `a |> f(args)` → `f(a, args)`; `a |> f` / `a |> M.f` → `f(a)` (bare callee).
   defp pipe_into(l, {:call, fun, args}), do: {:call, fun, [l | args]}
   defp pipe_into(l, callee), do: {:call, callee, [l]}

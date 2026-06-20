@@ -428,15 +428,32 @@ defmodule Rian.JSTest do
       assert_raise Rian.Check.Error, fn -> JS.compile("def f() Int := true") end
     end
 
+    test "a `with` expression desugars to nested cases and runs (ADR-0040)" do
+      js =
+        JS.compile("""
+        mod M do
+          pub def step(n Int53) Symbol | Int53 := if n > 0 do {:ok, n + 1} else {:error, :neg} end
+          pub def chain(x Int53) Int53 := with {:ok, v} <- step(x), {:ok, w} <- step(v) do v + w else {:error, _} -> 0 - 1 end
+        end
+        """)
+
+      case node_eval(js, "[chain(5), chain(-1)].join(',')") do
+        :no_node -> :ok
+        # chain(5): step→{ok,6}, step(6)→{ok,7} ⇒ 6+7=13 ; chain(-1): step→{error} ⇒ -1
+        out -> assert out == "13,-1"
+      end
+    end
+
     test "a not-yet-implemented construct fails early with a clear message (naming the fn)" do
       # the emitter-capability pre-check raises ONE clear error up front (Reach stays
       # architectural per ADR-0041 — this is an implementation-status check).
       err =
         assert_raise JS.Unsupported, fn ->
-          JS.compile("def f(x Int) Int := with {:ok, v} <- g(x) do v end")
+          JS.compile("def f(x Int) String := <<x>>")
         end
 
-      assert Exception.message(err) =~ "`f`: a `with` expression is not yet supported on :js"
+      assert Exception.message(err) =~
+               "`f`: a bitstring (BEAM-only, ADR-0078) is not yet supported on :js"
     end
 
     test "a `ref` param is lowered to value semantics (sound: return-based surface)" do

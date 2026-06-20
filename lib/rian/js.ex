@@ -61,8 +61,10 @@ defmodule Rian.JS do
   registry. A **lambda** `(a) -> body` lowers to a JS arrow function `(a) => body`,
   capturing its environment natively (no `Box`/`move` ceremony as Rust needs —
   ADR-0061). A **capture** `&(&1 + 1)` lowers to an arrow over generated args
-  (`(_1) => …`) and `&name/arity` to the bare function reference. **Not yet**
-  (raise `Rian.JS.Unsupported`): `with`, general FFI.
+  (`(_1) => …`) and `&name/arity` to the bare function reference. A **`with`**
+  expression desugars to a nest of `case`s (ADR-0040, via `Core.desugar_with`).
+  **Not yet** (raise `Rian.JS.Unsupported`): bitstrings (BEAM-only, ADR-0078),
+  general FFI.
 
   ## Capabilities
 
@@ -100,6 +102,7 @@ defmodule Rian.JS do
     ELabel,
     ETuple,
     EUnary,
+    EWith,
     PAs,
     PAtom,
     PChar,
@@ -127,7 +130,6 @@ defmodule Rian.JS do
   # atom inside an FFI call like `:lists.reverse` IS lowered). `Core.reject_unsupported!`
   # runs the shared walk; this map is the JS-specific construct→label set.
   @js_unsupported %{
-    Core.EWith => "a `with` expression",
     Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)"
   }
 
@@ -919,6 +921,10 @@ defmodule Rian.JS do
   # bare field access `value.field` (a remote call `Mod.fun(…)` is handled above
   # as an `ECall` over an `EDot`, so a standalone `EDot` here is field access)
   defp expr_js(%EDot{head: head, name: field}, i53), do: "#{expr_js(head, i53)}.#{field}"
+
+  # a `with` expression desugars to a nest of `case`s (ADR-0040) — emit that.
+  defp expr_js(%EWith{clauses: clauses, body: body, els: els}, i53),
+    do: expr_js(Core.desugar_with(clauses, body, els), i53)
 
   # a lambda `(a, b) -> body` -> a JS arrow function. JS closures capture their
   # environment natively, so a lambda value (passed to a HOF, returned, or bound)

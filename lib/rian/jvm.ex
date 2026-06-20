@@ -64,11 +64,13 @@ defmodule Rian.JVM do
   construction `Name(f = v)`, field access `p.f`, and `is Name` patterns). A
   **map** `%{k: v}` (atom keys → `String`) lowers to a Kotlin `Map` (`mapOf("k" to
   v)`, type `Dict(K, V)` → `Map<K, V>`), with `Map.get`→`getValue`, `Map.put`→`+
-  (k to v)`, `Map.has`→`containsKey`. **Not yet** (raise `Rian.JVM.Unsupported`):
-  arity-≥4 tuples (use a struct), tagged tuples (`{:ok, v}` — a Result, BEAM-only),
-  non-atom map keys (BEAM-only), map update (`%{m | …}`), map patterns, `with`,
-  general FFI; and an associated type in a *non*-covariant position (a bare `Elem`
-  return / an `Elem` parameter), which stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
+  (k to v)`, `Map.has`→`containsKey`. A **`with`** expression desugars to nested
+  `case`s (ADR-0040, via `Core.desugar_with`). **Not yet** (raise
+  `Rian.JVM.Unsupported`): arity-≥4 tuples (use a struct), tagged tuples
+  (`{:ok, v}` — a Result, BEAM-only), non-atom map keys (BEAM-only), map update
+  (`%{m | …}`), map patterns, bitstrings, general FFI; and an associated type in a
+  *non*-covariant position (a bare `Elem` return / an `Elem` parameter), which
+  stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
   `Any` — a member value *is-a* `Any`, so construction needs no wrapping — and a
   type-pattern `n Int53 ->` narrows it back with `is Long`/`is String` (Kotlin
   smart-cast), the same discriminator the dispatcher uses.
@@ -108,6 +110,7 @@ defmodule Rian.JVM do
     EStruct,
     ETuple,
     EUnary,
+    EWith,
     PAs,
     PAtom,
     PChar,
@@ -134,7 +137,6 @@ defmodule Rian.JVM do
   # context. (Type-level gaps — `Vec`/`Map` params, etc. — are left to `kt_type`.)
   # `Core.reject_unsupported!` runs the shared walk; this map is the JVM-specific set.
   @jvm_unsupported %{
-    Core.EWith => "a `with` expression",
     Core.EMapUpdate => "a map update",
     Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)"
   }
@@ -1041,6 +1043,10 @@ defmodule Rian.JVM do
 
   defp expr_kt(%ELambda{params: params, body: body}),
     do: "{ #{Enum.map_join(params, ", ", fn {n, _} -> n end)} -> #{branch_kt(body)} }"
+
+  # a `with` expression desugars to a nest of `case`s (ADR-0040) — emit that.
+  defp expr_kt(%EWith{clauses: clauses, body: body, els: els}),
+    do: expr_kt(Core.desugar_with(clauses, body, els))
 
   # an anonymous capture `&(&1 * 2)` -> a Kotlin lambda over generated args `_1.._N`
   defp expr_kt(%ECapture{body: body}),

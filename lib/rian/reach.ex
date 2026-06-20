@@ -33,8 +33,8 @@ defmodule Rian.Reach do
 
   Reach models **architectural** reachability (what a target *can* run — `ref` off
   the BEAM, `Int64` off JS, FFI off non-BEAM). It deliberately does NOT track an
-  emitter's **implementation status** (`with` not *yet* lowered on JS;
-  maps/structs/arity-≥4 tuples not *yet* on the Tier-2 JVM) — those are portable by
+  emitter's **implementation status** (a bitstring not *yet* lowered on JS;
+  map-update/arity-≥4 tuples not *yet* on the Tier-2 JVM) — those are portable by
   design (ADR-0041/0040/0049) and will land. That gap is reported by a per-emitter
   capability pre-check (`Rian.JS`/`Rian.JVM` `reject_unsupported!`), which fails fast
   with a clear "not yet supported on :js/:jvm" message — keeping this matrix honest

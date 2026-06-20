@@ -386,6 +386,15 @@ defmodule Rian.JVMTest do
       end
       """,
       probe: ~s|println("${classify(5L, 5L)},${classify(5L, 9L)}")|
+    },
+    %{
+      id: :with,
+      src: """
+      type Res := Ok(Int64) | Err
+      def step(n Int64) Res := if n > 0 do Ok(n + 1) else Err end
+      def chain(x Int64) Int64 := with Ok(v) <- step(x), Ok(w) <- step(v) do v + w else Err -> 0 - 1 end
+      """,
+      probe: ~s|println("${chain(5L)},${chain(-1L)}")|
     }
   ]
 
@@ -556,15 +565,16 @@ defmodule Rian.JVMTest do
     end
 
     test "a not-yet-implemented construct fails early with a clear message (naming the fn)" do
-      # the emitter-capability pre-check: a `with` expression isn't on the Tier-2 JVM
-      # subset yet, so it raises ONE clear error up front (naming `f`) rather than a
-      # deep inspect-dump mid-emission (Reach stays architectural per ADR-0041).
+      # the emitter-capability pre-check: a bitstring isn't on the Tier-2 JVM subset
+      # (BEAM-only, ADR-0078), so it raises ONE clear error up front (naming `f`)
+      # rather than a deep inspect-dump mid-emission (Reach stays architectural).
       err =
         assert_raise JVM.Unsupported, fn ->
-          JVM.compile("def f(x Int64) Int64 := with {:ok, v} <- g(x) do v end")
+          JVM.compile("def f(x Int64) String := <<x>>")
         end
 
-      assert Exception.message(err) =~ "`f`: a `with` expression is not yet supported on :jvm"
+      assert Exception.message(err) =~
+               "`f`: a bitstring (BEAM-only, ADR-0078) is not yet supported on :jvm"
     end
 
     test "an arity-≥4 tuple has no idiomatic Kotlin form and raises a clear error" do
@@ -686,6 +696,11 @@ defmodule Rian.JVMTest do
     test "a pin `^x` lowers to an equality test against the pinned value", %{jvm_batch: jvm} do
       assert jvm_kt(jvm, :pin) =~ "== target"
       expect_jvm(jvm, :pin, "1,0")
+    end
+
+    @tag :jvm
+    test "a `with` expression desugars to nested cases and runs (ADR-0040)", %{jvm_batch: jvm} do
+      expect_jvm(jvm, :with, "13,-1")
     end
 
     @tag :jvm
