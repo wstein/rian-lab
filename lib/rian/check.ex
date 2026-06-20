@@ -832,6 +832,7 @@ defmodule Rian.Check do
   def check_func(%Func{} = f, ic, eset) do
     with :ok <- check_external_caps(f),
          :ok <- check_labels(f),
+         :ok <- check_union_clash(f),
          :ok <- check_return(f, ic),
          :ok <- check_binds(f, ic),
          :ok <- check_bounds(f, ic),
@@ -840,6 +841,60 @@ defmodule Rian.Check do
          :ok <- check_effects(f, eset),
          do: check_error_set(f, eset)
   end
+
+  # A value union (`A | B`, ADR-0083) narrows by runtime type, so two members that
+  # share a runtime discriminator (`Int32 | Char` — both `is_integer`/`number`) can
+  # never be told apart: the second arm is dead. Reject such a union with a clear
+  # message rather than only pinning it off every target in `Rian.Reach`. Each
+  # top-level union in the signature (param or return) is checked.
+  defp check_union_clash(%Func{params: ps, ret: ret}) do
+    (Enum.map(ps, & &1.type) ++ [ret])
+    |> Enum.find_value(:ok, fn t -> union_clash(t) end)
+  end
+
+  defp union_clash("Union(" <> rest = t) do
+    members =
+      rest |> binary_part(0, byte_size(rest) - 1) |> Rian.TypeStr.split_top_commas()
+
+    # only PRIMITIVE members share a discriminator class; a sum/struct/tvar member is
+    # `:other` (its own narrowing test), so it never collides here.
+    clash =
+      members
+      |> Enum.map(&{&1, prim_disc(&1)})
+      |> Enum.reject(fn {_m, d} -> d == :other end)
+      |> Enum.group_by(fn {_m, d} -> d end, fn {m, _d} -> m end)
+      |> Enum.find(fn {_d, ms} -> length(ms) > 1 end)
+
+    case clash do
+      {disc, [a, b | _]} ->
+        {:error,
+         "value union `#{t}`: members `#{a}` and `#{b}` share a runtime discriminator " <>
+           "(#{disc_word(disc)}), so a `case` cannot tell them apart — the second arm is " <>
+           "dead. Use distinct member kinds, or a named sum type."}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp union_clash(_t), do: nil
+
+  defp prim_disc("Bool"), do: :boolean
+  defp prim_disc("String"), do: :binary
+  defp prim_disc("Char"), do: :integer
+
+  defp prim_disc(t) do
+    cond do
+      Regex.match?(~r/^U?Int\d*$/, t) -> :integer
+      Regex.match?(~r/^Float\d*$/, t) -> :float
+      true -> :other
+    end
+  end
+
+  defp disc_word(:integer), do: "both lower to an integer / JS `number`"
+  defp disc_word(:binary), do: "both lower to a binary / JS `string`"
+  defp disc_word(:boolean), do: "both lower to a boolean"
+  defp disc_word(:float), do: "both lower to a float"
 
   # ADR-0035 §6 — a **unit-yielding** expression must not appear in **value position**
   # (return / binding RHS / argument / a branch feeding a used value). Two constructs

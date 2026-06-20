@@ -379,6 +379,26 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "value-union discriminator clash (ADR-0083)" do
+    test "two members sharing a runtime discriminator (`Int32 | Char`) is a hard error" do
+      assert {:error, msg} = Check.check("def f(x Int32 | Char) Int53 := x")
+      assert msg =~ "share a runtime discriminator"
+      assert msg =~ "Int32" and msg =~ "Char"
+    end
+
+    test "two integer widths clash too (`Int32 | Int64`)" do
+      assert {:error, msg} = Check.check("def g(x Int32 | Int64) Int53 := x")
+      assert msg =~ "share a runtime discriminator"
+    end
+
+    test "distinct discriminators are fine (`Int53 | String`)" do
+      assert Check.check(
+               "def h(x Int53 | String) Int53 := case x do\n n Int53 -> n\n s String -> 0\nend"
+             ) ==
+               :ok
+    end
+  end
+
   describe "error-set composition (ADR-0040 §4)" do
     test "an error tag in the declared `T | E` set passes" do
       assert Check.check("def find(id Int64) Result(User, NotFound) := {:error, NotFound}") == :ok

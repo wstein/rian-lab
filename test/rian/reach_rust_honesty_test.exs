@@ -150,7 +150,10 @@ defmodule Rian.ReachRustHonestyTest do
                 # `enum` + `From` + `match` narrowing + call-site `::from` construction
                 "def describe(x Int53 | String) Int53 := case x do\n  n Int53 -> n + 1\n  s String -> 0\nend\ndef caller() Int53 := describe(41)",
                 # a value union of SUM members (the enum wraps user enums; ADR-0083)
-                "type Box := BoxV(Int53)\ntype Bag := BagV(Int53)\ndef kind(x Box | Bag) Int53 := case x do\n  a Box -> 1\n  b Bag -> 2\nend\ndef cb() Int53 := kind(BoxV(5))"
+                "type Box := BoxV(Int53)\ntype Bag := BagV(Int53)\ndef kind(x Box | Bag) Int53 := case x do\n  a Box -> 1\n  b Bag -> 2\nend\ndef cb() Int53 := kind(BoxV(5))",
+                # a value-union RETURN: each member-producing tail leaf wraps via
+                # `Enum::from`, pushed into the `if` branches (ADR-0083)
+                "def mk(b Bool) Int53 | String := if b do 1 else 33 end"
               ] do
             rust = Rian.Lower.rust_program(Decl.parse(src))
             base = Path.join(System.tmp_dir!(), "rian_pos_#{System.unique_integer([:positive])}")

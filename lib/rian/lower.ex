@@ -619,6 +619,32 @@ defmodule Rian.Lower do
 
   defp coerce_string_branch(e, ec), do: coerce_string_ast(e, ec)
 
+  # A value-union RETURN (ADR-0083): the body produces a MEMBER value but the
+  # signature is the synthesized enum, so wrap each TAIL leaf with `Enum::from(leaf)`,
+  # pushed into `if`/`case` branches so they unify (mirrors `coerce_string_ast`). A
+  # leaf already of union type (a union param, a union-returning call) passes through.
+  defp coerce_union_ret_ast(%EIf{cond: c, then: t, else: e}, enum, ec),
+    do:
+      "if #{p(c, 0, :rust, ec)} { #{coerce_union_ret_ast(t, enum, ec)} } else { #{coerce_union_ret_ast(e, enum, ec)} }"
+
+  defp coerce_union_ret_ast(%ECase{scrut: scrut, arms: arms}, enum, ec),
+    do: rust_case(scrut, arms, &coerce_union_ret_ast(&1, enum, ec), ec)
+
+  defp coerce_union_ret_ast(%EBlock{stmts: [{:expr, e}]}, enum, ec),
+    do: coerce_union_ret_ast(e, enum, ec)
+
+  defp coerce_union_ret_ast(%EBlock{} = b, enum, ec),
+    do: union_wrap("{ #{emit_block(b, :rust, ec)} }", b, enum)
+
+  defp coerce_union_ret_ast(ast, enum, ec), do: union_wrap(p(ast, 0, :rust, ec), ast, enum)
+
+  # wrap a member leaf in `Enum::from`; a leaf already of union type is left as-is.
+  defp union_wrap(str, ast, enum),
+    do: if(union_typed?(ast), do: str, else: "#{enum}::from(#{str})")
+
+  defp union_typed?(%{type: t}) when is_binary(t), do: String.starts_with?(t, "Union(")
+  defp union_typed?(_), do: false
+
   # Gap E+ (ADR-0061): a `Vec`-returning body that tail-returns a BORROWED collection —
   # a `&[T]` slice binder or a `&Vec<T>` field binder destructured from a borrowed value
   # — needs `.to_vec()` to materialise the owned `Vec<T>` the signature promises. Like
@@ -1633,10 +1659,26 @@ defmodule Rian.Lower do
         # or `def to_list(b) := case b do Bag(xs) -> xs end`), leaving owned leaves alone.
         arm =
           cond do
-            string_repr?(func.ret) and rebinds == [] -> coerce_string_ast(ast, ec)
-            match?("Vec(" <> _, func.ret) and rebinds == [] -> coerce_owned_vec_ast(ast, ec)
-            match?("Vec(" <> _, func.ret) and tail_slice_id?(ast, ec) -> "(#{arm}).to_vec()"
-            true -> coerce_ret(arm, func.ret)
+            # a value-union RETURN (ADR-0083): wrap each member-producing TAIL leaf into
+            # the synthesized enum (`Enum::from(leaf)`), pushed into if/case branches; a
+            # leaf already of union type passes through. With rebinds, wrap the whole arm.
+            union_type?(func.ret) and rebinds == [] ->
+              coerce_union_ret_ast(ast, union_enum_name(func.ret), ec)
+
+            union_type?(func.ret) ->
+              union_wrap(arm, ast, union_enum_name(func.ret))
+
+            string_repr?(func.ret) and rebinds == [] ->
+              coerce_string_ast(ast, ec)
+
+            match?("Vec(" <> _, func.ret) and rebinds == [] ->
+              coerce_owned_vec_ast(ast, ec)
+
+            match?("Vec(" <> _, func.ret) and tail_slice_id?(ast, ec) ->
+              "(#{arm}).to_vec()"
+
+            true ->
+              coerce_ret(arm, func.ret)
           end
 
         # a generic function returning a bare owned type variable (`T`) yields a

@@ -59,15 +59,11 @@ defmodule Rian.ReachTest do
       assert entry(rep, "kind").blockers == []
     end
 
-    test "a value-union RETURN pins :rs (Rust return-wrapping not built; ADR-0083)" do
+    test "a value-union RETURN reaches every target — Rust wraps the tail with `Enum::from` (ADR-0083)" do
       rep = reach("def mk(b Bool) Int53 | String := if b do 1 else 0 end")
 
-      assert targets(rep, "mk") == [:ex, :js, :jvm]
-
-      assert Enum.any?(
-               entry(rep, "mk").blockers,
-               &(&1.kind == :typed and &1.construct =~ "value union" and &1.kills == [:rs])
-             )
+      assert targets(rep, "mk") == [:ex, :js, :jvm, :rs]
+      assert entry(rep, "mk").blockers == []
     end
 
     test "a discriminator-CLASH union (`Int32 | Char`, both is_integer) is not claimed narrowable (ADR-0083)" do

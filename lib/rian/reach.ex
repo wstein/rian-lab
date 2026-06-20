@@ -494,20 +494,13 @@ defmodule Rian.Reach do
     # but unimplemented), so `Any` honestly pins off `:rs`/`:js`/`:jvm` until those land. This
     # is distinct from `_Unk`, an *unfinished* hole — `Any` is a real, reported reach contract.
     any = if Enum.any?(sig_types, &type_mentions_any?/1), do: [any_blocker()], else: []
-    # a value-union type `A | B` (canonical `Union(...)`, ADR-0083). A PRIMITIVE,
-    # distinct-discriminator union narrows on every target (BEAM/JS `is`/`typeof`,
-    # Phase 2; JVM `Any`+`when is`, Phase 5; Rust synthesized `enum`+`match`+`From`,
-    # Phase 4) — so in PARAMETER position it kills nothing. In RETURN position it kills
-    # `:rs`: the Rust return-body construction wrapping is not built (BEAM/JS/JVM return
-    # a union value natively). A non-primitive member, a discriminator clash, or a union
-    # nested in a generic still pins off EVERY target, honestly.
-    param_types = Enum.map(Map.get(f, :params, []), & &1.type)
-
-    union_kills =
-      (Enum.flat_map(param_types, &union_param_kills(&1, pctx)) ++
-         union_ret_kills(Map.get(f, :ret), pctx))
-      |> Enum.uniq()
-
+    # a value-union type `A | B` (canonical `Union(...)`, ADR-0083). A NARROWABLE union
+    # (every member primitive/sum/struct with a DISTINCT runtime discriminator) narrows
+    # on every target — BEAM/JS (`is`/`typeof`/tag/`__struct__`), JVM (`Any`+`when is`),
+    # Rust (synthesized `enum`+`match`+`From`, construction-wrapped at call AND return) —
+    # in both parameter and return position, so it kills nothing. A non-narrowable union
+    # (a tvar member, a discriminator clash, or a nested union) pins off EVERY target.
+    union_kills = sig_types |> Enum.flat_map(&union_kills(&1, pctx)) |> Enum.uniq()
     union = if union_kills == [], do: [], else: [union_blocker(union_kills)]
     # Two Rust-generic emitter gaps (ADR-0061/0047) the reach matrix must own up to,
     # or `mix rian.targets`/the conformance gate green-lights `:rs` for code `rustc`
@@ -624,13 +617,13 @@ defmodule Rian.Reach do
   defp union_blocker(kills),
     do: %{construct: "value union (A | B)", kind: :typed, kills: kills}
 
-  # the targets a value-union PARAMETER type kills (ADR-0083). A `:narrowable` union —
-  # every member runtime-discriminable (a primitive `is`/`typeof`, a sum tag, or a
-  # struct `__struct__`) with DISTINCT discriminators — narrows on EVERY target (BEAM
-  # Phase 2/sum-struct, JS Phase 2/baked sum-struct, JVM Phase 5, Rust Phase 4), so it
-  # kills nothing. `:neither` (a tvar member, a discriminator clash like `Int32 | Char`,
-  # or a nested union) kills all.
-  defp union_param_kills(t, pctx) when is_binary(t) do
+  # the targets a value-union signature type kills (ADR-0083), in any position. A
+  # `:narrowable` union — every member runtime-discriminable (a primitive `is`/`typeof`,
+  # a sum tag, or a struct `__struct__`) with DISTINCT discriminators — narrows on EVERY
+  # target (BEAM, JS, JVM, Rust), constructed by `Enum::from` at the call site and the
+  # return tail, so it kills nothing. `:neither` (a tvar member, a discriminator clash
+  # like `Int32 | Char`, or a nested union) kills all.
+  defp union_kills(t, pctx) when is_binary(t) do
     case union_class(t, pctx) do
       :none -> []
       :narrowable -> []
@@ -638,20 +631,7 @@ defmodule Rian.Reach do
     end
   end
 
-  defp union_param_kills(_, _), do: []
-
-  # the targets a value-union RETURN type kills. BEAM/JS/JVM return a union value
-  # natively, but the Rust return-body construction wrapping is not built — so a
-  # narrowable union return additionally kills `:rs`.
-  defp union_ret_kills(t, pctx) when is_binary(t) do
-    case union_class(t, pctx) do
-      :none -> []
-      :narrowable -> [:rs]
-      :neither -> [:ex, :rs, :js, :jvm]
-    end
-  end
-
-  defp union_ret_kills(_, _), do: []
+  defp union_kills(_, _), do: []
 
   # classify a union type string: `:none` (not a union), `:narrowable` (every member a
   # primitive/sum/struct with a runtime discriminator, all DISTINCT), or `:neither` (a
