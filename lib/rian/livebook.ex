@@ -59,6 +59,7 @@ defmodule Rian.Livebook do
 
   @doc "Reset the notebook's shared session to a fresh, empty one."
   @rian_sig "pub def reset() Symbol"
+  @rian_host "host boundary: looks up the Agent process (Process.whereis) and resets it (Agent.update) — :ex-only concurrency/state (ADR-0057), no Rian image"
   @spec reset() :: :ok
   def reset do
     if pid = Process.whereis(@server), do: Agent.update(pid, fn _ -> Repl.new() end)

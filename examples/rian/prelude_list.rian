@@ -80,6 +80,12 @@ mod List do
   pub def concat([], ys) := ys
   pub def concat([h | t], ys) := [h | concat(t, ys)]
 
+  # the inclusive integer sequence `[lo, lo+1, …, hi]` — the eager list a `lo..hi` literal
+  # desugars to (ADR-0036/0079; named `seq` since `range` is a reserved keyword). Empty when
+  # `lo > hi`. Portable (all targets).
+  pub def seq(lo Int53, hi Int53) Vec(Int53)
+  pub def seq(lo, hi) := if lo > hi do [] else [lo | seq(lo + 1, hi)] end
+
   pub def flat_map(xs Vec(T), f Fn(T, Vec(U))) Vec(U) forall T, U
   pub def flat_map([], _) := []
   pub def flat_map([h | t], f) := concat(f(h), flat_map(t, f))

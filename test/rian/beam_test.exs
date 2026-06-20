@@ -75,6 +75,21 @@ defmodule Rian.BeamTest do
       assert mod.grid([1, 2], [10, 20]) == [11, 21, 12, 22]
     end
 
+    test "the `..` range operator desugars to List.seq and enumerates (ADR-0036/0079)" do
+      {:ok, mod} =
+        Beam.load(
+          "def upto(n Int53) Vec(Int53) := 1..n\n" <>
+            "def squares(lo Int53, hi Int53) Vec(Int53) := for x <- lo..hi do x * x end\n" <>
+            "def empty(n Int53) Vec(Int53) := 5..n",
+          :rian_beam_range
+        )
+
+      assert mod.upto(4) == [1, 2, 3, 4]
+      assert mod.squares(2, 4) == [4, 9, 16]
+      # `lo > hi` is the empty sequence (List.seq base case)
+      assert mod.empty(3) == []
+    end
+
     test "the `into:`/`reduce:` desugars (fold over the prelude) compile and run (ADR-0079)" do
       # these are the shapes `Rian.Transpile` emits for Elixir `for … into:/reduce:` —
       # verify the desugared Rian actually compiles and matches the Elixir result.

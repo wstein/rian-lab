@@ -371,6 +371,13 @@ defmodule Rian.Core do
   # its sole argument.
   def from_expr({:bin, "|>", l, r}), do: from_expr(pipe_into(l, r))
 
+  # an inclusive integer range `lo..hi` desugars to the portable prelude `List.seq/2`
+  # (ADR-0036/0079; `seq` because `range` is a reserved keyword) — an eager list
+  # `[lo, …, hi]` — so it enumerates in a `for` and reaches every target without a new
+  # Core node or emitter clause (like the comprehension desugar).
+  def from_expr({:bin, "..", l, r}),
+    do: from_expr({:call, {:dot, {:id, "List"}, "seq"}, [l, r]})
+
   def from_expr({:bin, op, l, r}), do: %EBin{op: op, left: from_expr(l), right: from_expr(r)}
 
   def from_expr({:call, f, args}),

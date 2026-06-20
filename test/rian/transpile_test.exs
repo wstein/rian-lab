@@ -825,6 +825,27 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ "a ++ b"
     end
 
+    test "Elixir list subtraction `--` lowers to a portable `List.reject` over membership" do
+      out = rian("defmodule M do\n  def d(a, b), do: a -- b\nend")
+      assert out =~ "List.reject(a, (__d) -> List.member(b, __d))"
+      refute out =~ "--(a"
+    end
+
+    test "ranges: `a..b` → `a..b`; `//1` drops the step; `//-1` reverses (ADR-0036/0079)" do
+      assert rian("defmodule M do\n  def r(n), do: 1..n\nend") =~ "1..n"
+      # `-` binds tighter than `..`, so no parens are needed around `n - 1`
+      assert rian("defmodule M do\n  def r(n), do: 0..(n - 1)//1\nend") =~ "0..n - 1"
+      down = rian("defmodule M do\n  def r(n), do: n..1//-1\nend")
+      assert down =~ "List.reverse(1..n)"
+    end
+
+    test "an Elixir comprehension bind clause `x = e` → a singleton-list generator" do
+      out = rian("defmodule M do\n  def f(xs), do: for(x <- xs, y = x + 1, y > 0, do: y)\nend")
+      assert out =~ "y <- [x + 1]"
+      # not a raw bind clause `, y := …` (the singleton generator replaces it)
+      refute out =~ ", y := "
+    end
+
     test "Elixir text/regex match `=~` lowers to `Regex.match?(regex, subject)`" do
       out = rian("defmodule M do\n  def m(s), do: s =~ ~r/ab/\nend")
       assert out =~ "Regex.match?(sigil_r(\"ab\", []), s)"

@@ -17,7 +17,9 @@ defmodule Rian.Pratt do
 
   # `<~` is capability-gated mutation (ADR-0039). `<-` is NOT a general infix —
   # it is the failable-bind arrow, valid only in `with`/`for` clause headers.
-  @infix ~w(+ - * / rem div <> in |> < <= > >= == != and or <~)
+  # `..` is the inclusive integer range (ADR-0036/0079): `lo..hi` desugars in `Rian.Core`
+  # to the portable prelude `List.range(lo, hi)`, so a `for x <- lo..hi` enumerates it.
+  @infix ~w(+ - * / rem div <> in |> < <= > >= == != and or <~ ..)
 
   # already-parsed passthrough (symmetric with `parse_body/1`): a Rian-written
   # front-end (ADR-0063 Stage 2) may hand the checker/emitters an AST directly —
@@ -103,6 +105,9 @@ defmodule Rian.Pratt do
       op in ~w(+ -) -> {4, :left}
       op == "<>" -> {5, :right}
       op == "in" -> {6, :none}
+      # `..` binds looser than arithmetic (`n-1..m+1` = `(n-1)..(m+1)`) and is
+      # non-associative (`a..b..c` is meaningless) — its own level (ADR-0036/0079).
+      op == ".." -> {6, :none}
       op == "|>" -> {7, :left}
       op in ~w(< <= > >=) -> {8, :none}
       op in ~w(== !=) -> {9, :none}

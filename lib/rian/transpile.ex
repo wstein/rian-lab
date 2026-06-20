@@ -120,6 +120,7 @@ defmodule Rian.Transpile do
     "-" => 4,
     "<>" => 5,
     "in" => 6,
+    ".." => 6,
     "|>" => 7,
     "<" => 8,
     "<=" => 8,
@@ -1636,6 +1637,24 @@ defmodule Rian.Transpile do
   # `++` operator).
   defp expr({:++, _, [l, r]}), do: "List.concat(#{expr(l)}, #{expr(r)})"
 
+  # Elixir inclusive range `a..b` → the Rian `..` range operator (ADR-0036/0079); it
+  # desugars in `Rian.Core` to `List.seq(a, b)`. No-space form, Elixir style.
+  defp expr({:.., _, [a, b]}), do: range_text(a, b)
+
+  # a stepped range `a..b//step`. `//1` is the default ascending range (`a..b`); `//-1`
+  # is descending — `List.reverse(b..a)` (the ascending range, reversed; both portable).
+  # Other steps have no Rian image yet → a greppable marker.
+  defp expr({:..//, _, [a, b, 1]}), do: range_text(a, b)
+  defp expr({:..//, _, [a, b, {:-, _, [1]}]}), do: "List.reverse(#{range_text(b, a)})"
+  defp expr({:..//, _, [_, _, _]} = n), do: ~s|TODO_PORT("stepped range: #{escape(snippet(n))}")|
+
+  # Elixir list subtraction `l -- r` → a portable `List.reject` over membership (Rian has
+  # no `--` operator). This is *set* difference (drops every element of `l` that is in `r`),
+  # faithful for the unique-list uses in the compiler (`targets -- [:ex]`, `required --
+  # reached`); a true multiset `--` would differ, but the corpus subtracts sets.
+  defp expr({:--, _, [l, r]}),
+    do: "List.reject(#{expr(l)}, (__d) -> List.member(#{expr(r)}, __d))"
+
   # Elixir text/regex match `a =~ regex` → `Regex.match?(regex, a)` (host, typed `Bool`
   # in `Rian.Builtins`); Rian has no `=~` operator. The string-`contains?` form of `=~`
   # is not emitted (the corpus uses the regex form).
@@ -1880,6 +1899,9 @@ defmodule Rian.Transpile do
   # at the same level on the side the parent's associativity does not favour — which
   # also covers same-level non-associative parents (Rian's parser rejects those
   # unparenthesized). An atomic operand (`operand_level/1 == nil`) never needs them.
+  # render a Rian `a..b` range, parenthesizing each operand by `..`'s precedence.
+  defp range_text(a, b), do: "#{paren_operand(a, "..", :left)}..#{paren_operand(b, "..", :right)}"
+
   defp paren_operand(node, parent_op, side) do
     s = expr(node)
     plevel = @op_level[parent_op]
@@ -2156,6 +2178,12 @@ defmodule Rian.Transpile do
   # a comprehension clause (ADR-0079): a generator `pat <- src` (any pattern — a
   # non-match skips the element) or a boolean filter.
   defp for_clause_rian({:<-, _, [lhs, src]}), do: "#{pat(lhs)} <- #{expr(src)}"
+
+  # an Elixir comprehension **bind** clause `x = expr` (binds `x` for the later clauses /
+  # body) has no Rian surface (ADR-0079), but a **singleton-list generator** `x <- [expr]`
+  # is a faithful, portable image: the one-element list binds `x` to `expr` exactly once.
+  defp for_clause_rian({:=, _, [lhs, rhs]}), do: "#{pat(lhs)} <- [#{expr(rhs)}]"
+
   defp for_clause_rian(filter), do: expr(filter)
 
   defp for_clauses_text(clauses), do: Enum.map_join(clauses, ", ", &for_clause_rian/1)
