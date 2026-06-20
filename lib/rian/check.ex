@@ -66,6 +66,7 @@ defmodule Rian.Check do
     EId,
     EIf,
     EList,
+    EMap,
     ENum,
     EStr,
     ETuple,
@@ -443,6 +444,16 @@ defmodule Rian.Check do
   def infer(%ETuple{elems: es}, env, ic),
     do: "(" <> Enum.map_join(es, ",", &(infer(&1, env, ic) |> conservative_unk())) <> ")"
 
+  # a map literal `%{k => v, …}` infers `Dict(KeyT,ValT)` — the key and value types each
+  # LUB-join across the pairs (a `_Unk` hole when they don't, deferred), mirroring
+  # tuple/list literal inference. A struct value is `Struct(field: …)`, never `%{}`, so a
+  # `%{…}` literal is always a `Dict` (an `%{m | …}` update is the separate `EMapUpdate`).
+  def infer(%EMap{pairs: pairs}, env, ic) do
+    kt = join_all(Enum.map(pairs, fn {k, _} -> infer_map_key(k, env, ic) end))
+    vt = join_all(Enum.map(pairs, fn {_, v} -> infer(v, env, ic) end))
+    "Dict(#{conservative_unk(kt)},#{conservative_unk(vt)})"
+  end
+
   def infer(%EBlock{stmts: stmts}, env, ic), do: infer_block(stmts, env, ic, :unknown)
   # a `with` yields its do-block value on the happy path (clause-bound vars are
   # not tracked yet -> they infer `:unknown`, keeping the checker conservative)
@@ -499,6 +510,16 @@ defmodule Rian.Check do
   def annotate(%EList{elems: es, tail: tl} = n, env, ic) do
     tail = if tl == :close, do: :close, else: annotate(tl, env, ic)
     %{n | elems: ann_each(es, env, ic), tail: tail, type: infer(n, env, ic)}
+  end
+
+  def annotate(%EMap{pairs: pairs} = n, env, ic) do
+    pairs =
+      Enum.map(pairs, fn
+        {{:key, k}, v} -> {{:key, annotate(k, env, ic)}, annotate(v, env, ic)}
+        {k, v} -> {k, annotate(v, env, ic)}
+      end)
+
+    %{n | pairs: pairs, type: infer(n, env, ic)}
   end
 
   def annotate(%EIf{cond: c, then: t, else: e} = n, env, ic) do
@@ -825,6 +846,11 @@ defmodule Rian.Check do
 
   defp join_all(types),
     do: types |> Enum.reduce(:bottom, fn t, acc -> join(acc, t) end) |> debottom()
+
+  # a map literal's key: a non-atom key is wrapped `{:key, expr}` (ADR-0033) — infer the
+  # expr; a bare atom key (`%{id: …}`) is a `Symbol`.
+  defp infer_map_key({:key, k}, env, ic), do: infer(k, env, ic)
+  defp infer_map_key(_atom_key, _env, _ic), do: "Symbol"
 
   # ── function checking ──────────────────────────────────────────────────
   @doc """
@@ -1525,13 +1551,13 @@ defmodule Rian.Check do
       bare_head_of?(from, to) ->
         true
 
-      # a structural tuple type (`(A,B)`, from the literal `{a, b}`) declared against an
-      # *opaque nominal* return — a user type the checker can't resolve to a concrete
-      # shape (an undeclared / alias type like `Pair`, `Tup`) — is not a provable
-      # mismatch, so it is assignable (CLAUDE.md conservative bar; matches the prior
-      # behaviour when a tuple inferred `:unknown`). A *scalar primitive* `to` (`Int64`,
+      # a structural literal type — a tuple `(A,B)` from `{a, b}`, or a `Dict(K,V)` from
+      # `%{…}` — declared against an *opaque nominal* return (a user type the checker can't
+      # resolve to a concrete shape: an undeclared / alias type like `Pair`, `Tup`) is not
+      # a provable mismatch, so it is assignable (CLAUDE.md conservative bar; matches the
+      # prior behaviour when these inferred `:unknown`). A *scalar primitive* `to` (`Int64`,
       # `String`, …) or another structural type IS refutable and falls through below.
-      tuple_type?(from) and opaque_nominal?(to) ->
+      (tuple_type?(from) or dict_type?(from)) and opaque_nominal?(to) ->
         true
 
       true ->
@@ -1554,6 +1580,8 @@ defmodule Rian.Check do
   # a structural tuple type string (`(A,B)` — leading paren, the form `infer/3` emits
   # for a non-tagged tuple literal).
   defp tuple_type?(t), do: is_binary(t) and String.starts_with?(t, "(")
+
+  defp dict_type?(t), do: is_binary(t) and String.starts_with?(t, "Dict(")
 
   # an opaque nominal type: a bare capitalized name (no params/structure) that is not a
   # scalar primitive — i.e. a user type the checker can't resolve here (an undeclared or

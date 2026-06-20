@@ -960,6 +960,15 @@ defmodule Rian.CheckTest do
       assert %Core.ETuple{type: :unknown} = typed
     end
 
+    test "a map literal infers Dict(KeyT,ValT) — string-keyed and atom-keyed" do
+      assert %Core.EMap{type: "Dict(String,Int53)"} =
+               Check.annotate(Pratt.parse(~S|%{"a" => 1, "b" => 2}|))
+
+      # mixed values LUB-join to a `_Unk` hole; an atom key is a `Symbol`
+      assert %Core.EMap{type: "Dict(Symbol,_Unk)"} =
+               Check.annotate(Pratt.parse(~S|%{x: 1, y: "two"}|))
+    end
+
     test "a cons-tail list annotates head and tail and is typed Vec(T)" do
       typed = Check.annotate(Pratt.parse("[a | rest]"), %{"a" => "Int64", "rest" => "Vec(Int64)"})
 
