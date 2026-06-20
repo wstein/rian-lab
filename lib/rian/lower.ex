@@ -202,7 +202,12 @@ defmodule Rian.Lower do
       |> Enum.reject(&(&1 == ""))
       |> Enum.join("\n\n")
 
-    "mod #{PL.to_snake(name)} {\n#{body}\n}"
+    # a synthesized union `enum` (ADR-0083) is emitted at the crate root, so a `mod`
+    # whose body references one must `use super::*` to bring it into scope (a Rust
+    # module does not inherit its parent's items). Without this, a union-typed function
+    # inside a `mod` references an out-of-scope `RUnion_…` (rustc E0425).
+    use_super = if String.contains?(body, "RUnion_"), do: "use super::*;\n\n", else: ""
+    "mod #{PL.to_snake(name)} {\n#{use_super}#{body}\n}"
   end
 
   @spec const_set(list()) :: MapSet.t()

@@ -65,6 +65,12 @@ defmodule Rian.PatternLower do
   def lower(pat, env) when not is_struct(pat), do: lower(Core.from_pat(pat), env)
   def lower(%Core.PWild{}, _env), do: {:wild, false}
   def lower(%Core.PVar{}, _env), do: {:wild, false}
+  # a type-pattern `n Type` (a union arm, ADR-0083) BINDS `n`; for the exhaustiveness
+  # matrix it is a binding wildcard — the union's member coverage is not modelled in the
+  # env, so a union `case` is treated as unchecked here (matching the flat emit path),
+  # not crashed on. Without this clause `check_case_bodies!` raises a `FunctionClauseError`
+  # for a union `case` inside a `mod` (while the same function emits fine flat).
+  def lower(%Core.PTyped{}, _env), do: {:wild, false}
   def lower(%Core.PAs{pat: p}, env), do: lower(p, env)
   def lower(%Core.PPin{}, _env), do: {:wild, true}
   def lower(%Core.PLit{value: v}, _env), do: {{:ctor, {:lit, v}, []}, false}

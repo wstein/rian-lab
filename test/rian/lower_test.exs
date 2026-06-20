@@ -90,6 +90,51 @@ defmodule Rian.LowerTest do
       end
     end
 
+    @tag :rust
+    test "a value union inside a `mod` narrows + runs under rustc — param AND return (ADR-0083)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          # the synthesized `enum` is at the crate root; the `mod` must `use super::*` to
+          # see it, and the union `case` must not crash the exhaustiveness gate inside a
+          # `mod`. `roundtrip` exercises a union RETURN (wrap) feeding a union PARAM
+          # (describe) — both narrowed — without `main` constructing the enum directly.
+          src = """
+          mod M do
+            pub def describe(x Int53 | String) Int53 := case x do
+              n Int53 -> n + 1
+              s String -> 0
+            end
+            pub def wrap(b Bool) Int53 | String := if b do 41 else "x" end
+            pub def roundtrip(b Bool) Int53 := describe(wrap(b))
+          end
+          """
+
+          rust = Lower.rust_program(Rian.Decl.parse(src))
+          assert rust =~ "use super::*;"
+
+          dir =
+            Path.join(System.tmp_dir!(), "rian_modunion_#{System.unique_integer([:positive])}")
+
+          File.mkdir_p!(dir)
+          on_exit(fn -> File.rm_rf(dir) end)
+          rs = Path.join(dir, "u.rs")
+
+          File.write!(
+            rs,
+            rust <>
+              ~s|\nfn main() { assert_eq!(m::roundtrip(true), 42); assert_eq!(m::roundtrip(false), 0); println!("ok"); }\n|
+          )
+
+          bin = Path.join(dir, "u")
+          {out, code} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", rs, "-o", bin])
+          assert code == 0, "mod-union rustc failed:\n#{out}"
+          assert {"ok\n", 0} = System.cmd(bin, [])
+      end
+    end
+
     test "refuses to emit when a clause is unreachable" do
       dead = %{
         area()
