@@ -39,11 +39,12 @@ mod Dict do
   pub def inc(m Map(String, Int53), k String) Map(String, Int53) := put(m, k, get_or(m, k, zero()) + 1)
 
   # from_list — build a map from a list of `{key, value}` pairs (the portable image
-  # of `Map.new/1`/`Enum.into/2`). Folds left-to-right so a later pair overwrites an
-  # earlier one for the same key (matching `Map.new`).
-  pub def from_list(pairs Vec((K, V))) Map(K, V) forall K, V := from_into(pairs, empty())
-
-  def from_into(Vec((K, V)), Map(K, V)) Map(K, V) forall K, V
-  def from_into([], acc) := acc
-  def from_into([{k, v} | t], acc) := from_into(t, put(acc, k, v))
+  # of `Map.new/1`). Recursion builds the tail map first, then `put`s the head, so on
+  # a duplicate key the FIRST occurrence wins (the head `put` is outermost). Each
+  # clause returns a fresh `put(...)` (owned), so the Rust lowering needs no
+  # borrowed-accumulator return. Inputs in practice have unique keys (a range table,
+  # a builtins table), where head-vs-last is moot.
+  pub def from_list(pairs Vec((K, V))) Map(K, V) forall K, V
+  pub def from_list([]) := empty()
+  pub def from_list([{k, v} | t]) := put(from_list(t), k, v)
 end

@@ -71,12 +71,13 @@ defmodule Rian.PreludeListTest do
   end
 
   describe "Dict.from_list and Str.trim (portable, ADR-0047)" do
-    test "Dict.from_list builds a map; a later pair wins" do
+    test "Dict.from_list builds a map; first occurrence wins on a duplicate" do
       {:ok, d} =
         Rian.Beam.load(File.read!("examples/rian/prelude_dict.rian"), :"Elixir.RianPreludeDict")
 
       assert d.from_list([{"a", 1}, {"b", 2}]) == %{"a" => 1, "b" => 2}
-      assert d.from_list([{"a", 1}, {"a", 2}]) == %{"a" => 2}
+      # on a duplicate key the FIRST occurrence wins (the head `put` is outermost)
+      assert d.from_list([{"a", 1}, {"a", 2}]) == %{"a" => 1}
       assert d.from_list([]) == %{}
     end
 

@@ -43,9 +43,11 @@ mod Str do
 
   def drop_ws(Vec(Char)) Vec(Char)
   def drop_ws([]) := []
-  def drop_ws(all @ [c | t]) := if is_ws(c) do drop_ws(t) else all end
+  def drop_ws([c | t]) := if is_ws(c) do drop_ws(t) else [c | t] end
 
-  def is_ws(c Char) Bool := c == ' ' or c == '\t' or c == '\n' or c == '\r'
+  # whitespace by codepoint (space/tab/newline/CR) — NOT char-escape literals
+  # (`'\t'`), which the self-hosted lexer's slice does not yet lex (ADR-0063).
+  def is_ws(c Char) Bool := c == 32 or c == 9 or c == 10 or c == 13
 
   def rev(cs Vec(Char)) Vec(Char) := rev_onto(cs, [])
 
