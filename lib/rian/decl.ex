@@ -1273,6 +1273,12 @@ defmodule Rian.Decl do
        when close in [:rparen, :rbracket, :rbrace, :bitclose],
        do: take_line(rest, [t | acc], max(depth - 1, 0))
 
+  # a `:do`/`:end`/`:else`/… keyword used as an ATOM (preceded by `:`) is not a block
+  # delimiter — common in AST-matching bodies (`{:do, body}`) — so it must NOT move the
+  # depth count, or the body range mis-closes. Must precede the `do`/`end` counters below.
+  defp take_line([{:kw, _} = t | rest], [{:op, ":"} | _] = acc, depth),
+    do: take_line(rest, [t | acc], depth)
+
   # a `do … end` block inside a `:=` body (a multi-line `case`/`if`/`with`) deepens
   # like a bracket, so its arm/branch newlines continue the body to the matching
   # `end` instead of leaking each line as a bogus declaration (P1).
@@ -1296,6 +1302,12 @@ defmodule Rian.Decl do
 
   # Collect a block body up to the `end` that closes it; `do` (from nested
   # `if`/`case`) deepens, `end` un-deepens, depth 1's `end` closes the body.
+  # `:do`/`:end`/… as an ATOM (preceded by `:`, e.g. `{:do, body}` in AST code) is not a
+  # block delimiter, so it must NOT move the depth — else the block mis-closes. Precedes
+  # the `do`/`end` counters below (mirrors the `:=`-body `take_line` guard).
+  defp take_block([{:kw, _} = t | rest], depth, [{:op, ":"} | _] = acc),
+    do: take_block(rest, depth, [t | acc])
+
   defp take_block([{:kw, "do"} = t | rest], depth, acc),
     do: take_block(rest, depth + 1, [t | acc])
 
@@ -1329,6 +1341,11 @@ defmodule Rian.Decl do
   # `d` = `do`/`end` depth, `w` = open `with`-headers (between `with` and its `do`,
   # newlines separate comma-joined clauses, not statements), `p` = bracket depth.
   defp block_seps([], _d, _w, _p, acc), do: Enum.reverse(acc)
+
+  # a `:do`/`:end`/`:with`/… keyword used as an ATOM (preceded by `:`) is not a block
+  # delimiter — don't let it move the depth/with counters. Must precede the keyword clauses.
+  defp block_seps([{:kw, _} = t | r], d, w, p, [{:op, ":"} | _] = acc),
+    do: block_seps(r, d, w, p, [t | acc])
 
   defp block_seps([{:kw, "with"} = t | r], d, w, p, acc),
     do: block_seps(r, d, w + 1, p, [t | acc])
