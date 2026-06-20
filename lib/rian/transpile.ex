@@ -2257,8 +2257,12 @@ defmodule Rian.Transpile do
   # spelling one (`type`, `range`, `mod`, …) is a valid var/name in Elixir but lexes as a
   # keyword in Rian, so a `{type, x}` pattern or a `type` reference breaks. Rename it with
   # a trailing `_` — a pure function of the name, so a binding and its uses stay in sync.
+  # includes Rian's **word operators** (`Rian.Lexer.@op_words`): an Elixir local named
+  # `div`/`rem` (both valid Elixir identifiers) would otherwise emit bare and re-lex as an
+  # operator token, not an identifier. Aligns with `bare_atom?`'s escape set below.
   @rian_keywords ~w(if do else end def type range case when struct alias mod pub const
-                    macro use with for protocol impl opaque abstract)
+                    macro use with for protocol impl opaque abstract
+                    and or not in div rem)
 
   defp rian_ident(name) do
     s = to_string(name)

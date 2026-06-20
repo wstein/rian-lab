@@ -1191,6 +1191,14 @@ end|)
       refute out =~ ~s|TODO_PORT("remote/stdlib call|
     end
 
+    test "an Elixir var named after a Rian WORD-operator (`div`) is keyword-escaped" do
+      # `div`/`rem` are valid Elixir identifiers but Rian word operators — a bare `div`
+      # would re-lex as an operator token, so it must escape to `div_` head-and-uses.
+      out = rian("defmodule M do\n  def f(div), do: div + 1\nend")
+      assert out =~ "pub def f(div_ _Unk)"
+      assert out =~ ":= div_ + 1"
+    end
+
     test "stats counts auto-mapped calls" do
       {_t, stats} =
         Transpile.transpile_with_stats("defmodule M do\n  def f(m, k), do: Map.put(m, k, 1)\nend")
