@@ -98,7 +98,10 @@ defmodule Rian.CapFixpointTest do
     test "nested generics lower recursively under iso/owned", %{mod: mod} do
       assert mod.rust_param(:iso, to_ty("Vec(Vec(Int8))")) == "Vec<Vec<i8>>"
       assert mod.rust_param(:iso, to_ty("Option(Int64)")) == "Option<i64>"
-      assert mod.rust_param(:iso, to_ty("Map(String, Vec(Int64))")) == "Map<String, Vec<i64>>"
+      # `Map(K, V)` lowers to Rust's `std::collections::HashMap` (the `Dict` prelude backing,
+      # ADR-0047), recursively over its args
+      assert mod.rust_param(:iso, to_ty("Map(String, Vec(Int64))")) ==
+               "std::collections::HashMap<String, Vec<i64>>"
     end
 
     test "the reference quirk: val of a generic borrows the UNLOWERED spelling", %{mod: mod} do

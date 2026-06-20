@@ -65,7 +65,13 @@ mod Cap do
   def owned(TString) := "String"
   def owned(TNom(s)) := s
   def owned(TVec(t)) := "Vec<" <> owned(t) <> ">"
-  def owned(TGen(name, args, _)) := name <> "<" <> owned_args(args) <> ">"
+  def owned(TGen(name, args, _)) := gen_head(name) <> "<" <> owned_args(args) <> ">"
+
+  # `Map(K, V)` (the `Dict` prelude's backing, ADR-0047) -> `std::collections::HashMap`;
+  # every other generic keeps its source name.
+  def gen_head(String) String
+  def gen_head("Map") := "std::collections::HashMap"
+  def gen_head(name) := name
 
   # Lower a generic's type arguments, comma-separated.
   def owned_args(Vec(Ty)) String
@@ -81,7 +87,13 @@ mod Cap do
   def borrowed(TVec(t)) := "&[" <> owned(t) <> "]"
   def borrowed(TScalar(s)) := "&" <> scalar(s)
   def borrowed(TNom(s)) := "&" <> s
-  def borrowed(TGen(_, _, raw)) := "&" <> raw
+  # a generic borrows its raw source spelling (`rustify` rewrites a user type later), EXCEPT
+  # `Map`, which has no user definition to rewrite — it lowers to `&HashMap<…>` directly.
+  def borrowed(TGen(name, args, raw)) := borrow_gen(name, owned_args(args), raw)
+
+  def borrow_gen(String, String, String) String
+  def borrow_gen("Map", inner, _) := "&std::collections::HashMap<" <> inner <> ">"
+  def borrow_gen(_, _, raw) := "&" <> raw
 
   # `val` lowers by value when the type is `Copy`, else by shared borrow.
   def val_param(t Ty) String

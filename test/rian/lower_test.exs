@@ -1120,6 +1120,53 @@ end|
     end
   end
 
+  describe "the `Dict`/`Map(K,V)` prelude lowers to Rust `HashMap` (ADR-0047)" do
+    @dict_src """
+    def empty() Map(K, V) forall K, V := Prim.map_new()
+    def get(m Map(K, V), k K) V forall K, V := Prim.map_get(m, k)
+    def put(m Map(K, V), k K, v V) Map(K, V) forall K, V := Prim.map_put(m, k, v)
+    def has(m Map(K, V), k K) Bool forall K, V := Prim.map_has(m, k)
+    def get_or(m Map(K, V), k K, d V) V forall K, V := if has(m, k) do get(m, k) else d end
+    def inc(m Map(String, Int53), k String) Map(String, Int53) := put(m, k, get_or(m, k, 0) + 1)
+    """
+
+    test "`Map(K, V)` → `HashMap<K, V>`, a key tvar gains `Eq + std::hash::Hash`, prims map to ops" do
+      rust = Rian.Lower.rust_program(Rian.Decl.parse(@dict_src))
+      assert rust =~ "fn get<K: Clone + Eq + std::hash::Hash, V: Clone>"
+      assert rust =~ "m: &std::collections::HashMap<K, V>"
+      assert rust =~ "std::collections::HashMap::new()"
+      assert rust =~ "m.get(k).cloned().unwrap()"
+      assert rust =~ "m.contains_key(k)"
+    end
+
+    @tag :rust
+    test "the prelude Dict ops compile and run under rustc (a String→Int53 counter)" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust = Rian.Lower.rust_program(Rian.Decl.parse(@dict_src))
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_dict_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <>
+              "\nfn main() { let m = inc(&inc(&empty::<String,i64>(), \"x\"), \"x\"); " <>
+              "println!(\"{} {}\", get_or(&m, &\"x\".to_string(), &0), has(&m, &\"y\".to_string())); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", path, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "2 false"
+      end
+    end
+  end
+
   describe "Result-of-String coerces the Ok payload to owned String (ADR-0040/0061)" do
     @res_src ~S"""
     mod R do

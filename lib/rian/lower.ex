@@ -643,6 +643,23 @@ defmodule Rian.Lower do
 
   defp coerce_string_branch(e, ec), do: coerce_string_ast(e, ec)
 
+  # a bare-tvar return whose body is an `if`/`case`: `.clone()` each TAIL leaf to the owned
+  # `T` (mirrors `coerce_string_ast`), so a borrowed leaf (a returned `&T` param/binder)
+  # unifies with an owned one (`T: Clone`). A no-op clone when a leaf already owns its `T`.
+  defp coerce_owned_tvar_ast(%EIf{cond: c, then: t, else: e}, ec),
+    do:
+      "if #{p(c, 0, :rust, ec)} { #{coerce_owned_tvar_ast(t, ec)} } else { #{coerce_owned_tvar_ast(e, ec)} }"
+
+  defp coerce_owned_tvar_ast(%ECase{scrut: scrut, arms: arms}, ec),
+    do: rust_case(scrut, arms, fn b, aec -> coerce_owned_tvar_ast(b, aec) end, ec)
+
+  defp coerce_owned_tvar_ast(%EBlock{stmts: [{:expr, e}]}, ec), do: coerce_owned_tvar_ast(e, ec)
+
+  defp coerce_owned_tvar_ast(%EBlock{} = b, ec),
+    do: "({ #{emit_block(b, :rust, ec)} }).clone()"
+
+  defp coerce_owned_tvar_ast(ast, ec), do: "(#{p(ast, 0, :rust, ec)}).clone()"
+
   # A value-union RETURN (ADR-0083): the body produces a MEMBER value but the
   # signature is the synthesized enum, so wrap each TAIL leaf with `Enum::from(leaf)`,
   # pushed into `if`/`case` branches so they unify (mirrors `coerce_string_ast`). A
@@ -865,25 +882,63 @@ defmodule Rian.Lower do
       # synthesized enum via its `From` impl — `Enum::from(arg)` (the variant is
       # selected by the arg's Rust type). A union-typed arg (already the enum) is
       # passed through, not re-wrapped.
-      String.starts_with?(pt, "RUnion_") -> union_from_arg(a, pt, ec)
-      not borrow_type?(pt) -> a
+      String.starts_with?(pt, "RUnion_") ->
+        union_from_arg(a, pt, ec)
+
+      not borrow_type?(pt) ->
+        a
+
       # a `&impl Fn(...)` callback param (ADR-0061): a closure/expression argument is referenced
       # (`&|x| …`), but a bare variable is already a `&impl Fn` — a caller's own param or the
       # recursive `map(t, f)` — so it is left alone (referencing it again would be `&&`).
-      fn_borrow?(pt) -> if match?({:id, _}, a), do: a, else: {:unary, "&", a}
+      fn_borrow?(pt) ->
+        if match?({:id, _}, a), do: a, else: {:unary, "&", a}
+
       # a string literal fed to a *generic* `&K` param (`K` resolves to owned `String`,
       # which has the `Clone`/`impl`s a tvar needs — `str` does not): `&"a".to_string()`.
-      generic_tvar_borrow?(pt) and match?({:str, _}, a) -> owned_str_arg(elem(a, 1))
+      generic_tvar_borrow?(pt) and match?({:str, _}, a) ->
+        owned_str_arg(elem(a, 1))
+
       # a `Symbol` literal (`:foo`) fed to the same generic `&K`: a Symbol lowers to an
       # owned `String` too, so it needs the identical owned-borrow, not a bare `&str`.
-      generic_tvar_borrow?(pt) and match?({:atom, _}, a) -> owned_str_arg(elem(a, 1))
-      owned_field_var?(a, ec) -> {:unary, "&", a}
-      borrowed != nil -> borrow_value(a, borrowed)
-      owned_arg?(a, funs) -> {:unary, "&", a}
-      scalar_literal?(a) -> {:unary, "&", a}
-      true -> a
+      generic_tvar_borrow?(pt) and match?({:atom, _}, a) ->
+        owned_str_arg(elem(a, 1))
+
+      # a `String`/`Symbol`-typed VAR (a `&str` param) fed to a generic `&K` that resolves to
+      # owned `String` (`inc`'s `k` → `get_or`'s `&K`): `&str`/`&String` differ, so own it with
+      # `&(k <> "")` (the `<>` forces `String`), matching the literal case above.
+      generic_tvar_borrow?(pt) and str_typed_var?(a, ec) ->
+        {:unary, "&", {:bin, "<>", a, {:str, ""}}}
+
+      # a call result fed to a generic `&K`/`&V` is an owned value (Copy or not — e.g.
+      # `get_or(m, k, zero())` where `zero() Int53`), so the borrow param needs `&(…)`.
+      generic_tvar_borrow?(pt) and match?({:call, _, _}, a) ->
+        {:unary, "&", a}
+
+      owned_field_var?(a, ec) ->
+        {:unary, "&", a}
+
+      borrowed != nil ->
+        borrow_value(a, borrowed)
+
+      owned_arg?(a, funs) ->
+        {:unary, "&", a}
+
+      scalar_literal?(a) ->
+        {:unary, "&", a}
+
+      # an arithmetic result is an owned scalar (even with a non-literal operand, e.g.
+      # `get_or(m, k, 0) + 1`), so a borrow param needs `&(…)`.
+      arith_result?(a) ->
+        {:unary, "&", a}
+
+      true ->
+        a
     end
   end
+
+  defp arith_result?({:bin, op, _, _}), do: op in ~w(+ - * / div rem)
+  defp arith_result?(_), do: false
 
   # an owned `String`, borrowed for the `&K` param: `&format!("{}{}", "a", "")` via the
   # `<>` concat (which lowers to `format!` → owned `String`). Cleaner builders
@@ -904,6 +959,10 @@ defmodule Rian.Lower do
   # a borrowed bare type variable (`&K`, not `&str`/`&[T]`): the param is generic.
   defp generic_tvar_borrow?("&" <> rest), do: tvar_name?(rest)
   defp generic_tvar_borrow?(_), do: false
+
+  # a surface var whose inferred type is `String`/`Symbol` (so it lowered to `&str`).
+  defp str_typed_var?({:id, n}, ec), do: Map.get(ec.tenv, n) in ["String", "Symbol"]
+  defp str_typed_var?(_, _ec), do: false
 
   # `&`-borrow a value unless it is already a `&`-reference: a var bound to a `&`-param
   # or cons-tail (`borrowed`), an already-inserted `&`, or a string literal (`&str`).
@@ -1595,6 +1654,13 @@ defmodule Rian.Lower do
     ret = to_string(Map.get(gf, :ret, ""))
     fn_ret? = String.contains?(ret, "Fn(")
 
+    # a tvar used as a `Map(K, V)` KEY lowers to a Rust `HashMap<K, V>` key, so it needs
+    # `Eq + Hash` (the `HashMap::get`/`insert` bound) on top of `Clone` (ADR-0047).
+    sig_types = Enum.map(Map.get(gf, :params, []), & &1.type) ++ [Map.get(gf, :ret)]
+
+    map_keys =
+      sig_types |> Enum.filter(&is_binary/1) |> Enum.flat_map(&map_key_tvars/1) |> MapSet.new()
+
     inner =
       Enum.map_join(tvars, ", ", fn tv ->
         bounds_map =
@@ -1604,7 +1670,13 @@ defmodule Rian.Lower do
           end
 
         static = if fn_ret? and String.match?(ret, ~r/\b#{tv}\b/), do: ["'static"], else: []
-        traits = Enum.map(Map.get(bounds_map, tv, []), &"Rian#{&1}") ++ ["Clone"] ++ static
+        # fully-qualify `Hash` (bare `Hash` resolves to the derive macro, not the trait);
+        # `Eq` is in the std prelude.
+        key = if MapSet.member?(map_keys, tv), do: ["Eq", "std::hash::Hash"], else: []
+
+        traits =
+          Enum.map(Map.get(bounds_map, tv, []), &"Rian#{&1}") ++ ["Clone"] ++ static ++ key
+
         "#{tv}: #{Enum.join(traits, " + ")}"
       end)
 
@@ -1640,6 +1712,27 @@ defmodule Rian.Lower do
     case :binary.match(to_string(ret), "Fn(") do
       :nomatch -> ""
       {start, _} -> balanced_from(binary_part(ret, start, byte_size(ret) - start))
+    end
+  end
+
+  # the KEY tvar of the first `Map(K, V)` in a type string, if `K` is a type variable
+  # (`"Map(K, V)"` → `["K"]`, `"Map(String, V)"` → `[]`). Used to add `Eq + Hash` bounds.
+  defp map_key_tvars(type) do
+    case :binary.match(type, "Map(") do
+      :nomatch ->
+        []
+
+      {start, _} ->
+        inner =
+          binary_part(type, start, byte_size(type) - start)
+          |> balanced_from()
+          |> String.replace_prefix("Map(", "")
+          |> String.replace_suffix(")", "")
+
+        case Rian.TypeStr.split_top_commas(inner) do
+          [k | _] -> if tvar_name?(String.trim(k)), do: [String.trim(k)], else: []
+          _ -> []
+        end
     end
   end
 
@@ -1852,15 +1945,23 @@ defmodule Rian.Lower do
             match?("Vec(" <> _, func.ret) and tail_slice_id?(ast, ec) ->
               "(#{arm}).to_vec()"
 
+            # a generic bare-tvar return (`T`): clone borrowed leaves to the owned `T` the
+            # signature promises (`T: Clone`), pushed into `if`/`case` branches so a borrowed
+            # leaf (a returned param `d`) unifies with an owned one (`get(m,k)`). The `generic?`
+            # guard short-circuits the `func.tvars` access for a func map lacking that key.
+            generic? and func.ret in func.tvars and rebinds == [] ->
+              coerce_owned_tvar_ast(ast, ec)
+
             true ->
               coerce_ret(arm, func.ret)
           end
 
-        # a generic function returning a bare owned type variable (`T`) yields a
-        # borrowed `&T` in its base arms (a returned param); `.clone()` to the owned
-        # `T` the signature promises (`T: Clone`, `rust_generics`). A no-op clone when
-        # the arm already owns its `T`. `Vec(T)` returns are owned constructions already.
-        arm = if generic? and func.ret in func.tvars, do: "(#{arm}).clone()", else: arm
+        # the rebinds path can't push into branches (the body is already a `{ … }` block),
+        # so wrap the whole arm — a no-op clone when it already owns its `T`.
+        arm =
+          if generic? and func.ret in func.tvars and rebinds != [],
+            do: "(#{arm}).clone()",
+            else: arm
 
         # (a value-position closure boxes at the `ELambda` emit, driven by `fn_ec.fn_box`,
         # so it covers a top-level return AND a `Fn` nested in a constructor — `Some((n) ->
@@ -2524,6 +2625,24 @@ defmodule Rian.Lower do
 
   defp emit(%ECall{fun: %EId{name: "__prim_str_from_chars"}, args: [cs]}, :rust, ec),
     do: {"#{p(cs, 12, :rust, ec)}.iter().collect::<String>()", 12}
+
+  # `Map(K, V)` prims (ADR-0047) -> Rust `HashMap` ops. A `val` map/key/value is a borrow
+  # (`&HashMap`/`&K`/`&V`), so `get` clones the value out (`.cloned().unwrap()`), `put` builds
+  # a fresh owned map (clone the map, insert cloned key/value — a functional update matching
+  # BEAM/JS), and `new`/`has` map directly. `K: Eq + Hash` is added by `rust_generics`.
+  defp emit(%ECall{fun: %EId{name: "__prim_map_new"}, args: []}, :rust, _ec),
+    do: {"std::collections::HashMap::new()", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_map_get"}, args: [m, k]}, :rust, ec),
+    do: {"#{p(m, 12, :rust, ec)}.get(#{p(k, 12, :rust, ec)}).cloned().unwrap()", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_map_has"}, args: [m, k]}, :rust, ec),
+    do: {"#{p(m, 12, :rust, ec)}.contains_key(#{p(k, 12, :rust, ec)})", 12}
+
+  defp emit(%ECall{fun: %EId{name: "__prim_map_put"}, args: [m, k, v]}, :rust, ec),
+    do:
+      {"{ let mut __m = #{p(m, 12, :rust, ec)}.clone(); " <>
+         "__m.insert(#{p(k, 12, :rust, ec)}.clone(), #{p(v, 12, :rust, ec)}.clone()); __m }", 0}
 
   # a `Char`'s codepoint as an integer — the explicit Char→Int conversion
   # (ADR-0036); `char as i64` is the native widening on Rust.

@@ -760,7 +760,13 @@ mod Rust do
   # via the scalar table; an application is `Name<arg, …>`.
   def render_ty(Ty) String
   def render_ty(TName(n)) := rust_scalar(n)
-  def render_ty(TApp(name, args)) := name <> "<" <> join_tys(args) <> ">"
+  def render_ty(TApp(name, args)) := app_head(name) <> "<" <> join_tys(args) <> ">"
+
+  # `Map(K, V)` is the `Dict` prelude's backing -> Rust `std::collections::HashMap`
+  # (ADR-0047); every other generic keeps its source name.
+  def app_head(String) String
+  def app_head("Map") := "std::collections::HashMap"
+  def app_head(name) := name
 
   def join_tys(Vec(Ty)) String
   def join_tys([]) := ""

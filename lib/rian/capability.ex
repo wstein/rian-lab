@@ -117,6 +117,13 @@ defmodule Rian.Capability do
     "Vec<" <> owned(inner) <> ">"
   end
 
+  # the `Map(K, V)` type (the `Dict` prelude's backing, ADR-0047) -> Rust `HashMap<K, V>`.
+  # A key tvar additionally needs `Eq + Hash` bounds (added by `Rian.Lower.rust_generics`).
+  def owned("Map(" <> rest) do
+    [k, v] = rest |> String.replace_suffix(")", "") |> Rian.TypeStr.split_top_commas()
+    "std::collections::HashMap<" <> owned(k) <> ", " <> owned(v) <> ">"
+  end
+
   def owned(t) do
     case parametric(t) do
       # any other generic nominal `Name(A, B)` -> Rust `Name<A, B>` (e.g.
@@ -149,6 +156,9 @@ defmodule Rian.Capability do
     inner = String.replace_suffix(rest, ")", "")
     "&[" <> owned(inner) <> "]"
   end
+
+  # a `val Map(K, V)` param borrows the owned `HashMap` (`&HashMap<K, V>`).
+  def borrowed("Map(" <> _ = t), do: "&" <> owned(t)
 
   def borrowed(t), do: "&" <> rust_name(t)
 

@@ -69,6 +69,48 @@ defmodule Rian.ReachRustHonestyTest do
     end
   end
 
+  describe "prelude_dict — `Map(K,V)` lowers to Rust `HashMap` (ADR-0047)" do
+    setup do
+      {:ok, src: File.read!("examples/rian/prelude_dict.rian")}
+    end
+
+    test "every Dict function reaches :rs (the Map→HashMap lowering landed)", %{src: src} do
+      rep = src |> Decl.parse() |> Reach.analyze()
+
+      for {name, info} <- rep,
+          do: assert(:rs in (info.reach |> MapSet.to_list()), "#{name} should reach :rs")
+    end
+
+    @tag :rust
+    test "the emitted Rust compiles under rustc (the matrix is honest)", %{src: src} do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust = Rian.Lower.rust_program(Decl.parse(src))
+          base = Path.join(System.tmp_dir!(), "rian_pd_#{System.unique_integer([:positive])}")
+          rs = base <> ".rs"
+          lib = base <> ".rlib"
+          File.write!(rs, rust)
+
+          try do
+            {out, code} =
+              System.cmd(
+                rustc,
+                ["--crate-type", "lib", "-A", "warnings", "--edition", "2021", "-o", lib, rs],
+                stderr_to_stdout: true
+              )
+
+            assert code == 0, "prelude_dict must compile on rustc (Reach claims :rs):\n#{out}"
+          after
+            File.rm(rs)
+            File.rm(lib)
+          end
+      end
+    end
+  end
+
   describe "compound owned-tvar returns reach :rs; Fn params + concrete Fn returns too (ADR-0061)" do
     test "an `Option(T)`-returning generic reaches :rs (payload cloned at construction)" do
       rep =

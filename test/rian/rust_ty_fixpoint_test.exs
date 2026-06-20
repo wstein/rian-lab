@@ -78,7 +78,9 @@ defmodule Rian.RustTyFixpointTest do
 
     test "nesting and arity are preserved structurally", %{mod: mod} do
       assert ported(mod, "Vec(Vec(Int64))", []) == "Vec<Vec<i64>>"
-      assert ported(mod, "Map(String, Vec(Int64))", []) == "Map<String, Vec<i64>>"
+      # `Map(K, V)` -> Rust `std::collections::HashMap` (the `Dict` prelude backing, ADR-0047)
+      assert ported(mod, "Map(String, Vec(Int64))", []) ==
+               "std::collections::HashMap<String, Vec<i64>>"
     end
 
     test "instantiation splices the args and discriminates from the unapplied name", %{mod: mod} do
