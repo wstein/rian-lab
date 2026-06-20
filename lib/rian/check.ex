@@ -865,10 +865,11 @@ defmodule Rian.Check do
       # the non-literal branches join to an integer — the literal branches adopt it
       # (an `Int53` `then` with a literal `0` `else` stays `Int53`)
       int_type?(join_all(non_lit)) -> join_all(non_lit)
-      # otherwise (a `Bool`/`String`/`Float` or uninferable non-literal branch) the
-      # int literal cannot adopt it — join ALL branches as before (mismatch →
-      # `:unknown`, so `if c do 1 else true end` stays `:unknown`, not `Bool`)
-      true -> join_all(all)
+      # otherwise (a `Bool`/`String`/`Float` or uninferable non-literal branch) the int
+      # literal cannot adopt it — join ALL branches as **alternatives**: a common LUB
+      # where one exists, else a value union (`if c do 1 else "x" end` → `Int53 | String`,
+      # ADR-0083); a genuinely uninferable branch still forces `:unknown`.
+      true -> join_alts(all)
     end
   end
 
@@ -1774,7 +1775,9 @@ defmodule Rian.Check do
   # same-constructor covariant join: `Vec(A) ⊔ Vec(B) = Vec(A⊔B)`,
   # `Option(A) ⊔ Option(B) = Option(A⊔B)`, componentwise for any `Name(args)`.
   # Different constructors / non-parametric differing types ⇒ `:unknown` — the
-  # lattice never promotes across constructors (ADR-0035, ADR-0059 §4).
+  # lattice never promotes across constructors (ADR-0035, ADR-0059 §4). Synthesizing a
+  # *value union* across alternatives is a separate, scoped step (`join_alts/1`, used for
+  # case/if arms and function clauses), NOT a property of the raw LUB lattice.
   defp parametric_join(from, to) do
     with {n, fa} when is_list(fa) <- parse_parametric(from),
          {^n, ta} when length(ta) == length(fa) <- parse_parametric(to) do
@@ -1783,6 +1786,62 @@ defmodule Rian.Check do
     else
       _ -> :unknown
     end
+  end
+
+  # Join a set of **alternatives** (case/if arm bodies, or a function's clause bodies)
+  # into one type. Where the LUB lattice (`join/2`) finds a common type, use it; where it
+  # would give `:unknown` because the alternatives are distinct constructors, synthesize a
+  # **value union** `A | B` (ADR-0083) — the honest type of "one of these". A genuinely
+  # *uninferable* alternative (`:unknown`/`:mismatch` — an unmodelled body, a self-recursive
+  # call) still forces `:unknown`: a union of "something" is not informative. Reach decides
+  # the union's portability (a non-narrowable union is off targets), not this pass.
+  defp join_alts(types) do
+    if Enum.any?(types, &(&1 in [:unknown, :mismatch])) do
+      :unknown
+    else
+      types
+      |> Enum.reduce(:bottom, fn t, acc ->
+        cond do
+          acc == :unknown ->
+            :unknown
+
+          true ->
+            case join(acc, t) do
+              :unknown -> union_join(acc, t)
+              j -> j
+            end
+        end
+      end)
+      |> debottom()
+    end
+  end
+
+  defp union_type?(t), do: is_binary(t) and String.starts_with?(t, "Union(")
+
+  defp union_members(t) do
+    if union_type?(t), do: union_members_of(t), else: [t]
+  end
+
+  # synthesize the canonical value union of `from` and `to` (flattening nested unions,
+  # de-duplicating). Collapses to the lone member if they coincide. Returns `:unknown`
+  # when two members would share a runtime *primitive* discriminator (`Int8 | Char`, both
+  # integers): such a union is non-narrowable and `check_union_clash` would reject it, so
+  # the join stays the honest `:unknown` instead of synthesizing a dead union (ADR-0083).
+  defp union_join(from, to) do
+    members = (union_members(from) ++ union_members(to)) |> Enum.uniq()
+
+    cond do
+      match?([_], members) -> hd(members)
+      prim_disc_clash?(members) -> :unknown
+      true -> "Union(" <> Enum.join(members, ",") <> ")"
+    end
+  end
+
+  # do any two members share a non-`:other` primitive discriminator (so a `case` couldn't
+  # tell them apart)? Mirrors `union_clash/1`'s rule — only primitives collide.
+  defp prim_disc_clash?(members) do
+    discs = members |> Enum.map(&prim_disc/1) |> Enum.reject(&(&1 == :other))
+    discs != Enum.uniq(discs)
   end
 
   # "Vec(Int64)" -> {"Vec", ["Int64"]}; "Result(A,E)" -> {"Result", ["A","E"]};
@@ -2102,7 +2161,10 @@ defmodule Rian.Check do
     if Enum.any?(types, &(&1 in [:unknown, :mismatch, :bottom])) do
       :unknown
     else
-      case join_all(types) do
+      # join the clause bodies as alternatives: a common type where one exists, else a
+      # value union (a function returning `{name,…}` in one clause and `None` in another
+      # infers `(String,…) | None`, ADR-0083). `join_alts` is union-aware; `join_all` is not.
+      case join_alts(types) do
         t when is_binary(t) -> t
         _ -> :unknown
       end

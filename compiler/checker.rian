@@ -534,9 +534,26 @@ mod Checker do
     if int_type(nlj) do
       nlj
     else
-      join_all(all)
+      join_alts(all)
     end
   end
+
+  # join a set of ALTERNATIVES (case/if arm bodies): a common LUB where one exists, else a
+  # value union `A | B` (ADR-0083) — mirrors `Rian.Check.join_alts`. A genuinely uninferable
+  # arm (`"unknown"`) still forces `"unknown"`. (Subset: the self-hosted port synthesizes the
+  # 2-member non-clash unions the fixpoint corpus exercises; nesting/dedup/discriminator-clash
+  # — the full `Rian.Check.union_join` — are not yet ported.)
+  def join_alts(Vec(String)) String
+  def join_alts(ts) := if any_unknown(ts) do "unknown" else debottom(join_alts_fold(ts, "bottom")) end
+
+  def join_alts_fold(Vec(String), String) String
+  def join_alts_fold([], acc) := acc
+  def join_alts_fold([t | rest], acc) := if acc == "unknown" do "unknown" else jaf_step(join(acc, t), t, rest, acc) end
+
+  def jaf_step(j String, t String, rest Vec(String), acc String) String
+  def jaf_step(j, t, rest, acc) := if j == "unknown" do join_alts_fold(rest, union_join(acc, t)) else join_alts_fold(rest, j) end
+
+  def union_join(a String, b String) String := "Union(" <> a <> "," <> b <> ")"
 
   def all_types(Vec(BPair)) Vec(String)
   def all_types([]) := []

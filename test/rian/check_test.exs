@@ -874,10 +874,10 @@ defmodule Rian.CheckTest do
       assert Check.infer(Pratt.parse("&nope/1"), %{}, %{funs: %{}}) == :unknown
     end
 
-    test "an if expression unifies its two arm types" do
+    test "an if expression joins its two arm types (LUB, else a value union)" do
       assert Check.infer(Pratt.parse("if c do 1 else 2 end")) == "Int53"
-      # differing concrete arms are conservative, not an error
-      assert Check.infer(Pratt.parse("if c do 1 else true end")) == :unknown
+      # distinct-discriminator arms synthesize a value union (ADR-0083), not :unknown
+      assert Check.infer(Pratt.parse("if c do 1 else true end")) == "Union(Int53,Bool)"
     end
 
     test "a cons-tail list whose head and tail element types disagree is :unknown" do
@@ -967,6 +967,15 @@ defmodule Rian.CheckTest do
       # mixed values LUB-join to a `_Unk` hole; an atom key is a `Symbol`
       assert %Core.EMap{type: "Dict(Symbol,_Unk)"} =
                Check.annotate(Pratt.parse(~S|%{x: 1, y: "two"}|))
+    end
+
+    test "heterogeneous case/if arms synthesize a value union (ADR-0083), not :unknown" do
+      # distinct-discriminator alternatives become `A | B`; a self-recursive/uninferable
+      # arm still forces :unknown (a union of "something" is not informative).
+      assert Check.infer(Pratt.parse("case x do\n  0 -> \"z\"\n  _ -> 1\nend")) ==
+               "Union(String,Int53)"
+
+      assert Check.infer(Pratt.parse("if c do 1 else g(x) end")) == :unknown
     end
 
     test "a fixed-head polymorphic stdlib call infers its head, instantiating the element" do
@@ -1210,10 +1219,11 @@ defmodule Rian.CheckTest do
     end
 
     test "flexibility is integer-only — no int→float, no int→bool coercion" do
-      # `1 + 2.0` stays mixed/`:unknown` (ADR-0035, no implicit coercion), and an
-      # `if` with an int-literal and a Bool branch stays `:unknown` (not Bool).
+      # `1 + 2.0` stays mixed/`:unknown` (ADR-0035, no implicit coercion). An `if` with an
+      # int-literal and a Bool branch does NOT coerce the int to Bool — it is the honest
+      # value union `Int53 | Bool` (ADR-0083), each arm keeping its own type.
       assert Check.infer(Pratt.parse("1 + 2.0")) == :unknown
-      assert Check.infer(Pratt.parse("if c do 1 else true end")) == :unknown
+      assert Check.infer(Pratt.parse("if c do 1 else true end")) == "Union(Int53,Bool)"
     end
 
     test "an unknown operand + a literal keeps the literal's default Int53" do
