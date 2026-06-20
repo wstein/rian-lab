@@ -378,8 +378,22 @@ defmodule Rian.PrattTest do
       assert Pratt.parse_pats(~s|:"+"|) == [{:atom, "+"}]
     end
 
-    test "a bare operator atom `:+` is still a parse error (use the quoted form)" do
-      assert_raise ArgumentError, fn -> Pratt.parse(":+") end
+    test "a bare operator-name atom parses (`:+`, `:==`, `:/=`, `:=<`, `:and`)" do
+      # `:` + an operator run (or operator word) names that operator as an atom — the
+      # Erlang/Elixir-AST operator tables the transpiler emits. The quoted form still
+      # works for names outside the operator-char set.
+      assert Pratt.parse(":+") == {:atom, "+"}
+      assert Pratt.parse(":==") == {:atom, "=="}
+      assert Pratt.parse(":/=") == {:atom, "/="}
+      assert Pratt.parse(":=<") == {:atom, "=<"}
+      assert Pratt.parse(":and") == {:atom, "and"}
+    end
+
+    test "the bind `:=` and bitstring `::` are NOT operator atoms" do
+      assert Pratt.parse_body("x := 1; x") ==
+               {:block, [{:bind, "x", {:num, "1"}}, {:expr, {:id, "x"}}]}
+
+      assert Pratt.parse("<<c::utf8>>") == {:bitstr, [{:bitseg, {:id, "c"}, [type: "utf8"]}]}
     end
   end
 

@@ -41,6 +41,12 @@ defmodule Rian.Lexer do
   # checked first) still wins when `@` is immediately followed by an identifier.
   @single ["+", "-", "*", "/", "<", ">", ".", "|", ":", "&", "@", "^"]
 
+  # Operator-name atoms (`:==`, `:/=`, `:=<`, `:and`): a `:` directly followed by an
+  # operator run made of these chars, or by an operator word, is the atom NAMING that
+  # operator (the Erlang/Elixir-AST operator tables the transpiler emits). The bare
+  # bind `:=` (run is exactly `=`) and the bitstring `::` are NOT atoms.
+  @atom_op_chars ~w(+ - * / < > = !)
+
   @num_re ~r/^\d[\d_]*(?:\.\d[\d_]*)?(?:[eE][+-]?\d+)?/
   # Identifiers may carry a single trailing `?` or `!` — the Elixir/Ruby/Crystal
   # predicate/bang convention (ADR-0033): `empty?`, `gate!`. A `!` is part of the
@@ -419,6 +425,12 @@ defmodule Rian.Lexer do
         {cp, rest} = lex_char(advance(str, 1))
         lex(rest, [{:char, cp} | acc])
 
+      # operator-name atom (`:==`/`:/=`/`:=<`/`:and`) — must precede `@multi`, else
+      # `:=<` would be grabbed as the bind `:=`. Emitted as `:` + an `{:id, name}` so
+      # the existing `:`+id atom rules handle it in every position.
+      name = op_atom_name(str) ->
+        lex(advance(str, 1 + String.length(name)), [{:id, name}, {:op, ":"} | acc])
+
       op = Enum.find(@multi, &String.starts_with?(str, &1)) ->
         lex(advance(str, String.length(op)), [{:op, op} | acc])
 
@@ -435,6 +447,28 @@ defmodule Rian.Lexer do
 
       true ->
         raise ArgumentError, "cannot scan: #{inspect(str)}"
+    end
+  end
+
+  # The atom name when `str` begins with an operator-name atom, else nil. A symbolic
+  # run (`==`, `/=`, `=<`) wins unless it is exactly the bind `=`; otherwise an
+  # operator word (`and`/`or`/…) directly after the `:`. `::` declines (next char `:`
+  # is not an atom-op char and `:` is no op-word), so the bitstring spec is unaffected.
+  defp op_atom_name(":" <> rest) do
+    run = rest |> String.graphemes() |> Enum.take_while(&(&1 in @atom_op_chars)) |> Enum.join()
+
+    cond do
+      run != "" and run != "=" -> run
+      true -> op_word_name(rest)
+    end
+  end
+
+  defp op_atom_name(_), do: nil
+
+  defp op_word_name(rest) do
+    case Regex.run(~r/^(and|or|not|in|rem|div)\b/, rest) do
+      [_, w] -> w
+      _ -> nil
     end
   end
 
