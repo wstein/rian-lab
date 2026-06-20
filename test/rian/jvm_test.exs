@@ -326,6 +326,19 @@ defmodule Rian.JVMTest do
       def named(x Int64) Int64 := apply2(&neg/1, x)
       """,
       probe: ~s|println("${anon(5L)},${named(5L)}")|
+    },
+    %{
+      id: :tuple,
+      src: """
+      def swap(a Int64, b Int64) (Int64, Int64) := {b, a}
+      def fst_of(a Int64, b Int64) Int64 := case swap(a, b) do
+        {x, y} -> x
+      end
+      def sum3(a Int64, b Int64, c Int64) Int64 := case {a, b, c} do
+        {x, y, z} -> x + y + z
+      end
+      """,
+      probe: ~s|println("${fst_of(1L, 2L)},${sum3(1L, 2L, 3L)}")|
     }
   ]
 
@@ -496,17 +509,22 @@ defmodule Rian.JVMTest do
     end
 
     test "a not-yet-implemented construct fails early with a clear message (naming the fn)" do
-      # the emitter-capability pre-check: tuples aren't on the Tier-2 JVM subset
-      # yet, so a tuple raises ONE clear error up front (naming `f`). The return is an
-      # opaque nominal type (`Pair`) so the tuple body type-checks and the failure is
-      # the JVM emitter's, not the return-type gate (a structural tuple vs `Int64` is now
-      # a Check error — ADR-0050 tuple inference).
+      # the emitter-capability pre-check: a `with` expression isn't on the Tier-2 JVM
+      # subset yet, so it raises ONE clear error up front (naming `f`) rather than a
+      # deep inspect-dump mid-emission (Reach stays architectural per ADR-0041).
       err =
         assert_raise JVM.Unsupported, fn ->
-          JVM.compile("def f() Pair := {1, 2}")
+          JVM.compile("def f(x Int64) Int64 := with {:ok, v} <- g(x) do v end")
         end
 
-      assert Exception.message(err) =~ "`f`: a tuple is not yet supported on :jvm"
+      assert Exception.message(err) =~ "`f`: a `with` expression is not yet supported on :jvm"
+    end
+
+    test "an arity-≥4 tuple has no idiomatic Kotlin form and raises a clear error" do
+      # Pair/Triple cover 2/3; ≥4 should use a struct. The body type-checks against an
+      # opaque nominal return, so the failure is the emitter's, not the return gate.
+      err = assert_raise JVM.Unsupported, fn -> JVM.compile("def f() Quad := {1, 2, 3, 4}") end
+      assert Exception.message(err) =~ "4-tuple has no Kotlin form"
     end
 
     @tag :jvm
@@ -566,6 +584,18 @@ defmodule Rian.JVMTest do
       assert kt =~ "{ _1 -> (_1 * 2L) }"
       assert kt =~ "apply2(::neg, x)"
       expect_jvm(jvm, :capture, "10,-5")
+    end
+
+    @tag :jvm
+    test "tuples lower to Pair/Triple, destructured via componentN (ADR-0049 Tier 2)", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :tuple)
+      assert kt =~ "): Pair<Long, Long> {"
+      assert kt =~ "Pair(b, a)"
+      assert kt =~ "Triple(a, b, c)"
+      assert kt =~ "(__s).component1()"
+      expect_jvm(jvm, :tuple, "2,6")
     end
 
     @tag :jvm
@@ -709,13 +739,18 @@ defmodule Rian.JVMTest do
       expect_jvm(jvm, :list_head_lit, "yes\nno")
     end
 
-    test "a tuple clause pattern (outside the Tier-2 subset) raises" do
-      assert_raise JVM.Unsupported, fn ->
-        JVM.compile("""
-        def fst(p Int64) Int64
-        def fst({x, y}) := x
-        """)
-      end
+    test "an arity-≥4 tuple clause pattern (outside the Tier-2 subset) raises" do
+      # Pair/Triple cover 2-/3-tuple patterns (destructured via `componentN`); a
+      # ≥4 tuple has no idiomatic Kotlin form and raises a clear error.
+      err =
+        assert_raise JVM.Unsupported, fn ->
+          JVM.compile("""
+          def fst(p Int64) Int64
+          def fst({a, b, c, d}) := a
+          """)
+        end
+
+      assert Exception.message(err) =~ "4-tuple pattern"
     end
   end
 

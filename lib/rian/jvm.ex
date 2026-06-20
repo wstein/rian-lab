@@ -57,9 +57,12 @@ defmodule Rian.JVM do
   lowers to a Kotlin lambda `{ a -> body }` and a `Fn(arg…, ret)` type to a Kotlin
   function type `(arg…) -> ret`, capturing the environment natively (ADR-0061).
   A **capture** `&(&1 * 2)` lowers to a Kotlin lambda over generated args
-  (`{ _1 -> … }`) and `&name/arity` to a Kotlin function reference `::name`.
-  **Not yet** (raise `Rian.JVM.Unsupported`): tuples, maps, structs, `with`,
-  general FFI; and an associated type in a *non*-covariant position (a bare `Elem`
+  (`{ _1 -> … }`) and `&name/arity` to a Kotlin function reference `::name`. A
+  **tuple** `{a, b}` / `{a, b, c}` lowers to a Kotlin `Pair`/`Triple` (type
+  `(A, B)` → `Pair<A, B>`), destructured in a pattern via `componentN()`.
+  **Not yet** (raise `Rian.JVM.Unsupported`): arity-≥4 tuples (use a struct),
+  tagged tuples (`{:ok, v}` — a Result, BEAM-only), maps, structs, `with`, general
+  FFI; and an associated type in a *non*-covariant position (a bare `Elem`
   return / an `Elem` parameter), which stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
   `Any` — a member value *is-a* `Any`, so construction needs no wrapping — and a
   type-pattern `n Int53 ->` narrows it back with `is Long`/`is String` (Kotlin
@@ -95,12 +98,14 @@ defmodule Rian.JVM do
     EList,
     ENum,
     EStr,
+    ETuple,
     EUnary,
     PAtom,
     PChar,
     PCtor,
     PList,
     PLit,
+    PTuple,
     PTyped,
     PVar,
     PWild
@@ -119,7 +124,6 @@ defmodule Rian.JVM do
   # `Core.reject_unsupported!` runs the shared walk; this map is the JVM-specific set.
   @jvm_unsupported %{
     Core.EWith => "a `with` expression",
-    Core.ETuple => "a tuple",
     Core.EMap => "a map",
     Core.EMapUpdate => "a map update",
     Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)",
@@ -615,6 +619,24 @@ defmodule Rian.JVM do
     {size_test ++ elem_tests ++ tail_tests, elem_binds ++ tail_binds}
   end
 
+  # a tuple pattern destructures a `Pair`/`Triple` via `componentN()` — no shape
+  # test (the static type guarantees arity). Tagged/≥4 tuples are unsupported, as in
+  # construction.
+  defp pat_match(%PTuple{elems: [%PAtom{} | _]}, _acc),
+    do: raise(Unsupported, "jvm: a tagged tuple pattern (`{:tag, …}`) is BEAM-only")
+
+  defp pat_match(%PTuple{elems: ps}, acc) when length(ps) in [2, 3] do
+    ps
+    |> Enum.with_index(1)
+    |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
+      {t, b} = pat_match(p, "(#{acc}).component#{i}()")
+      {ts ++ t, bs ++ b}
+    end)
+  end
+
+  defp pat_match(%PTuple{elems: ps}, _acc),
+    do: raise(Unsupported, "jvm: a #{length(ps)}-tuple pattern (Pair/Triple cover 2/3)")
+
   defp pat_match(other, _acc), do: raise(Unsupported, "jvm: clause pattern #{inspect(other)}")
 
   defp bind_str([]), do: ""
@@ -895,6 +917,25 @@ defmodule Rian.JVM do
     "run rcase@{\n" <> Enum.join(decl ++ arm_lines ++ tail, "\n") <> "\n}"
   end
 
+  # a tuple `{a, b}` / `{a, b, c}` → a Kotlin `Pair`/`Triple` (the idiomatic 2-/3-
+  # tuple, destructured via `componentN`). A tagged tuple `{:ok, v}` is a Result/AST
+  # node (BEAM-only on :jvm, ADR-0040); arity ≥4 has no Kotlin form yet.
+  defp expr_kt(%ETuple{elems: [%EAtom{} | _]}),
+    do:
+      raise(Unsupported, "a tagged tuple (`{:tag, …}` — a Result/AST node) is BEAM-only on :jvm")
+
+  defp expr_kt(%ETuple{elems: [a, b]}), do: "Pair(#{expr_kt(a)}, #{expr_kt(b)})"
+
+  defp expr_kt(%ETuple{elems: [a, b, c]}),
+    do: "Triple(#{expr_kt(a)}, #{expr_kt(b)}, #{expr_kt(c)})"
+
+  defp expr_kt(%ETuple{elems: es}),
+    do:
+      raise(
+        Unsupported,
+        "a #{length(es)}-tuple has no Kotlin form (Pair/Triple cover 2/3; use a struct)"
+      )
+
   # a type-directed cast inserted by `coerce_casts` (ADR-0074): bridge an erased
   # dispatcher's `List<Any>` to the concrete `List<T>` a callee expects.
   defp expr_kt({:jvm_cast, inner, t}), do: "(#{expr_kt(inner)} as #{t})"
@@ -1035,6 +1076,24 @@ defmodule Rian.JVM do
       m = Regex.run(~r/^Fn\((.+)\)$/, t) ->
         {params, [ret]} = Rian.TypeStr.split_top_commas(Enum.at(m, 1)) |> Enum.split(-1)
         "(#{Enum.map_join(params, ", ", &kt_type/1)}) -> #{kt_type(ret)}"
+
+      # a tuple type `(A, B)` / `(A, B, C)` → a Kotlin `Pair`/`Triple` (the idiomatic
+      # 2-/3-tuple). A tuple type starts with `(` — distinct from `Fn(`/`Vec(`/a
+      # nominal type. Arity ≥4 has no Kotlin form yet (use a struct).
+      m = Regex.run(~r/^\((.+)\)$/, t) ->
+        case Rian.TypeStr.split_top_commas(Enum.at(m, 1)) do
+          [a, b] ->
+            "Pair<#{kt_type(a)}, #{kt_type(b)}>"
+
+          [a, b, c] ->
+            "Triple<#{kt_type(a)}, #{kt_type(b)}, #{kt_type(c)}>"
+
+          parts ->
+            raise(
+              Unsupported,
+              "jvm: a #{length(parts)}-tuple type `#{t}` (Pair/Triple cover 2/3)"
+            )
+        end
 
       # a value union `Union(A, B)` (ADR-0083) erases to `Any` — a member value
       # *is-a* `Any` (no wrapping needed, unlike Rust); a type-pattern narrows it back.
