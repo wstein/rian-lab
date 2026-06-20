@@ -926,9 +926,10 @@ mod Checker do
     end
   end
 
-  # a list whose element type can't be pinned is still a `Vec` — `Vec(_Unk)`, the head a
-  # fact, the element a deferred hole (mirrors `Rian.Check`'s `list_of/1`, ADR-0050).
-  def list_of(t String) String := if t == "unknown" do "Vec(_Unk)" else "Vec(" <> t <> ")" end
+  # a list whose element type can't be pinned is still a `Vec` — `Vec(Any)`, the head a
+  # fact, the element the dynamic top (mirrors `Rian.Check`'s `list_of/1`; `Any` not `_Unk`
+  # so the gate accepts it — ADR-0034/0050).
+  def list_of(t String) String := if t == "unknown" do "Vec(Any)" else "Vec(" <> t <> ")" end
 
   # drop ALL trailing `)` (mirrors String.trim_trailing(rest, ")")) — reverse, skip
   # leading `)`, reverse back.

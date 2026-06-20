@@ -667,10 +667,11 @@ defmodule Rian.Check do
   end
 
   # Instantiate a **fixed-head** polymorphic stdlib signature (`Rian.Builtins.poly_sig/3`):
-  # like `instantiate_ret/2`, but a tvar the args can't bind is filled with a `_Unk` hole
-  # rather than collapsing the whole call to `:unknown`. The return *head* is the function's
-  # contract (`List.reverse` -> `Vec(...)`), so `List.reverse(unknown)` is `Vec(_Unk)`, not
-  # `:unknown` — concrete enough to type a draft helper's return, while the element defers.
+  # like `instantiate_ret/2`, but a tvar the args can't bind is filled with `Any` (the
+  # dynamic top) rather than collapsing the whole call to `:unknown`. The return *head* is
+  # the function's contract (`List.reverse` -> `Vec(...)`), so `List.reverse(unknown)` is
+  # `Vec(Any)` — concrete enough to type a draft helper's return (and gate-accepted, unlike
+  # `_Unk`), while the element stays the dynamic top.
   defp instantiate_lax({params, ret, tvars}, arg_types) do
     subs =
       params
@@ -678,7 +679,7 @@ defmodule Rian.Check do
       |> Enum.reduce(%{}, fn {p, a}, acc -> bind_tvar(p, a, tvars, acc) end)
 
     Enum.reduce(tvars, ret, fn tv, r ->
-      Regex.replace(~r/\b#{tv}\b/, r, Map.get(subs, tv, "_Unk"))
+      Regex.replace(~r/\b#{tv}\b/, r, Map.get(subs, tv, "Any"))
     end)
   end
 
@@ -713,10 +714,11 @@ defmodule Rian.Check do
 
   # `Vec(T)` string helpers (types are strings; concrete generics unify by ==).
   # a list whose element type can't be pinned (an empty list, or `[x]` with `x` unknown)
-  # is still a `Vec` — `Vec(_Unk)`, the head a fact, the element a deferred hole — so it
-  # joins with concrete `Vec(T)` arms (`_Unk` is a structural wildcard) instead of
-  # poisoning the join to `:unknown`. Matches tuple/map literal inference (ADR-0050).
-  defp list_of(:unknown), do: "Vec(_Unk)"
+  # is still a `Vec` — `Vec(Any)`, the head a fact, the element the dynamic top — so it
+  # joins with concrete `Vec(T)` arms (`Any` is a structural wildcard) instead of poisoning
+  # the join to `:unknown`. `Any` (not `_Unk`) so the gate accepts it (`check_unk`); matches
+  # tuple/map literal inference (ADR-0050).
+  defp list_of(:unknown), do: "Vec(Any)"
   defp list_of(t), do: "Vec(#{t})"
 
   defp list_elem("Vec(" <> rest), do: String.trim_trailing(rest, ")")
@@ -799,11 +801,13 @@ defmodule Rian.Check do
   defp conservative(:mismatch), do: :unknown
   defp conservative(t), do: t
 
-  # a tuple/structural element type that the checker couldn't pin becomes a `_Unk`
-  # hole (compatible with everything, deferred), so the enclosing tuple type stays
-  # concrete rather than collapsing to `:unknown`.
+  # a tuple/structural/list element the checker couldn't pin becomes `Any` (the dynamic
+  # top type), so the enclosing tuple/map/list type stays concrete instead of collapsing
+  # to `:unknown`. `Any` — NOT `_Unk` — because `_Unk` is the fill-me draft marker the gate
+  # *rejects* (`check_unk`, ADR-0034); a genuinely-dynamic inferred slot is `Any` (valid on
+  # every target but `:rs`). `Any` is a structural wildcard in `assignable?`/`join` below.
   defp conservative_unk(t) when is_binary(t), do: t
-  defp conservative_unk(_), do: "_Unk"
+  defp conservative_unk(_), do: "Any"
 
   # ordinal arithmetic widens to the base (ADR-0036): `Char ± _` is `Int64`, not
   # `Char` (`'9' - '0' = 9 ∉ Char`). A `Char` operand contributes its codepoint
@@ -1602,12 +1606,13 @@ defmodule Rian.Check do
       bare_head_of?(from, to) ->
         true
 
-      # a `_Unk` hole is a wildcard at *any depth*: `Vec(_Unk)` (from a fixed-head stdlib
-      # call whose element couldn't be pinned) is assignable to/from `Vec(Int53)`, and
-      # `Dict(_Unk,_Unk)` to `Dict(String,Int53)`. `_Unk` is the unfinished-inference hole
-      # (compatible with everything, like `:unknown`) — structurally, not just at top level.
+      # `Any` (the dynamic top) and `_Unk` (the draft hole) are wildcards at *any depth*:
+      # `Vec(Any)` (from a fixed-head stdlib call whose element couldn't be pinned) is
+      # assignable to/from `Vec(Int53)`, and `Dict(Any,Any)` to `Dict(String,Int53)` —
+      # structurally, not just at top level. (`Any` is what inference now produces; `_Unk`
+      # only reaches here on the gate-skipping bootstrap path.)
       is_binary(from) and is_binary(to) and
-        (String.contains?(from, "_Unk") or String.contains?(to, "_Unk")) and
+        (has_wildcard?(from) or has_wildcard?(to)) and
           unk_assignable?(from, to) ->
         true
 
@@ -1643,15 +1648,17 @@ defmodule Rian.Check do
   # literals and fixed-head stdlib calls. Distinguished from a bare nominal (no paren).
   defp constructed_type?(t), do: is_binary(t) and String.contains?(t, "(")
 
-  # structural assignability treating `_Unk` (and `:unknown`) as a wildcard at any depth:
-  # same head + arity, componentwise. So `Vec(_Unk)` ~ `Vec(Int53)`, `Dict(_Unk,_Unk)` ~
-  # `Dict(String,Int53)`, `(_Unk,String)` ~ `(Int53,String)` — a fixed-head stdlib/literal
-  # type with an unpinned slot flows where the fully-typed one does (CLAUDE.md conservative).
-  # `a` and `b` are type strings (the entry guard is `is_binary`, and recursion descends
-  # through `split_top_commas`, which yields strings — incl. the literal `"_Unk"` hole).
+  # does a type string contain a wildcard slot — `Any` (dynamic top) or `_Unk` (draft hole)?
+  defp has_wildcard?(t), do: String.contains?(t, "Any") or String.contains?(t, "_Unk")
+
+  # structural assignability treating `Any` and `_Unk` as a wildcard at any depth: same head
+  # + arity, componentwise. So `Vec(Any)` ~ `Vec(Int53)`, `Dict(Any,Any)` ~ `Dict(String,
+  # Int53)`, `(Any,String)` ~ `(Int53,String)` — a fixed-head stdlib/literal type with an
+  # unpinned slot flows where the fully-typed one does (CLAUDE.md conservative). `a`/`b` are
+  # type strings (entry guard `is_binary`; recursion descends through `split_top_commas`).
   defp unk_assignable?(a, b) do
     cond do
-      a == "_Unk" or b == "_Unk" -> true
+      a in ["Any", "_Unk"] or b in ["Any", "_Unk"] -> true
       a == b -> true
       true -> heads_match?(split_head(a), split_head(b))
     end
@@ -1740,6 +1747,11 @@ defmodule Rian.Check do
   # Distinct from `:unknown`, which is TOP-absorbing (a genuinely uninferable arm).
   def join("_Unk", t), do: t
   def join(t, "_Unk"), do: t
+  # `Any` is the dynamic TOP type, so it absorbs in the LUB: `Any ⊔ t = Any` (the value is
+  # `t`-or-anything = anything). This makes a covariant join over an inferred-`Any` slot
+  # settle (`Vec(Any) ⊔ Vec(Int53) = Vec(Any)`) rather than diverging.
+  def join("Any", _t), do: "Any"
+  def join(_t, "Any"), do: "Any"
   def join(:unknown, _), do: :unknown
   def join(_, :unknown), do: :unknown
 

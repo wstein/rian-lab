@@ -964,8 +964,8 @@ defmodule Rian.CheckTest do
       assert %Core.EMap{type: "Dict(String,Int53)"} =
                Check.annotate(Pratt.parse(~S|%{"a" => 1, "b" => 2}|))
 
-      # mixed values LUB-join to a `_Unk` hole; an atom key is a `Symbol`
-      assert %Core.EMap{type: "Dict(Symbol,_Unk)"} =
+      # mixed values LUB-join to `Any` (the dynamic top, gate-accepted); atom key → `Symbol`
+      assert %Core.EMap{type: "Dict(Symbol,Any)"} =
                Check.annotate(Pratt.parse(~S|%{x: 1, y: "two"}|))
     end
 
@@ -979,12 +979,12 @@ defmodule Rian.CheckTest do
     end
 
     test "a fixed-head polymorphic stdlib call infers its head, instantiating the element" do
-      # precise when the argument is typed; `_Unk` element when it isn't (the head is the
+      # precise when the argument is typed; `Any` element when it isn't (the head is the
       # function's contract — ADR-0050 / ADR-0047 Builtins.poly_sig).
       assert %Core.ECall{type: "Vec(Int64)"} =
                Check.annotate(Pratt.parse("List.reverse(xs)"), %{"xs" => "Vec(Int64)"})
 
-      assert %Core.ECall{type: "Vec(_Unk)"} =
+      assert %Core.ECall{type: "Vec(Any)"} =
                Check.annotate(Pratt.parse("Enum.uniq(xs)"))
     end
 
