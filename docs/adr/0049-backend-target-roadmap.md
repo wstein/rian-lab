@@ -97,9 +97,11 @@ functions** (`forall T` → `fun <T : Any>`), and **protocols** (a `dispatch: :d
 (`(a) -> body` → a Kotlin lambda `{ a -> body }`, `Fn(arg…, ret)` → a function type `(arg…) -> ret`,
 capturing natively — ADR-0061), **captures** (`&(&1 * 2)` → `{ _1 -> … }`, `&name/arity` →
 `::name`), and **tuples** (`{a, b}`/`{a, b, c}` → Kotlin `Pair`/`Triple`, type `(A, B)` →
-`Pair<A, B>`, destructured via `componentN()`) now lower too. Still raising
+`Pair<A, B>`, destructured via `componentN()`), and **structs** (`struct Name(f T, …)` →
+a Kotlin `data class`, named-arg construction + field access + `is Name` patterns) now lower too.
+Still raising
 `Rian.JVM.Unsupported` (the next increments): arity-≥4 tuples (use a struct), tagged tuples
-(`{:ok, v}` — a Result, BEAM-only), maps, structs, `with`,
+(`{:ok, v}` — a Result, BEAM-only), maps, `with`,
 general FFI, and a dispatcher returning an associated type (ADR-0074 — no concrete Kotlin return). Per ADR-0026
 parity, JVM CI stays **non-blocking** until promoted: CI installs `kotlinc` and runs the JVM
 execution tests in a dedicated `continue-on-error` lane (the blocking `mix test.all` gate keeps

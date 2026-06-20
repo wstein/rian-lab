@@ -344,6 +344,18 @@ defmodule Rian.JVMTest do
       id: :membership,
       src: "def has(x Int64, xs Vec(Int64)) Bool := x in xs",
       probe: ~s|println("${has(2L, listOf(1L, 2L, 3L))},${has(9L, listOf(1L, 2L, 3L))}")|
+    },
+    %{
+      id: :struct,
+      src: """
+      struct Point(x Int64, y Int64)
+      def mk(a Int64, b Int64) Point := Point(x: a, y: b)
+      def getx(p Point) Int64 := p.x
+      def sumxy(p Point) Int64 := case p do
+        Point(x: a, y: b) -> a + b
+      end
+      """,
+      probe: ~s|println("${getx(mk(3L, 4L))},${sumxy(mk(3L, 4L))}")|
     }
   ]
 
@@ -607,6 +619,18 @@ defmodule Rian.JVMTest do
     test "membership `x in xs` lowers to Kotlin's native `in` and runs", %{jvm_batch: jvm} do
       assert jvm_kt(jvm, :membership) =~ "(x in xs)"
       expect_jvm(jvm, :membership, "true,false")
+    end
+
+    @tag :jvm
+    test "a struct lowers to a Kotlin data class: named-arg ctor, field access, pattern", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :struct)
+      assert kt =~ "data class Point(val x: Long, val y: Long)"
+      assert kt =~ "Point(x = a, y = b)"
+      assert kt =~ "p.x"
+      assert kt =~ "p is Point"
+      expect_jvm(jvm, :struct, "3,7")
     end
 
     @tag :jvm

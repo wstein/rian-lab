@@ -59,9 +59,11 @@ defmodule Rian.JVM do
   A **capture** `&(&1 * 2)` lowers to a Kotlin lambda over generated args
   (`{ _1 -> … }`) and `&name/arity` to a Kotlin function reference `::name`. A
   **tuple** `{a, b}` / `{a, b, c}` lowers to a Kotlin `Pair`/`Triple` (type
-  `(A, B)` → `Pair<A, B>`), destructured in a pattern via `componentN()`.
+  `(A, B)` → `Pair<A, B>`), destructured in a pattern via `componentN()`. A
+  **struct** `struct Name(f T, …)` lowers to a Kotlin `data class` (named-arg
+  construction `Name(f = v)`, field access `p.f`, and `is Name` patterns).
   **Not yet** (raise `Rian.JVM.Unsupported`): arity-≥4 tuples (use a struct),
-  tagged tuples (`{:ok, v}` — a Result, BEAM-only), maps, structs, `with`, general
+  tagged tuples (`{:ok, v}` — a Result, BEAM-only), maps, `with`, general
   FFI; and an associated type in a *non*-covariant position (a bare `Elem`
   return / an `Elem` parameter), which stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
   `Any` — a member value *is-a* `Any`, so construction needs no wrapping — and a
@@ -94,10 +96,12 @@ defmodule Rian.JVM do
     ECapture,
     ECaptureNamed,
     EIf,
+    ELabel,
     ELambda,
     EList,
     ENum,
     EStr,
+    EStruct,
     ETuple,
     EUnary,
     PAtom,
@@ -105,6 +109,7 @@ defmodule Rian.JVM do
     PCtor,
     PList,
     PLit,
+    PStruct,
     PTuple,
     PTyped,
     PVar,
@@ -126,8 +131,7 @@ defmodule Rian.JVM do
     Core.EWith => "a `with` expression",
     Core.EMap => "a map",
     Core.EMapUpdate => "a map update",
-    Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)",
-    Core.EStruct => "a struct construction"
+    Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)"
   }
 
   @doc "Compile `src`'s types + functions to a single Kotlin source module (a string)."
@@ -171,6 +175,9 @@ defmodule Rian.JVM do
 
     sigs = Map.new(all, fn f -> {{f.name, length(f.params)}, Enum.map(f.params, & &1.type)} end)
     type_decls = Enum.map_join(all_types(prog), "\n\n", &sum_decl/1)
+    # a `struct Name(f Type, …)` (ADR-0043) → a standalone Kotlin `data class` with
+    # named fields (a product type, no sealed supertype).
+    struct_decls = Enum.map_join(all_structs(prog), "\n\n", &struct_decl/1)
     # `const NAME := value` (ADR-0033) lowers to a top-level `val`, and a reference
     # resolves to it — threaded through `ic[:consts]` (parity with `Rian.Beam`/
     # `Rian.Lower`); without this a const reference emitted as an unresolved Kotlin
@@ -193,7 +200,7 @@ defmodule Rian.JVM do
     runtime =
       if String.contains?(fn_decls, "__rian_float_repr("), do: float_repr_helper(), else: ""
 
-    [runtime, type_decls, const_decls, fn_decls, disp_decls]
+    [runtime, type_decls, struct_decls, const_decls, fn_decls, disp_decls]
     |> Enum.reject(&(&1 == ""))
     |> Enum.join("\n\n")
   end
@@ -340,6 +347,17 @@ defmodule Rian.JVM do
 
   defp all_types(prog),
     do: Map.get(prog, :types, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.types)
+
+  defp all_structs(prog),
+    do: Map.get(prog, :structs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.structs)
+
+  # a `struct Name(f Type, …)` → `data class Name(val f: T, …)` (named fields, no
+  # sealed supertype). Construction is by named args; a field access `p.f` and a
+  # struct pattern read the data-class properties.
+  defp struct_decl(s) do
+    params = Enum.map_join(s.fields, ", ", fn f -> "val #{f.label}: #{kt_type(f.type)}" end)
+    "data class #{s.name}(#{params})"
+  end
 
   # ── sum type -> a Kotlin sealed hierarchy ───────────────────────────────
   # a single-variant sum whose ctor name **is** the type name (`type Bag := Bag(items …)`,
@@ -637,6 +655,19 @@ defmodule Rian.JVM do
   defp pat_match(%PTuple{elems: ps}, _acc),
     do: raise(Unsupported, "jvm: a #{length(ps)}-tuple pattern (Pair/Triple cover 2/3)")
 
+  # a struct pattern `Name(f: pat, …)` (ADR-0043): test `is Name` (Kotlin then
+  # smart-casts the scrutinee), then match each named field via its data-class
+  # property `acc.f` (recursing for nested patterns).
+  defp pat_match(%PStruct{name: name, fields: fields}, acc) do
+    {ts, bs} =
+      Enum.reduce(fields, {[], []}, fn {f, p}, {ts, bs} ->
+        {t, b} = pat_match(p, "(#{acc} as #{name}).#{f}")
+        {ts ++ t, bs ++ b}
+      end)
+
+    {["#{acc} is #{name}" | ts], bs}
+  end
+
   defp pat_match(other, _acc), do: raise(Unsupported, "jvm: clause pattern #{inspect(other)}")
 
   defp bind_str([]), do: ""
@@ -880,6 +911,19 @@ defmodule Rian.JVM do
        when mod not in ~w(Map String List),
        do: "#{fun}(#{Enum.map_join(args, ", ", &expr_kt/1)})"
 
+  # struct construction `Name(f: v, …)` (ADR-0043): labelled call args → a Kotlin
+  # data-class constructor with named arguments (`Name(f = v, …)`).
+  defp expr_kt(%ECall{fun: %EId{name: f}, args: [%ELabel{} | _] = args}) do
+    fields = Enum.map_join(args, ", ", fn %ELabel{name: l, expr: e} -> "#{l} = #{expr_kt(e)}" end)
+    "#{f}(#{fields})"
+  end
+
+  # a resolved struct literal (the `Rian.Lower` resolve passes produce `EStruct`).
+  defp expr_kt(%EStruct{name: name, pairs: pairs}) do
+    fields = Enum.map_join(pairs, ", ", fn {l, v} -> "#{l} = #{expr_kt(v)}" end)
+    "#{name}(#{fields})"
+  end
+
   # a PascalCase call is sum-variant construction `Ctor(args)`; a lowercase call
   # is a local function call
   defp expr_kt(%ECall{fun: %EId{name: f}, args: args}) do
@@ -963,6 +1007,10 @@ defmodule Rian.JVM do
     ps = Enum.map_join(0..(a - 1)//1, ", ", &"_a#{&1}")
     "{ #{ps} -> #{expr_kt(path)}(#{ps}) }"
   end
+
+  # bare struct field access `value.field` (a remote call `Mod.fun(…)` is an `ECall`
+  # over an `EDot`, handled above; a standalone `EDot` here is data-class field access).
+  defp expr_kt(%EDot{head: head, name: field}), do: "#{expr_kt(head)}.#{field}"
 
   defp expr_kt(other), do: raise(Unsupported, "jvm: expression #{inspect(other)}")
 
