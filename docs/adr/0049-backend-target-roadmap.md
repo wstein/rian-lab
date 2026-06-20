@@ -95,8 +95,9 @@ the **`Str`/`Char` codepoint prims**, **`Symbol`/atoms** (→ a Kotlin `String`,
 functions** (`forall T` → `fun <T : Any>`), and **protocols** (a `dispatch: :dispatcher` → a
 `when (a0)` over `is <Type>`; bounded-generic consumers call it, ADR-0042), and **lambdas**
 (`(a) -> body` → a Kotlin lambda `{ a -> body }`, `Fn(arg…, ret)` → a function type `(arg…) -> ret`,
-capturing natively — ADR-0061) now lower too. Still raising
-`Rian.JVM.Unsupported` (the next increments): tuples, maps, structs, `with`, captures (`&(…)`),
+capturing natively — ADR-0061), and **captures** (`&(&1 * 2)` → `{ _1 -> … }`, `&name/arity` →
+`::name`) now lower too. Still raising
+`Rian.JVM.Unsupported` (the next increments): tuples, maps, structs, `with`,
 general FFI, and a dispatcher returning an associated type (ADR-0074 — no concrete Kotlin return). Per ADR-0026
 parity, JVM CI stays **non-blocking** until promoted: CI installs `kotlinc` and runs the JVM
 execution tests in a dedicated `continue-on-error` lane (the blocking `mix test.all` gate keeps

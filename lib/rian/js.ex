@@ -60,8 +60,9 @@ defmodule Rian.JS do
   (`bake_union_disc`) before emit, as the `expr_js` recursion threads no type
   registry. A **lambda** `(a) -> body` lowers to a JS arrow function `(a) => body`,
   capturing its environment natively (no `Box`/`move` ceremony as Rust needs —
-  ADR-0061). **Not yet** (raise `Rian.JS.Unsupported`): `with`, captures (`&(…)`/
-  `&name/arity`), general FFI.
+  ADR-0061). A **capture** `&(&1 + 1)` lowers to an arrow over generated args
+  (`(_1) => …`) and `&name/arity` to the bare function reference. **Not yet**
+  (raise `Rian.JS.Unsupported`): `with`, general FFI.
 
   ## Capabilities
 
@@ -86,6 +87,9 @@ defmodule Rian.JS do
     EDot,
     EId,
     EIf,
+    ECapArg,
+    ECapture,
+    ECaptureNamed,
     ELambda,
     EList,
     EMap,
@@ -122,8 +126,6 @@ defmodule Rian.JS do
   # runs the shared walk; this map is the JS-specific construct→label set.
   @js_unsupported %{
     Core.EWith => "a `with` expression",
-    Core.ECapture => "a function capture (`&(…)`)",
-    Core.ECaptureNamed => "a function capture (`&name/arity`)",
     Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)"
   }
 
@@ -906,6 +908,23 @@ defmodule Rian.JS do
   defp expr_js(%ELambda{params: params, body: body}, i53) do
     ps = Enum.map_join(params, ", ", fn {n, _} -> n end)
     "(#{ps}) => #{branch_js(body, i53)}"
+  end
+
+  # an anonymous capture `&(&1 + &2)` -> an arrow over generated args `_1.._N`
+  defp expr_js(%ECapture{body: body}, i53) do
+    ps = Enum.map_join(1..Core.cap_arity(body)//1, ", ", &"_#{&1}")
+    "(#{ps}) => #{expr_js(body, i53)}"
+  end
+
+  defp expr_js(%ECapArg{n: n}, _i53), do: "_#{n}"
+
+  # `&name/arity` -> the bare function reference (JS functions are first-class);
+  # `&Mod.fun/arity` -> a forwarding arrow (a remote name has no bare JS binding).
+  defp expr_js(%ECaptureNamed{path: %EId{name: n}}, _i53), do: n
+
+  defp expr_js(%ECaptureNamed{path: path, arity: a}, i53) do
+    ps = Enum.map_join(0..(a - 1)//1, ", ", &"_a#{&1}")
+    "(#{ps}) => #{expr_js(path, i53)}(#{ps})"
   end
 
   defp expr_js(other, _i53), do: raise(Unsupported, "ecmascript: expression #{inspect(other)}")

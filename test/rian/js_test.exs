@@ -334,6 +334,26 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "captures lower: `&(…)` to an arrow over `_N`, `&name/arity` to a bare reference" do
+      js =
+        JS.compile("""
+        mod M do
+          pub def apply2(f Fn(Int53, Int53), x Int53) Int53 := f(x)
+          pub def neg(x Int53) Int53 := 0 - x
+          pub def anon(x Int53) Int53 := apply2(&(&1 * 2), x)
+          pub def named(x Int53) Int53 := apply2(&neg/1, x)
+        end
+        """)
+
+      assert js =~ "(_1) => (_1 * 2)"
+      assert js =~ "apply2(neg, x)"
+
+      case node_eval(js, "[anon(5), named(5)].join(',')") do
+        :no_node -> :ok
+        out -> assert out == "10,-5"
+      end
+    end
+
     test "a type error is caught by the gate, not emitted as malformed JS (parity)" do
       # JS.compile now runs `Check.gate!` before emitting (parity with the BEAM
       # `Decl.compile` path) — a proven type mismatch raises here, not downstream.

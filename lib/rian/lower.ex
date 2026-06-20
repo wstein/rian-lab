@@ -1120,31 +1120,9 @@ defmodule Rian.Lower do
   end
 
   # ── `&` capture support ────────────────────────────────────────────────
-  # Highest placeholder index in an anonymous-capture body → the closure arity
-  # the Rust target must spell out (`&(&1 + &2)` ⇒ 2 ⇒ `|a1, a2| …`).
-  defp cap_arity(%ECapArg{n: n}), do: n
-  defp cap_arity(%EBin{left: l, right: r}), do: max(cap_arity(l), cap_arity(r))
-  defp cap_arity(%EUnary{arg: x}), do: cap_arity(x)
-  defp cap_arity(%EDot{head: o}), do: cap_arity(o)
-
-  defp cap_arity(%EIf{cond: c, then: t, else: e}),
-    do: max(cap_arity(c), max(cap_arity(t), cap_arity(e)))
-
-  defp cap_arity(%ECall{fun: f, args: args}),
-    do: Enum.reduce([f | args], 0, fn n, acc -> max(cap_arity(n), acc) end)
-
-  defp cap_arity(%EList{elems: es, tail: tail}) do
-    base = Enum.reduce(es, 0, fn e, acc -> max(cap_arity(e), acc) end)
-    if tail == :close, do: base, else: max(base, cap_arity(tail))
-  end
-
-  defp cap_arity(%EMap{pairs: ps}),
-    do: Enum.reduce(ps, 0, fn {_, v}, acc -> max(cap_arity(v), acc) end)
-
-  defp cap_arity(%EMapUpdate{base: base, pairs: ps}),
-    do: Enum.reduce(ps, cap_arity(base), fn {_, v}, acc -> max(cap_arity(v), acc) end)
-
-  defp cap_arity(_), do: 0
+  # The closure arity the Rust target must spell out is `Core.cap_arity/1` — the
+  # body's highest `&N` placeholder (`&(&1 + &2)` ⇒ 2 ⇒ `|a1, a2| …`), shared
+  # across every backend.
 
   # "aFrom, …, aTo" — empty when the range is empty (a nullary closure).
   defp closure_params(from, to) when to < from, do: ""
@@ -2641,7 +2619,7 @@ defmodule Rian.Lower do
   defp emit(%ECapture{body: body}, :elixir, ec), do: {"&(#{p(body, 0, :elixir, ec)})", 12}
 
   defp emit(%ECapture{body: body}, :rust, ec) do
-    {"|#{closure_params(1, cap_arity(body))}| #{p(body, 0, :rust, ec)}", 12}
+    {"|#{closure_params(1, Core.cap_arity(body))}| #{p(body, 0, :rust, ec)}", 12}
   end
 
   # `&name/arity` — Elixir's native capture; Rust a forwarding closure.

@@ -440,6 +440,37 @@ defmodule Rian.Core do
     }
   end
 
+  @doc """
+  The arity of an anonymous capture body `&( … )` — its highest `&N` placeholder
+  (`&(&1 + &2)` ⇒ 2). Shared by every backend that lowers a capture to a closure
+  with spelled-out parameters (`Rian.Beam`/`Lower`/`JS`/`JVM`); a node with no
+  placeholder contributes 0.
+  """
+  @rian_sig "pub def cap_arity(body Expr) Int53"
+  @spec cap_arity(struct()) :: non_neg_integer()
+  def cap_arity(%ECapArg{n: n}), do: n
+  def cap_arity(%EBin{left: l, right: r}), do: max(cap_arity(l), cap_arity(r))
+  def cap_arity(%EUnary{arg: x}), do: cap_arity(x)
+  def cap_arity(%EDot{head: h}), do: cap_arity(h)
+
+  def cap_arity(%EIf{cond: c, then: t, else: e}),
+    do: max(cap_arity(c), max(cap_arity(t), cap_arity(e)))
+
+  def cap_arity(%ECall{fun: f, args: args}), do: cap_arity_list([f | args])
+  def cap_arity(%ETuple{elems: es}), do: cap_arity_list(es)
+
+  def cap_arity(%EList{elems: es, tail: :close}), do: cap_arity_list(es)
+  def cap_arity(%EList{elems: es, tail: tail}), do: max(cap_arity_list(es), cap_arity(tail))
+
+  def cap_arity(%EMap{pairs: ps}), do: cap_arity_list(Enum.map(ps, fn {_, v} -> v end))
+
+  def cap_arity(%EMapUpdate{base: base, pairs: ps}),
+    do: max(cap_arity(base), cap_arity_list(Enum.map(ps, fn {_, v} -> v end)))
+
+  def cap_arity(_), do: 0
+
+  defp cap_arity_list(es), do: Enum.reduce(es, 0, &max(cap_arity(&1), &2))
+
   # `a |> f(args)` → `f(a, args)`; `a |> f` / `a |> M.f` → `f(a)` (bare callee).
   defp pipe_into(l, {:call, fun, args}), do: {:call, fun, [l | args]}
   defp pipe_into(l, callee), do: {:call, callee, [l]}

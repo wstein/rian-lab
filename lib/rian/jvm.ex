@@ -56,10 +56,11 @@ defmodule Rian.JVM do
   `List<T>` callee param (an element-*typed* consumer). A **lambda** `(a) -> body`
   lowers to a Kotlin lambda `{ a -> body }` and a `Fn(arg…, ret)` type to a Kotlin
   function type `(arg…) -> ret`, capturing the environment natively (ADR-0061).
+  A **capture** `&(&1 * 2)` lowers to a Kotlin lambda over generated args
+  (`{ _1 -> … }`) and `&name/arity` to a Kotlin function reference `::name`.
   **Not yet** (raise `Rian.JVM.Unsupported`): tuples, maps, structs, `with`,
-  captures (`&(…)`/`&name/arity`), general FFI; and an associated type in a
-  *non*-covariant position (a bare `Elem` return / an `Elem` parameter), which
-  stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
+  general FFI; and an associated type in a *non*-covariant position (a bare `Elem`
+  return / an `Elem` parameter), which stays off `:jvm`. A **value union** `A | B` (ADR-0083) erases to
   `Any` — a member value *is-a* `Any`, so construction needs no wrapping — and a
   type-pattern `n Int53 ->` narrows it back with `is Long`/`is String` (Kotlin
   smart-cast), the same discriminator the dispatcher uses.
@@ -86,6 +87,9 @@ defmodule Rian.JVM do
     EConstRef,
     EDot,
     EId,
+    ECapArg,
+    ECapture,
+    ECaptureNamed,
     EIf,
     ELambda,
     EList,
@@ -115,8 +119,6 @@ defmodule Rian.JVM do
   # `Core.reject_unsupported!` runs the shared walk; this map is the JVM-specific set.
   @jvm_unsupported %{
     Core.EWith => "a `with` expression",
-    Core.ECapture => "a function capture (`&(…)`)",
-    Core.ECaptureNamed => "a function capture (`&name/arity`)",
     Core.ETuple => "a tuple",
     Core.EMap => "a map",
     Core.EMapUpdate => "a map update",
@@ -905,6 +907,21 @@ defmodule Rian.JVM do
 
   defp expr_kt(%ELambda{params: params, body: body}),
     do: "{ #{Enum.map_join(params, ", ", fn {n, _} -> n end)} -> #{branch_kt(body)} }"
+
+  # an anonymous capture `&(&1 * 2)` -> a Kotlin lambda over generated args `_1.._N`
+  defp expr_kt(%ECapture{body: body}),
+    do: "{ #{Enum.map_join(1..Core.cap_arity(body)//1, ", ", &"_#{&1}")} -> #{branch_kt(body)} }"
+
+  defp expr_kt(%ECapArg{n: n}), do: "_#{n}"
+
+  # `&name/arity` -> a Kotlin function reference `::name` (idiomatic); `&Mod.fun/arity`
+  # -> a forwarding lambda (a remote name has no bare `::` reference here).
+  defp expr_kt(%ECaptureNamed{path: %EId{name: n}}), do: "::#{n}"
+
+  defp expr_kt(%ECaptureNamed{path: path, arity: a}) do
+    ps = Enum.map_join(0..(a - 1)//1, ", ", &"_a#{&1}")
+    "{ #{ps} -> #{expr_kt(path)}(#{ps}) }"
+  end
 
   defp expr_kt(other), do: raise(Unsupported, "jvm: expression #{inspect(other)}")
 

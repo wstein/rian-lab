@@ -929,7 +929,7 @@ defmodule Rian.Beam do
 
   # `&(&1 + &2)` — an anonymous fun over generated args `Caparg_1..N`
   defp expr_form(%ECapture{body: body}, s) do
-    n = cap_arity(body)
+    n = Core.cap_arity(body)
     names = for i <- 1..n//1, do: "caparg_#{i}"
     inner = Enum.reduce(names, s, &Map.put(&2, &1, var_atom(&1)))
 
@@ -1108,18 +1108,6 @@ defmodule Rian.Beam do
     do: Enum.reduce(ps, acc, fn {_k, p}, a -> pat_vars(p, a) end)
 
   defp pat_vars(_other, acc), do: acc
-
-  # maximum capture placeholder `&N` in an anonymous-capture body -> its arity
-  defp cap_arity(%ECapArg{n: n}), do: n
-  defp cap_arity(%EBin{left: l, right: r}), do: max(cap_arity(l), cap_arity(r))
-  defp cap_arity(%EUnary{arg: x}), do: cap_arity(x)
-  defp cap_arity(%EDot{head: h}), do: cap_arity(h)
-  defp cap_arity(%ETuple{elems: es}), do: cap_arity_list(es)
-  defp cap_arity(%EList{elems: es, tail: :close}), do: cap_arity_list(es)
-  defp cap_arity(%EList{elems: es, tail: t}), do: max(cap_arity_list(es), cap_arity(t))
-  defp cap_arity(%ECall{fun: f, args: as}), do: cap_arity_list([f | as])
-  defp cap_arity(_), do: 0
-  defp cap_arity_list(es), do: Enum.reduce(es, 0, &max(cap_arity(&1), &2))
 
   # ── pattern forms (consume the typed core IR, Rian.Core) ───────────────
   defp pat_form(%Core.PWild{}), do: {:var, @ln, :_}

@@ -316,6 +316,16 @@ defmodule Rian.JVMTest do
       def go(n Int64) Int64 := apply2(adder(n), n)
       """,
       probe: ~s|println(go(20L))|
+    },
+    %{
+      id: :capture,
+      src: """
+      def apply2(f Fn(Int64, Int64), x Int64) Int64 := f(x)
+      def neg(x Int64) Int64 := 0 - x
+      def anon(x Int64) Int64 := apply2(&(&1 * 2), x)
+      def named(x Int64) Int64 := apply2(&neg/1, x)
+      """,
+      probe: ~s|println("${anon(5L)},${named(5L)}")|
     }
   ]
 
@@ -546,6 +556,16 @@ defmodule Rian.JVMTest do
       # the closure captures `n` from the enclosing frame
       assert kt =~ "{ x -> (x + n) }"
       expect_jvm(jvm, :lambda, "40")
+    end
+
+    @tag :jvm
+    test "captures lower: `&(…)` to a `{ _N -> … }` lambda, `&name/arity` to `::name`", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :capture)
+      assert kt =~ "{ _1 -> (_1 * 2L) }"
+      assert kt =~ "apply2(::neg, x)"
+      expect_jvm(jvm, :capture, "10,-5")
     end
 
     @tag :jvm
