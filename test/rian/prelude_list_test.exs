@@ -59,4 +59,62 @@ defmodule Rian.PreludeListTest do
     assert m.find([1, 2, 3], fn x -> x > 1 end) == {:some, 2}
     assert m.find([1, 2, 3], fn x -> x > 9 end) == :none
   end
+
+  test "sort_by orders by the comparator; uniq keeps the first occurrence", %{mod: m} do
+    le = fn a, b -> a <= b end
+    assert m.sort_by([3, 1, 2, 1], le) == [1, 1, 2, 3]
+    assert m.sort_by([], le) == []
+    assert m.uniq([1, 1, 2, 3, 3, 1]) == [1, 2, 3]
+    # sort_by is stable for equal keys (by a key projection)
+    by_fst = fn {a, _}, {b, _} -> a <= b end
+    assert m.sort_by([{1, :a}, {0, :b}, {1, :c}], by_fst) == [{0, :b}, {1, :a}, {1, :c}]
+  end
+
+  describe "Dict.from_list and Str.trim (portable, ADR-0047)" do
+    test "Dict.from_list builds a map; a later pair wins" do
+      {:ok, d} =
+        Rian.Beam.load(File.read!("examples/rian/prelude_dict.rian"), :"Elixir.RianPreludeDict")
+
+      assert d.from_list([{"a", 1}, {"b", 2}]) == %{"a" => 1, "b" => 2}
+      assert d.from_list([{"a", 1}, {"a", 2}]) == %{"a" => 2}
+      assert d.from_list([]) == %{}
+    end
+
+    test "Str.trim strips leading/trailing ASCII whitespace (self-contained, no List dep)" do
+      {:ok, s} =
+        Rian.Beam.load(File.read!("examples/rian/prelude_str.rian"), :"Elixir.RianPreludeStr")
+
+      assert s.trim("  hi  ") == "hi"
+      assert s.trim("\t a \n") == "a"
+      assert s.trim("none") == "none"
+    end
+  end
+
+  describe "the additions are portable (reach + run on JS via node)" do
+    test "sort_by/uniq/from_list/trim compile to JS and run under node" do
+      node_run = fn src, expr ->
+        case System.find_executable("node") do
+          nil ->
+            :no_node
+
+          node ->
+            js = Rian.JS.compile(src)
+            p = Path.join(System.tmp_dir!(), "pl_#{System.unique_integer([:positive])}.mjs")
+            File.write!(p, js <> "\nconsole.log(String(#{expr}));\n")
+            {out, 0} = System.cmd(node, [p])
+            File.rm(p)
+            String.trim(out)
+        end
+      end
+
+      list = File.read!("examples/rian/prelude_list.rian")
+      dict = File.read!("examples/rian/prelude_dict.rian")
+      str = File.read!("examples/rian/prelude_str.rian")
+
+      assert node_run.(list, "sort_by([3,1,2], (a,b)=>a<=b).join(',')") in [:no_node, "1,2,3"]
+      assert node_run.(list, "uniq([1,1,2,3,3]).join(',')") in [:no_node, "1,2,3"]
+      assert node_run.(dict, "from_list([['a',1],['b',2]]).a") in [:no_node, "1"]
+      assert node_run.(str, "trim('  hi  ')") in [:no_node, "hi"]
+    end
+  end
 end

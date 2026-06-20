@@ -34,4 +34,22 @@ mod Str do
   def count(cs Vec(Char)) Int53
   def count([]) := 0
   def count([_ | t]) := 1 + count(t)
+
+  # trim — strip leading and trailing ASCII whitespace (space/tab/newline/CR), the
+  # portable image of `String.trim/1`: drop leading whitespace, reverse, drop again,
+  # reverse back — over the char list, no host FFI. `rev` is local (self-contained,
+  # so `Str` carries no cross-module dependency).
+  pub def trim(s String) String := from_chars(rev(drop_ws(rev(drop_ws(chars(s))))))
+
+  def drop_ws(Vec(Char)) Vec(Char)
+  def drop_ws([]) := []
+  def drop_ws(all @ [c | t]) := if is_ws(c) do drop_ws(t) else all end
+
+  def is_ws(c Char) Bool := c == ' ' or c == '\t' or c == '\n' or c == '\r'
+
+  def rev(cs Vec(Char)) Vec(Char) := rev_onto(cs, [])
+
+  def rev_onto(Vec(Char), Vec(Char)) Vec(Char)
+  def rev_onto([], acc) := acc
+  def rev_onto([h | t], acc) := rev_onto(t, [h | acc])
 end

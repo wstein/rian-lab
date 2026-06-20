@@ -37,4 +37,13 @@ mod Dict do
   # fallback (ADR-0064 §2a).
   def zero() Int53 := 0
   pub def inc(m Map(String, Int53), k String) Map(String, Int53) := put(m, k, get_or(m, k, zero()) + 1)
+
+  # from_list — build a map from a list of `{key, value}` pairs (the portable image
+  # of `Map.new/1`/`Enum.into/2`). Folds left-to-right so a later pair overwrites an
+  # earlier one for the same key (matching `Map.new`).
+  pub def from_list(pairs Vec((K, V))) Map(K, V) forall K, V := from_into(pairs, empty())
+
+  def from_into(Vec((K, V)), Map(K, V)) Map(K, V) forall K, V
+  def from_into([], acc) := acc
+  def from_into([{k, v} | t], acc) := from_into(t, put(acc, k, v))
 end

@@ -143,4 +143,21 @@ mod List do
   pub def find(xs Vec(T), f Fn(T, Bool)) Option(T) forall T
   pub def find([], _) := None
   pub def find([h | t], f) := if f(h) do Some(h) else find(t, f) end
+
+  # sort_by — insertion sort ordered by `le` (`le(a, b)` is true when `a` should
+  # come at-or-before `b`); stable for equal keys. The portable image of
+  # `Enum.sort/2` — cons recursion + an as-pattern, no host FFI.
+  pub def sort_by(xs Vec(T), le Fn(T, T, Bool)) Vec(T) forall T
+  pub def sort_by([], _) := []
+  pub def sort_by([h | t], le) := insert_by(sort_by(t, le), h, le)
+
+  def insert_by(Vec(T), T, Fn(T, T, Bool)) Vec(T) forall T
+  def insert_by([], x, _) := [x]
+  def insert_by(all @ [h | t], x, le) := if le(x, h) do [x | all] else [h | insert_by(t, x, le)] end
+
+  # uniq — drop later duplicates, keeping the first occurrence (`Enum.uniq/1`); the
+  # `Eq` bound makes the equality a protocol method (UFCS on Rust), not BEAM-only `==`.
+  pub def uniq(xs Vec(T)) Vec(T) forall T: Eq
+  pub def uniq([]) := []
+  pub def uniq([h | t]) := [h | uniq(reject(t, (x) -> x == h))]
 end
