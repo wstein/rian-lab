@@ -58,8 +58,10 @@ defmodule Rian.JS do
   type-pattern `n Int53 ->`: a primitive tests `typeof`, a sum the tagged-array head,
   a struct `__struct__` — the sum/struct discriminator is *baked into the pattern*
   (`bake_union_disc`) before emit, as the `expr_js` recursion threads no type
-  registry. **Not yet** (raise `Rian.JS.Unsupported`): `with`, lambdas/captures,
-  general FFI.
+  registry. A **lambda** `(a) -> body` lowers to a JS arrow function `(a) => body`,
+  capturing its environment natively (no `Box`/`move` ceremony as Rust needs —
+  ADR-0061). **Not yet** (raise `Rian.JS.Unsupported`): `with`, captures (`&(…)`/
+  `&name/arity`), general FFI.
 
   ## Capabilities
 
@@ -84,6 +86,7 @@ defmodule Rian.JS do
     EDot,
     EId,
     EIf,
+    ELambda,
     EList,
     EMap,
     EMapUpdate,
@@ -119,7 +122,6 @@ defmodule Rian.JS do
   # runs the shared walk; this map is the JS-specific construct→label set.
   @js_unsupported %{
     Core.EWith => "a `with` expression",
-    Core.ELambda => "a lambda",
     Core.ECapture => "a function capture (`&(…)`)",
     Core.ECaptureNamed => "a function capture (`&name/arity`)",
     Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)"
@@ -895,6 +897,16 @@ defmodule Rian.JS do
   # bare field access `value.field` (a remote call `Mod.fun(…)` is handled above
   # as an `ECall` over an `EDot`, so a standalone `EDot` here is field access)
   defp expr_js(%EDot{head: head, name: field}, i53), do: "#{expr_js(head, i53)}.#{field}"
+
+  # a lambda `(a, b) -> body` -> a JS arrow function. JS closures capture their
+  # environment natively, so a lambda value (passed to a HOF, returned, or bound)
+  # needs no `Box`/`move` ceremony as Rust does (ADR-0061). The body is a single
+  # expression or a `do…end` block (an `EBlock`); `branch_js` renders both as one
+  # JS expression (an IIFE for a multi-statement block).
+  defp expr_js(%ELambda{params: params, body: body}, i53) do
+    ps = Enum.map_join(params, ", ", fn {n, _} -> n end)
+    "(#{ps}) => #{branch_js(body, i53)}"
+  end
 
   defp expr_js(other, _i53), do: raise(Unsupported, "ecmascript: expression #{inspect(other)}")
 

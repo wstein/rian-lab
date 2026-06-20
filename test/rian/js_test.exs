@@ -314,6 +314,26 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a lambda lowers to a JS arrow function with native closure capture (ADR-0061)" do
+      js =
+        JS.compile("""
+        mod M do
+          pub def apply2(f Fn(Int53, Int53), x Int53) Int53 := f(x)
+          pub def adder(n Int53) Fn(Int53, Int53) := (x) -> x + n
+          pub def go(n Int53) Int53 := apply2(adder(n), n)
+        end
+        """)
+
+      # the closure captures `n` from the enclosing frame — no Box/move ceremony
+      assert js =~ "(x) => (x + n)"
+      assert js =~ "f(x)"
+
+      case node_eval(js, "go(20)") do
+        :no_node -> :ok
+        out -> assert out == "40"
+      end
+    end
+
     test "a type error is caught by the gate, not emitted as malformed JS (parity)" do
       # JS.compile now runs `Check.gate!` before emitting (parity with the BEAM
       # `Decl.compile` path) — a proven type mismatch raises here, not downstream.
