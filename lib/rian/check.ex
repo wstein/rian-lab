@@ -1711,6 +1711,12 @@ defmodule Rian.Check do
   def join(t, t), do: t
   def join(:bottom, t), do: t
   def join(t, :bottom), do: t
+  # a `_Unk` hole is a *deferred* unknown, not an inference failure: in a branch/arm join
+  # it defers to the other arm's type (identity), so a `(_Unk,Bool)` arm and a `_Unk` arm
+  # (e.g. a callee declared `_Unk`) join to the concrete shape instead of `:unknown`.
+  # Distinct from `:unknown`, which is TOP-absorbing (a genuinely uninferable arm).
+  def join("_Unk", t), do: t
+  def join(t, "_Unk"), do: t
   def join(:unknown, _), do: :unknown
   def join(_, :unknown), do: :unknown
 
