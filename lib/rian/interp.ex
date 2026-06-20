@@ -163,6 +163,12 @@ defmodule Rian.Interp do
   defp stringify(expr, "Bool", _show),
     do: {:if, expr, {:block, [expr: {:str, "true"}]}, {:block, [expr: {:str, "false"}]}}
 
+  # a `Symbol` (atom) is stringifiable at runtime — its name. Atoms are BEAM-only, so the
+  # value (and any caller) is already `:ex`-pinned by Reach; lower via the runtime
+  # stringifier `Prim.to_string` (BEAM `String.Chars.to_string`). (ADR-0069 §2.)
+  defp stringify(expr, "Symbol", _show),
+    do: {:call, {:id, "__prim_to_string"}, [expr]}
+
   # The `_Unk` **transpiler-draft marker** is an explicit "type not yet supplied" hole, not
   # a stringifiability verdict — so the resolver **defers** it (the value passes through the
   # `<>` chain unchanged: no `to_string`, no coercion) rather than erroring, letting a draft
@@ -180,7 +186,12 @@ defmodule Rian.Interp do
   # Show`) still hard-errors below — that is a provable verdict. (2026-06 reversal of the
   # earlier "`:unknown` is a hard error" consensus: a real inference gap deserves runtime
   # dispatch, not a parse-time refusal, especially for transpiler-draft compiler sources.)
-  defp stringify(expr, :unknown, _show),
+  #
+  # `:infer` is the same case, one pass earlier: an un-annotated *private* param still
+  # carries the `:infer` marker here because `resolve_interp` runs *before* `InferLocal`
+  # fills it (ADR-0034). Its type is genuinely undetermined at interp time → runtime `Show`,
+  # exactly like `:unknown` (the value is whatever the resolved param turns out to be).
+  defp stringify(expr, t, _show) when t in [:unknown, :infer],
     do: {:call, {:id, "__prim_to_string"}, [expr]}
 
   defp stringify(expr, type, show) do

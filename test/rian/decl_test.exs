@@ -37,6 +37,26 @@ defmodule Rian.DeclTest do
   alias Rian.Decl
   alias Rian.IR.{Clause, Const, Field, Func, Param, Struct, Type, Variant}
 
+  describe "whole-program assembly (parse_program/1)" do
+    test "merges multiple module sources and infers across them (cross-module return)" do
+      # `B.f` calls `A.label`; in a per-file parse, `A` is invisible and `f`'s return
+      # can't be inferred — but `parse_program` merges both, so InferLocal sees `A`'s sig.
+      a = "mod A do\n  pub def label(n Int53) String := \"L\"\nend"
+      b = "mod B do\n  def f(n Int53) := A.label(n)\nend"
+
+      prog = Decl.parse_program([a, b])
+      assert length(prog.mods) == 2
+      modb = Enum.find(prog.mods, &(&1.name == "B"))
+      assert hd(modb.funcs).ret == "String"
+    end
+
+    test "a hard parse error in any source still raises" do
+      assert_raise Decl.Error, fn ->
+        Decl.parse_program(["mod A do\n  pub def g() Int53 := 1\nend", "mod B do"])
+      end
+    end
+  end
+
   describe "parsing -> core IR (Rian.IR structs)" do
     test "a `type` sum with labeled fields" do
       %{types: [t]} = Decl.parse("type Shape := Circle(radius Float64) | Square(side Float64)")

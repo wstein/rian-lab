@@ -91,6 +91,11 @@ defmodule Rian.InterpTest do
       assert m.flag(false) == "flag=false"
     end
 
+    test "a Symbol hole stringifies via the runtime Show (atoms are BEAM-only)" do
+      {:ok, m} = Beam.load(~S|def tag(s Symbol) String := "t=${s}"|, :interp_symbol)
+      assert m.tag(:ready) == "t=ready"
+    end
+
     test "a `${call()}` hole stringifies via the callee's declared return type (ADR-0069)" do
       # the interpolation pass now has the scope's function signatures in scope, so a
       # call result resolves its type instead of erroring `no Show for unknown`.

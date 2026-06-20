@@ -97,8 +97,8 @@ defmodule Rian.Decl do
   # ── Public API ─────────────────────────────────────────────────────────
   @doc "Parse source into `%{types: [...], structs: [...], funcs: [...], mods: [...]}` (pipeline IR)."
   @rian_sig "pub def parse(src String) Prog"
-  @spec parse(String.t()) :: map()
-  def parse(src) do
+  @spec parse(String.t(), keyword()) :: map()
+  def parse(src, opts \\ []) do
     decls = src |> Lexer.tokenize() |> split_decls()
     aliases = collect_aliases(decls)
     prog = assemble(decls, aliases)
@@ -145,22 +145,63 @@ defmodule Rian.Decl do
     # alongside the method-set coherence the desugar already ran.
     Rian.Protocol.check_assoc!(protocols, impl_decls)
 
-    prog
-    |> Map.drop([:consts, :uses])
-    |> Map.put(:mods, mods)
-    |> Map.put(:impls, all_impls(decls))
-    |> Map.put(:protocols, protocols)
-    |> Map.put(:impl_decls, impl_decls)
-    # String-interpolation resolution (ADR-0069), program-wide: every module's signatures,
-    # types, structs and ctors are in scope, so a `${OtherMod.f(x)}` / cross-module
-    # `${p.field}` hole resolves instead of erroring. Runs before `inject_stdlib`, which
-    # detects the resolved `Show.float`/`show` calls it may need to inject.
+    assembled =
+      prog
+      |> Map.drop([:consts, :uses])
+      |> Map.put(:mods, mods)
+      |> Map.put(:impls, all_impls(decls))
+      |> Map.put(:protocols, protocols)
+      |> Map.put(:impl_decls, impl_decls)
+
+    # `assemble_only: true` returns the assembled program *before* the program-wide tail
+    # passes (interpolation resolution, stdlib injection, infer-local return filling). A
+    # multi-module build (`parse_program/1`) merges several assembled programs and runs the
+    # tail ONCE over the union, so cross-module signatures resolve — InferLocal sees every
+    # module's `:funs`, not just this file's. Default (`assemble_only: false`) is the full
+    # single-source pipeline, unchanged.
+    if Keyword.get(opts, :assemble_only, false) do
+      assembled
+    else
+      run_program_tail(assembled)
+    end
+  end
+
+  # The program-wide tail passes, shared by `parse/2` and `parse_program/1`:
+  # String-interpolation resolution (ADR-0069, every module's sigs/types/structs/ctors in
+  # scope, so a `${OtherMod.f(x)}` hole resolves) → stdlib injection (detects the resolved
+  # `Show.float`/`show` calls) → infer-local (ADR-0034, fill undeclared private returns).
+  defp run_program_tail(assembled) do
+    assembled
     |> resolve_interp()
     |> inject_stdlib()
-    # infer-local (ADR-0034): fill undeclared private-function return types so the
-    # rest of the pipeline sees fully-typed functions. A no-op unless a private
-    # function omitted its return.
     |> Rian.InferLocal.fill_returns()
+  end
+
+  @rian_sig "pub def parse_program(sources Vec(String)) Prog"
+  @doc """
+  Assemble **multiple** sources into ONE program and run the program-wide tail passes
+  once over the union — so cross-module calls/signatures resolve (InferLocal sees every
+  module's `:funs`). This is the whole-program path a multi-module build (`rian/src` →
+  one target) needs, vs `parse/1`'s single-source view. Each source is assembled
+  independently (`assemble_only`); a hard parse error in any source still raises.
+  """
+  @spec parse_program([String.t()]) :: map()
+  def parse_program(sources) when is_list(sources) do
+    sources
+    |> Enum.map(&parse(&1, assemble_only: true))
+    |> merge_assembled()
+    |> run_program_tail()
+  end
+
+  # union the assembled programs: concatenate every list-valued field (`:mods`, top-level
+  # `:funcs`/`:types`/`:structs`/…, `:impls`/`:protocols`/`:impl_decls`). A non-list scalar
+  # field takes the latest program's value (program-wide, not per-source).
+  defp merge_assembled(progs) do
+    Enum.reduce(progs, %{mods: [], funcs: []}, fn prog, acc ->
+      Map.merge(acc, prog, fn _k, a, b ->
+        if is_list(a) and is_list(b), do: a ++ b, else: b
+      end)
+    end)
   end
 
   # Program-wide string-interpolation resolution (ADR-0069). Builds one inference context
