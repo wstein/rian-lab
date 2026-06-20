@@ -624,18 +624,16 @@ defmodule Rian.Reach do
   defp union_blocker(kills),
     do: %{construct: "value union (A | B)", kind: :typed, kills: kills}
 
-  # the targets a value-union PARAMETER type kills, by member kind (ADR-0083):
-  #   * `:primitive` (all members primitive, distinct discriminators) narrows on EVERY
-  #     target (BEAM/JS Phase 2, JVM Phase 5, Rust Phase 4) — kills nothing.
-  #   * `:discriminable` (members primitive/sum/struct, distinct) narrows on BEAM (tag/
-  #     `__struct__` test), JVM (`is Type`), and Rust (synthesized `enum`) — kills `:js`
-  #     only (the JS type-pattern handles primitive discriminators, not sum/struct yet).
-  #   * `:neither` (a tvar member, a discriminator clash, or a nested union) kills all.
+  # the targets a value-union PARAMETER type kills (ADR-0083). A `:narrowable` union —
+  # every member runtime-discriminable (a primitive `is`/`typeof`, a sum tag, or a
+  # struct `__struct__`) with DISTINCT discriminators — narrows on EVERY target (BEAM
+  # Phase 2/sum-struct, JS Phase 2/baked sum-struct, JVM Phase 5, Rust Phase 4), so it
+  # kills nothing. `:neither` (a tvar member, a discriminator clash like `Int32 | Char`,
+  # or a nested union) kills all.
   defp union_param_kills(t, pctx) when is_binary(t) do
     case union_class(t, pctx) do
       :none -> []
-      :primitive -> []
-      :discriminable -> [:js]
+      :narrowable -> []
       :neither -> [:ex, :rs, :js, :jvm]
     end
   end
@@ -644,23 +642,21 @@ defmodule Rian.Reach do
 
   # the targets a value-union RETURN type kills. BEAM/JS/JVM return a union value
   # natively, but the Rust return-body construction wrapping is not built — so a
-  # narrowable union return additionally kills `:rs` (and `:js` for a sum/struct member,
-  # as in the parameter case).
+  # narrowable union return additionally kills `:rs`.
   defp union_ret_kills(t, pctx) when is_binary(t) do
     case union_class(t, pctx) do
       :none -> []
-      :primitive -> [:rs]
-      :discriminable -> [:rs, :js]
+      :narrowable -> [:rs]
       :neither -> [:ex, :rs, :js, :jvm]
     end
   end
 
   defp union_ret_kills(_, _), do: []
 
-  # classify a union type string: `:none` (not a union), `:primitive` (every member a
-  # primitive, all discriminators DISTINCT — `Int32 | Char` both test `is_integer`, a
-  # dead-arm clash, so it is `:neither`), `:discriminable` (members primitive/sum/struct,
-  # distinct), or `:neither` (a tvar member, a clash, or a nested/malformed union).
+  # classify a union type string: `:none` (not a union), `:narrowable` (every member a
+  # primitive/sum/struct with a runtime discriminator, all DISTINCT), or `:neither` (a
+  # tvar member, a clash — `Int32 | Char` both test `is_integer`, a dead arm — or a
+  # nested/malformed union).
   defp union_class(t, pctx) do
     if String.contains?(t, "Union(") do
       case union_members(t) do
@@ -670,12 +666,7 @@ defmodule Rian.Reach do
         members ->
           discs = Enum.map(members, &discriminator(&1, pctx))
           distinct? = Enum.all?(discs, &(&1 != nil)) and length(Enum.uniq(discs)) == length(discs)
-
-          cond do
-            not distinct? -> :neither
-            Enum.all?(members, &primitive_member?/1) -> :primitive
-            true -> :discriminable
-          end
+          if distinct?, do: :narrowable, else: :neither
       end
     else
       :none
@@ -694,8 +685,6 @@ defmodule Rian.Reach do
   end
 
   defp union_members(_), do: nil
-
-  defp primitive_member?(m), do: discriminator(m, %{}) in [:boolean, :binary, :integer, :float]
 
   # the runtime discriminator a member narrows under: a primitive's `is_*`/`typeof`
   # class, a UNIQUE `{:sum, name}`/`{:struct, name}` for a user type (distinct ctors

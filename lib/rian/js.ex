@@ -54,8 +54,12 @@ defmodule Rian.JS do
   "Name", f: v}`, with field access `p.f` and struct clause patterns; struct
   protocol dispatch tests `a0.__struct__ === "Name"`. Atoms/`Symbol` (→ JS
   strings) and `Result` (`{:ok,v}`/`{:error,e}` → tagged arrays, matched in a
-  `case`) lower too. **Not yet** (raise `Rian.JS.Unsupported`): `with`,
-  lambdas/captures, general FFI.
+  `case`) lower too. A **value union** `A | B` (ADR-0083) is narrowed by a
+  type-pattern `n Int53 ->`: a primitive tests `typeof`, a sum the tagged-array head,
+  a struct `__struct__` — the sum/struct discriminator is *baked into the pattern*
+  (`bake_union_disc`) before emit, as the `expr_js` recursion threads no type
+  registry. **Not yet** (raise `Rian.JS.Unsupported`): `with`, lambdas/captures,
+  general FFI.
 
   ## Capabilities
 
@@ -157,7 +161,17 @@ defmodule Rian.JS do
     consts = all_consts(prog)
     # the program inference context lets each clause body emit from the TYPED core
     # IR (`Check.annotate` fills every node's type, ADR-0050 §3).
-    ic = Check.program_ic(prog) |> Map.put(:consts, MapSet.new(consts, & &1.name))
+    # the sum/struct registry, carried so a value-union type-pattern over a user type
+    # (`s Box ->`, ADR-0083) can bake its JS discriminator (tag / `__struct__`) in
+    # `clause_return` — the `expr_js` recursion threads no registry, so it is resolved
+    # before emit (`bake_union_disc`), not at the deep `pat_match` site.
+    reg = %{sums: sum_ctor_map(prog), structs: struct_name_set(prog)}
+
+    ic =
+      Check.program_ic(prog)
+      |> Map.put(:consts, MapSet.new(consts, & &1.name))
+      |> Map.put(:js_reg, reg)
+
     const_js = Enum.map_join(consts, "\n", &const_js(&1, i53, ic))
     fn_js = Enum.map_join(funcs, "\n\n", &function_js(&1, i53, ic))
     disp_js = protocol_dispatchers_js(prog, i53)
@@ -308,6 +322,19 @@ defmodule Rian.JS do
       true -> raise(Unsupported, "JS type-pattern over non-primitive `#{t}`")
     end
   end
+
+  # the JS test for a value-union type-pattern over a SUM member (ADR-0083): a sum
+  # value is a tagged array `["Ctor", …]`, so "is a `T`" tests the head against `T`'s
+  # ctor tags (mirrors `sum_guard_js`).
+  defp sum_disc_js(ctors, acc) do
+    tags = Enum.map_join(ctors, " || ", &~s(#{acc}[0] === "#{&1}"))
+    "Array.isArray(#{acc}) && (#{tags})"
+  end
+
+  # the JS test for a STRUCT member: a struct is `{__struct__: "Name", …}` (mirrors
+  # the struct case of `js_guard!`).
+  defp struct_disc_js(sname, acc),
+    do: ~s(typeof #{acc} === "object" && #{acc} !== null && #{acc}.__struct__ === "#{sname}")
 
   defp struct_name_set(prog) do
     structs =
@@ -500,8 +527,16 @@ defmodule Rian.JS do
   defp pat_match(%PVar{name: n}, acc, _i53), do: {[], [{n, acc}]}
 
   # a type-pattern `n Type` (ADR-0083): bind `n` and test the scrutinee's runtime
-  # type with the same JS-native discriminator the dispatcher uses (`typeof`).
-  defp pat_match(%PTyped{name: n, tname: t}, acc, i53),
+  # type with the same JS-native discriminator the dispatcher uses. A primitive
+  # (`disc: nil`) tests `typeof`; a sum/struct member's discriminator was baked into
+  # `disc` by `bake_union_disc` (the tag array / `__struct__`).
+  defp pat_match(%PTyped{name: n, disc: {:sum, ctors}}, acc, _i53),
+    do: {[sum_disc_js(ctors, acc)], [{n, acc}]}
+
+  defp pat_match(%PTyped{name: n, disc: {:struct, sname}}, acc, _i53),
+    do: {[struct_disc_js(sname, acc)], [{n, acc}]}
+
+  defp pat_match(%PTyped{name: n, tname: t, disc: nil}, acc, i53),
     do: {[type_test_js(t, acc, i53)], [{n, acc}]}
 
   defp pat_match(%PLit{value: v}, acc, i53), do: {["#{acc} === #{lit_js(v, i53)}"], []}
@@ -588,11 +623,40 @@ defmodule Rian.JS do
     %EBlock{stmts: stmts} =
       src
       |> Pratt.parse_body()
+      |> bake_union_disc(Map.get(ic, :js_reg, %{sums: %{}, structs: MapSet.new()}))
       |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
       |> Check.annotate(tenv, ic)
 
     block_return(Rian.Shadow.dedup(stmts, params, &js_fresh/2), i53)
   end
+
+  # Bake a value-union type-pattern's discriminator (ADR-0083) into the surface so
+  # `pat_match` (which threads no type registry) can emit a sum's tag / a struct's
+  # `__struct__` JS test. `map_node` deliberately skips arm PATTERNS, so a `case`
+  # arm's pattern is baked explicitly here; everything else recurses.
+  defp bake_union_disc({:case, s, arms}, reg) do
+    {:case, bake_union_disc(s, reg),
+     Enum.map(arms, fn {p, g, b} ->
+       {bake_pat(p, reg), bake_guard(g, reg), bake_union_disc(b, reg)}
+     end)}
+  end
+
+  defp bake_union_disc(node, reg), do: Rian.Macro.map_node(node, &bake_union_disc(&1, reg))
+
+  defp bake_guard(nil, _reg), do: nil
+  defp bake_guard(g, reg), do: bake_union_disc(g, reg)
+
+  # `{:typed, n, T}` -> `{:typed, n, T, {:sum, ctors}|{:struct, T}}` for a user type;
+  # a primitive `T` is left as the 3-tuple for `pat_match` to discriminate.
+  defp bake_pat({:typed, name, tname}, reg) do
+    cond do
+      ctors = Map.get(reg.sums, tname) -> {:typed, name, tname, {:sum, ctors}}
+      MapSet.member?(reg.structs, tname) -> {:typed, name, tname, {:struct, tname}}
+      true -> {:typed, name, tname}
+    end
+  end
+
+  defp bake_pat(p, _reg), do: p
 
   # Rewrite a reference to a declared `const` (`{:id, NAME}`, NAME in the set) into a
   # `{:const_ref, NAME}` surface node, which `Core.from_expr` lifts to `EConstRef` and

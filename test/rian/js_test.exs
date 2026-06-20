@@ -49,6 +49,27 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a value union of SUM members narrows by the tagged-array head and runs (ADR-0083)" do
+      js =
+        JS.compile("""
+        type Box := BoxV(Int53)
+        type Bag := BagV(Int53)
+        def kind(x Box | Bag) Int53 := case x do
+          a Box -> 1
+          b Bag -> 2
+        end
+        """)
+
+      # a sum value is `["Ctor", …]`, so "is a Box" tests the head against Box's tags
+      assert js =~ ~s|Array.isArray(_s) && (_s[0] === "BoxV")|
+      assert js =~ ~s|Array.isArray(_s) && (_s[0] === "BagV")|
+
+      case node_eval(js, "[kind(['BoxV',5]), kind(['BagV',9])].join(',')") do
+        :no_node -> :ok
+        out -> assert out == "1,2"
+      end
+    end
+
     test "a `const` reference resolves to the emitted top-level const, not a bare identifier" do
       js = JS.compile("mod M do\n  const Answer := 42\n  pub def get() Int53 := Answer\nend")
       assert js =~ "const Answer = 42;"

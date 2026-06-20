@@ -44,7 +44,7 @@ defmodule Rian.ReachTest do
       assert entry(rep, "describe").blockers == []
     end
 
-    test "a value union of SUM members reaches :ex/:jvm/:rs — pins :js (JS sum-narrowing deferred; ADR-0083)" do
+    test "a value union of SUM members narrows on every target — reaches all four (ADR-0083)" do
       rep =
         reach("""
         type Box := BoxV(Int53)
@@ -55,12 +55,8 @@ defmodule Rian.ReachTest do
         end
         """)
 
-      assert targets(rep, "kind") == [:ex, :jvm, :rs]
-
-      assert Enum.any?(
-               entry(rep, "kind").blockers,
-               &(&1.kind == :typed and &1.construct =~ "value union" and &1.kills == [:js])
-             )
+      assert targets(rep, "kind") == [:ex, :js, :jvm, :rs]
+      assert entry(rep, "kind").blockers == []
     end
 
     test "a value-union RETURN pins :rs (Rust return-wrapping not built; ADR-0083)" do

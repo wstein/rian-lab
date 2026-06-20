@@ -142,9 +142,14 @@ defmodule Rian.Core do
     A type-pattern `name Type` (ADR-0083) — binds `name`, matching only when the
     scrutinee's runtime type is `tname`. The narrowing form for a value union;
     after a match the binding is narrowed to `tname`.
+
+    `disc` is an OPTIONAL pre-resolved discriminator an emitter may bake in when it
+    cannot reach its type registry at the pattern site (the JS emitter does this):
+    `{:sum, ctor_tags}` or `{:struct, name}`. `nil` means a primitive discriminator
+    the emitter resolves itself.
     """
     @enforce_keys [:name, :tname]
-    defstruct [:name, :tname, type: nil]
+    defstruct [:name, :tname, disc: nil, type: nil]
   end
 
   defmodule PPin do
@@ -493,6 +498,7 @@ defmodule Rian.Core do
 
   def from_pat({:as, name, p}), do: %PAs{name: name, pat: from_pat(p)}
   def from_pat({:typed, name, tname}), do: %PTyped{name: name, tname: tname}
+  def from_pat({:typed, name, tname, disc}), do: %PTyped{name: name, tname: tname, disc: disc}
   # the pinned expression is carried verbatim — it is matched at runtime, not
   # destructured, and the exhaustiveness lowerer treats a pin as a guard
   def from_pat({:pin, e}), do: %PPin{expr: e}
