@@ -38,9 +38,9 @@ defmodule Rian.SelfhostGateTest do
     # `Rian.Lower` (2da702a) now lowers a non-total TOP-LEVEL function with a runtime
     # fallthrough (`_ => panic!(…)`), matching how BEAM/JS/JVM throw at runtime, instead
     # of refusing it — so the self-host corpus has ZERO totality refusals (the prior
-    # 9-entry ratchet bottomed out). This guards that it STAYS closed and catches the
-    # cases still refused everywhere: a non-exhaustive `case` *inside a body* and dead /
-    # unreachable clauses (`non_total_fn` matches the "non-exhaustive `…`" refusal).
+    # 9-entry ratchet bottomed out). A non-exhaustive `case` *inside a body* lowers the
+    # same way (ADR-0036, 2026-06-20); the only remaining refusal is a dead/unreachable
+    # clause. This guards that the corpus STAYS clean (`non_total_fn` reports any refusal).
     test "no compiler/*.rian function is refused for non-exhaustiveness" do
       refused =
         for f <- @sources, name = non_total_fn(f), name, do: {Path.basename(f), name}

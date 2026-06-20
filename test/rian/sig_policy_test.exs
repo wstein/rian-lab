@@ -125,7 +125,7 @@ defmodule Rian.SigPolicyTest do
   # ratchet enforces "drive it to zero": the count may only DROP. New `_Unk` fails the gate —
   # type it concretely, or write `Any` if the value is genuinely dynamic. When you reduce it,
   # lower @unk_baseline to lock the gain (same discipline as priv/transpile_check_baseline.txt).
-  @unk_baseline 264
+  @unk_baseline 260
 
   defp unk_count do
     lib_rian_modules()

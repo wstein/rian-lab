@@ -11,14 +11,16 @@ defmodule Rian.SelfhostParserRobustnessTest do
   # The self-hosted parser used to assume well-formed input: every
   # `case parse_X(...) do <expected-continuation> -> ... end` had no arm for a
   # malformed continuation, so a missing `do`/`->`/`end` crashed the parser with a
-  # raw `CaseClauseError` instead of producing a parse error. The `case`-body
-  # exhaustiveness gate (`Rian.Exhaustiveness.check_case_bodies!`) flagged these as
-  # non-exhaustive; the fix threads the established in-band `EErr` sentinel through
-  # each parser `case` (and an explicit `ArmErr` so the arm loop terminates).
+  # raw `CaseClauseError` instead of producing a parse error. A non-exhaustive `case`
+  # now lowers with a runtime fallthrough rather than being refused (ADR-0036), so this
+  # robustness is no longer compiler-enforced — making this an even more valuable guard:
+  # the fix threads the established in-band `EErr` sentinel through each parser `case`
+  # (and an explicit `ArmErr` so the arm loop terminates), and this file checks it holds
+  # by running the SAME usefulness analysis (`Rian.Exhaustiveness.analyze`) directly.
   #
   # This file is the proof, on the ACTIVE self-hosted compiler — the verified parser
   # (`compiler/decl.rian`) and the final driver (`compiler/compose_real_sum.rian`):
-  #   1. STRUCTURAL — both files are `case`-exhaustive (the gate finds nothing).
+  #   1. STRUCTURAL — both files are `case`-exhaustive (the analysis finds nothing).
   #   2. RUNTIME    — the parser, loaded onto the BEAM, turns malformed input into an
   #                   `EErr` node instead of crashing.
 

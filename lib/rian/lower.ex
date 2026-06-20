@@ -311,10 +311,11 @@ defmodule Rian.Lower do
   # heads are not total (rather than refusing to emit). A partial function lowers
   # everywhere: Elixir/BEAM clauses are total-by-`FunctionClauseError`, and the Rust
   # emitter appends a `_ => panic!(…)` fallthrough (`rust_fn`) — the same runtime no-match
-  # behaviour as the other backends (ADR-0036, the JS/JVM `throw`). Still a HARD
-  # error: dead (`unreachable`) clauses, and a non-exhaustive `case` inside a body (which
-  # has no clause-fallthrough shim). A synthetic protocol dispatcher is exempt (ADR-0042
-  # §3/§6): protocol dispatch is open by design.
+  # behaviour as the other backends (ADR-0036, the JS/JVM `throw`). A non-exhaustive
+  # **`case`** inside a body is treated the same way (ADR-0036, 2026-06-20): BEAM/JS/JVM
+  # already throw on a non-matching `case`, and `resolve_rust_pats` appends a `_ =>
+  # panic!()` arm — so the `:exh_env` is stamped here for that pass. Still a HARD error:
+  # dead (`unreachable`) clauses. A synthetic protocol dispatcher is exempt (ADR-0042 §3/§6).
   defp check!(%{synthetic: true} = func, _env), do: func
 
   defp check!(func, env) do
@@ -331,10 +332,9 @@ defmodule Rian.Lower do
       raise "unreachable clauses in `#{func.name}`: #{inspect(r.unreachable)}"
     end
 
-    # clause heads checked — now gate every `case` reachable in the body (no shim there).
-    E.check_case_bodies!([func], env)
     # `Map.put` (not `%{… | …}`) so a hand-built map func (tests) without the field works.
-    Map.put(func, :partial, not r.exhaustive?)
+    # `:exh_env` rides along for `resolve_rust_pats` to close a non-exhaustive body `case`.
+    func |> Map.put(:partial, not r.exhaustive?) |> Map.put(:exh_env, env)
   end
 
   # ── Elixir backend ─────────────────────────────────────────────────────
@@ -694,10 +694,12 @@ defmodule Rian.Lower do
         enum -> fn pt -> {:rpat, union_pat_rs(pt, enum, meta)} end
       end
 
-    {:case, resolve_rust_pats(scrut, meta, us),
-     Enum.map(arms, fn {pt, g, b} ->
-       {resolved.(pt), resolve_guard(g, meta, us), resolve_rust_pats(b, meta, us)}
-     end)}
+    resolved_arms =
+      Enum.map(arms, fn {pt, g, b} ->
+        {resolved.(pt), resolve_guard(g, meta, us), resolve_rust_pats(b, meta, us)}
+      end)
+
+    {:case, resolve_rust_pats(scrut, meta, us), close_rust_case(arms, resolved_arms, us)}
   end
 
   defp resolve_rust_pats({:with, clauses, body, els}, meta, us) do
@@ -716,6 +718,35 @@ defmodule Rian.Lower do
 
   defp resolve_guard(nil, _meta, _us), do: nil
   defp resolve_guard(g, meta, us), do: resolve_rust_pats(g, meta, us)
+
+  # Rust's `match` must be total (ADR-0036): a non-exhaustive body `case` gets a
+  # `_ => panic!(…)` arm — BEAM/JS/JVM already throw on a non-matching `case`, so this
+  # makes Rust the same runtime no-match instead of a refused compile. Needs the
+  # exhaustiveness env (threaded via `us.env`, stamped on the func by `Rian.Lower.check!`);
+  # an env-less path (`const`/`proto`) leaves the arms as-is, and a total case (a
+  # catch-all, or a closed-variant cover) gets no arm (no `unreachable` rustc warning).
+  defp close_rust_case(orig_arms, resolved_arms, us) do
+    env = Map.get(us, :env, %{})
+
+    cond do
+      env == %{} -> resolved_arms
+      Enum.any?(orig_arms, &catchall_arm?/1) -> resolved_arms
+      rust_case_total?(orig_arms, env) -> resolved_arms
+      true -> resolved_arms ++ [{{:rpat, "_"}, nil, case_panic_call()}]
+    end
+  end
+
+  defp catchall_arm?({pt, g, _}), do: g == nil and catchall_pat?(Core.from_pat(pt))
+
+  defp rust_case_total?(arms, env) do
+    rows =
+      Enum.map(arms, fn {pt, g, _} -> PL.lower_clause(%{pats: [pt], guard: g != nil}, env) end)
+
+    E.analyze(rows, 1, env).exhaustive?
+  end
+
+  defp case_panic_call,
+    do: {:call, {:id, "__prim_panic"}, [{:str, "case: no clause matched"}]}
 
   # a value-union arm pattern: a type-pattern `n Type` -> `Enum::Variant(n)`; any
   # other arm (a catch-all `_`/var) falls back to the ordinary resolution.
@@ -1241,7 +1272,18 @@ defmodule Rian.Lower do
     prog = Rian.Opaque.erase(prog)
     types = Map.get(prog, :types, [])
     structs = Map.get(prog, :structs, [])
-    funcs = Map.get(prog, :funcs, []) |> Enum.reject(& &1.dispatch)
+    # Stamp `:exh_env` so a non-exhaustive body `case` lowers with the `_ => panic!()`
+    # fallthrough on this top-level path too (`module_rust` gets it via `check!`). Only
+    # the env — NOT the full `check!` — so a partial *function*'s output is unchanged here
+    # (the self-hosted Rust emitter adds no function fallthrough on this path, and the
+    # fixpoint compares the two): the body-`case` fallthrough needs just the env.
+    env = build_env(types, structs, Map.get(prog, :ranges, []))
+
+    funcs =
+      Map.get(prog, :funcs, [])
+      |> Enum.reject(& &1.dispatch)
+      |> Enum.map(&Map.put(&1, :exh_env, env))
+
     protocols = Map.get(prog, :protocols, [])
     impl_decls = Map.get(prog, :impl_decls, [])
 
@@ -1682,7 +1724,11 @@ defmodule Rian.Lower do
 
         surface =
           pre
-          |> resolve_rust_pats(ctx.meta, %{scope: union_locals, funcs: union_funcs})
+          |> resolve_rust_pats(ctx.meta, %{
+            scope: union_locals,
+            funcs: union_funcs,
+            env: Map.get(func, :exh_env, %{})
+          })
           |> insert_borrows(Map.get(ctx, :funs, %{}), ec, borrowed)
 
         ast = Rian.Check.annotate(surface, tenv, ctx.ic)

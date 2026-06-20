@@ -33,7 +33,7 @@ defmodule Rian.Exhaustiveness do
 
   use Rian.Ann
 
-  alias Rian.{Core, PatternLower, Pratt, Prelude}
+  alias Rian.{PatternLower, Prelude}
 
   # ── Environment helpers ────────────────────────────────────────────────
 
@@ -287,51 +287,4 @@ defmodule Rian.Exhaustiveness do
       PatternLower.add_struct(env, s.name, Enum.map(s.fields, &PatternLower.to_snake(&1.label)))
     end)
   end
-
-  @doc "Refuse to emit any function whose body holds a non-exhaustive `case`."
-  @rian_sig "pub def check_case_bodies!(funcs Vec(Func), env _Unk) Symbol"
-  @spec check_case_bodies!(list(), map()) :: term()
-  def check_case_bodies!(funcs, env) do
-    for func <- funcs, not Map.get(func, :synthetic, false), clause <- func.clauses do
-      clause.body |> body_core() |> check_match!(env, func.name)
-    end
-
-    :ok
-  end
-
-  defp body_core(body) when is_binary(body), do: Core.from_expr(Pratt.parse_body(body))
-  defp body_core(ast), do: Core.from_expr(ast)
-
-  @doc "Check every `case` reachable in a Core expression; raise on the first gap."
-  @rian_sig "pub def check_match!(core Expr, env _Unk, where _Unk) _Unk"
-  @spec check_match!(term(), map(), term()) :: term()
-  def check_match!(core, env, where) do
-    core |> collect_cases([]) |> Enum.each(&check_one_case!(&1, env, where))
-  end
-
-  defp check_one_case!(%Core.ECase{arms: arms}, env, where) do
-    rows =
-      Enum.map(arms, fn {pat, guard, _body} ->
-        PatternLower.lower_clause(%{pats: [pat], guard: guard != nil}, env)
-      end)
-
-    r = analyze(rows, 1, env)
-
-    unless r.exhaustive? do
-      raise "non-exhaustive `case` in `#{where}`: pattern `#{render(r.missing)}` not covered"
-    end
-  end
-
-  # generic Core walk — collect every `ECase` node (recursing into arm bodies too).
-  defp collect_cases(%Core.ECase{} = n, acc), do: collect_children(n, [n | acc])
-  defp collect_cases(node, acc) when is_struct(node), do: collect_children(node, acc)
-  defp collect_cases(list, acc) when is_list(list), do: Enum.reduce(list, acc, &collect_cases/2)
-
-  defp collect_cases(tuple, acc) when is_tuple(tuple),
-    do: tuple |> Tuple.to_list() |> Enum.reduce(acc, &collect_cases/2)
-
-  defp collect_cases(_, acc), do: acc
-
-  defp collect_children(struct, acc),
-    do: struct |> Map.from_struct() |> Map.values() |> Enum.reduce(acc, &collect_cases/2)
 end

@@ -196,11 +196,12 @@ defmodule Rian.ExhaustivenessTest do
     end
   end
 
-  # The clause-head gate never saw `case` arms inside a body; a non-exhaustive
-  # `case` slipped through and crashed at runtime with `case_clause`. The body gate
-  # (`check_case_bodies!`, wired into `Rian.Lower.check!`) closes that — `case` arms
-  # run through the SAME usefulness analysis as clause heads.
-  describe "case-expression exhaustiveness (the body gate, via Rian.Decl.compile)" do
+  # A non-exhaustive body `case` LOWERS with a runtime fallthrough, the same as a
+  # non-total *function* (ADR-0036, 2026-06-20) — it is no longer refused. BEAM raises
+  # `case_clause`, JS/JVM `throw`, and the Rust emitter appends a `_ => panic!(…)` arm
+  # (`Rian.Lower.resolve_rust_pats`). The usefulness analysis still runs unchanged — it
+  # now *informs* the Rust fallthrough instead of gating emission.
+  describe "case-expression exhaustiveness (lowers with a runtime fallthrough, ADR-0036)" do
     defp compile_ok?(src) do
       Rian.Decl.compile(src)
       :ok
@@ -208,12 +209,17 @@ defmodule Rian.ExhaustivenessTest do
       e in RuntimeError -> {:refused, Exception.message(e)}
     end
 
-    test "a non-exhaustive `case` over a sum type is REFUSED" do
-      assert {:refused, msg} =
+    test "a non-exhaustive `case` over a sum type lowers (no longer refused)" do
+      assert :ok =
                compile_ok?("type C := A | B\npub def f(c C) Int53 := case c do\n  A -> 1\nend")
+    end
 
-      assert msg =~ "non-exhaustive `case` in `f`"
-      assert msg =~ "`B`"
+    test "the analysis still flags the non-exhaustive `case` (it informs, not gates)" do
+      # the arm matrix is still seen as non-total — the change is only that it no
+      # longer raises; `B` remains an uncovered row.
+      env = E.add_type(E.base_env(), :c, [{:a, 0}, {:b, 0}])
+      r = E.analyze([arm([c(:a)])], 1, env)
+      refute r.exhaustive?
     end
 
     test "an exhaustive `case` (all variants, or a `_`) compiles" do
@@ -228,19 +234,53 @@ defmodule Rian.ExhaustivenessTest do
                )
     end
 
-    test "a NESTED non-exhaustive `case` (in an arm body) is caught too" do
+    test "a NESTED non-exhaustive `case` (in an arm body) lowers too" do
       src =
         "type C := A | B\npub def f(x C, c C) Int53 := case x do\n  A -> case c do\n    A -> 1\n  end\n  B -> 2\nend"
 
-      assert {:refused, msg} = compile_ok?(src)
-      assert msg =~ "non-exhaustive `case`"
+      assert :ok = compile_ok?(src)
     end
 
-    test "a non-exhaustive `case` over literals (no `_`) is REFUSED" do
-      assert {:refused, msg} =
+    test "a non-exhaustive `case` over literals (no `_`) lowers" do
+      assert :ok =
                compile_ok?("pub def f(n Int53) Int53 := case n do\n  0 -> 0\n  1 -> 1\nend")
+    end
 
-      assert msg =~ "non-exhaustive `case`"
+    @tag :rust
+    test "the non-exhaustive `case` panics on the uncovered arm (rustc)" do
+      src =
+        "type C := A(n Int53) | B(n Int53)\n" <>
+          "def f(c C) Int53 := case c do\n  A(_) -> 7\nend\n" <>
+          "def hit() Int53 := f(A(1))\ndef miss() Int53 := f(B(2))"
+
+      rust = Rian.Lower.rust_program(Rian.Decl.parse(src))
+      assert rust =~ ~s/_ => panic!("{}", "case: no clause matched")/
+
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          main = """
+
+          fn main() {
+              assert_eq!(hit(), 7);
+              let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| miss()));
+              assert!(r.is_err());
+              println!("ok");
+          }
+          """
+
+          dir =
+            Path.join(System.tmp_dir!(), "rian_case_panic_#{System.unique_integer([:positive])}")
+
+          rs = dir <> ".rs"
+          bin = dir
+          File.write!(rs, rust <> main)
+          {out, code} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", rs, "-o", bin])
+          assert code == 0, "rustc failed:\n#{out}"
+          assert {"ok\n", 0} = System.cmd(bin, [])
+      end
     end
   end
 end
