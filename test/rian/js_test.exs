@@ -354,6 +354,26 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "tuples lower to arrays, including a tuple-typed parameter destructured in a case" do
+      js =
+        JS.compile("""
+        mod M do
+          pub def fst(p (Int53, Int53)) Int53 := case p do
+            {x, y} -> x
+          end
+          pub def mk(a Int53, b Int53) (Int53, Int53) := {a, b}
+          pub def go(a Int53, b Int53) Int53 := fst(mk(a, b))
+        end
+        """)
+
+      assert js =~ "[a, b]"
+
+      case node_eval(js, "go(7, 9)") do
+        :no_node -> :ok
+        out -> assert out == "7"
+      end
+    end
+
     test "a type error is caught by the gate, not emitted as malformed JS (parity)" do
       # JS.compile now runs `Check.gate!` before emitting (parity with the BEAM
       # `Decl.compile` path) — a proven type mismatch raises here, not downstream.
