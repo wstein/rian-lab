@@ -143,7 +143,7 @@ defmodule Rian.Builtins do
   # whose return *head* is a contract — `List.reverse` always yields a `Vec`, `Map.put`
   # a `Dict` — even when the element type can't be pinned. `{params, ret, tvars}`; the
   # caller (`Rian.Check`) instantiates the tvars from the inferred argument types and
-  # fills any it can't bind with a `_Unk` hole (so `List.reverse(unknown)` → `Vec(_Unk)`,
+  # fills any it can't bind with `Any` (so `List.reverse(unknown)` → `Vec(Any)`,
   # not `:unknown`). Distinct from `@table`, which is *concrete* returns only — here the
   # head is justified by the function's contract, the element deferred. Reach pins the
   # host ones (`Enum.*`, `Map.*`) off non-BEAM independently, so this only types the call.
@@ -167,11 +167,11 @@ defmodule Rian.Builtins do
     {"Enum", "to_list", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
     # `map_reduce` returns a `(mapped_list, final_acc)` pair (ADR-0079 comprehensions /
     # accumulating folds); the head is the contract, both elements deferred.
-    {"Enum", "map_reduce", 3} => {["Vec(T)", "A", "Fn(T,A,(U,A))"], "(Vec(_Unk),_Unk)", []},
-    {"List", "map_reduce", 3} => {["Vec(T)", "A", "Fn(T,A,(U,A))"], "(Vec(_Unk),_Unk)", []},
-    {"Map", "new", 0} => {[], "Dict(_Unk,_Unk)", []},
-    {"Map", "new", 1} => {["Vec(T)"], "Dict(_Unk,_Unk)", ["T"]},
-    {"Map", "new", 2} => {["Vec(T)", "Fn(T,U)"], "Dict(_Unk,_Unk)", ["T", "U"]},
+    {"Enum", "map_reduce", 3} => {["Vec(T)", "A", "Fn(T,A,(U,A))"], "(Vec(Any),Any)", []},
+    {"List", "map_reduce", 3} => {["Vec(T)", "A", "Fn(T,A,(U,A))"], "(Vec(Any),Any)", []},
+    {"Map", "new", 0} => {[], "Dict(Any,Any)", []},
+    {"Map", "new", 1} => {["Vec(T)"], "Dict(Any,Any)", ["T"]},
+    {"Map", "new", 2} => {["Vec(T)", "Fn(T,U)"], "Dict(Any,Any)", ["T", "U"]},
     {"Map", "put", 3} => {["Dict(K,V)", "K", "V"], "Dict(K,V)", ["K", "V"]},
     {"Map", "delete", 2} => {["Dict(K,V)", "K"], "Dict(K,V)", ["K", "V"]},
     {"Map", "update", 4} => {["Dict(K,V)", "K", "V", "Fn(V,V)"], "Dict(K,V)", ["K", "V"]},
@@ -181,7 +181,7 @@ defmodule Rian.Builtins do
   @rian_sig "pub def poly_sig(module Option(String), fun String, arity Int53) Option((Vec(String), String, Vec(String)))"
   @doc """
   The fixed-head polymorphic signature `{params, ret, tvars}` of a host/stdlib function,
-  or `nil`. The caller instantiates the tvars from argument types (`_Unk` when unbound).
+  or `nil`. The caller instantiates the tvars from argument types (`Any` when unbound).
   """
   @spec poly_sig(String.t() | nil, String.t(), non_neg_integer()) ::
           {[String.t()], String.t(), [String.t()]} | nil

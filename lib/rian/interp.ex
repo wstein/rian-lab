@@ -191,7 +191,9 @@ defmodule Rian.Interp do
   # carries the `:infer` marker here because `resolve_interp` runs *before* `InferLocal`
   # fills it (ADR-0034). Its type is genuinely undetermined at interp time → runtime `Show`,
   # exactly like `:unknown` (the value is whatever the resolved param turns out to be).
-  defp stringify(expr, t, _show) when t in [:unknown, :infer],
+  # `Any` (the explicit dynamic top, ADR-0034) is the same: a value of unknown-at-compile
+  # type → runtime `Show` (`Prim.to_string`); the function is already off `:rs` via `Any`.
+  defp stringify(expr, t, _show) when t in [:unknown, :infer, "Any"],
     do: {:call, {:id, "__prim_to_string"}, [expr]}
 
   defp stringify(expr, type, show) do
