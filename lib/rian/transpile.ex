@@ -2220,6 +2220,10 @@ defmodule Rian.Transpile do
   defp pat(list) when is_list(list), do: "[#{Enum.map_join(list, ", ", &pat/1)}]"
 
   # struct pattern `%Mod{f: p, …}` → Rian ctor pattern `Mod(f: p, …)`.
+  # an empty struct pattern `%Name{}` (match any struct of that type, ignore fields) renders as
+  # the bare ctor `Name` — `Name()` is ambiguous between a ctor pattern and a typed param.
+  defp pat({:%, _, [aliases, {:%{}, _, []}]}), do: short_name(aliases)
+
   defp pat({:%, _, [aliases, {:%{}, _, kvs}]}) do
     fields = Enum.map_join(kvs, ", ", fn {k, v} -> "#{k}: #{pat(v)}" end)
     "#{short_name(aliases)}(#{fields})"
