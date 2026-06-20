@@ -376,6 +376,16 @@ defmodule Rian.JVMTest do
       end
       """,
       probe: ~s|println(inner(Box(7L)))|
+    },
+    %{
+      id: :pin,
+      src: """
+      def classify(x Int64, target Int64) Int64 := case x do
+        ^target -> 1
+        _ -> 0
+      end
+      """,
+      probe: ~s|println("${classify(5L, 5L)},${classify(5L, 9L)}")|
     }
   ]
 
@@ -670,6 +680,12 @@ defmodule Rian.JVMTest do
     } do
       assert jvm_kt(jvm, :as_pat) =~ "val whole ="
       expect_jvm(jvm, :as_pat, "7")
+    end
+
+    @tag :jvm
+    test "a pin `^x` lowers to an equality test against the pinned value", %{jvm_batch: jvm} do
+      assert jvm_kt(jvm, :pin) =~ "== target"
+      expect_jvm(jvm, :pin, "1,0")
     end
 
     @tag :jvm

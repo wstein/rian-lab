@@ -106,6 +106,7 @@ defmodule Rian.JS do
     PCtor,
     PList,
     PLit,
+    PPin,
     PStruct,
     PTuple,
     PTyped,
@@ -537,6 +538,13 @@ defmodule Rian.JS do
     {ts, bs} = pat_match(p, acc, i53)
     {ts, [{n, acc} | bs]}
   end
+
+  # a pin `^x` (ADR-0050): match when the scrutinee equals the pinned value — an
+  # `===` test, no bind. Only `^var` is supported (as on the BEAM).
+  defp pat_match(%PPin{expr: {:id, name}}, acc, _i53), do: {["#{acc} === #{name}"], []}
+
+  defp pat_match(%PPin{expr: e}, _acc, _i53),
+    do: raise(Unsupported, "ecmascript: pin `^#{inspect(e)}` (only `^var` is supported)")
 
   # a type-pattern `n Type` (ADR-0083): bind `n` and test the scrutinee's runtime
   # type with the same JS-native discriminator the dispatcher uses. A primitive

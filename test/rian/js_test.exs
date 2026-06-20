@@ -405,6 +405,23 @@ defmodule Rian.JSTest do
       end
     end
 
+    test "a pin `^x` lowers to an equality test against the pinned value" do
+      js =
+        JS.compile("""
+        def classify(x Int53, target Int53) Int53 := case x do
+          ^target -> 1
+          _ -> 0
+        end
+        """)
+
+      assert js =~ "=== target"
+
+      case node_eval(js, "[classify(5, 5), classify(5, 9)].join(',')") do
+        :no_node -> :ok
+        out -> assert out == "1,0"
+      end
+    end
+
     test "a type error is caught by the gate, not emitted as malformed JS (parity)" do
       # JS.compile now runs `Check.gate!` before emitting (parity with the BEAM
       # `Decl.compile` path) — a proven type mismatch raises here, not downstream.

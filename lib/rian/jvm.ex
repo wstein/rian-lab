@@ -114,6 +114,7 @@ defmodule Rian.JVM do
     PCtor,
     PList,
     PLit,
+    PPin,
     PStruct,
     PTuple,
     PTyped,
@@ -592,6 +593,13 @@ defmodule Rian.JVM do
     {ts, bs} = pat_match(p, acc)
     {ts, [{n, acc} | bs]}
   end
+
+  # a pin `^x` (ADR-0050): match when the scrutinee equals the pinned value — an
+  # `==` test, no bind. Only `^var` is supported (as on the BEAM).
+  defp pat_match(%PPin{expr: {:id, name}}, acc), do: {["#{acc} == #{name}"], []}
+
+  defp pat_match(%PPin{expr: e}, _acc),
+    do: raise(Unsupported, "jvm: pin `^#{inspect(e)}` (only `^var` is supported)")
 
   # a type-pattern `n Type` (ADR-0083): test the runtime type (`is Long`/`is String`,
   # the dispatcher discriminator) and bind the scrutinee — Kotlin smart-casts it to

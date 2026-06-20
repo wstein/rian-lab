@@ -543,8 +543,9 @@ defmodule Rian.Reach do
         do: [bitstr_blocker()],
         else: []
 
-    # a pin `^x` in a clause head: lowered on BEAM (repeated-var equality), but the
-    # non-BEAM emitters have no guard-transform yet, so pin BEAM-only (honest).
+    # a pin `^x` in a clause head: lowered on BEAM (repeated-var equality) and JS/JVM
+    # (an `==` test against the pinned value); Rust has no match-guard transform yet,
+    # so a pin pins the function off `:rs` only (honest against the emitters).
     pin =
       if Enum.any?(f.clauses, fn c -> Enum.any?(c.pats, &pat_has_pin?/1) end),
         do: [pin_blocker()],
@@ -782,11 +783,11 @@ defmodule Rian.Reach do
   defp bitstr_blocker,
     do: %{construct: "bitstring (`<<…>>`)", kind: :bitstring, kills: [:rs, :js, :jvm]}
 
-  # A pin `^x` (ADR-0050): the BEAM lowers it (repeated-var equality) and `Rian.Lower`'s
-  # Elixir text emits `^x`, but the Rust/JS/JVM emitters have no guard-transform yet, so
-  # a pin pins the function BEAM-only (honest until the guard form lands).
+  # A pin `^x` (ADR-0050): the BEAM lowers it (repeated-var equality), JS/JVM emit an
+  # `==` test against the pinned value, and `Rian.Lower`'s Elixir text emits `^x`; only
+  # the Rust emitter lacks a match-guard transform, so a pin pins the function off `:rs`.
   defp pin_blocker,
-    do: %{construct: "pin (`^x`)", kind: :pin, kills: [:rs, :js, :jvm]}
+    do: %{construct: "pin (`^x`)", kind: :pin, kills: [:rs]}
 
   # does an associated type appear where the JVM can't erase it to `Any` — a parameter
   # (contravariant) or a bare/non-`Vec` return? Inside a covariant `Vec(...)` return it
