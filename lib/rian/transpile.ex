@@ -1673,6 +1673,17 @@ defmodule Rian.Transpile do
     if e, do: "if #{expr(c)} do #{t} else #{e} end", else: "if #{expr(c)} do #{t} end"
   end
 
+  # `unless cond do X [else Y] end` ≡ `if not cond do X [else Y] end` — Rian has no
+  # `unless`, but the negation is a faithful, portable image (not host residue). The
+  # condition is parenthesized so `not` binds over the whole expression (`unless a != b`
+  # → `if not (a != b)`, not `if (not a) != b`).
+  defp expr({:unless, _, [c, kw]}) do
+    t = render_body(Keyword.get(kw, :do))
+    e = if Keyword.has_key?(kw, :else), do: render_body(Keyword.get(kw, :else)), else: nil
+    neg = "not (#{expr(c)})"
+    if e, do: "if #{neg} do #{t} else #{e} end", else: "if #{neg} do #{t} end"
+  end
+
   defp expr({:case, _, [subj, [do: arms]]}) do
     rendered = Enum.map_join(arms, "\n", fn arm -> indent(case_arm(arm)) end)
     "case #{expr(subj)} do\n#{rendered}\nend"

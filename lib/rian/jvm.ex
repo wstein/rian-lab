@@ -284,6 +284,7 @@ defmodule Rian.JVM do
   """
   @rian_sig "pub def to_jar(src String, jar_path String) _Unk"
   @rian_sig "pub def to_jar(src String, jar_path String, opts _Unk) _Unk"
+  @rian_host "host boundary: invokes `kotlinc` and cleans up a temp `.kt` file (try/after) — :ex-only host I/O, no Rian image"
   @spec to_jar(String.t(), String.t(), keyword()) :: {:ok, String.t()}
   def to_jar(src, jar_path, opts \\ []) do
     kotlinc =

@@ -218,6 +218,7 @@ defmodule Rian.Roundtrip do
 
   # `debug_info` is required so `Rian.FormsEquiv` can read the abstract code back;
   # restored after so the harness leaves the compiler option as it found it.
+  @rian_host "host boundary: sets/restores the `:debug_info` compiler option around `fun` (try/after) — :ex-only host state, no Rian image"
   defp with_debug_info(fun) do
     prev = Code.get_compiler_option(:debug_info)
     Code.put_compiler_option(:debug_info, true)

@@ -125,6 +125,7 @@ defmodule Rian.Manifest do
   is found. Returns `fun`'s result.
   """
   @rian_sig "pub def with_project(start_dir String, fun Fn() _Unk) _Unk"
+  @rian_host "host boundary: sets/restores the `:rian_manifest` application env around `fun` (try/after) — :ex-only host state, no Rian image"
   @spec with_project(Path.t(), (-> result)) :: result when result: var
   def with_project(start_dir \\ ".", fun) when is_function(fun, 0) do
     prev = Application.fetch_env(:rian_lab, :rian_manifest)
