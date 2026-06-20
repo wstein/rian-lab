@@ -87,8 +87,8 @@ mod Checker do
   type FBnd := FB(Vec(String), Vec(String), Vec(ProtoBound))
   type ProtoBound := PBound(String, Vec(String))
   type TyLk := TyHit(String) | TyMiss
-  # error set #5 (`T | E` error-set check, ADR-0040 §4): the declared error-tag set of a
-  # `T | E` return, or none when the return is not a `T | E`.
+  # error set #5 (`Result(T, E)` error-set check, ADR-0040 §4): the declared error-tag set of a
+  # `Result(T, E)` return, or none when the return is not a `Result(T, E)`.
   type EsOpt := EsNone | EsSome(Vec(String))
   # collecting a maximal word-run while tokenizing a type string.
   type WordTake := WT(String, Vec(Int53))
@@ -1158,8 +1158,8 @@ mod Checker do
   def bind_lookup([], _) := TyMiss
   def bind_lookup([Bnd(tv, ty) | rest], x) := if tv == x do TyHit(ty) else bind_lookup(rest, x) end
 
-  # ── error set #5: `T | E` error-set check (Rian.Check.check_error_set, ADR-0040 §4) ──
-  # a function declared `T | E` must not RETURN an `{:error, Tag}` whose `Tag` (a PascalCase
+  # ── error set #5: `Result(T, E)` error-set check (Rian.Check.check_error_set, ADR-0040 §4) ──
+  # a function declared `Result(T, E)` must not RETURN an `{:error, Tag}` whose `Tag` (a PascalCase
   # constructor) is not in `E`'s set. `tsets` maps a named error type `E` to its variant
   # tags (a bare `E` -> `[E]`). CONSERVATIVE Phase-1 slice: only the tags DIRECTLY built in
   # the body are checked — callee-propagated error sets (`with`-without-`else`, the whole-
@@ -1173,7 +1173,7 @@ mod Checker do
   end
 
   # `Result(T, E)` -> the declared error-tag set (`tsets[E]`, else `[E]`); else `EsNone`
-  # (the `T | E` return sugar was removed — ADR-0083). `parse_parametric` splits
+  # (the `Result(T, E)` return sugar was removed — ADR-0083). `parse_parametric` splits
   # `Result(ok, err)` on its top-level comma; a non-`Result` / wrong-arity return is `EsNone`.
   def declared_set(ret String, tsets Dict(String, Vec(String))) EsOpt
   def declared_set(ret, tsets) := decl_from_pp(parse_parametric(ret), tsets)

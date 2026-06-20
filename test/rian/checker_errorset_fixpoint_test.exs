@@ -5,8 +5,8 @@ defmodule Rian.CheckerErrorSetFixpointTest do
   alias Rian.{Beam, Core, Check, Decl, Pratt}
 
   # Self-hosting fixpoint (ADR-0063) for the type checker's FIFTH (and last) ERROR SET —
-  # the `T | E` ERROR-SET check (Rian.Check.check_error_set, ADR-0040 §4). A function
-  # declared `T | E` must not RETURN an `{:error, Tag}` whose `Tag` (a PascalCase
+  # the `Result(T, E)` ERROR-SET check (Rian.Check.check_error_set, ADR-0040 §4). A function
+  # declared `Result(T, E)` must not RETURN an `{:error, Tag}` whose `Tag` (a PascalCase
   # constructor) is not in `E`'s set. `compiler/checker.rian`'s `error_set_bad/3` returns
   # `true` iff such an extra tag is DIRECTLY built in the body. `tsets` maps a named error
   # type to its variant tags (built here exactly like the reference's `error_sets`).
@@ -36,7 +36,7 @@ defmodule Rian.CheckerErrorSetFixpointTest do
      @types <> "def bad() Result(Int53, DivErr) := {:error, NotFound(5)}"}
   ]
 
-  # POSITIVE = NO extra tag → BOTH must pass: a tag in the set, or a non-`T | E` return.
+  # POSITIVE = NO extra tag → BOTH must pass: a tag in the set, or a non-`Result(T, E)` return.
   @positive [
     {"DivByZero ∈ DivErr", "{:error, DivByZero}", "Result(Int53, DivErr)",
      @types <> "def good() Result(Int53, DivErr) := {:error, DivByZero}"},

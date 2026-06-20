@@ -1276,8 +1276,8 @@ mod ComposeRealSum do
   def add_impl(String, String, Dict(String, Vec(String))) Dict(String, Vec(String))
   def add_impl(proto, ty, acc) := if Prim.map_has(acc, proto) do Prim.map_put(acc, proto, [ty | Prim.map_get(acc, proto)]) else Prim.map_put(acc, proto, [ty]) end
 
-  # ── the FIFTH type gate: `T | E` error-set check (Checker.error_set_bad, ADR-0040 §4) ──
-  # the self-built compiler REFUSES a `T | E` function that returns an `{:error, Tag}` whose
+  # ── the FIFTH type gate: `Result(T, E)` error-set check (Checker.error_set_bad, ADR-0040 §4) ──
+  # the self-built compiler REFUSES a `Result(T, E)` function that returns an `{:error, Tag}` whose
   # tag is not in `E`'s set ({:type_error, name}). `tsets` (each sum type -> its variant tags)
   # is built from the `d_type` decls; the body is projected with the atom/tuple-PRESERVING
   # `to_chk_es` so `error_set_bad` can see the error tuples. (`ts` is left untyped via a sig +

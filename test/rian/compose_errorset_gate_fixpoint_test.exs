@@ -3,10 +3,10 @@ defmodule Rian.ComposeErrorSetGateFixpointTest do
   use ExUnit.Case, async: false
   alias Rian.Beam
 
-  # P3 Phase 2 — the `T | E` error-set gate (Checker.error_set_bad, ADR-0040 §4) is WIRED
+  # P3 Phase 2 — the `Result(T, E)` error-set gate (Checker.error_set_bad, ADR-0040 §4) is WIRED
   # into `build`. The driver builds `tsets` (each sum type -> its variant tags, from the
   # d_type decls), projects each body with the atom/tuple-PRESERVING `to_chk_es`, and
-  # `first_error_set_bad` rejects a `T | E` function that returns an `{:error, Tag}` whose
+  # `first_error_set_bad` rejects a `Result(T, E)` function that returns an `{:error, Tag}` whose
   # tag is not in `E`'s set. This is the fifth and last of Rian.Check's error sets — the
   # self-built compiler's type-error coverage now mirrors the reference's.
 
@@ -30,7 +30,7 @@ defmodule Rian.ComposeErrorSetGateFixpointTest do
 
   @types "type DivErr := DivByZero | Overflow\n"
 
-  describe "the `T | E` error-set gate is WIRED into build" do
+  describe "the `Result(T, E)` error-set gate is WIRED into build" do
     test "a function returning an OUT-OF-SET error tag is REFUSED", %{drv: drv} do
       src = @types <> "def bad() Result(Int53, DivErr) := {:error, NotFound}"
 
@@ -44,7 +44,7 @@ defmodule Rian.ComposeErrorSetGateFixpointTest do
       assert m.good() == {:error, :div_by_zero}
     end
 
-    test "a non-`T | E` program is unaffected by the gate", %{drv: drv} do
+    test "a non-`Result(T, E)` program is unaffected by the gate", %{drv: drv} do
       m = drv.build("def add(a Int53) Int53 := a + 1\ndef go() Int53 := add(41)", uniq(:ESNone))
       assert m.go() == 42
     end
