@@ -2185,25 +2185,51 @@ defmodule Rian.Check do
   of an untyped private function (infer-local / declare-public, ADR-0034).
   """
   @spec infer_return_type(Rian.IR.Func.t(), map()) :: String.t() | :unknown
-  def infer_return_type(%Func{params: ps, clauses: clauses, tvars: tvs}, ic) do
+  def infer_return_type(%Func{name: name, params: ps, clauses: clauses, tvars: tvs}, ic) do
     types =
       Enum.map(clauses, fn c ->
-        env = c.pats |> clause_env(ps, ic) |> bind_tvar_params(c.pats, ps, tvs)
-        infer(Pratt.parse_body(c.body), env, ic)
+        body = Pratt.parse_body(c.body)
+
+        # a clause whose whole body is a direct self-call returns the function's OWN return
+        # type — the fixpoint we are computing, not a new alternative. Treat it as `:bottom`
+        # (the join identity) so the type is fixed by the *other* (base-case) clauses: a
+        # `def_name(x) := … def_name(inner) … to_string(n) … None` infers `String | None`,
+        # not `:unknown`. If EVERY clause is a self-call (no base case) the join stays
+        # `:bottom` → `:unknown` (genuinely uninferable), still honest.
+        if self_recursive_body?(body, name) do
+          :bottom
+        else
+          env = c.pats |> clause_env(ps, ic) |> bind_tvar_params(c.pats, ps, tvs)
+          infer(body, env, ic)
+        end
       end)
 
-    if Enum.any?(types, &(&1 in [:unknown, :mismatch, :bottom])) do
+    if Enum.any?(types, &(&1 in [:unknown, :mismatch])) do
       :unknown
     else
       # join the clause bodies as alternatives: a common type where one exists, else a
       # value union (a function returning `{name,…}` in one clause and `None` in another
       # infers `(String,…) | None`, ADR-0083). `join_alts` is union-aware; `join_all` is not.
+      # `:bottom` (a self-recursive clause) is the identity; all-`:bottom` debottoms to `:unknown`.
       case join_alts(types) do
         t when is_binary(t) -> t
         _ -> :unknown
       end
     end
   end
+
+  # a clause body that IS a direct self-call (the whole return is the recursive result, so
+  # it contributes the fixpoint, not a new type) — a bare `f(args)` or a block ending in one.
+  defp self_recursive_body?({:call, {:id, name}, _args}, name), do: true
+
+  defp self_recursive_body?({:block, stmts}, name) do
+    case List.last(stmts) do
+      {:expr, e} -> self_recursive_body?(e, name)
+      _ -> false
+    end
+  end
+
+  defp self_recursive_body?(_body, _name), do: false
 
   # `clause_env` concretizes a generic param's tvar to `:unknown` (it doesn't
   # instantiate generics). For a function's OWN type variables, though, the body must
