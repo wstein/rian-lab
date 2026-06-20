@@ -19,7 +19,8 @@ Rian adopts **No Hidden Control Flow** as a standing design principle. Concretel
 
 1. **No exceptions in the portable core.** Errors are values — `Result(T, E)` over a typed error
    set (ADR-0034). Control does not jump invisibly up the stack. (The BEAM target may still surface
-   `FunctionClauseError` for explicitly `@partial` functions; that is opt-in, never silent.)
+   `FunctionClauseError`/`CaseClauseError` at runtime for a non-total function or `case` — that is
+   the explicit fallthrough of §4, never silent.)
    **Termination is permitted, recovery is not:** `Prim.panic(msg) : T forall T` is a diverging,
    **uncatchable** abort for invariant violations / unreachable arms (lowers to
    `erlang:error`/`panic!`/`throw`/Kotlin `throw`; portable to every target). It is *not* hidden
@@ -37,8 +38,15 @@ Rian adopts **No Hidden Control Flow** as a standing design principle. Concretel
 3. **No operator-overload surprises.** Operators have fixed, total meanings (the precedence table);
    they are not user-redefinable to run arbitrary code. (`comptime` and macros are the *explicit*
    metaprogramming channels — ADR-0030 — not operators.)
-4. **No silent partiality.** A non-total function is a compile error unless marked `@partial`
-   (clauses-guards §6). `case` over an open type requires a `_ ->` arm (ADR-0033/0034).
+4. **No silent partiality.** A non-total function — and, identically, a non-exhaustive body
+   `case` — is **not** silently partial and **not** refused: it lowers with the explicit diverging
+   fallthrough of (1) — `_ => panic!(…)` on Rust, `FunctionClauseError`/`CaseClauseError` on BEAM,
+   a `throw` on JS/JVM — the same no-match behaviour on every target (clauses-guards §6, ADR-0036).
+   The exhaustiveness analysis still runs unchanged; it now *drives* the fallthrough (and the Rust
+   `_ =>` arm) instead of gating emission. An open-type `case` (`Symbol`, `Int64`, `String`, where
+   coverage can't be proven) lowers the same way — a `_ ->` arm is conventional, no longer required
+   (ADR-0033/0034). There is no `@partial` marker: partiality is uniform, so a function and a `case`
+   behave identically (the function-vs-`case` asymmetry was removed 2026-06-20).
 5. **No implicit coercions.** `/` is float division, `div` is integer (expressions spec); promotion
    is explicit. Numeric widths convert only via an explicit cast/annotation.
 

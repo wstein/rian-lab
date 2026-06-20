@@ -50,8 +50,10 @@ Introduce a fourth type-declaration keyword, `range`, for **finite ordinal subra
 This is the load-bearing decision and the deliberate **refinement of exhaustiveness spec §4**.
 
 §4's "no range machinery" stands **unchanged for the base primitives**: a `case` over a bare
-`Int64`/`Char`/`String` still sees an *infinite* signature and still requires `_`. What changes is
-narrow: a `range` *type* registers a **finite signature** — its members *are* its constructors,
+`Int64`/`Char`/`String` still sees an *infinite* signature, so it is never structurally total — a
+`_` arm is conventional but, like a non-total function, no longer required (without it the `case`
+lowers with a `_ => panic!(…)` fallthrough, ADR-0035 §4). What changes is narrow: a `range` *type*
+registers a **finite signature** — its members *are* its constructors,
 exactly the `{:lit, value}` 0-arity constructors the engine ([exhaustiveness.ex](../../lib/rian/exhaustiveness.ex))
 already models. Covering the full interval is therefore structurally exhaustive, with **no `_`**:
 
@@ -67,10 +69,13 @@ def flip(b)
 end
 ```
 
-Contrast a `case` over `Int64`, where `0` and `1` leave the witness `_` and the gate refuses to
-emit without a catch-all. The distinction is **finite vs infinite signature**, which the engine
-already branches on — not new "range pattern" syntax. **Range patterns in `case` arms remain out of
-scope** (ADR-0032/03-clauses): you match a `Digit` by its literal members or `_`, exactly as today.
+Contrast a `case` over `Int64`, where `0` and `1` leave the witness `_`: it is non-total, so
+without a catch-all it lowers with the `_ => panic!(…)` fallthrough (never refused, ADR-0035 §4).
+The distinction is **finite vs infinite signature** — it decides whether the match is structurally
+total, so whether the Rust emitter appends that fallthrough arm at all (a full sealed-`type` cover
+gets none) — which the engine already branches on, not new "range pattern" syntax. **Range patterns in
+`case` arms remain out of scope** (ADR-0032/03-clauses): you match a `Digit` by its literal members
+or `_`, exactly as today.
 
 #### Completeness checking, bounded
 
@@ -128,11 +133,12 @@ emitting **Rust**, where the base `i64`/`char` is open to *its* checker, a total
 on the `@type` spec and first-match clauses; no shim needed.
 
 The same mechanism handles a **non-exhaustive function** (a partial clause set, BEAM-idiomatic — a
-list helper that assumes a non-empty input). `Rian.Lower` no longer *refuses* it; it stamps the
-function partial and Rust gets a `_ => panic!(…)` arm, Elixir a natural `FunctionClauseError` — the
-runtime no-match behaviour `Rian.Beam`/`Rian.JS`/`Rian.JVM` already have, so one source lowers to every
-target (ADR-0082). Still refused everywhere: dead/unreachable clauses, and a non-exhaustive `case`
-*inside* a body (no clause-fallthrough position).
+list helper that assumes a non-empty input) **and a non-exhaustive `case` inside a body** — they are
+treated identically (the asymmetry was removed 2026-06-20). `Rian.Lower` no longer *refuses* either;
+Rust gets a `_ => panic!(…)` arm (appended by `resolve_rust_pats` for a `case`, by `rust_fn` for a
+function), Elixir a natural `FunctionClauseError`/`CaseClauseError` — the runtime no-match behaviour
+`Rian.Beam`/`Rian.JS`/`Rian.JVM` already have, so one source lowers to every target (ADR-0035 §4/0082).
+Still refused everywhere: dead/unreachable clauses.
 
 ## Consequences
 

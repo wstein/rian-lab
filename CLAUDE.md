@@ -75,11 +75,11 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
 3. **`Rian.Core`** — the typed, sealed-sum Core IR (`from_expr`/`from_pat` translate surface tuples →
    core structs like `ENum`/`EChar`/`PCtor`). **Every downstream pass consumes Core.**
 4. **Gates** (refuse to emit on failure): `Rian.Check` (unification-based inference + error sets),
-   `Rian.Exhaustiveness` (Maranget usefulness; the gate that has most earned its keep — it still
-   refuses **dead/unreachable clauses** and a **non-exhaustive `case` inside a body**, but a non-total
-   top-level *function* now lowers with a runtime fallthrough — Rust `_ => panic!(…)`, BEAM
-   `FunctionClauseError`, JS/JVM `throw` — instead of being refused, so `Rian.Lower` matches the other
-   backends; ADR-0034/0082),
+   `Rian.Exhaustiveness` (Maranget usefulness; still refuses **dead/unreachable clauses**, but a
+   non-total *function* **and** a non-exhaustive **`case`** both now lower with a runtime fallthrough —
+   Rust `_ => panic!(…)`, BEAM `FunctionClauseError`/`CaseClauseError`, JS/JVM `throw` — instead of
+   being refused, so all four backends match and a `case` behaves like a function; the analysis still
+   runs and *drives* the Rust `_ =>` arm (`Rian.Lower.resolve_rust_pats`); ADR-0035 §4/0034),
    `Rian.Capability` (BEAM linearity for `iso`/`ref`).
 5. **Emitters**, all consuming Core:
    - **`Rian.Beam`** — Erlang **abstract forms** via `:compile.forms` → real loadable `.beam`. This

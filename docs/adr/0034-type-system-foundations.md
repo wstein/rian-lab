@@ -198,7 +198,9 @@ narrowing, exactly as Kotlin invalidates a smart-cast on `var` reassignment.
 ### Folded-in rules
 
 - **Open-type exhaustiveness (from ADR-0033):** `case` on an open type (`Symbol`, `Int64`,
-  `String`) requires a `_ ->` catch-all; sealed `type` sums reach totality by coverage.
+  `String`) cannot be proven total; a `_ ->` catch-all is conventional but no longer required —
+  a non-total `case` lowers with an explicit panic/throw fallthrough like a non-total function
+  (ADR-0035 §4, 2026-06-20). Sealed `type` sums still reach totality by coverage.
 
 ## Ratings
 

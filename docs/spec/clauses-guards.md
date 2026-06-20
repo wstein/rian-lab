@@ -213,26 +213,33 @@ fn show(x: Value) -> String {
 
 ## 6. Exhaustiveness, reachability, partiality
 
-**Exhaustiveness — static, required (stricter than Elixir).**
-- A non-exhaustive function is a **compile error** (matches Rust).
-- **Guarded clauses do not count** toward exhaustiveness. A function using guards must have
-  an unguarded fallback (`_` or full structural coverage), exactly as Rust requires.
+**Exhaustiveness — always analysed; it informs the lowering, it does not gate it.**
+- The usefulness analysis runs over every clause head **and** every body `case` (the same
+  algorithm — [exhaustiveness spec](exhaustiveness.md)). It is never silenced.
+- **Guarded clauses do not count** toward exhaustiveness — a guarded arm cannot complete a
+  cover, exactly as Rust requires.
 - On Elixir the compiler's own check is the guarantee (BEAM does not enforce it); on Rust the
-  emitted `match` is provably exhaustive.
+  emitted `match` is provably exhaustive **because the emitter closes a non-total one** (below).
 
-**Reachability.**
-- **Warning:** a clause fully shadowed by earlier clauses is unreachable.
+**Reachability — still a hard gate.**
+- **Error:** a clause fully shadowed by earlier clauses is unreachable (dead code).
 - **Error:** two clauses with identical heads + guards (true duplicate).
 
-**Partiality — opt-in, never silent.**
+**Partiality — lowers with an explicit runtime fallthrough (never silent).**
+A non-total function — and, identically, a non-exhaustive body `case` — is **not refused**. It
+lowers with an explicit diverging fallthrough, the same no-match behaviour on every target
+(ADR-0035 sanctions `panic` as a total-by-abort, non-hidden operation; ADR-0036):
 ```
-@partial
 fn unwrap(Option(T)) T
 fn unwrap(Some(x)) := x
 ```
-- Rust: emits `_ => panic!("unwrap: None")`.
-- Elixir: relies on `FunctionClauseError` (optionally a generated raising clause).
-- Without `@partial`, the above is a **compile error** (`None` unhandled).
+- Rust: the emitter appends `_ => panic!("…: no clause matched")` — the totality `match` requires.
+- Elixir/BEAM: `FunctionClauseError` / `CaseClauseError` at runtime.
+- JS / JVM: a `throw` on the unmatched value.
+
+There is no `@partial` marker — partiality is uniform and unconditional, so a function and a
+`case` behave the same (the symmetry restored 2026-06-20). The analysis still *drives* this: it
+decides whether Rust needs the `_ =>` arm (a total cover gets none — no `unreachable` warning).
 
 ---
 
@@ -288,7 +295,7 @@ so the function is exhaustive on both targets.
 | Arbitrary function calls in guards | Rejected | Not Elixir-guard-safe; breaks portability |
 | Open map patterns to Rust | BEAM-only | No idiomatic Rust equivalent |
 | Early `return` in portable core | Deferred | Elixir lacks it; Rust-superset only |
-| Silent partial functions | Rejected | Must be `@partial`; partiality is explicit |
+| Silent partial functions | N/A | A non-total function/`case` lowers with an explicit panic/throw fallthrough (§6) — never silent, never `@partial`-gated |
 
 ---
 
