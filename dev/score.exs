@@ -9,8 +9,9 @@
 # vacuum, separating a real compiler gap from a measurement artifact (the prelude
 # not being in scope). See the memory note `rian-src-nested-repo-generated`.
 #
-# Both modes report parse/beam totals and a histogram of the FIRST blocker per file,
-# so the actual frontier (what to fix next) is visible, not just a count.
+# Both modes report parse totals + per-target reach (beam/rust/js/jvm) and a
+# per-target histogram of the FIRST blocker per file, so the actual frontier
+# (what to fix next, per backend) is visible, not just a count.
 
 asm? = "--asm" in System.argv()
 
@@ -58,6 +59,17 @@ run = fn fun ->
   end
 end
 
+# Drive each emitter from source the same way `mix rian.compile` does, so the
+# scoreboard tracks the real targets (not just BEAM): Rust via Rian.Lower,
+# JS via Rian.JS, Kotlin via Rian.JVM. Each target is attempted independently
+# (one raising does not mask the others), so a file's reach set is honest.
+targets = [
+  {:beam, fn src -> Rian.Beam.compile_program(src) end},
+  {:rust, fn src -> Rian.Lower.rust_program(Rian.Decl.parse(src)) end},
+  {:js, fn src -> Rian.JS.compile(src) end},
+  {:jvm, fn src -> Rian.JVM.compile(src) end}
+]
+
 results =
   Enum.map(files, fn f ->
     src = prelude <> File.read!(f)
@@ -65,27 +77,59 @@ results =
 
     case run.(fn -> Rian.Decl.parse(src) end) do
       :ok ->
-        case run.(fn -> Rian.Beam.compile_program(src) end) do
-          :ok -> {rel, :beam, nil}
-          {:fail, m} -> {rel, :parse_only, categorize.(m)}
-        end
+        reach =
+          Map.new(targets, fn {t, fun} ->
+            {t,
+             case run.(fn -> fun.(src) end) do
+               :ok -> :ok
+               {:fail, m} -> {:fail, categorize.(m)}
+             end}
+          end)
+
+        {rel, :parsed, reach}
 
       {:fail, m} ->
-        {rel, :fail, categorize.(m)}
+        {rel, :fail, %{parse: {:fail, categorize.(m)}}}
     end
   end)
 
-parse = Enum.count(results, fn {_, s, _} -> s in [:beam, :parse_only] end)
-beam = Enum.count(results, fn {_, s, _} -> s == :beam end)
+ok? = fn reach, t -> match?(:ok, Map.get(reach, t)) end
+
+parse = Enum.count(results, fn {_, s, _} -> s == :parsed end)
+count = fn t -> Enum.count(results, fn {_, _, reach} -> ok?.(reach, t) end) end
 
 IO.puts("\n=== rian/src scoreboard (#{if asm?, do: "ASSEMBLED + prelude", else: "isolated"}) ===")
-IO.puts("parse #{parse}/#{length(files)}   beam #{beam}\n")
+IO.puts("parse #{parse}/#{length(files)}")
 
-IO.puts("first-blocker histogram (non-building files):")
+IO.puts(
+  "reach  beam #{count.(:beam)}   rust #{count.(:rust)}   js #{count.(:js)}   jvm #{count.(:jvm)}\n"
+)
 
-results
-|> Enum.reject(fn {_, s, _} -> s == :beam end)
-|> Enum.map(fn {_, _, cat} -> cat end)
-|> Enum.frequencies()
-|> Enum.sort_by(fn {_, n} -> -n end)
-|> Enum.each(fn {cat, n} -> IO.puts("  #{String.pad_trailing(to_string(n), 3)} #{cat}") end)
+# Per-target first-blocker histogram: for each target, why the parsed files that
+# DON'T reach it stop. The parse failures are reported once under :parse.
+for {t, label} <- [
+      {:parse, "PARSE (file never parsed)"},
+      {:beam, "BEAM"},
+      {:rust, "RUST"},
+      {:js, "JS"},
+      {:jvm, "JVM"}
+    ] do
+  hist =
+    results
+    |> Enum.flat_map(fn {_, _, reach} ->
+      case Map.get(reach, t) do
+        {:fail, cat} -> [cat]
+        _ -> []
+      end
+    end)
+    |> Enum.frequencies()
+    |> Enum.sort_by(fn {_, n} -> -n end)
+
+  if hist != [] do
+    IO.puts("#{label} first-blocker histogram:")
+
+    Enum.each(hist, fn {cat, n} -> IO.puts("  #{String.pad_trailing(to_string(n), 3)} #{cat}") end)
+
+    IO.puts("")
+  end
+end
