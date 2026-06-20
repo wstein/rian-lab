@@ -345,6 +345,32 @@ defmodule Rian.ReachTest do
     end
   end
 
+  describe "`Any` is honest against the JVM emitter (operators vs pass-through, ADR-0034)" do
+    # Kotlin `Any` has no operators, so an `Any` value fed to a non-equality operator does
+    # not compile (`x + 1` → kotlinc `unresolved reference 'plus'`); the matrix must pin
+    # `:jvm` there, while a pass-through / equality `Any` genuinely reaches `:jvm`.
+    test "`Any` in a non-equality operator pins `:jvm` (kotlinc rejects it) but stays on `:js`" do
+      for op_src <- ["x + 1", "x <> \"!\"", "x and true"] do
+        rep = reach("def f(x Any) Any := #{op_src}")
+        assert :jvm not in targets(rep, "f"), "#{op_src} must pin :jvm"
+        assert :js in targets(rep, "f"), "#{op_src} stays on :js (JS is dynamic)"
+
+        assert Enum.any?(
+                 entry(rep, "f").blockers,
+                 &(&1.kills == [:jvm] and &1.construct =~ "Any value in a typed operator")
+               )
+      end
+    end
+
+    test "a pass-through / equality `Any` still reaches `:jvm` (Kotlin `Any` allows ==)" do
+      passthru = reach("def pick(b Bool, x Any, y Any) Any := if b do x else y end")
+      assert :jvm in targets(passthru, "pick")
+
+      eq = reach("def eq(x Any, y Any) Bool := x == y")
+      assert :jvm in targets(eq, "eq")
+    end
+  end
+
   describe "atoms/Result are honest against the emitters (ADR-0041 vs emitter)" do
     test "a bare value atom (`Symbol`) reaches every target (ADR-0041)" do
       rep = reach("def f(s Symbol) Bool := s == :foo")

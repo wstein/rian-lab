@@ -494,6 +494,15 @@ defmodule Rian.Reach do
     # `Any` pins off `:rs` alone. This is distinct from `_Unk`, an *unfinished* hole that
     # `Rian.Check` rejects outright — `Any` is a real, reported reach contract.
     any = if Enum.any?(sig_types, &type_mentions_any?/1), do: [any_blocker()], else: []
+    # `Any` reaches `:jvm` only as a *pass-through* value (Kotlin `Any`): union erasure,
+    # `List<Any>`, a returned/forwarded param. Kotlin `Any` has NO operators, so an `Any`
+    # value fed to a non-equality operator (`x + 1`, `x < y`, `x <> s`, `x and y`) does not
+    # compile — kotlinc rejects `plus`/`compareTo`/… on `Any`. Pin `:jvm` when a clause
+    # applies such an operator directly to an `Any`-typed parameter (`:js` stays — JS is
+    # dynamic and runs it). RESIDUAL: an `Any` value reaching an operator *indirectly* (via
+    # a `:=` bind or an `Any`-returning call) is not yet detected — the direct-operand case
+    # is the common, demonstrated one (the matrix can still over-claim `:jvm` for the rest).
+    any_op = if any_param_in_jvm_op?(f), do: [any_jvm_op_blocker()], else: []
     # a value-union type `A | B` (canonical `Union(...)`, ADR-0083). A NARROWABLE union
     # (every member primitive/sum/struct with a DISTINCT runtime discriminator) narrows
     # on every target — BEAM/JS (`is`/`typeof`/tag/`__struct__`), JVM (`Any`+`when is`),
@@ -565,7 +574,9 @@ defmodule Rian.Reach do
     Enum.reduce(
       f.clauses,
       {ref ++
-         int ++ width ++ any ++ union ++ param ++ as_pat ++ bit_pat ++ pin ++ disp, MapSet.new()},
+         int ++
+         width ++
+         any ++ any_op ++ union ++ param ++ as_pat ++ bit_pat ++ pin ++ disp, MapSet.new()},
       fn c, acc ->
         acc = scan(core(c.body, &Pratt.parse_body/1), modnames, acc)
         if c.guard, do: scan(core(c.guard, &Pratt.parse/1), modnames, acc), else: acc
@@ -604,6 +615,47 @@ defmodule Rian.Reach do
 
   defp any_blocker,
     do: %{construct: "Any (top type)", kind: :typed, kills: [:rs]}
+
+  defp any_jvm_op_blocker,
+    do: %{
+      construct: "Any value in a typed operator (Kotlin `Any` has no operators)",
+      kind: :typed,
+      kills: [:jvm]
+    }
+
+  # Kotlin `Any` supports only structural equality; every other operator needs a concrete
+  # operand type, so an `Any`-typed operand there does not compile (kotlinc `unresolved
+  # reference 'plus'/'compareTo'/…`). `:js` is dynamic and runs them, so only `:jvm` pins.
+  @any_jvm_ok_ops ["==", "!="]
+
+  # Does a clause apply a non-equality operator directly to an `Any`-typed parameter?
+  defp any_param_in_jvm_op?(f) do
+    any_names =
+      for p <- Map.get(f, :params, []), p.type == "Any", into: MapSet.new(), do: p.name
+
+    any_names != MapSet.new() and
+      Enum.any?(Map.get(f, :clauses, []), fn c ->
+        c.body |> core(&Pratt.parse_body/1) |> any_op_node?(any_names)
+      end)
+  end
+
+  defp any_op_node?(%Core.EBin{op: op, left: l, right: r}, names) do
+    (op not in @any_jvm_ok_ops and (any_operand?(l, names) or any_operand?(r, names))) or
+      any_op_node?(l, names) or any_op_node?(r, names)
+  end
+
+  defp any_op_node?(node, names) when is_struct(node),
+    do: node |> Map.from_struct() |> Map.values() |> Enum.any?(&any_op_node?(&1, names))
+
+  defp any_op_node?(list, names) when is_list(list), do: Enum.any?(list, &any_op_node?(&1, names))
+
+  defp any_op_node?(tuple, names) when is_tuple(tuple),
+    do: tuple |> Tuple.to_list() |> Enum.any?(&any_op_node?(&1, names))
+
+  defp any_op_node?(_, _names), do: false
+
+  defp any_operand?(%Core.EId{name: n}, names), do: MapSet.member?(names, n)
+  defp any_operand?(_, _names), do: false
 
   # a signature type that *is* `Any` or mentions it inside a generic (`Vec(Any)`, `Dict(String,
   # Any)`): the dynamic value flows through, so the pin applies. Word-boundary match avoids
