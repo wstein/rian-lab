@@ -139,6 +139,50 @@ defmodule Rian.Builtins do
     {"math", "pow", 2} => "Float64"
   }
 
+  # Fixed-head **polymorphic** host/stdlib signatures (ADR-0050, ADR-0047): functions
+  # whose return *head* is a contract — `List.reverse` always yields a `Vec`, `Map.put`
+  # a `Dict` — even when the element type can't be pinned. `{params, ret, tvars}`; the
+  # caller (`Rian.Check`) instantiates the tvars from the inferred argument types and
+  # fills any it can't bind with a `_Unk` hole (so `List.reverse(unknown)` → `Vec(_Unk)`,
+  # not `:unknown`). Distinct from `@table`, which is *concrete* returns only — here the
+  # head is justified by the function's contract, the element deferred. Reach pins the
+  # host ones (`Enum.*`, `Map.*`) off non-BEAM independently, so this only types the call.
+  @poly %{
+    {"List", "reverse", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
+    {"List", "map", 2} => {["Vec(T)", "Fn(T,U)"], "Vec(U)", ["T", "U"]},
+    {"List", "filter", 2} => {["Vec(T)", "Fn(T,Bool)"], "Vec(T)", ["T"]},
+    {"List", "reject", 2} => {["Vec(T)", "Fn(T,Bool)"], "Vec(T)", ["T"]},
+    {"List", "flat_map", 2} => {["Vec(T)", "Fn(T,Vec(U))"], "Vec(U)", ["T", "U"]},
+    {"List", "concat", 2} => {["Vec(T)", "Vec(T)"], "Vec(T)", ["T"]},
+    {"List", "take", 2} => {["Vec(T)", "Int53"], "Vec(T)", ["T"]},
+    {"List", "drop", 2} => {["Vec(T)", "Int53"], "Vec(T)", ["T"]},
+    {"List", "sort", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
+    {"List", "uniq", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
+    {"Enum", "map", 2} => {["Vec(T)", "Fn(T,U)"], "Vec(U)", ["T", "U"]},
+    {"Enum", "filter", 2} => {["Vec(T)", "Fn(T,Bool)"], "Vec(T)", ["T"]},
+    {"Enum", "reject", 2} => {["Vec(T)", "Fn(T,Bool)"], "Vec(T)", ["T"]},
+    {"Enum", "uniq", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
+    {"Enum", "reverse", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
+    {"Enum", "sort", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
+    {"Enum", "to_list", 1} => {["Vec(T)"], "Vec(T)", ["T"]},
+    {"Map", "new", 0} => {[], "Dict(_Unk,_Unk)", []},
+    {"Map", "new", 1} => {["Vec(T)"], "Dict(_Unk,_Unk)", ["T"]},
+    {"Map", "new", 2} => {["Vec(T)", "Fn(T,U)"], "Dict(_Unk,_Unk)", ["T", "U"]},
+    {"Map", "put", 3} => {["Dict(K,V)", "K", "V"], "Dict(K,V)", ["K", "V"]},
+    {"Map", "delete", 2} => {["Dict(K,V)", "K"], "Dict(K,V)", ["K", "V"]},
+    {"Map", "update", 4} => {["Dict(K,V)", "K", "V", "Fn(V,V)"], "Dict(K,V)", ["K", "V"]},
+    {"Map", "merge", 2} => {["Dict(K,V)", "Dict(K,V)"], "Dict(K,V)", ["K", "V"]}
+  }
+
+  @rian_sig "pub def poly_sig(module Option(String), fun String, arity Int53) Option((Vec(String), String, Vec(String)))"
+  @doc """
+  The fixed-head polymorphic signature `{params, ret, tvars}` of a host/stdlib function,
+  or `nil`. The caller instantiates the tvars from argument types (`_Unk` when unbound).
+  """
+  @spec poly_sig(String.t() | nil, String.t(), non_neg_integer()) ::
+          {[String.t()], String.t(), [String.t()]} | nil
+  def poly_sig(module, fun, arity), do: Map.get(@poly, {module, fun, arity})
+
   @rian_sig "pub def ret(module Option(String), fun String, arity Int53) Option(String)"
   @doc """
   The declared Rian return type of a host foreign function, or `nil` if it is not a

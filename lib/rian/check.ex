@@ -371,12 +371,20 @@ defmodule Rian.Check do
   # `{name, arity}` (module-flattened, as on the BEAM), so resolve the callee's declared
   # return type by name+arity. Unknown when no such function is in scope (a foreign/stdlib
   # call). Comes after the `.of`/zero-arg/cast clauses above, which are more specific.
-  def infer(%ECall{fun: %EDot{head: %EId{name: mod}, name: fun}, args: as}, _env, ic) do
+  def infer(%ECall{fun: %EDot{head: %EId{name: mod}, name: fun}, args: as}, env, ic) do
     case Map.get(Map.get(ic, :funs, %{}), {fun, length(as)}, :unknown) do
       # not a program function of that name/arity — try the foreign registry
       # (`String.replace/3 -> String`, …); host-only, but enough to type the call.
-      :unknown -> builtin_or_unknown(mod, fun, length(as))
-      v -> v
+      :unknown ->
+        case Rian.Builtins.poly_sig(mod, fun, length(as)) do
+          # a fixed-head polymorphic stdlib call (`List.reverse` -> `Vec(...)`): instantiate
+          # its tvars from the argument types, `_Unk`-filling any that can't bind (ADR-0050).
+          nil -> builtin_or_unknown(mod, fun, length(as))
+          sig -> instantiate_lax(sig, Enum.map(as, &infer(&1, env, ic)))
+        end
+
+      v ->
+        v
     end
   end
 
@@ -656,6 +664,22 @@ defmodule Rian.Check do
     else
       :unknown
     end
+  end
+
+  # Instantiate a **fixed-head** polymorphic stdlib signature (`Rian.Builtins.poly_sig/3`):
+  # like `instantiate_ret/2`, but a tvar the args can't bind is filled with a `_Unk` hole
+  # rather than collapsing the whole call to `:unknown`. The return *head* is the function's
+  # contract (`List.reverse` -> `Vec(...)`), so `List.reverse(unknown)` is `Vec(_Unk)`, not
+  # `:unknown` — concrete enough to type a draft helper's return, while the element defers.
+  defp instantiate_lax({params, ret, tvars}, arg_types) do
+    subs =
+      params
+      |> Enum.zip(arg_types)
+      |> Enum.reduce(%{}, fn {p, a}, acc -> bind_tvar(p, a, tvars, acc) end)
+
+    Enum.reduce(tvars, ret, fn tv, r ->
+      Regex.replace(~r/\b#{tv}\b/, r, Map.get(subs, tv, "_Unk"))
+    end)
   end
 
   # Unify a parameter's declared type string with the inferred argument type
@@ -1551,13 +1575,23 @@ defmodule Rian.Check do
       bare_head_of?(from, to) ->
         true
 
-      # a structural literal type — a tuple `(A,B)` from `{a, b}`, or a `Dict(K,V)` from
-      # `%{…}` — declared against an *opaque nominal* return (a user type the checker can't
-      # resolve to a concrete shape: an undeclared / alias type like `Pair`, `Tup`) is not
-      # a provable mismatch, so it is assignable (CLAUDE.md conservative bar; matches the
-      # prior behaviour when these inferred `:unknown`). A *scalar primitive* `to` (`Int64`,
-      # `String`, …) or another structural type IS refutable and falls through below.
-      (tuple_type?(from) or dict_type?(from)) and opaque_nominal?(to) ->
+      # a `_Unk` hole is a wildcard at *any depth*: `Vec(_Unk)` (from a fixed-head stdlib
+      # call whose element couldn't be pinned) is assignable to/from `Vec(Int53)`, and
+      # `Dict(_Unk,_Unk)` to `Dict(String,Int53)`. `_Unk` is the unfinished-inference hole
+      # (compatible with everything, like `:unknown`) — structurally, not just at top level.
+      is_binary(from) and is_binary(to) and
+        (String.contains?(from, "_Unk") or String.contains?(to, "_Unk")) and
+          unk_assignable?(from, to) ->
+        true
+
+      # a *constructed* type — a tuple `(A,B)`, `Vec(T)`, `Dict(K,V)`, `Option(T)`, … —
+      # declared against an *opaque nominal* return (a user type the checker can't resolve
+      # to a concrete shape here: an undeclared / alias type like `Pair`, `Tup`, or an alias
+      # `MyList := Vec(T)`) is not a provable mismatch, so it is assignable (CLAUDE.md
+      # conservative bar; matches the prior behaviour when these inferred `:unknown`). A
+      # *scalar primitive* `to` (`Int64`/`String`/…) or another constructed type with a
+      # different head IS refutable and falls through to the mismatch check below.
+      constructed_type?(from) and opaque_nominal?(to) ->
         true
 
       true ->
@@ -1577,11 +1611,38 @@ defmodule Rian.Check do
 
   defp bare_head_of?(_from, _to), do: false
 
-  # a structural tuple type string (`(A,B)` — leading paren, the form `infer/3` emits
-  # for a non-tagged tuple literal).
-  defp tuple_type?(t), do: is_binary(t) and String.starts_with?(t, "(")
+  # a *constructed* type string — a tuple `(A,B)` or a parameterized head `Vec(T)` /
+  # `Dict(K,V)` / `Option(T)` (anything with a `(`), the forms `infer/3` produces for
+  # literals and fixed-head stdlib calls. Distinguished from a bare nominal (no paren).
+  defp constructed_type?(t), do: is_binary(t) and String.contains?(t, "(")
 
-  defp dict_type?(t), do: is_binary(t) and String.starts_with?(t, "Dict(")
+  # structural assignability treating `_Unk` (and `:unknown`) as a wildcard at any depth:
+  # same head + arity, componentwise. So `Vec(_Unk)` ~ `Vec(Int53)`, `Dict(_Unk,_Unk)` ~
+  # `Dict(String,Int53)`, `(_Unk,String)` ~ `(Int53,String)` — a fixed-head stdlib/literal
+  # type with an unpinned slot flows where the fully-typed one does (CLAUDE.md conservative).
+  # `a` and `b` are type strings (the entry guard is `is_binary`, and recursion descends
+  # through `split_top_commas`, which yields strings — incl. the literal `"_Unk"` hole).
+  defp unk_assignable?(a, b) do
+    cond do
+      a == "_Unk" or b == "_Unk" -> true
+      a == b -> true
+      true -> heads_match?(split_head(a), split_head(b))
+    end
+  end
+
+  defp heads_match?({h, as}, {h, bs}) when length(as) == length(bs),
+    do: Enum.zip(as, bs) |> Enum.all?(fn {x, y} -> unk_assignable?(x, y) end)
+
+  defp heads_match?(_, _), do: false
+
+  # split a type string into `{head, top_level_args}`: `"Vec(Int53)"` -> `{"Vec",["Int53"]}`,
+  # a tuple `"(A,B)"` -> `{"", ["A","B"]}`, a bare name `"Int53"` -> `{"Int53", []}`.
+  defp split_head(t) do
+    case Regex.run(~r/^([A-Za-z0-9_]*)\((.*)\)$/, t) do
+      [_, head, inner] -> {head, Rian.TypeStr.split_top_commas(inner)}
+      _ -> {t, []}
+    end
+  end
 
   # an opaque nominal type: a bare capitalized name (no params/structure) that is not a
   # scalar primitive — i.e. a user type the checker can't resolve here (an undeclared or

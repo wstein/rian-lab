@@ -969,6 +969,16 @@ defmodule Rian.CheckTest do
                Check.annotate(Pratt.parse(~S|%{x: 1, y: "two"}|))
     end
 
+    test "a fixed-head polymorphic stdlib call infers its head, instantiating the element" do
+      # precise when the argument is typed; `_Unk` element when it isn't (the head is the
+      # function's contract — ADR-0050 / ADR-0047 Builtins.poly_sig).
+      assert %Core.ECall{type: "Vec(Int64)"} =
+               Check.annotate(Pratt.parse("List.reverse(xs)"), %{"xs" => "Vec(Int64)"})
+
+      assert %Core.ECall{type: "Vec(_Unk)"} =
+               Check.annotate(Pratt.parse("Enum.uniq(xs)"))
+    end
+
     test "a cons-tail list annotates head and tail and is typed Vec(T)" do
       typed = Check.annotate(Pratt.parse("[a | rest]"), %{"a" => "Int64", "rest" => "Vec(Int64)"})
 
