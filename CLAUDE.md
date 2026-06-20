@@ -158,8 +158,12 @@ architectural cost.
   nested in the return type** (`Option`/`Result`/`Vec(Fn(Int53,T))`: a value-position closure boxes at
   the `ELambda` emit, so `Some((n) -> x)` → `Option::Some(Box::new(move …))`). So `map`/`filter`/`reduce`,
   `adder`/`mk`, and the nested cases are all `:rs`-portable (rustc-verified) — **no `Fn`-bearing
-  signature is pinned off `:rs` any more**. The remaining `:rs` gap is the **parametric** monomorphic
-  subset (a user generic type outside the lowerable shape).
+  signature is pinned off `:rs` any more**. A **parametric user type** reaches `:rs` when its tvar fields
+  are each *lowerable* — a bare tvar (`k K`) OR a tvar nested in `Vec`/`Option`/`Result` (`items Vec(T)`
+  → `enum Stack<T> { S { items: Vec<T> } }`; the enum's generics are collected from every field tvar, and
+  construction into a compound field clones the payload: `S([x|items])`, `B(Some(x))` — rustc-verified).
+  The remaining `:rs` gap is a `Dict`/`Fn`/tuple/nested-user-type tvar field (separate lowering gaps) and
+  the non-positional/non-tail-call builder shapes.
 - **Self-hosting** (`SELFHOST.md`, `compiler/*.rian`): a compiler pipeline written in
   Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
   reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.

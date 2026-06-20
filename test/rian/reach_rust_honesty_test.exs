@@ -260,10 +260,18 @@ defmodule Rian.ReachRustHonestyTest do
     # green-lights code rustc rejects (ADR-0061). Each case below emits broken Rust.
     defp analyze(src), do: src |> Decl.parse() |> Reach.analyze()
 
-    test "F2: a parametric type with a non-bare-tvar field (Vec(T)) — undeclared generic" do
+    test "F2: a `Vec`/`Option` tvar field NOW reaches :rs (the enum declares its generics)" do
       rep = analyze("type Box := B(items Vec(T))\ndef wrap(x T) Box forall T := B([x])")
-      refute :rs in targets(rep, "wrap")
-      assert :generic in blocker_kinds(rep, "wrap")
+      assert :rs in targets(rep, "wrap")
+    end
+
+    test "F2: a `Dict`/`Fn` tvar field is STILL pinned off :rs (separate lowering gaps)" do
+      dict = analyze("type Map := M(d Dict(K, V))\ndef mk(d Dict(K, V)) Map forall K, V := M(d)")
+      refute :rs in targets(dict, "mk")
+      assert :generic in blocker_kinds(dict, "mk")
+
+      fnf = analyze("type Cell := C(f Fn(Int53, T))\ndef mk(x T) Cell forall T := C((n) -> x)")
+      refute :rs in targets(fnf, "mk")
     end
 
     test "F3: a generic builder whose construction args don't match the field tvars" do
@@ -298,7 +306,11 @@ defmodule Rian.ReachRustHonestyTest do
           :ok
 
         rustc ->
-          rust = Test.rust("type Box := B(items Vec(T))\ndef wrap(x T) Box forall T := B([x])")
+          # a `Dict` tvar field is still pinned (no `HashMap` mapping in this position) — its
+          # emitted `Dict<K, V>` is not a Rust type, so rustc rejects it (the blocker is real).
+          rust =
+            Test.rust("type Map := M(d Dict(K, V))\ndef mk(d Dict(K, V)) Map forall K, V := M(d)")
+
           base = Path.join(System.tmp_dir!(), "rian_neg_#{System.unique_integer([:positive])}")
           src = base <> ".rs"
           out_lib = base <> ".rlib"
@@ -323,7 +335,8 @@ defmodule Rian.ReachRustHonestyTest do
                 stderr_to_stdout: true
               )
 
-            refute code == 0, "the Vec(T)-field shape must NOT compile (Reach is right to pin it)"
+            refute code == 0,
+                   "the Dict(K,V)-field shape must NOT compile (Reach is right to pin it)"
           after
             File.rm(src)
             File.rm(out_lib)

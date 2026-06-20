@@ -2294,13 +2294,24 @@ defmodule Rian.Lower do
   defp type_param_tvars(t) do
     t.variants
     |> Enum.flat_map(fn v -> Enum.map(v.fields, &Map.get(&1, :type)) end)
-    |> Enum.filter(&tvar_name?/1)
+    |> Enum.flat_map(&type_tvars/1)
     |> Enum.uniq()
   end
 
   # a bare type variable name: a single uppercase letter optionally followed by digits
   defp tvar_name?(t) when is_binary(t), do: String.match?(t, ~r/^[A-Z][0-9]*$/)
   defp tvar_name?(_), do: false
+
+  # every type-variable token MENTIONED in a type string, in order of first appearance:
+  # a bare `T` → `["T"]`, a compound `Vec(T)` → `["T"]`, `Dict(K, V)` → `["K", "V"]`.
+  # (The enum's generic params are the union of these over all its fields, so a field
+  # that nests a tvar — `items Vec(T)` — declares `<T>` instead of emitting an undeclared
+  # `T`; ADR-0061 parametric subset.)
+  defp type_tvars(type) when is_binary(type) do
+    Regex.scan(~r/[A-Za-z_]\w*/, type) |> Enum.map(&hd/1) |> Enum.filter(&tvar_name?/1)
+  end
+
+  defp type_tvars(_), do: []
 
   # surface pattern -> typed core IR -> Rust (ADR-0050: emitter consumes the core)
   defp core_pat_rs(surface, meta), do: pat_rs(Core.from_pat(surface), meta)

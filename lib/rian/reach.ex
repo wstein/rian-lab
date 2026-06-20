@@ -849,16 +849,44 @@ defmodule Rian.Reach do
     Enum.any?(t.variants, fn v -> Enum.any?(v.fields, &type_has_tvar?(Map.get(&1, :type))) end)
   end
 
-  # The Rust emitter lowers a parametric type only when every tvar-bearing field is
-  # a *bare* tvar (`k K`) — that becomes a declared `enum Pair<K, V>` param. A field
-  # nesting a tvar in a compound (`items Vec(T)`) emits an undeclared `T` (rustc
-  # E0412), so such a type is not emittable.
+  # The Rust emitter lowers a parametric type when every tvar-bearing field is *lowerable*:
+  # a bare tvar (`k K` → declared `enum Pair<K, V>` param) OR a tvar nested in one of the
+  # data compounds the emitter monomorphizes — `Vec`/`Option`/`Result`, recursively
+  # (`items Vec(T)` → `enum Stack<T> { S { items: Vec<T> } }`). `Dict`/`Fn`/tuple/nested
+  # user-type fields carrying a tvar have separate lowering gaps, so they stay off `:rs`
+  # (default-deny — the matrix never oversells, ADR-0061).
   defp emittable_parametric?(t) do
     t.variants
     |> Enum.flat_map(& &1.fields)
     |> Enum.map(&Map.get(&1, :type))
     |> Enum.filter(&type_has_tvar?/1)
-    |> Enum.all?(&tvar?/1)
+    |> Enum.all?(&lowerable_field?/1)
+  end
+
+  # a tvar-bearing field type the Rust emitter lowers correctly (see `emittable_parametric?`).
+  defp lowerable_field?(type) do
+    cond do
+      not type_has_tvar?(type) ->
+        true
+
+      tvar?(type) ->
+        true
+
+      true ->
+        case compound_args(type) do
+          nil -> false
+          args -> Enum.all?(args, &lowerable_field?/1)
+        end
+    end
+  end
+
+  # the type args of a supported generic wrapper (`Vec`/`Option`/`Result`), else `nil`:
+  # `"Vec(T)"` → `["T"]`, `"Result(T, E)"` → `["T", "E"]`, `"Dict(K, V)"` → `nil`.
+  defp compound_args(type) do
+    case Regex.run(~r/^(?:Vec|Option|Result)\((.*)\)$/, type) do
+      [_, inner] -> Rian.TypeStr.split_top_commas(inner)
+      _ -> nil
+    end
   end
 
   # Does the function's signature (params or return) name a parametric type?
@@ -929,17 +957,22 @@ defmodule Rian.Reach do
 
   defp collect_ctors(_other, _ctors), do: []
 
-  # A construction is emittable iff each positional arg is a bare parameter
-  # reference whose declared type is exactly the field's tvar — the emitter assigns
-  # the field type (`K`) to the arg with no coercion, so a mismatch is rustc E0308.
-  defp ctor_aligned?({field_tvars, args}, f) do
+  # A construction is emittable iff each field/arg pair lowers: a *bare-tvar* field needs a
+  # bare-parameter arg whose declared type is exactly that tvar (the emitter assigns the
+  # field type with no coercion, so a mismatch is rustc E0308); a *lowerable compound* field
+  # (`Vec(T)`/`Option(T)`/…) accepts any well-typed arg — the construction coercion clones
+  # the payload (`S([x | items])`, `B(Some(x))` are rustc-verified, ADR-0061).
+  defp ctor_aligned?({field_types, args}, f) do
     ptypes = Map.new(Map.get(f, :params, []), &{&1.name, &1.type})
 
-    length(field_tvars) == length(args) and
-      field_tvars
+    length(field_types) == length(args) and
+      field_types
       |> Enum.zip(args)
-      |> Enum.all?(fn {tv, arg} ->
-        match?(%Core.EId{}, arg) and Map.get(ptypes, arg.name) == tv
+      |> Enum.all?(fn {ft, arg} ->
+        cond do
+          tvar?(ft) -> match?(%Core.EId{}, arg) and Map.get(ptypes, arg.name) == ft
+          true -> lowerable_field?(ft)
+        end
       end)
   end
 

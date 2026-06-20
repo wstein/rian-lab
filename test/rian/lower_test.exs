@@ -888,6 +888,65 @@ end|
     end
   end
 
+  describe "a parametric type with a `Vec`/`Option` tvar field monomorphizes on :rs (ADR-0061)" do
+    @param_src """
+    type Stack := S(items Vec(T))
+    def empty() Stack forall T := S([])
+    def push(s Stack, x T) Stack forall T := case s do
+      S(items) -> S([x | items])
+    end
+    def depth(s Stack) Int53 forall T := case s do
+      S(items) -> len(items)
+    end
+    def len(xs Vec(T)) Int53 forall T
+    def len([]) := 0
+    def len([_ | t]) := 1 + len(t)
+    type Maybe := M(v Option(T))
+    def wrap(x T) Maybe forall T := M(Some(x))
+    def nothing() Maybe forall T := M(None)
+    def unwrap(m Maybe, d T) T forall T := case m do
+      M(Some(v)) -> v
+      M(None) -> d
+    end
+    """
+
+    test "the enum declares its generics from the nested tvar field (`enum Stack<T>`)" do
+      rust = Rian.Lower.rust_program(Rian.Decl.parse(@param_src))
+      assert rust =~ "enum Stack<T: Clone>"
+      assert rust =~ "items: Vec<T>"
+      assert rust =~ "enum Maybe<T: Clone>"
+      assert rust =~ "v: Option<T>"
+      assert rust =~ "fn push<T: Clone>(s: &Stack<T>, x: &T) -> Stack<T>"
+    end
+
+    @tag :rust
+    test "construction + pattern-match compile and run under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          rust = Rian.Lower.rust_program(Rian.Decl.parse(@param_src))
+          dir = System.tmp_dir!()
+          path = Path.join(dir, "rian_param_#{System.unique_integer([:positive])}.rs")
+          bin = String.trim_trailing(path, ".rs")
+
+          File.write!(
+            path,
+            rust <>
+              "\nfn main() { let s = push(&push(&empty::<i64>(), &1), &2); " <>
+              "println!(\"{} {} {}\", depth(&s), unwrap(&wrap(&7i64), &0), unwrap(&nothing::<i64>(), &9)); }"
+          )
+
+          {_, 0} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", path, "-o", bin])
+          {out, 0} = System.cmd(bin, [])
+          File.rm(path)
+          File.rm(bin)
+          assert String.trim(out) == "2 7 9"
+      end
+    end
+  end
+
   describe "Result-of-String coerces the Ok payload to owned String (ADR-0040/0061)" do
     @res_src ~S"""
     mod R do

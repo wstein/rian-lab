@@ -159,13 +159,20 @@ Consequences of target-relativity:
        owned `String`) becomes `&format!("{}{}", "a", "")` (`owned_str_arg`). **`18_dict_eq` compiles to and
        runs on Rust** (`rustc --test`). The support is a **narrow monomorphic subset**, and `Rian.Reach`
        gates `:rs` to *exactly* that subset (`parametric_rs_ok?`, a default-deny allow-list) so the matrix
-       never oversells a shape rustc rejects: the type's tvar fields must all be **bare** tvars (`k K`, not
-       `items Vec(T)` — a nested tvar emits an undeclared generic); a **generic** builder's construction
-       args must match the field tvars *positionally* (`P(key, value)` with `key K`, `value V` — not
-       `P(a, b)` with `a A`, `b B`); and a **non-generic** builder must not construct directly (nothing to
-       infer) and must tail-call a generic helper (the one shape `infer_concrete_params` binds). Anything
-       outside this — including the previously-silent `i64` fallback — pins off `:rs` with a `:generic`
-       blocker (`reach_rust_honesty_test`, incl. a `@tag :rust` case proving the pinned shape fails rustc).
+       never oversells a shape rustc rejects: a type's tvar fields must each be **lowerable** — a bare tvar
+       (`k K`) OR a tvar nested in `Vec`/`Option`/`Result` (recursively): `items Vec(T)` now lowers to
+       `enum Stack<T> { S { items: Vec<T> } }` because the enum's generic params are collected from every
+       field tvar (`type_param_tvars`), not just bare-tvar fields. A `Dict`/`Fn`/tuple/nested-user-type
+       tvar field still pins off `:rs` (separate lowering gaps — `Dict` has no `HashMap` mapping in that
+       position, an `Fn` field's constructed closure isn't boxed). A **generic** builder's construction
+       into a *bare-tvar* field must still match positionally (`P(key, value)` with `key K`, `value V` —
+       not `P(a, b)` with `a A`, `b B`), but construction into a *lowerable compound* field accepts any
+       well-typed arg (`S([x | items])`, `B(Some(x))` — the construction coercion clones the payload); a
+       **non-generic** builder must not construct directly (nothing to infer) and must tail-call a generic
+       helper (the one shape `infer_concrete_params` binds). Anything outside this — including the
+       previously-silent `i64` fallback — pins off `:rs` with a `:generic` blocker (`reach_rust_honesty_test`
+       and `lower_test`, with `@tag :rust` cases proving both the supported shapes run and a pinned shape
+       fails rustc).
     3. **compound owned-tvar returns — DONE (2026-06-14).** `Option(T)`, `T | E` (a generic ok-type), and
        a user sum over a tvar now reach `:rs`: the payload is `.clone()`d at construction
        (`rust_owned_elem` on variant fields and on `Ok`/`Err`) — **including a payload reached via a `:=`
@@ -191,7 +198,8 @@ Consequences of target-relativity:
   nested inside a constructor — `Some((n) -> x)` → `Option::Some(Box::new(move …))` — lowers the same
   way. So **no `Fn`-bearing signature is pinned off `:rs`** any more (callback param, top-level return,
   nested return, HOF — all reach `:rs`); rustc-verified (`lower_test`, `reach_rust_honesty_test`). The
-  remaining `:rs` gap is every **parametric** shape outside the monomorphic subset above. (A
+  remaining `:rs` gap is the **parametric** shapes still outside the (now-widened) monomorphic subset —
+  `Dict`/`Fn`/tuple/nested-user-type tvar fields, and the non-positional/non-tail-call builder shapes. (A
   Copy-primitive *protocol-impl receiver* used as a value — `Show for Bool`'s `if b` — now derefs
   correctly and reaches `:rs`.)
 - **`Self` and associated types.** This ADR maps `Self` as the receiver only; protocols with
