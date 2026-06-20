@@ -149,15 +149,15 @@ defmodule Rian.TranspileTest do
   end
 
   describe "defstruct → a Rian `struct` record (named for the module)" do
-    test "an atom-list defstruct becomes `struct Mod(field _Unk, …)`" do
+    test "an atom-list defstruct becomes `struct Mod(field Any, …)`" do
       out = rian("defmodule Point do\n  defstruct [:x, :y]\nend")
-      assert out =~ "struct Point(x _Unk, y _Unk)"
+      assert out =~ "struct Point(x Any, y Any)"
       refute out =~ "TODO[port]: defstruct"
     end
 
     test "keyword defaults port the names; defaults are dropped (human types them)" do
       out = rian("defmodule Cfg do\n  defstruct host: \"localhost\", port: 0\nend")
-      assert out =~ "struct Cfg(host _Unk, port _Unk)"
+      assert out =~ "struct Cfg(host Any, port Any)"
     end
 
     test "a dynamic defstruct (non-literal) falls back to a marker, not a wrong decl" do
@@ -209,8 +209,8 @@ defmodule Rian.TranspileTest do
 
       out = rian(src)
       assert out =~ "mod IR do"
-      assert out =~ "struct Field(label _Unk, type _Unk)"
-      assert out =~ "struct Variant(ctor _Unk, fields _Unk)"
+      assert out =~ "struct Field(label Any, type Any)"
+      assert out =~ "struct Variant(ctor Any, fields Any)"
       # the wrapper `defmodule`s and `@enforce_keys` are absorbed, not left as markers
       refute out =~ "TODO[port]: defmodule"
       refute out =~ "enforce_keys"
@@ -230,7 +230,7 @@ defmodule Rian.TranspileTest do
   describe "module-less source (bare top-level `def`s, no `defmodule`)" do
     test "a single bare `def` renders FLAT — no `mod … do` box, no indent" do
       out = rian("def double(n) do\n  n * 2\nend")
-      assert out =~ "\npub def double(n _Unk) _Unk := n * 2\n"
+      assert out =~ "\npub def double(n Any) Any := n * 2\n"
       refute out =~ "mod "
       refute out =~ "TODO[port]: top-level"
     end
@@ -240,7 +240,7 @@ defmodule Rian.TranspileTest do
         "def fib(0) do\n  0\nend\n\ndef fib(1) do\n  1\nend\n\ndef fib(n) do\n  fib(n - 1) + fib(n - 2)\nend"
 
       out = rian(src)
-      assert out =~ "pub def fib(_Unk) _Unk"
+      assert out =~ "pub def fib(Any) Any"
       assert out =~ "pub def fib(0) := 0"
       assert out =~ "pub def fib(1) := 1"
       assert out =~ "pub def fib(n) := fib(n - 1) + fib(n - 2)"
@@ -261,7 +261,7 @@ defmodule Rian.TranspileTest do
     test "a non-declaration top-level degrades per-statement, not to one opaque blob" do
       out = rian("IO.puts(\"hi\")\ndef f(x) do\n  x\nend")
       assert out =~ "# TODO[port]:"
-      assert out =~ "pub def f(x _Unk) _Unk := x"
+      assert out =~ "pub def f(x Any) Any := x"
       refute out =~ "top-level is not a single"
     end
   end
@@ -560,7 +560,7 @@ defmodule Rian.TranspileTest do
     end
 
     test "no annotation → unchanged behaviour" do
-      assert rian("defmodule M do\n  def f(x), do: x\nend") =~ "pub def f(x _Unk) _Unk := x"
+      assert rian("defmodule M do\n  def f(x), do: x\nend") =~ "pub def f(x Any) Any := x"
     end
   end
 
@@ -568,7 +568,7 @@ defmodule Rian.TranspileTest do
     test "module + simple def → `mod`/`pub def` with type holes" do
       out = rian("defmodule M do\n  def double(x), do: x + x\nend")
       assert out =~ "mod M do"
-      assert out =~ "pub def double(x _Unk) _Unk := x + x"
+      assert out =~ "pub def double(x Any) Any := x + x"
     end
 
     test "a bitstring construction + pattern → Rian `<<…>>` (ADR-0078, no marker)" do
@@ -624,25 +624,27 @@ defmodule Rian.TranspileTest do
 
     test "a `pub def` (from Elixir `def`) KEEPS its return hole (declare-public)" do
       out = rian("defmodule M do\n  def f(x), do: x\nend")
-      assert out =~ "pub def f(x _Unk) _Unk := x"
+      assert out =~ "pub def f(x Any) Any := x"
     end
 
-    test "a private def omits its hole types entirely (no `_Unk` to fill)" do
+    test "no `_Unk` holes are emitted — public renders `Any`, private omits (infer-local)" do
       {_pub, ps} =
         {nil, Rian.Transpile.transpile_with_stats("defmodule M do\n  def f(x), do: x\nend")}
 
       {_priv, qs} =
         {nil, Rian.Transpile.transpile_with_stats("defmodule M do\n  defp f(x), do: x\nend")}
 
-      # public f keeps 2 holes (param + return, declare-public); private f omits
-      # both — Rian infers them, so there is nothing to fill.
-      assert elem(ps, 1).holes == 2
+      # neither carries a `_Unk` fill-me hole (ADR-0034): a public unmodelled type renders
+      # the dynamic `Any` (`pub def f(x Any) Any`), a private one is omitted for InferLocal.
+      assert elem(ps, 0) =~ "pub def f(x Any) Any := x"
+      assert elem(qs, 0) =~ "def f(x) := x"
+      assert elem(ps, 1).holes == 0
       assert elem(qs, 1).holes == 0
     end
 
     test "multi-clause def emits one sig + per-clause bodies" do
       out = rian("defmodule M do\n  def f(0), do: :z\n  def f(n), do: n\nend")
-      assert out =~ "pub def f(_Unk) _Unk"
+      assert out =~ "pub def f(Any) Any"
       assert out =~ "pub def f(0) := :z"
       assert out =~ "pub def f(n) := n"
     end
@@ -680,11 +682,12 @@ defmodule Rian.TranspileTest do
       refute out =~ ~s|TODO_PORT("as-pattern|
     end
 
-    test "a construct with no Rian image (non-atom-key map literal) stays a greppable marker" do
-      # field access, stdlib calls, and atom-key map *update* now lower; a non-atom
-      # key (`%{expr => v}`) has no `key: value` spelling, so it stays a marker.
+    test "a non-atom-key map literal lowers to Rian's `=>` map (ADR-0033, no marker)" do
+      # a non-atom key (`%{expr => v}`) has a Rian spelling — `keyExpr => value`
+      # (`map_pair_rian/1`) — so it lowers directly, no `TODO_PORT` quarantine.
       out = rian("defmodule M do\n  def t(k), do: %{k => 1}\nend")
-      assert out =~ "TODO_PORT"
+      assert out =~ "%{k => 1}"
+      refute out =~ "TODO_PORT("
     end
   end
 
@@ -719,17 +722,17 @@ end|) =~ ~S|"v=${x}!"|
       out = rian("defmodule M do\n  def g(x) do\n    y = x + 1\n    z = y + 1\n    z\n  end\nend")
       # binds on their own indented lines, closed by `end` — far more readable than
       # the `;`-joined inline form.
-      assert out =~ "pub def g(x _Unk) _Unk\n    y := x + 1\n    z := y + 1\n    z\n  end"
+      assert out =~ "pub def g(x Any) Any\n    y := x + 1\n    z := y + 1\n    z\n  end"
     end
 
     test "a single-statement clause body stays the inline `:= expr` form" do
       assert rian("defmodule M do\n  def d(x), do: x + x\nend") =~
-               "pub def d(x _Unk) _Unk := x + x"
+               "pub def d(x Any) Any := x + x"
     end
 
     test "a call to a sibling Rian module is emitted inline, not flagged" do
       out = rian("defmodule M do\n  def g(x), do: Core.from_expr(x)\nend")
-      assert out =~ "pub def g(x _Unk) _Unk := Core.from_expr(x)"
+      assert out =~ "pub def g(x Any) Any := Core.from_expr(x)"
       refute out =~ "remote/stdlib call: Core"
     end
 
@@ -776,7 +779,7 @@ end|) =~ ~S|"v=${x}!"|
         rian("defmodule M do\n  @prims ~w(a b c)\n  def names, do: @prims\nend")
 
       assert out =~ ~s|const prims := ["a", "b", "c"]|
-      assert out =~ "pub def names() _Unk := prims"
+      assert out =~ "pub def names() Any := prims"
       # the reference is the bare const name, never the unlexable `@(prims)`
       refute out =~ "@(prims"
     end
@@ -805,7 +808,7 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ "TODO[port]: @impl"
       refute out =~ "TODO[port]: @doc"
       refute out =~ "TODO[port]: @external_resource"
-      assert out =~ "pub def c(x _Unk) _Unk := x"
+      assert out =~ "pub def c(x Any) Any := x"
     end
 
     test "a referenced directive-shaped attribute still lowers to a `const`" do
@@ -1195,7 +1198,7 @@ end|)
       # `div`/`rem` are valid Elixir identifiers but Rian word operators — a bare `div`
       # would re-lex as an operator token, so it must escape to `div_` head-and-uses.
       out = rian("defmodule M do\n  def f(div), do: div + 1\nend")
-      assert out =~ "pub def f(div_ _Unk)"
+      assert out =~ "pub def f(div_ Any)"
       assert out =~ ":= div_ + 1"
     end
 
@@ -1221,7 +1224,7 @@ end|)
         """)
 
       assert out =~ "# (dropped Elixir `defmacro mac/1`: host metaprogramming, no Rian image)"
-      assert out =~ "pub def f(x _Unk) _Unk := x"
+      assert out =~ "pub def f(x Any) Any := x"
       refute out =~ "quote"
       refute out =~ "TODO[port]: defmacro"
     end
@@ -1306,9 +1309,9 @@ end|)
 
       # the full clause plus one delegating clause per trailing default, exactly
       # like Elixir's desugaring — f/1 -> f/2 -> f/3
-      assert out =~ "pub def f(a _Unk) _Unk := f(a, [], 0)"
-      assert out =~ "pub def f(a _Unk, opts _Unk) _Unk := f(a, opts, 0)"
-      assert out =~ "pub def f(a _Unk, opts _Unk, n _Unk) _Unk := {a, opts, n}"
+      assert out =~ "pub def f(a Any) Any := f(a, [], 0)"
+      assert out =~ "pub def f(a Any, opts Any) Any := f(a, opts, 0)"
+      assert out =~ "pub def f(a Any, opts Any, n Any) Any := {a, opts, n}"
       # no leftover `\\` and no port marker on the emitted body (the header always
       # mentions TODO_PORT generically — check the code after `mod M do`)
       body = out |> String.split("mod M do") |> List.last()
@@ -1326,8 +1329,8 @@ end|)
         end
         """)
 
-      assert out =~ ~S|pub def greet(name _Unk) _Unk := greet(name, "hi")|
-      assert out =~ "pub def greet(name _Unk, greeting _Unk) _Unk := greeting"
+      assert out =~ ~S|pub def greet(name Any) Any := greet(name, "hi")|
+      assert out =~ "pub def greet(name Any, greeting Any) Any := greeting"
     end
 
     test "a guarded default head desugars too, re-attaching the guard to each clause" do
@@ -1362,9 +1365,9 @@ end|)
         end
         """)
 
-      assert out =~ "pub def check(func _Unk) _Unk := check(func, %{}, %{tsets: %{}})"
-      assert out =~ "pub def check(func _Unk, ic _Unk) _Unk := check(func, ic, %{tsets: %{}})"
-      assert out =~ "pub def check(f _Unk, ic _Unk, eset _Unk) _Unk := {f, ic, eset}"
+      assert out =~ "pub def check(func Any) Any := check(func, %{}, %{tsets: %{}})"
+      assert out =~ "pub def check(func Any, ic Any) Any := check(func, ic, %{tsets: %{}})"
+      assert out =~ "pub def check(f Any, ic Any, eset Any) Any := {f, ic, eset}"
       body = out |> String.split("mod M do") |> List.last()
       refute body =~ "\\\\"
       refute body =~ "TODO"

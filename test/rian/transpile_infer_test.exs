@@ -122,7 +122,7 @@ defmodule Rian.TranspileInferTest do
 
       out = Transpile.transpile(src, infer: true)
       refute out =~ "| Errors"
-      assert out =~ "def f(x Int53) _Unk"
+      assert out =~ "def f(x Int53) Any"
     end
 
     test "honesty: a non-Capitalized error tag (Elixir idiom) is NOT made a Result" do
@@ -131,7 +131,7 @@ defmodule Rian.TranspileInferTest do
         Transpile.transpile("defmodule M do\n  def f(x), do: {:error, :nope}\nend", infer: true)
 
       refute out =~ "Errors"
-      assert out =~ "_Unk"
+      assert out =~ "Any"
     end
   end
 
@@ -155,13 +155,13 @@ defmodule Rian.TranspileInferTest do
   end
 
   describe "honesty — leave a hole when nothing pins it" do
-    test "an unknown callee leaves _Unk" do
+    test "an unknown callee leaves Any" do
       assert sig("  def h(x), do: unknown_fn(x)", "h") ==
-               "  pub def h(x _Unk) _Unk := unknown_fn(x)"
+               "  pub def h(x Any) Any := unknown_fn(x)"
     end
 
     test "a tuple return is left a hole in the MVP" do
-      assert sig("  def t(x), do: {:ok, x}", "t") =~ "_Unk"
+      assert sig("  def t(x), do: {:ok, x}", "t") =~ "Any"
     end
 
     test "infer_report names the remaining holes with reasons" do
@@ -183,9 +183,9 @@ defmodule Rian.TranspileInferTest do
   end
 
   describe "inference is off by default (existing behavior preserved)" do
-    test "without :infer, holes remain _Unk" do
+    test "without :infer, holes remain Any" do
       out = Transpile.transpile("defmodule M do\n  def f(x), do: x + 1\nend")
-      assert out =~ "pub def f(x _Unk) _Unk := x + 1"
+      assert out =~ "pub def f(x Any) Any := x + 1"
     end
   end
 
@@ -265,9 +265,9 @@ defmodule Rian.TranspileInferTest do
       assert sig(body, "wrap") =~ "forall T"
     end
 
-    test "an untranslatable any() return leaves a _Unk hole, not a guess" do
+    test "an untranslatable any() return leaves a Any hole, not a guess" do
       body = "  @spec opaque(integer()) :: any()\n  def opaque(n), do: Tuple.to_list(n)"
-      assert sig(body, "opaque") =~ "_Unk"
+      assert sig(body, "opaque") =~ "Any"
     end
 
     test "a proven body type WINS over a contradictory spec (the cross-check)" do
@@ -299,7 +299,7 @@ defmodule Rian.TranspileInferTest do
           "defmodule M do\n  @spec g(String.t()) :: String.t()\n  def g(s), do: s\nend"
         )
 
-      assert out =~ "pub def g(s _Unk) _Unk := s"
+      assert out =~ "pub def g(s Any) Any := s"
       # but the spec is still surfaced as provenance, never lost
       assert out =~ "# spec: @spec g"
     end
@@ -412,7 +412,7 @@ defmodule Rian.TranspileInferTest do
       assert rian_t("f() :: boolean()") == "Bool"
     end
 
-    test "a tuple renders a Rian tuple type; a map (no clean image) stays `_Unk`" do
+    test "a tuple renders a Rian tuple type; a map (no clean image) stays `Any`" do
       # Rian has tuple types — `{:ok, integer()}` → `(Symbol, Int53)`; `map()` has no image.
       assert rian_t("f() :: {:ok, integer()}") == "(Symbol, Int53)"
       assert rian_t("f() :: map()") == "_Unk"
@@ -441,7 +441,7 @@ defmodule Rian.TranspileInferTest do
 
   describe "guard, type-predicate, and Kernel-accessor evidence (Phase B)" do
     # `gg(...)` is an unknown call, so the guard/body BIF is the ONLY type evidence.
-    # A guarded clause renders a type-only signature header (`pub def f(String) _Unk`),
+    # A guarded clause renders a type-only signature header (`pub def f(String) Any`),
     # the param name living on the clause line below it.
     test "is_binary guard → String" do
       assert sig("  def f(s) when is_binary(s), do: gg(s)", "f") =~ "f(String)"
@@ -472,12 +472,12 @@ defmodule Rian.TranspileInferTest do
       assert sig("  def f(xs), do: length(xs)", "f") =~ ") Int53 := length(xs)"
     end
 
-    test "a predicate without a clean single Rian type is NOT over-claimed (stays `_Unk`)" do
+    test "a predicate without a clean single Rian type is NOT over-claimed (stays `Any`)" do
       # `is_tuple`/`is_map`/`is_struct` have no single Rian signature type, so we
       # deliberately do not map them — the param stays an honest hole rather than a
       # guessed (and likely wrong) concrete type.
-      assert sig("  def f(t) when is_tuple(t), do: gg(t)", "f") =~ "f(_Unk)"
-      assert sig("  def f(m) when is_map(m), do: gg(m)", "f") =~ "f(_Unk)"
+      assert sig("  def f(t) when is_tuple(t), do: gg(t)", "f") =~ "f(Any)"
+      assert sig("  def f(m) when is_map(m), do: gg(m)", "f") =~ "f(Any)"
     end
   end
 
@@ -513,7 +513,7 @@ defmodule Rian.TranspileInferTest do
     end
 
     test "an `if` with no `else` is an open hole in value position" do
-      assert sig("  def f(c), do: if(c, do: 1)", "f") =~ "f(c Bool) _Unk :="
+      assert sig("  def f(c), do: if(c, do: 1)", "f") =~ "f(c Bool) Any :="
     end
   end
 
@@ -563,7 +563,7 @@ defmodule Rian.TranspileInferTest do
     end
 
     test "an unbound variable reference is an honest hole" do
-      assert sig("  def f(), do: zzz", "f") == "  pub def f() _Unk := zzz"
+      assert sig("  def f(), do: zzz", "f") == "  pub def f() Any := zzz"
     end
 
     test "a cyclic `[x | x]` is caught by the occurs-check and still types" do
@@ -578,7 +578,7 @@ defmodule Rian.TranspileInferTest do
     end
 
     test "a tuple pattern carries no constraint in the MVP (param stays a hole)" do
-      assert sig("  def f({a, b}), do: a", "f") =~ "f(_Unk)"
+      assert sig("  def f({a, b}), do: a", "f") =~ "f(Any)"
     end
 
     test "a multi-statement block threads binds and non-bind statements to the last expr" do
@@ -588,7 +588,7 @@ defmodule Rian.TranspileInferTest do
     end
 
     test "an atom-head FFI call (`:lists.reverse`) is an unmodelled hole" do
-      assert sig("  def f(x), do: :lists.reverse(x)", "f") =~ "f(x _Unk) _Unk"
+      assert sig("  def f(x), do: :lists.reverse(x)", "f") =~ "f(x Any) Any"
     end
 
     test "a guarded case arm is handled (tails recurse through the guard)" do
@@ -643,7 +643,7 @@ defmodule Rian.TranspileInferTest do
       assert Infer.spec_type_to_rian(:ok) == "Symbol"
     end
 
-    test "types with no clean Rian image are an honest `_Unk` (never guessed)" do
+    test "types with no clean Rian image are an honest `Any` (never guessed)" do
       assert Infer.spec_type_to_rian(quote(do: any())) == "_Unk"
       # a *shapeless* `tuple()` element has no Rian image (Rian tuple types are shaped)
       assert Infer.spec_type_to_rian(quote(do: [tuple()])) == "_Unk"

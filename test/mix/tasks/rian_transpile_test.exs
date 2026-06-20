@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Rian.TranspileTest do
       assert File.exists?(Path.join(out, "src/script.rian"))
       # the `.exs` draft is NOT written back under its own extension
       refute File.exists?(Path.join(out, "src/script.exs"))
-      assert File.read!(Path.join(out, "src/script.rian")) =~ "pub def triple(n _Unk)"
+      assert File.read!(Path.join(out, "src/script.rian")) =~ "pub def triple(n Any)"
     end
 
     test "an empty dir raises mentioning both extensions", %{dir: dir} do

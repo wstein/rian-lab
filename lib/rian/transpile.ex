@@ -55,13 +55,15 @@ defmodule Rian.Transpile do
       (`def … rescue`/`catch`/`after`, ADR-0035/0040 — restructure to a
       `Result`/`Option`) and the truthy, value-returning `&&`/`||` (Rian's `and`/`or`
       are boolean-only — restructure to `case`/`Option`);
-    * **types are holes** (`_Unk`) by default — Elixir is untyped, so the human
-      supplies the sums and signatures. With `--infer` (ADR-0075) the engine fills
-      every *provable* slot, **harvesting any `@spec`** as a cross-checked hint (a
-      consumed `@spec` becomes a passive `# spec:` provenance line, not a TODO);
-      whatever stays unproven remains an honest `_Unk` hole for the human. A **private**
-      function (`defp` → `def`) omits its return hole — `Rian.InferLocal` recovers the
-      return once its params are typed (infer-local, ADR-0034), one fewer hole per `defp`.
+    * **unmodelled types render `Any`** (the dynamic top) by default — Elixir is untyped,
+      so the human refines the sums and signatures. With `--infer` (ADR-0075) the engine
+      fills every *provable* slot, **harvesting any `@spec`** as a cross-checked hint (a
+      consumed `@spec` becomes a passive `# spec:` provenance line, not a TODO); whatever
+      stays unproven renders `Any` — a valid dynamic type (reaches every target but `:rs`),
+      NOT the `_Unk` fill-me marker the gate rejects (`Rian.Check.check_unk`, ADR-0034), so
+      a draft compiles as-is. A **private** function (`defp` → `def`) instead omits its
+      return/param holes — `Rian.InferLocal` recovers them once enough is typed (infer-local,
+      ADR-0034), so a `defp` carries neither `_Unk` nor a premature `Any`.
 
   Usage: `mix rian.transpile lib/rian/range.ex [-o out.rian]`.
 
@@ -1131,9 +1133,10 @@ defmodule Rian.Transpile do
   defp struct_field?({a, _default}) when is_atom(a), do: true
   defp struct_field?(_), do: false
 
-  # `defstruct [:x, y: 0]` → `struct Mod(x _Unk, y _Unk)` (defaults dropped — the field
-  # NAMES port; their types and any default are for the human to fill). A `@rian_sig struct
-  # Mod(…)` annotation (by name) supplies the field types verbatim instead.
+  # `defstruct [:x, y: 0]` → `struct Mod(x Any, y Any)` (defaults dropped — the field NAMES
+  # port; their types default to the dynamic `Any`, for the human to refine). `Any` not
+  # `_Unk` so the draft compiles (`_Unk` is the gate-rejected fill-me marker, ADR-0034). A
+  # `@rian_sig struct Mod(…)` annotation (by name) supplies the field types verbatim instead.
   defp struct_decl(mod_name, fields, struct_anns) do
     case Map.get(struct_anns, mod_name) do
       nil ->
@@ -1143,10 +1146,10 @@ defmodule Rian.Transpile do
             k -> k
           end)
 
-        "struct #{mod_name}(#{Enum.map_join(names, ", ", &"#{&1} _Unk")})"
+        "struct #{mod_name}(#{Enum.map_join(names, ", ", &"#{&1} Any")})"
 
       decl ->
-        decl
+        to_any(decl)
     end
   end
 
@@ -1287,7 +1290,7 @@ defmodule Rian.Transpile do
     # `_Unk` return hole so `Rian.InferLocal` recovers it once the params are typed
     # (one fewer hole per `defp`). `pub` keeps its declared boundary; a return inference
     # already resolved (a real type) is kept as useful signal.
-    ret_part = if vis != :pub and ret == "_Unk", do: "", else: " #{ret}"
+    ret_part = if vis != :pub and ret == "_Unk", do: "", else: " #{to_any(ret)}"
 
     case hd(clauses).host do
       nil ->
@@ -1348,9 +1351,12 @@ defmodule Rian.Transpile do
 
   # A PRIVATE parameter whose type is an unresolved hole omits the type — Rian
   # infers it (infer-local, like the dropped private return), so the draft carries
-  # no `_Unk` noise. A `pub` parameter keeps its declared boundary (declare-public).
+  # no `_Unk` noise. A `pub` parameter keeps its declared boundary (declare-public),
+  # but a genuinely-unmodelled type renders `Any` (the dynamic top), not `_Unk` — `_Unk`
+  # is the fill-me marker the gate REJECTS (`Rian.Check.check_unk`, ADR-0034), while `Any`
+  # is a valid dynamic type (reaches every target but `:rs`).
   defp param(name, "_Unk", vis) when vis != :pub, do: name
-  defp param(name, type, _vis), do: "#{name} #{type}"
+  defp param(name, type, _vis), do: "#{name} #{to_any(type)}"
 
   # The multi-clause signature line lists param TYPES (the clauses carry the
   # patterns). For a private function with all-hole params, drop the `_Unk` types
@@ -1359,9 +1365,15 @@ defmodule Rian.Transpile do
     if vis != :pub and Enum.all?(ptypes, &(&1 == "_Unk")) do
       Enum.map_join(1..length(ptypes), ", ", &"p#{&1}")
     else
-      Enum.join(ptypes, ", ")
+      Enum.map_join(ptypes, ", ", &to_any/1)
     end
   end
+
+  # Render a genuinely-unmodelled type as `Any` (the dynamic top) rather than `_Unk` (the
+  # fill-me marker the gate rejects). Substitutes at any depth, so `Vec(_Unk)` -> `Vec(Any)`,
+  # `Dict(String, _Unk)` -> `Dict(String, Any)` (ADR-0034). The private bare-param / omitted
+  # private-return paths render no type at all, so they never reach this.
+  defp to_any(type), do: String.replace(type, "_Unk", "Any")
 
   # "Simple" = a single clause whose params are all plain variables and no guard;
   # render inline `def f(a _Unk) _Unk := body`. Anything else gets a sig + clauses.
