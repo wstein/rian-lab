@@ -92,7 +92,7 @@ what the Core oracle confirms over the surface form.
 | `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
 | `Rian.Coherence`      | ~240 | ✅ ported — protocol/impl coherence rules (ADR-0061 §5): unknown-protocol, method-set/arity, runtime-discriminator presence + non-overlap, duplicate. Pure pass over the parsed IR; parity-gated via the `coh` stream (8 records), serializing `rule:proto:type` synthesis-free so incoherent inputs (which the desugar raises on) compare too. The runtime discriminator is keyed by an equivalence class (`int`/`bool`/…/`sum:<name>`) rather than the BEAM guard string — same overlap outcome, no codegen coupling. |
 | `Rian.Capability`     | 290  | BEAM linearity (`iso`/`ref`); FFI-adjacent.     |
-| `Rian.Check`          | 2724 | unification inference — **reframe, not lift**.  |
+| `Rian.Check`          | 2724 | 🟡 **stage 1 ported** — the `unify`/`join` type algebra (`Ty` sum; `uni`/`joi` streams). `infer`/`annotate`/error-sets/gates pending. **reframe, not lift**. |
 | `Rian.Reach`          | 1235 | target-set portability inference (ADR-0057/58). |
 
 ### Phase 5 — Emitters
@@ -169,10 +169,12 @@ error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl
 `@external` + `abstract` + `protocol`/`impl`/`macro`) ported, plus **`Rian.Prelude`** (the pure
 `Option`/`with_prelude` part). **Phase 4 gates:** **`Rian.PatternLower`** + **`Rian.Exhaustiveness`**
 ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`exh`/`pge` streams).
-**Next:** the program-wide tail passes (macro expansion, protocol synthesis, interpolation/stdlib/
-infer-local) wait on `Check`/`InferLocal`/`Protocol`/`Macro`.
-Total **525/525** parity records across
-Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External/Coherence.
+**`Rian.Check` stage 1** ported — the `unify`/`join` type algebra (the `Ty` sum; `uni`/`joi`
+streams), the first slice of the inference engine; `infer`/`annotate`/error-sets/the program
+gates are later stages. **Next:** `Check.infer` (the Core-node dispatch), then the program-wide
+tail passes (macro expansion, protocol synthesis, interpolation/stdlib/infer-local).
+Total **569/569** parity records across
+Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External/Coherence/Check.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
 
@@ -188,6 +190,7 @@ end-to-end**. The parity-record count measures front-end *fidelity*, not compile
 **Known parity-corpus gaps (low severity, named not hidden).** The fixed-scenario streams cover
 every `lower`/`analyze`/`parse` branch *except*: `PMap` pattern lowering (BEAM-only, refutable);
 `Exhaustiveness.render`'s `inspect`-style escaping of a witness string/atom containing quotes
-(diagnostic text only — the PS `render` wraps raw where Elixir `inspect` escapes); and the
-`coh` stream's `@targets(:rs)`-exempt branch (hardcoded `Nothing`, so the Rust-only
-shared-discriminator exemption is logic-agreed but untested). These are tracked, not asserted away.
+(diagnostic text only — the PS `render` wraps raw where Elixir `inspect` escapes). The
+`@targets(:rs)`-exempt branch of `Coherence` is now covered by the **`cohrs`** stream (a
+Rust-only scope suppresses `shared_discriminator` while `duplicate`/`method_set` still fire).
+These remaining gaps are tracked, not asserted away.
