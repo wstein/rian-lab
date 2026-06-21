@@ -1,8 +1,9 @@
-# Generates purs/test/fixtures/lexer.fixtures — the parity oracle for the PureScript
-# lexer port (ADR-0084). Runs the Elixir reference `Rian.Lexer` over a corpus and writes,
-# per record: `<stream>\t<hex(source)>\t<canonical-tokens>`. The Erlang harness
-# (scripts/lexer-parity.sh) re-lexes each source with the purerl-compiled lexer and asserts
-# the same canonical string. Run from the repo root: `mix run purs/test/gen_fixtures.exs`.
+# Generates purs/test/fixtures/parity.fixtures — the parity oracle for the PureScript port
+# (ADR-0084). Runs the Elixir reference (Lexer/TypeStr/Pratt/Core) over per-module corpora and
+# writes, per record: `<stream>\t<hex(source)>\t<canonical>`. The Erlang harness
+# (purs/test/parity.erl, run by scripts/purerl-build.sh) re-runs each source through the
+# purerl build and asserts the same canonical string. Run from the repo root:
+# `mix run purs/test/gen_fixtures.exs`.
 defmodule Canon do
   # Canonical, language-agnostic serialization of a token list. String payloads are
   # lowercase hex of their UTF-8 bytes so the line is delimiter-safe and byte-identical
