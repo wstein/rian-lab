@@ -114,7 +114,7 @@ oracle = the reference `parse_sexpr`).
 typed Core (the leaf-gate pattern: a structural Core→Core pass); parity via the `rng` stream
 (9 records, composing `lexer → Pratt → Core → expand_of → coreSexpr` over a fixed table).
 Remaining: `Builtins` (204), `Protocol` (388, the dispatcher/trait synthesis), `ShowStdlib`
-(29), `Shadow` (114), `Opaque` (159), `Comptime` (79), `Macro` (251, expansion), `External`
+(29), `Shadow` (114) **✅ ported** (reflection-free Core var-dedup; `shd` stream), `Opaque` (159), `Comptime` (79), `Macro` (251, expansion), `External`
 (279), `Manifest` (315).
 `Builtins` (204) **✅ ported** — the host/stdlib foreign-call signature table (`ret`/`known`/`polySig` over `{module,fun,arity}`; `bui` stream). Consumed by `Check`/`Reach`.
 `Prelude` (115) **✅ ported** (pure part) — `types` (the built-in `Option(T) = Some(T) | None`,
@@ -174,8 +174,8 @@ ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`ex
 streams), the first slice of the inference engine; `infer`/`annotate`/error-sets/the program
 gates are later stages. **Next:** `Check.infer` (the Core-node dispatch), then the program-wide
 tail passes (macro expansion, protocol synthesis, interpolation/stdlib/infer-local).
-Total **672/672** parity records across
-Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External/Coherence/Check/Builtins.
+Total **678/678** parity records across
+Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
 
