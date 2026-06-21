@@ -912,16 +912,91 @@ checkReturn ic f = case f.ret of
 genericRet :: String -> Array String -> Boolean
 genericRet ret tvars = any (\tv -> elem tv (typeIdents ret)) tvars
 
--- assignability (the concrete subset): identical, an `Unknown` wildcard, a numeric widening
--- (`from`'s width ≤ `to`'s — `numLub` is `to`), else they must unify (a mismatch is rejected).
--- (Value-union / `Any`-wildcard / bare-head / constructed-vs-opaque clauses are a later slice.)
+-- assignability (ADR-0059): `Unknown` is a wildcard; a union flows where all its members do (and
+-- a value flows into a union); a bare sum head accepts its parameterization; `Any`/`_Unk` are
+-- wildcards at any depth; a constructed type accepts an opaque-nominal return; numerics widen;
+-- else they must unify (a proven mismatch is rejected).
 assignable :: Ty -> Ty -> Boolean
-assignable from to =
+assignable Unknown _ = true
+assignable _ Unknown = true
+assignable (TName from) (TName to) = assignableStr from to
+assignable from to = from == to
+
+assignableStr :: String -> String -> Boolean
+assignableStr from to =
   if from == to then true
-  else if from == Unknown || to == Unknown then true
-  else case numKind from, numKind to of
-    Just _, Just _ -> numLub from to == Just to
-    _, _ -> unify from to /= Mismatch
+  else if isUnion from then all (\m -> assignableStr m to) (unionMembersOf from)
+  else if isUnion to then any (assignableStr from) (unionMembersOf to)
+  else if bareHeadOf from to then true
+  else if (hasWildcard from || hasWildcard to) && unkAssignable from to then true
+  else if constructedType from && opaqueNominal to then true
+  else case numKind (TName from), numKind (TName to) of
+    Just a, Just b -> numWidens a b
+    _, _ -> unify (TName from) (TName to) /= Mismatch
+
+isUnion :: String -> Boolean
+isUnion s = isJust (Str.stripPrefix (Str.Pattern "Union(") s)
+
+unionMembersOf :: String -> Array String
+unionMembersOf s = splitTopCommas (chopLastParen (fromMaybe s (Str.stripPrefix (Str.Pattern "Union(") s)))
+
+-- `from` is the bare head of the parameterized `to` (`Option` of `Option(Vec(Char))`).
+bareHeadOf :: String -> String -> Boolean
+bareHeadOf from to = not (Str.contains (Str.Pattern "(") from) && isJust (Str.stripPrefix (Str.Pattern (from <> "(")) to)
+
+constructedType :: String -> Boolean
+constructedType t = Str.contains (Str.Pattern "(") t
+
+hasWildcard :: String -> Boolean
+hasWildcard t = Str.contains (Str.Pattern "Any") t || Str.contains (Str.Pattern "_Unk") t
+
+-- a PascalCase nominal that is not a scalar primitive (a user/alias type the checker can't resolve).
+opaqueNominal :: String -> Boolean
+opaqueNominal t =
+  let cs = toCharArray t
+  in maybe false isUpper (head cs) && all isWordChar cs && not (scalarPrim t)
+
+scalarPrim :: String -> Boolean
+scalarPrim t = elem t [ "Bool", "String", "Char", "Symbol" ] || intType (TName t) || isFloatStr t
+
+isFloatStr :: String -> Boolean
+isFloatStr t = case Str.stripPrefix (Str.Pattern "Float") t of
+  Just rest -> all isDigit (toCharArray rest)
+  Nothing -> false
+
+-- structural assignability treating `Any`/`_Unk` as a wildcard at any depth (same head + arity,
+-- componentwise).
+unkAssignable :: String -> String -> Boolean
+unkAssignable a b =
+  if a == "Any" || a == "_Unk" || b == "Any" || b == "_Unk" then true
+  else if a == b then true
+  else headsMatch (splitHead a) (splitHead b)
+
+headsMatch :: Tuple String (Array String) -> Tuple String (Array String) -> Boolean
+headsMatch (Tuple h1 as) (Tuple h2 bs) =
+  h1 == h2 && length as == length bs && all (\(Tuple x y) -> unkAssignable x y) (zip as bs)
+
+-- `"Vec(Int64)"` → `("Vec", ["Int64"])`; `"(A,B)"` → `("", ["A","B"])`; a non-parametric → `(t, [])`.
+splitHead :: String -> Tuple String (Array String)
+splitHead t = case Str.stripSuffix (Str.Pattern ")") t of
+  Just body -> case Str.indexOf (Str.Pattern "(") body of
+    Just i -> Tuple (Str.take i body) (splitTopCommas (Str.drop (i + 1) body))
+    Nothing -> Tuple t []
+  Nothing -> Tuple t []
+
+chopLastParen :: String -> String
+chopLastParen s = fromMaybe s (Str.stripSuffix (Str.Pattern ")") s)
+
+-- numeric widening (`from`'s width fits `to`'s): same kind ≤; uint→int (strict, sign bit);
+-- int/uint → float (mantissa); float→float ≤.
+numWidens :: { kind :: Kind, bits :: Int } -> { kind :: Kind, bits :: Int } -> Boolean
+numWidens { kind: KInt, bits: a } { kind: KInt, bits: b } = a <= b
+numWidens { kind: KUint, bits: a } { kind: KUint, bits: b } = a <= b
+numWidens { kind: KUint, bits: a } { kind: KInt, bits: b } = a < b
+numWidens { kind: KInt, bits: a } { kind: KFloat, bits: b } = a - 1 <= floatMantissa b
+numWidens { kind: KUint, bits: a } { kind: KFloat, bits: b } = a <= floatMantissa b
+numWidens { kind: KFloat, bits: a } { kind: KFloat, bits: b } = a <= b
+numWidens _ _ = false
 
 -- | The `gate` parity unit: `check_program`'s verdict — `ok` or the first mismatch message.
 checkProgramSexpr :: String -> String

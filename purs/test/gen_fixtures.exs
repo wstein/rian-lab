@@ -658,7 +658,14 @@ gate_corpus = [
   "pub def f(x Int53) Int53 := x",
   "pub def g(x Int53) String := x",
   "pub def h(x Bool) Bool := x",
-  "pub def k(x Int53) Bool := x"
+  "pub def k(x Int53) Bool := x",
+  # full assignable?: union membership / mismatch, a bare sum head, a constructed→opaque return,
+  # and numeric widening.
+  "pub def u(x Int32) Int32 | Bool := x",
+  "pub def um(x String) Int32 | Bool := x",
+  "pub def bh(x Int53) Option(Int53) := Some(x)",
+  "pub def st() Pair := [1, 2]\ntype Pair := P(a Int53, b Int53)",
+  "pub def w(x Int8) Int64 := x"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the
