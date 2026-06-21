@@ -28,12 +28,18 @@ defmodule Rian.ReachHonestyPropertyTest do
   Deterministic: the fixed `@seed` (and a deterministic per-type value) reproduce every
   program; a failure prints the minimal source and the seed.
 
-  Remaining (Stage 2 cont.): the `:js`/`node` and BEAM emit-**and-run** directions (this
-  checks `rustc` *compilation*).
+  The compound property verifies reach claims against the **real toolchain per target**:
+  `:rs` compiles under `rustc`, `:ex` loads + runs `f/0` on the BEAM, `:js` runs `f()`
+  under `node` (skipped when a toolchain is absent). Generated programs are first passed
+  through the type gate (`Rian.Check`) — a checker-rejected program is a generator
+  artefact, not a reach lie, so it is excluded (ADR-0087 §3).
+
+  Remaining: cross-target *value* equality (each target serialized to a common form) and
+  the Rust *binary* run (this runs BEAM/JS but compiles-only on Rust).
   """
   use ExUnit.Case, async: false
 
-  alias Rian.{Decl, Lower, Reach}
+  alias Rian.{Beam, Check, Decl, JS, Lower, Reach}
 
   @seed {0x5EED, 0x0087, 0x64}
   @runs 40
@@ -85,11 +91,11 @@ defmodule Rian.ReachHonestyPropertyTest do
   end
 
   # Stage 2 (ADR-0087 §2-4): type-directed generation over compound `Option`/`Vec`
-  # return types + shrinking. Two SAFE invariants (no Reach logic is replicated):
-  #   * over-claim — a :rs claim must compile under rustc (an emitter raise is a lie);
-  #   * under-claim — a *fully-portable* type (no `Int64`/bignum) must reach all four.
-  # A bare `Int64` literal does not adopt its width through a constructor, so exact
-  # membership for non-portable compounds is deliberately NOT asserted.
+  # return types + multi-target run + shrinking. SAFE invariants (no Reach logic is
+  # replicated): each reach claim is checked against the real toolchain (:rs compiles
+  # under rustc, :ex runs on the BEAM, :js runs under node), and a fully-portable type
+  # (no `Int64`) must reach all four. A bare `Int64` literal does not adopt its width
+  # through a constructor, so exact membership for non-portable compounds is NOT asserted.
   @tag :rust
   test "type-directed compound programs: :rs claims compile + portable types reach all four" do
     case System.find_executable("rustc") do
@@ -191,23 +197,40 @@ defmodule Rian.ReachHonestyPropertyTest do
 
   # ── Stage 2: type-directed generation + shrinking ───────────────────────────
 
-  # `nil` if return type `t` is reach-honest, else the failing kind. SAFE: asserts
-  # over-claim (a :rs claim must compile) and the portable-base under-claim only;
-  # never replicates Reach. A parse/reach crash on a valid program is itself a fail.
+  # `nil` if return type `t` is reach-honest (or outside the well-typed domain — see
+  # `valid?`), else the failing kind. SAFE: never replicates Reach. Checks the
+  # over-claim direction per target (a reach claim must compile/run) and the
+  # portable-base under-claim. Reach claims are verified by the *real* toolchain:
+  # `:rs` compiles under rustc, `:ex` loads+runs on the BEAM, `:js` runs under node.
   defp fail_reason(rustc, t) do
     src = "def f() #{ty_str(t)} := #{val_det(t)}"
 
-    try do
-      reach = src |> Decl.parse() |> Reach.analyze() |> reach_of("f")
+    # only well-typed programs are in scope (ADR-0087 §3) — the checker rejecting one
+    # is a generator artefact (e.g. a nested-parametric list literal), not a reach lie.
+    if not valid?(src) do
+      nil
+    else
+      try do
+        reach = src |> Decl.parse() |> Reach.analyze() |> reach_of("f")
 
-      cond do
-        portable?(t) and not MapSet.subset?(@all, reach) -> :underclaim
-        :rs in reach and not elem(rustc_ok?(rustc, src), 0) -> :overclaim
-        true -> nil
+        cond do
+          portable?(t) and not MapSet.subset?(@all, reach) -> :underclaim
+          :rs in reach and not elem(rustc_ok?(rustc, src), 0) -> :rs_overclaim
+          :ex in reach and not beam_runs?(src) -> :ex_overclaim
+          :js in reach and not js_runs?(src) -> :js_overclaim
+          true -> nil
+        end
+      rescue
+        _ -> :crash
       end
-    rescue
-      _ -> :crash
     end
+  end
+
+  # the program passes the type gate — the well-typedness precondition (ADR-0087 §3).
+  defp valid?(src) do
+    Check.check(src) == :ok
+  rescue
+    _ -> false
   end
 
   # emit + compile, treating an emitter raise as a (rejected, message) pair.
@@ -215,6 +238,37 @@ defmodule Rian.ReachHonestyPropertyTest do
     rustc_compiles?(rustc, Lower.rust_program(Decl.parse(src)))
   rescue
     e -> {false, Exception.message(e)}
+  end
+
+  # `:ex` over-claim check: the emitted BEAM module must load and `f/0` must run.
+  defp beam_runs?(src) do
+    {:ok, mod} = Beam.load(src, :"rian_rhp_beam_#{System.unique_integer([:positive])}")
+    _ = apply(mod, :f, [])
+    true
+  rescue
+    _ -> false
+  end
+
+  # `:js` over-claim check: the emitted JS must run `f()` under node without throwing.
+  # node absent → cannot check, so do not fail.
+  defp js_runs?(src) do
+    case System.find_executable("node") do
+      nil ->
+        true
+
+      node ->
+        path = Path.join(System.tmp_dir!(), "rian_rhp_#{System.unique_integer([:positive])}.mjs")
+        File.write!(path, JS.compile(src) <> "\nf();\n")
+
+        try do
+          {_out, code} = System.cmd(node, [path], stderr_to_stdout: true)
+          code == 0
+        after
+          File.rm(path)
+        end
+    end
+  rescue
+    _ -> false
   end
 
   # greedily shrink `t` to a minimal value still satisfying `fails?`.
