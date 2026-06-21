@@ -28,14 +28,14 @@ defmodule Rian.ReachHonestyPropertyTest do
   Deterministic: the fixed `@seed` (and a deterministic per-type value) reproduce every
   program; a failure prints the minimal source and the seed.
 
-  The compound property verifies reach claims against the **real toolchain per target**:
-  `:rs` compiles under `rustc`, `:ex` loads + runs `f/0` on the BEAM, `:js` runs `f()`
-  under `node` (skipped when a toolchain is absent). Generated programs are first passed
-  through the type gate (`Rian.Check`) — a checker-rejected program is a generator
-  artefact, not a reach lie, so it is excluded (ADR-0087 §3).
-
-  Remaining: cross-target *value* equality (each target serialized to a common form) and
-  the Rust *binary* run (this runs BEAM/JS but compiles-only on Rust).
+  The compound property **runs** `f()` on the real toolchain per target — `:ex` on the
+  BEAM, `:rs` as a compiled `rustc` *binary*, `:js` under `node` — serializes each result
+  to one canonical form (Rust's `{:?}`), and asserts: every claimed target runs and
+  produces a value (over-claim), and **every reached target's value is byte-equal**
+  (cross-target equivalence — the full ADR-0087 §1 "compiles **and runs**", plus the
+  portability guarantee). Generated programs are first passed through the type gate
+  (`Rian.Check`) — a checker-rejected program is a generator artefact, not a reach lie, so
+  it is excluded (ADR-0087 §3). (`:jvm` is reach-checked but not run here — no `kotlinc`.)
   """
   use ExUnit.Case, async: false
 
@@ -52,6 +52,21 @@ defmodule Rian.ReachHonestyPropertyTest do
   @depth2 3
   @leaves [:bool, :int53, :int64, :string]
   @all MapSet.new([:ex, :rs, :js, :jvm])
+
+  # a JS serializer producing Rust's `{:?}` canonical form (`Some(x)`/`None`, `[a, b]`,
+  # quoted strings) — so `f()`'s value compares byte-equal across BEAM/JS/Rust. Generated
+  # strings are `"s"` (never `"Some"`/`"None"`), so the tagged-array discrimination is safe.
+  @js_show ~S"""
+  function __show(x){
+    if(Array.isArray(x)){
+      if(x[0]==="Some")return "Some("+__show(x[1])+")";
+      if(x[0]==="None")return "None";
+      return "["+x.map(__show).join(", ")+"]";
+    }
+    if(typeof x==="string")return JSON.stringify(x);
+    return String(x);
+  }
+  """
 
   # Every fixed width is Rust-representable (two's-complement wrap, ADR-0064), so it
   # reaches `:rs`; the arbitrary-precision `Int` (BEAM bignum / JS BigInt) does not.
@@ -198,10 +213,13 @@ defmodule Rian.ReachHonestyPropertyTest do
   # ── Stage 2: type-directed generation + shrinking ───────────────────────────
 
   # `nil` if return type `t` is reach-honest (or outside the well-typed domain — see
-  # `valid?`), else the failing kind. SAFE: never replicates Reach. Checks the
-  # over-claim direction per target (a reach claim must compile/run) and the
-  # portable-base under-claim. Reach claims are verified by the *real* toolchain:
-  # `:rs` compiles under rustc, `:ex` loads+runs on the BEAM, `:js` runs under node.
+  # `valid?`), else the failing kind. SAFE: never replicates Reach. Each reach claim is
+  # verified by *running* `f()` on the real toolchain (`:ex` BEAM, `:rs` rustc binary,
+  # `:js` node) and serializing the result to one canonical form (Rust `{:?}`):
+  #   * over-claim — a claimed target must run + produce a value (`:run_failure`);
+  #   * cross-target equality — every reached, runnable target must agree (`:divergence`);
+  #   * under-claim — a fully-portable type must reach all four.
+  # (`:jvm` is reached-checked but not run here — no kotlinc in this lane.)
   defp fail_reason(rustc, t) do
     src = "def f() #{ty_str(t)} := #{val_det(t)}"
 
@@ -213,16 +231,28 @@ defmodule Rian.ReachHonestyPropertyTest do
       try do
         reach = src |> Decl.parse() |> Reach.analyze() |> reach_of("f")
 
+        values =
+          [{:ex, beam_value(src)}] ++
+            if(:rs in reach, do: [{:rs, rust_value(rustc, src)}], else: []) ++
+            if(:js in reach, do: [{:js, js_value(src)}], else: [])
+
         cond do
           portable?(t) and not MapSet.subset?(@all, reach) -> :underclaim
-          :rs in reach and not elem(rustc_ok?(rustc, src), 0) -> :rs_overclaim
-          :ex in reach and not beam_runs?(src) -> :ex_overclaim
-          :js in reach and not js_runs?(src) -> :js_overclaim
+          Enum.any?(values, fn {_, v} -> v == :error end) -> :run_failure
+          not consistent?(values) -> :divergence
           true -> nil
         end
       rescue
         _ -> :crash
       end
+    end
+  end
+
+  # every value present (a `:skip` = toolchain absent, ignored) must be byte-equal.
+  defp consistent?(values) do
+    case for({_, v} <- values, v != :skip, do: v) do
+      [] -> true
+      [h | rest] -> Enum.all?(rest, &(&1 == h))
     end
   end
 
@@ -233,42 +263,69 @@ defmodule Rian.ReachHonestyPropertyTest do
     _ -> false
   end
 
-  # emit + compile, treating an emitter raise as a (rejected, message) pair.
-  defp rustc_ok?(rustc, src) do
-    rustc_compiles?(rustc, Lower.rust_program(Decl.parse(src)))
-  rescue
-    e -> {false, Exception.message(e)}
-  end
-
-  # `:ex` over-claim check: the emitted BEAM module must load and `f/0` must run.
-  defp beam_runs?(src) do
+  # `f()`'s value on each target as Rust's `{:?}` canonical string, or `:error` if the
+  # claimed target fails to compile/run, or `:skip` if the toolchain is unavailable.
+  defp beam_value(src) do
     {:ok, mod} = Beam.load(src, :"rian_rhp_beam_#{System.unique_integer([:positive])}")
-    _ = apply(mod, :f, [])
-    true
+    canon_beam(apply(mod, :f, []))
   rescue
-    _ -> false
+    _ -> :error
+  catch
+    _, _ -> :error
   end
 
-  # `:js` over-claim check: the emitted JS must run `f()` under node without throwing.
-  # node absent → cannot check, so do not fail.
-  defp js_runs?(src) do
+  defp canon_beam(true), do: "true"
+  defp canon_beam(false), do: "false"
+  defp canon_beam(:none), do: "None"
+  defp canon_beam({:some, x}), do: "Some(#{canon_beam(x)})"
+  defp canon_beam(x) when is_integer(x), do: Integer.to_string(x)
+  defp canon_beam(x) when is_binary(x), do: "\"#{x}\""
+  defp canon_beam(x) when is_list(x), do: "[#{Enum.map_join(x, ", ", &canon_beam/1)}]"
+
+  defp rust_value(rustc, src) do
+    rust = Lower.rust_program(Decl.parse(src)) <> "\nfn main() { println!(\"{:?}\", f()); }\n"
+    base = Path.join(System.tmp_dir!(), "rian_rhp_#{System.unique_integer([:positive])}")
+    rs = base <> ".rs"
+    File.write!(rs, rust)
+
+    try do
+      with {_o, 0} <-
+             System.cmd(rustc, ["-A", "warnings", "--edition", "2021", "-o", base, rs],
+               stderr_to_stdout: true
+             ),
+           {out, 0} <- System.cmd(base, [], stderr_to_stdout: true) do
+        String.trim(out)
+      else
+        _ -> :error
+      end
+    after
+      File.rm(rs)
+      File.rm(base)
+    end
+  rescue
+    _ -> :error
+  end
+
+  defp js_value(src) do
     case System.find_executable("node") do
       nil ->
-        true
+        :skip
 
       node ->
         path = Path.join(System.tmp_dir!(), "rian_rhp_#{System.unique_integer([:positive])}.mjs")
-        File.write!(path, JS.compile(src) <> "\nf();\n")
+        File.write!(path, JS.compile(src) <> "\n" <> @js_show <> "console.log(__show(f()));\n")
 
         try do
-          {_out, code} = System.cmd(node, [path], stderr_to_stdout: true)
-          code == 0
+          case System.cmd(node, [path], stderr_to_stdout: true) do
+            {out, 0} -> String.trim(out)
+            _ -> :error
+          end
         after
           File.rm(path)
         end
     end
   rescue
-    _ -> false
+    _ -> :error
   end
 
   # greedily shrink `t` to a minimal value still satisfying `fails?`.
