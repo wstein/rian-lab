@@ -711,7 +711,15 @@ gate_corpus = [
   "pub def uh(x _Unk) Int53 := x",
   "pub def ur(x Int53) _Unk := x",
   "def up(x _Unk) := x",
-  "pub def um1(x _Unk) String := 1"
+  "pub def um1(x _Unk) String := 1",
+  # check_union_clash (ADR-0083): a value union whose members share a runtime discriminator is
+  # rejected (param + return, integer + float classes); a distinct-discriminator union is fine; and
+  # the clash fires BEFORE the return gate (the last case also has a return mismatch).
+  "pub def uc(x Int32 | Char) Int53 := 1",
+  "pub def ucr() Int8 | Int16 := 1",
+  "pub def ucf(x Float32 | Float64) Int53 := 1",
+  "pub def und(x Int53 | String) Int53 := 1",
+  "pub def ucm(x Int8 | Char) String := 1"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the

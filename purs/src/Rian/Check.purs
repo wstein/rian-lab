@@ -898,13 +898,16 @@ checkProgram prog = findMap checkFunc funcs
   ic = ic0 { funs = fillLocalRets funcs ic0 }
   tsets = errorSetsTable prog
   table = solveErrorSets funcs tsets
-  -- per function, in reference order: no `_Unk` hole in the signature, then the body must be
-  -- assignable to the declared return, then a Result return's produced error set ⊆ its `E`.
+  -- per function, in reference order: no `_Unk` hole in the signature, no value-union with two
+  -- members sharing a runtime discriminator, then the body must be assignable to the declared
+  -- return, then a Result return's produced error set ⊆ its `E`.
   checkFunc f = case checkUnk f of
     Just msg -> Just msg
-    Nothing -> case checkReturn ic f of
+    Nothing -> case checkUnionClash f of
       Just msg -> Just msg
-      Nothing -> checkErrorSet tsets table f
+      Nothing -> case checkReturn ic f of
+        Just msg -> Just msg
+        Nothing -> checkErrorSet tsets table f
 
 -- `_Unk` is an UNFINISHED inference hole, not a type (ADR-0034): a fill-me marker the transpiler
 -- leaves. A declared `_Unk` in a signature must be resolved before compiling, so the gated path
@@ -922,6 +925,45 @@ checkUnk f = case findMap holeOf (map _.ty f.params <> [ f.ret ]) of
   where
   holeOf (Just t) = if Str.contains (Str.Pattern "_Unk") t then Just t else Nothing
   holeOf Nothing = Nothing
+
+-- A value union (`A | B`, ADR-0083) narrows by runtime type, so two members sharing a runtime
+-- discriminator (`Int32 | Char` — both `is_integer`/`number`) can never be told apart: the second
+-- arm is dead. Reject such a union with a clear message rather than only pinning it off every
+-- target in `Rian.Reach`. Each top-level union in the signature (param or return) is checked.
+checkUnionClash :: Func -> Maybe String
+checkUnionClash f = findMap unionClash (mapMaybe identity (map _.ty f.params <> [ f.ret ]))
+
+unionClash :: String -> Maybe String
+unionClash t = case Str.stripPrefix (Str.Pattern "Union(") t of
+  Nothing -> Nothing
+  Just rest ->
+    -- only PRIMITIVE members share a discriminator class; a sum/struct/tvar member is `PdOther`
+    -- (its own narrowing test), so it never collides here. Search the discriminator classes in
+    -- the reference's atom order so a multi-clash union reports the same pair.
+    let
+      tagged = filter (\(Tuple _ d) -> d /= PdOther) (map (\m -> Tuple m (primDisc m)) (splitTopCommas (dropLastParen rest)))
+    in
+      case findMap (clashOf tagged) [ PdBinary, PdBoolean, PdFloat, PdInteger ] of
+        Nothing -> Nothing
+        Just (Tuple disc (Tuple a b)) ->
+          Just
+            ( "value union `" <> t <> "`: members `" <> a <> "` and `" <> b <> "` share a runtime discriminator "
+                <> "(" <> discWord disc <> "), so a `case` cannot tell them apart — the second arm is "
+                <> "dead. Use distinct member kinds, or a named sum type."
+            )
+  where
+  clashOf tagged disc =
+    let ms = map fst (filter (\(Tuple _ d) -> d == disc) tagged)
+    in case index ms 0, index ms 1 of
+      Just a, Just b -> Just (Tuple disc (Tuple a b))
+      _, _ -> Nothing
+
+discWord :: PrimDisc -> String
+discWord PdInteger = "both lower to an integer / JS `number`"
+discWord PdBinary = "both lower to a binary / JS `string`"
+discWord PdBoolean = "both lower to a boolean"
+discWord PdFloat = "both lower to a float"
+discWord PdOther = ""
 
 -- a function's declared (non-generic) return must accept every clause body's inferred type.
 checkReturn :: Ic -> Func -> Maybe String
