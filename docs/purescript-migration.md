@@ -73,7 +73,7 @@ removal-order note).
 | Module        | LOC  | Notes / status                                                 |
 | ------------- | ---- | -------------------------------------------------------------- |
 | `Rian.Pratt`  | 1218 | **Ported (parity-gated, `psx` stream):** the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms, patterns, `if`/`case`/`lambda`/blocks, **and `with`/`for`/`${}` interpolation**. **Remaining (raise a clear message, excluded from the corpus):** bitstrings (+pattern, BEAM-only), map *update* and type-patterns (no reference `sexpr` clause → not parity-testable), and error-propagation `<-` + speculative destructuring binds. **`parseBody`** (the `;`-separated statement-block body parser) is now exposed — the prerequisite for re-parsing a function body (`Shadow`/`Check.infer_return_type`). |
-| `Rian.Decl`   | 1901 | **All declaration forms ported** (parity-gated, `dcl` + `prc` streams, 74 records): **data-type declarations** (`type`/`struct`), **`def`** (single-/multi-clause, `:=` bodies, capabilities, `build_func` grouping, head patterns, `forall`), **`mod`/`const`/`use`/`alias`** (nested `assemble`, alias subst), and **`range`/`opaque`** (ordinal bounds; range name substitutes to its `base`), `const` (explicit + literal-inferred type), `use` (qualified + selective), **alias substitution** (whole-word, transitive to a fixpoint, over all type positions), **`def` block bodies** (`def … Ret <nl> body <nl> end` — `take_block` depth-counts the matching `end`; `block_seps`/`detok_block` rewrites a top-level newline to a `;` while tracking nested `do`/`end`, brackets, and `with`-headers), and **`@external(:target, spec)`** (ADR-0068 — target-scoped FFI bodies on a bodiless `def`: a string spec, a `Mod.fun`/`:erlang.fun` reference, or a `"path", "fun"` file ref; the target vocabulary is hardcoded since `Reach` is unported), and **`abstract Name := Base do … end`** (ADR-0067 — an `opaque` carrying `op`/`to` operator/cast rules, parsed via `extractParens`/`parseParams` and rendered to a canonical per-member string), plus **`protocol`/`impl`** (program-global, hoisted out of any `mod`; the `prc` stream serializes the protocol/impl IR **synthesis-free** — the reference's `Protocol.expand` injects dispatcher/`impl_*` funcs into the program during assembly, a tail pass not ported) and **`macro`** (consumed + dropped — emits no IR; expansion is a tail pass needing `Rian.Macro`). |
+| `Rian.Decl`   | 1901 | **All declaration forms ported** (parity-gated, `dcl` + `prc` streams, 74 records): **data-type declarations** (`type`/`struct`), **`def`** (single-/multi-clause, `:=` bodies, capabilities, `build_func` grouping, head patterns, `forall`), **`mod`/`const`/`use`/`alias`** (nested `assemble`, alias subst), and **`range`/`opaque`** (ordinal bounds; range name substitutes to its `base`), `const` (explicit + literal-inferred type), `use` (qualified + selective), **alias substitution** (whole-word, transitive to a fixpoint, over all type positions), **`def` block bodies** (`def … Ret <nl> body <nl> end` — `take_block` depth-counts the matching `end`; `block_seps`/`detok_block` rewrites a top-level newline to a `;` while tracking nested `do`/`end`, brackets, and `with`-headers), and **`@external(:target, spec)`** (ADR-0068 — target-scoped FFI bodies on a bodiless `def`: a string spec, a `Mod.fun`/`:erlang.fun` reference, or a `"path", "fun"` file ref; the target vocabulary is hardcoded since `Reach` is unported), and **`abstract Name := Base do … end`** (ADR-0067 — an `opaque` carrying `op`/`to` operator/cast rules, parsed via `extractParens`/`parseParams` and rendered to a canonical per-member string), plus **`protocol`/`impl`** (program-global, hoisted out of any `mod`; the `prc` stream serializes the protocol/impl IR **synthesis-free** — the reference's `Protocol.expand` dispatcher/`impl_*` injection is the assemble tail, now ported in **`Rian.Assemble`**, `asm` stream) and **`macro`** (`macro` defs preserved on `Prog.macros` for the `lower_meta` tail; **`Rian.Assemble`** expands them into `Expanded` clause bodies, `mxb` stream). |
 
 **Parity oracle (Pratt → Core).** Pratt is verified via its built-in `parse_sexpr/1` (the
 `psx` stream — output-only, no surface round-trip). `Core.from_expr`/`from_pat` then composes
@@ -87,7 +87,7 @@ what the Core oracle confirms over the surface form.
 
 | Module                | LOC  | Notes                                          |
 | --------------------- | ---- | ---------------------------------------------- |
-| `Rian.InferLocal`     | 250  | 🟡 **return inference ported** — `fillReturns` fills every un-annotated *private* function's return from its body (via `Check.fill_local_rets`' fixpoint), defaulting the uninferable to `Any` (ADR-0034); `pub` boundaries kept. `ilr` stream. **Deferred:** parameter inference (`Check.infer_param_type`) + the `forall T` generalization of an unconstrained pass-through param. |
+| `Rian.InferLocal`     | 250  | 🟡 **return inference ported** — `fillReturns` fills every un-annotated *private* function's return from its body (via `Check.fill_local_rets`' fixpoint), defaulting the uninferable to `Any` (ADR-0034); `pub` boundaries kept. `ilr` stream. **Deferred:** the parameter-inference fixpoint — `Check.infer_param_type` is now ported (`ipt`), but wiring it needs the `:unknown`/`Int53` `num_default` threaded through `infer` (today `numHint` hardcodes `Int53`) plus the `forall T` generalization of an unconstrained pass-through param. |
 | `Rian.PatternLower`   | 149  | ✅ ported — Core `CPat` → checker patterns (`plw` stream). |
 | `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
 | `Rian.Coherence`      | ~280 | ✅ ported — protocol/impl coherence rules (ADR-0061 §5): unknown-protocol, method-set/arity, runtime-discriminator presence + non-overlap, duplicate (`coh`/`cohrs` streams). **Enriched for `Protocol`:** the `Registry` carries sum variants and `classify` returns the **real BEAM guard string** (`sumGuard`/`structGuard`) — same overlap outcome as the old equivalence class, now also the dispatcher's discriminator — plus `guardFor`/`registry`. |
@@ -121,8 +121,10 @@ but not byte-tested), serialized through the shared `coreSexpr` oracle.
 methods (ADR-0042 §4): `expand`/`dispatcher`/`implMethods` + `mangle`/`substSelf`/`substAssoc`/
 `wordReplace`. Consumes the Coherence guard codegen; parity via the `pex` stream (serializes the
 generated def maps). Unblocks the Decl assemble tail (with `Macro`).
-Remaining: `ShowStdlib` (29), `Opaque` (159), `Comptime` (79), the BEAM-coupled rest of
-`External` (279 — only `render` is ported), `Manifest` (315).
+`Comptime` (79) **✅ ported** — `comptime(e)` compile-time const folding (the other half of
+`lower_meta`, wired into `Assemble`; `mxb` stream). Remaining: `ShowStdlib` (29, blocked on
+`Decl.inject_stdlib` — no consumer yet), `Opaque` (159), the BEAM-coupled rest of `External`
+(279 — only `render` is ported), `Manifest` (315).
 `Builtins` (204) **✅ ported** — the host/stdlib foreign-call signature table (`ret`/`known`/`polySig` over `{module,fun,arity}`; `bui` stream). Consumed by `Check`/`Reach`.
 `Shadow` (114) **✅ ported** — capture-avoiding `:=` shadow rename over Core (ADR-0034): a rebind
 `x := …; x := …` is renamed for targets that forbid same-scope re-declaration (JS `let`, Kotlin
@@ -193,14 +195,18 @@ and **`Rian.Capability`** (`cap`/`lin`) ported. **The Check `ic` landed:** `prog
 `Any`-wildcard-at-depth / bare-head / constructed-opaque / numeric widening) **and error sets**
 (ADR-0040 — a `Result(T,E)`'s produced error set ⊆ `E`, by a call-graph fixpoint), `infer_param_type`
 (`ipt`), `effect_sets` (`efs`, in Reach). **`Rian.Assemble`** (new top module) runs the whole
-assemble tail `Decl.parse` does but PS `parseToProg` defers — **protocol synthesis** (`asm`,
-`Protocol.expand` → `prog.funcs`, sidestepping the `Decl`↔`Protocol` cycle) **and macro expansion**
-(`mxb`, `Macro.expand` → `Expanded` clause bodies). The clause body is now `data Body = Raw String |
-Expanded Surface` with a `bodySurface` accessor (the reference's `String | ast`, idempotent re-parse
-restored). **Next:** `Comptime` (`lower_meta`'s other half), then the emitters
-(`Beam`/`JS`/`JVM`/`Lower`).
-Total **806/806** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
-Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/**InferLocal**.
+`lower_meta` assemble tail `Decl.parse` does but PS `parseToProg` defers — **protocol synthesis**
+(`asm`, `Protocol.expand` → `prog.funcs`, sidestepping the `Decl`↔`Protocol` cycle), **macro
+expansion** (`mxb`, `Macro.expand`) **and `Rian.Comptime`** (`comptime(e)` → a sandboxed const fold,
+also in `mxb`) → `Expanded` clause bodies. The clause body is now `data Body = Raw String | Expanded
+Surface` with a `bodySurface` accessor (the reference's `String | ast`, idempotent re-parse
+restored); `lower_meta` change-detects via the canonical `sexpr` so an untouched body stays `Raw`.
+**Next:** the **emitters** (`Beam`/`JS`/`JVM`/`Lower`) — the value backend — and two checker tails:
+**InferLocal parameter inference** (`infer_param_type` is ported; the fixpoint needs `num_default`
+threaded through `infer`) and the host-coupled `Reach.Prelude.defines?` refinement.
+Total **810/810** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
+InferLocal/Assemble/**Comptime**.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
 
@@ -212,13 +218,16 @@ front-end is ported and cross-checked**: lex → parse → typed Core IR → the
 expansion/synthesis passes `Macro` + `Protocol.expand`. **The inference + return gate now hold too**:
 the Check `ic` is built and threaded (so flow-narrowing, generic-return, and user/cross-module calls
 type), `infer_return_type`/`fill_local_rets` recover un-annotated returns, `InferLocal` writes them
-back, and `check_program` enforces return-assignability. **What remains before end-to-end compile**:
-the Check tail — `infer_param_type` (+ InferLocal's param generalization), the `error_sets` fixpoint
-(ADR-0040), `effect_sets`/`Reach.effect_sets`, `forall T: Bound`, and the union/`Any`-wildcard/
-literal-width clauses of `assignable?` — plus `Opaque.erase`'s cast inference, the emitters
-(`Beam`/`JS`/`JVM`/`Lower`), and the Decl assemble-tail wiring of `Macro`/`Protocol`. The
-parity-record count measures front-end + inference + gate *fidelity*, not compiler completeness; the
-**emitters** are now the gate that flips "checks a program" to "emits one."
+back, and `check_program` enforces return-assignability (the full `assignable?`: value unions /
+`Any`-wildcard / bare-head / opaque / numeric widening) **and error sets** (ADR-0040). `infer_param_type`
+(`ipt`) and `effect_sets` (`efs`) are ported. **And the assemble tail is ported**: `Rian.Assemble`
+runs `lower_meta` — `Protocol.expand` synthesis (`asm`) plus `Macro.expand` + `Comptime.fold` into
+`Expanded` clause bodies (`mxb`). **What remains before end-to-end compile**: the **emitters**
+(`Beam`/`JS`/`JVM`/`Lower`) — the value backend — plus two checker tails (InferLocal's param-inference
+fixpoint, now only blocked on `num_default` threading; the host-coupled `Reach.Prelude.defines?`),
+`Opaque.erase`'s cast inference, and `forall T: Bound`. The parity-record count measures front-end +
+inference + gate + assemble-tail *fidelity*, not compiler completeness; the **emitters** are now the
+gate that flips "checks a program" to "emits one."
 
 **Known parity-corpus gaps (low severity, named not hidden).** The fixed-scenario streams cover
 every `lower`/`analyze`/`parse` branch *except*: `PMap` pattern lowering (BEAM-only, refutable);

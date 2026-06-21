@@ -41,10 +41,12 @@ copyTypes =
   Array.concatMap (\p -> map (\w -> p <> w) [ "8", "16", "32", "64", "128" ]) [ "Int", "UInt" ]
     <> [ "Int53", "Float32", "Float64", "Bool", "Char" ]
 
+-- @rian_sig pub def copy?(t val String) Bool
 copy :: String -> Boolean
 copy t = elem t copyTypes
 
 -- ── Rust parameter-type lowering ──
+-- @rian_sig pub def rust_param(a val Symbol, t val String) String
 rustParam :: Cap -> String -> String
 rustParam cap t =
   if isJustPrefix "Fn(" t then "&impl " <> fnTrait t
@@ -81,6 +83,7 @@ rustScalar t =
         Just w -> "f" <> w
         Nothing -> t
 
+-- @rian_sig pub def owned(a val String) String
 owned :: String -> String
 owned t =
   if t == "String" then "String"
@@ -125,6 +128,7 @@ parametric t = case Str.stripSuffix (Str.Pattern ")") t of
       let name = Str.take i body
       in if name /= "" && isIdent name then Just (Tuple name (splitTopCommas (Str.drop (i + 1) body))) else Nothing
 
+-- @rian_sig pub def borrowed(a val String) String
 borrowed :: String -> String
 borrowed t =
   if t == "String" then "&str"
@@ -158,6 +162,7 @@ isIdent s = case Array.head cps of
 -- ── BEAM linearity: free-variable occurrence counts ──
 type Uses = Array (Tuple String Int)
 
+-- @rian_sig pub def count_uses(ast val Expr) _Unk
 countUses :: P.Surface -> Uses
 countUses = go []
 

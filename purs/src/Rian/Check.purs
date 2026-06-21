@@ -306,7 +306,7 @@ type Env = Array (Tuple String Ty)
 -- | `if`/`case` (branch-join + value unions), lambdas, calls/generics, `.field`, atoms, and
 -- | the inference context (`ic` — ctors/fsigs/abstract ops) arrive in later stages, so those
 -- | nodes defer to `Unknown` here (the conservative slice never over-claims).
--- @rian_sig pub def infer(ast val Expr, env val Dict(String, String)) String
+-- @rian_sig pub def infer(ast val Expr, env val Dict(String, String), ic val Ic) String
 infer :: CExpr -> Env -> Ic -> Ty
 infer (ENum n) _ _ = if hasDotOrE n then TName "Float64" else TName "Int53"
 infer (EStr _) _ _ = TName "String"
@@ -884,9 +884,10 @@ fillLocalRetsSexpr src =
 --------------------------------------------------------------------------------
 
 -- | The compile-time return gate: the first function whose body type is not assignable to its
--- | declared return (`Just message`), else `Nothing` (`:ok`). This slice covers the
--- | return-assignability check (the headline gate); error-sets/effects/bounds/coherence and the
+-- | declared return (`Just message`), else `Nothing` (`:ok`). Covers return-assignability (the
+-- | headline gate) AND error sets (ADR-0040, `checkErrorSet`); effects/bounds/coherence and the
 -- | literal-width-adoption relaxation are later — the corpus avoids them.
+-- @rian_sig pub def check_program(prog val Prog) _Unk
 checkProgram :: Prog -> Maybe String
 checkProgram prog = findMap checkFunc funcs
   where
@@ -1340,6 +1341,7 @@ type OpaqueInfo = { base :: String, ops :: Array String, casts :: Array String }
 type Fbound = { params :: Array (Maybe String), tvars :: Array String, bounds :: Array (Tuple String (Array String)) }
 
 -- | Build the inference context from a parsed program (mirrors `Rian.Check.program_ic`).
+-- @rian_sig pub def program_ic(prog val Prog) Ic
 programIc :: Prog -> Ic
 programIc prog =
   { tdefs: typeTable types
@@ -1368,6 +1370,7 @@ typeTable :: Array Type -> Array (Tuple String (Array String))
 typeTable types = concatMap (\t -> map (\v -> Tuple v.ctor (map _.ty v.fields)) t.variants) types
 
 -- a single-variant struct/record's ctor → its named `(field, type)` pairs (for `p.field`).
+-- @rian_sig pub def field_table(types val Vec(Type)) Dict(String, Dict(String, String))
 fieldTable :: Array Type -> Array (Tuple String (Array (Tuple String String)))
 fieldTable types = mapMaybe single types
   where

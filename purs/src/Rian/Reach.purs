@@ -79,6 +79,7 @@ jsWideInts :: Array String
 jsWideInts = [ "Int64", "Int128", "UInt64", "UInt128" ]
 
 -- | Analyze a parsed program: `name/arity → {reach, blockers}` (an assoc list).
+-- @rian_sig pub def analyze(prog val Prog) Dict(String, _Unk)
 analyze :: Prog -> Array (Tuple String Entry)
 analyze prog =
   map report facts
@@ -169,6 +170,7 @@ ffiCategory construct =
 
 -- | The inferred effect set of every function, keyed `name/arity` (ADR-0048 §3): direct effects
 -- | (from the same `scanFunc` blockers `analyze` uses) ∪ every callee's, to a call-graph fixpoint.
+-- @rian_sig pub def effect_sets(prog val Prog) Dict(String, _Unk)
 effectSets :: Prog -> Array (Tuple (Tuple String Int) (Array String))
 effectSets prog = effectFixpoint facts (map (\(Tuple n fc) -> Tuple n fc.direct) facts)
   where

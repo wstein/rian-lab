@@ -28,6 +28,7 @@ import Rian.IR (Func, Prog)
 
 -- | Fill undeclared private-function return types by local inference. A no-op unless some
 -- | private function omitted its return (or has an `:infer` param — deferred).
+-- @rian_sig pub def fill_returns(prog val Prog) Prog
 fillReturns :: Prog -> Prog
 fillReturns prog =
   if any (\f -> untypedRet f || hasInferParam f) (allFuncs prog) then writeFilled prog
