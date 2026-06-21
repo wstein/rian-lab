@@ -60,6 +60,7 @@ import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), from
 import Rian.Decl (parseToProg)
 import Rian.IR (Cap(..), Func, Param, Prog, Type, bodySurface)
 import Rian.Macro (childrenOf)
+import Rian.Reach (effectSets)
 import Rian.Prelude (withPrelude)
 import Rian.Pratt (Arm, ForClause(..), IPart(..), MapPair(..), Param, Pat, Stmt(..), Surface(..), WithClause, parse, parseBody) as P
 import Rian.Prim (normalize)
@@ -902,6 +903,7 @@ checkProgram prog = findMap checkFunc funcs
   ic = ic0 { funs = fillLocalRets funcs ic0 }
   tsets = errorSetsTable prog
   table = solveErrorSets funcs tsets
+  effects = effectSets prog
   -- per function, in reference order (`check_func`'s `with :ok <- …` chain): no `_Unk` hole; an
   -- `@external`'s params are `val`/`tag`; no labeled call args; no value-union with two members
   -- sharing a runtime discriminator; the body is assignable to the declared return; each bounded-
@@ -917,6 +919,7 @@ checkProgram prog = findMap checkFunc funcs
     , \_ -> checkBounds ic f
     , \_ -> checkNumericMix ic f
     , \_ -> checkValuePosition f
+    , \_ -> checkEffects effects f
     , \_ -> checkErrorSet tsets table f
     ]
 
@@ -1114,6 +1117,43 @@ mutationValueMsg :: String
 mutationValueMsg =
   "a `<~` mutation yields unit (ADR-0035) and cannot be used as a value: it is valid "
     <> "only as a statement, not the final/returned/bound/passed expression."
+
+-- A declared `@effects(…)` set must be EXACT (ADR-0048 §3): equal to the set `Reach.effect_sets`
+-- infers from the body's host-FFI/concurrency blockers. Over-declaration (an effect declared but
+-- never performed) and under-declaration (an effect performed but not declared) are both rejected.
+-- A function with no `@effects` is unconstrained.
+checkEffects :: Array (Tuple (Tuple String Int) (Array String)) -> Func -> Maybe String
+checkEffects effects f =
+  if null f.effects then Nothing
+  else
+    let
+      inferred = case find (\(Tuple k _) -> k == Tuple f.name (length f.params)) effects of
+        Just (Tuple _ es) -> es
+        Nothing -> []
+      over = sortString (filter (\e -> not (elem e inferred)) f.effects)
+      under = sortString (filter (\e -> not (elem e f.effects)) inferred)
+    in
+      if null over && null under then Nothing
+      else Just (effectMismatchMsg f.name over under)
+
+-- the reference's `Enum.join([over-part, under-part], "; ")`, each part a `[:a, :b]` atom-list
+-- (`inspect`), the sets in term order (so we sort). At least one part is non-empty here.
+effectMismatchMsg :: String -> Array String -> Array String -> String
+effectMismatchMsg name over under =
+  "`" <> name <> "`: " <> joinWith "; " (filter (_ /= "") [ overPart, underPart ])
+  where
+  overPart =
+    if null over then ""
+    else "declares effect(s) " <> inspectAtoms over <> " it does not perform (effects are exact — over-declaration is not allowed, ADR-0048 §3)"
+  underPart =
+    if null under then ""
+    else "performs effect(s) " <> inspectAtoms under <> " not in its `@effects` declaration"
+
+inspectAtoms :: Array String -> String
+inspectAtoms es = "[" <> joinWith ", " (map (\e -> ":" <> e) es) <> "]"
+
+sortString :: Array String -> Array String
+sortString = sortWith identity
 
 -- No implicit Int↔Float coercion (ADR-0035/0034 §1): an arithmetic op (`+`/`-`/`*`) whose operands
 -- are one integer-kind and one float-kind (both concretely known) is rejected — a value never

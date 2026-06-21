@@ -744,7 +744,13 @@ gate_corpus = [
   # rejected; an `if` with `else` is fine.
   "pub def vpbad(x Bool) Int53 := if x do 1 end",
   "pub def vpmut(x Int53) Int53 := id(x <~ 1)",
-  "pub def vpok(x Bool) Int53 := if x do 1 else 2 end"
+  "pub def vpok(x Bool) Int53 := if x do 1 else 2 end",
+  # check_effects (ADR-0048 §3): a declared `@effects(…)` set must equal the inferred set
+  # (`IO.puts` performs `host` + `io`). Exact match → ok; under-declaration and over-declaration
+  # are both rejected.
+  "@effects(host, io)\ndef effok(x Int53) Symbol := IO.puts(x)",
+  "@effects(io)\ndef effunder(x Int53) Symbol := IO.puts(x)",
+  "@effects(host, io, fs)\ndef effover(x Int53) Symbol := IO.puts(x)"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the

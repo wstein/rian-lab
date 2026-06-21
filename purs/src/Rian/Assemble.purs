@@ -70,6 +70,7 @@ defMapToRawDef d =
   , bounds: []
   , doc: Nothing
   , externals: []
+  , effects: []
   }
 
 -- ── `lower_meta` (ADR-0030): macro-expand then comptime-fold every clause body ──

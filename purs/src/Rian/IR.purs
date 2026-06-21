@@ -93,8 +93,10 @@ derive instance Eq ExtSpec
 
 -- A function: `name`, `params`, return type `ret`, `clauses`. `tvars`/`bounds` are the
 -- `forall` binders (ADR-0042); `externals` are per-target FFI bodies (ADR-0068) on a
--- bodiless `def` (mutually exclusive with `clauses`). (synthetic/dispatch/effects/test land later.)
--- @rian_sig struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause), externals Map(Symbol, ExtSpec), is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)), doc Option(String))
+-- bodiless `def` (mutually exclusive with `clauses`); `effects` is the declared `@effects(…)`
+-- set (ADR-0048/0081), verified against `Reach.effect_sets` by `Check`. (synthetic/dispatch/test
+-- land later.)
+-- @rian_sig struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause), externals Map(Symbol, ExtSpec), is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)), doc Option(String), effects Vec(Symbol))
 type Func =
   { name :: String
   , params :: Array Param
@@ -105,6 +107,7 @@ type Func =
   , tvars :: Array String
   , bounds :: Array (Tuple String (Array String))
   , doc :: Maybe String
+  , effects :: Array String
   }
 
 -- A module-scoped constant (`const NAME [Type] := value`). `ty` is `Nothing` when omitted

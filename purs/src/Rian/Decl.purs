@@ -179,6 +179,7 @@ type RawDef =
   , bounds :: Array (Tuple String (Array String))
   , doc :: Maybe String
   , externals :: Array (Tuple String ExtSpec)
+  , effects :: Array String
   }
 
 data RawDecl
@@ -224,6 +225,17 @@ takeDecl (TAnnot "external" : TLparen : rest) =
     Tuple (attachExternal decl target spec) rest''
 takeDecl (TAnnot "external" : _) =
   unsafeCrashWith "Decl: expected `@external(:target, \"host expression\")`"
+-- `@effects(host, …)` — the function's declared effect set (ADR-0048/0081); one precedes a `def`,
+-- and `Rian.Check` verifies it against the inferred set (`Reach.effect_sets`, exact, §3).
+takeDecl (TAnnot "effects" : TLparen : rest) =
+  let
+    Tuple argToks rest' = takeParens rest 0 Nil
+    effects = parseEffects argToks
+    Tuple decl rest'' = takeDecl (skipNl rest')
+  in
+    Tuple (attachEffects decl effects) rest''
+takeDecl (TAnnot "effects" : _) =
+  unsafeCrashWith "Decl: expected `@effects(host, …)`"
 takeDecl (TAnnot a : _) = stage2 ("annotation `@" <> a <> "`")
 takeDecl (TKw "pub" : rest) = let Tuple decl rest' = takeDecl rest in Tuple (markPub decl) rest'
 takeDecl (TKw "type" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DType (detok toks) false Nothing) rest'
@@ -619,6 +631,36 @@ attachExternal (DDef r) target spec
   | otherwise = DDef (r { externals = Array.snoc r.externals (Tuple target spec) })
 attachExternal _ _ _ = unsafeCrashWith "Decl: `@external(…)` may only precede a `def`"
 
+-- `@effects(host, io)` token list → a deduped list of effect names. Strict (ADR-0081): every token
+-- must be an effect name separated by `,` — `@effects(host io)` / `@effects(host + io)` are rejected
+-- rather than quietly read.
+parseEffects :: List Token -> Array String
+parseEffects toks = case strictEffects toks of
+  [] -> unsafeCrashWith "Decl: `@effects(…)` needs at least one effect"
+  effects -> Array.nub effects
+
+strictEffects :: List Token -> Array String
+strictEffects (TId e : rest) = Array.cons (effectAtom e) (strictEffectsTail rest)
+strictEffects Nil = []
+strictEffects _ = unsafeCrashWith "Decl: expected an effect name in `@effects(…)`"
+
+strictEffectsTail :: List Token -> Array String
+strictEffectsTail Nil = []
+strictEffectsTail (TComma : TId e : rest) = Array.cons (effectAtom e) (strictEffectsTail rest)
+strictEffectsTail _ = unsafeCrashWith "Decl: expected `,` between effects in `@effects(…)`"
+
+-- the effect names a function may declare (ADR-0048 §2); mirrors `Rian.Reach.effect_names`
+-- (hardcoded since Decl cannot import Reach — Reach depends on Decl).
+effectNames :: Array String
+effectNames = [ "host", "spawn", "io", "fs", "clock", "random", "net" ]
+
+effectAtom :: String -> String
+effectAtom e = if e `elem` effectNames then e else unsafeCrashWith ("Decl: unknown/unsupported effect `" <> e <> "` in `@effects`")
+
+attachEffects :: RawDecl -> Array String -> RawDecl
+attachEffects (DDef r) effects = DDef (r { effects = effects })
+attachEffects _ _ = unsafeCrashWith "Decl: `@effects(…)` may only precede a `def`"
+
 -- A `do … end` block body: collect the tokens up to the matching `end` (depth-counted;
 -- an atom/field keyword `:do`/`x.end` does not move the counter), then `block_seps`
 -- rewrites a top-level newline to a `;` statement separator.
@@ -661,7 +703,7 @@ defRaw name params headRev body =
     ph = parseHead sf.ret
     ret = map (TypeStr.normalize <<< collapseParens) ph.ret
   in
-    { name, params, ret, guard: ph.guard, body, pub: false, tvars: sf.tvars, bounds: sf.bounds, doc: Nothing, externals: [] }
+    { name, params, ret, guard: ph.guard, body, pub: false, tvars: sf.tvars, bounds: sf.bounds, doc: Nothing, externals: [], effects: [] }
 
 -- a `:=` body: a newline ends it unless the body plainly continues (inside unbalanced
 -- brackets, a `do…end`, or across a trailing/leading continuation operator).
@@ -765,6 +807,7 @@ externalFunc sig =
   , tvars: sig.tvars
   , bounds: sig.bounds
   , doc: sig.doc
+  , effects: sig.effects
   }
 
 -- bodiless signature + pattern clauses.
@@ -783,6 +826,7 @@ multiClauseFunc sig clauses =
     , tvars: sig.tvars
     , bounds: sig.bounds
     , doc: sig.doc
+    , effects: sig.effects
     }
 
 -- a single def whose head parameters double as the clause patterns.
@@ -802,6 +846,7 @@ singleClauseFunc d =
     , tvars: d.tvars
     , bounds: d.bounds
     , doc: d.doc
+    , effects: d.effects
     }
 
 clauseOf :: Int -> RawDef -> Clause
