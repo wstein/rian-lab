@@ -545,7 +545,17 @@ rch_corpus = [
   "def unar(x Int32 | Bool) := x",
   "def uclash(x Int32 | Char) := x",
   "def usum(x Color | Bool) := x\ntype Color := Red | Green",
-  "def same(x Int53, ^x) := x"
+  "def same(x Int53, ^x) := x",
+  # slice 3 — the parametric-:rs subset. F3 aligned-generic (reaches :rs): a forall builder whose
+  # construction args align positionally with the ctor's field tvars, and a forall passthrough with
+  # no construction. F1 pins (no forall → no instantiation to infer): a bare construction, and a
+  # Vec(T)-field builder. F2 pins (not Rust-emittable): a Map(K,V) field, and a recursion cycle.
+  "def mk(a K, b V) Pair forall K, V := P(a, b)\ntype Pair := P(a K, b V)",
+  "def swp(p Pair) Pair forall K, V := p\ntype Pair := P(a K, b V)",
+  "def mkbad(a K, b V) Pair := P(a, b)\ntype Pair := P(a K, b V)",
+  "def mkbox(x T) Box := Bx([x])\ntype Box := Bx(items Vec(T))",
+  "def useb(x Bad) Bad := x\ntype Bad := B(m Map(K, V))",
+  "def urec(x Rec) Rec := x\ntype Rec := R(nxt Rec, v T)"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

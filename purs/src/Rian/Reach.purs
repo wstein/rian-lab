@@ -34,7 +34,7 @@ import Data.String.Common (joinWith)
 import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CStmt(..), fromExpr)
 import Rian.Decl (parseToProg)
-import Rian.IR (Cap(..), Clause, Func, Prog)
+import Rian.IR (Cap(..), Clause, Field, Func, Prog, Type)
 import Rian.Pratt (MapPatPair(..), Pat(..), Surface, parse, parseBody) as P
 import Rian.Prim (normalize, overflowOps) as Prim
 import Rian.TypeStr (splitTopCommas)
@@ -45,8 +45,18 @@ type Blocker = { construct :: String, kind :: String, kills :: Array String }
 type Entry = { reach :: Array String, blockers :: Array Blocker }
 type Acc = { blockers :: Array Blocker, callees :: Array String }
 
--- the runtime-discriminator context the union-narrowing rule needs: the sum + struct names.
-type Disc = { sumNames :: Array String, structNames :: Array String }
+-- the program-wide context the union + parametric rules need: sum/struct names (runtime
+-- discriminators), the parametric type names + their Rust-emittability + ctor field tvars, and
+-- the local generic-function names + Fn-field-bearing type names (ADR-0061/0083).
+type Pctx =
+  { sumNames :: Array String
+  , structNames :: Array String
+  , names :: Array String
+  , emittable :: Array (Tuple String Boolean)
+  , ctors :: Array (Tuple String (Array String))
+  , generics :: Array String
+  , fnFieldNames :: Array String
+  }
 
 -- the closed target vocabulary, in canonical (sorted) order so reach sets compare by `==`.
 targetsAll :: Array String
@@ -74,7 +84,20 @@ analyze prog =
   funs = allFuncs prog
   modnames = map _.name prog.mods
   localNames = map _.name funs
-  disc = { sumNames: map _.name prog.types, structNames: map _.name prog.structs }
+
+  allTypes = prog.types <> Array.concatMap _.types prog.mods
+  allStructs = prog.structs <> Array.concatMap _.structs prog.mods
+  ptypes = expandPtypes allTypes
+  pnames = map _.name ptypes
+  pctx =
+    { sumNames: map _.name allTypes
+    , structNames: map _.name allStructs
+    , names: pnames
+    , emittable: emittableMap ptypes pnames
+    , ctors: Array.concatMap (\t -> map (\v -> Tuple v.ctor (map _.ty v.fields)) t.variants) ptypes
+    , generics: map _.name (Array.filter (\f -> not (Array.null f.tvars)) funs)
+    , fnFieldNames: map _.name (Array.filter hasFnField allTypes)
+    }
 
   -- per-function local facts: local reach (vocabulary minus killed targets, or the @external
   -- target set), the local-call callees, and the blockers.
@@ -83,7 +106,7 @@ analyze prog =
 
   fact f =
     let
-      scanned = scanFunc disc modnames f
+      scanned = scanFunc pctx modnames f
       killed = Array.nub (Array.concatMap _.kills scanned.blockers)
       lc =
         if Array.null f.externals then
@@ -110,19 +133,23 @@ allFuncs prog = prog.funcs <> Array.concatMap _.funcs prog.mods
 -- sigBlockers are built in the reference's canonical order (ref/int/width/any/any_op/union/pin);
 -- they seed the accumulator, the body scan PREPENDS, and `analyze`'s report reverses to source
 -- order — so a multi-blocker function (e.g. Any + Any-in-operator) matches byte-for-byte.
-scanFunc :: Disc -> Array String -> Func -> Acc
-scanFunc disc modnames f = foldl (scanClause modnames) { blockers: sigBlockers, callees: [] } f.clauses
+scanFunc :: Pctx -> Array String -> Func -> Acc
+scanFunc pctx modnames f = foldl (scanClause modnames) { blockers: sigBlockers, callees: [] } f.clauses
   where
-  sigTypes = Array.mapMaybe identity (map _.ty f.params <> [ f.ret ])
+  sigTypes = funcSigTypes f
   ref = if any (\p -> p.cap == Ref) f.params then [ refBlocker ] else []
   int = if any (_ == "Int") sigTypes then [ intBlocker ] else []
   width = if any (_ `elem` jsWideInts) sigTypes then [ widthBlocker ] else []
   anyB = if any (mentionsWord "Any") sigTypes then [ anyBlocker ] else []
   anyOp = if anyParamInJvmOp f then [ anyJvmOpBlocker ] else []
-  unionK = Array.nub (Array.concatMap (unionKills disc) sigTypes)
+  unionK = Array.nub (Array.concatMap (unionKills pctx) sigTypes)
   union = if Array.null unionK then [] else [ unionBlocker unionK ]
+  param = if parametricRsOk pctx f then [] else [ parametricBlocker ]
   pin = if any (\c -> any patHasPin c.pats) f.clauses then [ pinBlocker ] else []
-  sigBlockers = ref <> int <> width <> anyB <> anyOp <> union <> pin
+  sigBlockers = ref <> int <> width <> anyB <> anyOp <> union <> param <> pin
+
+funcSigTypes :: Func -> Array String
+funcSigTypes f = Array.mapMaybe identity (map _.ty f.params <> [ f.ret ])
 
 scanClause :: Array String -> Acc -> Clause -> Acc
 scanClause modnames acc c =
@@ -248,6 +275,10 @@ unionBlocker kills = { construct: "value union (A | B)", kind: "typed", kills }
 pinBlocker :: Blocker
 pinBlocker = { construct: "pin (`^x`)", kind: "pin", kills: [ "rs" ] }
 
+parametricBlocker :: Blocker
+parametricBlocker =
+  { construct: "parametric user type beyond the Rust emitter's monomorphic subset", kind: "generic", kills: [ "rs" ] }
+
 resultValueBlocker :: Blocker
 resultValueBlocker = { construct: "Result value (`{:ok,_}`/`{:error,_}`)", kind: "result", kills: [ "jvm" ] }
 
@@ -347,16 +378,16 @@ anyOperand _ _ = false
 -- ── union: a value-union type `A | B` (canonical `Union(...)`, ADR-0083). Narrowable (every
 -- member a DISTINCT runtime discriminator) kills nothing; otherwise (a clash / tvar / nested
 -- union) it pins off every target. ──
-unionKills :: Disc -> String -> Array String
-unionKills disc t = if unionClass disc t == "neither" then targetsAll else []
+unionKills :: Pctx -> String -> Array String
+unionKills pctx t = if unionClass pctx t == "neither" then targetsAll else []
 
-unionClass :: Disc -> String -> String
-unionClass disc t =
+unionClass :: Pctx -> String -> String
+unionClass pctx t =
   if Str.contains (Str.Pattern "Union(") t then
     case unionMembers t of
       Nothing -> "neither"
       Just members ->
-        let discs = map (discriminator disc) members
+        let discs = map (discriminator pctx) members
         in
           if all isJust discs && Array.length (Array.nub discs) == Array.length discs then "narrowable"
           else "neither"
@@ -374,15 +405,15 @@ unionMembers t = case Str.stripPrefix (Str.Pattern "Union(") t of
 
 -- the runtime discriminator class a member narrows under (`Nothing` = a tvar/unknown type).
 -- `Char`/`Int*`/`UInt*` share `integer` (a clash); distinct sums/structs are distinguishable.
-discriminator :: Disc -> String -> Maybe String
-discriminator disc t =
+discriminator :: Pctx -> String -> Maybe String
+discriminator pctx t =
   if t == "Bool" then Just "boolean"
   else if t == "String" then Just "binary"
   else if t == "Char" then Just "integer"
   else if isIntName t then Just "integer"
   else if isFloatName t then Just "float"
-  else if t `elem` disc.sumNames then Just ("sum:" <> t)
-  else if t `elem` disc.structNames then Just ("struct:" <> t)
+  else if t `elem` pctx.sumNames then Just ("sum:" <> t)
+  else if t `elem` pctx.structNames then Just ("struct:" <> t)
   else Nothing
 
 isIntName :: String -> Boolean
@@ -412,6 +443,172 @@ patHasPin _ = false
 mapPatPin :: P.MapPatPair -> Boolean
 mapPatPin (P.MPAtom _ p) = patHasPin p
 mapPatPin (P.MPKey _ p) = patHasPin p
+
+-- ── parametric user types: the Rust monomorphic-emit subset (ADR-0061) ──
+-- A function pins off `:rs` when its signature touches a parametric type beyond what the
+-- emitter monomorphizes (default-deny — never oversell `:rs`).
+parametricRsOk :: Pctx -> Func -> Boolean
+parametricRsOk pctx f =
+  if comparesFnField pctx f then false
+  else if not (usesParametric pctx.names f) then true
+  else if not (allEmittable pctx f) then false
+  else if not (Array.null f.tvars) then all (ctorAligned f) (parametricConstructions pctx.ctors f)
+  else Array.null (parametricConstructions pctx.ctors f) && builderTailOk pctx.generics f
+
+-- the parametric types: tvar-bearing bases + any type referencing one (a fixpoint outward).
+expandPtypes :: Array Type -> Array Type
+expandPtypes types =
+  let names = growPtypes types (map _.name (Array.filter parametricType types))
+  in Array.filter (\t -> t.name `elem` names) types
+
+growPtypes :: Array Type -> Array String -> Array String
+growPtypes types names =
+  let next = Array.nub (names <> map _.name (Array.filter (\t -> references t names) types))
+  in if Array.length next == Array.length names then names else growPtypes types next
+
+parametricType :: Type -> Boolean
+parametricType t = any (\fl -> typeHasTvar fl.ty) (typeFields t)
+
+references :: Type -> Array String -> Boolean
+references t names = any (\fl -> any (_ `elem` names) (identTokens fl.ty)) (typeFields t)
+
+typeFields :: Type -> Array Field
+typeFields t = Array.concatMap _.fields t.variants
+
+hasFnField :: Type -> Boolean
+hasFnField t = any (\fl -> Str.contains (Str.Pattern "Fn(") fl.ty) (typeFields t)
+
+-- which parametric types the Rust emitter lowers, as name→bool — a monotone fixpoint from
+-- all-false (a leaf resolves first, chains outward, a reference cycle never bootstraps).
+emittableMap :: Array Type -> Array String -> Array (Tuple String Boolean)
+emittableMap ptypes pnames = converge (map (\t -> Tuple t.name false) ptypes)
+  where
+  converge acc =
+    let next = map (\t -> Tuple t.name (allFieldsEmittable pnames acc t)) ptypes
+    in if next == acc then next else converge next
+
+allFieldsEmittable :: Array String -> Array (Tuple String Boolean) -> Type -> Boolean
+allFieldsEmittable pnames acc t = all (fieldEmittable pnames acc) (map _.ty (typeFields t))
+
+fieldEmittable :: Array String -> Array (Tuple String Boolean) -> String -> Boolean
+fieldEmittable pnames acc ft =
+  if ft `elem` pnames then lookupBool acc ft
+  else if any (_ `elem` pnames) (identTokens ft) then false
+  else if typeHasTvar ft then lowerableField ft
+  else true
+
+-- a tvar-bearing field type the Rust emitter lowers: a bare tvar, `Fn(...)`, or a
+-- `Vec`/`Option`/`Result` whose args are each lowerable.
+lowerableField :: String -> Boolean
+lowerableField t =
+  if not (typeHasTvar t) then true
+  else if tvar t then true
+  else if isJust (Str.stripPrefix (Str.Pattern "Fn(") t) then true
+  else case compoundArgs t of
+    Nothing -> false
+    Just args -> all lowerableField args
+
+-- the type args of a supported wrapper (`Vec`/`Option`/`Result`), else `Nothing`.
+compoundArgs :: String -> Maybe (Array String)
+compoundArgs t = case Str.stripSuffix (Str.Pattern ")") t of
+  Nothing -> Nothing
+  Just body -> map splitTopCommas (firstWrapper body)
+
+firstWrapper :: String -> Maybe String
+firstWrapper body = case Str.stripPrefix (Str.Pattern "Vec(") body of
+  Just inner -> Just inner
+  Nothing -> case Str.stripPrefix (Str.Pattern "Option(") body of
+    Just inner -> Just inner
+    Nothing -> Str.stripPrefix (Str.Pattern "Result(") body
+
+-- does the function's signature (params or return) name a parametric type?
+usesParametric :: Array String -> Func -> Boolean
+usesParametric names f = any (_ `elem` names) (Array.concatMap identTokens (funcSigTypes f))
+
+allEmittable :: Pctx -> Func -> Boolean
+allEmittable pctx f =
+  all (lookupBool pctx.emittable) (Array.nub (Array.filter (_ `elem` pctx.names) (Array.concatMap identTokens (funcSigTypes f))))
+
+-- an `Fn`-field type compared by `==`/`!=` can't lower (the `Rc<dyn Fn>` field isn't PartialEq).
+comparesFnField :: Pctx -> Func -> Boolean
+comparesFnField pctx f = usesParametric pctx.fnFieldNames f && bodyHasEq f
+
+bodyHasEq :: Func -> Boolean
+bodyHasEq f = any (\c -> maybe false (\b -> hasEq (coreOf P.parseBody b)) c.body) f.clauses
+
+hasEq :: CExpr -> Boolean
+hasEq node = thisEq || any hasEq (childrenOf node)
+  where
+  thisEq = case node of
+    EBin op _ _ -> op `elem` [ "==", "!=" ]
+    _ -> false
+
+-- every parametric construction `P(args)` in the body, as `{ordered_field_tvars, args}`.
+parametricConstructions :: Array (Tuple String (Array String)) -> Func -> Array (Tuple (Array String) (Array CExpr))
+parametricConstructions ctors f =
+  Array.concatMap (\c -> maybe [] (\b -> collectCtors ctors (coreOf P.parseBody b)) c.body) f.clauses
+
+collectCtors :: Array (Tuple String (Array String)) -> CExpr -> Array (Tuple (Array String) (Array CExpr))
+collectCtors ctors (ECall (EId n) args) =
+  (case lookupCtor ctors n of
+    Just fts -> [ Tuple fts args ]
+    Nothing -> [])
+    <> Array.concatMap (collectCtors ctors) args
+collectCtors ctors node = Array.concatMap (collectCtors ctors) (childrenOf node)
+
+-- a construction lowers iff each field/arg pair aligns: a bare-tvar field needs a bare param
+-- arg declared exactly that tvar; a lowerable compound field accepts any arg.
+ctorAligned :: Func -> Tuple (Array String) (Array CExpr) -> Boolean
+ctorAligned f (Tuple fieldTypes args) =
+  Array.length fieldTypes == Array.length args && all alignedPair (Array.zip fieldTypes args)
+  where
+  alignedPair (Tuple ft arg) =
+    if tvar ft then case arg of
+      EId n -> lookupParamType f n == Just ft
+      _ -> false
+    else lowerableField ft
+
+lookupParamType :: Func -> String -> Maybe String
+lookupParamType f n = case Array.find (\p -> p.name == n) f.params of
+  Just p -> p.ty
+  Nothing -> Nothing
+
+-- a non-generic builder lowers only when its tail is a direct call to a generic helper.
+builderTailOk :: Array String -> Func -> Boolean
+builderTailOk generics f =
+  all (\c -> maybe false (\b -> tailOk generics (coreOf P.parseBody b)) c.body) f.clauses
+
+tailOk :: Array String -> CExpr -> Boolean
+tailOk generics (EBlock stmts) = case Array.last stmts of
+  Just (CExprStmt (ECall (EId h) _)) -> h `elem` generics
+  _ -> false
+tailOk _ _ = false
+
+typeHasTvar :: String -> Boolean
+typeHasTvar t = any tvar (identTokens t)
+
+-- a type-variable token: a single uppercase optionally followed by one digit (`^[A-Z][0-9]?$`).
+tvar :: String -> Boolean
+tvar s =
+  let
+    cps = CP.toCodePointArray s
+    n = Array.length cps
+    up i = maybe false isUpperCp (Array.index cps i)
+    dg i = maybe false isDigitCp (Array.index cps i)
+  in
+    (n == 1 && up 0) || (n == 2 && up 0 && dg 1)
+
+isUpperCp :: CP.CodePoint -> Boolean
+isUpperCp cp = cp >= CP.codePointFromChar 'A' && cp <= CP.codePointFromChar 'Z'
+
+isDigitCp :: CP.CodePoint -> Boolean
+isDigitCp cp = cp >= CP.codePointFromChar '0' && cp <= CP.codePointFromChar '9'
+
+lookupBool :: Array (Tuple String Boolean) -> String -> Boolean
+lookupBool tbl k = fromMaybe false (map snd (Array.find (\(Tuple n _) -> n == k) tbl))
+
+lookupCtor :: Array (Tuple String (Array String)) -> String -> Maybe (Array String)
+lookupCtor tbl k = map snd (Array.find (\(Tuple n _) -> n == k) tbl)
 
 -- | The `rch` parity unit: serialize the reach report (`name/arity reach=… blockers=…`), keyed
 -- | order-independent (sorted by function key; reach sorted; blockers in report order).
