@@ -247,6 +247,9 @@ envTree = addType baseEnv "tree" [ Tuple (CName "leaf") 0, Tuple (CName "node") 
 envOption :: Env
 envOption = addType baseEnv "option" [ Tuple (CName "some") 1, Tuple (CName "none") 0 ]
 
+envPoint :: Env
+envPoint = addStruct baseEnv "Point" [ "x", "y" ]
+
 scenarios :: Array (Tuple String Scenario)
 scenarios =
   [ Tuple "list-exhaustive" { env: baseEnv, arms: [ a "[]", a "[h | t]" ], n: 1 }
@@ -266,6 +269,13 @@ scenarios =
   , Tuple "as-passthrough" { env: baseEnv, arms: [ a "all @ [h | t]", a "[]" ], n: 1 }
   , Tuple "guard-excluded" { env: baseEnv, arms: [ { src: "[]", guard: true }, a "_" ], n: 1 }
   , Tuple "two-arg" { env: envTree, arms: [ a "Leaf, Leaf", a "_, _" ], n: 2 }
+  -- struct patterns: a single-ctor type is exhaustive; field order is canonicalized so a
+  -- reordered `Point(y: …, x: …)` lowers to the same positional vector.
+  , Tuple "struct-exhaustive" { env: envPoint, arms: [ a "Point(x: p, y: q)" ], n: 1 }
+  , Tuple "struct-reordered" { env: envPoint, arms: [ a "Point(y: q, x: p)" ], n: 1 }
+  -- atom literals are an open universe (infinite): a `_` arm is still required.
+  , Tuple "atom-infinite" { env: baseEnv, arms: [ a ":ok", a ":err" ], n: 1 }
+  , Tuple "atom-wild" { env: baseEnv, arms: [ a ":ok", a "_" ], n: 1 }
   ]
 
 lookupScenario :: String -> Maybe Scenario

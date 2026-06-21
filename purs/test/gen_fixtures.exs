@@ -417,6 +417,9 @@ decl_corpus = [
   "pub abstract Money := Int64 do\n  op +(a Money, b Money) Money\n  op *(a Money, b Int64) Money\n  to cents() Int64\nend",
   "abstract Empty := Int53 do\nend",
   "mod U do\nabstract Id := Int53 do\n  to raw() Int53\nend\nend",
+  # op rule with parametric param + return types: the params/return contain parens, so the
+  # balanced `extract_parens` split (not a greedy regex) must keep them intact.
+  "abstract Vector := Vec(Int53) do\n  op map(f Fn(Int53, Int53), v Vector) Vec(Int53)\n  to items() Vec(Int53)\nend",
   # stage 4e (macro): a macro emits no IR (expanded before the checker); pair with a type/
   # struct (not a `def`, whose body assemble would macro-expand from a string to an AST) to
   # show the macro decl is consumed and dropped while the sibling survives.
@@ -744,6 +747,7 @@ defmodule ExhFixtures do
     do: Exhaustiveness.add_type(Exhaustiveness.base_env(), :option, [{:some, 1}, {:none, 0}])
 
   defp env_digit, do: Exhaustiveness.add_range(Exhaustiveness.base_env(), :digit, 0, 3)
+  defp env_point, do: Rian.PatternLower.add_struct(Exhaustiveness.base_env(), "Point", [:x, :y])
 
   def scenarios do
     base = Exhaustiveness.base_env()
@@ -766,7 +770,11 @@ defmodule ExhFixtures do
       {"unreachable-after-wild", base, [{"_", false}, {"[]", false}], 1},
       {"as-passthrough", base, [{"all @ [h | t]", false}, {"[]", false}], 1},
       {"guard-excluded", base, [{"[]", true}, {"_", false}], 1},
-      {"two-arg", env_tree(), [{"Leaf, Leaf", false}, {"_, _", false}], 2}
+      {"two-arg", env_tree(), [{"Leaf, Leaf", false}, {"_, _", false}], 2},
+      {"struct-exhaustive", env_point(), [{"Point(x: p, y: q)", false}], 1},
+      {"struct-reordered", env_point(), [{"Point(y: q, x: p)", false}], 1},
+      {"atom-infinite", base, [{":ok", false}, {":err", false}], 1},
+      {"atom-wild", base, [{":ok", false}, {"_", false}], 1}
     ]
   end
 

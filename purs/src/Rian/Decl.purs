@@ -502,11 +502,12 @@ parseOpRule line = case extractParens (trim (dropPrefix "op " line)) of
     trim name <> "(" <> joinWith ", " (map (fromMaybe "_infer" <<< _.ty) (parseParams inside)) <> ") " <> trim rest
   Nothing -> unsafeCrashWith ("Decl: malformed `op` in abstract: " <> line)
 
--- `to base() Type` → the canonical `base() Type`.
+-- `to base() Type` → the canonical `base() Type`. A cast takes no arguments, so the parens
+-- must be empty — a `to f(x) T` is a hard error (matching the reference).
 parseCastRule :: String -> String
 parseCastRule line = case extractParens (trim (dropPrefix "to " line)) of
-  Just { name, rest } -> trim name <> "() " <> trim rest
-  Nothing -> unsafeCrashWith ("Decl: malformed `to` cast in abstract: " <> line)
+  Just { name, inside, rest } | trim inside == "" -> trim name <> "() " <> trim rest
+  _ -> unsafeCrashWith ("Decl: malformed `to` cast in abstract: " <> line)
 
 takeUntilDo :: List Token -> List Token -> Tuple (List Token) (List Token)
 takeUntilDo (TKw "do" : r) acc = Tuple (List.reverse acc) (TKw "do" : r)
