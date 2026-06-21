@@ -99,7 +99,9 @@ run_stream(<<"cap">>, Src) -> hexbin('rian_capability@ps':rustParamSexpr(Src));
 %% Rian.Capability countUses (canon = sorted name:count linearity occurrences of an expr)
 run_stream(<<"lin">>, Src) -> hexbin('rian_capability@ps':countUsesSexpr(Src));
 %% Rian.Check program_ic (canon = the dumped whole-program inference-context tables)
-run_stream(<<"pic">>, Src) -> hexbin('rian_check@ps':programIcSexpr(Src)).
+run_stream(<<"pic">>, Src) -> hexbin('rian_check@ps':programIcSexpr(Src));
+%% Rian.Check infer with a real ic (canon = the inferred type of `prog ;; expr`)
+run_stream(<<"ifc">>, Src) -> hexbin('rian_check@ps':inferIcSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

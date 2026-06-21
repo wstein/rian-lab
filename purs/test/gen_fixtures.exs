@@ -605,6 +605,18 @@ ic_corpus = [
   "def add(a Int53, b Int53) Int53 := a + b"
 ]
 
+# Rian.Check `infer` with a real `ic` — the `ifc` stream. `prog ;; expr`: build `program_ic`
+# over `prog`, infer `expr`. Covers the ic-using call clauses — a sum/struct constructor
+# (`ic.ctors`), a program function's declared return (`ic.funs`), a cross-module call, and a
+# user-fn call nested in arithmetic. Functions are explicitly-typed (non-generic).
+ifc_corpus = [
+  "type Color := Red | Green | Blue(shade Int53);;Blue(5)",
+  "def foo(x Int53) String := x;;foo(1)",
+  "def helper(x Int53) Bool := true;;M.helper(1)",
+  "struct Point(x Int53, y Int53);;Point(1, 2)",
+  "def baz(x Int53) Int53 := x;;baz(n) + 1"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1222,6 +1234,14 @@ defmodule CheckCanon do
     out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse(src)), @fixed_env, %{}))
   end
 
+  # the `ifc` stream: infer `expr` under a real `ic` built from `program_ic` over the leading
+  # `prog`, the two `;;`-separated. Tests the ic-using call clauses (ctor / user-fn / cross-module).
+  def infer_ic(src) do
+    [prog, expr] = String.split(src, ";;")
+    ic = Rian.Check.program_ic(Rian.Decl.parse(prog, assemble_only: true))
+    out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse(expr)), @fixed_env, ic))
+  end
+
   # the `bdy` stream: infer a `;`-separated function body (binds threaded through the env).
   def infer_body(src) do
     out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse_body(src)), @fixed_env, %{}))
@@ -1396,6 +1416,9 @@ lines =
     end) ++
     Enum.map(ic_corpus, fn s ->
       "pic\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.ic_dump(s))}"
+    end) ++
+    Enum.map(ifc_corpus, fn s ->
+      "ifc\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer_ic(s))}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)

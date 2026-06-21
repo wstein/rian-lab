@@ -32,6 +32,7 @@ module Rian.Check
   , joinSexpr
   , inferSexpr
   , inferBodySexpr
+  , inferIcSexpr
   , programIcSexpr
   ) where
 
@@ -42,7 +43,7 @@ import Data.Foldable (all, any, elem)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String as Str
-import Data.String.CodeUnits (toCharArray)
+import Data.String.CodeUnits (singleton, toCharArray)
 import Data.String.Common (joinWith, replaceAll, split)
 import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
@@ -298,57 +299,64 @@ type Env = Array (Tuple String Ty)
 -- | the inference context (`ic` — ctors/fsigs/abstract ops) arrive in later stages, so those
 -- | nodes defer to `Unknown` here (the conservative slice never over-claims).
 -- @rian_sig pub def infer(ast val Expr, env val Dict(String, String)) String
-infer :: CExpr -> Env -> Ty
-infer (ENum n) _ = if hasDotOrE n then TName "Float64" else TName "Int53"
-infer (EStr _) _ = TName "String"
-infer (EChar _) _ = TName "Char"
-infer (EId "true") _ = TName "Bool"
-infer (EId "false") _ = TName "Bool"
-infer (EId x) env = fromMaybe Unknown (envLookup x env)
-infer (EUnary "-" x) env = infer x env
-infer (EUnary "not" _) _ = TName "Bool"
-infer (EBin op l r) env = inferBin op l r env
-infer (EList elems tail) env = inferList elems tail env
-infer (ETuple elems) env = inferTuple elems env
-infer (EMap pairs) env = inferMap pairs env
+infer :: CExpr -> Env -> Ic -> Ty
+infer (ENum n) _ _ = if hasDotOrE n then TName "Float64" else TName "Int53"
+infer (EStr _) _ _ = TName "String"
+infer (EChar _) _ _ = TName "Char"
+infer (EId "true") _ _ = TName "Bool"
+infer (EId "false") _ _ = TName "Bool"
+infer (EId x) env _ = fromMaybe Unknown (envLookup x env)
+infer (EUnary "-" x) env ic = infer x env ic
+infer (EUnary "not" _) _ _ = TName "Bool"
+infer (EBin op l r) env ic = inferBin op l r env ic
+infer (EList elems tail) env ic = inferList elems tail env ic
+infer (ETuple elems) env ic = inferTuple elems env ic
+infer (EMap pairs) env ic = inferMap pairs env ic
 -- `if`'s value is the LUB-join of its two arms (a value union when they don't share an LUB).
 -- The arms are `do`/`else` blocks, so each is an `EBlock` whose value is its last statement.
-infer (EIf _ t e) env = branchJoin [ Tuple t (infer t env), Tuple e (infer e env) ]
+infer (EIf _ t e) env ic = branchJoin [ Tuple t (infer t env ic), Tuple e (infer e env ic) ]
 -- a lambda `(a, b) -> body` infers the arrow type `Fn(a_t.., body_t)`.
-infer (ELambda ps body) env = inferLambda ps body env
-infer (EBlock stmts) env = inferBlock stmts env Unknown
+infer (ELambda ps body) env ic = inferLambda ps body env ic
+infer (EBlock stmts) env ic = inferBlock stmts env Unknown ic
 -- a `with` yields its do-block value on the happy path (clause-bound vars infer `Unknown`).
-infer (EWith _ body _) env = infer body env
+infer (EWith _ body _) env ic = infer body env ic
 -- prim intrinsics (after `Rian.Prim.normalize` rewrote `Prim.x`/`panic` to `__prim_x`).
-infer (ECall (EId "__prim_char_code") _) _ = TName "Int53"
-infer (ECall (EId "__prim_int_to_float") _) _ = TName "Float64"
-infer (ECall (EId "__prim_str_to_atom") _) _ = TName "Symbol"
-infer (ECall (EId "__prim_str_concat_all") _) _ = TName "String"
-infer (ECall (EId "__prim_char_to_string") _) _ = TName "String"
-infer (ECall (EId "__prim_panic") _) _ = Unknown
+infer (ECall (EId "__prim_char_code") _) _ _ = TName "Int53"
+infer (ECall (EId "__prim_int_to_float") _) _ _ = TName "Float64"
+infer (ECall (EId "__prim_str_to_atom") _) _ _ = TName "Symbol"
+infer (ECall (EId "__prim_str_concat_all") _) _ _ = TName "String"
+infer (ECall (EId "__prim_char_to_string") _) _ _ = TName "String"
+infer (ECall (EId "__prim_panic") _) _ _ = Unknown
 -- `inspect/1` is the host value→text function: always `String`.
-infer (ECall (EId "inspect") [ _ ]) _ = TName "String"
--- a bare call: a `Fn`-typed var applied → its return; else a Kernel auto-import builtin.
-infer (ECall (EId f) args) env = case envLookup f env of
+infer (ECall (EId "inspect") [ _ ]) _ _ = TName "String"
+-- a bare call: a `Fn`-typed var applied → its return; else a sum/struct constructor (`ic.ctors`
+-- → its type), a program function (`ic.funs` → its declared return), or a Kernel-auto-import
+-- builtin. (An empty `ic` falls straight through to the builtin — the env-only behaviour.)
+infer (ECall (EId f) args) env ic = case envLookup f env of
   Just ft | isFnTy ft -> fnRet ft
-  _ -> builtinOrUnknown Nothing f (length args)
--- a ZERO-arg dot-call is the `abstract`-cast position (`m.base()`): with no inference context
--- there is no declared cast, so it is `Unknown` — and this intercepts a zero-arg `Mod.fun()`
--- (e.g. `Map.new()`) before the builtin clause, matching the reference's clause order.
-infer (ECall (EDot _ _) []) _env = Unknown
--- a module call `Mod.fun(args)`: a host/stdlib builtin's return, or a fixed-head poly stdlib
--- call (`List.map`) instantiated from the argument types.
-infer (ECall (EDot (EId modn) fn) args) env = case Builtins.polySig (Just modn) fn (length args) of
-  -- a fixed-head polymorphic stdlib call (`List.reverse` → `Vec(…)`): instantiate its tvars
-  -- from the argument types, `Any`-filling any that can't bind.
-  Just sig -> instantiateLax sig (map (\a -> infer a env) args)
-  Nothing -> builtinOrUnknown (Just modn) fn (length args)
+  _ -> case ctorType ic f of
+    Just ty -> TName ty
+    Nothing -> case calledRet ic f (length args) of
+      Unknown -> builtinOrUnknown Nothing f (length args)
+      v -> v
+-- a ZERO-arg dot-call is the `abstract`-cast position (`m.base()`): cast inference (ic.opaques)
+-- is a later slice, so it is `Unknown` — and this intercepts a zero-arg `Mod.fun()` (e.g.
+-- `Map.new()`) before the builtin clause, matching the reference's clause order.
+infer (ECall (EDot _ _) []) _env _ = Unknown
+-- a module call `Mod.fun(args)`: a program function's declared return (`ic.funs`, keyed by
+-- name+arity, module-flattened as on the BEAM), else a fixed-head poly stdlib call (`List.map`)
+-- instantiated from the argument types, else a host/stdlib builtin.
+infer (ECall (EDot (EId modn) fn) args) env ic = case lookupFunRaw ic.funs fn (length args) of
+  Just ret -> TName ret
+  Nothing -> case Builtins.polySig (Just modn) fn (length args) of
+    Just sig -> instantiateLax sig (map (\a -> infer a env ic) args)
+    Nothing -> builtinOrUnknown (Just modn) fn (length args)
 -- an Erlang-BIF FFI call `:erlang.phash2(x)` — typed from the foreign registry.
-infer (ECall (EDot (EAtom modn) fn) args) _ = builtinOrUnknown (Just modn) fn (length args)
+infer (ECall (EDot (EAtom modn) fn) args) _ _ = builtinOrUnknown (Just modn) fn (length args)
 -- any other callable (a lambda result, a returned function): its return when it is known
 -- to be a function, else `Unknown`.
-infer (ECall fn _) env = let ft = infer fn env in if isFnTy ft then fnRet ft else Unknown
-infer _ _ = Unknown
+infer (ECall fn _) env ic = let ft = infer fn env ic in if isFnTy ft then fnRet ft else Unknown
+infer _ _ _ = Unknown
 
 builtinOrUnknown :: Maybe String -> String -> Int -> Ty
 builtinOrUnknown m f a = maybe Unknown TName (Builtins.ret m f a)
@@ -390,12 +398,12 @@ fnRet _ = Unknown
 
 -- block-statement threading: a bind extends the env and becomes the running value; the
 -- block's type is its last statement's.
-inferBlock :: Array CStmt -> Env -> Ty -> Ty
-inferBlock stmts env value = case uncons stmts of
+inferBlock :: Array CStmt -> Env -> Ty -> Ic -> Ty
+inferBlock stmts env value ic = case uncons stmts of
   Nothing -> value
-  Just { head: CBind n e, tail: rest } -> let t = infer e env in inferBlock rest (envPut n t env) t
-  Just { head: CTypedBind n t _, tail: rest } -> inferBlock rest (envPut n (TName t) env) (TName t)
-  Just { head: CExprStmt e, tail: rest } -> inferBlock rest env (infer e env)
+  Just { head: CBind n e, tail: rest } -> let t = infer e env ic in inferBlock rest (envPut n t env) t ic
+  Just { head: CTypedBind n t _, tail: rest } -> inferBlock rest (envPut n (TName t) env) (TName t) ic
+  Just { head: CExprStmt e, tail: rest } -> inferBlock rest env (infer e env ic) ic
 
 envLookup :: String -> Env -> Maybe Ty
 envLookup k = map snd <<< find (\(Tuple k' _) -> k' == k)
@@ -414,11 +422,11 @@ intOps = [ "div", "rem" ]
 arithOps :: Array String
 arithOps = [ "+", "-", "*" ]
 
-inferBin :: String -> CExpr -> CExpr -> Env -> Ty
-inferBin op l r env =
+inferBin :: String -> CExpr -> CExpr -> Env -> Ic -> Ty
+inferBin op l r env ic =
   let
-    lt = infer l env
-    rt = infer r env
+    lt = infer l env ic
+    rt = infer r env ic
   in
     -- (abstract-operator resolution needs the inference context; empty here, so it falls
     -- through to the default arithmetic rules — a later stage threads `ic`.)
@@ -466,17 +474,17 @@ intLiteral n = not (hasDotOrE n)
 
 -- ── list / tuple / map literals ──────────────────────────────────────────────
 
-inferList :: Array CExpr -> Maybe CExpr -> Env -> Ty
-inferList elems tail env =
+inferList :: Array CExpr -> Maybe CExpr -> Env -> Ic -> Ty
+inferList elems tail env ic =
   let
-    elemT = debottom (foldl (\acc e -> join (infer e env) acc) Bottom elems)
-    te = listElem (inferTail tail env)
+    elemT = debottom (foldl (\acc e -> join (infer e env ic) acc) Bottom elems)
+    te = listElem (inferTail tail env ic)
   in
     if te == Unknown || te == elemT then listOf (conservative elemT) else Unknown
 
-inferTail :: Maybe CExpr -> Env -> Ty
-inferTail Nothing _ = Unknown
-inferTail (Just t) env = infer t env
+inferTail :: Maybe CExpr -> Env -> Ic -> Ty
+inferTail Nothing _ _ = Unknown
+inferTail (Just t) env ic = infer t env ic
 
 listElem :: Ty -> Ty
 listElem (TName s) = case Str.stripPrefix (Str.Pattern "Vec(") s of
@@ -490,23 +498,23 @@ listOf _ = TName "Vec(Any)"
 
 -- a tuple literal infers its structural shape `(Ta,Tb,…)` — an unpinnable element defers to
 -- `Any`. An ATOM-tagged tuple (`{:ok, v}`) is a tagged sum value, not a raw tuple → `Unknown`.
-inferTuple :: Array CExpr -> Env -> Ty
-inferTuple elems env = case head elems of
+inferTuple :: Array CExpr -> Env -> Ic -> Ty
+inferTuple elems env ic = case head elems of
   Just (EAtom _) -> Unknown
-  _ -> TName ("(" <> joinWith "," (map (\e -> tyStr (conservativeUnk (infer e env))) elems) <> ")")
+  _ -> TName ("(" <> joinWith "," (map (\e -> tyStr (conservativeUnk (infer e env ic))) elems) <> ")")
 
 -- a `%{…}` literal infers `Dict(KeyT,ValT)` — key/value types each LUB-join across the pairs.
-inferMap :: Array CMapPair -> Env -> Ty
-inferMap pairs env =
+inferMap :: Array CMapPair -> Env -> Ic -> Ty
+inferMap pairs env ic =
   let
-    kt = joinAll (map (inferMapKey env) pairs)
-    vt = joinAll (map (\p -> infer (mapVal p) env) pairs)
+    kt = joinAll (map (inferMapKey env ic) pairs)
+    vt = joinAll (map (\p -> infer (mapVal p) env ic) pairs)
   in
     TName ("Dict(" <> tyStr (conservativeUnk kt) <> "," <> tyStr (conservativeUnk vt) <> ")")
 
-inferMapKey :: Env -> CMapPair -> Ty
-inferMapKey _ (CMAtom _ _) = TName "Symbol"
-inferMapKey env (CMKey k _) = infer k env
+inferMapKey :: Env -> Ic -> CMapPair -> Ty
+inferMapKey _ _ (CMAtom _ _) = TName "Symbol"
+inferMapKey env ic (CMKey k _) = infer k env ic
 
 mapVal :: CMapPair -> CExpr
 mapVal (CMAtom _ v) = v
@@ -516,13 +524,13 @@ mapVal (CMKey _ v) = v
 
 -- ── lambdas (arrow types) ────────────────────────────────────────────────────
 
-inferLambda :: Array P.Param -> CExpr -> Env -> Ty
-inferLambda ps body env =
+inferLambda :: Array P.Param -> CExpr -> Env -> Ic -> Ty
+inferLambda ps body env ic =
   let
     lenv = foldl (\e prm -> envPut prm.name (paramTy prm) e) env ps
     args = map paramTy ps
   in
-    buildFn args (infer body lenv)
+    buildFn args (infer body lenv ic)
   where
   paramTy prm = maybe Unknown TName prm.ty
 
@@ -643,12 +651,61 @@ pairOp f src = case split (Str.Pattern ";;") src of
 -- `Prim.normalize` (rewriting `Prim.x`/`panic` → `__prim_x`) matches the reference's
 -- normalizing `Pratt.parse`; it is identity over non-`Prim` expressions.
 inferSexpr :: String -> String
-inferSexpr src = tyStr (infer (fromExpr (normalize (P.parse src))) fixedEnv)
+inferSexpr src = tyStr (infer (fromExpr (normalize (P.parse src))) fixedEnv emptyIc)
 
 -- | The `bdy` stream: infer a function body (`;`-separated statements with binds threaded
 -- | through the env), composing `lexer → Pratt.parseBody → Prim.normalize → Core → infer`.
 inferBodySexpr :: String -> String
-inferBodySexpr src = tyStr (infer (fromExpr (normalize (P.parseBody src))) fixedEnv)
+inferBodySexpr src = tyStr (infer (fromExpr (normalize (P.parseBody src))) fixedEnv emptyIc)
+
+-- the empty inference context — `infer` with it reproduces the env-only behaviour.
+emptyIc :: Ic
+emptyIc = { tdefs: [], fields: [], funs: [], fsigs: [], ctors: [], ranges: [], opaques: [], impls: [], fbounds: [] }
+
+-- | The `ifc` stream: infer an expression under a real `ic` built from `program_ic` over a
+-- | leading program, `;;`-separated from the expression. Tests the ic-using call clauses
+-- | (a sum/struct constructor, a program function's return, a cross-module call).
+inferIcSexpr :: String -> String
+inferIcSexpr src = case split (Str.Pattern ";;") src of
+  [ prog, expr ] -> tyStr (infer (fromExpr (normalize (P.parse expr))) fixedEnv (programIc (parseToProg prog)))
+  _ -> "?"
+
+-- ── ic-using call inference ──
+-- a sum/struct constructor → the type it builds (`ic.ctors`).
+ctorType :: Ic -> String -> Maybe String
+ctorType ic name = map snd (find (\(Tuple k _) -> k == name) ic.ctors)
+
+-- a program function's declared return (`ic.funs`), keyed name+arity; a generic return (one
+-- mentioning a tvar) stays `Unknown` (pinning it to its literal form would lie to a concrete
+-- caller). Not found → `Unknown`.
+calledRet :: Ic -> String -> Int -> Ty
+calledRet ic f arity = case lookupFunRaw ic.funs f arity of
+  Nothing -> Unknown
+  Just ret -> if hasTvar ret then Unknown else TName ret
+
+-- the raw declared return string for `name/arity` in `ic.funs` (`Nothing` = absent or un-filled).
+lookupFunRaw :: Array (Tuple (Tuple String Int) (Maybe String)) -> String -> Int -> Maybe String
+lookupFunRaw funs f arity = case find (\(Tuple k _) -> k == Tuple f arity) funs of
+  Just (Tuple _ ret) -> ret
+  Nothing -> Nothing
+
+-- does a type string mention a type-variable token (`^[A-Z][0-9]?$` per identifier)?
+hasTvar :: String -> Boolean
+hasTvar t = any isTvar (typeIdents t)
+
+-- the `[A-Za-z_]\w*` identifier tokens of a type string (maximal word runs).
+typeIdents :: String -> Array String
+typeIdents t =
+  let final = foldl step { toks: [], cur: "" } (toCharArray t)
+  in final.toks <> (if final.cur == "" then [] else [ final.cur ])
+  where
+  step acc c =
+    if isWordChar c then acc { cur = acc.cur <> singleton c }
+    else if acc.cur == "" then acc
+    else acc { toks = acc.toks <> [ acc.cur ], cur = "" }
+
+isWordChar :: Char -> Boolean
+isWordChar c = isUpper c || (c >= 'a' && c <= 'z') || isDigit c || c == '_'
 
 -- the parity env (must match `CheckCanon.fixed_env` in gen_fixtures.exs).
 fixedEnv :: Env
