@@ -561,7 +561,22 @@ check_infer_corpus = [
   "{1, b}",
   "{n}",
   "%{a: 1, b: 2}",
-  "%{a: x, b: n}"
+  "%{a: x, b: n}",
+  # stage 3a: if (branch-join + value unions) + lambdas (arrow types)
+  "if b do x else y end",
+  "if b do 1 else 2 end",
+  "if b do x else 1 end",
+  "if b do n else x end",
+  "if b do b else b end",
+  "if b do x else s end",
+  "if b do 1 else s end",
+  "if b do x else f end",
+  "if b do c else n end",
+  "(x) -> x",
+  "(a Int64) -> a",
+  "(a Int64, b Int64) -> a + b",
+  "(a) -> not a",
+  "() -> 1"
 ]
 
 check_join_corpus = [

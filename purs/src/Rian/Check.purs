@@ -29,16 +29,16 @@ module Rian.Check
 
 import Prelude hiding (join)
 
-import Data.Array (find, foldl, head, length, uncons, zipWith)
+import Data.Array (filter, find, foldl, head, length, nubEq, null, snoc, uncons, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String as Str
 import Data.String.CodeUnits (toCharArray)
 import Data.String.Common (joinWith, split)
 import Data.Tuple (Tuple(..), snd)
-import Rian.Core (CExpr(..), CMapPair(..), fromExpr)
-import Rian.Pratt (parse) as P
+import Rian.Core (CExpr(..), CMapPair(..), CStmt(..), fromExpr)
+import Rian.Pratt (Param, parse) as P
 import Rian.TypeStr (splitTopCommas)
 
 -- | An inferred type: a type-name string (`"Int53"`, `"Fn(_,Int64)"`, `"Vec(Int53)"`), or
@@ -295,10 +295,30 @@ infer (EBin op l r) env = inferBin op l r env
 infer (EList elems tail) env = inferList elems tail env
 infer (ETuple elems) env = inferTuple elems env
 infer (EMap pairs) env = inferMap pairs env
+-- `if`'s value is the LUB-join of its two arms (a value union when they don't share an LUB).
+-- The arms are `do`/`else` blocks, so each is an `EBlock` whose value is its last statement.
+infer (EIf _ t e) env = branchJoin [ Tuple t (infer t env), Tuple e (infer e env) ]
+-- a lambda `(a, b) -> body` infers the arrow type `Fn(a_t.., body_t)`.
+infer (ELambda ps body) env = inferLambda ps body env
+infer (EBlock stmts) env = inferBlock stmts env Unknown
+-- a `with` yields its do-block value on the happy path (clause-bound vars infer `Unknown`).
+infer (EWith _ body _) env = infer body env
 infer _ _ = Unknown
+
+-- block-statement threading: a bind extends the env and becomes the running value; the
+-- block's type is its last statement's.
+inferBlock :: Array CStmt -> Env -> Ty -> Ty
+inferBlock stmts env value = case uncons stmts of
+  Nothing -> value
+  Just { head: CBind n e, tail: rest } -> let t = infer e env in inferBlock rest (envPut n t env) t
+  Just { head: CTypedBind n t _, tail: rest } -> inferBlock rest (envPut n (TName t) env) (TName t)
+  Just { head: CExprStmt e, tail: rest } -> inferBlock rest env (infer e env)
 
 envLookup :: String -> Env -> Maybe Ty
 envLookup k = map snd <<< find (\(Tuple k' _) -> k' == k)
+
+envPut :: String -> Ty -> Env -> Env
+envPut k v env = snoc (filter (\(Tuple k' _) -> k' /= k) env) (Tuple k v)
 
 -- ── binary operators ─────────────────────────────────────────────────────────
 
@@ -410,6 +430,95 @@ mapVal (CMAtom _ v) = v
 mapVal (CMKey _ v) = v
 
 -- ── small inference helpers ──────────────────────────────────────────────────
+
+-- ── lambdas (arrow types) ────────────────────────────────────────────────────
+
+inferLambda :: Array P.Param -> CExpr -> Env -> Ty
+inferLambda ps body env =
+  let
+    lenv = foldl (\e prm -> envPut prm.name (paramTy prm) e) env ps
+    args = map paramTy ps
+  in
+    buildFn args (infer body lenv)
+  where
+  paramTy prm = maybe Unknown TName prm.ty
+
+-- `Fn(A1,…,An,R)` from inferred component types (an `Unknown`/wildcard slot → `_`).
+buildFn :: Array Ty -> Ty -> Ty
+buildFn args ret = TName ("Fn(" <> joinWith "," (map compStr (snoc args ret)) <> ")")
+
+compStr :: Ty -> String
+compStr Unknown = "_"
+compStr (TName s) = s
+compStr t = tyStr t
+
+-- ── branch / arm join (if / case arms) ───────────────────────────────────────
+
+-- The type of an expression whose value is one of several typed branches. An integer-literal
+-- branch is width-flexible (adopts the non-literal branches' integer type); otherwise the
+-- branches join as ALTERNATIVES — a common LUB, else a value union (ADR-0083).
+branchJoin :: Array (Tuple CExpr Ty) -> Ty
+branchJoin typed =
+  let
+    allTs = map snd typed
+    nonLit = map snd (filter (\(Tuple e _) -> not (intLitExpr e)) typed)
+  in
+    if null nonLit then joinAll allTs
+    else if intType (joinAll nonLit) then joinAll nonLit
+    else joinAlts allTs
+
+-- join branches as alternatives: a common LUB where one exists, else a value `Union(…)`;
+-- a genuinely uninferable (`Unknown`/`Mismatch`) branch poisons the whole to `Unknown`.
+joinAlts :: Array Ty -> Ty
+joinAlts types =
+  if any (\t -> t == Unknown || t == Mismatch) types then Unknown
+  else debottom (foldl step Bottom types)
+  where
+  step acc t
+    | acc == Unknown = Unknown
+    | otherwise = case join acc t of
+        Unknown -> unionJoin acc t
+        j -> j
+
+unionJoin :: Ty -> Ty -> Ty
+unionJoin from to =
+  let members = nubEq (unionMembers from <> unionMembers to) in
+  case members of
+    [ m ] -> TName m
+    _ -> if primDiscClash members then Unknown else TName ("Union(" <> joinWith "," members <> ")")
+
+unionMembers :: Ty -> Array String
+unionMembers (TName s) =
+  case Str.stripPrefix (Str.Pattern "Union(") s of
+    Just rest -> splitTopCommas (dropLastParen rest)
+    Nothing -> [ s ]
+unionMembers _ = []
+
+-- do any two members share a non-`Other` primitive discriminator (so a `case` couldn't tell
+-- them apart)? Only primitives collide.
+primDiscClash :: Array String -> Boolean
+primDiscClash members =
+  let discs = filter (_ /= PdOther) (map primDisc members) in
+  length (nubEq discs) /= length discs
+
+data PrimDisc = PdInteger | PdFloat | PdBinary | PdBoolean | PdOther
+
+derive instance Eq PrimDisc
+
+primDisc :: String -> PrimDisc
+primDisc "Bool" = PdBoolean
+primDisc "String" = PdBinary
+primDisc "Char" = PdInteger
+primDisc s
+  | intType (TName s) = PdInteger
+  | floatTypeStr s = PdFloat
+  | otherwise = PdOther
+
+-- `^Float\d*$`.
+floatTypeStr :: String -> Boolean
+floatTypeStr s = case Str.stripPrefix (Str.Pattern "Float") s of
+  Just rest -> all isDigit (toCharArray rest)
+  Nothing -> false
 
 joinAll :: Array Ty -> Ty
 joinAll = debottom <<< foldl (\acc t -> join t acc) Bottom
