@@ -87,12 +87,12 @@ what the Core oracle confirms over the surface form.
 
 | Module                | LOC  | Notes                                          |
 | --------------------- | ---- | ---------------------------------------------- |
-| `Rian.InferLocal`     | 250  | 🟡 local return inference (`fill_returns`); sits on `Check.infer_return_type` — **next, after the Check `ic`**. |
+| `Rian.InferLocal`     | 250  | 🟡 **return inference ported** — `fillReturns` fills every un-annotated *private* function's return from its body (via `Check.fill_local_rets`' fixpoint), defaulting the uninferable to `Any` (ADR-0034); `pub` boundaries kept. `ilr` stream. **Deferred:** parameter inference (`Check.infer_param_type`) + the `forall T` generalization of an unconstrained pass-through param. |
 | `Rian.PatternLower`   | 149  | ✅ ported — Core `CPat` → checker patterns (`plw` stream). |
 | `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
 | `Rian.Coherence`      | ~280 | ✅ ported — protocol/impl coherence rules (ADR-0061 §5): unknown-protocol, method-set/arity, runtime-discriminator presence + non-overlap, duplicate (`coh`/`cohrs` streams). **Enriched for `Protocol`:** the `Registry` carries sum variants and `classify` returns the **real BEAM guard string** (`sumGuard`/`structGuard`) — same overlap outcome as the old equivalence class, now also the dispatcher's discriminator — plus `guardFor`/`registry`. |
 | `Rian.Capability`     | 290  | ✅ ported — Rust capability lowering (`rustParam`: val/iso/ref/tag + Copy/borrow/owned, `Fn`→`&impl`, Vec/Map/tuple/parametric/nested) + BEAM linearity (`countUses`: branch-aware free-var occurrence count; iso/ref use-once). Pure. `cap`/`lin` streams. |
-| `Rian.Check`          | 2724 | 🟡 **type algebra + inference ported** — `unify`/`join` + `infer`/`inferBody` (expression core, `if`/`lambda`/`block`, `ECall` to prims/builtins/`Fn`-vars/poly-stdlib-generics, + function-body re-parse; `uni`/`joi`/`inf`/`bdy` streams). **In progress: the `ic` (whole-program inference context)** — `program_ic`'s 9 tables + threading it through `infer` (user-fn calls/ctors/ECase narrowing) + `infer_return_type`/`infer_param_type` + `check_program`/`gate!`. **reframe, not lift**. |
+| `Rian.Check`          | 2724 | 🟡 **type algebra + inference + the `ic` + the return gate ported** — `unify`/`join`, `infer`/`inferBody` (expression core), and the **whole-program inference context `ic`**: `program_ic`'s 9 tables (`pic`), threaded through `infer` so a constructor / program-function / cross-module call (`ifc`), **ECase flow-narrowing** (`ic.tdefs`), generic-return instantiation (`ic.fsigs`), and `.of` range/opaque construction all resolve; **`infer_return_type` + `fill_local_rets`** (`irt`/`flr`); and **`check_program`'s return-assignability gate** (`gate`). `uni`/`joi`/`inf`/`bdy`/`pic`/`ifc`/`irt`/`flr`/`gate` streams. **Deferred:** `infer_param_type`, the `error_sets` fixpoint (ADR-0040), `effect_sets` (needs `Reach.effect_sets`), `forall T: Bound`, and the value-union/`Any`-wildcard/literal-width-adoption clauses of `assignable?`. **reframe, not lift**. |
 | `Rian.Reach`          | 1235 | ✅ ported — target-set portability inference (ADR-0057/58, `rch` stream). `analyze` + the call-graph reach fixpoint; the signature pins (ref→off`:ex`, Int→off`:rs`/`:jvm`, wide-int→off`:js`, Any→off`:rs`), the body scan (host FFI/concurrency, Result, map literal/update, BEAM-only prims + local-call edges), the emitter-gap detectors (value-union narrowability, Any-in-JVM-operator, clause-head pin), and the **parametric-`:rs` monomorphic subset** (the `expandPtypes`/`emittableMap` fixpoints + the F1/F2/F3 builder-shape gate). Only host-coupled `Prelude.defines?` deferred; `dispatch`/`bitstr` detectors moot in PS (no `Func.dispatch`; no bitstr in portable Core). |
 
 ### Phase 5 — Emitters
@@ -185,12 +185,16 @@ ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`ex
 a function body; `inf`/`bdy` streams). **`Rian.Shadow`** (capture-avoiding `:=` rename, ADR-0034;
 `shd` stream), **`Rian.Macro`** (`mac`) + **`Rian.Protocol`** (`pex`, with the Coherence guard
 enrichment), **`Rian.Reach`** (`rch`, COMPLETE — all detectors incl. the parametric-`:rs` subset),
-and **`Rian.Capability`** (`cap`/`lin`) ported. **Next:** the **Check `ic`** (whole-program
-inference context: `program_ic`'s 9 tables, threaded through `infer` for user-fn calls/ctors/ECase
-narrowing) + `infer_return_type`/`infer_param_type`/`check_program`/`gate!`, then **`InferLocal`**
-(`fill_returns`, which sits on `infer_return_type`) — together these complete **Phase 4**.
-Total **753/753** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
-Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/**Macro/Protocol/Reach/Capability**.
+and **`Rian.Capability`** (`cap`/`lin`) ported. **The Check `ic` landed:** `program_ic`'s 9 tables
+(`pic`), threaded through `infer` — a constructor / program-function / cross-module call (`ifc`),
+**ECase flow-narrowing** + generic-return instantiation + `.of` construction — plus
+`infer_return_type`/`fill_local_rets` (`irt`/`flr`), **`Rian.InferLocal.fill_returns`** (`ilr`), and
+**`check_program`'s return-assignability gate** (`gate`). **Next:** the Check tail — `infer_param_type`
+(+ InferLocal's param generalization), `error_sets` (ADR-0040), `effect_sets` (needs
+`Reach.effect_sets`), the rest of `assignable?` — then the emitters (`Beam`/`JS`/`JVM`/`Lower`) and
+the Decl assemble-tail wiring of `Macro`/`Protocol`.
+Total **780/780** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/**InferLocal**.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
 
@@ -199,13 +203,16 @@ front-end is ported and cross-checked**: lex → parse → typed Core IR → the
 (`PatternLower`/`Exhaustiveness`) → leaf passes (`Range`/`Prelude`/`External.render`/`Coherence`/
 `Builtins`/`Shadow`). **The portability + capability + expansion gates are now ported too**:
 `Reach` (target reachability, complete), `Capability` (Rust lowering + BEAM linearity), and the
-expansion/synthesis passes `Macro` + `Protocol.expand`. **What remains before end-to-end compile**:
-`Check`'s **program gates** — the `ic` (whole-program inference context) threaded through `infer`,
-`infer_return_type`/`infer_param_type`, `check_program`/error-sets/`annotate` — plus `InferLocal`
-(which sits on `infer_return_type`), `Opaque.erase`'s cast inference, the emitters
-(`Beam`/`JS`/`JVM`/`Lower`), and the Decl assemble-tail wiring of the now-ported `Macro`/`Protocol`.
-The parity-record count measures front-end + inference-core + gate *fidelity*, not compiler
-completeness; the Check `ic` is the gate that flips "front-end + gates ported" to "can compile."
+expansion/synthesis passes `Macro` + `Protocol.expand`. **The inference + return gate now hold too**:
+the Check `ic` is built and threaded (so flow-narrowing, generic-return, and user/cross-module calls
+type), `infer_return_type`/`fill_local_rets` recover un-annotated returns, `InferLocal` writes them
+back, and `check_program` enforces return-assignability. **What remains before end-to-end compile**:
+the Check tail — `infer_param_type` (+ InferLocal's param generalization), the `error_sets` fixpoint
+(ADR-0040), `effect_sets`/`Reach.effect_sets`, `forall T: Bound`, and the union/`Any`-wildcard/
+literal-width clauses of `assignable?` — plus `Opaque.erase`'s cast inference, the emitters
+(`Beam`/`JS`/`JVM`/`Lower`), and the Decl assemble-tail wiring of `Macro`/`Protocol`. The
+parity-record count measures front-end + inference + gate *fidelity*, not compiler completeness; the
+**emitters** are now the gate that flips "checks a program" to "emits one."
 
 **Known parity-corpus gaps (low severity, named not hidden).** The fixed-scenario streams cover
 every `lower`/`analyze`/`parse` branch *except*: `PMap` pattern lowering (BEAM-only, refutable);
