@@ -3,7 +3,7 @@ defmodule Rian.ProtocolTest do
   use ExUnit.Case, async: false
 
   alias Rian.{Beam, Check, Decl, Protocol}
-  alias Rian.Protocol.Error, as: CoherenceError
+  alias Rian.Coherence.Error, as: CoherenceError
 
   defp load(src, mod) do
     {:ok, ^mod} = Beam.load(src, mod)

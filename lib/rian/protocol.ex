@@ -16,18 +16,17 @@ defmodule Rian.Protocol do
       `:__struct__` tag for a struct). This is the BEAM "consolidated protocol
       dispatch" of ADR-0042 §4, static-where-known by the guard.
 
-  ## Coherence (ADR-0042 §5)
-
-    * an `impl` for an undeclared protocol is rejected;
-    * an `impl` must define exactly the protocol's method set (no missing / extra);
-    * at most one `impl` per `(protocol, type)` pair — and no two impl types may
-      share a dispatch guard (e.g. `Int64` and `Char` both test `is_integer`),
-      which would make dispatch ambiguous.
-
   Impls dispatch over **primitive** types (`is_integer`/`is_boolean`/…), **sum**
   types (by constructor tag — `element/2` on the tagged tuple, or a bare atom for
   a nullary variant), and **structs** (by `:__struct__`). This covers the
   compiler's own data (`Token`, `Expr`), so a real `Eq`/`Show` can be written.
+
+  **Coherence** (ADR-0061 §5) — one impl per `(protocol, type)`, method-set/arity
+  match, runtime-discriminator presence and non-overlap — is owned by
+  `Rian.Coherence`, which `expand/5` consults before codegen. The runtime
+  discriminator that the shared-guard rule and this module's dispatcher share is
+  also `Rian.Coherence`'s (`guard_for!/3`), so rule and codegen agree by
+  construction.
 
   ## MVP limits (deferred, ADR-0042)
 
@@ -38,24 +37,19 @@ defmodule Rian.Protocol do
 
   use Rian.Ann
 
-  defmodule Error do
-    @moduledoc "Raised on a protocol/impl coherence violation."
-    defexception [:message]
-  end
-
   @doc """
   Expand the collected `protocols` (`name => [sig_raw_map]`) and `impls`
   (`[{proto, type, [method_raw_map]}]`) into a list of raw `def` maps to append
-  to a scope's function stream. Raises `Error` on any coherence violation.
+  to a scope's function stream. Raises `Rian.Coherence.Error` on any coherence
+  violation.
   """
   @rian_sig "pub def expand(protocols _Unk, impls Vec(_Unk), types Vec(Type)) _Unk"
   @rian_sig "pub def expand(protocols _Unk, impls Vec(_Unk), types Vec(Type), structs Vec(Struct)) _Unk"
   @rian_sig "pub def expand(protocols _Unk, impls Vec(_Unk), types Vec(Type), structs Vec(Struct), targets _Unk) _Unk"
   @spec expand(map(), list(), list(), list(), term()) :: term()
   def expand(protocols, impls, types \\ [], structs \\ [], targets \\ nil) do
-    reg = registry(types, structs)
-    Enum.each(impls, &check_impl(&1, protocols, reg))
-    check_no_overlap(impls, reg, targets)
+    reg = Rian.Coherence.registry(types, structs)
+    Rian.Coherence.check!(protocols, impls, reg, targets)
 
     dispatchers =
       for {name, sigs} <- protocols, sig <- sigs, do: dispatcher(name, sig, impls, reg)
@@ -64,128 +58,6 @@ defmodule Rian.Protocol do
 
     List.flatten(dispatchers) ++ methods
   end
-
-  @doc """
-  Associated-type coherence (ADR-0074 Stage 2). Every `impl` must bind **exactly** the
-  associated types its protocol declares — a `type Elem := …` for each declared
-  `type Elem`, none undeclared, and none left bare. Operates on the structured IR
-  (`prog.protocols`/`prog.impl_decls`, each carrying `:assoc`), so it sees the names the
-  BEAM desugar erases. Raises `Error`; the analogue of the method-set coherence in
-  `check_impl/3`, for the type side. A protocol with no associated types is unaffected.
-  """
-  @rian_sig "pub def check_assoc!(protocols Vec(_Unk), impl_decls Vec(_Unk)) _Unk"
-  @spec check_assoc!(list(), list()) :: term()
-  def check_assoc!(protocols, impl_decls) do
-    declared = Map.new(protocols, fn p -> {p.name, MapSet.new(Map.get(p, :assoc, []))} end)
-
-    Enum.each(impl_decls, fn impl ->
-      want = Map.get(declared, impl.proto, MapSet.new())
-      assoc = Map.get(impl, :assoc, %{})
-      bound = assoc |> Map.keys() |> MapSet.new()
-
-      missing = MapSet.difference(want, bound) |> Enum.to_list()
-      extra = MapSet.difference(bound, want) |> Enum.to_list()
-      unbound = for {k, nil} <- assoc, do: k
-
-      cond do
-        missing != [] ->
-          raise(
-            Error,
-            "`impl #{impl.proto} for #{impl.type}` is missing associated type " <>
-              "binding(s) #{inspect(missing)} — add `type Elem := …`"
-          )
-
-        extra != [] ->
-          raise(
-            Error,
-            "`impl #{impl.proto} for #{impl.type}` binds undeclared associated " <>
-              "type(s) #{inspect(extra)}"
-          )
-
-        unbound != [] ->
-          raise(
-            Error,
-            "`impl #{impl.proto} for #{impl.type}`: associated type(s) #{inspect(unbound)} " <>
-              "need a binding (`type Elem := …`, not bare `type Elem`)"
-          )
-
-        true ->
-          :ok
-      end
-    end)
-
-    :ok
-  end
-
-  # the dispatchable types in scope: sum types (name -> variants) and struct
-  # names — the basis for runtime tag-membership guards.
-  defp registry(types, structs) do
-    %{
-      sums: Map.new(types, &{&1.name, &1.variants}),
-      structs: MapSet.new(Enum.map(structs, & &1.name))
-    }
-  end
-
-  # ── coherence ───────────────────────────────────────────────────────────
-  defp check_impl({proto, type, methods, _assoc}, protocols, reg) do
-    sigs =
-      case protocols[proto] do
-        nil -> raise(Error, "`impl … for #{type}`: unknown protocol `#{proto}`")
-        sigs -> sigs
-      end
-
-    want = sigs |> Enum.map(& &1.name) |> MapSet.new()
-    got = methods |> Enum.map(& &1.name) |> MapSet.new()
-
-    unless MapSet.equal?(want, got) do
-      missing = MapSet.difference(want, got) |> Enum.to_list()
-      extra = MapSet.difference(got, want) |> Enum.to_list()
-
-      raise(
-        Error,
-        "`impl #{proto} for #{type}` does not match the protocol: " <>
-          "missing #{inspect(missing)}, extra #{inspect(extra)}"
-      )
-    end
-
-    # reject unsupported impl types early (so the message names the construct,
-    # not a downstream guard failure)
-    _ = guard_for!(type, proto, reg)
-  end
-
-  # Coherence (ADR-0061 §5), target-set-relative:
-  #   * one `impl` per `(protocol, type)` — required on **every** target;
-  #   * no two impl types sharing a runtime discriminator (e.g. `Int64`+`Char`,
-  #     both `is_integer`) — required only on the **runtime-dispatch** targets
-  #     (`:ex`/`:js`); on a Rust-only module the two are distinct static types, so
-  #     it is allowed. `targets == nil` (unannotated) is treated as all targets.
-  defp check_no_overlap(impls, reg, targets) do
-    discriminator? = runtime_dispatch_target?(targets)
-
-    impls
-    |> Enum.reduce(%{}, fn {proto, type, _, _}, seen ->
-      key = {proto, type}
-      if Map.has_key?(seen, key), do: raise(Error, "duplicate `impl #{proto} for #{type}`")
-
-      gkey = {proto, guard_for!(type, proto, reg)}
-      other = Map.get(seen, gkey)
-
-      if discriminator? and other do
-        raise(
-          Error,
-          "ambiguous dispatch: `impl #{proto} for #{type}` and `impl #{proto} for #{other}` " <>
-            "select on the same runtime shape (allowed only on a Rust-only `@targets(rs)` module)"
-        )
-      end
-
-      seen |> Map.put(key, true) |> Map.put(gkey, type)
-    end)
-  end
-
-  # the runtime-discriminator rule applies when the module can reach a runtime
-  # dispatch target (`:ex`/`:js`); an unannotated module (`nil`) reaches all.
-  defp runtime_dispatch_target?(nil), do: true
-  defp runtime_dispatch_target?(targets), do: :ex in targets or :js in targets
 
   # ── dispatcher: one guarded clause per impl ──────────────────────────────
   defp dispatcher(proto, sig, impls, reg) do
@@ -200,7 +72,7 @@ defmodule Rian.Protocol do
           name: sig.name,
           params: pat,
           ret: nil,
-          guard: guard_for!(type, proto, reg),
+          guard: Rian.Coherence.guard_for!(type, proto, reg),
           body: "#{mangle(proto, type, sig.name)}(#{argv})",
           pub: false,
           tvars: [],
@@ -250,6 +122,8 @@ defmodule Rian.Protocol do
   end
 
   # ── impl methods: mangled single-clause functions ────────────────────────
+  # `Rian.Coherence` has already verified the method set and arity, so the
+  # `names`/`types` zip below is total.
   defp impl_methods({proto, type, methods, assoc}, protocols) do
     sigs = Map.new(protocols[proto], &{&1.name, &1})
 
@@ -257,14 +131,6 @@ defmodule Rian.Protocol do
       sig = sigs[m.name]
       names = m.params |> split_commas() |> Enum.map(&String.trim/1)
       types = sig.params |> split_commas() |> Enum.map(&param_type/1)
-
-      unless length(names) == length(types) do
-        raise(
-          Error,
-          "`impl #{proto} for #{type}`: method `#{m.name}` has #{length(names)} " <>
-            "parameter(s) but the protocol declares #{length(types)}"
-        )
-      end
 
       # Resolve BOTH `Self` (-> the impl type) and each associated type (`Elem` -> its
       # `type Elem := Int53` binding, ADR-0074 W1) in the generated method's declared
@@ -303,76 +169,6 @@ defmodule Rian.Protocol do
   # ── helpers ──────────────────────────────────────────────────────────────
   defp mangle(proto, type, method),
     do: "impl_#{String.downcase(proto)}_#{String.downcase(type)}_#{method}"
-
-  # A boolean guard expression (over the first dispatch var `v0`) selecting the
-  # impl for `type` by the receiver's runtime shape:
-  #   * primitives -> a type-test BIF (`is_integer`/`is_boolean`/…);
-  #   * a sum type -> its constructor tags (nullary -> a bare atom; field-carrying
-  #     -> a tagged tuple `{:tag, …}`, tested via `element/2`);
-  #   * a struct -> a map carrying `:__struct__ => :name`.
-  # Raises for a type with no runtime discriminator (a type variable, an unknown).
-  defp guard_for!(type, proto, reg) do
-    cond do
-      type == "Bool" ->
-        "is_boolean(v0)"
-
-      type == "String" ->
-        "is_binary(v0)"
-
-      type == "Char" ->
-        "is_integer(v0)"
-
-      String.match?(type, ~r/^U?Int\d*$/) ->
-        "is_integer(v0)"
-
-      String.match?(type, ~r/^Float\d*$/) ->
-        "is_float(v0)"
-
-      Map.has_key?(reg.sums, type) ->
-        sum_guard(reg.sums[type])
-
-      MapSet.member?(reg.structs, type) ->
-        struct_guard(snake(type))
-
-      true ->
-        raise(
-          Error,
-          "`impl #{proto} for #{type}`: no runtime discriminator for `#{type}` (a type variable or unknown type); dispatch needs a concrete primitive, sum, or struct type"
-        )
-    end
-  end
-
-  # the tag-membership guard for a sum type's variants. A field-carrying variant
-  # is a tagged tuple (matched by `element/2`, which fails safely on a non-tuple
-  # in guard position); a nullary variant is a bare atom.
-  defp sum_guard(variants) do
-    {nullary, tupled} = Enum.split_with(variants, &(&1.fields == []))
-
-    tupled_part =
-      if tupled == [],
-        do: [],
-        else: ["(is_tuple(v0) and (#{tag_disjunction(tupled, "element(1, v0) ==")}))"]
-
-    nullary_part =
-      if nullary == [], do: [], else: ["(#{tag_disjunction(nullary, "v0 ==")})"]
-
-    Enum.join(tupled_part ++ nullary_part, " or ")
-  end
-
-  defp tag_disjunction(variants, lhs),
-    do: Enum.map_join(variants, " or ", &"#{lhs} :#{snake(&1.ctor)}")
-
-  # a struct value is either a tagged tuple (positional construction `Name(a, b)`)
-  # or a `:__struct__` map (named construction `Name(f: v)`) — accept both.
-  defp struct_guard(tag) do
-    # bare `map_get/2` is NOT a guard BIF — `cannot invoke local map_get/2 inside a
-    # guard`. Use the auto-imported `is_map_key/2` to confirm the key, then the
-    # remote guard BIF `:erlang.map_get/2` to read it (both valid in guards).
-    "(is_tuple(v0) and element(1, v0) == :#{tag}) or " <>
-      "(is_map(v0) and is_map_key(:__struct__, v0) and :erlang.map_get(:__struct__, v0) == :#{tag})"
-  end
-
-  defp snake(name), do: Rian.PatternLower.to_snake(name)
 
   defp subst_self(nil, _type), do: nil
   defp subst_self(t, type), do: Regex.replace(~r/\bSelf\b/, t, type)

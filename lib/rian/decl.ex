@@ -141,9 +141,9 @@ defmodule Rian.Decl do
     protocols = all_protocols(decls)
     impl_decls = all_impl_decls(decls)
     # associated-type coherence (ADR-0074 Stage 2): each impl binds exactly its
-    # protocol's declared associated types. Raises `Rian.Protocol.Error` at parse time,
+    # protocol's declared associated types. Raises `Rian.Coherence.Error` at parse time,
     # alongside the method-set coherence the desugar already ran.
-    Rian.Protocol.check_assoc!(protocols, impl_decls)
+    Rian.Coherence.check_assoc!(protocols, impl_decls)
 
     assembled =
       prog
@@ -523,7 +523,7 @@ defmodule Rian.Decl do
   # guarded dispatcher per protocol method plus one mangled function per impl
   # method — so they flow through `build_func` like any other function. The sum
   # `types` and `structs` in scope let the dispatcher discriminate by runtime
-  # tag; coherence is enforced by `Rian.Protocol.expand/4`.
+  # tag; coherence is enforced by `Rian.Coherence` (via `Rian.Protocol.expand/5`).
   defp protocol_defs(decls, types, structs, targets) do
     protocols =
       for {:protocol, name, inner, _doc} <- decls, into: %{} do

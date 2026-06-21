@@ -125,7 +125,13 @@ defmodule Rian.SigPolicyTest do
   # ratchet enforces "drive it to zero": the count may only DROP. New `_Unk` fails the gate —
   # type it concretely, or write `Any` if the value is genuinely dynamic. When you reduce it,
   # lower @unk_baseline to lock the gain (same discipline as priv/transpile_check_baseline.txt).
-  @unk_baseline 260
+  #
+  # 260 -> 270: `Rian.Coherence` (ADR-0061 §5) formalises the protocol-coherence layer as its own
+  # SSOT. Its public surface annotates the **protocol machinery** (`protocols`/`impls`/`reg` and the
+  # violation list) — the same layer `Rian.IR`'s `Prog` documents as honestly `_Unk` "until that
+  # layer is modelled". `targets` was typed concretely (`Option(Vec(Symbol))`) and the internal
+  # `classify`/`runtime_dispatch_target?` made private to keep the bump to the irreducible residual.
+  @unk_baseline 270
 
   defp unk_count do
     lib_rian_modules()
