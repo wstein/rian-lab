@@ -424,6 +424,15 @@ decl_corpus = [
   "macro inc(x) := x + 1\nstruct Box(v Int53)"
 ]
 
+# Rian.External corpus — the `ext` stream: render each function's `@external` specs (ADR-0068)
+# against its own params (composes the Decl @external parse with External.render).
+ext_corpus = [
+  "@external(:js, \"x => x * 2\")\ndef f(x Int53) Int53",
+  "@external(:ex, Mod.fun)\ndef g(a Int53, b Int53) Int53",
+  "@external(:js, :erlang.length)\ndef h(xs Vec(Int53)) Int53",
+  "@external(:rs, \"todo!()\")\n@external(:js, \"0\")\npub def k() Int53"
+]
+
 # Rian.Decl protocol/impl corpus — the `prc` stream (ADR-0042 §3). Serializes ONLY the
 # program-global protocols + impl-decls, NOT the full program: the Elixir `Protocol.expand`
 # synthesizes dispatcher / `impl_*` funcs into `funcs` during assembly (a pass not ported),
@@ -838,6 +847,20 @@ lines =
     end) ++
     Enum.map(prog_env_corpus, fn s ->
       "pge\t#{Canon.hex(s)}\t#{Canon.hex(ExhFixtures.program_env(s))}"
+    end) ++
+    Enum.map(ext_corpus, fn s ->
+      prog = Decl.parse(s, assemble_only: true)
+
+      rendered =
+        prog.funcs
+        |> Enum.filter(fn f -> map_size(f.externals) > 0 end)
+        |> Enum.map_join("\n", fn f ->
+          Enum.map_join(Enum.sort(Map.to_list(f.externals)), " ", fn {t, spec} ->
+            "#{t}=#{Rian.External.render(spec, f.params)}"
+          end)
+        end)
+
+      "ext\t#{Canon.hex(s)}\t#{Canon.hex(rendered)}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
