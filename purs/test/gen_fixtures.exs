@@ -576,7 +576,24 @@ check_infer_corpus = [
   "(a Int64) -> a",
   "(a Int64, b Int64) -> a + b",
   "(a) -> not a",
-  "() -> 1"
+  "() -> 1",
+  # stage 3b: calls — prims, inspect, builtin returns, Fn-typed-var application
+  "map_size(xs)",
+  "inspect(x)",
+  "is_atom(x)",
+  "nope(x)",
+  "String.trim(s)",
+  "String.length(s)",
+  "String.to_integer(s)",
+  "Path.join(s, s)",
+  "Regex.escape(s)",
+  "math.sqrt(f)",
+  ":erlang.phash2(x)",
+  "g(x)",
+  "Prim.char_code(c)",
+  "Prim.int_to_float(n)",
+  "Prim.char_to_string(c)",
+  "panic(s)"
 ]
 
 check_join_corpus = [
@@ -937,7 +954,8 @@ defmodule CheckCanon do
     "s" => "String",
     "f" => "Float64",
     "c" => "Char",
-    "xs" => "Vec(Int53)"
+    "xs" => "Vec(Int53)",
+    "g" => "Fn(Int64,Bool)"
   }
 
   def infer(src) do

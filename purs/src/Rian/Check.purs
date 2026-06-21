@@ -29,7 +29,7 @@ module Rian.Check
 
 import Prelude hiding (join)
 
-import Data.Array (filter, find, foldl, head, length, nubEq, null, snoc, uncons, zipWith)
+import Data.Array (filter, find, foldl, head, last, length, nubEq, null, snoc, uncons, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
@@ -37,8 +37,10 @@ import Data.String as Str
 import Data.String.CodeUnits (toCharArray)
 import Data.String.Common (joinWith, split)
 import Data.Tuple (Tuple(..), snd)
+import Rian.Builtins as Builtins
 import Rian.Core (CExpr(..), CMapPair(..), CStmt(..), fromExpr)
 import Rian.Pratt (Param, parse) as P
+import Rian.Prim (normalize)
 import Rian.TypeStr (splitTopCommas)
 
 -- | An inferred type: a type-name string (`"Int53"`, `"Fn(_,Int64)"`, `"Vec(Int53)"`), or
@@ -303,7 +305,41 @@ infer (ELambda ps body) env = inferLambda ps body env
 infer (EBlock stmts) env = inferBlock stmts env Unknown
 -- a `with` yields its do-block value on the happy path (clause-bound vars infer `Unknown`).
 infer (EWith _ body _) env = infer body env
+-- prim intrinsics (after `Rian.Prim.normalize` rewrote `Prim.x`/`panic` to `__prim_x`).
+infer (ECall (EId "__prim_char_code") _) _ = TName "Int53"
+infer (ECall (EId "__prim_int_to_float") _) _ = TName "Float64"
+infer (ECall (EId "__prim_str_to_atom") _) _ = TName "Symbol"
+infer (ECall (EId "__prim_str_concat_all") _) _ = TName "String"
+infer (ECall (EId "__prim_char_to_string") _) _ = TName "String"
+infer (ECall (EId "__prim_panic") _) _ = Unknown
+-- `inspect/1` is the host value→text function: always `String`.
+infer (ECall (EId "inspect") [ _ ]) _ = TName "String"
+-- a bare call: a `Fn`-typed var applied → its return; else a Kernel auto-import builtin.
+infer (ECall (EId f) args) env = case envLookup f env of
+  Just ft | isFnTy ft -> fnRet ft
+  _ -> builtinOrUnknown Nothing f (length args)
+-- a module call `Mod.fun(args)`: a host/stdlib builtin's return (a poly stdlib call —
+-- `List.map` — defers to `Unknown` here; tvar instantiation is a later stage).
+infer (ECall (EDot (EId modn) fn) args) _env = case Builtins.polySig (Just modn) fn (length args) of
+  Just _ -> Unknown
+  Nothing -> builtinOrUnknown (Just modn) fn (length args)
+-- an Erlang-BIF FFI call `:erlang.phash2(x)` — typed from the foreign registry.
+infer (ECall (EDot (EAtom modn) fn) args) _ = builtinOrUnknown (Just modn) fn (length args)
+-- any other callable (a lambda result, a returned function): its return when it is known
+-- to be a function, else `Unknown`.
+infer (ECall fn _) env = let ft = infer fn env in if isFnTy ft then fnRet ft else Unknown
 infer _ _ = Unknown
+
+builtinOrUnknown :: Maybe String -> String -> Int -> Ty
+builtinOrUnknown m f a = maybe Unknown TName (Builtins.ret m f a)
+
+-- the return type of a `Fn(A.., R)` (the last component; a `_` placeholder → `Unknown`).
+fnRet :: Ty -> Ty
+fnRet (TName s) = case last (fnParts s) of
+  Just (TName "_") -> Unknown
+  Just t -> t
+  Nothing -> Unknown
+fnRet _ = Unknown
 
 -- block-statement threading: a bind extends the env and becomes the running value; the
 -- block's type is its last statement's.
@@ -557,8 +593,10 @@ pairOp f src = case split (Str.Pattern ";;") src of
 
 -- | The `inf` stream: infer an expression's type under a fixed env (mirrored in the oracle),
 -- | composing `lexer → Pratt → Core → infer`.
+-- `Prim.normalize` (rewriting `Prim.x`/`panic` → `__prim_x`) matches the reference's
+-- normalizing `Pratt.parse`; it is identity over non-`Prim` expressions.
 inferSexpr :: String -> String
-inferSexpr src = tyStr (infer (fromExpr (P.parse src)) fixedEnv)
+inferSexpr src = tyStr (infer (fromExpr (normalize (P.parse src))) fixedEnv)
 
 -- the parity env (must match `CheckCanon.fixed_env` in gen_fixtures.exs).
 fixedEnv :: Env
@@ -571,4 +609,5 @@ fixedEnv =
   , Tuple "f" (TName "Float64")
   , Tuple "c" (TName "Char")
   , Tuple "xs" (TName "Vec(Int53)")
+  , Tuple "g" (TName "Fn(Int64,Bool)")
   ]
