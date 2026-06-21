@@ -651,6 +651,16 @@ ilr_corpus = [
   "pub def p(x Int53) Int53 := x"
 ]
 
+# Rian.Check `check_program` corpus — the `gate` stream. The return-assignability gate: a body
+# whose inferred type is assignable to the declared return passes (`ok`), else the first mismatch
+# message. Concrete types (no error-sets / effects / bounds / coherence / literal-width-adoption).
+gate_corpus = [
+  "pub def f(x Int53) Int53 := x",
+  "pub def g(x Int53) String := x",
+  "pub def h(x Bool) Bool := x",
+  "pub def k(x Int53) Bool := x"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1313,6 +1323,14 @@ defmodule CheckCanon do
     |> Enum.join(";")
   end
 
+  # the `gate` stream: `check_program`'s verdict — `ok` or the first return-mismatch message.
+  def gate(src) do
+    case Rian.Check.check_program(Rian.Decl.parse(src, assemble_only: true)) do
+      :ok -> "ok"
+      {:error, msg} -> msg
+    end
+  end
+
   # the `bdy` stream: infer a `;`-separated function body (binds threaded through the env).
   def infer_body(src) do
     out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse_body(src)), @fixed_env, %{}))
@@ -1499,6 +1517,9 @@ lines =
     end) ++
     Enum.map(ilr_corpus, fn s ->
       "ilr\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.fill_returns(s))}"
+    end) ++
+    Enum.map(gate_corpus, fn s ->
+      "gate\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.gate(s))}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)

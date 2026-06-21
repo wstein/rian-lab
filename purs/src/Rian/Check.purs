@@ -30,6 +30,7 @@ module Rian.Check
   , programIc
   , inferReturnType
   , fillLocalRets
+  , checkProgram
   , unifySexpr
   , joinSexpr
   , inferSexpr
@@ -38,11 +39,12 @@ module Rian.Check
   , programIcSexpr
   , inferReturnTypeSexpr
   , fillLocalRetsSexpr
+  , checkProgramSexpr
   ) where
 
 import Prelude hiding (join)
 
-import Data.Array (concatMap, filter, find, foldl, head, index, last, length, mapMaybe, mapWithIndex, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
+import Data.Array (concatMap, filter, find, findMap, foldl, head, index, last, length, mapMaybe, mapWithIndex, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing, maybe)
@@ -874,6 +876,56 @@ fillLocalRetsSexpr src =
   prog = parseToProg src
   funcs = prog.funcs <> concatMap _.funcs prog.mods
   entry (Tuple (Tuple n a) ret) = n <> "/" <> show a <> "=>" <> fromMaybe "_" ret
+
+--------------------------------------------------------------------------------
+-- the program gate (ADR-0034): each function's body must be assignable to its return
+--------------------------------------------------------------------------------
+
+-- | The compile-time return gate: the first function whose body type is not assignable to its
+-- | declared return (`Just message`), else `Nothing` (`:ok`). This slice covers the
+-- | return-assignability check (the headline gate); error-sets/effects/bounds/coherence and the
+-- | literal-width-adoption relaxation are later — the corpus avoids them.
+checkProgram :: Prog -> Maybe String
+checkProgram prog = findMap (checkReturn ic) funcs
+  where
+  funcs = prog.funcs <> concatMap _.funcs prog.mods
+  ic0 = programIc prog
+  ic = ic0 { funs = fillLocalRets funcs ic0 }
+
+-- a function's declared (non-generic) return must accept every clause body's inferred type.
+checkReturn :: Ic -> Func -> Maybe String
+checkReturn ic f = case f.ret of
+  Nothing -> Nothing
+  Just ret ->
+    if genericRet ret f.tvars then Nothing
+    else findMap (clauseErr ret) f.clauses
+  where
+  clauseErr ret c = case c.body of
+    Nothing -> Nothing
+    Just b ->
+      let bt = infer (fromExpr (normalize (P.parseBody b))) (clauseEnv c.pats f.params ic) ic
+      in
+        if assignable bt (TName ret) then Nothing
+        else Just ("`" <> f.name <> "`: body has type `" <> tyStr bt <> "` but the declared return type is `" <> ret <> "`")
+
+-- a return mentioning one of the function's `forall` tvars is generic — checked conservatively.
+genericRet :: String -> Array String -> Boolean
+genericRet ret tvars = any (\tv -> elem tv (typeIdents ret)) tvars
+
+-- assignability (the concrete subset): identical, an `Unknown` wildcard, a numeric widening
+-- (`from`'s width ≤ `to`'s — `numLub` is `to`), else they must unify (a mismatch is rejected).
+-- (Value-union / `Any`-wildcard / bare-head / constructed-vs-opaque clauses are a later slice.)
+assignable :: Ty -> Ty -> Boolean
+assignable from to =
+  if from == to then true
+  else if from == Unknown || to == Unknown then true
+  else case numKind from, numKind to of
+    Just _, Just _ -> numLub from to == Just to
+    _, _ -> unify from to /= Mismatch
+
+-- | The `gate` parity unit: `check_program`'s verdict — `ok` or the first mismatch message.
+checkProgramSexpr :: String -> String
+checkProgramSexpr src = fromMaybe "ok" (checkProgram (parseToProg src))
 
 -- the parity env (must match `CheckCanon.fixed_env` in gen_fixtures.exs).
 fixedEnv :: Env
