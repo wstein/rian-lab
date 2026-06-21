@@ -58,6 +58,25 @@ throughout, so every annotation is `val` — but they still carry the **type bri
 `Int` → `Int53`), and they establish the pattern for later modules (IR/Core/Decl) where owned
 sub-trees and builders take `iso`. Annotate public functions and every struct/sum field.
 
+### Effects (`@rian_host`)
+
+A `-- @rian_host` line tags a function with the **host effect** (ADR-0048/0081 → surface
+`@effects(host)`): host-runtime work — I/O, FFI to the BEAM, a `try/rescue`→value boundary.
+It is the effect sibling of `@rian_sig`, but the two differ in how much PureScript already
+tells the transpiler:
+
+- **Capabilities are invisible** to PS, so `@rian_sig` is the *only* source of truth.
+- **Effects are half-visible**: a host-effecting function is typed `Effect a` / `Aff a`, so PS
+  already signals *that* it is effectful. PureScript's single `Effect` just doesn't carry the
+  *granularity* (host vs fs vs io); `@rian_host` supplies it — and only at `pub` boundaries
+  (effects are inferred for private functions, a checked declared assertion for public ones).
+
+**None of the modules ported so far need it.** `Token`/`Lexer`/`TypeStr` are pure (no `Effect`);
+the lexer's `unsafeCrashWith` on malformed input is a **portable panic** (`Prim.panic`,
+ADR-0035), not a host effect, so it is *not* tagged. `@rian_host` enters when the host-coupled
+modules land — `Beam` (`:compile.forms`), `Run`/`Repl`, CLI/file-I/O, the Erlang-FFI boundary —
+which are typed `Effect`/FFI in PureScript.
+
 ## Layout
 
 ```

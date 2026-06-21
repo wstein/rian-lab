@@ -91,7 +91,11 @@ Elixir reference, not a redesign.
   *reader* module `Rian.Ann` is obsolete (Phase 7 reads PS `corefn` + these comments, not
   Elixir AST/`.beam`), but the **annotation convention is retained** — it is what lets the
   Rust backend lower transpiled code correctly from day one instead of defaulting `val`
-  everywhere and miscompiling the owned/moved cases.
+  everywhere and miscompiling the owned/moved cases. Effects use the sibling marker
+  `@rian_host` (→ `@effects(host)`, ADR-0048/0081), but asymmetrically: PureScript *already*
+  signals effectfulness via the `Effect`/`Aff` type, so `@rian_host` only supplies the effect
+  **granularity** (host vs fs vs io) at `pub` boundaries — and pure modules (the lexer's
+  panics are portable `Prim.panic`, not host effects) carry none.
 
 ### FFI boundary (the BEAM-coupled modules)
 
