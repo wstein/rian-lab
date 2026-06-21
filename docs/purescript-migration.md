@@ -122,8 +122,9 @@ methods (ADR-0042 §4): `expand`/`dispatcher`/`implMethods` + `mangle`/`substSel
 `wordReplace`. Consumes the Coherence guard codegen; parity via the `pex` stream (serializes the
 generated def maps). Unblocks the Decl assemble tail (with `Macro`).
 `Comptime` (79) **✅ ported** — `comptime(e)` compile-time const folding (the other half of
-`lower_meta`, wired into `Assemble`; `mxb` stream). Remaining: `ShowStdlib` (29, blocked on
-`Decl.inject_stdlib` — no consumer yet), `Opaque` (159), the BEAM-coupled rest of `External`
+`lower_meta`, wired into `Assemble`; `mxb` stream). `Opaque` (159) **✅ ported** — opaque→base
+type substitution + `.of`/cast body stripping (ADR-0067; `opq` stream). Remaining: `ShowStdlib`
+(29, blocked on `Decl.inject_stdlib` — no consumer yet), the BEAM-coupled rest of `External`
 (279 — only `render` is ported), `Manifest` (315).
 `Builtins` (204) **✅ ported** — the host/stdlib foreign-call signature table (`ret`/`known`/`polySig` over `{module,fun,arity}`; `bui` stream). Consumed by `Check`/`Reach`.
 `Shadow` (114) **✅ ported** — capture-avoiding `:=` shadow rename over Core (ADR-0034): a rebind
@@ -201,12 +202,12 @@ expansion** (`mxb`, `Macro.expand`) **and `Rian.Comptime`** (`comptime(e)` → a
 also in `mxb`) → `Expanded` clause bodies. The clause body is now `data Body = Raw String | Expanded
 Surface` with a `bodySurface` accessor (the reference's `String | ast`, idempotent re-parse
 restored); `lower_meta` change-detects via the canonical `sexpr` so an untouched body stays `Raw`.
-**Next:** the **emitters** (`Beam`/`JS`/`JVM`/`Lower`) — the value backend — and two checker tails:
-**InferLocal parameter inference** (`infer_param_type` is ported; the fixpoint needs `num_default`
-threaded through `infer`) and the host-coupled `Reach.Prelude.defines?` refinement.
-Total **815/815** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+**Next:** the **emitters** (`Beam`/`JS`/`JVM`/`Lower`) — the value backend. The checker spine and
+its erase passes are complete; the only remaining non-emitter leaf is the host-coupled
+`Reach.Prelude.defines?` refinement.
+Total **819/819** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
-InferLocal/Assemble/**Comptime**.
+InferLocal/Assemble/Comptime/**Opaque**.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
 
