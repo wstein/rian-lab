@@ -21,6 +21,8 @@ module Rian.IR
   , Func
   , Const
   , Use
+  , Range
+  , Opaque
   , Mod
   , Prog
   ) where
@@ -81,12 +83,26 @@ type Const = { name :: String, ty :: Maybe String, value :: String, pub :: Boole
 -- @rian_sig struct Use(path String, names Vec(String))
 type Use = { path :: String, names :: Array String }
 
--- A module (`mod Name do … end`) grouping uses/types/structs/consts/funcs.
--- @rian_sig struct Mod(name String, uses Vec(Use), types Vec(Type), structs Vec(Struct), consts Vec(Const), funcs Vec(Func), doc Option(String))
+-- A finite ordinal subrange type (`range Name := lo..hi`, ADR-0036). `lo`/`hi` are inclusive
+-- integer bounds (a `Char` bound is its codepoint); `base` is `Int64` or `Char`.
+-- @rian_sig struct Range(name String, base String, lo Int53, hi Int53, is_pub Bool, doc Option(String))
+type Range = { name :: String, base :: String, lo :: Int, hi :: Int, pub :: Boolean, doc :: Maybe String }
+
+-- An abstract type (`opaque Name := Base` / `abstract …`, ADR-0067/0043): nominally distinct
+-- from `Base`, erased to `Base` at emit. `ops`/`casts` are the `abstract` operator/cast rules
+-- (empty for a plain `opaque`; modelled as rendered strings until `abstract` lands).
+-- @rian_sig struct Opaque(name String, base String, is_pub Bool, doc Option(String), ops Vec(String), casts Vec(String))
+type Opaque =
+  { name :: String, base :: String, pub :: Boolean, doc :: Maybe String, ops :: Array String, casts :: Array String }
+
+-- A module (`mod Name do … end`) grouping uses/types/ranges/opaques/structs/consts/funcs.
+-- @rian_sig struct Mod(name String, uses Vec(Use), types Vec(Type), ranges Vec(Range), opaques Vec(Opaque), structs Vec(Struct), consts Vec(Const), funcs Vec(Func), doc Option(String))
 type Mod =
   { name :: String
   , uses :: Array Use
   , types :: Array Type
+  , ranges :: Array Range
+  , opaques :: Array Opaque
   , structs :: Array Struct
   , consts :: Array Const
   , funcs :: Array Func
@@ -94,6 +110,12 @@ type Mod =
   }
 
 -- The whole-program IR. Top-level `const`/`use` are module-scoped (rejected at top level),
--- so the top scope carries only types/structs/funcs; `mods` hold their own consts/uses.
+-- so the top scope carries only types/ranges/opaques/structs/funcs; `mods` hold their own.
 type Prog =
-  { types :: Array Type, structs :: Array Struct, funcs :: Array Func, mods :: Array Mod }
+  { types :: Array Type
+  , ranges :: Array Range
+  , opaques :: Array Opaque
+  , structs :: Array Struct
+  , funcs :: Array Func
+  , mods :: Array Mod
+  }

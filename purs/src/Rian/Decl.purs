@@ -22,6 +22,7 @@ import Data.Array as Array
 import Data.Array.NonEmpty as NEA
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (elem, foldMap, foldl)
+import Data.Int as Int
 import Data.List (List(..), (:))
 import Data.List as List
 import Data.Maybe (Maybe(..), fromJust, fromMaybe)
@@ -31,7 +32,7 @@ import Data.String.CodePoints as CP
 import Data.String.Common (joinWith, trim)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Rian.IR (Cap(..), Clause, Const, Field, Func, Mod, Param, Prog, Struct, Type, Use, Variant)
+import Rian.IR (Cap(..), Clause, Const, Field, Func, Mod, Opaque, Param, Prog, Range, Struct, Type, Use, Variant)
 import Rian.Lexer (detokenize, exprTokens, tokenize)
 import Rian.Pratt (Pat, parsePats, sexprPat)
 import Rian.Pratt as P
@@ -50,13 +51,22 @@ parseToProg src =
   in
     if not (Array.null top.consts) then unsafeCrashWith "Decl: `const` must appear inside a `mod`"
     else if not (Array.null top.uses) then unsafeCrashWith "Decl: `use` must appear inside a `mod`"
-    else { types: top.types, structs: top.structs, funcs: top.funcs, mods: buildMods decls aliases }
+    else
+      { types: top.types
+      , ranges: top.ranges
+      , opaques: top.opaques
+      , structs: top.structs
+      , funcs: top.funcs
+      , mods: buildMods decls aliases
+      }
 
 type Aliases = Array (Tuple String String)
 
 -- one scope's IR (top level, or a module body) before the program-wide tail passes.
 type Scope =
   { types :: Array Type
+  , ranges :: Array Range
+  , opaques :: Array Opaque
   , structs :: Array Struct
   , funcs :: Array Func
   , consts :: Array Const
@@ -71,7 +81,17 @@ buildMods decls aliases = Array.mapMaybe modOf (Array.fromFoldable decls)
       scoped = collectAliases inner <> aliases
       s = assembleScope inner scoped
     in
-      Just { name, uses: s.uses, types: s.types, structs: s.structs, consts: s.consts, funcs: s.funcs, doc }
+      Just
+        { name
+        , uses: s.uses
+        , types: s.types
+        , ranges: s.ranges
+        , opaques: s.opaques
+        , structs: s.structs
+        , consts: s.consts
+        , funcs: s.funcs
+        , doc
+        }
   modOf _ = Nothing
 
 --------------------------------------------------------------------------------
@@ -98,6 +118,8 @@ data RawDecl
   | DConst String Boolean (Maybe String)
   | DUse String
   | DAlias String
+  | DRange String Boolean (Maybe String)
+  | DOpaque String Boolean (Maybe String)
   | DMod String (List RawDecl) (Maybe String)
 
 declKws :: Array String
@@ -123,6 +145,8 @@ takeDecl (TKw "def" : rest) = let Tuple raw rest' = takeDef rest in Tuple (DDef 
 takeDecl (TKw "const" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DConst (detok toks) false Nothing) rest'
 takeDecl (TKw "use" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DUse (detok toks)) rest'
 takeDecl (TKw "alias" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DAlias (detok toks)) rest'
+takeDecl (TKw "range" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DRange (detok toks) false Nothing) rest'
+takeDecl (TKw "opaque" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DOpaque (detok toks) false Nothing) rest'
 takeDecl (TKw "mod" : TId name : TKw "do" : rest) =
   let Tuple inner rest' = takeModBody rest Nil in Tuple (DMod name inner Nothing) rest'
 takeDecl (TKw "mod" : _) = unsafeCrashWith "Decl: expected `mod Name do … end`"
@@ -159,6 +183,8 @@ attachDoc doc (DType s p _) = DType s p (Just doc)
 attachDoc doc (DStruct s p _) = DStruct s p (Just doc)
 attachDoc doc (DDef r) = DDef (r { doc = Just doc })
 attachDoc doc (DConst s p _) = DConst s p (Just doc)
+attachDoc doc (DRange s p _) = DRange s p (Just doc)
+attachDoc doc (DOpaque s p _) = DOpaque s p (Just doc)
 attachDoc doc (DMod n inner _) = DMod n inner (Just doc)
 attachDoc _ d = d
 
@@ -167,6 +193,8 @@ markPub (DType s _ d) = DType s true d
 markPub (DStruct s _ d) = DStruct s true d
 markPub (DDef r) = DDef (r { pub = true })
 markPub (DConst s _ d) = DConst s true d
+markPub (DRange s _ d) = DRange s true d
+markPub (DOpaque s _ d) = DOpaque s true d
 markPub _ = unsafeCrashWith "Decl: `pub` may only precede `def` / `type` / `struct` / `const`"
 
 detok :: List Token -> String
@@ -179,6 +207,8 @@ detok = detokenize <<< Array.fromFoldable
 assembleScope :: List RawDecl -> Aliases -> Scope
 assembleScope decls aliases =
   { types: map (substType aliases) (Array.mapMaybe typeOf arr)
+  , ranges: Array.mapMaybe rangeOf arr
+  , opaques: Array.mapMaybe opaqueOf arr
   , structs: map (substStruct aliases) (Array.mapMaybe structOf arr)
   , funcs: map (substFunc aliases) (map (buildFunc <<< NEA.toArray) (Array.groupBy sameFunc (Array.mapMaybe defOf arr)))
   , consts: map (substConst aliases) (Array.mapMaybe constOf arr)
@@ -196,17 +226,26 @@ assembleScope decls aliases =
   constOf _ = Nothing
   useOf (DUse s) = Just (parseUse s)
   useOf _ = Nothing
+  rangeOf (DRange s p d) = Just (parseRange s p d)
+  rangeOf _ = Nothing
+  opaqueOf (DOpaque s p d) = Just (parseOpaque s p d)
+  opaqueOf _ = Nothing
   sameFunc a b = a.name == b.name && rawArity a == rawArity b
 
 --------------------------------------------------------------------------------
 -- alias collection + substitution
 --------------------------------------------------------------------------------
 
+-- alias synonyms plus `range` names — both substitute out of type positions (a range name
+-- resolves to its ordinal `base`, ADR-0036 "representation, not newtype").
 collectAliases :: List RawDecl -> Aliases
-collectAliases decls = Array.mapMaybe aliasOf (Array.fromFoldable decls)
+collectAliases decls = Array.mapMaybe aliasOf arr <> Array.mapMaybe rangeAlias arr
   where
+  arr = Array.fromFoldable decls
   aliasOf (DAlias s) = Just (parseAlias s)
   aliasOf _ = Nothing
+  rangeAlias (DRange s p d) = let r = parseRange s p d in Just (Tuple r.name r.base)
+  rangeAlias _ = Nothing
 
 parseAlias :: String -> Tuple String String
 parseAlias text = case splitOnce ":=" text of
@@ -283,6 +322,45 @@ literalType (P.SListLit es _) = case Array.head es of
   Just e -> map (\t -> "Vec(" <> t <> ")") (literalType e)
   Nothing -> Nothing
 literalType _ = Nothing
+
+--------------------------------------------------------------------------------
+-- range / opaque
+--------------------------------------------------------------------------------
+
+parseRange :: String -> Boolean -> Maybe String -> Range
+parseRange text pub doc = case splitOnce ":=" text of
+  Just { left, right } ->
+    let b = parseBounds (trim right)
+    in { name: stripTypeParams left, base: b.base, lo: b.lo, hi: b.hi, pub, doc }
+  Nothing -> unsafeCrashWith ("Decl: range declaration needs `:=`: " <> text)
+
+parseBounds :: String -> { lo :: Int, hi :: Int, base :: String }
+parseBounds text = case splitFirst ".." text of
+  Just { left: loS, right: hiS } ->
+    let
+      lo = parseOrdinal (trim loS)
+      hi = parseOrdinal (trim hiS)
+    in
+      if lo.kind /= hi.kind then unsafeCrashWith ("Decl: range bounds must share a base: " <> text)
+      else if lo.val > hi.val then unsafeCrashWith ("Decl: empty/inverted range (need lo <= hi): " <> text)
+      else { lo: lo.val, hi: hi.val, base: if lo.kind == "char" then "Char" else "Int64" }
+  Nothing -> unsafeCrashWith ("Decl: range needs `lo..hi`: " <> text)
+
+-- an ordinal bound: a `Char` literal → {codepoint, char}; else an integer.
+parseOrdinal :: String -> { val :: Int, kind :: String }
+parseOrdinal s
+  | startsWithStr "'" s = case List.fromFoldable (exprTokens s) of
+      (TChar cp : Nil) -> { val: cp, kind: "char" }
+      _ -> unsafeCrashWith ("Decl: invalid Char bound: " <> s)
+  | otherwise = case Int.fromString (Str.replaceAll (Str.Pattern " ") (Str.Replacement "") s) of
+      Just n -> { val: n, kind: "int" }
+      Nothing -> unsafeCrashWith ("Decl: invalid integer bound: " <> s)
+
+parseOpaque :: String -> Boolean -> Maybe String -> Opaque
+parseOpaque text pub doc = case splitOnce ":=" text of
+  Just { left, right } ->
+    { name: stripTypeParams left, base: collapseParens (trim right), pub, doc, ops: [], casts: [] }
+  Nothing -> unsafeCrashWith ("Decl: opaque declaration needs `:=`: " <> text)
 
 parseUse :: String -> Use
 parseUse text =
@@ -804,16 +882,35 @@ declSexpr = progSexpr <<< parseToProg
 progSexpr :: Prog -> String
 progSexpr prog =
   joinWith "\n"
-    (map typeSexpr prog.types <> map structSexpr prog.structs <> map funcSexpr prog.funcs <> map modSexpr prog.mods)
+    ( map typeSexpr prog.types
+        <> map rangeSexpr prog.ranges
+        <> map opaqueSexpr prog.opaques
+        <> map structSexpr prog.structs
+        <> map funcSexpr prog.funcs
+        <> map modSexpr prog.mods
+    )
 
 modSexpr :: Mod -> String
 modSexpr m =
   "(mod " <> m.name <> docFlag m.doc
     <> foldMap (\u -> " " <> useSexpr u) m.uses
     <> foldMap (\t -> " " <> typeSexpr t) m.types
+    <> foldMap (\r -> " " <> rangeSexpr r) m.ranges
+    <> foldMap (\o -> " " <> opaqueSexpr o) m.opaques
     <> foldMap (\s -> " " <> structSexpr s) m.structs
     <> foldMap (\c -> " " <> constSexpr c) m.consts
     <> foldMap (\f -> " " <> funcSexpr f) m.funcs
+    <> ")"
+
+rangeSexpr :: Range -> String
+rangeSexpr r =
+  "(range " <> r.name <> pubFlag r.pub <> docFlag r.doc <> " " <> r.base <> " " <> show r.lo <> ".." <> show r.hi <> ")"
+
+opaqueSexpr :: Opaque -> String
+opaqueSexpr o =
+  "(opaque " <> o.name <> pubFlag o.pub <> docFlag o.doc <> " " <> o.base
+    <> foldMap (\op -> " op=" <> op) o.ops
+    <> foldMap (\c -> " cast=" <> c) o.casts
     <> ")"
 
 useSexpr :: Use -> String

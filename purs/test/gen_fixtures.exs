@@ -132,24 +132,57 @@ end
 # Canonical s-expression for the declaration IR (Rian.Decl assemble → Prog) — the `dcl`
 # parity oracle. Mirrors `progSexpr`/`typeSexpr`/… in purs/src/Rian/Decl.purs byte-for-byte.
 defmodule DeclCanon do
-  alias Rian.IR.{Type, Variant, Field, Struct, Func, Param, Clause, Mod, Const, Use}
+  alias Rian.IR.{
+    Type,
+    Variant,
+    Field,
+    Struct,
+    Func,
+    Param,
+    Clause,
+    Mod,
+    Const,
+    Use,
+    Range,
+    Opaque
+  }
 
   def prog(p) do
     types = Enum.map(Map.get(p, :types, []), &type_s/1)
+    ranges = Enum.map(Map.get(p, :ranges, []), &range_s/1)
+    opaques = Enum.map(Map.get(p, :opaques, []), &opaque_s/1)
     structs = Enum.map(Map.get(p, :structs, []), &struct_s/1)
     funcs = Enum.map(Map.get(p, :funcs, []), &func_s/1)
     mods = Enum.map(Map.get(p, :mods, []), &mod_s/1)
-    Enum.join(types ++ structs ++ funcs ++ mods, "\n")
+    Enum.join(types ++ ranges ++ opaques ++ structs ++ funcs ++ mods, "\n")
   end
 
-  defp mod_s(%Mod{name: n, uses: us, types: ts, structs: ss, consts: cs, funcs: fs, doc: doc}) do
+  defp mod_s(%Mod{
+         name: n,
+         uses: us,
+         types: ts,
+         ranges: rs,
+         opaques: os,
+         structs: ss,
+         consts: cs,
+         funcs: fs,
+         doc: doc
+       }) do
     "(mod #{n}#{doc_flag(doc)}" <>
       Enum.map_join(us, "", fn u -> " " <> use_s(u) end) <>
       Enum.map_join(ts, "", fn t -> " " <> type_s(t) end) <>
+      Enum.map_join(rs, "", fn r -> " " <> range_s(r) end) <>
+      Enum.map_join(os, "", fn o -> " " <> opaque_s(o) end) <>
       Enum.map_join(ss, "", fn s -> " " <> struct_s(s) end) <>
       Enum.map_join(cs, "", fn c -> " " <> const_s(c) end) <>
       Enum.map_join(fs, "", fn f -> " " <> func_s(f) end) <> ")"
   end
+
+  defp range_s(%Range{name: n, base: base, lo: lo, hi: hi, pub?: pub, doc: doc}),
+    do: "(range #{n}#{pub_flag(pub)}#{doc_flag(doc)} #{base} #{lo}..#{hi})"
+
+  defp opaque_s(%Opaque{name: n, base: base, pub?: pub, doc: doc}),
+    do: "(opaque #{n}#{pub_flag(pub)}#{doc_flag(doc)} #{base})"
 
   defp use_s(%Use{path: path, names: names}),
     do: "(use #{path}#{Enum.map_join(names, "", fn n -> " " <> n end)})"
@@ -305,7 +338,16 @@ decl_corpus = [
   "alias Id := Int53\nstruct Box(item Id)",
   "alias Pair := Tuple(Int53, Int53)\ndef swap(p Pair) Pair := p",
   "alias A := Int53\nalias B := A\nstruct S(x B)",
-  "alias Name := String\nmod U do\nstruct Person(name Name, age Int53)\nend"
+  "alias Name := String\nmod U do\nstruct Person(name Name, age Int53)\nend",
+  # stage 4a: range / opaque (+ range-as-alias substitution)
+  "range Digit := 0..9",
+  "pub range Byte := 0..255",
+  "range Letter := 'a'..'z'",
+  "opaque UserId := Int53",
+  "pub opaque Tok := String",
+  "opaque Wrapped := Vec(Int53)",
+  "range Digit := 0..9\nstruct Pos(d Digit)",
+  "mod R do\nrange Small := 0..3\nopaque Handle := Int64\nend"
 ]
 
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.
