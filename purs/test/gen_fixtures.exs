@@ -707,7 +707,12 @@ mxb_corpus = [
   "macro double(x) := x + x\npub def u(n Int53) Int53 := double(n)",
   "macro inc(x) := x + 1\npub def v(n Int53) Int53 := inc(n)",
   "macro swap(a, b) := (b, a)\ndef w(n Int53) := swap(n, 1)",
-  "macro double(x) := x + x\npub def p(n Int53) Int53 := n + 1"
+  "macro double(x) := x + x\npub def p(n Int53) Int53 := n + 1",
+  # comptime (lower_meta's other half — fires without macros, and composes after expansion):
+  "pub def c() Int53 := comptime(2 + 3)",
+  "pub def d() Int53 := comptime(10 div 3)",
+  "pub def lt() Bool := comptime(2 < 3)",
+  "macro double(x) := x + x\npub def m() Int53 := comptime(double(2))"
 ]
 
 asm_corpus = [

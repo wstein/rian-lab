@@ -24,19 +24,21 @@ import Data.Array.NonEmpty as NEA
 import Data.Foldable (any)
 import Data.Maybe (Maybe(..))
 import Data.String.Common (joinWith)
+import Rian.Comptime (fold) as Comptime
 import Rian.Core (coreSexpr, fromExpr)
 import Rian.Decl (RawDef, buildFunc, parseToProg, progSexpr)
 import Rian.IR (Body(..), Clause, Func, Prog, bodySurface)
 import Rian.Macro (Env, buildEnv, expand) as Macro
-import Rian.Pratt (parseBody) as P
+import Rian.Pratt (parseBody, sexpr) as P
 import Rian.Prim (normalize)
 import Rian.Protocol (DefMap, expand)
 import Rian.TypeStr (splitTopCommas)
 
 -- | Run the assemble tail passes: synthesize the protocol dispatcher / `impl_*` functions
--- | (`Protocol.expand`), then expand `macro` calls in every clause body (`lower_meta`, ADR-0030).
+-- | (`Protocol.expand`), then `lower_meta` over every clause body — `Macro.expand` then
+-- | `Comptime.fold` (ADR-0030).
 assemble :: Prog -> Prog
-assemble prog = expandMacros (prog { funcs = prog.funcs <> synthFuncs })
+assemble prog = lowerMeta (prog { funcs = prog.funcs <> synthFuncs })
   where
   -- only impls of a locally-declared protocol synthesize here (the orphan/own-type cases are
   -- `Decl.check_cross_module!`'s job, not this pass).
@@ -70,25 +72,31 @@ defMapToRawDef d =
   , externals: []
   }
 
--- ── macro expansion (`lower_meta`, ADR-0030): expand `macro` calls in every clause body ──
--- A `Raw` body is parsed, normalized, and macro-expanded; the result is stored as an `Expanded`
--- AST (the form the reference's `meta_clause` leaves behind). A no-op when no macros are declared.
-expandMacros :: Prog -> Prog
-expandMacros prog =
-  if null prog.macros then prog
-  else
-    let env = Macro.buildEnv prog.macros
-    in prog
-      { funcs = map (expandFunc env) prog.funcs
-      , mods = map (\m -> m { funcs = map (expandFunc env) m.funcs }) prog.mods
-      }
+-- ── `lower_meta` (ADR-0030): macro-expand then comptime-fold every clause body ──
+-- A `Raw` body is parsed, normalized, `Macro.expand`ed (a no-op for an empty env), then
+-- `Comptime.fold`ed; the result is stored as `Expanded` ONLY when it actually changed (the
+-- reference's "an untouched body keeps its source string" invariant — change-detected by the
+-- canonical `sexpr`, since `Surface` has no `Eq`). Runs always — comptime fires without macros.
+lowerMeta :: Prog -> Prog
+lowerMeta prog =
+  prog
+    { funcs = map (lowerMetaFunc env) prog.funcs
+    , mods = map (\m -> m { funcs = map (lowerMetaFunc env) m.funcs }) prog.mods
+    }
+  where
+  env = Macro.buildEnv prog.macros
 
-expandFunc :: Macro.Env -> Func -> Func
-expandFunc env f = f { clauses = map (expandClause env) f.clauses }
+lowerMetaFunc :: Macro.Env -> Func -> Func
+lowerMetaFunc env f = f { clauses = map (lowerMetaClause env) f.clauses }
 
-expandClause :: Macro.Env -> Clause -> Clause
-expandClause env c = case c.body of
-  Just (Raw s) -> c { body = Just (Expanded (Macro.expand env (normalize (P.parseBody s)) false)) }
+lowerMetaClause :: Macro.Env -> Clause -> Clause
+lowerMetaClause env c = case c.body of
+  Just (Raw s) ->
+    let
+      ast = normalize (P.parseBody s)
+      folded = Comptime.fold (Macro.expand env ast false)
+    in
+      if P.sexpr folded == P.sexpr ast then c else c { body = Just (Expanded folded) }
   _ -> c
 
 -- | The `asm` parity unit: serialize the assembled program (user + synthesized functions) via the
