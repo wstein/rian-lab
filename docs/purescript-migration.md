@@ -105,9 +105,12 @@ what the Core oracle confirms over the surface form.
 
 ### Phase 6 — Prim & stdlib support
 
-`Prim` (97), `Prelude` (115), `Builtins` (204), `Protocol` (388), `ShowStdlib` (29),
-`Range` (73), `Shadow` (114), `Opaque` (159), `Comptime` (79), `Macro` (251),
-`External` (279), `Manifest` (315).
+`Prim` (97) **✅ ported** — `Prim.*`→`__prim_*` rewrite + bare `panic`, a structural
+`normalize` over the surface AST (a separate pass; `Pratt.parse` stays normalize-free to
+avoid a module cycle, callers compose it). Parity-gated via the `prm` stream (13 records,
+oracle = the reference `parse_sexpr`). Remaining: `Prelude` (115), `Builtins` (204),
+`Protocol` (388), `ShowStdlib` (29), `Range` (73), `Shadow` (114), `Opaque` (159),
+`Comptime` (79), `Macro` (251), `External` (279), `Manifest` (315).
 
 ### Phase 7 — Transpiler: **PureScript → Rian** (re-aimed, not ported)
 
@@ -145,6 +148,8 @@ Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (par
 `Rian.Ann` reader dropped (annotation convention retained); `Rian.IR` (data structs) remains.
 **Phase 3**: `Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks +
 `with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
-error-propagation. **Next:** `Rian.IR` (data structs), then `Rian.Decl` (the declaration
-parser). Total **364/364** parity records across Lexer/TypeStr/Pratt/Core. Each module is
-parity-gated and committed on its own (Conventional Commits, ADR-0084).
+error-propagation. **Phase 6**: `Rian.Prim` ported (the `Prim.*`→`__prim_*` rewrite — a leaf Pratt depends on).
+**Next:** `Rian.IR` (data structs) + `Rian.Decl` (the declaration parser → whole-program IR;
+the largest module — port as a focused, staged unit). Total **377/377** parity records across
+Lexer/TypeStr/Pratt/Core/Prim. Each module is parity-gated and committed on its own
+(Conventional Commits, ADR-0084).

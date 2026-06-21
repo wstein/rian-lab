@@ -134,6 +134,25 @@ alias Rian.TypeStr
 alias Rian.Pratt
 alias Rian.Core
 
+# Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.
+# Oracle = Pratt.parse_sexpr (which already applies Prim.normalize inside `parse`); the PS
+# side composes Prim.normalize. Excludes unknown `Prim.x` (raises on both sides).
+prim_corpus = [
+  "Prim.char_code(c)",
+  "Prim.str_concat(a, b)",
+  "Prim.str_concat_all(parts)",
+  "Prim.map_get(m, k)",
+  "Prim.wrapping_add(a, b)",
+  "Prim.panic(msg)",
+  "panic(msg)",
+  "panic(a, b)",
+  "f(Prim.char_code(c))",
+  "x + Prim.char_code(c)",
+  "Str.chars(s)",
+  "[Prim.char_code(c), x]",
+  "if c do Prim.panic(m) else x end"
+]
+
 # Rian.Core corpus (Phase 2): exercises from_expr/from_pat + the desugarings (pipe `|>` →
 # call, range `..` → List.seq, comprehension → flat_map). Excludes pins, pattern generators,
 # interpolation, bitstrings, map update (no shared Core oracle / staged).
@@ -388,6 +407,9 @@ lines =
     end) ++
     Enum.map(core_corpus, fn s ->
       "cor\t#{Canon.hex(s)}\t#{Canon.hex(CoreCanon.expr(Core.from_expr(Pratt.parse(s))))}"
+    end) ++
+    Enum.map(prim_corpus, fn s ->
+      "prm\t#{Canon.hex(s)}\t#{Canon.hex(Pratt.parse_sexpr(s))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])

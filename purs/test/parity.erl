@@ -54,7 +54,9 @@ run_stream(<<"tsn">>, Src) -> hexbin('rian_typeStr@ps':normalize(Src));
 %% Rian.Pratt (canon = hex of the parse_sexpr rendering — the reference's own oracle)
 run_stream(<<"psx">>, Src) -> hexbin('rian_pratt@ps':parseSexpr(Src));
 %% Rian.Core (canon = hex of coreSexpr over lexer→Pratt→from_expr)
-run_stream(<<"cor">>, Src) -> hexbin('rian_core@ps':fromSource(Src)).
+run_stream(<<"cor">>, Src) -> hexbin('rian_core@ps':fromSource(Src));
+%% Rian.Prim (canon = hex of sexpr(normalize(parse)) — matches the reference's parse_sexpr)
+run_stream(<<"prm">>, Src) -> hexbin('rian_prim@ps':normalizeSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.
