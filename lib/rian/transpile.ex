@@ -1767,6 +1767,13 @@ defmodule Rian.Transpile do
   # (not the trailing `__STACKTRACE__`, which `raise_msg/1`'s 2-arg arm would otherwise pick).
   defp expr({:reraise, _, [exc | _]}), do: "panic(#{raise_msg([exc])})"
 
+  # `try do … rescue/catch/after … end` — host exception handling, which Rian has no surface
+  # for (errors are values: `Result`/`Option`). It must be restructured by hand, so emit an
+  # honest marker rather than spill a prefix `try([{:do, …}, {:rescue, [->(…)]}])` (the `->`
+  # rescue arms don't parse), mirroring the truthy `&&`/`||` and assign-in-expression markers.
+  defp expr({:try, _, _} = n),
+    do: ~s|TODO_PORT("try/rescue — restructure to Result/Option by hand: #{escape(snippet(n))}")|
+
   # `if x = e do … end` (Elixir's assign-in-condition, nil/false-falsy) has no faithful Rian
   # image: a `:=` bind is a statement, not an expression, and Rian's `if` needs a `Bool`
   # condition — so it must be restructured to a `case`/Option by hand. Emit an honest marker
