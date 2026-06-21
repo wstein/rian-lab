@@ -74,6 +74,19 @@ still depends on it — see the DoD removal-order note).
 | `Rian.Pratt`  | 1218 | the **one** expression+pattern parser (ADR-0050).  |
 | `Rian.Decl`   | 1901 | declaration parser; newline-tolerant `:=` bodies.  |
 
+**Parity plan (Pratt).** Pratt has a built-in AST→s-expression renderer
+(`parse_sexpr/1`); use it as the canonical oracle — add a `psx` stream to
+`gen_fixtures.exs` comparing `Pratt.parse_sexpr(src)` against the ported
+`parseSexpr`, so the harness only ever serializes output (no surface-AST
+round-trip). Dependencies to port alongside: the surface-AST type (Pratt's
+output), `parse`/`parse_body`/`parse_pat`, and the relevant slice of
+`Rian.Prim.normalize` (`Prim.*` → `__prim_*` rewrite; identity on a `Prim`-free
+corpus). Pratt is large and interconnected; if staged, scope the corpus to the
+ported forms and document the gap (like the partial JS/JVM emitters). **Then**
+`Core.from_expr`/`from_pat` is parity-tested by composing `lexer → Pratt → Core`
+(serialize the Core canonically) — its surface-AST input comes from the ported
+Pratt in-process, so no surface deserialization is needed.
+
 ### Phase 4 — Gates
 
 | Module                | LOC  | Notes                                          |
@@ -127,7 +140,8 @@ purerl-built BEAM modules (ADR-0031), or native `rian` CLI subcommands.
 
 ## Status
 
-Phase 0 complete (purerl chain verified end-to-end on `Rian.Token`). **Phase 1 complete**:
-the package set is wired (Task 1a) and `Rian.Lexer` is ported at full parity (Task 1b,
-204/204 fixture records). Phases 2–10 proceed one module at a time, each parity-gated and
-committed on its own (Conventional Commits, ADR-0084 cited). Next: Phase 2 (the Core IR).
+Phases 0–1 complete (purerl chain verified on `Rian.Token`; `Rian.Lexer` ported at full
+parity). **Phase 2 in progress**: `Rian.TypeStr` ported (parity-gated), `Rian.Ann` dropped
+as obsolete; `Rian.IR`/`Rian.Core` remain — `Core`'s `from_expr` composes with `Pratt`
+(Phase 3) for parity, so the natural next unit is **Pratt** (see the Phase 3 parity plan).
+Each module is parity-gated and committed on its own (Conventional Commits, ADR-0084 cited).
