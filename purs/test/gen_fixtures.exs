@@ -137,9 +137,9 @@ defmodule CoreCanon do
 
   def pat(%PMap{pairs: ps}), do: "%{#{Enum.map_join(ps, ", ", &map_pat_pair/1)}}"
 
-  # pins + type-patterns are excluded from the Core corpus (no shared renderer / no reference clause).
+  # pins stay excluded from the Core corpus (no shared renderer); type-patterns are covered.
   def pat(%PPin{}), do: raise("pin pattern is excluded from the Core parity corpus")
-  def pat(%PTyped{}), do: raise("type-pattern has no sexpr clause")
+  def pat(%PTyped{name: n, tname: t}), do: "(: #{n} #{t})"
 
   defp map_pat_pair({{:key, k}, p}), do: "#{expr(k)} => #{pat(p)}"
   defp map_pat_pair({k, p}), do: "#{k}: #{pat(p)}"
@@ -747,6 +747,8 @@ core_corpus = [
   "case r do Ok(v) -> v\nErr(e) -> e end",
   "case xs do [] -> 0\n[h | t] -> h end",
   "case p do Point(x: a, y: b) -> a\n_ -> 0 end",
+  "case x do n Int53 -> n\n_ -> 0 end",
+  "case v do n Int53 -> n\ns String -> 0 end",
   "case v do n @ Foo(x) -> n\n_ -> v end",
   "case w do \"hi\" -> 1\n_ -> 0 end",
   "case n do -1 -> a\n0 -> b\n_ -> c end",

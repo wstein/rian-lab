@@ -271,7 +271,7 @@ corePatSexpr (PPin e) = "(^ " <> P.sexpr e <> ")"
 corePatSexpr (PStruct n fields) =
   n <> "(" <> joinWith ", " (map (\(Tuple k p) -> k <> ": " <> corePatSexpr p) fields) <> ")"
 corePatSexpr (PMap fields) = "%{" <> joinWith ", " (map coreMapPatPair fields) <> "}"
-corePatSexpr (PTyped _ _) = unsafeCrashWith "Core: sexpr of a type-pattern (no reference clause)"
+corePatSexpr (PTyped name ty) = "(: " <> name <> " " <> ty <> ")"
 
 coreMapPatPair :: CMapPatPair -> String
 coreMapPatPair (CMPAtom k p) = k <> ": " <> corePatSexpr p
