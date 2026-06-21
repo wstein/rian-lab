@@ -71,7 +71,7 @@ still depends on it — see the DoD removal-order note).
 
 | Module        | LOC  | Notes / status                                                 |
 | ------------- | ---- | -------------------------------------------------------------- |
-| `Rian.Pratt`  | 1218 | **Stage 1 ported** (parity-gated, `psx` stream): the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms — **plus patterns and `if`/`case`/`lambda`/blocks**. **Stage 2** (raises a clear "stage 2" message, excluded from the corpus): `with`, `for`/comprehension, bitstrings (+pattern), `${}` interpolation, map *update*, error-propagation `<-`, speculative destructuring binds, and type-patterns (no reference `sexpr` clause). |
+| `Rian.Pratt`  | 1218 | **Ported (parity-gated, `psx` stream):** the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms, patterns, `if`/`case`/`lambda`/blocks, **and `with`/`for`/`${}` interpolation**. **Remaining (raise a clear message, excluded from the corpus):** bitstrings (+pattern, BEAM-only), map *update* and type-patterns (no reference `sexpr` clause → not parity-testable), and error-propagation `<-` + speculative destructuring binds. |
 | `Rian.Decl`   | 1901 | declaration parser; newline-tolerant `:=` bodies.              |
 
 **Parity plan (Pratt).** Pratt has a built-in AST→s-expression renderer
@@ -147,7 +147,8 @@ purerl-built BEAM modules (ADR-0031), or native `rian` CLI subcommands.
 
 Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` ported (parity-gated); `Rian.Ann` reader
 dropped (annotation convention retained); `Rian.IR`/`Rian.Core` remain. **Phase 3**:
-`Rian.Pratt` **stage 1** ported (expression core + patterns + `if`/`case`/`lambda`/blocks,
-parity-gated via `psx`); stage 2 (with/for/bitstr/interp/map-update/propagation) + `Rian.Decl`
-remain. `Core`'s `from_expr` now composes on the ported Pratt (lexer→Pratt→Core) for its parity
-test. Each module is parity-gated and committed on its own (Conventional Commits, ADR-0084).
+`Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks + `with`/`for`/
+interpolation, parity-gated via `psx`, 55 corpus records); remaining: bitstrings, map-update +
+type-patterns (no reference `sexpr`), and error-propagation. `Rian.Decl` is the next module.
+`Core`'s `from_expr` now composes on the ported Pratt (lexer→Pratt→Core) for its parity test.
+Each module is parity-gated and committed on its own (Conventional Commits, ADR-0084).

@@ -18,6 +18,9 @@ module Rian.Pratt
   , Stmt(..)
   , Pat(..)
   , MapPatPair(..)
+  , WithClause
+  , ForClause(..)
+  , IPart(..)
   , parse
   , parseSexpr
   ) where
@@ -37,7 +40,7 @@ import Data.String.Pattern (Pattern(..), Replacement(..))
 import Data.Tuple (Tuple(..))
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Lexer (exprTokens)
-import Rian.Token (Token(..))
+import Rian.Token (Token(..), StrPart(..))
 
 --------------------------------------------------------------------------------
 -- Surface AST (the transient tuple AST in the Elixir reference, as a real sum)
@@ -64,11 +67,27 @@ data Surface
   | SCase Surface (Array Arm)
   | SLambda (Array Param) Surface
   | SBlock (Array Stmt)
+  | SWith (Array WithClause) Surface (Array Arm)
+  | SFor (Array ForClause) Surface
+  | SStrInterp (Array IPart) -- `"… ${e} …"` (ADR-0069), holes re-parsed as expressions
 
 -- a map-literal pair: atom-key shorthand `k: v`, or a computed key `keyExpr => v`.
 data MapPair
   = MAtom String Surface
   | MKey Surface Surface
+
+-- a `with` clause `pat <- expr`.
+type WithClause = { pat :: Pat, expr :: Surface }
+
+-- a `for` clause: a generator `pat <- src` or a boolean filter.
+data ForClause
+  = FGen Pat Surface
+  | FFilter Surface
+
+-- a segment of an interpolated string: a literal run, or a re-parsed `${…}` hole.
+data IPart
+  = ILit String
+  | IHole Surface
 
 -- a `case`/`with`-else arm; the guard is rendered nowhere (matching `sexpr/1`).
 type Arm = { pat :: Pat, guard :: Maybe Surface, body :: Surface }
@@ -205,8 +224,8 @@ parsePrefix toks = parsePrimary toks
 parsePrimary :: List Token -> Parsed Surface
 parsePrimary (TKw "if" : rest) = parseIf rest
 parsePrimary (TKw "case" : rest) = parseCase rest
-parsePrimary (TKw "with" : _) = stage2 "with"
-parsePrimary (TKw "for" : _) = stage2 "for"
+parsePrimary (TKw "with" : rest) = parseWith rest
+parsePrimary (TKw "for" : rest) = parseFor rest
 parsePrimary (TLbracket : rest) = parseList rest []
 parsePrimary (TMapopen : rest) = parseMapStart rest
 parsePrimary (TBitopen : _) = stage2 "bitstring"
@@ -223,7 +242,7 @@ parsePrimary (TOp ":" : TId name : rest) = parsePostfix (SAtom name) rest
 parsePrimary (TOp ":" : TKw name : rest) = parsePostfix (SAtom name) rest
 parsePrimary (TOp ":" : TStr s : rest) = parsePostfix (SAtom s) rest
 parsePrimary (TStr s : rest) = parsePostfix (SStr s) rest
-parsePrimary (TIstr _ : _) = stage2 "string interpolation"
+parsePrimary (TIstr parts : rest) = parsePostfix (strInterp parts) rest
 parsePrimary (TNum n : rest) = parsePostfix (SNum n) rest
 parsePrimary (TChar cp : rest) = parsePostfix (SChar cp) rest
 parsePrimary (TId x : rest) = parsePostfix (SId x) rest
@@ -524,6 +543,92 @@ parseTypeArgs tokens acc =
     _ -> unsafeCrashWith ("Pratt: malformed type argument list: " <> here rest)
 
 --------------------------------------------------------------------------------
+-- with / for (comprehension) / string interpolation
+--------------------------------------------------------------------------------
+
+parseWith :: List Token -> Parsed Surface
+parseWith tokens =
+  let
+    Tuple clauses t1 = parseWithClauses tokens []
+    t2 = expectKw t1 "do"
+    Tuple body t3 = parseBlock t2
+    Tuple els t4 = case t3 of
+      (TKw "else" : r) -> parseArms r []
+      _ -> Tuple [] t3
+    t5 = expectKw t4 "end"
+  in Tuple (SWith clauses body els) t5
+
+parseWithClauses :: List Token -> Array WithClause -> Parsed (Array WithClause)
+parseWithClauses tokens acc =
+  let
+    Tuple pat t1 = parsePat tokens
+    t2 = expectOp2 t1 "<-"
+    Tuple expr t3 = parseExpr t2 0
+    acc' = Array.cons { pat, expr } acc
+  in case t3 of
+    (TComma : r) -> parseWithClauses r acc'
+    _ -> Tuple (Array.reverse acc') t3
+
+parseFor :: List Token -> Parsed Surface
+parseFor tokens =
+  let
+    Tuple clauses t1 = parseForClauses tokens []
+    t2 = expectKw t1 "do"
+    Tuple body t3 = parseBlock t2
+    t4 = expectKw t3 "end"
+  in Tuple (SFor clauses body) t4
+
+parseForClauses :: List Token -> Array ForClause -> Parsed (Array ForClause)
+parseForClauses tokens acc =
+  let Tuple clause rest = parseForClause tokens
+      acc' = Array.cons clause acc
+  in case rest of
+    (TComma : r) -> parseForClauses r acc'
+    _ -> Tuple (Array.reverse acc') rest
+
+parseForClause :: List Token -> Parsed ForClause
+parseForClause tokens =
+  if forGenerator tokens 0 then
+    let
+      Tuple pat r1 = parsePat tokens
+      r2 = expectOp2 r1 "<-"
+      Tuple src r3 = parseExpr r2 0
+    in Tuple (FGen pat src) r3
+  else
+    let Tuple expr r = parseExpr tokens 0 in Tuple (FFilter expr) r
+
+-- a generator iff a top-level `<-` precedes the clause boundary (`,`/`do` at depth 0).
+forGenerator :: List Token -> Int -> Boolean
+forGenerator (TOp "<-" : _) 0 = true
+forGenerator (TComma : _) 0 = false
+forGenerator (TKw "do" : _) 0 = false
+forGenerator Nil _ = false
+forGenerator (t : rest) depth = forGenerator rest (depth + forDepth t)
+
+forDepth :: Token -> Int
+forDepth TLparen = 1
+forDepth TLbracket = 1
+forDepth TLbrace = 1
+forDepth TMapopen = 1
+forDepth TBitopen = 1
+forDepth TRparen = -1
+forDepth TRbracket = -1
+forDepth TRbrace = -1
+forDepth TBitclose = -1
+forDepth _ = 0
+
+-- build the interpolation node: literal segments pass through; each hole's raw source
+-- is re-parsed as an expression (an empty hole is a parse error).
+strInterp :: Array StrPart -> Surface
+strInterp parts = SStrInterp (map resolve parts)
+  where
+  resolve (Lit s) = ILit s
+  resolve (Hole src) =
+    if trimmedEmpty src then unsafeCrashWith "Pratt: empty interpolation hole `${}`"
+    else IHole (parse src)
+  trimmedEmpty s = replaceAll (Pattern " ") (Replacement "") s == ""
+
+--------------------------------------------------------------------------------
 -- Patterns (the one pattern parser, ADR-0050 §2)
 --------------------------------------------------------------------------------
 
@@ -660,6 +765,21 @@ sexpr (SCase s arms) =
 sexpr (SLambda ps b) =
   "(lambda (" <> joinWith " " (map _.name ps) <> ") " <> sexpr b <> ")"
 sexpr (SBlock stmts) = "(block" <> foldMap (\s -> " " <> sexprStmt s) stmts <> ")"
+sexpr (SWith clauses body els) =
+  "(with " <> joinWith " " (map withClause clauses) <> " " <> sexpr body <> elseArms els <> ")"
+  where
+  withClause c = "(<- " <> sexprPat c.pat <> " " <> sexpr c.expr <> ")"
+  elseArms [] = ""
+  elseArms arms = " (else" <> foldMap (\a -> " (" <> sexprPat a.pat <> " -> " <> sexpr a.body <> ")") arms <> ")"
+sexpr (SFor clauses body) =
+  "(for " <> joinWith " " (map forClause clauses) <> " " <> sexpr body <> ")"
+  where
+  forClause (FGen p src) = "(<- " <> sexprPat p <> " " <> sexpr src <> ")"
+  forClause (FFilter c) = "(? " <> sexpr c <> ")"
+sexpr (SStrInterp parts) = "(str-interp " <> joinWith " " (map iPart parts) <> ")"
+  where
+  iPart (ILit s) = "\"" <> s <> "\""
+  iPart (IHole e) = "${" <> sexpr e <> "}"
 
 sexprMapPair :: MapPair -> String
 sexprMapPair (MAtom k v) = k <> ": " <> sexpr v

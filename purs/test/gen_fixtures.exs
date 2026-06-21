@@ -115,7 +115,19 @@ pratt_corpus = [
   "(n) -> if n > 0 do n else 0 end",
   "if c do x := 1; x + 2 end",
   "if c do x Int64 := 5; x end",
-  "case xs do [h | t] -> y := h; y + 1\n_ -> 0 end"
+  "case xs do [h | t] -> y := h; y + 1\n_ -> 0 end",
+  # stage 2a: with / for / string interpolation
+  "with Ok(x) <- r do x end",
+  "with a <- f(x), b <- g(a) do a + b end",
+  "with Ok(x) <- r do x else Err(e) -> e end",
+  "for x <- xs do x + 1 end",
+  "for x <- xs, x > 0 do x end",
+  "for {a, b} <- pairs do a end",
+  "for x <- xs, y <- ys do x + y end",
+  ~S|"a${b}c"|,
+  ~S|"${x + 1}"|,
+  ~S|"sum=${a + b}!"|,
+  ~S|"${f(x)}"|
 ]
 
 # Type-string corpus for Rian.TypeStr (split_top_commas / split_top_pipes / normalize).
