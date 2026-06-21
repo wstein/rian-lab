@@ -597,6 +597,68 @@ detok_corpus = [
   "x := 2"
 ]
 
+# Rian.PatternLower + Rian.Exhaustiveness gate corpus (the `plw` / `exh` streams). Each
+# scenario builds a signature env (base + add_type / add_range), lowers real source-parsed
+# pattern vectors through `PatternLower.lower_clause`, then runs `Exhaustiveness.analyze`.
+# The scenario table is mirrored byte-for-byte in `Rian.Exhaustiveness.scenarios` (PS).
+defmodule ExhFixtures do
+  alias Rian.{Exhaustiveness, PatternLower, Pratt}
+
+  defp env_tree,
+    do: Exhaustiveness.add_type(Exhaustiveness.base_env(), :tree, [{:leaf, 0}, {:node, 2}])
+
+  defp env_option,
+    do: Exhaustiveness.add_type(Exhaustiveness.base_env(), :option, [{:some, 1}, {:none, 0}])
+
+  defp env_digit, do: Exhaustiveness.add_range(Exhaustiveness.base_env(), :digit, 0, 3)
+
+  def scenarios do
+    base = Exhaustiveness.base_env()
+
+    [
+      {"list-exhaustive", base, [{"[]", false}, {"[h | t]", false}], 1},
+      {"list-missing-nil", base, [{"[h | t]", false}], 1},
+      {"list-wild", base, [{"[]", false}, {"_", false}], 1},
+      {"tuple-2", base, [{"{x, y}", false}], 1},
+      {"tree-exhaustive", env_tree(), [{"Leaf", false}, {"Node(l, r)", false}], 1},
+      {"tree-missing-node", env_tree(), [{"Leaf", false}], 1},
+      {"tree-nested-witness", env_tree(), [{"Node(Leaf, Leaf)", false}, {"Leaf", false}], 1},
+      {"option-exhaustive", env_option(), [{"Some(x)", false}, {"None", false}], 1},
+      {"option-missing-none", env_option(), [{"Some(x)", false}], 1},
+      {"lit-int-infinite", base, [{"0", false}, {"1", false}], 1},
+      {"lit-int-wild", base, [{"0", false}, {"_", false}], 1},
+      {"range-exhaustive", env_digit(), [{"0", false}, {"1", false}, {"2", false}, {"3", false}],
+       1},
+      {"range-incomplete", env_digit(), [{"0", false}, {"1", false}], 1},
+      {"unreachable-after-wild", base, [{"_", false}, {"[]", false}], 1},
+      {"as-passthrough", base, [{"all @ [h | t]", false}, {"[]", false}], 1},
+      {"guard-excluded", base, [{"[]", true}, {"_", false}], 1},
+      {"two-arg", env_tree(), [{"Leaf, Leaf", false}, {"_, _", false}], 2}
+    ]
+  end
+
+  defp lower_arms(env, arms) do
+    Enum.map(arms, fn {src, g} ->
+      PatternLower.lower_clause(%{pats: Pratt.parse_pats(src), guard: g}, env)
+    end)
+  end
+
+  def plow(env, arms) do
+    lower_arms(env, arms)
+    |> Enum.map_join(" ; ", fn c ->
+      Exhaustiveness.render(c.pat) <> " g=" <> to_string(c.guard)
+    end)
+  end
+
+  def exh(env, arms, n) do
+    r = Exhaustiveness.analyze(lower_arms(env, arms), n, env)
+    miss = if r.missing, do: Exhaustiveness.render(r.missing), else: "-"
+
+    "exh=" <>
+      to_string(r.exhaustive?) <> " miss=" <> miss <> " unr=" <> Enum.join(r.unreachable, ",")
+  end
+end
+
 lines =
   Enum.flat_map(corpus, fn src ->
     [
@@ -633,6 +695,12 @@ lines =
     Enum.map(range_corpus, fn s ->
       core = Rian.Range.expand_of(Core.from_expr(Pratt.parse(s)), range_table)
       "rng\t#{Canon.hex(s)}\t#{Canon.hex(CoreCanon.expr(core))}"
+    end) ++
+    Enum.flat_map(ExhFixtures.scenarios(), fn {name, env, arms, n} ->
+      [
+        "plw\t#{Canon.hex(name)}\t#{Canon.hex(ExhFixtures.plow(env, arms))}",
+        "exh\t#{Canon.hex(name)}\t#{Canon.hex(ExhFixtures.exh(env, arms, n))}"
+      ]
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])

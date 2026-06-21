@@ -60,7 +60,11 @@ run_stream(<<"prm">>, Src) -> hexbin('rian_prim@ps':normalizeSexpr(Src));
 %% Rian.Decl (canon = hex of the Prog serializer over tokenize→split_decls→assemble)
 run_stream(<<"dcl">>, Src) -> hexbin('rian_decl@ps':declSexpr(Src));
 %% Rian.Range (canon = hex of coreSexpr after the Name.of(n) rewrite over a fixed table)
-run_stream(<<"rng">>, Src) -> hexbin('rian_range@ps':expandOfSexpr(Src)).
+run_stream(<<"rng">>, Src) -> hexbin('rian_range@ps':expandOfSexpr(Src));
+%% Rian.PatternLower (canon = hex of the lowered checker patterns + guard, per scenario)
+run_stream(<<"plw">>, Src) -> hexbin('rian_exhaustiveness@ps':plowSexpr(Src));
+%% Rian.Exhaustiveness (canon = hex of the analyze result over a fixed scenario table)
+run_stream(<<"exh">>, Src) -> hexbin('rian_exhaustiveness@ps':analyzeSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

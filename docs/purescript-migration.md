@@ -88,8 +88,8 @@ what the Core oracle confirms over the surface form.
 | Module                | LOC  | Notes                                          |
 | --------------------- | ---- | ---------------------------------------------- |
 | `Rian.InferLocal`     | 250  | local inference helper.                         |
-| `Rian.PatternLower`   | 149  | pattern compilation.                            |
-| `Rian.Exhaustiveness` | 290  | Maranget usefulness; drives Rust `_ =>`.        |
+| `Rian.PatternLower`   | 149  | ✅ ported — Core `CPat` → checker patterns (`plw` stream). |
+| `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable (`exh` stream). |
 | `Rian.Capability`     | 290  | BEAM linearity (`iso`/`ref`); FFI-adjacent.     |
 | `Rian.Check`          | 2724 | unification inference — **reframe, not lift**.  |
 | `Rian.Reach`          | 1235 | target-set portability inference (ADR-0057/58). |
@@ -114,7 +114,13 @@ typed Core (the leaf-gate pattern: a structural Core→Core pass); parity via th
 (9 records, composing `lexer → Pratt → Core → expand_of → coreSexpr` over a fixed table).
 Remaining: `Prelude` (115), `Builtins` (204), `Protocol` (388), `ShowStdlib` (29),
 `Shadow` (114), `Opaque` (159), `Comptime` (79), `Macro` (251), `External` (279),
-`Manifest` (315). Sibling gates (Phase 4): `PatternLower`/`Exhaustiveness`/… also consume Core.
+`Manifest` (315).
+`PatternLower` (149) + `Exhaustiveness` (290) **✅ ported** (Phase 4 gates, consuming the
+ported Core) — `PatternLower.lower` (Core `CPat` → Maranget checker patterns) and the full
+usefulness engine (`base_env`/`add_type`/`add_range`/`useful?`/`analyze`/witness/`render`).
+The heterogeneous-atom signature env becomes a `CtorId` sum over small association lists (no
+`Data.Map` in the purerl set). Parity via the `plw`/`exh` streams (17-scenario fixed table,
+composing `lexer → Pratt → Core → lower → analyze`); `program_env` waits on `Prelude`.
 
 ### Phase 7 — Transpiler: **PureScript → Rian** (re-aimed, not ported)
 
@@ -152,9 +158,11 @@ Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (par
 `Rian.Ann` reader dropped (annotation convention retained); `Rian.IR` (data structs) remains.
 **Phase 3**: `Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks +
 `with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
-error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` stages 1–3**
-(`type`/`struct`/`def`/`mod`/`const`/`use`/`alias`) ported. **Next:** `Rian.Decl` stage 4 — `def`
-block bodies (`take_block`/`detok_block`) + `@external`, `range`, `opaque`; the program-wide
-tail passes wait on `Check`/`InferLocal`/`Protocol`. Total **435/435** parity records across
-Lexer/TypeStr/Pratt/Core/Prim/Decl. Each module is parity-gated and committed on its own
+error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` stages 1–4a**
+(`type`/`struct`/`def`/`mod`/`const`/`use`/`alias`/`range`/`opaque`) ported. **Phase 4 gates:**
+**`Rian.PatternLower`** + **`Rian.Exhaustiveness`** ported (Maranget usefulness over the ported
+Core; `plw`/`exh` streams). **Next:** `Rian.Decl` stage 4b/4c — `def` block bodies
+(`take_block`/`detok_block`) + `@external`; the program-wide tail passes wait on
+`Check`/`InferLocal`/`Protocol`. Total **469/469** parity records across
+Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness. Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
