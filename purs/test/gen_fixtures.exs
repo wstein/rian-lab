@@ -536,7 +536,16 @@ rch_corpus = [
   "def m() := %{a: 1}",
   "def okv(x Int53) := {:ok, x}",
   "def shw(x Int53) := __prim_to_string(x)",
-  "def host() := :erlang.now()\ndef caller() := host()"
+  "def host() := :erlang.now()\ndef caller() := host()",
+  # slice 2 — emitter-gap detectors: Any-in-operator (off :jvm, + Any off :rs), a narrowable
+  # union (kills nothing), a non-narrowable union (Int32+Char clash → off all), a sum-member
+  # union, and a clause-head pin (off :rs).
+  "def gop(x Any) := x + 1",
+  "def heq(x Any) := x == 1",
+  "def unar(x Int32 | Bool) := x",
+  "def uclash(x Int32 | Char) := x",
+  "def usum(x Color | Bool) := x\ntype Color := Red | Green",
+  "def same(x Int53, ^x) := x"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
