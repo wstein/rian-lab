@@ -36,7 +36,7 @@ import Data.String.Common (joinWith)
 import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CStmt(..), fromExpr)
 import Rian.Decl (parseToProg)
-import Rian.IR (Cap(..), Clause, Field, Func, Prog, Type)
+import Rian.IR (Body, Cap(..), Clause, Field, Func, Prog, Type, bodySurface)
 import Rian.Pratt (MapPatPair(..), Pat(..), Surface, parse, parseBody) as P
 import Rian.Prim (normalize, overflowOps) as Prim
 import Rian.TypeStr (splitTopCommas)
@@ -233,13 +233,17 @@ funcSigTypes f = Array.mapMaybe identity (map _.ty f.params <> [ f.ret ])
 scanClause :: Array String -> Acc -> Clause -> Acc
 scanClause modnames acc c =
   let
-    acc' = maybe acc (\b -> scan modnames acc (coreOf P.parseBody b)) c.body
+    acc' = maybe acc (\b -> scan modnames acc (coreOfBody b)) c.body
   in
     maybe acc' (\g -> scan modnames acc' (coreOf P.parse g)) c.guard
 
 -- parse → normalize (`Prim.*` → `__prim_*`, as the reference's `parse_body` does) → Core.
 coreOf :: (String -> P.Surface) -> String -> CExpr
 coreOf parser src = fromExpr (Prim.normalize (parser src))
+
+-- a clause body to Core: parse the raw / pass the expanded AST (`bodySurface`), then normalize.
+coreOfBody :: Body -> CExpr
+coreOfBody b = fromExpr (Prim.normalize (bodySurface b))
 
 -- ── the body walker: classify each node, recurse children ──
 -- NOTE: purerl gotchas avoided here — (1) NO array-literal pattern in a function head
@@ -439,7 +443,7 @@ isWordCp cp =
 anyParamInJvmOp :: Func -> Boolean
 anyParamInJvmOp f =
   not (Array.null anyNames)
-    && any (\c -> maybe false (\b -> anyOpNode anyNames (coreOf P.parseBody b)) c.body) f.clauses
+    && any (\c -> maybe false (\b -> anyOpNode anyNames (coreOfBody b)) c.body) f.clauses
   where
   anyNames = map _.name (Array.filter (\p -> p.ty == Just "Any") f.params)
 
@@ -613,7 +617,7 @@ comparesFnField :: Pctx -> Func -> Boolean
 comparesFnField pctx f = usesParametric pctx.fnFieldNames f && bodyHasEq f
 
 bodyHasEq :: Func -> Boolean
-bodyHasEq f = any (\c -> maybe false (\b -> hasEq (coreOf P.parseBody b)) c.body) f.clauses
+bodyHasEq f = any (\c -> maybe false (\b -> hasEq (coreOfBody b)) c.body) f.clauses
 
 hasEq :: CExpr -> Boolean
 hasEq node = thisEq || any hasEq (childrenOf node)
@@ -625,7 +629,7 @@ hasEq node = thisEq || any hasEq (childrenOf node)
 -- every parametric construction `P(args)` in the body, as `{ordered_field_tvars, args}`.
 parametricConstructions :: Array (Tuple String (Array String)) -> Func -> Array (Tuple (Array String) (Array CExpr))
 parametricConstructions ctors f =
-  Array.concatMap (\c -> maybe [] (\b -> collectCtors ctors (coreOf P.parseBody b)) c.body) f.clauses
+  Array.concatMap (\c -> maybe [] (\b -> collectCtors ctors (coreOfBody b)) c.body) f.clauses
 
 collectCtors :: Array (Tuple String (Array String)) -> CExpr -> Array (Tuple (Array String) (Array CExpr))
 collectCtors ctors (ECall (EId n) args) =
@@ -655,7 +659,7 @@ lookupParamType f n = case Array.find (\p -> p.name == n) f.params of
 -- a non-generic builder lowers only when its tail is a direct call to a generic helper.
 builderTailOk :: Array String -> Func -> Boolean
 builderTailOk generics f =
-  all (\c -> maybe false (\b -> tailOk generics (coreOf P.parseBody b)) c.body) f.clauses
+  all (\c -> maybe false (\b -> tailOk generics (coreOfBody b)) c.body) f.clauses
 
 tailOk :: Array String -> CExpr -> Boolean
 tailOk generics (EBlock stmts) = case Array.last stmts of

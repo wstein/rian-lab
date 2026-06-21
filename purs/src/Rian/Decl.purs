@@ -36,7 +36,7 @@ import Data.String.CodePoints as CP
 import Data.String.Common (joinWith, trim)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Rian.IR (Cap(..), Clause, Const, ExtSpec(..), Field, Func, ImplDecl, ImplMethod, Method, Mod, Opaque, Param, Prog, Protocol, Range, Struct, Type, Use, Variant)
+import Rian.IR (Body(..), Cap(..), Clause, Const, ExtSpec(..), Field, Func, ImplDecl, ImplMethod, Method, Mod, Opaque, Param, Prog, Protocol, Range, Struct, Type, Use, Variant)
 import Rian.Lexer (detokenize, exprTokens, tokenize)
 import Rian.Pratt (Pat, parsePats, sexprPat)
 import Rian.Pratt as P
@@ -786,7 +786,7 @@ singleClauseFunc d =
     { name: d.name
     , params
     , ret: reqRet d
-    , clauses: [ { pats: map _.pat hp, body: d.body, guard: d.guard } ]
+    , clauses: [ { pats: map _.pat hp, body: map Raw d.body, guard: d.guard } ]
     , externals: []
     , pub: d.pub
     , tvars: d.tvars
@@ -800,7 +800,7 @@ clauseOf arity d = case d.body of
   Just _ ->
     let pats = parsePats d.params
     in if Array.length pats /= arity then unsafeCrashWith ("Decl: clause has " <> show (Array.length pats) <> " patterns but arity " <> show arity)
-       else { pats, body: d.body, guard: d.guard }
+       else { pats, body: map Raw d.body, guard: d.guard }
 
 reqRet :: RawDef -> Maybe String
 reqRet d = case d.ret of
@@ -1241,7 +1241,8 @@ clauseSexpr c =
   guardOf Nothing = ""
   guardOf (Just g) = " when=" <> g
   bodyOf Nothing = ""
-  bodyOf (Just b) = " body=" <> b
+  bodyOf (Just (Raw s)) = " body=" <> s
+  bodyOf (Just (Expanded ast)) = " body=" <> P.sexpr ast
 
 typeSexpr :: Type -> String
 typeSexpr t =

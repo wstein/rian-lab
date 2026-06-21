@@ -17,6 +17,8 @@ module Rian.IR
   , Struct
   , Cap(..)
   , Param
+  , Body(..)
+  , bodySurface
   , Clause
   , ExtSpec(..)
   , Func
@@ -36,7 +38,7 @@ import Prelude
 
 import Data.Maybe (Maybe)
 import Data.Tuple (Tuple)
-import Rian.Pratt (Pat)
+import Rian.Pratt (Pat, Surface, parseBody)
 
 -- @rian_sig struct Field(label Option(String), type val String)
 type Field = { label :: Maybe String, ty :: String }
@@ -60,10 +62,22 @@ derive instance Eq Cap
 -- @rian_sig struct Param(name String, ty String, cap Cap)
 type Param = { name :: String, ty :: Maybe String, cap :: Cap }
 
--- One function clause: argument `pats` (surface patterns), a `body` source string (`Nothing`
--- for a bodiless signature), and an optional `guard` source string.
+-- A clause body: `Raw` source text (the common case — the invariant that an untouched body is
+-- its source) or an `Expanded` surface AST, the form `Macro.expand`/`Comptime.fold` leave behind
+-- (ADR-0030/0040). Mirrors the reference's `String | ast` clause body without losing the
+-- idempotent re-parse: a consumer reads it through `bodySurface` (parse the raw / pass the AST).
+data Body = Raw String | Expanded Surface
+
+-- | The surface AST of a clause body, parsing `Raw` source and passing an `Expanded` tree
+-- | through — the PureScript stand-in for the reference's idempotent `Pratt.parse_body`.
+bodySurface :: Body -> Surface
+bodySurface (Raw s) = parseBody s
+bodySurface (Expanded ast) = ast
+
+-- One function clause: argument `pats` (surface patterns), an optional `body` (`Nothing` for a
+-- bodiless signature), and an optional `guard` source string.
 -- @rian_sig struct Clause(pats Vec(Pat), body Core, guard Option(Core))
-type Clause = { pats :: Array Pat, body :: Maybe String, guard :: Maybe String }
+type Clause = { pats :: Array Pat, body :: Maybe Body, guard :: Maybe String }
 
 -- A target-scoped FFI body (`@external(:target, spec)`, ADR-0068): a raw host-expression
 -- `String`, a function reference (`Mod.fun` local / `:erlang.fun`, the `Boolean` = erlang?),

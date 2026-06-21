@@ -57,7 +57,7 @@ import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
 import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Func, Param, Prog, Type)
+import Rian.IR (Func, Param, Prog, Type, bodySurface)
 import Rian.Prelude (withPrelude)
 import Rian.Pratt (Arm, ForClause(..), IPart(..), MapPair(..), Param, Pat, Stmt(..), Surface(..), WithClause, parse, parseBody) as P
 import Rian.Prim (normalize)
@@ -806,7 +806,7 @@ inferReturnType f ic =
   clauseType c = case c.body of
     Nothing -> Unknown
     Just b ->
-      let body = fromExpr (normalize (P.parseBody b))
+      let body = fromExpr (normalize (bodySurface b))
       in
         if selfRecursiveBody body f.name then Bottom
         else infer body (bindTvarParams (clauseEnv c.pats f.params ic) c.pats f.params f.tvars) ic
@@ -912,7 +912,7 @@ checkReturn ic f = case f.ret of
   clauseErr ret c = case c.body of
     Nothing -> Nothing
     Just b ->
-      let bt = infer (fromExpr (normalize (P.parseBody b))) (clauseEnv c.pats f.params ic) ic
+      let bt = infer (fromExpr (normalize (bodySurface b))) (clauseEnv c.pats f.params ic) ic
       in
         if assignable bt (TName ret) then Nothing
         else Just ("`" <> f.name <> "`: body has type `" <> tyStr bt <> "` but the declared return type is `" <> ret <> "`")
@@ -1026,7 +1026,7 @@ inferParamType f i ic = foldl (\acc c -> foldConstraint acc (clauseC c)) Unknown
   clauseC c = case index c.pats i of
     Nothing -> Unknown
     Just pat -> case fromPat pat of
-      PVar vn -> maybe Unknown (\b -> varConstraint vn (clauseEnv c.pats f.params ic) ic (fromExpr (normalize (P.parseBody b)))) c.body
+      PVar vn -> maybe Unknown (\b -> varConstraint vn (clauseEnv c.pats f.params ic) ic (fromExpr (normalize (bodySurface b)))) c.body
       other -> patternType ic other
 
 -- the type a clause-head pattern requires of its scrutinee (structural patterns stay `Unknown`).
@@ -1173,11 +1173,11 @@ declaredSet tsets ret = case Str.stripPrefix (Str.Pattern "Result(") ret of
 
 -- the tags a function directly builds (`{:error, Tag}`) over its clause bodies.
 directTags :: Func -> Array String
-directTags f = nub (concatMap (\c -> maybe [] (\b -> errorTags (P.parseBody b)) c.body) f.clauses)
+directTags f = nub (concatMap (\c -> maybe [] (\b -> errorTags (bodySurface b)) c.body) f.clauses)
 
 -- functions whose errors propagate (a `with`-clause source when the `with` has no `else`).
 propagatedCallees :: Func -> Array String
-propagatedCallees f = concatMap (\c -> maybe [] (\b -> withCallees (P.parseBody b)) c.body) f.clauses
+propagatedCallees f = concatMap (\c -> maybe [] (\b -> withCallees (bodySurface b)) c.body) f.clauses
 
 errorTags :: P.Surface -> Array String
 errorTags node = case node of
