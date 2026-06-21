@@ -19,6 +19,7 @@ import Data.Show.Generic (genericShow)
 -- | One segment of an interpolated string (`TIstr`): a literal run (escape-decoded)
 -- | or a `${expr}` hole carrying the raw expression source (parsed later by the Pratt
 -- | parser). Mirrors the Elixir `{:lit, s}` / `{:hole, src}` parts (ADR-0069).
+-- @rian_sig type StrPart := Lit(val String) | Hole(val String)
 data StrPart
   = Lit String
   | Hole String
@@ -31,6 +32,12 @@ instance Show StrPart where
 
 -- | A lexer token. Mirrors `Rian.Lexer`'s `@type token` (lib/rian/lexer.ex) and the
 -- | self-hosted `Token` sum one-for-one, so the migrated lexer can emit it directly.
+-- @rian_sig type Token :=
+--   TNl | TLparen | TRparen | TLbracket | TRbracket | TLbrace | TRbrace | TMapopen
+--   | TBitopen | TBitclose | TComma | TSemi | TStr(val String) | TChar(val Int53)
+--   | TNum(val String) | TOp(val String) | TKw(val String) | TId(val String)
+--   | TAnnot(val String) | TComment(val String) | THeredoc(val String)
+--   | TIstr(val Vec(StrPart))
 data Token
   = TNl
   | TLparen
@@ -65,18 +72,21 @@ instance Show Token where
 
 -- | A significant newline separator (`{:nl}`). Drives the declaration stream;
 -- | stripped from the expression stream.
+-- @rian_sig pub def isNewline(t val Token) Bool
 isNewline :: Token -> Boolean
 isNewline TNl = true
 isNewline _ = false
 
 -- | Formatter-only trivia the compiler pipeline discards (`strip_trivia/1`):
 -- | comments and the raw heredoc form.
+-- @rian_sig pub def isTrivia(t val Token) Bool
 isTrivia :: Token -> Boolean
 isTrivia (TComment _) = true
 isTrivia (THeredoc _) = true
 isTrivia _ = false
 
 -- | The token's constructor name — used for diagnostics and the parity harness.
+-- @rian_sig pub def tokenName(t val Token) String
 tokenName :: Token -> String
 tokenName TNl = "TNl"
 tokenName TLparen = "TLparen"

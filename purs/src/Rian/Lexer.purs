@@ -134,6 +134,7 @@ isWs c = c == 32 || c == 9 || c == 13 || c == 10 || c == 11 || c == 12
 
 type Step = { prepend :: List Token, rest :: Cs }
 
+-- @rian_sig pub def tokenizeTrivia(src val String) Vec(Token)
 tokenizeTrivia :: String -> Array Token
 tokenizeTrivia s = Array.fromFoldable (List.reverse (lexLoop (toCps s) Nil))
 
@@ -485,9 +486,11 @@ partLitText (Hole _) = ""
 -- The three public streams
 --------------------------------------------------------------------------------
 
+-- @rian_sig pub def tokenize(src val String) Vec(Token)
 tokenize :: String -> Array Token
 tokenize = collapseNl <<< stripTrivia <<< tokenizeTrivia
 
+-- @rian_sig pub def exprTokens(src val String) Vec(Token)
 exprTokens :: String -> Array Token
 exprTokens = Array.filter (not <<< isNewline) <<< stripTrivia <<< tokenizeTrivia
 
@@ -516,9 +519,11 @@ collapseNl toks =
 -- detokenize (the inverse — a re-lexable rendering; String ops here are UTF-8-safe)
 --------------------------------------------------------------------------------
 
+-- @rian_sig pub def detokenize(toks val Vec(Token)) String
 detokenize :: Array Token -> String
 detokenize = detokenizeWith " "
 
+-- @rian_sig pub def detokenizeWith(nlAs val String, toks val Vec(Token)) String
 detokenizeWith :: String -> Array Token -> String
 detokenizeWith nlAs toks =
   trimTrailing (joinWith "" (Array.mapWithIndex render toks))

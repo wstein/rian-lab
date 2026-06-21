@@ -34,6 +34,7 @@ fromCps = CP.fromCodePointArray <<< map (\n -> unsafePartial (fromJust (toEnum n
 
 -- | Split `s` on its **top-level commas only** (nested generics stay intact). Each
 -- | component is trimmed; empty components are dropped.
+-- @rian_sig pub def splitTopCommas(s val String) Vec(String)
 splitTopCommas :: String -> Array String
 splitTopCommas "" = []
 splitTopCommas s = Array.filter (_ /= "") (map trim (slice (topCommaCuts s) s))
@@ -71,6 +72,7 @@ slice cuts s =
 
 -- | Split `s` on its **top-level `|` only** (paren-aware). Each component is trimmed;
 -- | empty components are dropped.
+-- @rian_sig pub def splitTopPipes(s val String) Vec(String)
 splitTopPipes :: String -> Array String
 splitTopPipes s =
   let
@@ -87,6 +89,7 @@ splitTopPipes s =
 -- | Canonicalize a type-reference string. A top-level `|` becomes the value-union form
 -- | `Union(m1, m2, …)` (ADR-0083) — members flattened, de-duplicated, sorted. A type
 -- | with no top-level `|` is returned trimmed.
+-- @rian_sig pub def normalize(t val String) String
 normalize :: String -> String
 normalize t = case splitTopPipes t of
   [ single ] -> trim single

@@ -62,7 +62,7 @@ still depends on it — see the DoD removal-order note).
 
 | Module          | LOC | Notes / status                                                  |
 | --------------- | --- | --------------------------------------------------------------- |
-| `Rian.Ann`      | 173 | **Dropped, not ported** — the Elixir `@rian_sig`/`@rian_host` annotation bridge is obsolete under PureScript's real types. |
+| `Rian.Ann`      | 173 | **Reader dropped; convention retained.** The Elixir `Rian.Ann` module (reads `@rian_sig` from Elixir AST/`.beam`) is obsolete, but `@rian_sig` annotation *comments* live on in PureScript source — they carry the **capabilities** (`val`/`iso`/`ref`/`tag`) and **type bridge** (`Int`→`Int53`, `Array`→`Vec`, …) that PS types underdetermine, read by the Phase-7 PS→Rian transpiler. See `purs/README.md`. |
 | `Rian.TypeStr`  | 155 | ✅ ported (`splitTopCommas`/`splitTopPipes`/`normalize`); parity-gated (48 fixtures). |
 | `Rian.IR`       | 262 | shared IR structs (data definitions).                           |
 | `Rian.Core`     | 717 | `from_expr`/`from_pat`; the sealed-sum Core IR. Surface-AST input comes from `Pratt` (Phase 3), so its parity test composes with the parser. |
@@ -113,12 +113,17 @@ Pratt in-process, so no surface deserialization is needed.
 `Range` (73), `Shadow` (114), `Opaque` (159), `Comptime` (79), `Macro` (251),
 `External` (279), `Manifest` (315).
 
-### Phase 7 — Transpiler (decision point)
+### Phase 7 — Transpiler: **PureScript → Rian** (re-aimed, not ported)
 
-`Transpile` (2525) + `Transpile.Infer` (1195) port **Elixir AST → Rian**. Under purerl
-this needs Elixir/Erlang-AST FFI. **Open question for ADR-0084:** once the compiler is
-self-hosting in PureScript, the Elixir-source transpiler may be retired rather than
-ported — decide before starting this phase.
+The Elixir `Transpile` (2525) + `Transpile.Infer` (1195) consume **Elixir AST → Rian**;
+they are **not ported**. Instead the transpiler is re-aimed at **PureScript → Rian**: it
+reads the ported PS modules plus their `@rian_sig` comments (the capability + type-bridge
+info PS types underdetermine, see `purs/README.md`) and emits Rian source, so the compiler
+self-hosts and the Rust/BEAM/JS backends compile it. This is why every module ported in
+Phases 1–6 carries `@rian_sig` annotations on its public functions and struct/sum fields:
+they are the transpiler's input, and they let the **Rust backend work from day one** on the
+transpiled output (correct ownership/borrowing instead of a guessed default). Likely reads
+PureScript's `corefn` JSON (already emitted by `purs`) rather than re-parsing source.
 
 ### Phase 8 — Execution & self-host (FFI-heavy)
 

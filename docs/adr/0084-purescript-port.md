@@ -79,6 +79,19 @@ Elixir reference, not a redesign.
   its output against the Elixir reference's recorded fixtures (the `Rian.Fixpoint`
   discipline: a port is a regression test, not a demo). A module is "migrated" only when
   the parity harness is green **and** parity holds; "compiles" is not "correct".
+- **Annotate for the Phase-7 PS→Rian transpiler as you port.** The endgame transpiler is
+  re-aimed from Elixir→Rian to **PureScript→Rian** (Phase 7): it lowers the ported PS
+  implementation back to Rian so the compiler self-hosts and the Rust/BEAM/JS backends
+  compile it. PureScript's types **underdetermine** the Rian signature — reference
+  **capabilities** (`val`/`iso`/`ref`/`tag`, ADR-0025; not expressible in PS, yet they
+  drive Rust ownership and BEAM linearity) and **type width/shape** (`Int`→`Int53`,
+  `Array`→`Vec`, `Boolean`→`Bool`). So every ported module carries `@rian_sig` annotation
+  *comments* on its public functions and struct/sum fields (form + mental model in
+  `purs/README.md`). This is the surviving half of the old Elixir `@rian_sig` bridge: the
+  *reader* module `Rian.Ann` is obsolete (Phase 7 reads PS `corefn` + these comments, not
+  Elixir AST/`.beam`), but the **annotation convention is retained** — it is what lets the
+  Rust backend lower transpiled code correctly from day one instead of defaulting `val`
+  everywhere and miscompiling the owned/moved cases.
 
 ### FFI boundary (the BEAM-coupled modules)
 

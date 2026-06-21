@@ -13,6 +13,51 @@ modules need (`:compile.forms`, code loading, the REPL) — preserving the self-
 bootstrap that a PureScript→JS port would have lost. See ADR-0084 for the full rationale
 and the FFI boundary.
 
+## `@rian_sig` capability & type annotations
+
+The endgame (ADR-0084 Phase 7) is a **PureScript → Rian** transpiler — Rian's reference
+implementation, written in PureScript, lowered back to Rian source so it self-hosts and the
+Rust/BEAM/JS backends compile it. PureScript's type system is rich, but it **underdetermines
+the Rian signature** in two ways the transpiler and the Rust backend need, so each ported
+module carries `@rian_sig` annotation comments (the convention that replaces the Elixir
+`@rian_sig` attribute — only the Elixir *reader* `Rian.Ann` is obsolete, the annotation lives on):
+
+1. **Reference capabilities** — `val` / `iso` / `ref` / `tag` are not expressible in PureScript
+   at all, yet they drive the Rust signature (owned vs borrowed vs `&mut`) and BEAM linearity
+   (use-once). See [`../docs/spec/capability-lowering.md`](../docs/spec/capability-lowering.md).
+2. **Type bridging** — PureScript `Int` does not say `Int53` vs `Int32`; `Array T` → `Vec(T)`,
+   `Boolean` → `Bool`, `Maybe T` → `Option(T)`, `String` → `String`.
+
+### Form
+
+A `-- @rian_sig <decl>` line sits immediately before the PureScript declaration it annotates
+(a multi-line type continues on following `--` comment lines). It is a plain comment — invisible
+to `purs`, read only by the Phase-7 transpiler. The `<decl>` is a Rian declaration head with
+capability-annotated parameters/fields (grammar: `[label] [capability] type`,
+[types-match.md §3.4](../docs/spec/types-match.md)):
+
+```purescript
+-- @rian_sig type Token := … | TStr(val String) | TChar(val Int53) | TIstr(val Vec(StrPart))
+data Token = … | TStr String | TChar Int | TIstr (Array StrPart)
+
+-- @rian_sig pub def tokenize(src val String) Vec(Token)
+tokenize :: String -> Array Token
+```
+
+### Capability mental model (default: `val`)
+
+| keyword | meaning             | Rust (param)        |
+| ------- | ------------------- | ------------------- |
+| `val`   | borrowed / read-only (default) | `&str` / `&[T]` / `&T`, `Copy` prim by value |
+| `iso`   | owned / move (use-once)        | `String` / `Vec<T>` / `T` |
+| `ref`   | mutable borrow                 | `&mut T` (BEAM-illegal) |
+| `tag`   | shared borrow / identity       | `&T` |
+
+Omit the keyword and it defaults to `val`. The leaf modules ported so far are read-only
+throughout, so every annotation is `val` — but they still carry the **type bridge** (e.g.
+`Int` → `Int53`), and they establish the pattern for later modules (IR/Core/Decl) where owned
+sub-trees and builders take `iso`. Annotate public functions and every struct/sum field.
+
 ## Layout
 
 ```
