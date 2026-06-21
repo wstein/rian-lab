@@ -495,7 +495,12 @@ shadow_corpus = [
   "x := 1 ; y := x + 1 ; y",
   "x := 1 ; x := 2 ; case x do\n  x -> x\nend",
   "a := s ; a",
-  "x := 1 ; x := x + 1 ; x := x * 2 ; x"
+  "x := 1 ; x := x + 1 ; x := x * 2 ; x",
+  # `<-` error-propagation desugar (ADR-0066): a single arrow, a nested chain, and a
+  # `:=` bind before the arrow (the `before` stmts pass through).
+  "x <- foo() ; bar(x)",
+  "a <- f() ; b <- g(a) ; c(a, b)",
+  "y := 1 ; x <- foo(y) ; bar(x, y)"
 ]
 
 # Rian.Builtins corpus — the `bui` stream: host/stdlib foreign-call signatures

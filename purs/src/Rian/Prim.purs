@@ -87,6 +87,7 @@ normForClause (P.FFilter c) = P.FFilter (normalize c)
 normStmt :: P.Stmt -> P.Stmt
 normStmt (P.StBind n e) = P.StBind n (normalize e)
 normStmt (P.StTypedBind n t e) = P.StTypedBind n t (normalize e)
+normStmt (P.StBindArrow n e) = P.StBindArrow n (normalize e)
 normStmt (P.StExpr e) = P.StExpr (normalize e)
 
 normIPart :: P.IPart -> P.IPart

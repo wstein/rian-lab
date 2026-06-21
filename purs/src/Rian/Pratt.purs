@@ -104,6 +104,7 @@ type Param = { name :: String, ty :: Maybe String }
 data Stmt
   = StBind String Surface
   | StTypedBind String String Surface
+  | StBindArrow String Surface -- `name <- expr` error-propagation bind (ADR-0066)
   | StExpr Surface
 
 -- surface patterns (clause heads & case arms). Bitstring patterns are stage 2.
@@ -536,7 +537,41 @@ parseParam other = unsafeCrashWith ("Pratt: bad lambda param: " <> here other)
 
 parseBlock :: List Token -> Parsed Surface
 parseBlock tokens =
-  let Tuple stmts rest = parseStmts tokens [] in Tuple (SBlock (Array.reverse stmts)) rest
+  let Tuple stmts rest = parseStmts tokens []
+  in Tuple (desugarPropagation (Array.reverse stmts)) rest
+
+-- ADR-0066 (P4): a bare `name <- expr` statement is **error propagation** — desugar a
+-- block carrying one into a `case` over the `Result`: `{:ok, name}` binds and continues,
+-- `{:error, e}` short-circuits (returns the error unchanged). Sugar over the same Result
+-- match `with` desugars to; no new semantics. A block with no `<-` is unchanged.
+desugarPropagation :: Array Stmt -> Surface
+desugarPropagation stmts =
+  if Array.any isArrow stmts then desugarProp stmts 0 else SBlock stmts
+  where
+  isArrow (StBindArrow _ _) = true
+  isArrow _ = false
+
+-- `depth` deterministically names each propagation's error binder `__prop_e<depth>`, so
+-- nested `<-` chains get distinct names without a non-deterministic gensym (ADR-0063 §3
+-- determinism); the `__` prefix keeps it out of the user namespace. A *trailing* `<-`
+-- has no continuation, so it is a mistake (matches the reference's raise).
+desugarProp :: Array Stmt -> Int -> Surface
+desugarProp stmts depth =
+  let { init: before, rest } = Array.span notArrow stmts
+  in case Array.uncons rest of
+    Nothing -> SBlock before
+    Just { head: StBindArrow name e, tail } ->
+      if Array.null tail then unsafeCrashWith "Pratt: a trailing `<-` propagation bind has no continuation"
+      else
+        let
+          ev = "__prop_e" <> show depth
+          okArm = { pat: PTuple [ PAtom "ok", PVar name ], guard: Nothing, body: desugarProp tail (depth + 1) }
+          errArm = { pat: PTuple [ PAtom "error", PVar ev ], guard: Nothing, body: STuple [ SAtom "error", SId ev ] }
+        in SBlock (before <> [ StExpr (SCase e [ okArm, errArm ]) ])
+    Just _ -> SBlock before
+  where
+  notArrow (StBindArrow _ _) = false
+  notArrow _ = true
 
 parseStmts :: List Token -> Array Stmt -> Parsed (Array Stmt)
 parseStmts toks@(TKw k : _) acc | k == "else" || k == "end" = Tuple acc toks
@@ -550,7 +585,8 @@ parseStmts tokens acc =
 parseStmt :: List Token -> Parsed Stmt
 parseStmt (TId name : TOp ":=" : rest) =
   let Tuple e r = parseExpr rest 0 in Tuple (StBind name e) r
-parseStmt (TId _ : TOp "<-" : _) = stage2 "error-propagation `<-` bind"
+parseStmt (TId name : TOp "<-" : rest) =
+  let Tuple e r = parseExpr rest 0 in Tuple (StBindArrow name e) r
 parseStmt toks@(TId name : TId _ : _) =
   let
     Tuple ty afterType = parseType (List.drop 1 toks)
@@ -822,6 +858,8 @@ sexprMapPair (MKey k v) = sexpr k <> " => " <> sexpr v
 sexprStmt :: Stmt -> String
 sexprStmt (StBind n e) = "(:= " <> n <> " " <> sexpr e <> ")"
 sexprStmt (StTypedBind n t e) = "(:= " <> n <> " " <> t <> " " <> sexpr e <> ")"
+-- never reached post-desugar (`desugarPropagation` consumes it); present for totality.
+sexprStmt (StBindArrow n e) = "(<- " <> n <> " " <> sexpr e <> ")"
 sexprStmt (StExpr e) = sexpr e
 
 sexprPat :: Pat -> String
