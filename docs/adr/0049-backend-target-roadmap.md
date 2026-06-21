@@ -183,6 +183,13 @@ explicit rule, not by momentum:
    portable-core parity — lists/maps/FFI raise `Unsupported`), which is the rule working as
    intended, not a gap to paper over.
 
+The proposed/candidate backends — Python (ADR-0071), Swift (ADR-0072), and the **Haxe-style dynamic
+triad Lua/PHP/Neko (ADR-0085)** — all enter *under* these four rules, not around them: each is a
+Tier-2/3 candidate counted against the target budget, graduates only on sustained green conformance,
+and may not widen the frozen portable core. ADR-0085 is the pointed case — it adopts the very targets
+this Haxe lesson came from, which is honest **only** because it does so under the gate, not in spite of
+it (it borrows Haxe's demonstrated *reach*, refuses Haxe's *sprawl*).
+
 **The gate is mechanized** — `Rian.ConformanceTest` (`test/rian/conformance_test.exs`) compiles and
 *runs* the portable-core corpus (`examples/rian/conformance_core.rian` + `14_test_framework.rian`) on
 every Tier-1 target (`:ex` via `Rian.Test.run`, `:rs` via `rustc --test`, `:js` via `node --test`) plus
