@@ -1,10 +1,16 @@
 # ADR-0087 — Generative reach-honesty harness: prove the matrix, don't assert it
 
-**Status:** Proposed (direction) — this ADR **locks the invariant** (§1); the generator, shrinking, and
-per-target conformance lanes (§2–§4) are stated as direction and remain Open Items until built.
-**Implemented:** no. The honesty mechanism today is fixture-based (`reach_rust_honesty_test` and
-siblings over a hand-curated corpus); this ADR replaces the *gate* with a generative property and keeps
-the fixtures as named regression cases.
+**Status:** Proposed (direction) — this ADR **locks the invariant** (§1), now enforced by a Stage-1
+generator on the numeric-width surface (see Implemented); the type-directed generator, shrinking, and
+the remaining per-target lanes (§2–§4) are stated as direction and remain Open Items.
+**Implemented:** Stage 1 landed (`reach_honesty_property_test`, `@tag :rust`) — a seeded generator of
+**well-typed-by-construction** integer programs over a random numeric width (the ADR-0064 contract, the
+densest blocker surface) asserts the §1 over-claim invariant on `:rs` (a `:rs` reach claim must compile
+under `rustc`, an emitter raise counts as a lie) plus the width contract both ways (`:rs` reached iff
+fixed-width; `:js` iff the width fits 2^53). The fixtures (`reach_rust_honesty_test`) stay as named
+regression cases. **Not yet:** the type-directed generator beyond integer arithmetic (§2-3), shrinking
+(§4), the `:js`/`node` and BEAM emit-**and-run** directions (Stage 1 checks `rustc` *compilation*, not
+execution), and the coherence consumer (§5). Those are Stage 2 — its own effort.
 **Refines:** ADR-0000 (honesty bar — supplies the precise, machine-checkable definition of "verified":
 a generative property, not a curated corpus), ADR-0058 (reachability + CI parity — the property is what
 the parity lane must satisfy per target).
