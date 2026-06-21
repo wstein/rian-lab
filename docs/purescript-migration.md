@@ -92,7 +92,7 @@ what the Core oracle confirms over the surface form.
 | `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
 | `Rian.Coherence`      | ~240 | ✅ ported — protocol/impl coherence rules (ADR-0061 §5): unknown-protocol, method-set/arity, runtime-discriminator presence + non-overlap, duplicate. Pure pass over the parsed IR; parity-gated via the `coh` stream (8 records), serializing `rule:proto:type` synthesis-free so incoherent inputs (which the desugar raises on) compare too. The runtime discriminator is keyed by an equivalence class (`int`/`bool`/…/`sum:<name>`) rather than the BEAM guard string — same overlap outcome, no codegen coupling. |
 | `Rian.Capability`     | 290  | BEAM linearity (`iso`/`ref`); FFI-adjacent.     |
-| `Rian.Check`          | 2724 | 🟡 **stages 1-3b ported** — `unify`/`join` + `infer` (expression core, `if`/`lambda`/`block`, and `ECall` to prims/builtins/`Fn`-vars). `infer` case/poly-generics/`.of`-cast, `annotate`, error-sets, the program gates pending. **reframe, not lift**. |
+| `Rian.Check`          | 2724 | 🟡 **stages 1-3c ported** — `unify`/`join` + `infer` (expression core, `if`/`lambda`/`block`, `ECall` to prims/builtins/`Fn`-vars/poly-stdlib-generics). `infer` case-narrowing/`.of`-cast/the `ic`, `annotate`, error-sets, the program gates pending. **reframe, not lift**. |
 | `Rian.Reach`          | 1235 | target-set portability inference (ADR-0057/58). |
 
 ### Phase 5 — Emitters
@@ -174,7 +174,7 @@ ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`ex
 streams), the first slice of the inference engine; `infer`/`annotate`/error-sets/the program
 gates are later stages. **Next:** `Check.infer` (the Core-node dispatch), then the program-wide
 tail passes (macro expansion, protocol synthesis, interpolation/stdlib/infer-local).
-Total **659/659** parity records across
+Total **664/664** parity records across
 Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External/Coherence/Check/Builtins.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
