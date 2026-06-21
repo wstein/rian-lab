@@ -471,6 +471,39 @@ proto_impl_corpus = [
   "mod P do\nprotocol Ord do\n  def lt(a Self, b Self) Bool\nend\nimpl Ord for Int53 do\n  def lt(a, b) := a < b\nend\nend"
 ]
 
+# Rian.Builtins corpus — the `bui` stream: host/stdlib foreign-call signatures
+# (`mod;fun;arity`; `mod=nil` = Kernel auto-import). Covers table hits across modules,
+# the `Int`-vs-`Int53` arbitrary-precision returns, misses, and poly-only entries (which
+# are NOT `known?` — that checks the concrete-return table only).
+builtins_corpus = [
+  "nil;map_size;1",
+  "nil;inspect;1",
+  "nil;is_atom;1",
+  "nil;to_string;1",
+  "String;trim;1",
+  "String;length;1",
+  "String;to_integer;1",
+  "String;split;2",
+  "String;to_atom;1",
+  "Enum;count;1",
+  "Enum;join;2",
+  "erlang;phash2;1",
+  "erlang;binary_to_integer;1",
+  "erlang;system_time;0",
+  "IO;puts;1",
+  "math;pi;0",
+  "math;sqrt;1",
+  "nil;nope;1",
+  "String;trim;9",
+  "List;map;2",
+  "List;reverse;1",
+  "Enum;filter;2",
+  "Enum;map_reduce;3",
+  "Map;new;0",
+  "Map;put;3",
+  "Map;merge;2"
+]
+
 # Rian.Check type-algebra corpus (ADR-0084 stage 1). `unify` (partial-inference vs decl:
 # Unknown is a wildcard) and `join` (branch/arm LUB: Unknown absorbs, Bottom identity,
 # numeric widening, covariant parametric). Pairs are `t;;u`.
@@ -840,6 +873,27 @@ detok_corpus = [
 # scenario builds a signature env (base + add_type / add_range), lowers real source-parsed
 # pattern vectors through `PatternLower.lower_clause`, then runs `Exhaustiveness.analyze`.
 # The scenario table is mirrored byte-for-byte in `Rian.Exhaustiveness.scenarios` (PS).
+defmodule BuiltinsCanon do
+  # the `bui` stream: `known?`/`ret`/`poly_sig` for a `mod;fun;arity` key (`mod` = `nil` for a
+  # Kernel auto-import). Mirrors `Builtins.builtinSexpr` in PureScript.
+  def run(src) do
+    [m, f, a] = String.split(src, ";")
+    modv = if m == "nil", do: nil, else: m
+    arity = String.to_integer(a)
+
+    "known=#{Rian.Builtins.known?(modv, f, arity)} ret=#{ret(modv, f, arity)} poly=#{poly(modv, f, arity)}"
+  end
+
+  defp ret(m, f, a), do: Rian.Builtins.ret(m, f, a) || ":nil"
+
+  defp poly(m, f, a) do
+    case Rian.Builtins.poly_sig(m, f, a) do
+      nil -> ":nil"
+      {params, r, tvars} -> "(#{Enum.join(params, ",")});#{r};#{Enum.join(tvars, ",")}"
+    end
+  end
+end
+
 defmodule CheckCanon do
   # the `uni`/`joi` streams: a `t;;u` pair through `Rian.Check.unify`/`join`. The Elixir `ty`
   # is `String | :unknown | :mismatch | :bottom`; the sentinels are spelled `:unknown` etc.
@@ -1048,6 +1102,9 @@ lines =
     end) ++
     Enum.map(check_infer_corpus, fn s ->
       "inf\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer(s))}"
+    end) ++
+    Enum.map(builtins_corpus, fn s ->
+      "bui\t#{Canon.hex(s)}\t#{Canon.hex(BuiltinsCanon.run(s))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
