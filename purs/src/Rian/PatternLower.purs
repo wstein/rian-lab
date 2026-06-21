@@ -98,6 +98,7 @@ arityOf env c = fromMaybe 0 (aLookup c env.arity)
 -- | The two Elixir snake regexes fused into one neighbour-aware pass: insert `_`
 -- | before an uppercase letter that either follows a lowercase/digit, or sits between
 -- | an uppercase and a lowercase (the acronym boundary), then downcase.
+-- @rian_sig pub def toSnake(name val String) String
 toSnake :: String -> String
 toSnake name = toLower (foldlWithIndex step "" cs)
   where
@@ -124,6 +125,7 @@ isLowerOrDigit c = isLowerAlpha c || (c >= '0' && c <= '9')
 -- ── Lowering ─────────────────────────────────────────────────────────────────
 
 -- | Lower one Core pattern → `Tuple checker introduced_guard?`.
+-- @rian_sig pub def lower(pat val Pat, env val _Unk) _Unk
 lower :: CPat -> Env -> Tuple CkPat Boolean
 lower PWild _ = Tuple Wild false
 lower (PVar _) _ = Tuple Wild false
@@ -182,6 +184,7 @@ lowerList elems tail env = case uncons elems of
       Tuple (Ctor CCons [ hc, tc ]) (hi || ti)
 
 -- | Lower one clause: parse the source pattern vector, lower each, OR the guard flags.
+-- @rian_sig pub def lowerClause(src val String, guard val Bool, env val _Unk) _Unk
 lowerClause :: String -> Boolean -> Env -> Clause
 lowerClause src guard env =
   let
@@ -191,6 +194,7 @@ lowerClause src guard env =
     { pat: pats, guard: guard || intro }
 
 -- | Register a product type (struct) so struct patterns can be ordered + decomposed.
+-- @rian_sig pub def addStruct(env val _Unk, name val String, fields val Vec(String)) _Unk
 addStruct :: Env -> String -> Array String -> Env
 addStruct env name fields =
   let s = toSnake name in

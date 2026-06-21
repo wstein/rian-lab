@@ -22,6 +22,7 @@ import Rian.IR (ExtSpec(..), Param)
 -- | Render one `@external` spec against a function's `params`. A raw host-expression string
 -- | is verbatim; a function reference (`Mod.fun` / `:erlang.fun`) becomes a positional host
 -- | call; a foreign-file reference has no direct rendering (bundled by `rian build`).
+-- @rian_sig pub def render(spec val _Unk, params val Vec(_Unk)) String
 render :: ExtSpec -> Array Param -> String
 render (ExtStr s) _ = s
 render (ExtRef parts erlang) params =

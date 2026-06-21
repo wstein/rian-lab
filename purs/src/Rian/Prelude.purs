@@ -26,6 +26,7 @@ import Rian.Decl (parseToProg, typeSexpr)
 import Rian.IR (Type)
 
 -- | The built-in prelude types (known everywhere, never re-emitted as user types).
+-- @rian_sig pub def types() Vec(Type)
 types :: Array Type
 types =
   [ { name: "Option"
@@ -39,6 +40,7 @@ types =
   ]
 
 -- | Prepend the prelude types to a program's user types (for env / meta / inference).
+-- @rian_sig pub def withPrelude(types val Vec(Type)) Vec(Type)
 withPrelude :: Array Type -> Array Type
 withPrelude userTypes = types <> userTypes
 

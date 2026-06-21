@@ -32,12 +32,15 @@ type PolySig = { params :: Array String, ret :: String, tvars :: Array String }
 
 -- ── lookups ──────────────────────────────────────────────────────────────────
 
+-- @rian_sig pub def ret(module val Option(String), fun val String, arity val Int53) Option(String)
 ret :: Maybe String -> String -> Int -> Maybe String
 ret m f a = lookupKey { mod: m, fun: f, arity: a } table
 
+-- @rian_sig pub def known(module val Option(String), fun val String, arity val Int53) Bool
 known :: Maybe String -> String -> Int -> Boolean
 known m f a = isJust (lookupKey { mod: m, fun: f, arity: a } table)
 
+-- @rian_sig pub def polySig(module val Option(String), fun val String, arity val Int53) Option((Vec(String), String, Vec(String)))
 polySig :: Maybe String -> String -> Int -> Maybe PolySig
 polySig m f a = lookupKey { mod: m, fun: f, arity: a } poly
 

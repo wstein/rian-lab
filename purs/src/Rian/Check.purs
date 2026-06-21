@@ -69,6 +69,7 @@ tyOf s = TName s
 
 -- | Unify two types: equal → itself; `Unknown` → the other; `Any` → the other; `Fn(…)`
 -- | structurally; else `Mismatch`.
+-- @rian_sig pub def unify(t val String, u val String) String
 unify :: Ty -> Ty -> Ty
 unify t u
   | t == u = t
@@ -139,6 +140,7 @@ isTvar s = case toCharArray s of
 
 -- | The LUB of two branch/arm/element types (ADR-0059). NOT `unify`: here `Unknown` is
 -- | *absorbing* (top), `Bottom` is the identity, `Any` absorbs, `_Unk` defers.
+-- @rian_sig pub def join(from val String, to val String) String
 join :: Ty -> Ty -> Ty
 join t u
   | t == u = t
@@ -285,6 +287,7 @@ type Env = Array (Tuple String Ty)
 -- | `if`/`case` (branch-join + value unions), lambdas, calls/generics, `.field`, atoms, and
 -- | the inference context (`ic` — ctors/fsigs/abstract ops) arrive in later stages, so those
 -- | nodes defer to `Unknown` here (the conservative slice never over-claims).
+-- @rian_sig pub def infer(ast val Expr, env val Dict(String, String)) String
 infer :: CExpr -> Env -> Ty
 infer (ENum n) _ = if hasDotOrE n then TName "Float64" else TName "Int53"
 infer (EStr _) _ = TName "String"
