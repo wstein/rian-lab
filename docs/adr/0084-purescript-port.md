@@ -1,24 +1,24 @@
 # ADR-0084 — Re-platform the reference compiler from Elixir to PureScript (purerl)
 
-**Status:** Proposed
-**Implemented:** foundation — the `purs/` workspace, toolchain pinning, and the first
-migrated module (`Rian.Token`, the leaf data spine, **idiomatic**: Prelude, derived `Eq`,
-`genericShow`). The **full purerl chain is verified end-to-end** through the real library
-set: legacy `spago` 0.21 + the purerl *dhall* package set → `purs` typecheck → `purerl`
-0.0.24 codegen of the sources **and** the package set → `erlc` → runs correctly on
-Erlang/OTP 29 (`purs/scripts/purerl-build.sh`, a reproducible gate). This proves the
-chosen architecture with a runnable artifact, not an assertion (ADR-0000). **Phase 1 is
-complete:** the package set is wired (Task 1a), and `Rian.Lexer` is ported (Task 1b) — a
-pure, no-FFI scanner over a decoded codepoint stream, verified at **byte-for-byte parity**
-against the Elixir reference (204/204 fixture records: all three streams + detokenize, via
-`purs/test/{gen_fixtures.exs,lexer_parity.erl}`, gated by `scripts/purerl-build.sh`). The
-Elixir `Lexer` remains as the parity oracle (removal is root-first; see the migration plan).
-**Phase 2** (in progress): `Rian.TypeStr` ported; the `Rian.Ann` reader is dropped but the
-`@rian_sig` convention is retained. **Phase 3**: `Rian.Pratt` **stage 1** ported — the
-precedence-climbing expression core + patterns + `if`/`case`/`lambda`/blocks, verified against
-the reference's own `parse_sexpr` renderer (the `psx` parity stream); stage 2
-(`with`/`for`/bitstrings/interpolation/map-update/propagation) and `Rian.Decl` remain. See
-`purs/README.md` and `docs/purescript-migration.md`.
+**Status:** Accepted (in progress — Phase 4 closed; emitters remain)
+**Implemented:** the **entire front-end + inference + gate stack is ported** and verified at
+**byte-for-byte parity** against the Elixir reference — lex → `Pratt`/`Decl` parse → typed
+`Core` IR → the refutation gates (`PatternLower`/`Exhaustiveness`) → the portability/capability/
+expansion gates (`Reach`, `Capability`, `Macro`, `Protocol.expand`, `Coherence`) → the inference
++ return gate (`Check` `ic`/`assignable?`/error-sets, `InferLocal`, `infer_param_type`,
+`effect_sets`) → the assemble tail (`Assemble`/`Comptime`). **Phase 4 is closed.** The full
+purerl chain is verified end-to-end through the real library set: legacy `spago` 0.21 + the
+purerl *dhall* package set → `purs` typecheck → `purerl` 0.0.24 codegen of the sources **and** the
+package set → `erlc` → runs correctly on Erlang/OTP 29 (`purs/scripts/purerl-build.sh`, a
+reproducible **local** gate). This proves the architecture with a runnable artifact, not an
+assertion (ADR-0000). **What remains:** the value backend — the `Beam`/`Lower`/`JS`/`JVM`
+emitters — plus the `Check.annotate`/`forall T: Bound` tail. The Elixir reference stays as the
+parity oracle until each module's PureScript counterpart reaches parity (removal is root-first).
+The per-module status table, the exact parity-record breakdown (currently **825/825**, the
+harness's own `N/N` total), and the remaining work live in **`docs/purescript-migration.md`** —
+the single source of truth, so this header does not drift; see also `purs/README.md`. **Honesty
+caveat:** the parity gate runs **locally per commit**, not in CI — fetching the pinned `purerl`
+release + dhall set is a network step the CI image does not perform today (see "Consequences").
 **Refs:** ADR-0000 (honesty bar — no asserted-not-proven build claims), ADR-0050
 (typed Core IR as the spine the migration follows; per-target emitter structure),
 ADR-0031 (toolchain-free `rian` CLI — the purerl build is a BEAM artifact, same as
@@ -125,8 +125,10 @@ the compiler (lexer → Core → checker → source emitters) is pure PureScript
   shrinking Elixir remainder.
 - **Toolchain gains a non-npm dependency** (the purerl binary + its package set). The
   bootstrap is documented in `purs/README.md` and pinned in `spago.yaml`; CI must fetch
-  the purerl release and package set (a network step the sandbox used during authoring
-  could not perform — hence the "foundation only" status above).
+  the purerl release and package set (a network step the CI image does not perform today).
+  Until it does, **the parity gate is local-per-commit, not CI-enforced** — the one
+  honesty caveat on the status above: ported modules are parity-checked at authoring time,
+  not re-verified on the default `mix`/CI gate.
 - **The language ADRs and the by-example tour are unaffected** — same source, same
   targets, same Reach matrix. Only the compiler's host language changes.
 
