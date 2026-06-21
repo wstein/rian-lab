@@ -662,6 +662,15 @@ ilr_corpus = [
   "pub def p(x Int53) Int53 := x"
 ]
 
+# parameter inference + `forall T` generalization (the InferLocal fixpoint's headline) — `ilp`:
+ilp_corpus = [
+  "def add(x, y) := x + y",
+  "def idu(x) := x",
+  "def fst(x, y) := x",
+  "def cat(s) := s <> \"!\"",
+  "def callee(x String) := x\ndef caller(y) := callee(y)"
+]
+
 # Rian.Check `check_program` corpus — the `gate` stream. The return-assignability gate: a body
 # whose inferred type is assignable to the declared return passes (`ok`), else the first mismatch
 # message. Concrete types (no error-sets / effects / bounds / coherence / literal-width-adoption).
@@ -1384,6 +1393,23 @@ defmodule CheckCanon do
     |> Enum.join(";")
   end
 
+  # the `ilp` stream: each function's FULL inferred signature after `fill_returns` —
+  # `name/arity:p0,p1=>ret[tvars]` (proves parameter inference + `forall T` generalization).
+  def fill_sig(src) do
+    filled = Rian.InferLocal.fill_returns(Rian.Decl.parse(src, assemble_only: true))
+    funcs = Map.get(filled, :funcs, []) ++ Enum.flat_map(Map.get(filled, :mods, []), & &1.funcs)
+    pty = fn t -> if is_binary(t), do: t, else: "_" end
+
+    funcs
+    |> Enum.map(fn f ->
+      ptys = f.params |> Enum.map(fn p -> pty.(p.type) end) |> Enum.join(",")
+      tv = if f.tvars == [], do: "", else: "[" <> Enum.join(f.tvars, ",") <> "]"
+      "#{f.name}/#{length(f.params)}:#{ptys}=>#{f.ret || "_"}#{tv}"
+    end)
+    |> Enum.sort()
+    |> Enum.join(";")
+  end
+
   # the `ipt` stream: each function's parameters' `infer_param_type` (`name/i=>type`) under a
   # filled `ic`.
   def infer_param(src) do
@@ -1606,6 +1632,9 @@ lines =
     end) ++
     Enum.map(ilr_corpus, fn s ->
       "ilr\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.fill_returns(s))}"
+    end) ++
+    Enum.map(ilp_corpus, fn s ->
+      "ilp\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.fill_sig(s))}"
     end) ++
     Enum.map(ipt_corpus, fn s ->
       "ipt\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer_param(s))}"

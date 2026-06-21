@@ -681,7 +681,7 @@ inferBodySexpr src = tyStr (infer (fromExpr (normalize (P.parseBody src))) fixed
 
 -- the empty inference context — `infer` with it reproduces the env-only behaviour.
 emptyIc :: Ic
-emptyIc = { tdefs: [], fields: [], funs: [], fsigs: [], ctors: [], ranges: [], opaques: [], impls: [], fbounds: [] }
+emptyIc = { tdefs: [], fields: [], funs: [], fsigs: [], ctors: [], ranges: [], opaques: [], impls: [], fbounds: [], numDefault: TName "Int53" }
 
 -- | The `ifc` stream: infer an expression under a real `ic` built from `program_ic` over a
 -- | leading program, `;;`-separated from the expression. Tests the ic-using call clauses
@@ -1062,8 +1062,8 @@ varConstraint name env ic node = case node of
     let
       here =
         if op == "<>" && (varIs name l || varIs name r) then TName "String"
-        else if isArithOp op && varIs name l then numHint (infer r env ic)
-        else if isArithOp op && varIs name r then numHint (infer l env ic)
+        else if isArithOp op && varIs name l then numHint ic.numDefault (infer r env ic)
+        else if isArithOp op && varIs name r then numHint ic.numDefault (infer l env ic)
         else if elem op boolOps && varIs name l then concretize (infer r env ic)
         else if elem op boolOps && varIs name r then concretize (infer l env ic)
         else Unknown
@@ -1104,10 +1104,11 @@ varIs :: String -> CExpr -> Boolean
 varIs name (EId n) = n == name
 varIs _ _ = false
 
--- an arithmetic neighbour's numeric hint: an int type's ordinal base; else the `Int53` default.
-numHint :: Ty -> Ty
-numHint (TName t) = if intType (TName t) then ordinalBase (TName t) else Unknown
-numHint _ = TName "Int53"
+-- an arithmetic neighbour's numeric hint: an int type's ordinal base; else the `num_default`
+-- (`Int53` normally, `Unknown` during InferLocal's first pass so a param isn't frozen early).
+numHint :: Ty -> Ty -> Ty
+numHint _ (TName t) = if intType (TName t) then ordinalBase (TName t) else Unknown
+numHint dflt _ = dflt
 
 stmtExpr :: CStmt -> CExpr
 stmtExpr (CBind _ e) = e
@@ -1333,6 +1334,10 @@ type Ic =
   , opaques :: Array (Tuple String OpaqueInfo)
   , impls :: Array (Tuple String (Array String))
   , fbounds :: Array (Tuple String Fbound)
+  -- the type an unconstrained arithmetic operand defaults to (ADR-0034): `Int53` normally, but
+  -- `Unknown` during `InferLocal`'s first fixpoint pass so a param isn't frozen from a not-yet-
+  -- typed neighbour. Mirrors the reference's `ic.num_default`.
+  , numDefault :: Ty
   }
 
 type Fsig = { params :: Array (Maybe String), ret :: Maybe String, tvars :: Array String }
@@ -1353,6 +1358,7 @@ programIc prog =
   , opaques: map (\o -> Tuple o.name { base: o.base, ops: o.ops, casts: o.casts }) allOpaques
   , impls: implTable prog
   , fbounds: fboundTable allFuncs
+  , numDefault: TName "Int53"
   }
   where
   types = allTypes prog

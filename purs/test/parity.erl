@@ -108,6 +108,8 @@ run_stream(<<"irt">>, Src) -> hexbin('rian_check@ps':inferReturnTypeSexpr(Src));
 run_stream(<<"flr">>, Src) -> hexbin('rian_check@ps':fillLocalRetsSexpr(Src));
 %% Rian.InferLocal fill_returns (canon = each function's return after infer-local)
 run_stream(<<"ilr">>, Src) -> hexbin('rian_inferLocal@ps':fillReturnsSexpr(Src));
+%% Rian.InferLocal full inferred signature (canon = params + ret + tvars after infer-local)
+run_stream(<<"ilp">>, Src) -> hexbin('rian_inferLocal@ps':fillSigSexpr(Src));
 %% Rian.Check check_program (canon = `ok` or the first return-mismatch message)
 run_stream(<<"gate">>, Src) -> hexbin('rian_check@ps':checkProgramSexpr(Src));
 %% Rian.Assemble (canon = the assembled program incl. synthesized protocol funcs, via progSexpr)
