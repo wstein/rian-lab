@@ -183,6 +183,24 @@ defmodule DeclCanon do
     Enum.join(protocols ++ impls, "\n")
   end
 
+  # the `pex` stream: a generated `Protocol.expand` def map (dispatcher head/clause or impl method).
+  def expand_def_s(d) do
+    "(" <>
+      Atom.to_string(d.dispatch) <>
+      " " <>
+      d.name <>
+      " params=" <>
+      (d.params || "") <>
+      ret_flag(Map.get(d, :ret)) <>
+      guard_of(Map.get(d, :guard)) <>
+      body_of(Map.get(d, :body)) <>
+      " pub=" <>
+      to_string(d.pub) <>
+      " tvars=" <>
+      Enum.join(Map.get(d, :tvars, []), ",") <>
+      if(Map.get(d, :synthetic), do: " syn", else: "") <> ")"
+  end
+
   defp protocol_s(p) do
     "(protocol #{p.name}#{Enum.map_join(p.methods, "", &method_s/1)}#{Enum.map_join(p.assoc, "", fn a -> " assoc=#{a}" end)})"
   end
@@ -485,6 +503,21 @@ proto_impl_corpus = [
   "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := int_to_str(x)\nend",
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
   "mod P do\nprotocol Ord do\n  def lt(a Self, b Self) Bool\nend\nimpl Ord for Int53 do\n  def lt(a, b) := a < b\nend\nend"
+]
+
+# Rian.Protocol corpus — the `pex` stream (ADR-0042 §4): the dispatcher / `impl_*` def maps
+# `Protocol.expand` synthesizes. Exercises the runtime discriminator guards (primitive / sum
+# (all-nullary + mixed) / struct), a multi-clause dispatcher (two impls), a two-param method,
+# and a protocol with no impls (no dispatcher). Types/structs come LAST (after the impl `end`)
+# to sidestep the `type`-absorbs-next quirk shared by both parsers.
+pex_corpus = [
+  "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := f(x)\nend",
+  "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := a(x)\nend\nimpl Show for Bool do\n  def show(x) := b(x)\nend",
+  "protocol Nm do\n  def nm(c Self) String\nend\nimpl Nm for Color do\n  def nm(c) := s(c)\nend\ntype Color := Red | Green | Blue",
+  "protocol Tag do\n  def tag(o Self) Int53\nend\nimpl Tag for Box do\n  def tag(o) := 0\nend\ntype Box := Em | Full(v Int53)",
+  "protocol Org do\n  def org(p Self) Bool\nend\nimpl Org for Point do\n  def org(p) := f(p)\nend\nstruct Point(x Int53, y Int53)",
+  "protocol Empty do\n  def e(x Self) Bool\nend",
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
@@ -1195,6 +1228,21 @@ lines =
     end) ++
     Enum.map(proto_impl_corpus, fn s ->
       "prc\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.proto_impl(Decl.parse(s, assemble_only: true)))}"
+    end) ++
+    Enum.map(pex_corpus, fn s ->
+      p = Decl.parse(s, assemble_only: true)
+      protocols = Map.new(Map.get(p, :protocols, []), &{&1.name, &1.methods})
+
+      impls =
+        Map.get(p, :impl_decls, [])
+        |> Enum.map(&{&1.proto, &1.type, &1.methods, &1.assoc})
+        |> Enum.filter(fn {proto, _, _, _} -> Map.has_key?(protocols, proto) end)
+
+      defs =
+        Rian.Protocol.expand(protocols, impls, Map.get(p, :types, []), Map.get(p, :structs, []))
+
+      canon = Enum.map_join(defs, "\n", &DeclCanon.expand_def_s/1)
+      "pex\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)

@@ -16,6 +16,8 @@ module Rian.Coherence
   , violations
   , violationsSexpr
   , violationsRsSexpr
+  , registry
+  , guardFor
   ) where
 
 import Prelude
@@ -27,16 +29,20 @@ import Data.String (Pattern(..)) as Str
 import Data.String as Str
 import Data.String.CodePoints as CP
 import Data.String.Common (joinWith)
+import Data.Tuple (Tuple(..))
+import Partial.Unsafe (unsafeCrashWith)
 import Rian.Decl (parseToProg)
-import Rian.IR (ImplDecl, Protocol, Prog)
+import Rian.IR (ImplDecl, Protocol, Prog, Struct, Type, Variant)
+import Rian.PatternLower (toSnake)
 import Rian.TypeStr (splitTopCommas)
 
 -- | A coherence violation: the `rule` and the offending `(proto, ty)`. The message is
 -- | omitted — the gate's message text is an Elixir-presentation concern, not portable.
 type Violation = { rule :: String, proto :: String, ty :: String }
 
--- | The dispatchable types in scope, by name: sum types and struct names.
-type Registry = { sums :: Array String, structs :: Array String }
+-- | The dispatchable types in scope: each sum type's variants (for the runtime guard) and
+-- | the struct names. Mirrors `Rian.Coherence.registry` (`%{sums: name => variants, structs}`).
+type Registry = { sums :: Array (Tuple String (Array Variant)), structs :: Array String }
 
 -- | The coherence violations among `impls`, in check order (empty = coherent). Mirrors
 -- | `Rian.Coherence.violations/4`: every impl's per-impl rules, then the cross-impl
@@ -117,18 +123,64 @@ runtimeDispatchTarget :: Maybe (Array String) -> Boolean
 runtimeDispatchTarget Nothing = true
 runtimeDispatchTarget (Just ts) = elem "ex" ts || elem "js" ts
 
--- ── type → runtime discriminator (equivalence class) ────────────────────────
--- two types overlap iff they classify equal; `Nothing` = no discriminator.
+-- ── type → runtime discriminator (the BEAM guard string) ────────────────────
+-- two types overlap iff they classify equal; `Nothing` = no discriminator. The guard is
+-- the exact BEAM expression the dispatcher (`Rian.Protocol`) and the shared-guard rule both
+-- use, so rule and codegen agree by construction (ADR-0061 §5).
 classify :: Registry -> String -> Maybe String
 classify reg ty
-  | ty == "Bool" = Just "bool"
-  | ty == "String" = Just "bin"
-  | ty == "Char" = Just "int"
-  | isIntName ty = Just "int"
-  | isFloatName ty = Just "float"
-  | ty `elem` reg.sums = Just ("sum:" <> ty)
-  | ty `elem` reg.structs = Just ("struct:" <> ty)
-  | otherwise = Nothing
+  | ty == "Bool" = Just "is_boolean(v0)"
+  | ty == "String" = Just "is_binary(v0)"
+  | ty == "Char" = Just "is_integer(v0)"
+  | isIntName ty = Just "is_integer(v0)"
+  | isFloatName ty = Just "is_float(v0)"
+  | otherwise = case Array.find (\(Tuple n _) -> n == ty) reg.sums of
+      Just (Tuple _ variants) -> Just (sumGuard variants)
+      Nothing ->
+        if ty `elem` reg.structs then Just (structGuard (toSnake ty)) else Nothing
+
+-- a sum's runtime guard: tupled variants discriminate on `element(1, v0)`, nullary on the
+-- bare atom; an empty group contributes nothing.
+sumGuard :: Array Variant -> String
+sumGuard variants =
+  let
+    parts = partitionVariants variants
+    tupledPart = if Array.null parts.no then [] else [ "(is_tuple(v0) and (" <> tagDisjunction "element(1, v0) ==" parts.no <> "))" ]
+    nullaryPart = if Array.null parts.yes then [] else [ "(" <> tagDisjunction "v0 ==" parts.yes <> ")" ]
+  in
+    joinWith " or " (tupledPart <> nullaryPart)
+  where
+  partitionVariants = Array.partition (\v -> Array.null v.fields)
+
+tagDisjunction :: String -> Array Variant -> String
+tagDisjunction lhs variants = joinWith " or " (map (\v -> lhs <> " :" <> toSnake v.ctor) variants)
+
+-- a struct's runtime guard: a tagged tuple OR a `%{__struct__: tag}` map (the BEAM struct
+-- shape); `map_get/2` is not a guard BIF, so read the key via `is_map_key` + `:erlang.map_get`.
+structGuard :: String -> String
+structGuard tag =
+  "(is_tuple(v0) and element(1, v0) == :" <> tag <> ") or "
+    <> "(is_map(v0) and is_map_key(:__struct__, v0) and :erlang.map_get(:__struct__, v0) == :" <> tag <> ")"
+
+-- | The runtime discriminator guard for `impl proto for type`; raises when `type` has none
+-- | (a type variable or unknown type — dispatch needs a concrete primitive, sum, or struct).
+-- @rian_sig pub def guardFor!(type val String, proto val String, reg val Registry) String
+guardFor :: Registry -> String -> String -> String
+guardFor reg ty proto = case classify reg ty of
+  Just g -> g
+  Nothing ->
+    unsafeCrashWith
+      ( "`impl " <> proto <> " for " <> ty <> "`: no runtime discriminator for `" <> ty
+          <> "` (a type variable or unknown type); dispatch needs a concrete primitive, sum, or struct type"
+      )
+
+-- | Build the dispatch registry from the scope's sum types + structs (ADR-0061 §5).
+-- @rian_sig pub def registry(types val Vec(Type), structs val Vec(Struct)) Registry
+registry :: Array Type -> Array Struct -> Registry
+registry types structs =
+  { sums: map (\t -> Tuple t.name t.variants) types
+  , structs: map _.name structs
+  }
 
 -- `^U?Int\d*$` — an optional `U`, `Int`, then only digits (possibly none).
 isIntName :: String -> Boolean
@@ -168,5 +220,5 @@ violationsWith targets src =
   where
   prog :: Prog
   prog = parseToProg src
-  reg = { sums: map _.name prog.types, structs: map _.name prog.structs }
+  reg = registry prog.types prog.structs
   ser vio = vio.rule <> ":" <> vio.proto <> ":" <> vio.ty
