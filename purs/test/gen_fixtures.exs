@@ -624,6 +624,23 @@ ifc_corpus = [
   "opaque Id := Int64;;Id.of(n)"
 ]
 
+# Rian.Check `infer_return_type` corpus — the `irt` stream. Un-annotated functions whose return
+# infers from the body (literal/arith/string/param); a self-recursive function with no base case
+# stays `:unknown`.
+irt_corpus = [
+  "def f(x Int53) := x + 1",
+  "def g(s String) := s",
+  "def two(a Int53, b Int53) := a + b",
+  "def cnt(x Int53) := cnt(x)"
+]
+
+# Rian.Check `fill_local_rets` corpus — the `flr` stream. The fixpoint fills each un-annotated
+# function's return; a caller of another un-annotated function resolves through the filled table.
+flr_corpus = [
+  "def f(x Int53) := x + 1\ndef g(x Int53) := f(x)",
+  "def h(x Int53) := x * 2"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1249,6 +1266,32 @@ defmodule CheckCanon do
     out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse(expr)), @fixed_env, ic))
   end
 
+  # the `irt` stream: each function's `infer_return_type` under a filled `ic` (`program_ic`).
+  def infer_ret(src) do
+    prog = Rian.Decl.parse(src, assemble_only: true)
+    ic = Rian.Check.program_ic(prog)
+    funcs = Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
+
+    funcs
+    |> Enum.map(fn f ->
+      "#{f.name}/#{length(f.params)}=>#{out(Rian.Check.infer_return_type(f, ic))}"
+    end)
+    |> Enum.sort()
+    |> Enum.join(";")
+  end
+
+  # the `flr` stream: the `fill_local_rets` converged funs table (un-annotated returns filled).
+  def fill_rets(src) do
+    prog = Rian.Decl.parse(src, assemble_only: true)
+    ic = Rian.Check.program_ic(prog)
+    funcs = Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
+
+    Rian.Check.fill_local_rets(funcs, ic)
+    |> Enum.map(fn {{n, a}, r} -> "#{n}/#{a}=>#{r || "_"}" end)
+    |> Enum.sort()
+    |> Enum.join(";")
+  end
+
   # the `bdy` stream: infer a `;`-separated function body (binds threaded through the env).
   def infer_body(src) do
     out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse_body(src)), @fixed_env, %{}))
@@ -1426,6 +1469,12 @@ lines =
     end) ++
     Enum.map(ifc_corpus, fn s ->
       "ifc\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer_ic(s))}"
+    end) ++
+    Enum.map(irt_corpus, fn s ->
+      "irt\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer_ret(s))}"
+    end) ++
+    Enum.map(flr_corpus, fn s ->
+      "flr\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.fill_rets(s))}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)

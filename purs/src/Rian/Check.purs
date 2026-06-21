@@ -28,12 +28,16 @@ module Rian.Check
   , OpaqueInfo
   , Fbound
   , programIc
+  , inferReturnType
+  , fillLocalRets
   , unifySexpr
   , joinSexpr
   , inferSexpr
   , inferBodySexpr
   , inferIcSexpr
   , programIcSexpr
+  , inferReturnTypeSexpr
+  , fillLocalRetsSexpr
   ) where
 
 import Prelude hiding (join)
@@ -41,17 +45,17 @@ import Prelude hiding (join)
 import Data.Array (concatMap, filter, find, foldl, head, index, last, length, mapMaybe, mapWithIndex, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
-import Data.Maybe (Maybe(..), fromMaybe, isJust, maybe)
+import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing, maybe)
 import Data.String as Str
 import Data.String.CodeUnits (singleton, toCharArray)
 import Data.String.Common (joinWith, replaceAll, split)
 import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
-import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), fromExpr)
+import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Func, Prog, Type)
+import Rian.IR (Func, Param, Prog, Type)
 import Rian.Prelude (withPrelude)
-import Rian.Pratt (Param, parse, parseBody) as P
+import Rian.Pratt (Param, Pat, parse, parseBody) as P
 import Rian.Prim (normalize)
 import Rian.TypeStr (splitTopCommas)
 
@@ -776,6 +780,100 @@ typeIdents t =
 
 isWordChar :: Char -> Boolean
 isWordChar c = isUpper c || (c >= 'a' && c <= 'z') || isDigit c || c == '_'
+
+--------------------------------------------------------------------------------
+-- back-inference: a private function's return / fill_local_rets (ADR-0034 infer-local)
+--------------------------------------------------------------------------------
+
+-- | Infer a private function's RETURN type from its clause bodies — the join of each clause's
+-- | inferred body type under `ic`. `Unknown` when no clause pins it. A clause that IS a direct
+-- | self-call contributes `Bottom` (the fixpoint, not a new alternative), so the type is fixed
+-- | by the base-case clauses. The engine behind `Rian.InferLocal` filling an untyped function.
+-- @rian_sig pub def infer_return_type(func val Func, ic val Ic) String
+inferReturnType :: Func -> Ic -> Ty
+inferReturnType f ic =
+  let types = map clauseType f.clauses
+  in
+    if any (\t -> t == Unknown || t == Mismatch) types then Unknown
+    else case joinAlts types of
+      TName t -> TName t
+      _ -> Unknown
+  where
+  clauseType c = case c.body of
+    Nothing -> Unknown
+    Just b ->
+      let body = fromExpr (normalize (P.parseBody b))
+      in
+        if selfRecursiveBody body f.name then Bottom
+        else infer body (bindTvarParams (clauseEnv c.pats f.params ic) c.pats f.params f.tvars) ic
+
+-- a clause-head env: each var-pattern param binds to its declared (concretized) type, narrowed
+-- against the param's type (reuses `narrow`, so ctor-pattern fields refine too).
+clauseEnv :: Array P.Pat -> Array Param -> Ic -> Env
+clauseEnv pats params ic =
+  foldl (\env (Tuple pat param) -> narrow (fromPat pat) (maybe Unknown TName param.ty) ic env) [] (zip pats params)
+
+-- re-bind a bare-var param whose declared type is one of the function's own `forall` tvars to
+-- that tvar (so a pass-through `def id(x) := x` infers the return `T`).
+bindTvarParams :: Env -> Array P.Pat -> Array Param -> Array String -> Env
+bindTvarParams env pats ps tvs = foldl step env (zip pats ps)
+  where
+  step e (Tuple pat p) = case fromPat pat of
+    PVar vn -> if maybe false (\t -> elem t tvs) p.ty then envPut vn (TName (fromMaybe "" p.ty)) e else e
+    _ -> e
+
+-- a clause body that IS a direct self-call (a bare `f(args)` or a block ending in one).
+selfRecursiveBody :: CExpr -> String -> Boolean
+selfRecursiveBody (ECall (EId n) _) name = n == name
+selfRecursiveBody (EBlock stmts) name = case last stmts of
+  Just (CExprStmt e) -> selfRecursiveBody e name
+  _ -> false
+selfRecursiveBody _ _ = false
+
+-- | Call-result return inference (the `funs` table fixpoint): every un-annotated non-generic
+-- | function's return inferred from its body, so a caller resolves the call's type. A bounded
+-- | fixpoint — each pass only fills a `Nothing`, so it converges monotonically.
+-- @rian_sig pub def fill_local_rets(funcs val Vec(Func), ic val Ic) Dict(String, String)
+fillLocalRets :: Array Func -> Ic -> Array (Tuple (Tuple String Int) (Maybe String))
+fillLocalRets allFuncs ic = fixIter (length untyped) ic.funs
+  where
+  untyped = filter (\f -> isNothing f.ret && null f.tvars) allFuncs
+  fixIter n funs =
+    if n <= 0 then funs
+    else
+      let next = foldl (fillStep ic) funs untyped
+      in if next == funs then funs else fixIter (n - 1) next
+
+fillStep :: Ic -> Array (Tuple (Tuple String Int) (Maybe String)) -> Func -> Array (Tuple (Tuple String Int) (Maybe String))
+fillStep ic acc f =
+  let key = Tuple f.name (length f.params)
+  in case lookupFunRaw acc f.name (length f.params) of
+    Just _ -> acc
+    Nothing -> case inferReturnType f (ic { funs = acc }) of
+      TName t -> map (\(Tuple k old) -> if k == key then Tuple k (Just t) else Tuple k old) acc
+      _ -> acc
+
+-- | The `irt` stream: each function's `inferReturnType` under a fully-filled `ic` (matching the
+-- | reference's `program_ic`, which runs `fill_local_rets`). `name/arity=>type` sorted.
+inferReturnTypeSexpr :: String -> String
+inferReturnTypeSexpr src =
+  joinWith ";" (sortWith identity (map entry funcs))
+  where
+  prog = parseToProg src
+  funcs = prog.funcs <> concatMap _.funcs prog.mods
+  ic0 = programIc prog
+  ic = ic0 { funs = fillLocalRets funcs ic0 }
+  entry f = f.name <> "/" <> show (length f.params) <> "=>" <> tyStr (inferReturnType f ic)
+
+-- | The `flr` stream: dump `fill_local_rets`' converged `funs` table (un-annotated returns
+-- | filled from bodies). `name/arity=>ret` sorted.
+fillLocalRetsSexpr :: String -> String
+fillLocalRetsSexpr src =
+  joinWith ";" (sortWith identity (map entry (fillLocalRets funcs (programIc prog))))
+  where
+  prog = parseToProg src
+  funcs = prog.funcs <> concatMap _.funcs prog.mods
+  entry (Tuple (Tuple n a) ret) = n <> "/" <> show a <> "=>" <> fromMaybe "_" ret
 
 -- the parity env (must match `CheckCanon.fixed_env` in gen_fixtures.exs).
 fixedEnv :: Env
