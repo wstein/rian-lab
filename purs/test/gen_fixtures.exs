@@ -661,6 +661,17 @@ gate_corpus = [
   "pub def k(x Int53) Bool := x"
 ]
 
+# Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the
+# reference's `Decl.parse` synthesizes (dispatcher + `impl_*`), serialized via the shared `prog`
+# oracle. Confirms PS `Assemble` reproduces `Decl.assemble`'s protocol-synthesis tail pass. (User
+# `def`s before the protocol/impl, types last — mirrors the `pex` corpus.)
+asm_corpus = [
+  "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := f(x)\nend",
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
+  "pub def caller(n Int53) String := show(n)\nprotocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := g(x)\nend",
+  "protocol Nm do\n  def nm(c Self) String\nend\nimpl Nm for Color do\n  def nm(c) := s(c)\nend\ntype Color := Red | Green | Blue(shade Int53)"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1520,6 +1531,9 @@ lines =
     end) ++
     Enum.map(gate_corpus, fn s ->
       "gate\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.gate(s))}"
+    end) ++
+    Enum.map(asm_corpus, fn s ->
+      "asm\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.prog(Decl.parse(s, assemble_only: true)))}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)

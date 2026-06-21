@@ -16,6 +16,8 @@ module Rian.Decl
   , declSexpr
   , protoImplSexpr
   , typeSexpr
+  , RawDef
+  , buildFunc
   ) where
 
 import Prelude
