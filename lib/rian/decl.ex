@@ -193,6 +193,32 @@ defmodule Rian.Decl do
     |> run_program_tail()
   end
 
+  @rian_sig "pub def coherence_violations(src String) Vec(_Unk)"
+  @doc """
+  Coherence violations for a single top-level scope, **synthesis-free** — collect the
+  scope's protocols/impls/types/structs and run `Rian.Coherence.violations` *without*
+  the desugar (so it returns the violations instead of raising). The cross-language
+  `coh` parity unit (ADR-0084), mirroring the PureScript `Rian.Coherence.violationsSexpr`.
+  """
+  @spec coherence_violations(String.t()) :: [map()]
+  def coherence_violations(src) do
+    decls = src |> Lexer.tokenize() |> split_decls()
+    aliases = collect_aliases(decls)
+
+    types =
+      for({:type, t, pub?, doc} <- decls, do: parse_type(t, pub?, doc))
+      |> Enum.map(&subst_type(&1, aliases))
+
+    structs =
+      for({:struct, s, pub?, doc} <- decls, do: parse_struct(s, pub?, doc))
+      |> Enum.map(&subst_struct(&1, aliases))
+
+    protocols = for p <- all_protocols(decls), into: %{}, do: {p.name, p.methods}
+    impls = for i <- all_impl_decls(decls), do: {i.proto, i.type, i.methods, i.assoc}
+
+    Rian.Coherence.violations(protocols, impls, Rian.Coherence.registry(types, structs), nil)
+  end
+
   # union the assembled programs: concatenate every list-valued field (`:mods`, top-level
   # `:funcs`/`:types`/`:structs`/…, `:impls`/`:protocols`/`:impl_decls`). A non-list scalar
   # field takes the latest program's value (program-wide, not per-source).

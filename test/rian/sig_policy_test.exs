@@ -131,7 +131,9 @@ defmodule Rian.SigPolicyTest do
   # violation list) — the same layer `Rian.IR`'s `Prog` documents as honestly `_Unk` "until that
   # layer is modelled". `targets` was typed concretely (`Option(Vec(Symbol))`) and the internal
   # `classify`/`runtime_dispatch_target?` made private to keep the bump to the irreducible residual.
-  @unk_baseline 270
+  # 270 -> 271: `Rian.Decl.coherence_violations/1` (the `coh` parity unit, ADR-0084) returns the same
+  # honestly-`_Unk` violation list.
+  @unk_baseline 271
 
   defp unk_count do
     lib_rian_modules()

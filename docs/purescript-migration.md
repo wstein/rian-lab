@@ -90,6 +90,7 @@ what the Core oracle confirms over the surface form.
 | `Rian.InferLocal`     | 250  | local inference helper.                         |
 | `Rian.PatternLower`   | 149  | ✅ ported — Core `CPat` → checker patterns (`plw` stream). |
 | `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
+| `Rian.Coherence`      | ~240 | ✅ ported — protocol/impl coherence rules (ADR-0061 §5): unknown-protocol, method-set/arity, runtime-discriminator presence + non-overlap, duplicate. Pure pass over the parsed IR; parity-gated via the `coh` stream (8 records), serializing `rule:proto:type` synthesis-free so incoherent inputs (which the desugar raises on) compare too. The runtime discriminator is keyed by an equivalence class (`int`/`bool`/…/`sum:<name>`) rather than the BEAM guard string — same overlap outcome, no codegen coupling. |
 | `Rian.Capability`     | 290  | BEAM linearity (`iso`/`ref`); FFI-adjacent.     |
 | `Rian.Check`          | 2724 | unification inference — **reframe, not lift**.  |
 | `Rian.Reach`          | 1235 | target-set portability inference (ADR-0057/58). |
@@ -113,13 +114,8 @@ oracle = the reference `parse_sexpr`).
 typed Core (the leaf-gate pattern: a structural Core→Core pass); parity via the `rng` stream
 (9 records, composing `lexer → Pratt → Core → expand_of → coreSexpr` over a fixed table).
 Remaining: `Builtins` (204), `Protocol` (388, the dispatcher/trait synthesis), `ShowStdlib`
-(29), `Shadow` (114), `Opaque` (159, blocked on `Check` for cast erasure), `Comptime` (79),
-`Macro` (251, expansion), `Manifest` (315).
-`External` (279) **✅ ported** (the pure rendering half) — `render` (an `@external` spec → a
-target host call: string verbatim, `Mod.fun`/`:erlang.fun` → a positional call); parity via the
-`ext` stream (composing the `Decl` @external parse with the render). The build-time half
-(`resolve`/`has_beam_file_ref?`/`lower_beam` — stat foreign files, arity-check via `Check`,
-bundle `.beam` via `Beam`) stays at the Erlang-FFI boundary.
+(29), `Shadow` (114), `Opaque` (159), `Comptime` (79), `Macro` (251, expansion), `External`
+(279), `Manifest` (315).
 `Prelude` (115) **✅ ported** (pure part) — `types` (the built-in `Option(T) = Some(T) | None`,
 ADR-0047 §3) + `with_prelude`; parity via the `prl` stream. The BEAM/Reach-coupled function
 linkage (`module_names`/`defines?`/`atom`/`beams`/`load` — bundles `prelude_*.rian` and compiles
@@ -175,7 +171,6 @@ error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl
 ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`exh`/`pge` streams).
 **Next:** the program-wide tail passes (macro expansion, protocol synthesis, interpolation/stdlib/
 infer-local) wait on `Check`/`InferLocal`/`Protocol`/`Macro`.
-Plus **`Rian.External.render`** (the pure @external-spec rendering). Total **508/508** parity
-records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External.
-Each module is parity-gated and committed on its own
+Total **504/504** parity records across
+Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude. Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).

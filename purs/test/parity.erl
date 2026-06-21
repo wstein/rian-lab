@@ -72,7 +72,9 @@ run_stream(<<"prl">>, Src) -> hexbin('rian_prelude@ps':withPreludeSexpr(Src));
 %% Rian.Exhaustiveness.program_env (canon = hex of the env's ctors table from a source)
 run_stream(<<"pge">>, Src) -> hexbin('rian_exhaustiveness@ps':programEnvSexpr(Src));
 %% Rian.External (canon = hex of each func's @external specs rendered against its params)
-run_stream(<<"ext">>, Src) -> hexbin('rian_external@ps':externalRenderSexpr(Src)).
+run_stream(<<"ext">>, Src) -> hexbin('rian_external@ps':externalRenderSexpr(Src));
+%% Rian.Coherence (canon = hex of `rule:proto:type;…` for the protocol/impl coherence violations)
+run_stream(<<"coh">>, Src) -> hexbin('rian_coherence@ps':violationsSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

@@ -468,6 +468,21 @@ proto_impl_corpus = [
   "mod P do\nprotocol Ord do\n  def lt(a Self, b Self) Bool\nend\nimpl Ord for Int53 do\n  def lt(a, b) := a < b\nend\nend"
 ]
 
+# Rian.Coherence corpus — the `coh` stream (ADR-0061 §5). Single top-level scope, run
+# **synthesis-free** (`Decl.coherence_violations`), so an INCOHERENT program — which the
+# parse-time desugar would *raise* on — still yields its violation list on both sides.
+# Each entry exercises one rule (or, for the first/last, the no-violation path).
+coh_corpus = [
+  "protocol P do\n  def m(x Self) Bool\nend\nimpl P for Int64 do\n  def m(x) := true\nend",
+  "impl Nope for Int64 do\n  def f(x) := x\nend",
+  "protocol P do\n  def m(x Self) Bool\nend\nimpl P for Int64 do\n  def wrong(x) := true\nend",
+  "protocol Q do\n  def m(a Self, b Self) Bool\nend\nimpl Q for Int64 do\n  def m(a) := true\nend",
+  "protocol P do\n  def m(x Self) Bool\nend\nimpl P for Int64 do\n  def m(x) := true\nend\nimpl P for Int64 do\n  def m(x) := false\nend",
+  "protocol P do\n  def m(x Self) Bool\nend\nimpl P for Int64 do\n  def m(x) := true\nend\nimpl P for Char do\n  def m(x) := false\nend",
+  "protocol Show do\n  def show(x Self) String\nend\nimpl Show for T do\n  def show(x) := \"x\"\nend",
+  "type Foo := A | B\nprotocol P do\n  def m(x Self) Bool\nend\nimpl P for Foo do\n  def m(x) := true\nend"
+]
+
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.
 # Oracle = Pratt.parse_sexpr (which already applies Prim.normalize inside `parse`); the PS
 # side composes Prim.normalize. Excludes unknown `Prim.x` (raises on both sides).
@@ -861,6 +876,14 @@ lines =
         end)
 
       "ext\t#{Canon.hex(s)}\t#{Canon.hex(rendered)}"
+    end) ++
+    Enum.map(coh_corpus, fn s ->
+      canon =
+        Enum.map_join(Decl.coherence_violations(s), ";", fn vio ->
+          "#{vio.rule}:#{vio.proto}:#{vio.type}"
+        end)
+
+      "coh\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
