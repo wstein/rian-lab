@@ -15,6 +15,7 @@ module Rian.Macro
   , buildEnv
   , expand
   , mapNode
+  , childrenOf
   , expandSexpr
   ) where
 

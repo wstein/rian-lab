@@ -47,7 +47,7 @@ module Rian.Check
 
 import Prelude hiding (join)
 
-import Data.Array (concatMap, filter, find, findMap, foldl, fromFoldable, head, index, last, length, mapMaybe, mapWithIndex, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
+import Data.Array (concatMap, filter, find, findMap, foldl, fromFoldable, head, index, last, length, mapMaybe, mapWithIndex, nub, nubEq, null, snoc, sortWith, uncons, unsnoc, zip, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing, maybe)
@@ -59,6 +59,7 @@ import Rian.Builtins as Builtins
 import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Cap(..), Func, Param, Prog, Type, bodySurface)
+import Rian.Macro (childrenOf)
 import Rian.Prelude (withPrelude)
 import Rian.Pratt (Arm, ForClause(..), IPart(..), MapPair(..), Param, Pat, Stmt(..), Surface(..), WithClause, parse, parseBody) as P
 import Rian.Prim (normalize)
@@ -885,10 +886,13 @@ fillLocalRetsSexpr src =
 --------------------------------------------------------------------------------
 
 -- | The compile-time gate: the first function that fails a check (`Just message`), else `Nothing`
--- | (`:ok`). In reference order so the first-error message matches: `check_unk` (no unresolved
--- | `_Unk` hole in the signature), then return-assignability (the headline gate), then error sets
--- | (ADR-0040, `checkErrorSet`). The body-walking checks (labels/binds/numeric-mix/value-position/
--- | bounds), `check_external_caps`, and `check_effects` are later — the corpus avoids them.
+-- | (`:ok`). Runs the reference `check_func` chain in order so the first-error message matches:
+-- | `check_unk` → `check_external_caps` → `check_labels` → `check_union_clash` → return-
+-- | assignability → `check_bounds` → `check_numeric_mix` → `check_value_position` → error sets
+-- | (ADR-0040). Two reference checks are NOT wired yet: `check_binds` (blocked on the deferred
+-- | literal-width-adoption + range-bind machinery — porting it naively would falsely reject
+-- | `x Int8 := 5`) and `check_effects` (deferred). The gate is therefore sound but conservative on
+-- | those two — it never wrongly rejects, it can only miss a binding-width / effect-set error.
 -- @rian_sig pub def check_program(prog val Prog) _Unk
 checkProgram :: Prog -> Maybe String
 checkProgram prog = findMap checkFunc funcs
@@ -898,18 +902,32 @@ checkProgram prog = findMap checkFunc funcs
   ic = ic0 { funs = fillLocalRets funcs ic0 }
   tsets = errorSetsTable prog
   table = solveErrorSets funcs tsets
-  -- per function, in reference order: no `_Unk` hole in the signature; an `@external`'s params are
-  -- `val`/`tag`; no value-union with two members sharing a runtime discriminator; the body must be
-  -- assignable to the declared return; then a Result return's produced error set ⊆ its `E`.
-  checkFunc f = case checkUnk f of
-    Just msg -> Just msg
-    Nothing -> case checkExternalCaps f of
-      Just msg -> Just msg
-      Nothing -> case checkUnionClash f of
-        Just msg -> Just msg
-        Nothing -> case checkReturn ic f of
-          Just msg -> Just msg
-          Nothing -> checkErrorSet tsets table f
+  -- per function, in reference order (`check_func`'s `with :ok <- …` chain): no `_Unk` hole; an
+  -- `@external`'s params are `val`/`tag`; no labeled call args; no value-union with two members
+  -- sharing a runtime discriminator; the body is assignable to the declared return; each bounded-
+  -- generic call site satisfies its bounds; no implicit Int↔Float mix; no unit in value position;
+  -- then a Result return's produced error set ⊆ its `E`. `check_binds` and `check_effects` are not
+  -- wired yet (see the module note), so the gate stays sound-but-conservative on those two.
+  checkFunc f = firstErr
+    [ \_ -> checkUnk f
+    , \_ -> checkExternalCaps f
+    , \_ -> checkLabels f
+    , \_ -> checkUnionClash f
+    , \_ -> checkReturn ic f
+    , \_ -> checkBounds ic f
+    , \_ -> checkNumericMix ic f
+    , \_ -> checkValuePosition f
+    , \_ -> checkErrorSet tsets table f
+    ]
+
+-- the first check that returns `Just msg` wins, evaluating later checks only on `Nothing`
+-- (mirrors the reference's short-circuiting `with :ok <- …` chain in `check_func`).
+firstErr :: Array (Unit -> Maybe String) -> Maybe String
+firstErr = foldl step Nothing
+  where
+  step acc k = case acc of
+    Just _ -> acc
+    Nothing -> k unit
 
 -- `_Unk` is an UNFINISHED inference hole, not a type (ADR-0034): a fill-me marker the transpiler
 -- leaves. A declared `_Unk` in a signature must be resolved before compiling, so the gated path
@@ -989,6 +1007,222 @@ discWord PdBinary = "both lower to a binary / JS `string`"
 discWord PdBoolean = "both lower to a boolean"
 discWord PdFloat = "both lower to a float"
 discWord PdOther = ""
+
+-- Labeled arguments (`name: value`, ADR-0065) are valid ONLY in struct/variant construction — a
+-- bare PascalCase constructor callee. On a lowercase function call, or a qualified `Mod.foo`
+-- (whose callee is never a constructor), they are rejected: labeled call args are not yet a
+-- surface feature, and the BEAM emitter would otherwise silently miscompile them.
+checkLabels :: Func -> Maybe String
+checkLabels f = findMap clauseLabels f.clauses
+  where
+  clauseLabels c = maybe Nothing (\b -> labelError (bodySurface b)) c.body
+
+labelError :: P.Surface -> Maybe String
+labelError node = case node of
+  P.SCall callee args ->
+    if any isLabelArg args && not (isConstruction callee) then
+      Just
+        ( "`" <> calleeName callee <> "(…)`: labeled arguments (`name: value`) are only for struct/variant "
+            <> "construction (a PascalCase constructor), not function calls (ADR-0065 — labeled call args "
+            <> "are not yet a surface feature)"
+        )
+    else findMap labelError (childrenOf node)
+  _ -> findMap labelError (childrenOf node)
+  where
+  isLabelArg (P.SLabel _ _) = true
+  isLabelArg _ = false
+
+isConstruction :: P.Surface -> Boolean
+isConstruction (P.SId nm) = pascalName nm
+isConstruction _ = false
+
+calleeName :: P.Surface -> String
+calleeName (P.SId nm) = nm
+calleeName (P.SDot base field) = calleeName base <> "." <> field
+calleeName _ = "(…)"
+
+pascalName :: String -> Boolean
+pascalName s = maybe false isUpper (head (toCharArray s))
+
+-- A unit-yielding expression — an `else`-less `if`, a `<~` mutation (ADR-0035 §6) — must not
+-- appear in value position (return / binding RHS / argument / a used branch); it is legal only as
+-- an effect statement. The walk threads a position: a block's non-final statements are effects,
+-- its final statement keeps the block's position, and a lambda body is walked as `:effect`
+-- (lambdas are frequently unit-returning callbacks, so the gate rejects only a PROVABLE misuse).
+data Pos = PValue | PEffect
+
+isValuePos :: Pos -> Boolean
+isValuePos PValue = true
+isValuePos PEffect = false
+
+checkValuePosition :: Func -> Maybe String
+checkValuePosition f = findMap clausePos f.clauses
+  where
+  clausePos c = maybe Nothing (\b -> posWalk PValue (bodySurface b)) c.body
+
+posWalk :: Pos -> P.Surface -> Maybe String
+posWalk pos (P.SIf cnd thenB elseB) =
+  if isValuePos pos && isEmptyBlock elseB then case posWalk PValue cnd of
+    Nothing -> Just ifElseMsg
+    v -> v
+  else case posWalk PValue cnd of
+    Nothing -> case posWalk pos thenB of
+      Nothing -> posWalk pos elseB
+      v -> v
+    v -> v
+posWalk pos (P.SBin op l r) =
+  if op == "<~" && isValuePos pos then Just mutationValueMsg
+  else findMap (posWalk PValue) [ l, r ]
+posWalk _ (P.SLambda _ body) = posWalk PEffect body
+posWalk pos (P.SBlock stmts) = blockWalk pos stmts
+posWalk pos (P.SCase scrut arms) = case posWalk PValue scrut of
+  Nothing -> findMap (\a -> posWalk pos a.body) arms
+  v -> v
+posWalk pos (P.SWith cls body els) = case findMap (\wc -> posWalk PValue wc.expr) cls of
+  Nothing -> case posWalk pos body of
+    Nothing -> findMap (\a -> posWalk pos a.body) els
+    v -> v
+  v -> v
+posWalk _ node = findMap (posWalk PValue) (childrenOf node)
+
+isEmptyBlock :: P.Surface -> Boolean
+isEmptyBlock (P.SBlock stmts) = null stmts
+isEmptyBlock _ = false
+
+blockWalk :: Pos -> Array P.Stmt -> Maybe String
+blockWalk pos stmts = case unsnoc stmts of
+  Nothing -> Nothing
+  Just u -> case findMap (stmtWalk PEffect) u.init of
+    Nothing -> stmtWalk pos u.last
+    v -> v
+
+-- a binding's RHS is always a used value; an effect statement keeps the statement's position.
+stmtWalk :: Pos -> P.Stmt -> Maybe String
+stmtWalk _ (P.StBind _ e) = posWalk PValue e
+stmtWalk _ (P.StTypedBind _ _ e) = posWalk PValue e
+stmtWalk _ (P.StBindArrow _ e) = posWalk PValue e
+stmtWalk _ (P.StBindPat _ e) = posWalk PValue e
+stmtWalk pos (P.StExpr e) = posWalk pos e
+
+ifElseMsg :: String
+ifElseMsg =
+  "`if` in value position must have an `else` branch (ADR-0035): it is an expression "
+    <> "that yields a value. Add `else …` — or, if the value is unused, make the `if` a "
+    <> "statement (not the final/returned expression of the block)."
+
+mutationValueMsg :: String
+mutationValueMsg =
+  "a `<~` mutation yields unit (ADR-0035) and cannot be used as a value: it is valid "
+    <> "only as a statement, not the final/returned/bound/passed expression."
+
+-- No implicit Int↔Float coercion (ADR-0035/0034 §1): an arithmetic op (`+`/`-`/`*`) whose operands
+-- are one integer-kind and one float-kind (both concretely known) is rejected — a value never
+-- silently becomes a float. Conservative: an `:unknown` operand is never flagged.
+checkNumericMix :: Ic -> Func -> Maybe String
+checkNumericMix ic f = findMap clauseMix f.clauses
+  where
+  clauseMix c = maybe Nothing (\b -> scanNumMix (clauseEnv c.pats f.params ic) ic (bodySurface b)) c.body
+
+scanNumMix :: Env -> Ic -> P.Surface -> Maybe String
+scanNumMix env ic node = case node of
+  P.SBin op l r ->
+    if elem op arithOps then case numMixError env ic op l r of
+      Just msg -> Just msg
+      Nothing -> findMap (scanNumMix env ic) (childrenOf node)
+    else findMap (scanNumMix env ic) (childrenOf node)
+  _ -> findMap (scanNumMix env ic) (childrenOf node)
+
+numMixError :: Env -> Ic -> String -> P.Surface -> P.Surface -> Maybe String
+numMixError env ic op l r =
+  let
+    lt = ordinalBase (inferSurf env ic l)
+    rt = ordinalBase (inferSurf env ic r)
+  in
+    if mixedNum lt rt then
+      Just
+        ( "`" <> op <> "`: no implicit Int↔Float conversion (`" <> tyStr lt <> " " <> op <> " " <> tyStr rt <> "`) — a value never "
+            <> "silently becomes a float (ADR-0035/0034 §1). Convert explicitly: write a float "
+            <> "literal (e.g. `3.0`) or `Prim.int_to_float(n)`."
+        )
+    else Nothing
+
+-- one operand integer-kind (`Int`/`UInt`, incl. a `Char`'s `Int53` base), the other float-kind.
+mixedNum :: Ty -> Ty -> Boolean
+mixedNum lt rt = case numKind lt, numKind rt of
+  Just a, Just b -> numMix a.kind b.kind
+  _, _ -> false
+
+numMix :: Kind -> Kind -> Boolean
+numMix KFloat KInt = true
+numMix KFloat KUint = true
+numMix KInt KFloat = true
+numMix KUint KFloat = true
+numMix _ _ = false
+
+-- infer a body sub-expression's type (the surface AST → Core → `infer`, mirroring the reference's
+-- `infer(Core.from_expr(ast), …)`; the body is walked un-normalized, as the reference does).
+inferSurf :: Env -> Ic -> P.Surface -> Ty
+inferSurf env ic s = infer (fromExpr s) env ic
+
+-- At each call to a bounded generic (`def f(x T) … forall T: P`), the type its bound's tvar is
+-- instantiated to must have the required `impl` (ADR-0042 §2). Conservative — an `:unknown` or
+-- un-pinned (still-tvar) arg stays unchecked. A no-op unless the program declares a bounded generic.
+checkBounds :: Ic -> Func -> Maybe String
+checkBounds ic f =
+  if null ic.fbounds then Nothing
+  else findMap clauseBounds f.clauses
+  where
+  clauseBounds c = maybe Nothing (\b -> scanBoundCalls (clauseEnv c.pats f.params ic) ic (bodySurface b)) c.body
+
+scanBoundCalls :: Env -> Ic -> P.Surface -> Maybe String
+scanBoundCalls env ic node = case node of
+  P.SCall (P.SId g) args -> case callBoundError env ic g args of
+    Just msg -> Just msg
+    Nothing -> findMap (scanBoundCalls env ic) (childrenOf node)
+  _ -> findMap (scanBoundCalls env ic) (childrenOf node)
+
+callBoundError :: Env -> Ic -> String -> Array P.Surface -> Maybe String
+callBoundError env ic g args = case assocFind g ic.fbounds of
+  Nothing -> Nothing
+  Just fb ->
+    let
+      argTypes = map (inferSurf env ic) args
+      -- bind each declared param-type position to the concrete arg type, via the shared `bindTvar`
+      -- (an untyped `:infer` param binds nothing); `Vec(T)` against `Vec(C)` binds `T := C`.
+      subs = foldl (\acc (Tuple mp a) -> maybe acc (\p -> bindTvar p a fb.tvars acc) mp) [] (zip fb.params argTypes)
+    in
+      firstBoundViolation ic g fb.bounds subs
+
+firstBoundViolation :: Ic -> String -> Array (Tuple String (Array String)) -> Array (Tuple String String) -> Maybe String
+firstBoundViolation ic g bounds subs = findMap checkOne bounds
+  where
+  checkOne (Tuple tvar protos) = case assocFind tvar subs of
+    Nothing -> Nothing
+    Just ty -> if concreteType ty then missingImpl ic g tvar ty protos else Nothing
+
+missingImpl :: Ic -> String -> String -> String -> Array String -> Maybe String
+missingImpl ic g tvar ty protos = findMap viol protos
+  where
+  viol p =
+    if implMember ic p ty then Nothing
+    else Just ("`" <> g <> "` requires `" <> tvar <> ": " <> p <> "`, but `" <> ty <> "` has no `impl " <> p <> " for " <> ty <> "` (ADR-0042 §2)")
+
+implMember :: Ic -> String -> String -> Boolean
+implMember ic p ty = case assocFind p ic.impls of
+  Just types -> elem ty types
+  Nothing -> false
+
+-- a type the bound check can act on: a known concrete type, not `:unknown` and not still a tvar
+-- (`hasTvar` mirrors the reference `has_tvar?` — a standalone `U`/`Vec(U)`, not `Int64`).
+concreteType :: String -> Boolean
+concreteType t = t /= "unknown" && not (hasTvar t)
+
+assocFind :: forall v. String -> Array (Tuple String v) -> Maybe v
+assocFind k = foldl step Nothing
+  where
+  step acc (Tuple k2 v) = case acc of
+    Just _ -> acc
+    Nothing -> if k2 == k then Just v else Nothing
 
 -- a function's declared (non-generic) return must accept every clause body's inferred type.
 checkReturn :: Ic -> Func -> Maybe String

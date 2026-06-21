@@ -726,7 +726,25 @@ gate_corpus = [
   "@external(:js, \"x => x\")\ndef ecbad(x iso Vec(Int53)) Int53",
   "@external(:js, \"x => x\")\ndef ecref(x ref Int53) Int53",
   "@external(:js, \"x => x\")\ndef ecok(x tag Int53) Int53",
-  "@external(:js, :erlang.length)\ndef eclen(xs Vec(Int53)) Int53"
+  "@external(:js, :erlang.length)\ndef eclen(xs Vec(Int53)) Int53",
+  # check_labels (ADR-0065): a labeled arg is valid only on PascalCase construction — a lowercase
+  # call and a qualified `Mod.foo` call are rejected; construction is fine.
+  "pub def lblbad(x Int53) Int53 := g(a: x)",
+  "pub def lblq(x Int53) Int53 := Mod.foo(a: x)",
+  "type Pt := Pt(px Int53)\npub def lblok() Pt := Pt(px: 1)",
+  # check_bounds (ADR-0042 §2): a bounded-generic call whose tvar is instantiated to a type lacking
+  # the required `impl` is rejected; a type that has the impl is fine.
+  "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := \"n\"\nend\ndef needsShow(x T) String forall T: Show := show(x)\npub def callbad(b Bool) String := needsShow(b)",
+  "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := \"n\"\nend\ndef needsShow(x T) String forall T: Show := show(x)\npub def callok(n Int53) String := needsShow(n)",
+  # check_numeric_mix (ADR-0035/0034 §1): an arithmetic op mixing an integer and a float operand is
+  # rejected; same-kind arithmetic is fine. (Explicit returns so the return gate passes first.)
+  "pub def nmix(x Int53) Float64 := x + 2.0",
+  "pub def nmix2(x Int53) Int53 := x + 2",
+  # check_value_position (ADR-0035 §6): an `else`-less `if` or a `<~` mutation in value position is
+  # rejected; an `if` with `else` is fine.
+  "pub def vpbad(x Bool) Int53 := if x do 1 end",
+  "pub def vpmut(x Int53) Int53 := id(x <~ 1)",
+  "pub def vpok(x Bool) Int53 := if x do 1 else 2 end"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the
