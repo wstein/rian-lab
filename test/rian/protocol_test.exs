@@ -340,6 +340,85 @@ defmodule Rian.ProtocolTest do
     end
   end
 
+  describe "cross-module impls + orphan rule (ADR-0061 §5)" do
+    @own_protocol """
+    mod Shapes do
+      type Circle := C(r Int64)
+    end
+
+    mod Display do
+      use Shapes.(Circle)
+
+      protocol Show do
+        def show(x Self) String
+      end
+
+      impl Show for Circle do
+        def show(c) := "a circle"
+      end
+    end
+    """
+
+    test "own-protocol: an impl of a local protocol for an IMPORTED type compiles + dispatches" do
+      # the dispatcher (in Display) must discriminate `Circle`, defined in Shapes — the
+      # whole-program registry resolves the imported type's runtime tag.
+      mods = Beam.compile_program(@own_protocol)
+      for {atom, bin} <- mods, do: :code.load_binary(atom, ~c"#{atom}.beam", bin)
+      # a `Circle` value `C(5)` is the tagged tuple `{:c, 5}`.
+      assert apply(:"Elixir.Display", :show, [{:c, 5}]) == "a circle"
+    end
+
+    test "orphan: an impl in a module owning NEITHER the protocol nor the type is rejected" do
+      assert_raise CoherenceError, ~r/orphan `impl Show for Circle`/, fn ->
+        Decl.parse("""
+        mod Proto do
+          protocol Show do
+            def show(x Self) String
+          end
+        end
+
+        mod Shapes do
+          type Circle := C(r Int64)
+        end
+
+        mod App do
+          use Proto.(Show)
+          use Shapes.(Circle)
+
+          impl Show for Circle do
+            def show(c) := "circle"
+          end
+        end
+        """)
+      end
+    end
+
+    test "own-type: an impl of an IMPORTED protocol for a local type is a clear, gated error" do
+      # the dispatcher would have to consolidate clauses across modules (unbuilt) —
+      # a specific diagnostic, not the misleading "unknown protocol".
+      assert_raise CoherenceError,
+                   ~r/cross-module impl of an imported protocol is not yet supported/,
+                   fn ->
+                     Decl.parse("""
+                     mod Proto do
+                       protocol Show do
+                         def show(x Self) String
+                       end
+                     end
+
+                     mod Shapes do
+                       use Proto.(Show)
+                       type Circle := C(r Int64)
+
+                       impl Show for Circle do
+                         def show(c) := "circle"
+                       end
+                     end
+                     """)
+                   end
+    end
+  end
+
   describe "sum-type dispatch (ADR-0042 — dispatch on the constructor tag)" do
     test "dispatches a sum value by its constructor tag (tupled and nullary)" do
       m =

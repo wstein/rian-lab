@@ -2483,36 +2483,44 @@ defmodule Rian.Check do
   # `gate!` rejects an incoherent program even on a path that did not go through the
   # desugar. Grouped by each impl's home module (`:module`, attributed by
   # `Rian.Decl`) and that module's `@targets`, so a `(proto, type)` legitimately
-  # repeated in two separate modules is never a false duplicate.
+  # repeated in two separate modules is never a false duplicate. The discriminator is
+  # classified against the **whole-program** registry, so an own-protocol impl of an
+  # imported type resolves. Cross-module impls (protocol in another module) are the
+  # job of `Rian.Decl.check_cross_module!` (orphan rule / own-type), not this gate.
   @spec check_coherence(map()) :: :ok | {:error, String.t()}
   defp check_coherence(prog) do
     protocols = Map.get(prog, :protocols, [])
+    reg = Rian.Coherence.registry(wp_types(prog), wp_structs(prog))
 
     prog
     |> Map.get(:impl_decls, [])
     |> Enum.group_by(&Map.get(&1, :module))
     |> Enum.find_value(:ok, fn {mod, impls} ->
       protos = for p <- protocols, Map.get(p, :module) == mod, into: %{}, do: {p.name, p.methods}
-      {types, structs, targets} = coherence_scope(prog, mod)
-      reg = Rian.Coherence.registry(types, structs)
-      tuples = for i <- impls, do: {i.proto, i.type, i.methods, i.assoc}
 
-      case Rian.Coherence.violations(protos, tuples, reg, targets) do
+      local =
+        for i <- impls, Map.has_key?(protos, i.proto), do: {i.proto, i.type, i.methods, i.assoc}
+
+      case Rian.Coherence.violations(protos, local, reg, scope_targets(prog, mod)) do
         [] -> nil
         [%{message: msg} | _] -> {:error, msg}
       end
     end)
   end
 
-  # the resolved types/structs and `@targets` of a coherence scope: top level
-  # (`mod == nil`) or one named module.
-  defp coherence_scope(prog, nil),
-    do: {Map.get(prog, :types, []), Map.get(prog, :structs, []), nil}
+  defp wp_types(prog),
+    do: Map.get(prog, :types, []) ++ for(m <- Map.get(prog, :mods, []), t <- m.types, do: t)
 
-  defp coherence_scope(prog, mod) do
+  defp wp_structs(prog),
+    do: Map.get(prog, :structs, []) ++ for(m <- Map.get(prog, :mods, []), s <- m.structs, do: s)
+
+  # the `@targets` of a coherence scope: top level (`mod == nil`) or one named module.
+  defp scope_targets(_prog, nil), do: nil
+
+  defp scope_targets(prog, mod) do
     case Enum.find(Map.get(prog, :mods, []), &(&1.name == mod)) do
-      nil -> {[], [], nil}
-      m -> {m.types, m.structs, m.targets}
+      nil -> nil
+      m -> m.targets
     end
   end
 

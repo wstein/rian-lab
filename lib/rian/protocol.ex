@@ -32,7 +32,11 @@ defmodule Rian.Protocol do
 
     * the generic `forall T: Bound` call path is future work (bounds parsed-and-dropped);
     * the Rust/JS lowerings are not emitted here (BEAM-first);
-    * the orphan rule is not enforced across modules yet (single-program scope).
+    * cross-module impls: **own-protocol works** (an impl of a local protocol for an
+      imported type, via `Rian.Decl`'s whole-program registry) and the **orphan rule
+      fires** (`Rian.Decl.check_cross_module!`, ADR-0061 §5); the **own-type** direction
+      (impl of an imported protocol for a local type) is a clear gated error — it needs
+      the dispatcher to consolidate clauses across modules, which is unbuilt.
   """
 
   use Rian.Ann

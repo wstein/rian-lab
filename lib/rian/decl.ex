@@ -101,7 +101,10 @@ defmodule Rian.Decl do
   def parse(src, opts \\ []) do
     decls = src |> Lexer.tokenize() |> split_decls()
     aliases = collect_aliases(decls)
-    prog = assemble(decls, aliases)
+    # the whole-program sum/struct registry (top level + every `mod`), so an
+    # own-protocol cross-module impl can discriminate an *imported* type (ADR-0061 §5).
+    wp = wp_registry(decls, aliases)
+    prog = assemble(decls, aliases, nil, wp)
 
     # `const` and `use` are module-scoped: a top-level one has no enclosing module
     # to hold its accessor / import (ADR-0033 / modules: items live in a `mod`).
@@ -122,7 +125,7 @@ defmodule Rian.Decl do
 
         # top-level aliases are visible inside a module; module-local aliases add to them
         scoped = Map.merge(aliases, collect_aliases(inner))
-        p = assemble(inner, scoped, targets)
+        p = assemble(inner, scoped, targets, wp)
 
         %Mod{
           name: name,
@@ -171,11 +174,76 @@ defmodule Rian.Decl do
   # scope, so a `${OtherMod.f(x)}` hole resolves) → stdlib injection (detects the resolved
   # `Show.float`/`show` calls) → infer-local (ADR-0034, fill undeclared private returns).
   defp run_program_tail(assembled) do
+    check_cross_module!(assembled)
+
     assembled
     |> resolve_interp()
     |> inject_stdlib()
     |> Rian.InferLocal.fill_returns()
   end
+
+  # Whole-program cross-module `impl` validation (ADR-0061 §5). An impl whose protocol
+  # is not in its own scope was *skipped* by the per-scope desugar (`protocol_defs`);
+  # classify it against the whole-program protocol/type ownership:
+  #   * own-protocol (the protocol is declared in the impl's module) — already expanded;
+  #   * own-type (the impl's module declares the type, the protocol is imported) — the
+  #     dispatcher would have to consolidate clauses across modules, not yet built → a
+  #     clear error rather than a silent gap;
+  #   * orphan (the impl's module declares NEITHER) — rejected, the firing orphan rule;
+  #   * unknown (the protocol is declared in no module) — "unknown protocol".
+  defp check_cross_module!(prog) do
+    protocols = Map.get(prog, :protocols, [])
+
+    proto_modules =
+      Enum.reduce(protocols, %{}, fn p, acc ->
+        Map.update(acc, p.name, MapSet.new([p.module]), &MapSet.put(&1, p.module))
+      end)
+
+    owner = owner_map(prog)
+
+    Enum.each(Map.get(prog, :impl_decls, []), fn i ->
+      home = Map.get(i, :module)
+      mods_of_proto = Map.get(proto_modules, i.proto, MapSet.new())
+
+      cond do
+        MapSet.member?(mods_of_proto, home) ->
+          :ok
+
+        MapSet.size(mods_of_proto) == 0 ->
+          raise(Rian.Coherence.Error, "`impl … for #{i.type}`: unknown protocol `#{i.proto}`")
+
+        owns_type?(owner, home, i.type) ->
+          raise(
+            Rian.Coherence.Error,
+            "`impl #{i.proto} for #{i.type}`: a cross-module impl of an imported protocol is " <>
+              "not yet supported — declare it in `#{i.proto}`'s module (cross-module own-type " <>
+              "dispatcher consolidation is unimplemented, ADR-0061 §5)"
+          )
+
+        true ->
+          raise(
+            Rian.Coherence.Error,
+            "orphan `impl #{i.proto} for #{i.type}`: an `impl` must be declared in the " <>
+              "protocol's or the type's module (ADR-0061 §5 orphan rule)"
+          )
+      end
+    end)
+
+    prog
+  end
+
+  # `module => MapSet of the type + struct names it declares` (nil = top level).
+  defp owner_map(prog) do
+    top = {nil, decl_names(Map.get(prog, :types, []), Map.get(prog, :structs, []))}
+    mods = for m <- Map.get(prog, :mods, []), do: {m.name, decl_names(m.types, m.structs)}
+    Map.new([top | mods])
+  end
+
+  defp decl_names(types, structs),
+    do: MapSet.new(Enum.map(types, & &1.name) ++ Enum.map(structs, & &1.name))
+
+  defp owns_type?(owner, module, type),
+    do: MapSet.member?(Map.get(owner, module, MapSet.new()), type)
 
   @rian_sig "pub def parse_program(sources Vec(String)) Prog"
   @doc """
@@ -377,6 +445,24 @@ defmodule Rian.Decl do
     end
   end
 
+  # the whole-program sum/struct registry: every `type`/`struct` across the top level
+  # and every `mod`, parsed (ctor tags are alias-independent, so the global `aliases`
+  # suffice for the dispatch classification this feeds). Lets an own-protocol
+  # cross-module impl discriminate an imported type (ADR-0061 §5).
+  defp wp_registry(decls, aliases) do
+    types =
+      in_scope(decls, fn _m, d -> for {:type, t, pub?, doc} <- d, do: parse_type(t, pub?, doc) end)
+      |> Enum.map(&subst_type(&1, aliases))
+
+    structs =
+      in_scope(decls, fn _m, d ->
+        for {:struct, s, pub?, doc} <- d, do: parse_struct(s, pub?, doc)
+      end)
+      |> Enum.map(&subst_struct(&1, aliases))
+
+    {types, structs}
+  end
+
   # apply `f.(module, scope_decls)` to the top-level decls (`module` = nil) and to
   # each module's inner decls (`module` = the mod name), concatenating. The module
   # tag is the *home scope* an `impl`/`protocol` is written in — the attribution the
@@ -427,7 +513,7 @@ defmodule Rian.Decl do
   # One scope's declarations (top level, or one module's body) -> typed IR.
   # `targets` is the enclosing `mod`'s `@targets` (nil at top level / unannotated),
   # used to select the target-relative coherence rules (ADR-0061 §5).
-  defp assemble(decls, aliases, targets \\ nil) do
+  defp assemble(decls, aliases, targets, wp) do
     types =
       for({:type, t, pub?, doc} <- decls, do: parse_type(t, pub?, doc))
       |> Enum.map(&subst_type(&1, aliases))
@@ -449,7 +535,7 @@ defmodule Rian.Decl do
       end)
 
     assembled_funcs =
-      (user_defs ++ protocol_defs(decls, types, structs, targets))
+      (user_defs ++ protocol_defs(decls, types, structs, targets, wp))
       # group by name AND arity, so same-name clauses of different arity form
       # separate functions (`f/1` vs `f/2`, like Elixir/Erlang — exported per
       # `{name, arity}` on the BEAM). Same-arity clauses stay one multi-clause group.
@@ -552,17 +638,23 @@ defmodule Rian.Decl do
 
   # `protocol`/`impl` (ADR-0042 §3) desugar to ordinary raw `def` maps — a
   # guarded dispatcher per protocol method plus one mangled function per impl
-  # method — so they flow through `build_func` like any other function. The sum
-  # `types` and `structs` in scope let the dispatcher discriminate by runtime
-  # tag; coherence is enforced by `Rian.Coherence` (via `Rian.Protocol.expand/5`).
-  defp protocol_defs(decls, types, structs, targets) do
+  # method — so they flow through `build_func` like any other function. The
+  # **whole-program** `types`/`structs` (`wp`, ADR-0061 §5) let the dispatcher
+  # discriminate an *imported* type's runtime tag (own-protocol cross-module impls);
+  # coherence is enforced by `Rian.Coherence` (via `Rian.Protocol.expand/5`).
+  #
+  # Only impls whose protocol is in *this* scope are expanded here. An impl of a
+  # protocol declared in another module (or nowhere) is left for the whole-program
+  # `check_cross_module!/1` (orphan rule / own-type diagnostic), not expanded into a
+  # per-scope dispatcher — so it never raises a misleading "unknown protocol".
+  defp protocol_defs(decls, types, structs, targets, wp) do
     protocols =
       for {:protocol, name, inner, _doc} <- decls, into: %{} do
         {name, for({:def, raw} <- inner, do: raw)}
       end
 
     impls =
-      for {:impl, proto, type, inner, _doc} <- decls do
+      for {:impl, proto, type, inner, _doc} <- decls, Map.has_key?(protocols, proto) do
         # carry the impl's associated-type bindings (`type Elem := Int53`, ADR-0074) so
         # protocol expansion can resolve them into the generated method signatures (W1) —
         # otherwise the impl method declares `Vec(Elem)` and `Check.gate!` rejects it
@@ -571,9 +663,11 @@ defmodule Rian.Decl do
         {proto, type, for({:def, raw} <- inner, do: raw), assoc}
       end
 
+    {reg_types, reg_structs} = wp || {types, structs}
+
     if protocols == %{} and impls == [],
       do: [],
-      else: Rian.Protocol.expand(protocols, impls, types, structs, targets)
+      else: Rian.Protocol.expand(protocols, impls, reg_types, reg_structs, targets)
   end
 
   defp parse_alias(text) do
@@ -676,22 +770,35 @@ defmodule Rian.Decl do
     end)
   end
 
-  # `op +(a T, b T) Ret` -> %{op: "+", params: ["T", "T"], ret: "Ret"}.
+  # `op +(a T, b T) Ret` -> %{op: "+", params: ["T", "T"], ret: "Ret"}. Splits on the op
+  # symbol's BALANCED parens (`extract_parens`), so a parametric param OR return type
+  # (`op map(f Fn(A, B)) Vec(B)`) parses correctly — a greedy `(.*)` regex would mis-split
+  # at the last `)`, swallowing the closing paren into the param list.
   defp parse_op_rule("op " <> rest) do
-    case Regex.run(~r/^(\S+?)\s*\((.*)\)\s*(.*)$/, String.trim(rest)) do
-      [_, op_sym, params, ret] ->
-        %{op: op_sym, params: Enum.map(parse_params(params), & &1.type), ret: String.trim(ret)}
+    case extract_parens(String.trim(rest)) do
+      {op_sym, params, ret} ->
+        %{
+          op: String.trim(op_sym),
+          params: Enum.map(parse_params(params), & &1.type),
+          ret: String.trim(ret)
+        }
 
-      _ ->
+      :none ->
         raise Error, "malformed `op` in abstract: op #{rest}"
     end
   end
 
-  # `to base() Type` -> %{name: "base", ret: "Type"} (ADR-0067 §2 explicit cast).
+  # `to base() Type` -> %{name: "base", ret: "Type"} (ADR-0067 §2 explicit cast). A cast
+  # takes NO arguments, so the parens must be empty; a `to f(x) T` is a hard error.
   defp parse_cast_rule("to " <> rest) do
-    case Regex.run(~r/^(\w+)\s*\(\s*\)\s*(.*)$/, String.trim(rest)) do
-      [_, cast_name, ret] -> %{name: cast_name, ret: String.trim(ret)}
-      _ -> raise Error, "malformed `to` cast in abstract: to #{rest}"
+    case extract_parens(String.trim(rest)) do
+      {cast_name, inside, ret} ->
+        if String.trim(inside) == "",
+          do: %{name: String.trim(cast_name), ret: String.trim(ret)},
+          else: raise(Error, "malformed `to` cast in abstract: to #{rest}")
+
+      :none ->
+        raise Error, "malformed `to` cast in abstract: to #{rest}"
     end
   end
 
