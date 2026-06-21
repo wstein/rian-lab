@@ -16,3 +16,6 @@ output
 _build
 *.beam
 erl_crash.dump
+
+# vendored purerl binary (re-fetched via README bootstrap)
+.toolchain

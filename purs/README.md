@@ -56,14 +56,26 @@ cd purs && npx spago build
 ## Verifying
 
 ```sh
-# full gate (needs the bootstrapped toolchain + package set):
-cd purs && npx spago build && npx spago test
+# package-set-free slice (Rian.Token today): the FULL chain, no spago needed —
+# purs → corefn → purerl → erlc → run on the BEAM. Verified end-to-end:
+cd purs && ./scripts/purerl-build.sh
+#   → ✓ Rian.Token runs on the BEAM via purerl
 
-# offline (no package set): typecheck the Prim-only modules + emit the corefn
-# JSON that purerl consumes — proves the compile chain end-to-end short of codegen:
-cd purs && ./node_modules/.bin/purs compile --codegen corefn 'src/**/*.purs'
+# library-dependent modules (Lexer onward) — gated by spago once the package set
+# is wired (see the OPEN note below):
+cd purs && npx spago build && npx spago test
 ```
 
-The offline `purs compile` is what currently gates `Rian.Token`; every module that
-only uses built-in `Prim` types is checkable this way before the package set lands.
-Modules importing the library set (anything past `Token`) are gated by `spago test`.
+`scripts/purerl-build.sh` is the working gate for every module that uses only built-in
+`Prim` types; it drives the whole purerl chain and smoke-tests the result on Erlang/OTP.
+
+### Two known caveats
+
+1. **Compiler-version skew.** purerl 0.0.24 was built against purs 0.15.x and prints
+   `Found externs for wrong compiler version (continuing anyway)` against purs 0.15.16.
+   It is harmless for codegen today; pin `purs` to purerl's exact target if it ever bites.
+2. **Package set (OPEN — Phase 1 blocker).** purerl's package set is a legacy *dhall*
+   set; spago 0.93 expects a registry (`packages.json`) set and cannot consume it
+   directly. Resolving this — legacy spago (0.21, dhall) or `extraPackages` git deps
+   generated from the dhall set — is the first task of Phase 1, since the Lexer needs
+   `strings`/`arrays`/`maybe`/regex. The `Prim`-only slice is unaffected.

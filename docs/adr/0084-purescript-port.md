@@ -1,12 +1,15 @@
 # ADR-0084 — Re-platform the reference compiler from Elixir to PureScript (purerl)
 
 **Status:** Proposed
-**Implemented:** foundation only — the `purs/` workspace, toolchain pinning, and the
-first migrated module (`Rian.Token`, the leaf data spine) typecheck offline via `purs
-compile` (Prim-only; emits the `corefn.json` purerl consumes). The purerl codegen
-backend + package set, and every module past `Token`, are gated on a network-enabled
-toolchain bootstrap (`purs/README.md`). No `.erl` has been emitted in CI yet — claimed
-honestly per ADR-0000.
+**Implemented:** foundation — the `purs/` workspace, toolchain pinning, and the first
+migrated module (`Rian.Token`, the leaf data spine). The **full purerl chain is verified
+end-to-end on `Token`**: `purs` typecheck → `corefn` → `purerl` 0.0.24 → `.erl` → `erlc`
+→ runs correctly on Erlang/OTP 29 (`purs/scripts/purerl-build.sh`, a reproducible gate).
+This proves the chosen architecture with a runnable artifact, not an assertion (ADR-0000).
+**Open:** purerl's package set ships as a legacy *dhall* set that spago 0.93 cannot
+consume directly, so only the `Prim`-only (no-library-import) slice builds today; wiring
+the package set is the first task of Phase 1 (the Lexer needs `strings`/`arrays`/regex).
+See `purs/README.md` and `docs/purescript-migration.md`.
 **Refs:** ADR-0000 (honesty bar — no asserted-not-proven build claims), ADR-0050
 (typed Core IR as the spine the migration follows; per-target emitter structure),
 ADR-0031 (toolchain-free `rian` CLI — the purerl build is a BEAM artifact, same as

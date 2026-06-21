@@ -30,9 +30,12 @@ package:
       - effect
 
 workspace:
-  # purerl maintains its own package set (Erlang-FFI libraries). Pin the tag during
-  # bootstrap; see README. The standard JS registry set will NOT link under purerl.
-  packageSet:
-    url: https://github.com/purerl/package-sets/releases/download/erl-0.15.3-20230910/packages.json
+  # OPEN (Phase 1 blocker): purerl ships its package set as a legacy *dhall* set
+  #   https://github.com/purerl/package-sets/releases/download/erl-0.15.3-20220629/packages.dhall
+  # which spago 0.93 (registry/`packages.json`) cannot consume directly. The
+  # package-set-free slice (Rian.Token) builds + runs today via scripts/purerl-build.sh
+  # (purs → corefn → purerl → erlc, verified). Library-dependent modules (Lexer onward)
+  # need this resolved — either legacy spago (0.21, dhall) or `extraPackages` git deps
+  # generated from the dhall set. See docs/purescript-migration.md (Phase 1).
   backend:
     cmd: purerl
