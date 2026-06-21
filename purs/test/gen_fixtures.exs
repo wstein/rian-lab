@@ -500,7 +500,12 @@ shadow_corpus = [
   # `:=` bind before the arrow (the `before` stmts pass through).
   "x <- foo() ; bar(x)",
   "a <- f() ; b <- g(a) ; c(a, b)",
-  "y := 1 ; x <- foo(y) ; bar(x, y)"
+  "y := 1 ; x <- foo(y) ; bar(x, y)",
+  # destructuring binds (ADR-0066 P4): tuple, cons, ctor; and one mixed with `<-`.
+  "{a, b} := pair ; a + b",
+  "[h | t] := xs ; h",
+  "Ok(v) := r ; v",
+  "{a, b} := p ; x <- f(a) ; g(x, b)"
 ]
 
 # Rian.Builtins corpus — the `bui` stream: host/stdlib foreign-call signatures

@@ -105,6 +105,7 @@ data Stmt
   = StBind String Surface
   | StTypedBind String String Surface
   | StBindArrow String Surface -- `name <- expr` error-propagation bind (ADR-0066)
+  | StBindPat Pat Surface -- destructuring bind `pat := expr` (ADR-0066 P4)
   | StExpr Surface
 
 -- surface patterns (clause heads & case arms). Bitstring patterns are stage 2.
@@ -549,6 +550,7 @@ desugarPropagation stmts =
   if Array.any isArrow stmts then desugarProp stmts 0 else SBlock stmts
   where
   isArrow (StBindArrow _ _) = true
+  isArrow (StBindPat _ _) = true
   isArrow _ = false
 
 -- `depth` deterministically names each propagation's error binder `__prop_e<depth>`, so
@@ -557,7 +559,7 @@ desugarPropagation stmts =
 -- has no continuation, so it is a mistake (matches the reference's raise).
 desugarProp :: Array Stmt -> Int -> Surface
 desugarProp stmts depth =
-  let { init: before, rest } = Array.span notArrow stmts
+  let { init: before, rest } = Array.span notSpecial stmts
   in case Array.uncons rest of
     Nothing -> SBlock before
     Just { head: StBindArrow name e, tail } ->
@@ -568,10 +570,16 @@ desugarProp stmts depth =
           okArm = { pat: PTuple [ PAtom "ok", PVar name ], guard: Nothing, body: desugarProp tail (depth + 1) }
           errArm = { pat: PTuple [ PAtom "error", PVar ev ], guard: Nothing, body: STuple [ SAtom "error", SId ev ] }
         in SBlock (before <> [ StExpr (SCase e [ okArm, errArm ]) ])
+    -- a destructuring bind `pat := e` wraps the rest in a single-arm `case e do pat -> … end`
+    -- (the bound vars scope over the continuation); `depth` is unchanged (only `<-` allocates).
+    Just { head: StBindPat pat e, tail } ->
+      if Array.null tail then unsafeCrashWith "Pratt: a trailing destructuring bind has no continuation"
+      else SBlock (before <> [ StExpr (SCase e [ { pat, guard: Nothing, body: desugarProp tail depth } ]) ])
     Just _ -> SBlock before
   where
-  notArrow (StBindArrow _ _) = false
-  notArrow _ = true
+  notSpecial (StBindArrow _ _) = false
+  notSpecial (StBindPat _ _) = false
+  notSpecial _ = true
 
 parseStmts :: List Token -> Array Stmt -> Parsed (Array Stmt)
 parseStmts toks@(TKw k : _) acc | k == "else" || k == "end" = Tuple acc toks
@@ -593,7 +601,49 @@ parseStmt toks@(TId name : TId _ : _) =
   in case afterType of
     (TOp ":=" : r) -> let Tuple e r2 = parseExpr r 0 in Tuple (StTypedBind name ty e) r2
     _ -> let Tuple e r2 = parseExpr toks 0 in Tuple (StExpr e) r2
+
+-- a destructuring bind `pat := e` — any *pattern* LHS other than a bare name (handled by
+-- the first clause). The reference speculatively `parse_pat`s and commits on a trailing
+-- `:=` (Elixir `try/rescue`); PureScript can't `try`, so we detect a top-level `:=` first
+-- (`hasTopLevelAssign`), then parse the LHS as a pattern — equivalent for a well-formed bind.
+parseStmt tokens
+  | hasTopLevelAssign tokens =
+      let Tuple pat rest = parsePat tokens
+      in case rest of
+        (TOp ":=" : r) -> let Tuple e r2 = parseExpr r 0 in Tuple (StBindPat pat e) r2
+        _ -> let Tuple e r2 = parseExpr tokens 0 in Tuple (StExpr e) r2
 parseStmt tokens = let Tuple e r = parseExpr tokens 0 in Tuple (StExpr e) r
+
+-- the current statement carries a top-level `:=` before its boundary (a depth-0 `;` /
+-- `do` / `end` / `else`)? A pattern LHS has no `do`/`;`, so the first depth-0 `:=` is the
+-- bind separator. Bracket depth tracks `(`/`[`/`{`/`%{`/`<<`.
+hasTopLevelAssign :: List Token -> Boolean
+hasTopLevelAssign = go 0
+  where
+  go :: Int -> List Token -> Boolean
+  go _ Nil = false
+  go d (t : rest)
+    | d == 0 && isAssign t = true
+    | d == 0 && isBoundary t = false
+    | otherwise = go (d + delta t) rest
+
+  isAssign (TOp ":=") = true
+  isAssign _ = false
+
+  isBoundary TSemi = true
+  isBoundary (TKw k) = k == "do" || k == "end" || k == "else"
+  isBoundary _ = false
+
+  delta TLparen = 1
+  delta TLbracket = 1
+  delta TLbrace = 1
+  delta TMapopen = 1
+  delta TBitopen = 1
+  delta TRparen = -1
+  delta TRbracket = -1
+  delta TRbrace = -1
+  delta TBitclose = -1
+  delta _ = 0
 
 -- a type phrase: `Name` or `Name(t1, t2, …)`, rendered with no interior spaces.
 parseType :: List Token -> Parsed String
@@ -858,8 +908,9 @@ sexprMapPair (MKey k v) = sexpr k <> " => " <> sexpr v
 sexprStmt :: Stmt -> String
 sexprStmt (StBind n e) = "(:= " <> n <> " " <> sexpr e <> ")"
 sexprStmt (StTypedBind n t e) = "(:= " <> n <> " " <> t <> " " <> sexpr e <> ")"
--- never reached post-desugar (`desugarPropagation` consumes it); present for totality.
+-- never reached post-desugar (`desugarPropagation` consumes both); present for totality.
 sexprStmt (StBindArrow n e) = "(<- " <> n <> " " <> sexpr e <> ")"
+sexprStmt (StBindPat p e) = "(:= " <> sexprPat p <> " " <> sexpr e <> ")"
 sexprStmt (StExpr e) = sexpr e
 
 sexprPat :: Pat -> String

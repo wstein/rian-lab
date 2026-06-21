@@ -158,8 +158,9 @@ fromStmt :: P.Stmt -> CStmt
 fromStmt (P.StBind n e) = CBind n (fromExpr e)
 fromStmt (P.StTypedBind n t e) = CTypedBind n t (fromExpr e)
 fromStmt (P.StExpr e) = CExprStmt (fromExpr e)
--- `<-` is desugared into a `case` by `Pratt.parseBlock` before Core ever sees it.
+-- `<-` and `pat := e` are desugared into a `case` by `Pratt.parseBlock` before Core sees them.
 fromStmt (P.StBindArrow _ _) = unsafeCrashWith "Core: StBindArrow must be desugared by Pratt.parseBlock"
+fromStmt (P.StBindPat _ _) = unsafeCrashWith "Core: StBindPat must be desugared by Pratt.parseBlock"
 
 fromArm :: P.Arm -> CArm
 fromArm a = { pat: fromPat a.pat, guard: map fromExpr a.guard, body: fromExpr a.body }
