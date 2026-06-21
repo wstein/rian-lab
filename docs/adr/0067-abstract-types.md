@@ -137,6 +137,13 @@ number-mode invariant are precisely why it is **not** one, and stays a compiler 
   types as the nominal `Meters` — **not** the base, so there is no implicit decay (ADR-0035). At emit
   nothing special is needed: erasure substitutes `Meters → Float64`, and `a + b` is already the native
   base `+` on every target. Works for any base (`abstract Count := Int64`). Tested.
+  - *Parsing (corrected 2026-06-21, ADR-0084 port review):* `parse_op_rule`/`parse_cast_rule` now
+    split the member on the symbol's **balanced** parens (the in-file `extract_parens`/`match_paren`),
+    not a greedy `~r/^(\S+?)\s*\((.*)\)\s*(.*)$/` regex. The old regex backtracked to the *last* `)`,
+    so an `op`/`to` whose param **or** return type itself contained parens — `op map(f Fn(A, B), v T)
+    Vec(B)` — mis-split, swallowing the closing paren into the param list. The PureScript port
+    (`purs/src/Rian/Decl.purs`) was already balanced-correct; this brought the Elixir oracle into
+    agreement (reference op/cast tests unchanged, since they use non-parametric `op +(a T, b T) T`).
 - **P1c — casts (DONE).** `to base() B` parses into `%IR.Opaque{casts}`; `m.base()` types as `B`
   (`abstract_cast_ret`) and **erases to the bare `m`** (`Rian.Opaque` strips the declared cast call —
   the underlying representation *is* the value). The cast is explicit; there is no implicit decay.

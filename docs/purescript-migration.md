@@ -171,6 +171,23 @@ error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl
 ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`exh`/`pge` streams).
 **Next:** the program-wide tail passes (macro expansion, protocol synthesis, interpolation/stdlib/
 infer-local) wait on `Check`/`InferLocal`/`Protocol`/`Macro`.
-Total **504/504** parity records across
-Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude. Each module is parity-gated and committed on its own
+Total **525/525** parity records across
+Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External/Coherence.
+Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
+
+**What "ported" means here — read this before trusting the module count.** The **entire
+front-end is ported and cross-checked**: lex → parse → typed Core IR → the refutation gates
+(`PatternLower`/`Exhaustiveness`) → leaf passes (`Range`/`Prelude`/`External.render`/`Coherence`).
+**None of the inference or back-end is**: `Check` (2724), `Reach`, `InferLocal`, the emitters
+(`Beam`/`JS`/`JVM`/`Lower`), and the expansion/synthesis tail passes (`Macro`/`Protocol.expand`,
+`Opaque.erase`'s cast inference) are unported — so the port **cannot yet compile a program
+end-to-end**. The parity-record count measures front-end *fidelity*, not compiler completeness;
+`Check` is the gate that flips "front-end ported" to "can compile."
+
+**Known parity-corpus gaps (low severity, named not hidden).** The fixed-scenario streams cover
+every `lower`/`analyze`/`parse` branch *except*: `PMap` pattern lowering (BEAM-only, refutable);
+`Exhaustiveness.render`'s `inspect`-style escaping of a witness string/atom containing quotes
+(diagnostic text only — the PS `render` wraps raw where Elixir `inspect` escapes); and the
+`coh` stream's `@targets(:rs)`-exempt branch (hardcoded `Nothing`, so the Rust-only
+shared-discriminator exemption is logic-agreed but untested). These are tracked, not asserted away.
