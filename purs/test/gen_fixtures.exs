@@ -614,7 +614,14 @@ ifc_corpus = [
   "def foo(x Int53) String := x;;foo(1)",
   "def helper(x Int53) Bool := true;;M.helper(1)",
   "struct Point(x Int53, y Int53);;Point(1, 2)",
-  "def baz(x Int53) Int53 := x;;baz(n) + 1"
+  "def baz(x Int53) Int53 := x;;baz(n) + 1",
+  # slice C: ECase flow-narrowing (ctor-pattern field types via ic.tdefs), generic return
+  # instantiation (forall via ic.fsigs), and `.of` range/opaque construction.
+  "type Box := Bx(v Int53);;case b do\n  Bx(x) -> x\nend",
+  "type Pair := P(a Int53, b String);;case b do\n  P(i, t) -> t\nend",
+  "def idv(x T) T forall T := x;;idv(n)",
+  "range Bit := 0..1;;Bit.of(n)",
+  "opaque Id := Int64;;Id.of(n)"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

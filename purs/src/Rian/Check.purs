@@ -38,16 +38,16 @@ module Rian.Check
 
 import Prelude hiding (join)
 
-import Data.Array (concatMap, filter, find, foldl, head, last, length, mapMaybe, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
+import Data.Array (concatMap, filter, find, foldl, head, index, last, length, mapMaybe, mapWithIndex, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
-import Data.Maybe (Maybe(..), fromMaybe, maybe)
+import Data.Maybe (Maybe(..), fromMaybe, isJust, maybe)
 import Data.String as Str
 import Data.String.CodeUnits (singleton, toCharArray)
 import Data.String.Common (joinWith, replaceAll, split)
 import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
-import Rian.Core (CExpr(..), CMapPair(..), CStmt(..), fromExpr)
+import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), fromExpr)
 import Rian.Decl (parseToProg)
 import Rian.IR (Func, Prog, Type)
 import Rian.Prelude (withPrelude)
@@ -315,6 +315,11 @@ infer (EMap pairs) env ic = inferMap pairs env ic
 -- `if`'s value is the LUB-join of its two arms (a value union when they don't share an LUB).
 -- The arms are `do`/`else` blocks, so each is an `EBlock` whose value is its last statement.
 infer (EIf _ t e) env ic = branchJoin [ Tuple t (infer t env ic), Tuple e (infer e env ic) ]
+-- `case` — flow narrowing: each arm body infers under an env where the arm pattern's bindings
+-- are refined against the scrutinee's type (`ic.tdefs`); the case's type is the LUB-join of arms.
+infer (ECase scrut arms) env ic =
+  let st = infer scrut env ic
+  in branchJoin (map (\arm -> Tuple arm.body (infer arm.body (narrow arm.pat st ic env) ic)) arms)
 -- a lambda `(a, b) -> body` infers the arrow type `Fn(a_t.., body_t)`.
 infer (ELambda ps body) env ic = inferLambda ps body env ic
 infer (EBlock stmts) env ic = inferBlock stmts env Unknown ic
@@ -336,12 +341,20 @@ infer (ECall (EId f) args) env ic = case envLookup f env of
   Just ft | isFnTy ft -> fnRet ft
   _ -> case ctorType ic f of
     Just ty -> TName ty
-    Nothing -> case calledRet ic f (length args) of
+    Nothing -> case calledRetWith ic f args env of
       Unknown -> builtinOrUnknown Nothing f (length args)
       v -> v
--- a ZERO-arg dot-call is the `abstract`-cast position (`m.base()`): cast inference (ic.opaques)
--- is a later slice, so it is `Unknown` — and this intercepts a zero-arg `Mod.fun()` (e.g.
--- `Map.new()`) before the builtin clause, matching the reference's clause order.
+-- `Name.of(n)` — range/opaque construction (ADR-0036/0067): an opaque's constructor is total
+-- (returns the nominal `Name`); a range's returns `Result(base,RangeError)` (collapsed form,
+-- matching declared-return storage). Otherwise it falls through to a function value.
+infer (ECall (EDot (EId n) "of") args) env ic =
+  if isJust (find (\(Tuple k _) -> k == n) ic.opaques) then TName n
+  else case rangeBase ic n of
+    Just base -> TName ("Result(" <> base <> ",RangeError)")
+    Nothing -> let ft = infer (EDot (EId n) "of") env ic in if isFnTy ft then fnRet ft else Unknown
+-- a ZERO-arg dot-call is the `abstract`-cast position (`m.base()`): cast inference (ic.opaques
+-- ops/casts) is a later slice, so it is `Unknown` — and this intercepts a zero-arg `Mod.fun()`
+-- (e.g. `Map.new()`) before the builtin clause, matching the reference's clause order.
 infer (ECall (EDot _ _) []) _env _ = Unknown
 -- a module call `Mod.fun(args)`: a program function's declared return (`ic.funs`, keyed by
 -- name+arity, module-flattened as on the BEAM), else a fixed-head poly stdlib call (`List.map`)
@@ -688,6 +701,63 @@ lookupFunRaw :: Array (Tuple (Tuple String Int) (Maybe String)) -> String -> Int
 lookupFunRaw funs f arity = case find (\(Tuple k _) -> k == Tuple f arity) funs of
   Just (Tuple _ ret) -> ret
   Nothing -> Nothing
+
+-- a program function's return: a generic callee (its `fsigs` carries `forall` tvars) instantiates
+-- its return from the call's argument types; otherwise the declared (non-generic) return.
+calledRetWith :: Ic -> String -> Array CExpr -> Env -> Ty
+calledRetWith ic f args env = case find (\(Tuple k _) -> k == Tuple f (length args)) ic.fsigs of
+  Just (Tuple _ sig) | not (null sig.tvars) -> instantiateRet sig (map (\a -> infer a env ic) args)
+  _ -> calledRet ic f (length args)
+
+-- instantiate a generic return: bind each tvar from the args, then word-substitute it in `ret`.
+-- Only tvars that actually appear in `ret` need binding (`length … Int53 forall T` is `Int53`
+-- regardless of `T`); an unbindable needed tvar yields `Unknown` (sound).
+instantiateRet :: Fsig -> Array Ty -> Ty
+instantiateRet sig argTypes = case sig.ret of
+  Nothing -> Unknown
+  Just ret ->
+    let
+      subs = foldl bindOne [] (zip sig.params argTypes)
+      needed = filter (\tv -> elem tv (typeIdents ret)) sig.tvars
+    in
+      if all (\tv -> any (\(Tuple k _) -> k == tv) subs) needed then TName (foldl applySub ret subs)
+      else Unknown
+  where
+  bindOne acc (Tuple mp a) = case mp of
+    Just p -> bindTvar p a sig.tvars acc
+    Nothing -> acc
+  applySub r (Tuple tv ty) = wordReplace tv ty r
+
+-- the ordinal base of a `range` named `n` (`ic.ranges`), else `Nothing`.
+rangeBase :: Ic -> String -> Maybe String
+rangeBase ic n = map (\(Tuple _ info) -> info.base) (find (\(Tuple k _) -> k == n) ic.ranges)
+
+-- ── `case` flow narrowing (refine arm-pattern bindings against the scrutinee) ──
+narrow :: CPat -> Ty -> Ic -> Env -> Env
+narrow (PVar name) ty _ env = envPut name (concretize ty) env
+narrow (PTyped name tname) _ _ env = envPut name (TName tname) env
+narrow (PCtor ctor args) _ ic env =
+  foldl (\e (Tuple i p) -> narrow p (fieldTy i) ic e) env (mapWithIndex Tuple args)
+  where
+  fieldTypes = fromMaybe [] (map snd (find (\(Tuple k _) -> k == ctor) ic.tdefs))
+  fieldTy i = maybe Unknown TName (index fieldTypes i)
+narrow _ _ _ env = env
+
+-- a bare-tvar field type narrows to `Unknown` (generics are not instantiated in a pattern).
+concretize :: Ty -> Ty
+concretize (TName t) = if isTvar t then Unknown else TName t
+concretize t = t
+
+-- replace whole-word occurrences of `target` with `repl` (the reference's `\b…\b` regex).
+wordReplace :: String -> String -> String -> String
+wordReplace target repl input =
+  let final = foldl go { out: "", cur: "" } (toCharArray input)
+  in final.out <> emit final.cur
+  where
+  emit w = if w == target then repl else w
+  go acc c =
+    if isWordChar c then acc { cur = acc.cur <> singleton c }
+    else { out: acc.out <> emit acc.cur <> singleton c, cur: "" }
 
 -- does a type string mention a type-variable token (`^[A-Z][0-9]?$` per identifier)?
 hasTvar :: String -> Boolean
