@@ -884,10 +884,11 @@ fillLocalRetsSexpr src =
 -- the program gate (ADR-0034): each function's body must be assignable to its return
 --------------------------------------------------------------------------------
 
--- | The compile-time return gate: the first function whose body type is not assignable to its
--- | declared return (`Just message`), else `Nothing` (`:ok`). Covers return-assignability (the
--- | headline gate) AND error sets (ADR-0040, `checkErrorSet`); effects/bounds/coherence and the
--- | literal-width-adoption relaxation are later — the corpus avoids them.
+-- | The compile-time gate: the first function that fails a check (`Just message`), else `Nothing`
+-- | (`:ok`). In reference order so the first-error message matches: `check_unk` (no unresolved
+-- | `_Unk` hole in the signature), then return-assignability (the headline gate), then error sets
+-- | (ADR-0040, `checkErrorSet`). The body-walking checks (labels/binds/numeric-mix/value-position/
+-- | bounds), `check_external_caps`, and `check_effects` are later — the corpus avoids them.
 -- @rian_sig pub def check_program(prog val Prog) _Unk
 checkProgram :: Prog -> Maybe String
 checkProgram prog = findMap checkFunc funcs
@@ -897,11 +898,30 @@ checkProgram prog = findMap checkFunc funcs
   ic = ic0 { funs = fillLocalRets funcs ic0 }
   tsets = errorSetsTable prog
   table = solveErrorSets funcs tsets
-  -- per function: the body must be assignable to the declared return, AND a Result return's
-  -- produced error set ⊆ its declared `E` (ADR-0040).
-  checkFunc f = case checkReturn ic f of
+  -- per function, in reference order: no `_Unk` hole in the signature, then the body must be
+  -- assignable to the declared return, then a Result return's produced error set ⊆ its `E`.
+  checkFunc f = case checkUnk f of
     Just msg -> Just msg
-    Nothing -> checkErrorSet tsets table f
+    Nothing -> case checkReturn ic f of
+      Just msg -> Just msg
+      Nothing -> checkErrorSet tsets table f
+
+-- `_Unk` is an UNFINISHED inference hole, not a type (ADR-0034): a fill-me marker the transpiler
+-- leaves. A declared `_Unk` in a signature must be resolved before compiling, so the gated path
+-- rejects it with a clear fix (a genuinely-dynamic value is `Any`, which lowers on every target
+-- but Rust). The raw BEAM `load` path skips the gate by design, so draft code is unaffected.
+checkUnk :: Func -> Maybe String
+checkUnk f = case findMap holeOf (map _.ty f.params <> [ f.ret ]) of
+  Nothing -> Nothing
+  Just t ->
+    Just
+      ( "`" <> f.name <> "`: unresolved `_Unk` hole in its signature (`" <> t <> "`) — `_Unk` is a "
+          <> "fill-me marker, not a type. Give it a concrete type, or `Any` if the value "
+          <> "is genuinely dynamic (`Any` reaches every target but `:rs`)."
+      )
+  where
+  holeOf (Just t) = if Str.contains (Str.Pattern "_Unk") t then Just t else Nothing
+  holeOf Nothing = Nothing
 
 -- a function's declared (non-generic) return must accept every clause body's inferred type.
 checkReturn :: Ic -> Func -> Maybe String

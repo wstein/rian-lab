@@ -705,7 +705,13 @@ gate_corpus = [
   # error sets (ADR-0040): a Result return's produced error set must be ⊆ its declared E.
   "pub def safe() Result(Int53, MyErr) := {:ok, 1}\ntype MyErr := Bad",
   "pub def bad() Result(Int53, MyErr) := {:error, Other}\ntype MyErr := Bad",
-  "pub def okerr() Result(Int53, MyErr) := {:error, Bad}\ntype MyErr := Bad"
+  "pub def okerr() Result(Int53, MyErr) := {:error, Bad}\ntype MyErr := Bad",
+  # check_unk (ADR-0034): an unresolved `_Unk` hole in the signature is rejected (param, return,
+  # private fn), and it fires BEFORE the return gate (the last case also has a return mismatch).
+  "pub def uh(x _Unk) Int53 := x",
+  "pub def ur(x Int53) _Unk := x",
+  "def up(x _Unk) := x",
+  "pub def um1(x _Unk) String := 1"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the
