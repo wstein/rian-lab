@@ -1,7 +1,7 @@
 # ADR-0025 — Memory capabilities: `val` / `iso` / `ref` / `tag`
 
-**Status:** Accepted (§1–§3 implemented; §4 — the move-on-last-use clone-elision optimization — **proposed, not yet implemented**)
-**Implemented:** §1–§3 yes — `Rian.Capability` (Rust parameter lowering + BEAM use-once linearity + `beam_legal!/1` rejecting `ref`); `test/rian/capability_test.exs`. The owned↔borrow **coercion** at the emit seams (§4.1) is implemented in `Rian.Lower` (~22 `.clone()`/`.to_vec()` sites against ~162 borrow sites). The **clone-elision optimization** (§4.2) is proposed — there is no liveness pass today. *(Retroactively documented 2026-06-14: this foundational decision was referenced by ADR-0034/0035/0041/0046/0048/0055 but never had its own file — the corpus-review honesty pass gave it one. §4 added 2026-06-21.)*
+**Status:** Accepted (§1–§3 + the §4.1 coercion implemented; §4.2 move-on-last-use and §5 single-region lifetime emission — **proposed, not yet implemented**)
+**Implemented:** §1–§3 yes — `Rian.Capability` (Rust parameter lowering + BEAM use-once linearity + `beam_legal!/1` rejecting `ref`); `test/rian/capability_test.exs`. The owned↔borrow **coercion** at the emit seams (§4.1) is implemented in `Rian.Lower` (~22 `.clone()`/`.to_vec()` sites against ~162 borrow sites). The **clone-elision optimizations** — §4.2 (move-on-last-use) and §5 (single-region `&'a`) — are proposed: there is no liveness pass and **no emitted lifetimes** today (only `'static` on `Rc<dyn Fn>` closure fields). *(Retroactively documented 2026-06-14: referenced by ADR-0034/0035/0041/0046/0048/0055 but had no file until the corpus-review honesty pass. §4 + §5 added 2026-06-21.)*
 **Refs:** ADR-0034 (capabilities × types; flow narrowing), ADR-0055 (capabilities through dispatch / opaque), ADR-0035 (no hidden control flow), ADR-0041 (per-target representation), ADR-0057 (concurrency/FFI native-per-target), ADR-0070 (proposed: make `val` the inferred default), ADR-0000 (charter — the capability model is half of Rian's distinctive pairing)
 **Owners:** Elena Rostova (Rust ownership) · Arthur Pendelton (type system) · Samir Patel (linearity/totality) · Maya Lin (multi-target) · Kira Neri (no hidden coercion) · Rachel Okafor (PM)
 
@@ -88,6 +88,54 @@ must still compile and produce identical results to its non-optimised form (and 
 build). The optimization is **observable-behaviour-preserving** — it changes only the number of
 allocations, never the result.
 
+### 5. Single-region lifetime emission (lightweight `&'a`), to borrow where §4 would clone
+
+§4.2 recovers the clones on an *owned* return built from a *dead* local. The complementary case is
+a **borrowed** return that is a *view into a live input* — `def field(s val Shape) val Field`,
+which today must `.clone()` because lifetime **elision refuses two cases**: multiple borrowed
+inputs with a borrowed output (`fn longest(a: &str, b: &str) -> &str`), and a stored/returned
+reference elision can't disambiguate. Decision: emit **one function-level lifetime** to cover
+these — *not* per-borrow inference.
+
+**§5.1 — One region per function (mechanical, no inference).** When a function's signature
+contains *any* borrow, emit a single `<'a>` and stamp `'a` on **every** borrowed position
+(`val`/`tag` params **and** a borrowed return): `fn longest<'a>(a: &'a str, b: &'a str) -> &'a str`,
+`fn field<'a>(s: &'a Shape) -> &'a Field`. This is elision *generalised* — elision already unifies
+the single-input case; one region unifies the multi-input case. It is sound for Rian because the
+surface is **pure / return-based** (no `&mut`, §2): the programs that genuinely need two *distinct*
+lifetimes are about mutation or independent-borrow invariants Rian can't express, so one region
+over-constrains only rarely and **never unsoundly** (`rustc` validates). Only `Rian.Capability` +
+the function-signature emitter change; the `&[T]`/`&str`/`&T` spellings are unchanged.
+
+**§5.2 — Deciding a borrowed return.** Two paths, mirroring ADR-0070's annotate-only-to-deviate:
+
+- **inference (default, zero annotation):** a *local* **return-provenance** check — does the
+  return expression's root trace to a borrowed (`val`/`tag`) parameter (a field-access / index /
+  passthrough)? If yes → `&'a`; if it is freshly constructed → owned, as today. Same flavour of
+  cheap intraprocedural analysis as §4.2, *not* a borrow checker.
+- **annotation (override):** a `val`/`tag` capability on the **return** position
+  (`def field(s val Shape) val Field`) forces the borrowed return — intent per signature position,
+  fully in the model's spirit.
+
+**§5.3 — The boundary (where "lightweight" stops).** The moment a program would need **two
+distinct lifetimes** (`<'a, 'b>` with the output tied to one but not the other), the single-region
+scheme cannot express it → **fall back to clone**. That line — *single-region borrow or clone* — is
+what keeps this lightweight; crossing it is the per-borrow constraint-solving (real lifetime
+inference) this ADR exists to avoid.
+
+**§5.4 — Safety + portability (same bars as §4.2).** Lifetimes are a **Rust-only emit detail**,
+erased on BEAM/JS/JVM exactly like the `&`/owned spelling (§3) — nothing changes in the surface or
+the other backends. The scheme is a **pure optimisation over clone-at-seam**: emit a borrowed
+return *only* when provenance proves it sound within the one region; **in any doubt, clone**. So it
+can only *remove* clones, never introduce a `rustc` error the clone path didn't have. Validated by
+the `rustc --test` honesty lane + identical-results-across-targets, like §4.2.
+
+**Composition.** §4.2 (move) handles an owned return from a dead local; §5 (borrow `&'a`) handles a
+borrowed return into a live input; the genuinely-multi-lifetime case stays a clone; `Copy`/`Rc`
+are free. Together they reduce the residual clones to just the multi-lifetime tail — while keeping
+the **no-hand-written-lifetimes-in-the-surface** guarantee (the `'a` is emitter-generated, erased
+everywhere but Rust).
+
 ## Rationale
 
 - **One annotation, two payoffs** (Rust ownership + BEAM linearity) — the novel thing the charter
@@ -116,3 +164,8 @@ allocations, never the result.
   last-use/liveness pass over the clause body in `Rian.Lower`, gated by the `rustc --test` honesty
   lane and an "identical results to the non-optimised + BEAM/JS builds" check. Highest-value Rust
   perf work; `Cow`/wider-`Rc` are follow-ons on the same axis. (Surfaced 2026-06-21.)
+- **Single-region lifetime emission (§5)** — proposed, not yet implemented. Needs a return-
+  provenance check + the function-signature emitter to add one `<'a>` and stamp it on every borrow;
+  falls back to clone outside the single-region case. Complements §4.2 (move = owned-from-dead;
+  `&'a` = borrowed-into-live). Same honesty-lane gate. Sequencing: do §4.2 first (no signature
+  change), then §5. Both land with the `Rian.Rust` port (emitter plan Part D). (Surfaced 2026-06-21.)
