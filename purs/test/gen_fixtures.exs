@@ -558,6 +558,41 @@ rch_corpus = [
   "def urec(x Rec) Rec := x\ntype Rec := R(nxt Rec, v T)"
 ]
 
+# Rian.Capability corpus — the `cap` stream (ADR-0025/0061): Rust parameter-type lowering of a
+# `<cap> <type>` pair (copy/borrow/owned, Fn callbacks, Vec/Map/tuple/parametric, nested).
+cap_corpus = [
+  "val Int64",
+  "val String",
+  "val Vec(Int64)",
+  "val Foo",
+  "val UInt8",
+  "iso String",
+  "iso Vec(Int64)",
+  "iso Int64",
+  "iso Float32",
+  "iso Map(String, Int64)",
+  "iso Option(Int64)",
+  "iso (Int53, String)",
+  "iso Vec(Option(Int64))",
+  "ref Int64",
+  "tag Foo",
+  "val Fn(Int53, Int53)"
+]
+
+# Rian.Capability `lin` stream (ADR-0055): the branch-aware free-variable occurrence counts of
+# an expression (use-once linearity for iso/ref). Covers binders (lambda/block/case-pat shadow),
+# branch-aware `if`/`case` (max over arms), dot, list.
+lin_corpus = [
+  "x + x",
+  "f(x, y)",
+  "(a) -> a + b",
+  "if c do x else x end",
+  "g(h)",
+  "case y do\n  z -> z + z\n  w -> q\nend",
+  "p.field + p.field",
+  "[a, a, b]"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1293,6 +1328,18 @@ lines =
         end)
 
       "rch\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
+    end) ++
+    Enum.map(cap_corpus, fn s ->
+      [cap, t] = String.split(s, " ", parts: 2)
+      "cap\t#{Canon.hex(s)}\t#{Canon.hex(Rian.Capability.rust_param(String.to_atom(cap), t))}"
+    end) ++
+    Enum.map(lin_corpus, fn s ->
+      canon =
+        Rian.Capability.count_uses(Rian.Pratt.parse(s))
+        |> Enum.sort()
+        |> Enum.map_join(";", fn {k, n} -> "#{k}:#{n}" end)
+
+      "lin\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)

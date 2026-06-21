@@ -93,7 +93,11 @@ run_stream(<<"mac">>, Src) -> hexbin('rian_macro@ps':expandSexpr(Src));
 %% Rian.Protocol expand (canon = serialized dispatcher / impl_* DefMaps)
 run_stream(<<"pex">>, Src) -> hexbin('rian_protocol@ps':expandSexpr(Src));
 %% Rian.Reach analyze (canon = per-func sorted reach + blocker constructs)
-run_stream(<<"rch">>, Src) -> hexbin('rian_reach@ps':analyzeSexpr(Src)).
+run_stream(<<"rch">>, Src) -> hexbin('rian_reach@ps':analyzeSexpr(Src));
+%% Rian.Capability rustParam (canon = the Rust parameter-type lowering of `<cap> <type>`)
+run_stream(<<"cap">>, Src) -> hexbin('rian_capability@ps':rustParamSexpr(Src));
+%% Rian.Capability countUses (canon = sorted name:count linearity occurrences of an expr)
+run_stream(<<"lin">>, Src) -> hexbin('rian_capability@ps':countUsesSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.
