@@ -1,7 +1,8 @@
 # ADR-0052 — Documentation Site: Astro/Starlight portal + native per-target API reference
 
 **Status:** Accepted (direction) · **Lightweight/tooling** (not on the implementation critical path)
-**Implemented:** partial — an Astro/Starlight portal exists (`site/astro.config.mjs` with `@astrojs/starlight`, `site/src/content`); the in-browser Rian playground (engine = **self-host → JS**; gated on the `v1==v2` bootstrap fixed point + JS-reachability, ADR-0063) is not built
+**Amended 2026-06-21 (ADR-0088):** the live-playground engine is **no longer "self-host → JS only".** The reference interpreter (`Rian.Eval`, ADR-0088) compiled to **WASM/JS** is a second engine that ships the playground **ahead** of the `v1==v2` bootstrap — self-host → JS remains the *eventual* whole-compiler-in-browser engine, but it is no longer the *only* one or a precondition for shipping. Wherever this ADR says "self-host → JS only / nothing else", read "the interpreter engine first, self-host → JS later" (ADR-0088 §3).
+**Implemented:** partial — an Astro/Starlight portal exists (`site/astro.config.mjs` with `@astrojs/starlight`, `site/src/content`); the in-browser Rian playground (engine = the **`Rian.Eval` interpreter → WASM/JS** first (ADR-0088), **self-host → JS** later; the latter gated on the `v1==v2` bootstrap + JS-reachability, ADR-0063) is not built
 **Refs:** ADR-0026 (ExDoc/EEP-48), ADR-0041/0046 (native-per-target; "don't simulate"), ADR-0049 (Tier-1 ECMAScript — enables the playground), ADR-0051 (doc-comment extraction — the *other* layer), ADR-0027/0063 (self-host → JS — the playground engine + its `v1==v2` gate), ADR-0047 (portable prelude — the JS-reachability prerequisite)
 **Prior-art blueprint:** [github.com/wstein/flatbars](https://github.com/wstein/flatbars) — a same-author PureScript monorepo with an Astro Starlight MDX spec site and a client-side `lab/` playground (engine compiled to a committed JS bundle + a WASM core). It already runs the patterns below in production; the playground open items adopt its architecture — **except the engine substrate**: Rian's bundle is self-host → JS, **not** a WASM core (see "Playground architecture").
 **Owners:** Liam Davis (site/JS) · Julian Vance (content) · Kira Neri (build/CI) · Maya Lin (architecture) · Marcus Chen (supply chain) · Rachel Okafor (PM)
@@ -58,7 +59,7 @@ BEAM/host API reference.
 | Decision | Rating |
 |---|---|
 | Public portal → Astro/Starlight (Markdown-native; search/versioning; in-browser playground) | 5/5 |
-| Live-playground engine = self-host → JS only (no BEAM-in-WASM bridge, no server-side); gated on `v1==v2` + JS-reachability | 5/5 |
+| Live-playground engine = the `Rian.Eval` interpreter → WASM/JS first (ADR-0088), self-host → JS later (no BEAM-in-WASM bridge, no server-side); the self-host engine gated on `v1==v2` + JS-reachability | 5/5 |
 | API reference → native per target (EEP-48/ExDoc, rustdoc, JSDoc), linked | 5/5 |
 | Keep ExDoc for the compiler's own Elixir/BEAM API | 4/5 |
 | Sphinx as the portal | 3/5 (reST friction vs the Markdown corpus; strengths are layer-1, already solved) |
@@ -93,8 +94,11 @@ The FlatBars `lab/` + `spec/` proves the stack; Rian adopts its patterns, with o
   compiler. Ties to the ADR-0041 conformance matrix.
 - **Reuse the existing TextMate grammar** (`editors/vscode/rian`) registered as a Shiki/Expressive-Code
   language for ```rian fences (FlatBars registers its grammar in `astro.config.mjs`). Zero new work.
-- **In-browser *compilation* requires the compiler itself to run client-side — and the engine is
-  decided: self-host → JS (ADR-0027/0063), nothing else.** FlatBars compiles trivially (PureScript→JS
+- **In-browser *evaluation* ships first on the reference interpreter** (`Rian.Eval` → WASM/JS,
+  ADR-0088): a small total tree-walker over Core, compiled to the browser, runs an edited snippet
+  ahead of any self-host. **In-browser *whole-compiler* compilation** then requires the compiler
+  itself to run client-side, and that engine is self-host → JS (ADR-0027/0063) — later, not a
+  precondition. FlatBars compiles trivially (PureScript→JS
   is native); Rian's compiler is Elixir-hosted, so the Rian-in-Rian compiler is lowered to a committed
   JS bundle via the ECMAScript target (ADR-0049) — FlatBars' "engine as a JS bundle", minus its WASM
   core. The two alternatives once floated are **rejected**: **BEAM-in-WASM** (AtomVM/Firefly/Popcorn)
@@ -119,7 +123,9 @@ The FlatBars `lab/` + `spec/` proves the stack; Rian adopts its patterns, with o
 - **Versioned docs** — per-release doc snapshots; align with the language-versioning policy (still open).
 - **ADR rendering** — surface the design corpus in the portal (a "design" section) vs keep ADRs
   repo-only. (FlatBars renders its ADRs as Starlight pages.)
-- ~~**Playground execution path** — settle (a)/(b)/(c) above.~~ **Resolved:** self-host → JS only;
-  BEAM-in-WASM and server-side compile are rejected. Gated on `v1==v2` + JS-reachability (ADR-0063 §4).
+- ~~**Playground execution path** — settle (a)/(b)/(c) above.~~ **Resolved (amended by ADR-0088):** the
+  `Rian.Eval` interpreter → WASM/JS ships the live engine **first** (ahead of self-host), with self-host
+  → JS as the later whole-compiler engine; BEAM-in-WASM and server-side compile stay rejected. Only the
+  self-host engine is gated on `v1==v2` + JS-reachability (ADR-0063 §4) — the interpreter engine is not.
   The remaining open work is the engine-independent front-end (editor / `LivePane` / multi-target panel),
   which can proceed against the static gallery now.
