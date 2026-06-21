@@ -69,10 +69,10 @@ still depends on it — see the DoD removal-order note).
 
 ### Phase 3 — Parsers
 
-| Module        | LOC  | Notes                                              |
-| ------------- | ---- | -------------------------------------------------- |
-| `Rian.Pratt`  | 1218 | the **one** expression+pattern parser (ADR-0050).  |
-| `Rian.Decl`   | 1901 | declaration parser; newline-tolerant `:=` bodies.  |
+| Module        | LOC  | Notes / status                                                 |
+| ------------- | ---- | -------------------------------------------------------------- |
+| `Rian.Pratt`  | 1218 | **Stage 1 ported** (parity-gated, `psx` stream): the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms — **plus patterns and `if`/`case`/`lambda`/blocks**. **Stage 2** (raises a clear "stage 2" message, excluded from the corpus): `with`, `for`/comprehension, bitstrings (+pattern), `${}` interpolation, map *update*, error-propagation `<-`, speculative destructuring binds, and type-patterns (no reference `sexpr` clause). |
+| `Rian.Decl`   | 1901 | declaration parser; newline-tolerant `:=` bodies.              |
 
 **Parity plan (Pratt).** Pratt has a built-in AST→s-expression renderer
 (`parse_sexpr/1`); use it as the canonical oracle — add a `psx` stream to
@@ -145,8 +145,9 @@ purerl-built BEAM modules (ADR-0031), or native `rian` CLI subcommands.
 
 ## Status
 
-Phases 0–1 complete (purerl chain verified on `Rian.Token`; `Rian.Lexer` ported at full
-parity). **Phase 2 in progress**: `Rian.TypeStr` ported (parity-gated), `Rian.Ann` dropped
-as obsolete; `Rian.IR`/`Rian.Core` remain — `Core`'s `from_expr` composes with `Pratt`
-(Phase 3) for parity, so the natural next unit is **Pratt** (see the Phase 3 parity plan).
-Each module is parity-gated and committed on its own (Conventional Commits, ADR-0084 cited).
+Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` ported (parity-gated); `Rian.Ann` reader
+dropped (annotation convention retained); `Rian.IR`/`Rian.Core` remain. **Phase 3**:
+`Rian.Pratt` **stage 1** ported (expression core + patterns + `if`/`case`/`lambda`/blocks,
+parity-gated via `psx`); stage 2 (with/for/bitstr/interp/map-update/propagation) + `Rian.Decl`
+remain. `Core`'s `from_expr` now composes on the ported Pratt (lexer→Pratt→Core) for its parity
+test. Each module is parity-gated and committed on its own (Conventional Commits, ADR-0084).

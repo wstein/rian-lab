@@ -13,6 +13,11 @@
 module Rian.Pratt
   ( Surface(..)
   , MapPair(..)
+  , Arm
+  , Param
+  , Stmt(..)
+  , Pat(..)
+  , MapPatPair(..)
   , parse
   , parseSexpr
   ) where
@@ -20,11 +25,13 @@ module Rian.Pratt
 import Prelude
 
 import Data.Array as Array
+import Data.Enum (fromEnum)
 import Data.Foldable (elem, foldMap)
 import Data.Int as Int
 import Data.List (List(..), (:))
 import Data.List as List
 import Data.Maybe (Maybe(..), fromMaybe)
+import Data.String.CodePoints as CP
 import Data.String.Common (joinWith, replaceAll)
 import Data.String.Pattern (Pattern(..), Replacement(..))
 import Data.Tuple (Tuple(..))
@@ -53,11 +60,48 @@ data Surface
   | STuple (Array Surface)
   | SListLit (Array Surface) (Maybe Surface) -- Nothing = closed `[…]`, Just = cons `[… | t]`
   | SMapLit (Array MapPair)
+  | SIf Surface Surface Surface -- then/else are blocks
+  | SCase Surface (Array Arm)
+  | SLambda (Array Param) Surface
+  | SBlock (Array Stmt)
 
 -- a map-literal pair: atom-key shorthand `k: v`, or a computed key `keyExpr => v`.
 data MapPair
   = MAtom String Surface
   | MKey Surface Surface
+
+-- a `case`/`with`-else arm; the guard is rendered nowhere (matching `sexpr/1`).
+type Arm = { pat :: Pat, guard :: Maybe Surface, body :: Surface }
+
+-- a lambda parameter: a name with an optional declared type.
+type Param = { name :: String, ty :: Maybe String }
+
+-- a block statement: a simple bind, a typed bind, or an expression.
+data Stmt
+  = StBind String Surface
+  | StTypedBind String String Surface
+  | StExpr Surface
+
+-- surface patterns (clause heads & case arms). Bitstring patterns are stage 2.
+data Pat
+  = PWild
+  | PLitInt Int
+  | PLitStr String
+  | PCharLit Int
+  | PAtom String
+  | PTuple (Array Pat)
+  | PListP (Array Pat) (Maybe Pat)
+  | PCtor String (Array Pat)
+  | PStruct String (Array (Tuple String Pat))
+  | PVar String
+  | PAs String Pat
+  | PTyped String String
+  | PPin Surface
+  | PMap (Array MapPatPair)
+
+data MapPatPair
+  = MPAtom String Pat
+  | MPKey Surface Pat
 
 --------------------------------------------------------------------------------
 -- Entry points
@@ -159,8 +203,8 @@ parsePrefix (TOp "&" : rest) = parseCapture rest
 parsePrefix toks = parsePrimary toks
 
 parsePrimary :: List Token -> Parsed Surface
-parsePrimary (TKw "if" : _) = stage2 "if"
-parsePrimary (TKw "case" : _) = stage2 "case"
+parsePrimary (TKw "if" : rest) = parseIf rest
+parsePrimary (TKw "case" : rest) = parseCase rest
 parsePrimary (TKw "with" : _) = stage2 "with"
 parsePrimary (TKw "for" : _) = stage2 "for"
 parsePrimary (TLbracket : rest) = parseList rest []
@@ -168,7 +212,7 @@ parsePrimary (TMapopen : rest) = parseMapStart rest
 parsePrimary (TBitopen : _) = stage2 "bitstring"
 parsePrimary (TLbrace : rest) = parseTuple rest []
 parsePrimary toks@(TLparen : rest) =
-  if lambdaAhead toks then stage2 "lambda"
+  if lambdaAhead toks then parseLambda toks
   else
     let Tuple e r = parseExpr rest 0
     in case r of
@@ -328,6 +372,23 @@ expectOp2 :: List Token -> String -> List Token
 expectOp2 (TOp x : rest) o | x == o = rest
 expectOp2 toks o = unsafeCrashWith ("Pratt: expected `" <> o <> "`, got " <> here toks)
 
+expectKw :: List Token -> String -> List Token
+expectKw (TKw x : rest) k | x == k = rest
+expectKw toks k = unsafeCrashWith ("Pratt: expected `" <> k <> "`, got " <> here toks)
+
+firstCp :: String -> Maybe Int
+firstCp s = Array.head (map fromEnum (CP.toCodePointArray s))
+
+isUpperHead :: String -> Boolean
+isUpperHead s = case firstCp s of
+  Just c -> c >= 65 && c <= 90
+  Nothing -> false
+
+isLowerHead :: String -> Boolean
+isLowerHead s = case firstCp s of
+  Just c -> c >= 97 && c <= 122
+  Nothing -> false
+
 expectSlash :: List Token -> List Token
 expectSlash (TOp "/" : rest) = rest
 expectSlash toks = unsafeCrashWith ("Pratt: expected `/`, got " <> here toks)
@@ -352,6 +413,226 @@ here (TNum n : _) = "number `" <> n <> "`"
 here (_ : _) = "token"
 
 --------------------------------------------------------------------------------
+-- if / case / lambda / blocks
+--------------------------------------------------------------------------------
+
+parseIf :: List Token -> Parsed Surface
+parseIf tokens =
+  let
+    Tuple cnd t1 = parseExpr tokens 0
+    t2 = expectKw t1 "do"
+    Tuple thenB t3 = parseBlock t2
+    Tuple elseB t4 = case t3 of
+      (TKw "else" : r) -> parseBlock r
+      _ -> Tuple (SBlock []) t3
+    t5 = expectKw t4 "end"
+  in Tuple (SIf cnd thenB elseB) t5
+
+parseCase :: List Token -> Parsed Surface
+parseCase tokens =
+  let
+    Tuple scrut t1 = parseExpr tokens 0
+    t2 = expectKw t1 "do"
+    Tuple arms t3 = parseArms t2 []
+    t4 = expectKw t3 "end"
+  in Tuple (SCase scrut arms) t4
+
+parseArms :: List Token -> Array Arm -> Parsed (Array Arm)
+parseArms toks@(TKw "end" : _) acc = Tuple (Array.reverse acc) toks
+parseArms tokens acc =
+  let
+    Tuple pat t1 = parsePat tokens
+    Tuple guard t2 = case t1 of
+      (TKw "when" : r) -> let Tuple g r2 = parseExpr r 0 in Tuple (Just g) r2
+      _ -> Tuple Nothing t1
+    t3 = expectOp2 t2 "->"
+    Tuple body t4 = parseBlockValue t3
+  in parseArms t4 (Array.cons { pat, guard, body } acc)
+
+-- a `->` body unwraps a single-expression block back to a bare expression.
+parseBlockValue :: List Token -> Parsed Surface
+parseBlockValue tokens = case parseBlock tokens of
+  Tuple (SBlock [ StExpr e ]) rest -> Tuple e rest
+  Tuple block rest -> Tuple block rest
+
+parseLambda :: List Token -> Parsed Surface
+parseLambda (TLparen : rest) =
+  let
+    Tuple params t1 = parseParams rest
+    t2 = expectOp2 t1 "->"
+    Tuple body t3 = parseLambdaBody t2
+  in Tuple (SLambda params body) t3
+parseLambda toks = unsafeCrashWith ("Pratt: bad lambda: " <> here toks)
+
+parseLambdaBody :: List Token -> Parsed Surface
+parseLambdaBody (TKw "do" : rest) =
+  let Tuple block r = parseBlock rest in Tuple block (expectKw r "end")
+parseLambdaBody tokens = parseExpr tokens 0
+
+parseParams :: List Token -> Parsed (Array Param)
+parseParams (TRparen : rest) = Tuple [] rest
+parseParams tokens =
+  let Tuple param rest = parseParam tokens
+  in case rest of
+    (TComma : r) -> let Tuple ps r2 = parseParams r in Tuple (Array.cons param ps) r2
+    (TRparen : r) -> Tuple [ param ] r
+    _ -> unsafeCrashWith ("Pratt: bad lambda params: " <> here rest)
+
+parseParam :: List Token -> Parsed Param
+parseParam (TId name : TId ty : rest) = Tuple { name, ty: Just ty } rest
+parseParam (TId name : rest) = Tuple { name, ty: Nothing } rest
+parseParam other = unsafeCrashWith ("Pratt: bad lambda param: " <> here other)
+
+parseBlock :: List Token -> Parsed Surface
+parseBlock tokens =
+  let Tuple stmts rest = parseStmts tokens [] in Tuple (SBlock (Array.reverse stmts)) rest
+
+parseStmts :: List Token -> Array Stmt -> Parsed (Array Stmt)
+parseStmts toks@(TKw k : _) acc | k == "else" || k == "end" = Tuple acc toks
+parseStmts Nil acc = Tuple acc Nil
+parseStmts tokens acc =
+  let Tuple stmt rest = parseStmt tokens
+  in case rest of
+    (TSemi : r) -> parseStmts r (Array.cons stmt acc)
+    _ -> Tuple (Array.cons stmt acc) rest
+
+parseStmt :: List Token -> Parsed Stmt
+parseStmt (TId name : TOp ":=" : rest) =
+  let Tuple e r = parseExpr rest 0 in Tuple (StBind name e) r
+parseStmt (TId _ : TOp "<-" : _) = stage2 "error-propagation `<-` bind"
+parseStmt toks@(TId name : TId _ : _) =
+  let
+    Tuple ty afterType = parseType (List.drop 1 toks)
+  in case afterType of
+    (TOp ":=" : r) -> let Tuple e r2 = parseExpr r 0 in Tuple (StTypedBind name ty e) r2
+    _ -> let Tuple e r2 = parseExpr toks 0 in Tuple (StExpr e) r2
+parseStmt tokens = let Tuple e r = parseExpr tokens 0 in Tuple (StExpr e) r
+
+-- a type phrase: `Name` or `Name(t1, t2, …)`, rendered with no interior spaces.
+parseType :: List Token -> Parsed String
+parseType (TId name : TLparen : rest) =
+  let Tuple args r = parseTypeArgs rest [] in Tuple (name <> "(" <> joinWith "," args <> ")") r
+parseType (TId name : rest) = Tuple name rest
+parseType other = unsafeCrashWith ("Pratt: malformed type: " <> here other)
+
+parseTypeArgs :: List Token -> Array String -> Parsed (Array String)
+parseTypeArgs tokens acc =
+  let Tuple t rest = parseType tokens
+  in case rest of
+    (TRparen : r) -> Tuple (Array.reverse (Array.cons t acc)) r
+    (TComma : r) -> parseTypeArgs r (Array.cons t acc)
+    _ -> unsafeCrashWith ("Pratt: malformed type argument list: " <> here rest)
+
+--------------------------------------------------------------------------------
+-- Patterns (the one pattern parser, ADR-0050 §2)
+--------------------------------------------------------------------------------
+
+parsePat :: List Token -> Parsed Pat
+parsePat (TId "_" : rest) = Tuple PWild rest
+parsePat (TOp "-" : TNum n : rest) = Tuple (PLitInt (negate (intOf n))) rest
+parsePat (TNum n : rest) = Tuple (PLitInt (intOf n)) rest
+parsePat (TChar cp : rest) = Tuple (PCharLit cp) rest
+parsePat (TOp ":" : TId name : rest) = Tuple (PAtom name) rest
+parsePat (TOp ":" : TKw name : rest) = Tuple (PAtom name) rest
+parsePat (TOp ":" : TStr s : rest) = Tuple (PAtom s) rest
+parsePat (TStr s : rest) = Tuple (PLitStr s) rest
+parsePat (TLbrace : rest) = parsePatTuple rest []
+parsePat (TLparen : rest) =
+  let Tuple p r = parsePat rest
+  in case r of
+    (TRparen : r2) -> Tuple p r2
+    (TComma : r2) -> parseParenPatTuple r2 [ p ]
+    _ -> unsafeCrashWith ("Pratt: expected `)` or `,` in pattern, got " <> here r)
+parsePat (TLbracket : rest) = parsePatList rest []
+parsePat (TMapopen : rest) = parsePatMap rest []
+parsePat (TBitopen : _) = stage2 "bitstring pattern"
+parsePat (TOp "^" : rest) = let Tuple e r = parseExpr rest 0 in Tuple (PPin e) r
+parsePat (TId name : TOp "@" : rest) = let Tuple p r = parsePat rest in Tuple (PAs name p) r
+parsePat (TId name : TId ty : rest) | isLowerHead name && isUpperHead ty = Tuple (PTyped name ty) rest
+parsePat (TId name : rest) =
+  if isUpperHead name then case rest of
+    (TLparen : TId _ : TOp ":" : _) -> parsePatStruct name rest
+    (TLparen : TKw _ : TOp ":" : _) -> parsePatStruct name rest
+    (TLparen : r) -> let Tuple args r2 = parsePatArgs r [] in Tuple (PCtor name args) r2
+    _ -> Tuple (PCtor name []) rest
+  else Tuple (PVar name) rest
+parsePat other = unsafeCrashWith ("Pratt: unsupported pattern: " <> here other)
+
+parsePatStruct :: String -> List Token -> Parsed Pat
+parsePatStruct name (TLparen : rest) =
+  let Tuple fields r = parsePatFields rest [] in Tuple (PStruct name fields) r
+parsePatStruct _ other = unsafeCrashWith ("Pratt: bad struct pattern: " <> here other)
+
+parsePatFields :: List Token -> Array (Tuple String Pat) -> Parsed (Array (Tuple String Pat))
+parsePatFields (TRparen : rest) acc = Tuple (Array.reverse acc) rest
+parsePatFields (TId k : TOp ":" : rest) acc = patFieldAfter k rest acc
+parsePatFields (TKw k : TOp ":" : rest) acc = patFieldAfter k rest acc
+parsePatFields other _ = unsafeCrashWith ("Pratt: bad struct pattern fields: " <> here other)
+
+patFieldAfter :: String -> List Token -> Array (Tuple String Pat) -> Parsed (Array (Tuple String Pat))
+patFieldAfter k rest acc =
+  let Tuple p r = parsePat rest
+  in case r of
+    (TComma : r2) -> parsePatFields r2 (Array.cons (Tuple k p) acc)
+    (TRparen : r2) -> Tuple (Array.reverse (Array.cons (Tuple k p) acc)) r2
+    _ -> unsafeCrashWith ("Pratt: bad struct pattern: " <> here r)
+
+parsePatArgs :: List Token -> Array Pat -> Parsed (Array Pat)
+parsePatArgs (TRparen : rest) acc = Tuple (Array.reverse acc) rest
+parsePatArgs tokens acc =
+  let Tuple p rest = parsePat tokens
+  in case rest of
+    (TComma : r) -> parsePatArgs r (Array.cons p acc)
+    (TRparen : r) -> Tuple (Array.reverse (Array.cons p acc)) r
+    _ -> unsafeCrashWith ("Pratt: expected `,` or `)` in pattern, got " <> here rest)
+
+parsePatTuple :: List Token -> Array Pat -> Parsed Pat
+parsePatTuple (TRbrace : rest) acc = Tuple (PTuple (Array.reverse acc)) rest
+parsePatTuple tokens acc =
+  let Tuple p rest = parsePat tokens
+  in case rest of
+    (TComma : r) -> parsePatTuple r (Array.cons p acc)
+    (TRbrace : r) -> Tuple (PTuple (Array.reverse (Array.cons p acc))) r
+    _ -> unsafeCrashWith ("Pratt: bad tuple pattern: " <> here rest)
+
+parseParenPatTuple :: List Token -> Array Pat -> Parsed Pat
+parseParenPatTuple tokens acc =
+  let Tuple p rest = parsePat tokens
+  in case rest of
+    (TComma : r) -> parseParenPatTuple r (Array.cons p acc)
+    (TRparen : r) -> Tuple (PTuple (Array.reverse (Array.cons p acc))) r
+    _ -> unsafeCrashWith ("Pratt: expected `,` or `)` in tuple pattern, got " <> here rest)
+
+parsePatList :: List Token -> Array Pat -> Parsed Pat
+parsePatList (TRbracket : rest) acc = Tuple (PListP (Array.reverse acc) Nothing) rest
+parsePatList tokens acc =
+  let Tuple p rest = parsePat tokens
+  in case rest of
+    (TComma : r) -> parsePatList r (Array.cons p acc)
+    (TRbracket : r) -> Tuple (PListP (Array.reverse (Array.cons p acc)) Nothing) r
+    (TOp "|" : r) ->
+      let Tuple tl r2 = parsePat r in Tuple (PListP (Array.reverse (Array.cons p acc)) (Just tl)) (expectRbracket r2)
+    _ -> unsafeCrashWith ("Pratt: bad list pattern: " <> here rest)
+
+parsePatMap :: List Token -> Array MapPatPair -> Parsed Pat
+parsePatMap (TRbrace : rest) acc = Tuple (PMap (Array.reverse acc)) rest
+parsePatMap (TId k : TOp ":" : rest) acc =
+  let Tuple p r = parsePat rest in patMapAfter r (Array.cons (MPAtom k p) acc)
+parsePatMap (TKw k : TOp ":" : rest) acc =
+  let Tuple p r = parsePat rest in patMapAfter r (Array.cons (MPAtom k p) acc)
+parsePatMap tokens acc =
+  let
+    Tuple k rest = parseExpr tokens 0
+    r = expectOp2 rest "=>"
+    Tuple p r2 = parsePat r
+  in patMapAfter r2 (Array.cons (MPKey k p) acc)
+
+patMapAfter :: List Token -> Array MapPatPair -> Parsed Pat
+patMapAfter (TComma : r) acc = parsePatMap r acc
+patMapAfter (TRbrace : r) acc = Tuple (PMap (Array.reverse acc)) r
+patMapAfter other _ = unsafeCrashWith ("Pratt: bad map pattern: " <> here other)
+
+--------------------------------------------------------------------------------
 -- s-expression renderer — the canonical parity oracle (mirrors sexpr/1)
 --------------------------------------------------------------------------------
 
@@ -373,7 +654,43 @@ sexpr (STuple es) = "{" <> joinWith " " (map sexpr es) <> "}"
 sexpr (SListLit elems Nothing) = "[" <> joinWith " " (map sexpr elems) <> "]"
 sexpr (SListLit elems (Just t)) = "[" <> joinWith " " (map sexpr elems) <> " | " <> sexpr t <> "]"
 sexpr (SMapLit pairs) = "%{" <> joinWith " " (map sexprMapPair pairs) <> "}"
+sexpr (SIf c t e) = "(if " <> sexpr c <> " " <> sexpr t <> " " <> sexpr e <> ")"
+sexpr (SCase s arms) =
+  "(case " <> sexpr s <> foldMap (\a -> " (" <> sexprPat a.pat <> " -> " <> sexpr a.body <> ")") arms <> ")"
+sexpr (SLambda ps b) =
+  "(lambda (" <> joinWith " " (map _.name ps) <> ") " <> sexpr b <> ")"
+sexpr (SBlock stmts) = "(block" <> foldMap (\s -> " " <> sexprStmt s) stmts <> ")"
 
 sexprMapPair :: MapPair -> String
 sexprMapPair (MAtom k v) = k <> ": " <> sexpr v
 sexprMapPair (MKey k v) = sexpr k <> " => " <> sexpr v
+
+sexprStmt :: Stmt -> String
+sexprStmt (StBind n e) = "(:= " <> n <> " " <> sexpr e <> ")"
+sexprStmt (StTypedBind n t e) = "(:= " <> n <> " " <> t <> " " <> sexpr e <> ")"
+sexprStmt (StExpr e) = sexpr e
+
+sexprPat :: Pat -> String
+sexprPat PWild = "_"
+sexprPat (PLitStr v) = "\"" <> v <> "\""
+sexprPat (PLitInt v) = show v
+sexprPat (PCharLit cp) = "?" <> show cp
+sexprPat (PAtom a) = ":" <> a
+sexprPat (PTuple ps) = "{" <> joinWith ", " (map sexprPat ps) <> "}"
+sexprPat (PListP ps Nothing) = "[" <> joinWith ", " (map sexprPat ps) <> "]"
+sexprPat (PListP ps (Just t)) = "[" <> joinWith ", " (map sexprPat ps) <> " | " <> sexprPat t <> "]"
+sexprPat (PVar x) = x
+sexprPat (PAs n p) = "(@ " <> n <> " " <> sexprPat p <> ")"
+sexprPat (PCtor n []) = n
+sexprPat (PCtor n args) = n <> "(" <> joinWith ", " (map sexprPat args) <> ")"
+sexprPat (PMap fields) = "%{" <> joinWith ", " (map sexprMapPatPair fields) <> "}"
+sexprPat (PStruct n fields) =
+  n <> "(" <> joinWith ", " (map (\(Tuple k p) -> k <> ": " <> sexprPat p) fields) <> ")"
+sexprPat (PPin e) = "(^ " <> sexpr e <> ")"
+-- a type-pattern has no `sexpr_pat` clause in the reference (it crashes there too); it is
+-- excluded from the parity corpus.
+sexprPat (PTyped _ _) = unsafeCrashWith "Pratt: sexpr of a type-pattern (no reference clause)"
+
+sexprMapPatPair :: MapPatPair -> String
+sexprMapPatPair (MPAtom k p) = k <> ": " <> sexprPat p
+sexprMapPatPair (MPKey k p) = sexpr k <> " => " <> sexprPat p

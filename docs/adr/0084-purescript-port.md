@@ -13,7 +13,12 @@ pure, no-FFI scanner over a decoded codepoint stream, verified at **byte-for-byt
 against the Elixir reference (204/204 fixture records: all three streams + detokenize, via
 `purs/test/{gen_fixtures.exs,lexer_parity.erl}`, gated by `scripts/purerl-build.sh`). The
 Elixir `Lexer` remains as the parity oracle (removal is root-first; see the migration plan).
-Next: Phase 2 (the Core IR). See `purs/README.md` and `docs/purescript-migration.md`.
+**Phase 2** (in progress): `Rian.TypeStr` ported; the `Rian.Ann` reader is dropped but the
+`@rian_sig` convention is retained. **Phase 3**: `Rian.Pratt` **stage 1** ported — the
+precedence-climbing expression core + patterns + `if`/`case`/`lambda`/blocks, verified against
+the reference's own `parse_sexpr` renderer (the `psx` parity stream); stage 2
+(`with`/`for`/bitstrings/interpolation/map-update/propagation) and `Rian.Decl` remain. See
+`purs/README.md` and `docs/purescript-migration.md`.
 **Refs:** ADR-0000 (honesty bar — no asserted-not-proven build claims), ADR-0050
 (typed Core IR as the spine the migration follows; per-target emitter structure),
 ADR-0031 (toolchain-free `rian` CLI — the purerl build is a BEAM artifact, same as

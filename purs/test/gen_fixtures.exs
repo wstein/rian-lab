@@ -89,7 +89,33 @@ pratt_corpus = [
   "'A' == c",
   "1_000 + 2",
   "1e9",
-  "x"
+  "x",
+  # if / case / lambda / blocks + patterns (stage 1).
+  # NB: case ARMS are newline-separated (the lexer strips the newline); `;` is the
+  # block-statement separator *within* an arm/`do` body, not an arm separator.
+  "if c do a else b end",
+  "if c do a end",
+  "if x > 0 do pos else neg end",
+  "case x do 1 -> a\n2 -> b end",
+  "case x do n when n > 0 -> a\n_ -> b end",
+  "case t do {a, b} -> a\n_ -> 0 end",
+  "case xs do [] -> 0\n[h | t] -> h end",
+  "case r do Ok(v) -> v\nErr(e) -> e end",
+  "case s do :ok -> 1\n:error -> 0 end",
+  "case p do Point(x: a, y: b) -> a\n_ -> 0 end",
+  "case v do n @ Foo(x) -> n\n_ -> v end",
+  "case v do ^expected -> 1\n_ -> 0 end",
+  "case m do %{a: x} -> x\n_ -> 0 end",
+  "case w do \"hi\" -> 1\n_ -> 0 end",
+  "case n do -1 -> a\n0 -> b\n_ -> c end",
+  "(x) -> x + 1",
+  "(x, y) -> x",
+  "(x Int) -> x",
+  "() -> 0",
+  "(n) -> if n > 0 do n else 0 end",
+  "if c do x := 1; x + 2 end",
+  "if c do x Int64 := 5; x end",
+  "case xs do [h | t] -> y := h; y + 1\n_ -> 0 end"
 ]
 
 # Type-string corpus for Rian.TypeStr (split_top_commas / split_top_pipes / normalize).
