@@ -1774,6 +1774,13 @@ defmodule Rian.Transpile do
   defp expr({:try, _, _} = n),
     do: ~s|TODO_PORT("try/rescue — restructure to Result/Option by hand: #{escape(snippet(n))}")|
 
+  # a guarded pattern in EXPRESSION position — `match?(p when g, x)`, a `{:when, _, [pat, guard]}`
+  # node — has no inline Rian image (a guard lives on a clause/`case`-arm head, not mid-expression),
+  # so it must be restructured to a `case` by hand. Emit a marker, not the prefix `when(p, g)`.
+  defp expr({:when, _, [_pat, _guard]} = n),
+    do:
+      ~s|TODO_PORT("guarded pattern in expression position (e.g. match?(p when g, x)) — restructure to a case: #{escape(snippet(n))}")|
+
   # `if x = e do … end` (Elixir's assign-in-condition, nil/false-falsy) has no faithful Rian
   # image: a `:=` bind is a statement, not an expression, and Rian's `if` needs a `Bool`
   # condition — so it must be restructured to a `case`/Option by hand. Emit an honest marker
