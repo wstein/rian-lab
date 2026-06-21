@@ -593,7 +593,13 @@ check_infer_corpus = [
   "Prim.char_code(c)",
   "Prim.int_to_float(n)",
   "Prim.char_to_string(c)",
-  "panic(s)"
+  "panic(s)",
+  # stage 3c: poly stdlib generics (tvar instantiation from arg types, Any-fill when unbound)
+  "List.reverse(xs)",
+  "List.map(xs, g)",
+  "Enum.filter(xs, g)",
+  "Map.new()",
+  "Map.put(xs, x, n)"
 ]
 
 check_join_corpus = [

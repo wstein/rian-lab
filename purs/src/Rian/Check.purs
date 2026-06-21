@@ -29,13 +29,13 @@ module Rian.Check
 
 import Prelude hiding (join)
 
-import Data.Array (filter, find, foldl, head, last, length, nubEq, null, snoc, uncons, zipWith)
+import Data.Array (filter, find, foldl, head, last, length, nubEq, null, snoc, uncons, zip, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String as Str
 import Data.String.CodeUnits (toCharArray)
-import Data.String.Common (joinWith, split)
+import Data.String.Common (joinWith, replaceAll, split)
 import Data.Tuple (Tuple(..), snd)
 import Rian.Builtins as Builtins
 import Rian.Core (CExpr(..), CMapPair(..), CStmt(..), fromExpr)
@@ -318,10 +318,16 @@ infer (ECall (EId "inspect") [ _ ]) _ = TName "String"
 infer (ECall (EId f) args) env = case envLookup f env of
   Just ft | isFnTy ft -> fnRet ft
   _ -> builtinOrUnknown Nothing f (length args)
--- a module call `Mod.fun(args)`: a host/stdlib builtin's return (a poly stdlib call —
--- `List.map` — defers to `Unknown` here; tvar instantiation is a later stage).
-infer (ECall (EDot (EId modn) fn) args) _env = case Builtins.polySig (Just modn) fn (length args) of
-  Just _ -> Unknown
+-- a ZERO-arg dot-call is the `abstract`-cast position (`m.base()`): with no inference context
+-- there is no declared cast, so it is `Unknown` — and this intercepts a zero-arg `Mod.fun()`
+-- (e.g. `Map.new()`) before the builtin clause, matching the reference's clause order.
+infer (ECall (EDot _ _) []) _env = Unknown
+-- a module call `Mod.fun(args)`: a host/stdlib builtin's return, or a fixed-head poly stdlib
+-- call (`List.map`) instantiated from the argument types.
+infer (ECall (EDot (EId modn) fn) args) env = case Builtins.polySig (Just modn) fn (length args) of
+  -- a fixed-head polymorphic stdlib call (`List.reverse` → `Vec(…)`): instantiate its tvars
+  -- from the argument types, `Any`-filling any that can't bind.
+  Just sig -> instantiateLax sig (map (\a -> infer a env) args)
   Nothing -> builtinOrUnknown (Just modn) fn (length args)
 -- an Erlang-BIF FFI call `:erlang.phash2(x)` — typed from the foreign registry.
 infer (ECall (EDot (EAtom modn) fn) args) _ = builtinOrUnknown (Just modn) fn (length args)
@@ -332,6 +338,33 @@ infer _ _ = Unknown
 
 builtinOrUnknown :: Maybe String -> String -> Int -> Ty
 builtinOrUnknown m f a = maybe Unknown TName (Builtins.ret m f a)
+
+-- instantiate a fixed-head poly signature `{params, ret, tvars}` against the inferred
+-- argument types: bind each tvar from the args, then substitute it in `ret` (`Any` when
+-- unbound). "Lax" — a tvar nested in an `Fn(…)` param is not unified (it stays `Any`).
+instantiateLax :: Builtins.PolySig -> Array Ty -> Ty
+instantiateLax sig argTypes =
+  let subs = foldl (\acc (Tuple param arg) -> bindTvar param arg sig.tvars acc) [] (zip sig.params argTypes) in
+  TName (foldl (\r tv -> replaceAll (Str.Pattern tv) (Str.Replacement (lookupSub tv subs)) r) sig.ret sig.tvars)
+  where
+  lookupSub tv subs = fromMaybe "Any" (map snd (find (\(Tuple k _) -> k == tv) subs))
+
+-- extract `tvar → concrete` bindings by matching a param's declared type against the inferred
+-- argument type: a bare tvar binds directly; `Vec(T)` vs `Vec(A)` recurses; else nothing.
+-- First binding wins (`Map.put_new`).
+bindTvar :: String -> Ty -> Array String -> Array (Tuple String String) -> Array (Tuple String String)
+bindTvar _ Unknown _ acc = acc
+bindTvar param (TName arg) tvars acc
+  | param `elem` tvars = if any (\(Tuple k _) -> k == param) acc then acc else snoc acc (Tuple param arg)
+  | isVecOf param && isVecOf arg = bindTvar (vecInner param) (TName (vecInner arg)) tvars acc
+  | otherwise = acc
+bindTvar _ _ _ acc = acc
+
+isVecOf :: String -> Boolean
+isVecOf s = Str.take 4 s == "Vec("
+
+vecInner :: String -> String
+vecInner s = fromMaybe s (Str.stripSuffix (Str.Pattern ")") (Str.drop 4 s))
 
 -- the return type of a `Fn(A.., R)` (the last component; a `_` placeholder → `Unknown`).
 fnRet :: Ty -> Ty
