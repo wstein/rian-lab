@@ -471,6 +471,17 @@ proto_impl_corpus = [
   "mod P do\nprotocol Ord do\n  def lt(a Self, b Self) Bool\nend\nimpl Ord for Int53 do\n  def lt(a, b) := a < b\nend\nend"
 ]
 
+# Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
+# fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
+shadow_corpus = [
+  "p := 1 ; p",
+  "x := 1 ; x := 2 ; x",
+  "x := 1 ; y := x + 1 ; y",
+  "x := 1 ; x := 2 ; case x do\n  x -> x\nend",
+  "a := s ; a",
+  "x := 1 ; x := x + 1 ; x := x * 2 ; x"
+]
+
 # Rian.Builtins corpus — the `bui` stream: host/stdlib foreign-call signatures
 # (`mod;fun;arity`; `mod=nil` = Kernel auto-import). Covers table hits across modules,
 # the `Int`-vs-`Int53` arbitrary-precision returns, misses, and poly-only entries (which
@@ -924,6 +935,23 @@ detok_corpus = [
 # scenario builds a signature env (base + add_type / add_range), lowers real source-parsed
 # pattern vectors through `PatternLower.lower_clause`, then runs `Exhaustiveness.analyze`.
 # The scenario table is mirrored byte-for-byte in `Rian.Exhaustiveness.scenarios` (PS).
+defmodule ShadowCanon do
+  # the `shd` stream: dedup a `;`-separated body (params fixed `["p"]`, fresh `base$count`),
+  # composing parse_body → Core → Shadow.dedup, serialized as a block via CoreCanon.
+  def run(src) do
+    block = Rian.Core.from_expr(Rian.Pratt.parse_body(src))
+
+    stmts =
+      case block do
+        %Rian.Core.EBlock{stmts: ss} -> ss
+        e -> [{:expr, e}]
+      end
+
+    result = Rian.Shadow.dedup(stmts, ["p"], fn b, c -> "#{b}$#{c}" end)
+    CoreCanon.expr(%Rian.Core.EBlock{stmts: result})
+  end
+end
+
 defmodule BuiltinsCanon do
   # the `bui` stream: `known?`/`ret`/`poly_sig` for a `mod;fun;arity` key (`mod` = `nil` for a
   # Kernel auto-import). Mirrors `Builtins.builtinSexpr` in PureScript.
@@ -1165,6 +1193,9 @@ lines =
     end) ++
     Enum.map(builtins_corpus, fn s ->
       "bui\t#{Canon.hex(s)}\t#{Canon.hex(BuiltinsCanon.run(s))}"
+    end) ++
+    Enum.map(shadow_corpus, fn s ->
+      "shd\t#{Canon.hex(s)}\t#{Canon.hex(ShadowCanon.run(s))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
