@@ -20,21 +20,26 @@ module Rian.Exhaustiveness
   , analyze
   , render
   , renderVec
+  , programEnv
   , plowSexpr
   , analyzeSexpr
+  , programEnvSexpr
   ) where
 
 import Prelude
 
-import Data.Array (difference, filter, findMap, length, nubEq, null, range, replicate, snoc, splitAt, uncons, (:))
-import Data.Foldable (all, any, elem, find)
+import Data.Array (difference, filter, findMap, length, nubEq, null, range, replicate, snoc, sortWith, splitAt, uncons, (:))
+import Data.Foldable (all, any, elem, find, foldMap, foldl)
 import Data.FoldableWithIndex (foldlWithIndex)
-import Data.Maybe (Maybe(..), maybe)
+import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String.CodeUnits as CU
 import Data.String.Common (joinWith, split, toUpper)
 import Data.String.Pattern (Pattern(..))
-import Data.Tuple (Tuple(..), snd)
-import Rian.PatternLower (CkPat(..), CtorId(..), Env, LitV(..), Sig(..), arityOf, aLookup, aPut, lowerClause)
+import Data.Tuple (Tuple(..), fst, snd)
+import Rian.Decl (parseToProg)
+import Rian.IR (Range, Struct, Type)
+import Rian.PatternLower (CkPat(..), CtorId(..), Env, LitV(..), Sig(..), addStruct, arityOf, aLookup, aPut, lowerClause, toSnake)
+import Rian.Prelude (withPrelude)
 
 -- | Whether the present head constructors cover the whole type.
 data Cov = Complete (Array CtorId) | Incomplete
@@ -78,6 +83,18 @@ addRange env tn lo hi =
     typeOf' = foldlWithIndex (\_ acc m -> aPut m tn acc) env.typeOf members
   in
     env { typeOf = typeOf', ctors = aPut tn (Finite members) env.ctors }
+
+-- | The signature env for a whole program (prelude + user types + ranges + structs). The
+-- | built-in `Option` is prepended via `Rian.Prelude.with_prelude`, so a `case` over it is
+-- | exhaustiveness-checkable without a `type Option := …` in the source (ADR-0047 §3).
+programEnv :: Array Type -> Array Struct -> Array Range -> Env
+programEnv types structs ranges =
+  foldl addS (foldl addR (foldl addT baseEnv (withPrelude types)) ranges) structs
+  where
+  addT env t = addType env (toSnake t.name) (map variant t.variants)
+  variant v = Tuple (CName (toSnake v.ctor)) (length v.fields)
+  addR env r = addRange env r.name r.lo r.hi
+  addS env s = addStruct env s.name (map (toSnake <<< fromMaybe "" <<< _.label) s.fields)
 
 -- ── Signature / matrix operations ────────────────────────────────────────────
 
@@ -273,3 +290,27 @@ analyzeSexpr name = case lookupScenario name of
     "exh=" <> show r.exhaustive
       <> " miss=" <> maybe "-" renderVec r.missing
       <> " unr=" <> joinWith "," (map show r.unreachable)
+
+-- | The `pge` stream: build `program_env` from a source's types/structs/ranges and serialize
+-- | its `ctors` signature table (sorted by type name), so the prelude/type/range/struct
+-- | registration is checked end-to-end (`Decl → program_env`).
+programEnvSexpr :: String -> String
+programEnvSexpr src =
+  let prog = parseToProg src in
+  envSexpr (programEnv prog.types prog.structs prog.ranges)
+
+envSexpr :: Env -> String
+envSexpr env = "(env" <> foldMap entry (sortWith fst env.ctors) <> ")"
+  where
+  entry (Tuple tn sig) = " (" <> tn <> " " <> sigStr sig <> ")"
+  sigStr (Finite cs) = joinWith "," (map ctorStr cs)
+  sigStr Infinite = "*"
+
+ctorStr :: CtorId -> String
+ctorStr CNil = "nil"
+ctorStr CCons = "cons"
+ctorStr (CTuple n) = "tup" <> show n
+ctorStr (CName s) = s
+ctorStr (CLit (LvInt n)) = "#" <> show n
+ctorStr (CLit (LvStr s)) = "#" <> s
+ctorStr (CLit (LvAtom a)) = "#:" <> a

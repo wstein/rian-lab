@@ -89,7 +89,7 @@ what the Core oracle confirms over the surface form.
 | --------------------- | ---- | ---------------------------------------------- |
 | `Rian.InferLocal`     | 250  | local inference helper.                         |
 | `Rian.PatternLower`   | 149  | ✅ ported — Core `CPat` → checker patterns (`plw` stream). |
-| `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable (`exh` stream). |
+| `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
 | `Rian.Capability`     | 290  | BEAM linearity (`iso`/`ref`); FFI-adjacent.     |
 | `Rian.Check`          | 2724 | unification inference — **reframe, not lift**.  |
 | `Rian.Reach`          | 1235 | target-set portability inference (ADR-0057/58). |
@@ -112,15 +112,20 @@ oracle = the reference `parse_sexpr`).
 `Range` (73) **✅ ported** — the `Name.of(n)` → in-bounds `if`-`Result` rewrite over the
 typed Core (the leaf-gate pattern: a structural Core→Core pass); parity via the `rng` stream
 (9 records, composing `lexer → Pratt → Core → expand_of → coreSexpr` over a fixed table).
-Remaining: `Prelude` (115), `Builtins` (204), `Protocol` (388), `ShowStdlib` (29),
-`Shadow` (114), `Opaque` (159), `Comptime` (79), `Macro` (251), `External` (279),
-`Manifest` (315).
+Remaining: `Builtins` (204), `Protocol` (388, the dispatcher/trait synthesis), `ShowStdlib`
+(29), `Shadow` (114), `Opaque` (159), `Comptime` (79), `Macro` (251, expansion), `External`
+(279), `Manifest` (315).
+`Prelude` (115) **✅ ported** (pure part) — `types` (the built-in `Option(T) = Some(T) | None`,
+ADR-0047 §3) + `with_prelude`; parity via the `prl` stream. The BEAM/Reach-coupled function
+linkage (`module_names`/`defines?`/`atom`/`beams`/`load` — bundles `prelude_*.rian` and compiles
+them via `Rian.Beam`) stays at the Erlang-FFI boundary.
 `PatternLower` (149) + `Exhaustiveness` (290) **✅ ported** (Phase 4 gates, consuming the
-ported Core) — `PatternLower.lower` (Core `CPat` → Maranget checker patterns) and the full
-usefulness engine (`base_env`/`add_type`/`add_range`/`useful?`/`analyze`/witness/`render`).
-The heterogeneous-atom signature env becomes a `CtorId` sum over small association lists (no
-`Data.Map` in the purerl set). Parity via the `plw`/`exh` streams (17-scenario fixed table,
-composing `lexer → Pratt → Core → lower → analyze`); `program_env` waits on `Prelude`.
+ported Core) — `PatternLower.lower` (Core `CPat` → Maranget checker patterns), the full
+usefulness engine (`base_env`/`add_type`/`add_range`/`useful?`/`analyze`/witness/`render`), and
+**`program_env`** (now that `Prelude.with_prelude` landed — the prelude `Option` is prepended so
+a `case` over it is total). The heterogeneous-atom signature env becomes a `CtorId` sum over
+small association lists (no `Data.Map` in the purerl set). Parity via the `plw`/`exh`/`pge`
+streams (composing `lexer → Pratt → Core → lower → analyze`, and `Decl → program_env`).
 
 ### Phase 7 — Transpiler: **PureScript → Rian** (re-aimed, not ported)
 
@@ -160,10 +165,11 @@ Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (par
 `with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
 error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` — every declaration form**
 (`type`/`struct`/`def`/`mod`/`const`/`use`/`alias`/`range`/`opaque` + `def` block bodies +
-`@external` + `abstract` + `protocol`/`impl`/`macro`) ported. **Phase 4 gates:**
-**`Rian.PatternLower`** + **`Rian.Exhaustiveness`** ported (Maranget usefulness over the ported
-Core; `plw`/`exh` streams). **Next:** the program-wide tail passes (macro expansion, protocol
-synthesis, interpolation/stdlib/infer-local) wait on `Check`/`InferLocal`/`Protocol`/`Macro`.
-Total **494/494** parity records across
-Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness. Each module is parity-gated and committed on its own
+`@external` + `abstract` + `protocol`/`impl`/`macro`) ported, plus **`Rian.Prelude`** (the pure
+`Option`/`with_prelude` part). **Phase 4 gates:** **`Rian.PatternLower`** + **`Rian.Exhaustiveness`**
+ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`exh`/`pge` streams).
+**Next:** the program-wide tail passes (macro expansion, protocol synthesis, interpolation/stdlib/
+infer-local) wait on `Check`/`InferLocal`/`Protocol`/`Macro`.
+Total **504/504** parity records across
+Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude. Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).

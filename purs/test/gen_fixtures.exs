@@ -157,6 +157,9 @@ defmodule DeclCanon do
     Enum.join(types ++ ranges ++ opaques ++ structs ++ funcs ++ mods, "\n")
   end
 
+  # the `prl` stream: a type list (`Prelude.with_prelude` output) serialized via `type_s`.
+  def types_s(types), do: Enum.map_join(types, "\n", &type_s/1)
+
   # the `prc` stream: ONLY the program-global protocols + impl-decls (synthesis-free).
   def proto_impl(p) do
     protocols = Enum.map(Map.get(p, :protocols, []), &protocol_s/1)
@@ -426,6 +429,28 @@ decl_corpus = [
 # synthesizes dispatcher / `impl_*` funcs into `funcs` during assembly (a pass not ported),
 # so the full `funcs` diverge while the protocol/impl IR matches. An `impl` needs its
 # `protocol` in the same source (coherence runs in `assemble`), so they are paired.
+# Rian.Prelude corpus — the `prl` stream: `Prelude.with_prelude(types)` prepends the built-in
+# `Option(T)` to a source's user types (ADR-0047 §3). Serialized via the shared type renderer.
+prelude_corpus = [
+  "",
+  "type Color := Red | Green | Blue",
+  "type Pair := P(a Int53, b Int53)",
+  "struct Foo(x Int53)",
+  "type Maybe := Nothing | Just(val String)\ntype Dir := N | S"
+]
+
+# Rian.Exhaustiveness.program_env corpus — the `pge` stream: build the whole-program
+# signature env (prelude Option + user types + ranges + structs) and dump its `ctors` table.
+prog_env_corpus = [
+  "",
+  "type Tree := Leaf | Node(l Tree, r Tree)",
+  "range Bit := 0..1",
+  "struct Point(x Int53, y Int53)",
+  # range/struct precede the type: `range`/`opaque` are not declaration-boundary keywords
+  # (shared PS/Elixir quirk), so a `type` must be last or followed by a boundary kw.
+  "range D := 0..2\nstruct Box(v Int53)\ntype Color := Red | Green | Blue"
+]
+
 proto_impl_corpus = [
   "protocol Show do\n  def show(x Self) String\nend",
   "protocol Container do\n  type Elem\n  def empty() Self\n  def insert(c Self, e Elem) Self\nend",
@@ -741,6 +766,24 @@ defmodule ExhFixtures do
     "exh=" <>
       to_string(r.exhaustive?) <> " miss=" <> miss <> " unr=" <> Enum.join(r.unreachable, ",")
   end
+
+  # the `pge` stream: build `program_env` from a source and serialize its `ctors` table.
+  def program_env(src) do
+    prog = Rian.Decl.parse(src, assemble_only: true)
+    env = Exhaustiveness.program_env(prog.types, prog.structs, prog.ranges)
+    ctors = Enum.sort_by(env.ctors, fn {tn, _} -> to_string(tn) end)
+    "(env" <> Enum.map_join(ctors, "", fn {tn, sig} -> " (#{tn} #{sig_str(sig)})" end) <> ")"
+  end
+
+  defp sig_str({:finite, cs}), do: Enum.map_join(cs, ",", &ctor_str/1)
+  defp sig_str(:infinite), do: "*"
+  defp ctor_str(nil), do: "nil"
+  defp ctor_str(:cons), do: "cons"
+  defp ctor_str({:tuple, n}), do: "tup#{n}"
+  defp ctor_str({:lit, v}) when is_integer(v), do: "#" <> Integer.to_string(v)
+  defp ctor_str({:lit, v}) when is_binary(v), do: "#" <> v
+  defp ctor_str({:lit, v}) when is_atom(v), do: "#:" <> to_string(v)
+  defp ctor_str(c) when is_atom(c), do: to_string(c)
 end
 
 lines =
@@ -788,6 +831,13 @@ lines =
     end) ++
     Enum.map(proto_impl_corpus, fn s ->
       "prc\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.proto_impl(Decl.parse(s, assemble_only: true)))}"
+    end) ++
+    Enum.map(prelude_corpus, fn s ->
+      types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)
+      "prl\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.types_s(types))}"
+    end) ++
+    Enum.map(prog_env_corpus, fn s ->
+      "pge\t#{Canon.hex(s)}\t#{Canon.hex(ExhFixtures.program_env(s))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
