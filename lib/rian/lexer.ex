@@ -465,7 +465,13 @@ defmodule Rian.Lexer do
 
       m = Regex.run(@id_re, str) ->
         w = hd(m)
-        lex(advance(str, String.length(w)), [word(w) | acc])
+        rest = advance(str, String.length(w))
+        # a word that is a reserved keyword but sits in map/keyword-KEY position (immediately
+        # followed by a single `:`, as in `%{end: …}`/`%{do: …}`) is the KEY, not a block
+        # delimiter — lex it as an `{:id}` so neither the depth counters nor Pratt mistake it
+        # (the `::` bitstring spec is excluded). A bare keyword keeps its keyword token.
+        tok = if key_colon?(rest), do: {:id, w}, else: word(w)
+        lex(rest, [tok | acc])
 
       true ->
         raise ArgumentError, "cannot scan: #{inspect(str)}"
@@ -486,6 +492,13 @@ defmodule Rian.Lexer do
   end
 
   defp op_atom_name(_), do: nil
+
+  # is the upcoming text a key colon (`end:` → key) rather than the bind `:=` or the bitstring
+  # spec `::`? Used to tell a keyword-as-map-key from a block-delimiter keyword.
+  defp key_colon?(":=" <> _), do: false
+  defp key_colon?("::" <> _), do: false
+  defp key_colon?(":" <> _), do: true
+  defp key_colon?(_), do: false
 
   defp op_word_name(rest) do
     case Regex.run(~r/^(and|or|not|in|rem|div)\b/, rest) do
