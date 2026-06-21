@@ -44,7 +44,7 @@ defmodule Rian.Coherence do
   @type violation :: %{
           rule: atom(),
           proto: String.t(),
-          type: String.t() | nil,
+          type: String.t(),
           message: String.t()
         }
 
@@ -173,10 +173,19 @@ defmodule Rian.Coherence do
         key = {proto, type}
 
         if Map.has_key?(seen, key) do
-          # a duplicate `(proto, type)` — reported once as a duplicate; it is the
-          # *same* type, not two different types sharing a guard, so the
-          # shared-discriminator test is skipped (and `seen` is unchanged).
-          {vs ++ [v(:duplicate, proto, type, "duplicate `impl #{proto} for #{type}`")], seen}
+          # a duplicate `(proto, type)` — reported once, on the *second* impl; it is
+          # the *same* type, not two different types sharing a guard, so the
+          # shared-discriminator test is skipped. A third-or-later impl of the same
+          # pair is already covered by that one violation, so we mark the key `:dup`
+          # and stay silent rather than emit a redundant entry per extra impl.
+          case Map.fetch!(seen, key) do
+            :dup ->
+              {vs, seen}
+
+            _ ->
+              {vs ++ [v(:duplicate, proto, type, "duplicate `impl #{proto} for #{type}`")],
+               Map.put(seen, key, :dup)}
+          end
         else
           # a type with no discriminator is already a per-impl violation; skip the
           # overlap test for it rather than deref a guard it does not have.

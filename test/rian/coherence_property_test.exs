@@ -132,6 +132,13 @@ defmodule Rian.CoherencePropertyTest do
       assert [%{rule: :duplicate, proto: "P", type: "Int64"}] =
                Coherence.violations(protocols, dup, reg(), nil)
 
+      # a (proto, type) pair repeated 3+ times is still reported exactly once —
+      # the single violation already covers every redundant impl of that pair.
+      triple = [impl("P", "Int64"), impl("P", "Int64"), impl("P", "Int64")]
+
+      assert [%{rule: :duplicate, proto: "P", type: "Int64"}] =
+               Coherence.violations(protocols, triple, reg(), nil)
+
       shared = [impl("P", "Int64"), impl("P", "Char")]
 
       assert [%{rule: :shared_discriminator}] =
