@@ -108,9 +108,13 @@ what the Core oracle confirms over the surface form.
 `Prim` (97) **✅ ported** — `Prim.*`→`__prim_*` rewrite + bare `panic`, a structural
 `normalize` over the surface AST (a separate pass; `Pratt.parse` stays normalize-free to
 avoid a module cycle, callers compose it). Parity-gated via the `prm` stream (13 records,
-oracle = the reference `parse_sexpr`). Remaining: `Prelude` (115), `Builtins` (204),
-`Protocol` (388), `ShowStdlib` (29), `Range` (73), `Shadow` (114), `Opaque` (159),
-`Comptime` (79), `Macro` (251), `External` (279), `Manifest` (315).
+oracle = the reference `parse_sexpr`).
+`Range` (73) **✅ ported** — the `Name.of(n)` → in-bounds `if`-`Result` rewrite over the
+typed Core (the leaf-gate pattern: a structural Core→Core pass); parity via the `rng` stream
+(9 records, composing `lexer → Pratt → Core → expand_of → coreSexpr` over a fixed table).
+Remaining: `Prelude` (115), `Builtins` (204), `Protocol` (388), `ShowStdlib` (29),
+`Shadow` (114), `Opaque` (159), `Comptime` (79), `Macro` (251), `External` (279),
+`Manifest` (315). Sibling gates (Phase 4): `PatternLower`/`Exhaustiveness`/… also consume Core.
 
 ### Phase 7 — Transpiler: **PureScript → Rian** (re-aimed, not ported)
 
@@ -151,6 +155,6 @@ Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (par
 error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` stages 1–3**
 (`type`/`struct`/`def`/`mod`/`const`/`use`/`alias`) ported. **Next:** `Rian.Decl` stage 4 — `def`
 block bodies (`take_block`/`detok_block`) + `@external`, `range`, `opaque`; the program-wide
-tail passes wait on `Check`/`InferLocal`/`Protocol`. Total **418/418** parity records across
+tail passes wait on `Check`/`InferLocal`/`Protocol`. Total **427/427** parity records across
 Lexer/TypeStr/Pratt/Core/Prim/Decl. Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).

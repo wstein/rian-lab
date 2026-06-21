@@ -241,6 +241,25 @@ alias Rian.Pratt
 alias Rian.Core
 alias Rian.Decl
 
+# Rian.Range leaf-gate corpus: rewrite `Name.of(n)` → an in-bounds `if`-Result over the Core,
+# given a fixed test table (must match `testTable` in Range.purs).
+range_table = %{
+  "Digit" => %{lo: 0, hi: 9, base: "Int53"},
+  "Byte" => %{lo: 0, hi: 255, base: "Int53"}
+}
+
+range_corpus = [
+  "Digit.of(n)",
+  "Byte.of(x)",
+  "f(Digit.of(n))",
+  "Other.of(n)",
+  "Digit.of(n) + 1",
+  "if c do Digit.of(a) else b end",
+  "a + b",
+  "[Digit.of(x), Byte.of(y)]",
+  "Digit.of(Byte.of(n))"
+]
+
 # Rian.Decl corpus (data-type declarations: type / struct, with @doc / pub / field caps /
 # union-type fields / multi-line). Excludes def/mod/const/alias/range/opaque/protocol/macro.
 decl_corpus = [
@@ -568,6 +587,10 @@ lines =
     end) ++
     Enum.map(decl_corpus, fn s ->
       "dcl\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.prog(Decl.parse(s, assemble_only: true)))}"
+    end) ++
+    Enum.map(range_corpus, fn s ->
+      core = Rian.Range.expand_of(Core.from_expr(Pratt.parse(s)), range_table)
+      "rng\t#{Canon.hex(s)}\t#{Canon.hex(CoreCanon.expr(core))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
