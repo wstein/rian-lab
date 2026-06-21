@@ -1744,11 +1744,13 @@ defmodule Rian.Transpile do
        when is_map_key(@binops, op),
        do: expr({op, [], [l, r]})
 
-  # A match `=` reached in expression position (a `with`/`case` arm, a nested
-  # statement) is Rian's bind `:=`, same as the block-statement path (`stmt/1`).
-  # Without this it falls through to the generic local-call clause and mis-renders
-  # as the prefix `=(l, r)`.
-  defp expr({:=, _, [l, r]}), do: "#{pat(l)} := #{expr(r)}"
+  # A match `=` reached in a true EXPRESSION position — an operator operand (`(j = e) != x`),
+  # a call argument, a list element, or a `with` filter clause (Rian's `with` wants `<-`, not a
+  # bind) — has no Rian image: a `:=` bind is a statement, never a sub-expression, so it must be
+  # hoisted by hand. Emit an honest marker. (Statement-position binds render via `stmt/1`, which
+  # does not route through here, so the genuinely-valid binds are untouched.)
+  defp expr({:=, _, _} = n),
+    do: ~s|TODO_PORT("assign in expression position — hoist the bind: #{escape(snippet(n))}")|
 
   defp expr({:-, _, [x]}), do: "-#{paren_unary(x)}"
   defp expr({:not, _, [x]}), do: "not #{paren_unary(x)}"

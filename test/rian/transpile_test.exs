@@ -768,8 +768,18 @@ end|) =~ ~S|"v=${x}!"|
       refute out =~ "%{:lo"
     end
 
-    test "a match `=` in expression position renders as `:=`, not the prefix `=(l, r)`" do
-      out = rian("defmodule M do\n  def g(x), do: with(y = f(x), do: y)\nend")
+    test "a match `=` in a true expression position renders an honest marker, not invalid Rian" do
+      # a `:=` bind is a statement, never a sub-expression — an assign as an operator operand
+      # (or a `with` filter / call arg) has no Rian image, so it must be hoisted by hand. The
+      # marker is honest (and parses); the old `=(l, r)` prefix and a mid-expression `:=` do not.
+      out = rian("defmodule M do\n  def g(x), do: (y = f(x)) != nil\nend")
+      assert out =~ "assign in expression position"
+      refute out =~ "=(y"
+      refute out =~ "(y := f(x))"
+    end
+
+    test "a match `=` as a block statement renders as the bind `:=` (a valid position)" do
+      out = rian("defmodule M do\n  def g(x) do\n    y = f(x)\n    h(y)\n  end\nend")
       assert out =~ "y := f(x)"
       refute out =~ "=(y"
     end
