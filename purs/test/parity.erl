@@ -76,7 +76,10 @@ run_stream(<<"ext">>, Src) -> hexbin('rian_external@ps':externalRenderSexpr(Src)
 %% Rian.Coherence (canon = hex of `rule:proto:type;…` for the protocol/impl coherence violations)
 run_stream(<<"coh">>, Src) -> hexbin('rian_coherence@ps':violationsSexpr(Src));
 %% Rian.Coherence under @targets(:rs) — the runtime-discriminator exemption (Rust-only scope)
-run_stream(<<"cohrs">>, Src) -> hexbin('rian_coherence@ps':violationsRsSexpr(Src)).
+run_stream(<<"cohrs">>, Src) -> hexbin('rian_coherence@ps':violationsRsSexpr(Src));
+%% Rian.Check type algebra (canon = hex of the unify/join result over a `t;;u` pair)
+run_stream(<<"uni">>, Src) -> hexbin('rian_check@ps':unifySexpr(Src));
+run_stream(<<"joi">>, Src) -> hexbin('rian_check@ps':joinSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

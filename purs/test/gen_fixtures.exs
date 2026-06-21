@@ -471,6 +471,56 @@ proto_impl_corpus = [
   "mod P do\nprotocol Ord do\n  def lt(a Self, b Self) Bool\nend\nimpl Ord for Int53 do\n  def lt(a, b) := a < b\nend\nend"
 ]
 
+# Rian.Check type-algebra corpus (ADR-0084 stage 1). `unify` (partial-inference vs decl:
+# Unknown is a wildcard) and `join` (branch/arm LUB: Unknown absorbs, Bottom identity,
+# numeric widening, covariant parametric). Pairs are `t;;u`.
+check_unify_corpus = [
+  "Int53;;Int53",
+  ":unknown;;Int53",
+  "Int53;;:unknown",
+  "Any;;Int53",
+  "Int53;;Any",
+  "Int53;;Bool",
+  "Fn(_,Int64);;Fn(Int64,Int64)",
+  "Fn(Int64,Int64);;Fn(_,Int64)",
+  "Fn(_,Int64);;Fn(Int64,Bool)",
+  "Fn(Int64,Int64);;Fn(Int64)",
+  "Fn(T,Int64);;Fn(Int64,Int64)",
+  "Fn(_,Int53);;Fn(Int64,Int64)",
+  "Fn(Int64,Fn(_,Bool));;Fn(Int64,Fn(Int64,Bool))",
+  "Vec(Int53);;Vec(Int53)",
+  "Vec(Int53);;Vec(Bool)"
+]
+
+check_join_corpus = [
+  "Int64;;Int64",
+  ":bottom;;Int64",
+  "Int64;;:bottom",
+  "_Unk;;Bool",
+  "Bool;;_Unk",
+  "Any;;Int64",
+  "Int64;;Any",
+  ":unknown;;Int64",
+  "Int8;;Int16",
+  "UInt8;;UInt32",
+  "Float32;;Float64",
+  "UInt8;;Int16",
+  "UInt32;;Int8",
+  "UInt64;;Int8",
+  "Int32;;Float64",
+  "Int64;;Float64",
+  "Int16;;Float32",
+  "Vec(Int8);;Vec(Int16)",
+  "Option(Int8);;Option(Int16)",
+  "Vec(Int8);;Vec(Bool)",
+  "Map(String,Int8);;Map(String,Int16)",
+  "Vec(Option(Int8));;Vec(Option(Int16))",
+  "Vec(Int8);;Option(Int8)",
+  "Fn(Int8,Int8);;Fn(Int16,Int16)",
+  "Bool;;String",
+  "Int;;Int64"
+]
+
 # Rian.Coherence corpus — the `coh` stream (ADR-0061 §5). Single top-level scope, run
 # **synthesis-free** (`Decl.coherence_violations`), so an INCOHERENT program — which the
 # parse-time desugar would *raise* on — still yields its violation list on both sides.
@@ -751,6 +801,25 @@ detok_corpus = [
 # scenario builds a signature env (base + add_type / add_range), lowers real source-parsed
 # pattern vectors through `PatternLower.lower_clause`, then runs `Exhaustiveness.analyze`.
 # The scenario table is mirrored byte-for-byte in `Rian.Exhaustiveness.scenarios` (PS).
+defmodule CheckCanon do
+  # the `uni`/`joi` streams: a `t;;u` pair through `Rian.Check.unify`/`join`. The Elixir `ty`
+  # is `String | :unknown | :mismatch | :bottom`; the sentinels are spelled `:unknown` etc.
+  def run(op, src) do
+    [a, b] = String.split(src, ";;")
+    out(apply(Rian.Check, op, [tin(a), tin(b)]))
+  end
+
+  defp tin(":unknown"), do: :unknown
+  defp tin(":mismatch"), do: :mismatch
+  defp tin(":bottom"), do: :bottom
+  defp tin(s), do: s
+
+  defp out(:unknown), do: ":unknown"
+  defp out(:mismatch), do: ":mismatch"
+  defp out(:bottom), do: ":bottom"
+  defp out(s) when is_binary(s), do: s
+end
+
 defmodule ExhFixtures do
   alias Rian.{Exhaustiveness, PatternLower, Pratt}
 
@@ -914,6 +983,12 @@ lines =
         end)
 
       "cohrs\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
+    end) ++
+    Enum.map(check_unify_corpus, fn s ->
+      "uni\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.run(:unify, s))}"
+    end) ++
+    Enum.map(check_join_corpus, fn s ->
+      "joi\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.run(:join, s))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
