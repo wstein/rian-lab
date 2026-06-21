@@ -1,0 +1,18 @@
+
+
+### Created by https://www.gitignore.io
+### PureScript ###
+# Dependencies
+.psci_modules
+.spago
+bower_components
+node_modules
+
+# Generated files
+.psci
+output
+
+# purerl / BEAM artifacts
+_build
+*.beam
+erl_crash.dump

@@ -16,6 +16,13 @@ implemented (check the `**Status:**` header and the code before trusting it). `d
 prose specs; `examples/rian/` is the annotated by-example tour; `compiler/` holds the self-hosted
 compiler sources (the Rian-in-Rian ports — lexer/decl/beam/checker/… and the composing driver).
 
+**Migration in progress (ADR-0084):** `lib/` (Elixir) is being ported file-by-file to
+**PureScript/purerl** under `purs/` — a real type system replaces Dialyzer; purerl (PureScript→Erlang)
+keeps the BEAM self-host bootstrap via a small Erlang-FFI boundary. The repo is **hybrid** until each
+module reaches parity, then its Elixir twin is dropped. Order + status: `docs/purescript-migration.md`;
+toolchain bootstrap: `purs/README.md`. Foundation only so far (`Rian.Token` typechecks offline; the
+purerl binary + package set need a network step). Work the migration leaf-first along the Core spine.
+
 ## Commands
 
 ```bash

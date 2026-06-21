@@ -1,0 +1,38 @@
+# Spago workspace for the Rian compiler's PureScript/purerl port (ADR-0084).
+#
+# The `backend.cmd` routes codegen through purerl (PureScript -> Erlang) instead of
+# the default JavaScript backend, so the migrated compiler runs on the BEAM and can
+# FFI to the Erlang machinery the BEAM-coupled modules need (`:compile.forms`, code
+# loading) — see ADR-0084 §"FFI boundary".
+#
+# NOTE: the package set below is the purerl set (Erlang FFI), not the default JS
+# registry set. Fetching it + the purerl binary needs a network-enabled bootstrap;
+# see purs/README.md. Until then, `purs compile` typechecks the Prim-only modules
+# offline (e.g. Rian.Token).
+package:
+  name: rian-purs
+  dependencies:
+    - prelude
+    - arrays
+    - either
+    - foldable-traversable
+    - integers
+    - lists
+    - maybe
+    - ordered-collections
+    - strings
+    - tuples
+  test:
+    main: Test.Main
+    dependencies:
+      - spec
+      - aff
+      - effect
+
+workspace:
+  # purerl maintains its own package set (Erlang-FFI libraries). Pin the tag during
+  # bootstrap; see README. The standard JS registry set will NOT link under purerl.
+  packageSet:
+    url: https://github.com/purerl/package-sets/releases/download/erl-0.15.3-20230910/packages.json
+  backend:
+    cmd: purerl
