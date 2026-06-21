@@ -31,9 +31,10 @@ import Data.String.CodePoints as CP
 import Data.String.Common (joinWith, trim)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Rian.IR (Cap(..), Clause, Field, Func, Param, Prog, Struct, Type, Variant)
+import Rian.IR (Cap(..), Clause, Const, Field, Func, Mod, Param, Prog, Struct, Type, Use, Variant)
 import Rian.Lexer (detokenize, exprTokens, tokenize)
 import Rian.Pratt (Pat, parsePats, sexprPat)
+import Rian.Pratt as P
 import Rian.Token (Token(..))
 import Rian.TypeStr as TypeStr
 
@@ -41,7 +42,37 @@ import Rian.TypeStr as TypeStr
 -- | program-wide tail passes).
 -- @rian_sig pub def parseToProg(src val String) Prog
 parseToProg :: String -> Prog
-parseToProg src = assemble (splitDecls (List.fromFoldable (tokenize src)))
+parseToProg src =
+  let
+    decls = splitDecls (List.fromFoldable (tokenize src))
+    aliases = collectAliases decls
+    top = assembleScope decls aliases
+  in
+    if not (Array.null top.consts) then unsafeCrashWith "Decl: `const` must appear inside a `mod`"
+    else if not (Array.null top.uses) then unsafeCrashWith "Decl: `use` must appear inside a `mod`"
+    else { types: top.types, structs: top.structs, funcs: top.funcs, mods: buildMods decls aliases }
+
+type Aliases = Array (Tuple String String)
+
+-- one scope's IR (top level, or a module body) before the program-wide tail passes.
+type Scope =
+  { types :: Array Type
+  , structs :: Array Struct
+  , funcs :: Array Func
+  , consts :: Array Const
+  , uses :: Array Use
+  }
+
+buildMods :: List RawDecl -> Aliases -> Array Mod
+buildMods decls aliases = Array.mapMaybe modOf (Array.fromFoldable decls)
+  where
+  modOf (DMod name inner doc) =
+    let
+      scoped = collectAliases inner <> aliases
+      s = assembleScope inner scoped
+    in
+      Just { name, uses: s.uses, types: s.types, structs: s.structs, consts: s.consts, funcs: s.funcs, doc }
+  modOf _ = Nothing
 
 --------------------------------------------------------------------------------
 -- Declaration splitting (token stream → raw decls)
@@ -64,6 +95,10 @@ data RawDecl
   = DType String Boolean (Maybe String)
   | DStruct String Boolean (Maybe String)
   | DDef RawDef
+  | DConst String Boolean (Maybe String)
+  | DUse String
+  | DAlias String
+  | DMod String (List RawDecl) (Maybe String)
 
 declKws :: Array String
 declKws =
@@ -85,8 +120,21 @@ takeDecl (TKw "pub" : rest) = let Tuple decl rest' = takeDecl rest in Tuple (mar
 takeDecl (TKw "type" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DType (detok toks) false Nothing) rest'
 takeDecl (TKw "struct" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DStruct (detok toks) false Nothing) rest'
 takeDecl (TKw "def" : rest) = let Tuple raw rest' = takeDef rest in Tuple (DDef raw) rest'
+takeDecl (TKw "const" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DConst (detok toks) false Nothing) rest'
+takeDecl (TKw "use" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DUse (detok toks)) rest'
+takeDecl (TKw "alias" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DAlias (detok toks)) rest'
+takeDecl (TKw "mod" : TId name : TKw "do" : rest) =
+  let Tuple inner rest' = takeModBody rest Nil in Tuple (DMod name inner Nothing) rest'
+takeDecl (TKw "mod" : _) = unsafeCrashWith "Decl: expected `mod Name do … end`"
 takeDecl (TKw k : _) = stage2 ("declaration `" <> k <> "`")
 takeDecl other = unsafeCrashWith ("Decl: expected a declaration, got " <> here other)
+
+-- collect a `mod` body declaration-by-declaration up to its closing `end`.
+takeModBody :: List Token -> List RawDecl -> Tuple (List RawDecl) (List Token)
+takeModBody (TNl : rest) acc = takeModBody rest acc
+takeModBody (TKw "end" : rest) acc = Tuple (List.reverse acc) rest
+takeModBody Nil _ = unsafeCrashWith "Decl: `mod` body not closed by `end`"
+takeModBody toks acc = let Tuple decl rest = takeDecl toks in takeModBody rest (decl : acc)
 
 -- collect a declaration's tokens up to the next declaration boundary (drops the newlines).
 takeType :: List Token -> List Token -> Tuple (List Token) (List Token)
@@ -110,11 +158,16 @@ attachDoc :: String -> RawDecl -> RawDecl
 attachDoc doc (DType s p _) = DType s p (Just doc)
 attachDoc doc (DStruct s p _) = DStruct s p (Just doc)
 attachDoc doc (DDef r) = DDef (r { doc = Just doc })
+attachDoc doc (DConst s p _) = DConst s p (Just doc)
+attachDoc doc (DMod n inner _) = DMod n inner (Just doc)
+attachDoc _ d = d
 
 markPub :: RawDecl -> RawDecl
 markPub (DType s _ d) = DType s true d
 markPub (DStruct s _ d) = DStruct s true d
 markPub (DDef r) = DDef (r { pub = true })
+markPub (DConst s _ d) = DConst s true d
+markPub _ = unsafeCrashWith "Decl: `pub` may only precede `def` / `type` / `struct` / `const`"
 
 detok :: List Token -> String
 detok = detokenize <<< Array.fromFoldable
@@ -123,11 +176,13 @@ detok = detokenize <<< Array.fromFoldable
 -- Assemble (raw decls → IR)
 --------------------------------------------------------------------------------
 
-assemble :: List RawDecl -> Prog
-assemble decls =
-  { types: Array.mapMaybe typeOf arr
-  , structs: Array.mapMaybe structOf arr
-  , funcs: map (buildFunc <<< NEA.toArray) (Array.groupBy sameFunc (Array.mapMaybe defOf arr))
+assembleScope :: List RawDecl -> Aliases -> Scope
+assembleScope decls aliases =
+  { types: map (substType aliases) (Array.mapMaybe typeOf arr)
+  , structs: map (substStruct aliases) (Array.mapMaybe structOf arr)
+  , funcs: map (substFunc aliases) (map (buildFunc <<< NEA.toArray) (Array.groupBy sameFunc (Array.mapMaybe defOf arr)))
+  , consts: map (substConst aliases) (Array.mapMaybe constOf arr)
+  , uses: Array.mapMaybe useOf arr
   }
   where
   arr = Array.fromFoldable decls
@@ -137,7 +192,121 @@ assemble decls =
   structOf _ = Nothing
   defOf (DDef r) = Just r
   defOf _ = Nothing
+  constOf (DConst s p d) = Just (parseConst s p d)
+  constOf _ = Nothing
+  useOf (DUse s) = Just (parseUse s)
+  useOf _ = Nothing
   sameFunc a b = a.name == b.name && rawArity a == rawArity b
+
+--------------------------------------------------------------------------------
+-- alias collection + substitution
+--------------------------------------------------------------------------------
+
+collectAliases :: List RawDecl -> Aliases
+collectAliases decls = Array.mapMaybe aliasOf (Array.fromFoldable decls)
+  where
+  aliasOf (DAlias s) = Just (parseAlias s)
+  aliasOf _ = Nothing
+
+parseAlias :: String -> Tuple String String
+parseAlias text = case splitOnce ":=" text of
+  Just { left, right } -> Tuple (stripTypeParams left) right
+  Nothing -> unsafeCrashWith ("Decl: alias needs `:=`: " <> text)
+
+-- whole-word substitution of every alias name in a type string (transitive to a fixpoint).
+substTypeStr :: Aliases -> String -> String
+substTypeStr aliases s =
+  let resolved = foldl (\acc a -> wholeWordReplace (fst a) (snd a) acc) s aliases
+  in if resolved == s then resolved else substTypeStr aliases resolved
+
+wholeWordReplace :: String -> String -> String -> String
+wholeWordReplace name val s = joinWith "" (map (\t -> if t == name then val else t) (splitWords s))
+
+-- split into maximal word tokens (`[A-Za-z0-9_]+`) and single non-word-char tokens.
+splitWords :: String -> Array String
+splitWords s = flush (foldl step { cur: [], acc: [] } (toCps s))
+  where
+  step st c
+    | isWordCp c = st { cur = Array.snoc st.cur c }
+    | otherwise = { cur: [], acc: st.acc <> wordOf st.cur <> [ fromCps [ c ] ] }
+  flush st = st.acc <> wordOf st.cur
+  wordOf [] = []
+  wordOf w = [ fromCps w ]
+  isWordCp c = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95
+
+substType :: Aliases -> Type -> Type
+substType aliases t = t { variants = map (substVariant aliases) t.variants }
+
+substVariant :: Aliases -> Variant -> Variant
+substVariant aliases v = v { fields = map (substField aliases) v.fields }
+
+substField :: Aliases -> Field -> Field
+substField aliases f = f { ty = substTypeStr aliases f.ty }
+
+substStruct :: Aliases -> Struct -> Struct
+substStruct aliases s = s { fields = map (substField aliases) s.fields }
+
+substFunc :: Aliases -> Func -> Func
+substFunc aliases f =
+  f
+    { params = map (\p -> p { ty = map (substTypeStr aliases) p.ty }) f.params
+    , ret = map (substTypeStr aliases) f.ret
+    }
+
+substConst :: Aliases -> Const -> Const
+substConst aliases c = c { ty = map (substTypeStr aliases) c.ty }
+
+--------------------------------------------------------------------------------
+-- const / use
+--------------------------------------------------------------------------------
+
+parseConst :: String -> Boolean -> Maybe String -> Const
+parseConst text pub doc = case splitOnce ":=" text of
+  Just { left: decl, right: value } -> case wordsWs (collapseParens decl) of
+    [ name, ty ] -> { name, ty: Just ty, value, pub, doc }
+    [ name ] -> { name, ty: inferConstType value, value, pub, doc }
+    _ -> unsafeCrashWith ("Decl: const needs `NAME [Type] := value`: " <> text)
+  Nothing -> unsafeCrashWith ("Decl: const needs `:=`: " <> text)
+
+-- infer a const's type from its literal value (the value is always a literal).
+inferConstType :: String -> Maybe String
+inferConstType value = literalType (P.parse value)
+
+literalType :: P.Surface -> Maybe String
+literalType (P.SNum n) = Just (if contains "." n then "Float64" else "Int53")
+literalType (P.SStr _) = Just "String"
+literalType (P.SStrInterp _) = Just "String"
+literalType (P.SAtom _) = Just "Symbol"
+literalType (P.SId b)
+  | b == "true" || b == "false" = Just "Bool"
+literalType (P.SListLit es _) = case Array.head es of
+  Just e -> map (\t -> "Vec(" <> t <> ")") (literalType e)
+  Nothing -> Nothing
+literalType _ = Nothing
+
+parseUse :: String -> Use
+parseUse text =
+  let s = collapseDots (collapseParens text)
+  in case extractParens s of
+    Just { name: path, inside, rest } ->
+      if rest == "" then { path: trimTrailingDot path, names: splitTop ',' inside }
+      else unsafeCrashWith ("Decl: trailing tokens after use `" <> text <> "`: " <> rest)
+    Nothing -> { path: s, names: [] }
+
+trimTrailingDot :: String -> String
+trimTrailingDot s = fromMaybe s (Str.stripSuffix (Str.Pattern ".") s)
+
+-- collapse whitespace adjacent to `.` (the `\s*\.\s*` → `.` rewrite for `use` paths).
+collapseDots :: String -> String
+collapseDots s = fromCps (Array.reverse (go (toCps s) [] false))
+  where
+  go cs out skip = case Array.uncons cs of
+    Nothing -> out
+    Just { head: c, tail }
+      | c == 46 -> go tail (Array.cons 46 (Array.dropWhile isWs out)) true
+      | isWs c -> if skip then go tail out true else go tail (Array.cons c out) false
+      | otherwise -> go tail (Array.cons c out) false
+  isWs c = c == 32 || c == 9
 
 --------------------------------------------------------------------------------
 -- `def` token parsing (→ RawDef)
@@ -634,7 +803,28 @@ declSexpr = progSexpr <<< parseToProg
 
 progSexpr :: Prog -> String
 progSexpr prog =
-  joinWith "\n" (map typeSexpr prog.types <> map structSexpr prog.structs <> map funcSexpr prog.funcs)
+  joinWith "\n"
+    (map typeSexpr prog.types <> map structSexpr prog.structs <> map funcSexpr prog.funcs <> map modSexpr prog.mods)
+
+modSexpr :: Mod -> String
+modSexpr m =
+  "(mod " <> m.name <> docFlag m.doc
+    <> foldMap (\u -> " " <> useSexpr u) m.uses
+    <> foldMap (\t -> " " <> typeSexpr t) m.types
+    <> foldMap (\s -> " " <> structSexpr s) m.structs
+    <> foldMap (\c -> " " <> constSexpr c) m.consts
+    <> foldMap (\f -> " " <> funcSexpr f) m.funcs
+    <> ")"
+
+useSexpr :: Use -> String
+useSexpr u = "(use " <> u.path <> foldMap (\n -> " " <> n) u.names <> ")"
+
+constSexpr :: Const -> String
+constSexpr c =
+  "(const " <> c.name <> pubFlag c.pub <> docFlag c.doc <> " " <> tyOf c.ty <> " " <> c.value <> ")"
+  where
+  tyOf Nothing = "_infer"
+  tyOf (Just t) = t
 
 funcSexpr :: Func -> String
 funcSexpr f =

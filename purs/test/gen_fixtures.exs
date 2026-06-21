@@ -132,14 +132,33 @@ end
 # Canonical s-expression for the declaration IR (Rian.Decl assemble → Prog) — the `dcl`
 # parity oracle. Mirrors `progSexpr`/`typeSexpr`/… in purs/src/Rian/Decl.purs byte-for-byte.
 defmodule DeclCanon do
-  alias Rian.IR.{Type, Variant, Field, Struct, Func, Param, Clause}
+  alias Rian.IR.{Type, Variant, Field, Struct, Func, Param, Clause, Mod, Const, Use}
 
   def prog(p) do
     types = Enum.map(Map.get(p, :types, []), &type_s/1)
     structs = Enum.map(Map.get(p, :structs, []), &struct_s/1)
     funcs = Enum.map(Map.get(p, :funcs, []), &func_s/1)
-    Enum.join(types ++ structs ++ funcs, "\n")
+    mods = Enum.map(Map.get(p, :mods, []), &mod_s/1)
+    Enum.join(types ++ structs ++ funcs ++ mods, "\n")
   end
+
+  defp mod_s(%Mod{name: n, uses: us, types: ts, structs: ss, consts: cs, funcs: fs, doc: doc}) do
+    "(mod #{n}#{doc_flag(doc)}" <>
+      Enum.map_join(us, "", fn u -> " " <> use_s(u) end) <>
+      Enum.map_join(ts, "", fn t -> " " <> type_s(t) end) <>
+      Enum.map_join(ss, "", fn s -> " " <> struct_s(s) end) <>
+      Enum.map_join(cs, "", fn c -> " " <> const_s(c) end) <>
+      Enum.map_join(fs, "", fn f -> " " <> func_s(f) end) <> ")"
+  end
+
+  defp use_s(%Use{path: path, names: names}),
+    do: "(use #{path}#{Enum.map_join(names, "", fn n -> " " <> n end)})"
+
+  defp const_s(%Const{name: n, type: t, value: v, pub?: pub, doc: doc}),
+    do: "(const #{n}#{pub_flag(pub)}#{doc_flag(doc)} #{const_ty(t)} #{v})"
+
+  defp const_ty(nil), do: "_infer"
+  defp const_ty(t), do: t
 
   defp func_s(%Func{
          name: n,
@@ -256,7 +275,18 @@ decl_corpus = [
   "def identity(x T) T forall T := x",
   "def both(a T, b U) Bool forall T, U := true",
   "def store(data iso Vec(Int53)) Int53 := len(data)",
-  "def max2(a Int64, b Int64) Int64\ndef max2(a, b) when a >= b := a\ndef max2(a, b) := b"
+  "def max2(a Int64, b Int64) Int64\ndef max2(a, b) when a >= b := a\ndef max2(a, b) := b",
+  # stage 3: mod / const / use / alias
+  "mod Math do\npub const PI Float64 := 3.14\npub def double(n Int53) Int53 := n * 2\nend",
+  "mod Geo do\ntype Shape := Circle(r Float64) | Square(s Float64)\nstruct Point(x Int53, y Int53)\nend",
+  "mod M do\nuse Std\nuse List.(map, filter)\nconst N Int53 := 10\nend",
+  "mod Empty do\nend",
+  "mod C do\nconst X := 42\nconst S := \"hi\"\nend",
+  "mod D do\n@doc \"the answer\"\npub const ANSWER Int53 := 42\nend",
+  "alias Id := Int53\nstruct Box(item Id)",
+  "alias Pair := Tuple(Int53, Int53)\ndef swap(p Pair) Pair := p",
+  "alias A := Int53\nalias B := A\nstruct S(x B)",
+  "alias Name := String\nmod U do\nstruct Person(name Name, age Int53)\nend"
 ]
 
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.

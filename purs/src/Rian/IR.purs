@@ -19,6 +19,9 @@ module Rian.IR
   , Param
   , Clause
   , Func
+  , Const
+  , Use
+  , Mod
   , Prog
   ) where
 
@@ -69,6 +72,28 @@ type Func =
   , doc :: Maybe String
   }
 
--- The whole-program IR (the slice ported so far: data-type + function declarations).
--- `mods`/`consts`/… join as `Rian.Decl`'s remaining stages land.
-type Prog = { types :: Array Type, structs :: Array Struct, funcs :: Array Func }
+-- A module-scoped constant (`const NAME [Type] := value`). `ty` is `Nothing` when omitted
+-- (inferred from the value's literal shape). `value` is the body source.
+-- @rian_sig struct Const(name String, ty String, value String, is_pub Bool, doc Option(String))
+type Const = { name :: String, ty :: Maybe String, value :: String, pub :: Boolean, doc :: Maybe String }
+
+-- An import inside a module: `use Path` (qualified) or `use Path.(a, b)` (selective).
+-- @rian_sig struct Use(path String, names Vec(String))
+type Use = { path :: String, names :: Array String }
+
+-- A module (`mod Name do … end`) grouping uses/types/structs/consts/funcs.
+-- @rian_sig struct Mod(name String, uses Vec(Use), types Vec(Type), structs Vec(Struct), consts Vec(Const), funcs Vec(Func), doc Option(String))
+type Mod =
+  { name :: String
+  , uses :: Array Use
+  , types :: Array Type
+  , structs :: Array Struct
+  , consts :: Array Const
+  , funcs :: Array Func
+  , doc :: Maybe String
+  }
+
+-- The whole-program IR. Top-level `const`/`use` are module-scoped (rejected at top level),
+-- so the top scope carries only types/structs/funcs; `mods` hold their own consts/uses.
+type Prog =
+  { types :: Array Type, structs :: Array Struct, funcs :: Array Func, mods :: Array Mod }
