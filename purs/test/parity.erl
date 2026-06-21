@@ -113,7 +113,9 @@ run_stream(<<"gate">>, Src) -> hexbin('rian_check@ps':checkProgramSexpr(Src));
 %% Rian.Assemble (canon = the assembled program incl. synthesized protocol funcs, via progSexpr)
 run_stream(<<"asm">>, Src) -> hexbin('rian_assemble@ps':assembleSexpr(Src));
 %% Rian.Check infer_param_type (canon = each function's parameters' inferred types)
-run_stream(<<"ipt">>, Src) -> hexbin('rian_check@ps':inferParamTypeSexpr(Src)).
+run_stream(<<"ipt">>, Src) -> hexbin('rian_check@ps':inferParamTypeSexpr(Src));
+%% Rian.Reach effect_sets (canon = each function's inferred effect set)
+run_stream(<<"efs">>, Src) -> hexbin('rian_reach@ps':effectSetsSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

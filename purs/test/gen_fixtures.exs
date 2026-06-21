@@ -558,6 +558,17 @@ rch_corpus = [
   "def urec(x Rec) Rec := x\ntype Rec := R(nxt Rec, v T)"
 ]
 
+# Rian.Reach `effect_sets` corpus — the `efs` stream (ADR-0048 §3): the inferred effect set per
+# function — a clock primitive (host+clock), a known host module (host+io), a concurrency
+# primitive (spawn), a pure function (none), and a caller inheriting a callee's effects.
+efs_corpus = [
+  "def now() := :erlang.system_time()",
+  "def log(s String) := IO.puts(s)",
+  "def go(f Int53) := :erlang.spawn(f)",
+  "def pure(x Int53) := x + 1",
+  "def caller() := tick()\ndef tick() := :erlang.system_time()"
+]
+
 # Rian.Capability corpus — the `cap` stream (ADR-0025/0061): Rust parameter-type lowering of a
 # `<cap> <type>` pair (copy/borrow/owned, Fn callbacks, Vec/Map/tuple/parametric, nested).
 cap_corpus = [
@@ -1525,6 +1536,17 @@ lines =
 
       canon = Enum.map_join(defs, "\n", &DeclCanon.expand_def_s/1)
       "pex\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
+    end) ++
+    Enum.map(efs_corpus, fn s ->
+      es = Rian.Reach.effect_sets(Decl.parse(s, assemble_only: true))
+
+      canon =
+        es
+        |> Enum.map(fn {k, set} -> "#{k}=>#{Enum.join(Enum.sort(MapSet.to_list(set)), ",")}" end)
+        |> Enum.sort()
+        |> Enum.join(";")
+
+      "efs\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
     end) ++
     Enum.map(rch_corpus, fn s ->
       rep = Rian.Reach.analyze(Decl.parse(s, assemble_only: true))

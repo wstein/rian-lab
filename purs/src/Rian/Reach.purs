@@ -21,6 +21,8 @@ module Rian.Reach
   ( Blocker
   , analyze
   , analyzeSexpr
+  , effectSets
+  , effectSetsSexpr
   ) where
 
 import Prelude
@@ -28,7 +30,7 @@ import Prelude
 import Data.Array as Array
 import Data.Foldable (all, any, elem, foldl)
 import Data.Maybe (Maybe(..), fromMaybe, isJust, maybe)
-import Data.String (Pattern(..), contains, stripPrefix, stripSuffix) as Str
+import Data.String (Pattern(..), contains, split, stripPrefix, stripSuffix) as Str
 import Data.String.CodePoints as CP
 import Data.String.Common (joinWith)
 import Data.Tuple (Tuple(..), fst, snd)
@@ -84,20 +86,7 @@ analyze prog =
   funs = allFuncs prog
   modnames = map _.name prog.mods
   localNames = map _.name funs
-
-  allTypes = prog.types <> Array.concatMap _.types prog.mods
-  allStructs = prog.structs <> Array.concatMap _.structs prog.mods
-  ptypes = expandPtypes allTypes
-  pnames = map _.name ptypes
-  pctx =
-    { sumNames: map _.name allTypes
-    , structNames: map _.name allStructs
-    , names: pnames
-    , emittable: emittableMap ptypes pnames
-    , ctors: Array.concatMap (\t -> map (\v -> Tuple v.ctor (map _.ty v.fields)) t.variants) ptypes
-    , generics: map _.name (Array.filter (\f -> not (Array.null f.tvars)) funs)
-    , fnFieldNames: map _.name (Array.filter hasFnField allTypes)
-    }
+  pctx = programPctx prog
 
   -- per-function local facts: local reach (vocabulary minus killed targets, or the @external
   -- target set), the local-call callees, and the blockers.
@@ -128,6 +117,96 @@ analyze prog =
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> Array.concatMap _.funcs prog.mods
+
+-- the program-wide context `scanFunc` needs (shared by `analyze` + `effectSets`).
+programPctx :: Prog -> Pctx
+programPctx prog =
+  { sumNames: map _.name allTypes
+  , structNames: map _.name allStructs
+  , names: map _.name ptypes
+  , emittable: emittableMap ptypes (map _.name ptypes)
+  , ctors: Array.concatMap (\t -> map (\v -> Tuple v.ctor (map _.ty v.fields)) t.variants) ptypes
+  , generics: map _.name (Array.filter (\f -> not (Array.null f.tvars)) (allFuncs prog))
+  , fnFieldNames: map _.name (Array.filter hasFnField allTypes)
+  }
+  where
+  allTypes = prog.types <> Array.concatMap _.types prog.mods
+  allStructs = prog.structs <> Array.concatMap _.structs prog.mods
+  ptypes = expandPtypes allTypes
+
+-- ── effect inference (ADR-0048 §3): per-function effect set, union over the call graph ──
+-- known host modules → their world-effect category; clock is function-keyed (its modules mix).
+effectMods :: Array (Tuple String String)
+effectMods =
+  [ Tuple "IO" "io", Tuple "io" "io", Tuple "File" "fs", Tuple "file" "fs", Tuple "rand" "random"
+  , Tuple "random" "random", Tuple "gen_tcp" "net", Tuple "gen_udp" "net", Tuple "gen_sctp" "net"
+  , Tuple "ssl" "net", Tuple "inet" "net", Tuple "httpc" "net"
+  ]
+
+clockFuns :: Array String
+clockFuns = [ "system_time", "monotonic_time", "os_time", "timestamp", "now" ]
+
+clockMods :: Array String
+clockMods = [ "os", "erlang", "System" ]
+
+-- a blocker's effect contribution: host FFI → `host` + its world category; concurrency → `spawn`.
+effectOf :: Blocker -> Array String
+effectOf b =
+  if b.kind == "ffi" then [ "host" ] <> ffiCategory b.construct
+  else if b.kind == "concurrency" then [ "spawn" ]
+  else []
+
+ffiCategory :: String -> Array String
+ffiCategory construct =
+  let
+    segs = Str.split (Str.Pattern ".") (fromMaybe construct (Str.stripPrefix (Str.Pattern ":") construct))
+    modroot = fromMaybe "" (Array.head segs)
+    fun = fromMaybe "" (Array.last segs)
+  in
+    case Array.find (\(Tuple m _) -> m == modroot) effectMods of
+      Just (Tuple _ cat) -> [ cat ]
+      Nothing -> if fun `elem` clockFuns && modroot `elem` clockMods then [ "clock" ] else []
+
+-- | The inferred effect set of every function, keyed `name/arity` (ADR-0048 §3): direct effects
+-- | (from the same `scanFunc` blockers `analyze` uses) ∪ every callee's, to a call-graph fixpoint.
+effectSets :: Prog -> Array (Tuple (Tuple String Int) (Array String))
+effectSets prog = effectFixpoint facts (map (\(Tuple n fc) -> Tuple n fc.direct) facts)
+  where
+  funs = allFuncs prog
+  modnames = map _.name prog.mods
+  localNames = map _.name funs
+  pctx = programPctx prog
+  facts = map fact funs
+  fact f =
+    let scanned = scanFunc pctx modnames f
+    in Tuple (Tuple f.name (Array.length f.params))
+      { direct: Array.sort (Array.nub (Array.concatMap effectOf scanned.blockers))
+      , callees: Array.filter (_ `elem` localNames) scanned.callees
+      }
+
+-- effects(f) = direct(f) ∪ ⋃ effects(callee), monotone-increasing, to a fixpoint.
+effectFixpoint
+  :: Array (Tuple (Tuple String Int) { direct :: Array String, callees :: Array String })
+  -> Array (Tuple (Tuple String Int) (Array String))
+  -> Array (Tuple (Tuple String Int) (Array String))
+effectFixpoint facts table =
+  let next = map (\(Tuple n fc) -> Tuple n (foldl (\acc c -> unionSorted acc (effectFor table c)) fc.direct fc.callees)) facts
+  in if next == table then table else effectFixpoint facts next
+
+-- a name-folded callee contributes the UNION of its arities' effects (the over-approximate,
+-- honest direction for effects — never under-claim).
+effectFor :: Array (Tuple (Tuple String Int) (Array String)) -> String -> Array String
+effectFor table name = foldl unionSorted [] (map snd (Array.filter (\(Tuple (Tuple n _) _) -> n == name) table))
+
+unionSorted :: Array String -> Array String -> Array String
+unionSorted a b = Array.sort (Array.nub (a <> b))
+
+-- | The `efs` parity unit: each function's inferred effect set (`name/arity=>e1,e2`), sorted.
+effectSetsSexpr :: String -> String
+effectSetsSexpr src =
+  joinWith ";" (Array.sortWith identity (map entry (effectSets (parseToProg src))))
+  where
+  entry (Tuple (Tuple n a) effs) = n <> "/" <> show a <> "=>" <> joinWith "," effs
 
 -- ── per-function scan: signature pins + clause body/guard scan ──
 -- sigBlockers are built in the reference's canonical order (ref/int/width/any/any_op/union/pin);
