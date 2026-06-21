@@ -202,10 +202,11 @@ expansion** (`mxb`, `Macro.expand`) **and `Rian.Comptime`** (`comptime(e)` → a
 also in `mxb`) → `Expanded` clause bodies. The clause body is now `data Body = Raw String | Expanded
 Surface` with a `bodySurface` accessor (the reference's `String | ast`, idempotent re-parse
 restored); `lower_meta` change-detects via the canonical `sexpr` so an untouched body stays `Raw`.
-**Next:** the **emitters** (`Beam`/`JS`/`JVM`/`Lower`) — the value backend. The checker spine and
-its erase passes are complete; the only remaining non-emitter leaf is the host-coupled
-`Reach.Prelude.defines?` refinement.
-Total **819/819** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+**Next:** the **emitters** (`Beam`/`JS`/`JVM`/`Lower`) — the value backend. The checker spine, its
+erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
+modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
+`Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
+Total **821/821** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
 InferLocal/Assemble/Comptime/**Opaque**.
 Each module is parity-gated and committed on its own
