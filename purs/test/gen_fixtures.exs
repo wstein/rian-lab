@@ -129,10 +129,61 @@ defmodule CoreCanon do
   defp map_pat_pair({k, p}), do: "#{k}: #{pat(p)}"
 end
 
+# Canonical s-expression for the declaration IR (Rian.Decl assemble → Prog) — the `dcl`
+# parity oracle. Mirrors `progSexpr`/`typeSexpr`/… in purs/src/Rian/Decl.purs byte-for-byte.
+defmodule DeclCanon do
+  alias Rian.IR.{Type, Variant, Field, Struct}
+
+  def prog(p) do
+    types = Enum.map(Map.get(p, :types, []), &type_s/1)
+    structs = Enum.map(Map.get(p, :structs, []), &struct_s/1)
+    Enum.join(types ++ structs, "\n")
+  end
+
+  defp type_s(%Type{name: n, variants: vs, pub?: pub, doc: doc}),
+    do: "(type #{n}#{pub_flag(pub)}#{doc_flag(doc)}#{Enum.map_join(vs, "", &variant_s/1)})"
+
+  defp struct_s(%Struct{name: n, fields: fs, pub?: pub, doc: doc}),
+    do: "(struct #{n}#{pub_flag(pub)}#{doc_flag(doc)}#{Enum.map_join(fs, "", &field_s/1)})"
+
+  defp variant_s(%Variant{ctor: c, fields: fs}),
+    do: " (variant #{c}#{Enum.map_join(fs, "", &field_s/1)})"
+
+  defp field_s(%Field{label: l, type: t}), do: " (field #{label_of(l)} #{t})"
+  defp label_of(nil), do: "_"
+  defp label_of(l), do: l
+  defp pub_flag(true), do: " pub"
+  defp pub_flag(false), do: ""
+  defp doc_flag(nil), do: ""
+  defp doc_flag(d), do: " doc=#{d}"
+end
+
 alias Rian.Lexer
 alias Rian.TypeStr
 alias Rian.Pratt
 alias Rian.Core
+alias Rian.Decl
+
+# Rian.Decl corpus (data-type declarations: type / struct, with @doc / pub / field caps /
+# union-type fields / multi-line). Excludes def/mod/const/alias/range/opaque/protocol/macro.
+decl_corpus = [
+  "type Color := Red | Green | Blue",
+  "type Shape := Circle(r Float64) | Square(s Float64)",
+  "type Tree := Leaf | Node(left Tree, value Int53, right Tree)",
+  "type Opt := None | Some(value Int53)",
+  "pub type Dir := North | South | East | West",
+  "type T := A(x Int53 | String) | B",
+  "struct Point(x Int53, y Int53)",
+  "struct Empty",
+  "struct Pair(a String, b Int53)",
+  "pub struct Vec2(x Float64, y Float64)",
+  "struct Buf(data iso Vec(Int53))",
+  "struct Ref(item val Shape)",
+  "type Maybe := Nothing | Just(val String)",
+  "@doc \"a color\"\ntype Hue := Warm | Cool",
+  "type Long :=\n  Red |\n  Green |\n  Blue",
+  "struct Nested(m Map(String, Vec(Int53)), n Int53)"
+]
 
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.
 # Oracle = Pratt.parse_sexpr (which already applies Prim.normalize inside `parse`); the PS
@@ -410,6 +461,9 @@ lines =
     end) ++
     Enum.map(prim_corpus, fn s ->
       "prm\t#{Canon.hex(s)}\t#{Canon.hex(Pratt.parse_sexpr(s))}"
+    end) ++
+    Enum.map(decl_corpus, fn s ->
+      "dcl\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.prog(Decl.parse(s, assemble_only: true)))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])

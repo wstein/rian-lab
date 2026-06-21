@@ -65,7 +65,7 @@ removal-order note).
 | --------------- | --- | --------------------------------------------------------------- |
 | `Rian.Ann`      | 173 | **Reader dropped; convention retained.** The Elixir `Rian.Ann` module (reads `@rian_sig` from Elixir AST/`.beam`) is obsolete, but `@rian_sig` annotation *comments* live on in PureScript source — they carry the **capabilities** (`val`/`iso`/`ref`/`tag`) and **type bridge** (`Int`→`Int53`, `Array`→`Vec`, …) that PS types underdetermine, read by the Phase-7 PS→Rian transpiler. See `purs/README.md`. |
 | `Rian.TypeStr`  | 155 | ✅ ported (`splitTopCommas`/`splitTopPipes`/`normalize`); parity-gated (48 fixtures). |
-| `Rian.IR`       | 262 | shared IR structs (data definitions). **Next module.**          |
+| `Rian.IR`       | 262 | ✅ data-type records ported (`Field`/`Variant`/`Type`/`Struct`/`Prog`); the rest (`Param`/`Clause`/`Func`/`Mod`/`Const`/…) land with `Decl`'s further stages. The Rian `type` field is `ty` in PS (reserved word), bridged by `@rian_sig`. |
 | `Rian.Core`     | 717 | ✅ ported (`fromExpr`/`fromPat` + the desugarings: pipe `\|>`→call, range `..`→`List.seq`, comprehension→`flat_map`); parity-gated via the `cor` stream (37 records) composing `lexer → Pratt → Core` through a shared `coreSexpr` oracle. The inferred `type` field + per-node `@rian_sig` arrive with `Rian.Check`. Staged out (excluded): pins, for-pattern generators, bitstrings, map update. |
 
 ### Phase 3 — Parsers
@@ -73,7 +73,7 @@ removal-order note).
 | Module        | LOC  | Notes / status                                                 |
 | ------------- | ---- | -------------------------------------------------------------- |
 | `Rian.Pratt`  | 1218 | **Ported (parity-gated, `psx` stream):** the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms, patterns, `if`/`case`/`lambda`/blocks, **and `with`/`for`/`${}` interpolation**. **Remaining (raise a clear message, excluded from the corpus):** bitstrings (+pattern, BEAM-only), map *update* and type-patterns (no reference `sexpr` clause → not parity-testable), and error-propagation `<-` + speculative destructuring binds. |
-| `Rian.Decl`   | 1901 | declaration parser; newline-tolerant `:=` bodies.              |
+| `Rian.Decl`   | 1901 | **Stage 1 ported** (parity-gated, `dcl` stream, 16 records): the **data-type declarations** — `type` (sum) + `struct` (product), with `@doc`/`pub`, the `[label] [cap] Type` field grammar (caps parsed-and-dropped), union-type fields, and multi-line decls. Stage 2 (raise/excluded): `def` (signatures/clauses/bodies/`forall`), `mod`, `const`, `alias`, `range`, `opaque`/`abstract`, `use`, `protocol`/`impl`, `macro`, and the tail passes (interp/stdlib/infer-local — need `Check`/`InferLocal`/`Protocol`). |
 
 **Parity oracle (Pratt → Core).** Pratt is verified via its built-in `parse_sexpr/1` (the
 `psx` stream — output-only, no surface round-trip). `Core.from_expr`/`from_pat` then composes
@@ -148,8 +148,9 @@ Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (par
 `Rian.Ann` reader dropped (annotation convention retained); `Rian.IR` (data structs) remains.
 **Phase 3**: `Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks +
 `with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
-error-propagation. **Phase 6**: `Rian.Prim` ported (the `Prim.*`→`__prim_*` rewrite — a leaf Pratt depends on).
-**Next:** `Rian.IR` (data structs) + `Rian.Decl` (the declaration parser → whole-program IR;
-the largest module — port as a focused, staged unit). Total **377/377** parity records across
-Lexer/TypeStr/Pratt/Core/Prim. Each module is parity-gated and committed on its own
+error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** (data-type records) + **`Rian.Decl` stage 1**
+(`type`/`struct` declarations) ported. **Next:** `Rian.Decl` stage 2 — `def` (the biggest
+sub-grammar: signatures with capabilities, multi-clause grouping, newline-tolerant bodies,
+`forall`/bounds), then `mod`/`const`/`alias`. Total **393/393** parity records across
+Lexer/TypeStr/Pratt/Core/Prim/Decl. Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084).
