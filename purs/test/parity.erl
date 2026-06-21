@@ -105,7 +105,9 @@ run_stream(<<"ifc">>, Src) -> hexbin('rian_check@ps':inferIcSexpr(Src));
 %% Rian.Check infer_return_type (canon = each function's inferred return)
 run_stream(<<"irt">>, Src) -> hexbin('rian_check@ps':inferReturnTypeSexpr(Src));
 %% Rian.Check fill_local_rets (canon = the converged funs table)
-run_stream(<<"flr">>, Src) -> hexbin('rian_check@ps':fillLocalRetsSexpr(Src)).
+run_stream(<<"flr">>, Src) -> hexbin('rian_check@ps':fillLocalRetsSexpr(Src));
+%% Rian.InferLocal fill_returns (canon = each function's return after infer-local)
+run_stream(<<"ilr">>, Src) -> hexbin('rian_inferLocal@ps':fillReturnsSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

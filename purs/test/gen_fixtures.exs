@@ -641,6 +641,16 @@ flr_corpus = [
   "def h(x Int53) := x * 2"
 ]
 
+# Rian.InferLocal `fill_returns` corpus — the `ilr` stream. A private function's undeclared
+# return is filled by inference (`Any` when uninferable, e.g. self-recursion); a `pub` boundary
+# and an explicitly-typed return are kept. Params are typed (param inference is a later slice).
+ilr_corpus = [
+  "def f(x Int53) := x + 1",
+  "def g(s String) := s\ndef h(s String) := g(s)",
+  "def cnt(x Int53) := cnt(x)",
+  "pub def p(x Int53) Int53 := x"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1292,6 +1302,17 @@ defmodule CheckCanon do
     |> Enum.join(";")
   end
 
+  # the `ilr` stream: every function's return after `Rian.InferLocal.fill_returns`.
+  def fill_returns(src) do
+    filled = Rian.InferLocal.fill_returns(Rian.Decl.parse(src, assemble_only: true))
+    funcs = Map.get(filled, :funcs, []) ++ Enum.flat_map(Map.get(filled, :mods, []), & &1.funcs)
+
+    funcs
+    |> Enum.map(fn f -> "#{f.name}/#{length(f.params)}=>#{f.ret || "_"}" end)
+    |> Enum.sort()
+    |> Enum.join(";")
+  end
+
   # the `bdy` stream: infer a `;`-separated function body (binds threaded through the env).
   def infer_body(src) do
     out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse_body(src)), @fixed_env, %{}))
@@ -1475,6 +1496,9 @@ lines =
     end) ++
     Enum.map(flr_corpus, fn s ->
       "flr\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.fill_rets(s))}"
+    end) ++
+    Enum.map(ilr_corpus, fn s ->
+      "ilr\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.fill_returns(s))}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)
