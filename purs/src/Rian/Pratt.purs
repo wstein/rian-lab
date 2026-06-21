@@ -67,6 +67,7 @@ data Surface
   | STuple (Array Surface)
   | SListLit (Array Surface) (Maybe Surface) -- Nothing = closed `[…]`, Just = cons `[… | t]`
   | SMapLit (Array MapPair)
+  | SMapUpdate Surface (Array MapPair) -- `%{base | k: v, …}` (ADR-0033)
   | SIf Surface Surface Surface -- then/else are blocks
   | SCase Surface (Array Arm)
   | SLambda (Array Param) Surface
@@ -367,7 +368,8 @@ parseMapStart toks@(TKw _ : TOp ":" : _) = mapLit (parseMapPairs toks [])
 parseMapStart toks =
   let Tuple first rest = parseExpr toks 0
   in case rest of
-    (TOp "|" : _) -> stage2 "map update"
+    (TOp "|" : r) ->
+      let Tuple pairs r2 = parseMapPairs r [] in Tuple (SMapUpdate first pairs) r2
     (TOp "=>" : r) ->
       let Tuple v r2 = parseExpr r 0 in mapLit (mapPairsAfter r2 [ MKey first v ])
     _ -> unsafeCrashWith ("Pratt: bad map: " <> here rest)
@@ -789,6 +791,8 @@ sexpr (STuple es) = "{" <> joinWith " " (map sexpr es) <> "}"
 sexpr (SListLit elems Nothing) = "[" <> joinWith " " (map sexpr elems) <> "]"
 sexpr (SListLit elems (Just t)) = "[" <> joinWith " " (map sexpr elems) <> " | " <> sexpr t <> "]"
 sexpr (SMapLit pairs) = "%{" <> joinWith " " (map sexprMapPair pairs) <> "}"
+sexpr (SMapUpdate base pairs) =
+  "%{" <> sexpr base <> " | " <> joinWith " " (map sexprMapPair pairs) <> "}"
 sexpr (SIf c t e) = "(if " <> sexpr c <> " " <> sexpr t <> " " <> sexpr e <> ")"
 sexpr (SCase s arms) =
   "(case " <> sexpr s <> foldMap (\a -> " (" <> sexprPat a.pat <> " -> " <> sexpr a.body <> ")") arms <> ")"

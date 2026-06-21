@@ -46,7 +46,19 @@ end
 # parity oracle. Mirrors `coreSexpr`/`corePatSexpr` in purs/src/Rian/Core.purs byte-for-byte.
 defmodule CoreCanon do
   alias Rian.Core.{ENum, EStr, EChar, EId, EAtom, EUnary, EBin, ECall, EDot, EIf, ECase}
-  alias Rian.Core.{EWith, EBlock, EList, EMap, ETuple, ELambda, ECapture, ECaptureNamed}
+
+  alias Rian.Core.{
+    EWith,
+    EBlock,
+    EList,
+    EMap,
+    EMapUpdate,
+    ETuple,
+    ELambda,
+    ECapture,
+    ECaptureNamed
+  }
+
   alias Rian.Core.{ECapArg, ELabel, PWild, PVar, PLit, PChar, PAtom, PTuple, PList, PCtor}
   alias Rian.Core.{PAs, PStruct, PMap, PPin, PTyped}
 
@@ -86,6 +98,10 @@ defmodule CoreCanon do
   def expr(%EList{elems: es, tail: :close}), do: "[#{Enum.map_join(es, " ", &expr/1)}]"
   def expr(%EList{elems: es, tail: t}), do: "[#{Enum.map_join(es, " ", &expr/1)} | #{expr(t)}]"
   def expr(%EMap{pairs: ps}), do: "%{#{Enum.map_join(ps, " ", &map_pair/1)}}"
+
+  def expr(%EMapUpdate{base: b, pairs: ps}),
+    do: "%{#{expr(b)} | #{Enum.map_join(ps, " ", &map_pair/1)}}"
+
   def expr(%ETuple{elems: es}), do: "{#{Enum.map_join(es, " ", &expr/1)}}"
 
   def expr(%ELambda{params: ps, body: b}),
@@ -705,7 +721,7 @@ prim_corpus = [
 
 # Rian.Core corpus (Phase 2): exercises from_expr/from_pat + the desugarings (pipe `|>` →
 # call, range `..` → List.seq, comprehension → flat_map). Excludes pins, pattern generators,
-# interpolation, bitstrings, map update (no shared Core oracle / staged).
+# interpolation, bitstrings (no shared Core oracle / staged); map *update* is covered.
 core_corpus = [
   "a + b",
   "a |> f(b)",
@@ -720,6 +736,9 @@ core_corpus = [
   "{1, 2}",
   "%{a: 1, b: 2}",
   ~S|%{"k" => v}|,
+  "%{m | a: 1}",
+  "%{m | a: 1, b: 2}",
+  ~S(%{base | "k" => v}),
   ":ok",
   "if c do a else b end",
   "if c do a end",

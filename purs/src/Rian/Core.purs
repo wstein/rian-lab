@@ -61,6 +61,7 @@ data CExpr
   | EBlock (Array CStmt)
   | EList (Array CExpr) (Maybe CExpr) -- Nothing = `:close`
   | EMap (Array CMapPair)
+  | EMapUpdate CExpr (Array CMapPair) -- `%{base | k: v, …}` (ADR-0033)
   | ETuple (Array CExpr)
   | ELambda (Array P.Param) CExpr
   | ECapture CExpr
@@ -124,6 +125,7 @@ fromExpr (P.SDot h n) = EDot (fromExpr h) n
 fromExpr (P.SIf c t e) = EIf (fromExpr c) (fromExpr t) (fromExpr e)
 fromExpr (P.STuple es) = ETuple (map fromExpr es)
 fromExpr (P.SMapLit ps) = EMap (map fromMapPair ps)
+fromExpr (P.SMapUpdate base ps) = EMapUpdate (fromExpr base) (map fromMapPair ps)
 fromExpr (P.SCapArg n) = ECapArg n
 fromExpr (P.SCapture b) = ECapture (fromExpr b)
 fromExpr (P.SCaptureNamed p a) = ECaptureNamed (fromExpr p) a
@@ -234,6 +236,8 @@ coreSexpr (EBlock stmts) = "(block" <> foldMap (\s -> " " <> coreStmt s) stmts <
 coreSexpr (EList elems Nothing) = "[" <> joinWith " " (map coreSexpr elems) <> "]"
 coreSexpr (EList elems (Just t)) = "[" <> joinWith " " (map coreSexpr elems) <> " | " <> coreSexpr t <> "]"
 coreSexpr (EMap pairs) = "%{" <> joinWith " " (map coreMapPair pairs) <> "}"
+coreSexpr (EMapUpdate base pairs) =
+  "%{" <> coreSexpr base <> " | " <> joinWith " " (map coreMapPair pairs) <> "}"
 coreSexpr (ETuple es) = "{" <> joinWith " " (map coreSexpr es) <> "}"
 coreSexpr (ELambda ps b) = "(lambda (" <> joinWith " " (map _.name ps) <> ") " <> coreSexpr b <> ")"
 coreSexpr (ECapture b) = "(& " <> coreSexpr b <> ")"
