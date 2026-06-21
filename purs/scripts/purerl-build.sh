@@ -36,9 +36,9 @@ erl -noshell -pa "$BUILD" -eval '
   io:format("✓ Rian.Token builds + runs on the BEAM via purerl~n"),
   halt(0).' || { echo "✗ Rian.Token smoke check failed"; rm -f "$BUILD/erl_crash.dump"; exit 1; }
 
-echo "→ parity: Rian.Lexer vs the Elixir reference fixtures"
-FIX=test/fixtures/lexer.fixtures
+echo "→ parity: migrated modules vs the Elixir reference fixtures"
+FIX=test/fixtures/parity.fixtures
 [ -f "$FIX" ] || { echo "✗ missing $FIX — regenerate: mix run purs/test/gen_fixtures.exs"; exit 1; }
-erlc -o "$BUILD" test/lexer_parity.erl
-erl -noshell -pa "$BUILD" -run lexer_parity run "$FIX" \
-  || { echo "✗ lexer parity failed"; rm -f "$BUILD/erl_crash.dump"; exit 1; }
+erlc -o "$BUILD" test/parity.erl
+erl -noshell -pa "$BUILD" -run parity run "$FIX" \
+  || { echo "✗ parity check failed"; rm -f "$BUILD/erl_crash.dump"; exit 1; }

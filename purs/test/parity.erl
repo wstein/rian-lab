@@ -1,10 +1,9 @@
-%% Cross-language parity harness for the PureScript lexer port (ADR-0084).
-%%
-%% Reads purs/test/fixtures/lexer.fixtures (generated from the Elixir reference by
-%% gen_fixtures.exs), re-lexes each source with the purerl-compiled `rian_lexer@ps`, and
-%% asserts the canonical token serialization matches the reference byte-for-byte. The
-%% canonical form here MUST mirror Canon in gen_fixtures.exs (lowercase hex of UTF-8 bytes).
--module(lexer_parity).
+%% Cross-language parity harness for the PureScript port (ADR-0084). Generalized over
+%% modules: reads purs/test/fixtures/parity.fixtures (generated from the Elixir reference
+%% by gen_fixtures.exs), re-runs each input through the purerl build, and asserts the
+%% canonical serialization matches the reference byte-for-byte. The canonical forms here
+%% MUST mirror Canon in gen_fixtures.exs (lowercase hex of UTF-8 bytes).
+-module(parity).
 -export([run/1]).
 
 run([Path]) ->
@@ -15,7 +14,7 @@ run([Path]) ->
     Total = length(Results),
     case Fails of
         [] ->
-            io:format("\x{2713} lexer parity: ~p/~p records match~n", [Total, Total]),
+            io:format("\x{2713} parity: ~p/~p records match~n", [Total, Total]),
             halt(0);
         _ ->
             lists:foreach(
@@ -40,13 +39,18 @@ check_line(Line) ->
         _:Reason -> {fail, Stream, SrcHex, Exp, iolist_to_binary(io_lib:format("CRASH ~p", [Reason]))}
     end.
 
+%% Rian.Lexer (canon = the token stream; detok = hex of the rendered string)
 run_stream(<<"tok">>, Src) -> canon('rian_lexer@ps':tokenize(Src));
 run_stream(<<"expr">>, Src) -> canon('rian_lexer@ps':exprTokens(Src));
 run_stream(<<"triv">>, Src) -> canon('rian_lexer@ps':tokenizeTrivia(Src));
 run_stream(<<"detok">>, Src) ->
     hexbin('rian_lexer@ps':detokenize('rian_lexer@ps':tokenize(Src)));
 run_stream(<<"detok;">>, Src) ->
-    hexbin('rian_lexer@ps':detokenizeWith(<<";">>, 'rian_lexer@ps':tokenize(Src))).
+    hexbin('rian_lexer@ps':detokenizeWith(<<";">>, 'rian_lexer@ps':tokenize(Src)));
+%% Rian.TypeStr (canon = a `,`-joined list of hex strings, or hex for normalize)
+run_stream(<<"tsc">>, Src) -> strlist('rian_typeStr@ps':splitTopCommas(Src));
+run_stream(<<"tsp">>, Src) -> strlist('rian_typeStr@ps':splitTopPipes(Src));
+run_stream(<<"tsn">>, Src) -> hexbin('rian_typeStr@ps':normalize(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.
@@ -77,6 +81,9 @@ tok({tIstr, Parts}) -> ["istr:", lists:join(",", [part(P) || P <- array:to_list(
 
 part({lit, B}) -> ["lit=", hex(B)];
 part({hole, B}) -> ["hole=", hex(B)].
+
+%% a Vec(String) result → a `,`-joined list of hex'd elements.
+strlist(Arr) -> iolist_to_binary(lists:join(",", [hex(B) || B <- array:to_list(Arr)])).
 
 hex(B) -> [io_lib:format("~2.16.0b", [X]) || X <- binary_to_list(B)].
 

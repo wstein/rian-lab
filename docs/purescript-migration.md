@@ -60,12 +60,12 @@ still depends on it — see the DoD removal-order note).
 
 ### Phase 2 — Core IR (the spine)
 
-| Module          | LOC | Notes                                             |
-| --------------- | --- | ------------------------------------------------- |
-| `Rian.Ann`      | 173 | annotation model.                                 |
-| `Rian.TypeStr`  | 155 | type pretty-printer.                              |
-| `Rian.IR`       | 262 | shared IR structs.                                |
-| `Rian.Core`     | 717 | `from_expr`/`from_pat`; the sealed-sum Core IR.   |
+| Module          | LOC | Notes / status                                                  |
+| --------------- | --- | --------------------------------------------------------------- |
+| `Rian.Ann`      | 173 | **Dropped, not ported** — the Elixir `@rian_sig`/`@rian_host` annotation bridge is obsolete under PureScript's real types. |
+| `Rian.TypeStr`  | 155 | ✅ ported (`splitTopCommas`/`splitTopPipes`/`normalize`); parity-gated (48 fixtures). |
+| `Rian.IR`       | 262 | shared IR structs (data definitions).                           |
+| `Rian.Core`     | 717 | `from_expr`/`from_pat`; the sealed-sum Core IR. Surface-AST input comes from `Pratt` (Phase 3), so its parity test composes with the parser. |
 
 ### Phase 3 — Parsers
 

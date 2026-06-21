@@ -35,10 +35,34 @@ defmodule Canon do
   defp part({:lit, s}), do: "lit=" <> hex(s)
   defp part({:hole, s}), do: "hole=" <> hex(s)
 
+  # a Vec(String) result → a `,`-joined list of hex'd elements.
+  def strlist(list), do: Enum.map_join(list, ",", &hex/1)
+
   def hex(s), do: Base.encode16(s, case: :lower)
 end
 
 alias Rian.Lexer
+alias Rian.TypeStr
+
+# Type-string corpus for Rian.TypeStr (split_top_commas / split_top_pipes / normalize).
+typestr_corpus = [
+  "",
+  "String",
+  "String, Vec(Int64)",
+  "Map(K, V), Bool",
+  "Fn(A, B), C",
+  "Map(K, Vec(V)), Result(T, E), Bool",
+  " Int53 ,  String ",
+  "Vec(Int53)",
+  "Int53 | String",
+  "B | A | B",
+  "Vec(Int) | Str | Int53",
+  "Union(B, A)",
+  "Union(Int53, String) | Bool",
+  "(A | B) | C",
+  "Result(Vec(T), E) | Nil",
+  "Map(K, V)"
+]
 
 # Sources that lex successfully (error cases are covered by the Elixir suite).
 corpus = [
@@ -133,9 +157,16 @@ lines =
         "detok\t#{Canon.hex(src)}\t#{Canon.hex(Lexer.detokenize(Lexer.tokenize(src)))}",
         "detok;\t#{Canon.hex(src)}\t#{Canon.hex(Lexer.detokenize(Lexer.tokenize(src), ";"))}"
       ]
+    end) ++
+    Enum.flat_map(typestr_corpus, fn s ->
+      [
+        "tsc\t#{Canon.hex(s)}\t#{Canon.strlist(TypeStr.split_top_commas(s))}",
+        "tsp\t#{Canon.hex(s)}\t#{Canon.strlist(TypeStr.split_top_pipes(s))}",
+        "tsn\t#{Canon.hex(s)}\t#{Canon.hex(TypeStr.normalize(s))}"
+      ]
     end)
 
-path = Path.join([__DIR__, "fixtures", "lexer.fixtures"])
+path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
 File.mkdir_p!(Path.dirname(path))
 File.write!(path, Enum.join(lines, "\n") <> "\n")
 IO.puts("wrote #{length(lines)} fixture records to #{path}")
