@@ -17,10 +17,12 @@ and the FFI boundary.
 
 ```
 purs/
-  spago.yaml          workspace + purerl backend + (purerl) package set
-  package.json        pins purs + spago (via npm)
+  spago.dhall         project + purerl backend (legacy spago / dhall)
+  packages.dhall      the purerl (Erlang-FFI) package set
+  package.json        pins purs + legacy spago (via npm)
   src/Rian/           the migrated compiler modules (Elixir lib/rian/* -> here)
   test/               spec suites + parity fixtures vs the Elixir reference
+  scripts/            build + smoke-test gate
 ```
 
 ## Toolchain
@@ -28,54 +30,48 @@ purs/
 | Tool        | Version  | Source                                  |
 | ----------- | -------- | --------------------------------------- |
 | `purs`      | 0.15.16  | npm (`purescript`)                      |
-| `spago`     | 0.93.45  | npm (`spago`)                           |
+| `spago`     | 0.21.0   | npm (`spago`, legacy/dhall — purerl)    |
 | `purerl`    | 0.0.24   | GitHub release (purerl/purerl)          |
 | Erlang/OTP  | 27+      | system (`erl`)                          |
 
-`purs` and `spago` are installed from npm and committed via `package.json`:
+> **Why legacy spago 0.21, not 0.93?** purerl ships its package set as a *dhall* set
+> (`packages.dhall`). The current spago (0.93) consumes only registry (`packages.json`)
+> sets and cannot link purerl libraries; the dhall-based legacy spago (0.21) is the
+> supported purerl build tool.
+
+`purs` and legacy `spago` install from npm (committed via `package.json`):
 
 ```sh
 cd purs && npm install
 ```
 
 `purerl` is a separate Erlang-emitting backend distributed as a platform binary from
-GitHub releases — it is **not** an npm package. Bootstrap it once (network required):
+GitHub releases — **not** an npm package. Bootstrap it once (network required):
 
 ```sh
-# 1. fetch the purerl binary for your platform from
-#    https://github.com/purerl/purerl/releases/tag/v0.0.24
-#    and put it on PATH (the `backend.cmd: purerl` in spago.yaml invokes it)
-# 2. fetch the purerl package set + build (spago reads spago.yaml)
-cd purs && npx spago build
+# fetch the purerl binary for your platform from
+#   https://github.com/purerl/purerl/releases/tag/v0.0.24
+# verify its checksum, then put it on PATH (spago's `backend = "purerl"` invokes it).
+# This repo vendors it under purs/.toolchain/ (gitignored); the build script adds it to PATH.
 ```
 
-> The purerl **package set** (`workspace.packageSet.url` in `spago.yaml`) ships
-> Erlang-FFI versions of `prelude`, `strings`, `arrays`, … — the default JS registry
-> set will not link under purerl. Pin a matching `erl-*` tag for `purs` 0.15.x.
+The first `spago build` fetches the purerl **package set** (`packages.dhall`) into
+`.spago/` (network); subsequent builds are offline.
 
 ## Verifying
 
 ```sh
-# package-set-free slice (Rian.Token today): the FULL chain, no spago needed —
-# purs → corefn → purerl → erlc → run on the BEAM. Verified end-to-end:
 cd purs && ./scripts/purerl-build.sh
-#   → ✓ Rian.Token runs on the BEAM via purerl
-
-# library-dependent modules (Lexer onward) — gated by spago once the package set
-# is wired (see the OPEN note below):
-cd purs && npx spago build && npx spago test
+#   → ✓ Rian.Token builds + runs on the BEAM via purerl
 ```
 
-`scripts/purerl-build.sh` is the working gate for every module that uses only built-in
-`Prim` types; it drives the whole purerl chain and smoke-tests the result on Erlang/OTP.
+`scripts/purerl-build.sh` is the gate for every migrated module: it runs the full chain —
+`spago build` (purs typecheck + purerl codegen of the sources **and** the package set) →
+`erlc` (Erlang → BEAM) → runs the result on Erlang/OTP. Raw `spago build` typechecks +
+emits `.erl` without the run step.
 
-### Two known caveats
+### Known caveat — compiler-version skew
 
-1. **Compiler-version skew.** purerl 0.0.24 was built against purs 0.15.x and prints
-   `Found externs for wrong compiler version (continuing anyway)` against purs 0.15.16.
-   It is harmless for codegen today; pin `purs` to purerl's exact target if it ever bites.
-2. **Package set (OPEN — Phase 1 blocker).** purerl's package set is a legacy *dhall*
-   set; spago 0.93 expects a registry (`packages.json`) set and cannot consume it
-   directly. Resolving this — legacy spago (0.21, dhall) or `extraPackages` git deps
-   generated from the dhall set — is the first task of Phase 1, since the Lexer needs
-   `strings`/`arrays`/`maybe`/regex. The `Prim`-only slice is unaffected.
+purerl 0.0.24 was built against purs 0.15.x and prints `Found externs for wrong compiler
+version (continuing anyway)` against purs 0.15.16. It is harmless for codegen today (the
+chain builds and runs); pin `purs` to purerl's exact target if it ever bites.

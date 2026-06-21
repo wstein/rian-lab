@@ -1,9 +1,9 @@
 {
   "name": "rian-purs",
   "private": true,
-  "description": "Rian compiler — PureScript/purerl port (migration of lib/)",
+  "description": "Rian compiler — PureScript/purerl port (migration of lib/, ADR-0084)",
   "devDependencies": {
-    "purescript": "^0.15.15",
-    "spago": "^0.93.42"
+    "purescript": "0.15.16",
+    "spago": "0.21.0"
   }
 }

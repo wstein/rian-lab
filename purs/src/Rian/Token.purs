@@ -3,18 +3,17 @@
 -- | `Rian.Lexer`'s `@rian_sig`). This is the first module of the Elixir → PureScript
 -- | migration (ADR-0084): the leaf-most shared type, so everything downstream can
 -- | depend on it.
--- |
--- | This module is deliberately written against only the built-in `Prim` types
--- | (no `Prelude` import) so it typechecks **offline**, before the purerl package
--- | set is fetched. Once the toolchain is bootstrapped (see `purs/README.md`), the
--- | derived `Eq`/`Show` instances and the `Data.String`-backed payload helpers move
--- | here from their hand-rolled forms.
 module Rian.Token
   ( Token(..)
   , isNewline
   , isTrivia
   , tokenName
   ) where
+
+import Prelude
+
+import Data.Generic.Rep (class Generic)
+import Data.Show.Generic (genericShow)
 
 -- | A lexer token. Mirrors `Rian.Lexer`'s `@type token` (lib/rian/lexer.ex) and the
 -- | self-hosted `Token` sum one-for-one, so the migrated lexer can emit it directly.
@@ -41,6 +40,14 @@ data Token
   | TComment String
   | THeredoc String
 
+derive instance Eq Token
+derive instance Generic Token _
+
+-- | `show` renders the constructor with its payload (`(TStr "x")`), so token streams
+-- | print readably in parity-test failures.
+instance Show Token where
+  show = genericShow
+
 -- | A significant newline separator (`{:nl}`). Drives the declaration stream;
 -- | stripped from the expression stream.
 isNewline :: Token -> Boolean
@@ -54,8 +61,7 @@ isTrivia (TComment _) = true
 isTrivia (THeredoc _) = true
 isTrivia _ = false
 
--- | The token's constructor name — used for diagnostics and the parity harness
--- | (a `Prim`-only stand-in for `Show` until the package set lands).
+-- | The token's constructor name — used for diagnostics and the parity harness.
 tokenName :: Token -> String
 tokenName TNl = "TNl"
 tokenName TLparen = "TLparen"

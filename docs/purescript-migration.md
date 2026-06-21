@@ -30,10 +30,10 @@ Sizes are the Elixir source LOC (the work, not the target LOC).
 
 ### Phase 1 — Lexer
 
-**Task 1a — wire the package set (blocker).** purerl's package set is a legacy *dhall*
-set spago 0.93 cannot consume; the Lexer needs `strings`/`arrays`/`maybe`/regex. Resolve
-via legacy spago (0.21, dhall) or `extraPackages` git deps generated from the dhall set,
-then `npx spago build`/`spago test` becomes the gate for all library-dependent modules.
+**Task 1a — wire the package set ✅.** Resolved with **legacy spago 0.21 + the purerl
+*dhall* package set** (`packages.dhall`); `./scripts/purerl-build.sh` builds the sources
+*and* the library set through purerl and runs them on the BEAM. Library-dependent modules
+can now build (`strings`/`arrays`/`maybe` are available; regex FFI for the Lexer is next).
 
 **Task 1b — port the lexer.**
 
