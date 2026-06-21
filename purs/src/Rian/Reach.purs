@@ -13,7 +13,8 @@
 -- | emitter-gap tail): value unions, the parametric-`:rs` subset, `Any`-in-JVM-operator,
 -- | clause-head pins, and associated-type dispatch — so the corpus avoids those constructs.
 -- | Bitstrings are absent from the portable Core entirely (BEAM-only), so that pin is moot.
--- | `Prelude.defines?` is not yet ported, so the corpus avoids portable-prelude module calls.
+-- | `preludeDefines` (a snapshot of `Rian.Prelude.defines?`) makes a `List`/`Dict`/`Str`/`Int`
+-- | prelude-module call portable by construction rather than host FFI.
 -- |
 -- | Parity (`rch` stream): `analyzeSexpr` serializes `{name/arity → sorted-reach + blocker
 -- | constructs}` for a parsed scope.
@@ -278,6 +279,7 @@ classify _ acc (ECall (EDot (EAtom m) fun) _) =
 classify modnames acc (ECall (EDot (EId m) fun) _) =
   if not (pascal m) then acc
   else if m `elem` modnames then acc
+  else if preludeDefines m fun then acc
   else addBlocker (ffi (m <> "." <> fun) (m `elem` concEx)) acc
 classify _ acc (ECall (EId f) _) =
   if f `elem` widePrims then addBlocker widePrimBlocker acc
@@ -412,6 +414,24 @@ fixpoint facts table =
 reachFor :: Array (Tuple (Tuple String Int) (Array String)) -> String -> Array String
 reachFor table name =
   foldl intersect targetsAll (map snd (Array.filter (\(Tuple (Tuple n _) _) -> n == name) table))
+
+-- | Whether the portable prelude (`List`/`Dict`/`Str`/`Int`, written in Rian over the primitive
+-- | layer, ADR-0047 §2) defines `Mod.fun` — such a call is portable by construction, not host FFI.
+-- | Mirrors `Rian.Prelude.defines?`, whose Elixir builds this set by parsing the prelude sources;
+-- | here it is the (stable) snapshot of those exports — drift would surface as a parity miss.
+preludeDefines :: String -> String -> Boolean
+preludeDefines m fun = case m of
+  "List" -> member fun listFuns
+  "Dict" -> member fun dictFuns
+  "Str" -> member fun strFuns
+  "Int" -> member fun intFuns
+  _ -> false
+  where
+  member x = foldl (\acc e -> acc || e == x) false
+  listFuns = [ "all", "all_by", "any", "any_by", "concat", "count_by", "drop", "filter", "find", "flat_map", "insert_by", "join", "length", "map", "map_join", "member", "product", "reduce", "reject", "rev_onto", "reverse", "seq", "sort_by", "sum", "take", "uniq" ]
+  dictFuns = [ "empty", "from_list", "get", "get_or", "has", "inc", "put", "zero" ]
+  strFuns = [ "app", "chars", "concat", "count", "drop_n", "drop_ws", "from_chars", "from_int", "is_ws", "len_c", "length", "repl", "replace", "rev", "rev_onto", "starts", "trim" ]
+  intFuns = [ "checked_add", "saturating_add", "wrapping_add" ]
 
 -- ── type-string helpers ──
 pascal :: String -> Boolean

@@ -533,6 +533,10 @@ rch_corpus = [
   "def now() := :erlang.system_time()",
   "def go(f Int53) := :erlang.spawn(f)",
   "def ext() := Foo.bar()",
+  # portable-prelude module calls (Prelude.defines?): an exported `List.length` is portable by
+  # construction (reaches all targets); a non-exported `List.bogus` falls through to host FFI.
+  "def uselen(xs Vec(Int53)) Int53 := List.length(xs)",
+  "def usebogus(xs Vec(Int53)) := List.bogus(xs)",
   "def m() := %{a: 1}",
   "def okv(x Int53) := {:ok, x}",
   "def shw(x Int53) := __prim_to_string(x)",
