@@ -119,7 +119,9 @@ run_stream(<<"ipt">>, Src) -> hexbin('rian_check@ps':inferParamTypeSexpr(Src));
 %% Rian.Reach effect_sets (canon = each function's inferred effect set)
 run_stream(<<"efs">>, Src) -> hexbin('rian_reach@ps':effectSetsSexpr(Src));
 %% Rian.Assemble macro expansion (canon = the Core of every assembled, macro-expanded clause body)
-run_stream(<<"mxb">>, Src) -> hexbin('rian_assemble@ps':assembleBodiesSexpr(Src)).
+run_stream(<<"mxb">>, Src) -> hexbin('rian_assemble@ps':assembleBodiesSexpr(Src));
+%% Rian.Opaque erase (canon = each erased function's param/ret types + stripped body Core)
+run_stream(<<"opq">>, Src) -> hexbin('rian_opaque@ps':eraseSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

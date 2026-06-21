@@ -18,6 +18,7 @@ module Rian.Decl
   , typeSexpr
   , RawDef
   , buildFunc
+  , splitWords
   ) where
 
 import Prelude

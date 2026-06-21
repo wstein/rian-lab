@@ -27,6 +27,7 @@ module Rian.Check
   , RangeInfo
   , OpaqueInfo
   , Fbound
+  , emptyIc
   , programIc
   , inferReturnType
   , inferParamType

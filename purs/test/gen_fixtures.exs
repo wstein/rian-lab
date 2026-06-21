@@ -724,6 +724,14 @@ mxb_corpus = [
   "macro double(x) := x + x\npub def m() Int53 := comptime(double(2))"
 ]
 
+# Rian.Opaque erase (ADR-0067) — opaque→base type subst + `.of`/cast body stripping. `opq`:
+opq_corpus = [
+  "opaque Token := String\npub def f(t Token) Token := t",
+  "opaque Id := Int53\npub def g(x Id) Id := Id.of(x)",
+  "opaque A := B\nopaque B := Int64\npub def h(a A) A := a",
+  "abstract Meters := Int53 do\n  to base() Int53\nend\npub def m(d Meters) Int53 := d.base()"
+]
+
 asm_corpus = [
   "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := f(x)\nend",
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
@@ -1644,6 +1652,30 @@ lines =
     end) ++
     Enum.map(asm_corpus, fn s ->
       "asm\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.prog(Decl.parse(s, assemble_only: true)))}"
+    end) ++
+    Enum.map(opq_corpus, fn s ->
+      prog = Rian.Opaque.erase(Decl.parse(s, assemble_only: true))
+      funcs = Map.get(prog, :funcs, [])
+
+      canon =
+        funcs
+        |> Enum.map(fn f ->
+          pts = f.params |> Enum.map(fn p -> p.type end) |> Enum.join(",")
+
+          body =
+            case f.clauses do
+              [c | _] when c.body != nil ->
+                CoreCanon.expr(Rian.Core.from_expr(Rian.Pratt.parse_body(c.body)))
+
+              _ ->
+                "_"
+            end
+
+          "#{f.name}:#{pts}=>#{f.ret}=#{body}"
+        end)
+        |> Enum.join(";")
+
+      "opq\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
     end) ++
     Enum.map(mxb_corpus, fn s ->
       funcs = Map.get(Decl.parse(s, assemble_only: true), :funcs, [])
