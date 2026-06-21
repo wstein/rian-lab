@@ -654,6 +654,18 @@ ilr_corpus = [
 # Rian.Check `check_program` corpus — the `gate` stream. The return-assignability gate: a body
 # whose inferred type is assignable to the declared return passes (`ok`), else the first mismatch
 # message. Concrete types (no error-sets / effects / bounds / coherence / literal-width-adoption).
+# Rian.Check `infer_param_type` corpus — the `ipt` stream. An untyped private param is inferred
+# from the body: an arithmetic neighbour (Int53), a string concat (String), a compare (Int53), a
+# typed callee parameter (cross-function); a pure pass-through stays `:unknown` (InferLocal then
+# generalizes it to `forall T`).
+ipt_corpus = [
+  "def f(x) := x + 1",
+  "def cat(s) := s <> \"!\"",
+  "def cmp(a) := a == 3",
+  "def passthru(x) := x",
+  "def callee(a Int53) := a\ndef caller(y) := callee(y)"
+]
+
 gate_corpus = [
   "pub def f(x Int53) Int53 := x",
   "pub def g(x Int53) String := x",
@@ -1341,6 +1353,23 @@ defmodule CheckCanon do
     |> Enum.join(";")
   end
 
+  # the `ipt` stream: each function's parameters' `infer_param_type` (`name/i=>type`) under a
+  # filled `ic`.
+  def infer_param(src) do
+    prog = Rian.Decl.parse(src, assemble_only: true)
+    ic = Rian.Check.program_ic(prog)
+    funcs = Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
+
+    funcs
+    |> Enum.flat_map(fn f ->
+      Enum.map(0..(length(f.params) - 1)//1, fn i ->
+        "#{f.name}/#{i}=>#{out(Rian.Check.infer_param_type(f, i, ic))}"
+      end)
+    end)
+    |> Enum.sort()
+    |> Enum.join(";")
+  end
+
   # the `gate` stream: `check_program`'s verdict — `ok` or the first return-mismatch message.
   def gate(src) do
     case Rian.Check.check_program(Rian.Decl.parse(src, assemble_only: true)) do
@@ -1535,6 +1564,9 @@ lines =
     end) ++
     Enum.map(ilr_corpus, fn s ->
       "ilr\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.fill_returns(s))}"
+    end) ++
+    Enum.map(ipt_corpus, fn s ->
+      "ipt\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer_param(s))}"
     end) ++
     Enum.map(gate_corpus, fn s ->
       "gate\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.gate(s))}"

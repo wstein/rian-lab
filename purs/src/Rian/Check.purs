@@ -29,6 +29,7 @@ module Rian.Check
   , Fbound
   , programIc
   , inferReturnType
+  , inferParamType
   , fillLocalRets
   , checkProgram
   , unifySexpr
@@ -40,11 +41,12 @@ module Rian.Check
   , inferReturnTypeSexpr
   , fillLocalRetsSexpr
   , checkProgramSexpr
+  , inferParamTypeSexpr
   ) where
 
 import Prelude hiding (join)
 
-import Data.Array (concatMap, filter, find, findMap, foldl, head, index, last, length, mapMaybe, mapWithIndex, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
+import Data.Array (concatMap, filter, find, findMap, foldl, fromFoldable, head, index, last, length, mapMaybe, mapWithIndex, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing, maybe)
@@ -53,7 +55,7 @@ import Data.String.CodeUnits (singleton, toCharArray)
 import Data.String.Common (joinWith, replaceAll, split)
 import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
-import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), fromExpr, fromPat)
+import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Func, Param, Prog, Type)
 import Rian.Prelude (withPrelude)
@@ -1001,6 +1003,145 @@ numWidens _ _ = false
 -- | The `gate` parity unit: `check_program`'s verdict — `ok` or the first mismatch message.
 checkProgramSexpr :: String -> String
 checkProgramSexpr src = fromMaybe "ok" (checkProgram (parseToProg src))
+
+--------------------------------------------------------------------------------
+-- infer_param_type: bidirectional private-parameter inference (ADR-0034)
+--------------------------------------------------------------------------------
+
+-- | Infer a private function's parameter type at position `i` — an arithmetic/compare operator,
+-- | a string concat, or a typed callee parameter pushes its expected type onto the variable; a
+-- | literal/ctor clause-head pattern pins it. `Unknown` when unconstrained (InferLocal generalizes
+-- | to `forall T`); `Mismatch` on a provable conflict.
+-- @rian_sig pub def infer_param_type(func val Func, i val Int53, ic val Ic) String
+inferParamType :: Func -> Int -> Ic -> Ty
+inferParamType f i ic = foldl (\acc c -> foldConstraint acc (clauseC c)) Unknown f.clauses
+  where
+  clauseC c = case index c.pats i of
+    Nothing -> Unknown
+    Just pat -> case fromPat pat of
+      PVar vn -> maybe Unknown (\b -> varConstraint vn (clauseEnv c.pats f.params ic) ic (fromExpr (normalize (P.parseBody b)))) c.body
+      other -> patternType ic other
+
+-- the type a clause-head pattern requires of its scrutinee (structural patterns stay `Unknown`).
+patternType :: Ic -> CPat -> Ty
+patternType _ (PLit (LInt _)) = TName "Int53"
+patternType _ (PLit (LStr _)) = TName "String"
+patternType _ (PChar _) = TName "Char"
+patternType ic (PCtor c _) = maybe Unknown TName (ctorType ic c)
+patternType _ _ = Unknown
+
+-- fold two parameter constraints: `Unknown` = identity, a concrete wins, two differing concretes
+-- conflict. `unify`'s clash is softened to `Unknown` by `conservative` — restore it (a clash IS
+-- the signal for parameter inference).
+foldConstraint :: Ty -> Ty -> Ty
+foldConstraint Unknown t = t
+foldConstraint t Unknown = t
+foldConstraint Mismatch _ = Mismatch
+foldConstraint _ Mismatch = Mismatch
+foldConstraint a b = nilableMismatch (conservative (unify a b)) a b
+
+nilableMismatch :: Ty -> Ty -> Ty -> Ty
+nilableMismatch Unknown (TName a) (TName b) = if a /= b then Mismatch else Unknown
+nilableMismatch t _ _ = t
+
+foldConstraints :: Array Ty -> Ty
+foldConstraints = foldl foldConstraint Unknown
+
+-- the type the body forces on variable `name` (the "expected type in", recursed structurally).
+varConstraint :: String -> Env -> Ic -> CExpr -> Ty
+varConstraint name env ic node = case node of
+  EBin op l r ->
+    let
+      here =
+        if op == "<>" && (varIs name l || varIs name r) then TName "String"
+        else if isArithOp op && varIs name l then numHint (infer r env ic)
+        else if isArithOp op && varIs name r then numHint (infer l env ic)
+        else if elem op boolOps && varIs name l then concretize (infer r env ic)
+        else if elem op boolOps && varIs name r then concretize (infer l env ic)
+        else Unknown
+    in
+      foldConstraints [ here, varConstraint name env ic l, varConstraint name env ic r ]
+  ECall (EId fn) as ->
+    let
+      fromCallee = case find (\(Tuple k _) -> k == Tuple fn (length as)) ic.fsigs of
+        Just (Tuple _ sig) ->
+          foldl (\acc (Tuple i a) -> if varIs name a then foldConstraint acc (concretize (sigParamTy sig i)) else acc)
+            Unknown
+            (mapWithIndex Tuple as)
+        Nothing -> Unknown
+    in
+      foldl (\acc a -> foldConstraint acc (varConstraint name env ic a)) fromCallee as
+  ECall _ as -> foldConstraints (map (varConstraint name env ic) as)
+  EUnary _ a -> varConstraint name env ic a
+  EIf c t e -> foldConstraints (map (varConstraint name env ic) [ c, t, e ])
+  EBlock stmts -> foldConstraints (map (\s -> varConstraint name env ic (stmtExpr s)) stmts)
+  ECase s arms ->
+    let
+      fromScrut = if varIs name s then foldConstraints (map (\a -> patternType ic a.pat) arms) else Unknown
+    in
+      foldConstraints ([ fromScrut, varConstraint name env ic s ] <> map (\a -> varConstraint name env ic a.body) arms)
+  EList es _ -> foldConstraints (map (varConstraint name env ic) es)
+  _ -> foldConstraints (map (varConstraint name env ic) (cexprChildren node))
+
+-- the callee's i-th declared parameter type (`Unknown` when out of range or itself untyped).
+sigParamTy :: Fsig -> Int -> Ty
+sigParamTy sig i = case index sig.params i of
+  Just (Just t) -> TName t
+  _ -> Unknown
+
+isArithOp :: String -> Boolean
+isArithOp op = elem op arithOps || elem op intOps
+
+varIs :: String -> CExpr -> Boolean
+varIs name (EId n) = n == name
+varIs _ _ = false
+
+-- an arithmetic neighbour's numeric hint: an int type's ordinal base; else the `Int53` default.
+numHint :: Ty -> Ty
+numHint (TName t) = if intType (TName t) then ordinalBase (TName t) else Unknown
+numHint _ = TName "Int53"
+
+stmtExpr :: CStmt -> CExpr
+stmtExpr (CBind _ e) = e
+stmtExpr (CTypedBind _ _ e) = e
+stmtExpr (CExprStmt e) = e
+
+-- direct sub-expressions (the generic `var_constraint` recurse — a var use may sit in any child).
+cexprChildren :: CExpr -> Array CExpr
+cexprChildren = case _ of
+  EUnary _ x -> [ x ]
+  EBin _ l r -> [ l, r ]
+  ECall f as -> [ f ] <> as
+  EDot h _ -> [ h ]
+  EIf c t e -> [ c, t, e ]
+  ECase s arms -> [ s ] <> concatMap (\a -> [ a.body ]) arms
+  EWith cls body arms -> map _.expr cls <> [ body ] <> map _.body arms
+  EBlock stmts -> map stmtExpr stmts
+  EList es tl -> es <> fromFoldable tl
+  EMap ps -> concatMap mapPairExpr ps
+  EMapUpdate base ps -> [ base ] <> concatMap mapPairExpr ps
+  ETuple es -> es
+  ELambda _ b -> [ b ]
+  ECapture b -> [ b ]
+  ECaptureNamed p _ -> [ p ]
+  ELabel _ e -> [ e ]
+  _ -> []
+
+mapPairExpr :: CMapPair -> Array CExpr
+mapPairExpr (CMAtom _ v) = [ v ]
+mapPairExpr (CMKey k v) = [ k, v ]
+
+-- | The `ipt` parity unit: each function's parameters' inferred types (`name/i=>type`), under a
+-- | filled `ic`.
+inferParamTypeSexpr :: String -> String
+inferParamTypeSexpr src =
+  joinWith ";" (sortWith identity (concatMap perFunc funcs))
+  where
+  prog = parseToProg src
+  funcs = prog.funcs <> concatMap _.funcs prog.mods
+  ic0 = programIc prog
+  ic = ic0 { funs = fillLocalRets funcs ic0 }
+  perFunc f = mapWithIndex (\i _ -> f.name <> "/" <> show i <> "=>" <> tyStr (inferParamType f i ic)) f.params
 
 -- the parity env (must match `CheckCanon.fixed_env` in gen_fixtures.exs).
 fixedEnv :: Env
