@@ -92,7 +92,7 @@ what the Core oracle confirms over the surface form.
 | `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
 | `Rian.Coherence`      | ~240 | ✅ ported — protocol/impl coherence rules (ADR-0061 §5): unknown-protocol, method-set/arity, runtime-discriminator presence + non-overlap, duplicate. Pure pass over the parsed IR; parity-gated via the `coh` stream (8 records), serializing `rule:proto:type` synthesis-free so incoherent inputs (which the desugar raises on) compare too. The runtime discriminator is keyed by an equivalence class (`int`/`bool`/…/`sum:<name>`) rather than the BEAM guard string — same overlap outcome, no codegen coupling. |
 | `Rian.Capability`     | 290  | BEAM linearity (`iso`/`ref`); FFI-adjacent.     |
-| `Rian.Check`          | 2724 | 🟡 **stage 1 ported** — the `unify`/`join` type algebra (`Ty` sum; `uni`/`joi` streams). `infer`/`annotate`/error-sets/gates pending. **reframe, not lift**. |
+| `Rian.Check`          | 2724 | 🟡 **stages 1-2 ported** — the `unify`/`join` type algebra + `infer` over the expression core (`uni`/`joi`/`inf` streams). `infer` if/case/calls/generics, `annotate`, error-sets, the program gates pending. **reframe, not lift**. |
 | `Rian.Reach`          | 1235 | target-set portability inference (ADR-0057/58). |
 
 ### Phase 5 — Emitters
@@ -173,7 +173,7 @@ ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`ex
 streams), the first slice of the inference engine; `infer`/`annotate`/error-sets/the program
 gates are later stages. **Next:** `Check.infer` (the Core-node dispatch), then the program-wide
 tail passes (macro expansion, protocol synthesis, interpolation/stdlib/infer-local).
-Total **569/569** parity records across
+Total **603/603** parity records across
 Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External/Coherence/Check.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
