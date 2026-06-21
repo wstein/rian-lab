@@ -42,7 +42,7 @@ type Registry = { sums :: Array String, structs :: Array String }
 -- | `Rian.Coherence.violations/4`: every impl's per-impl rules, then the cross-impl
 -- | duplicate / shared-discriminator rules. `targets` is the scope's `@targets`
 -- | (`Nothing` = unannotated = all targets, so the runtime-discriminator rule applies).
--- @rian_sig pub def violations(protocols val _Unk, impls val Vec(_Unk), reg val _Unk, targets val Option(Vec(Symbol))) Vec(_Unk)
+-- @rian_sig pub def violations(protocols val Vec(Protocol), impls val Vec(ImplDecl), reg val Registry, targets val Option(Vec(Symbol))) Vec(Violation)
 violations :: Array Protocol -> Array ImplDecl -> Registry -> Maybe (Array String) -> Array Violation
 violations protocols impls reg targets =
   Array.concatMap (implViolations protocols reg) impls <> overlapViolations impls reg targets

@@ -47,7 +47,7 @@ data Cov = Complete (Array CtorId) | Incomplete
 -- ── Environment helpers ─────────────────────────────────────────────────────
 
 -- | Base env: built-in bool, list, and the infinite primitive types.
--- @rian_sig pub def baseEnv() _Unk
+-- @rian_sig pub def baseEnv() Env
 baseEnv :: Env
 baseEnv =
   { arity: [ Tuple CNil 0, Tuple CCons 2, Tuple (CName "true") 0, Tuple (CName "false") 0 ]
@@ -65,7 +65,7 @@ baseEnv =
   }
 
 -- | Register a sum type: `variants` is `[(ctor_id, arity)]`.
--- @rian_sig pub def addType(env val _Unk, typeName val Symbol, variants val Vec(_Unk)) _Unk
+-- @rian_sig pub def addType(env val Env, typeName val Symbol, variants val Vec((CtorId, Int53))) Env
 addType :: Env -> String -> Array (Tuple CtorId Int) -> Env
 addType env tn variants =
   let
@@ -78,7 +78,7 @@ addType env tn variants =
 -- | Register a finite ordinal `range` type (ADR-0036): the inclusive interval `lo..hi`
 -- | over an ordinal base. Its members are the `{:lit, v}` constructors, so a `case`
 -- | covering the whole interval is exhaustive.
--- @rian_sig pub def addRange(env val _Unk, typeName val Symbol, lo val Int53, hi val Int53) _Unk
+-- @rian_sig pub def addRange(env val Env, typeName val Symbol, lo val Int53, hi val Int53) Env
 addRange :: Env -> String -> Int -> Int -> Env
 addRange env tn lo hi =
   let
@@ -90,7 +90,7 @@ addRange env tn lo hi =
 -- | The signature env for a whole program (prelude + user types + ranges + structs). The
 -- | built-in `Option` is prepended via `Rian.Prelude.with_prelude`, so a `case` over it is
 -- | exhaustiveness-checkable without a `type Option := …` in the source (ADR-0047 §3).
--- @rian_sig pub def programEnv(types val Vec(Type), structs val Vec(Struct), ranges val Vec(Range)) _Unk
+-- @rian_sig pub def programEnv(types val Vec(Type), structs val Vec(Struct), ranges val Vec(Range)) Env
 programEnv :: Array Type -> Array Struct -> Array Range -> Env
 programEnv types structs ranges =
   foldl addS (foldl addR (foldl addT baseEnv (withPrelude types)) ranges) structs
@@ -142,7 +142,7 @@ defaultM rows = rows >>= row
 -- ── Usefulness U(P, q) ───────────────────────────────────────────────────────
 
 -- | Is pattern vector `q` useful w.r.t. matrix `rows`?
--- @rian_sig pub def useful(rows val Vec(_Unk), q val Vec(_Unk), env val _Unk) Bool
+-- @rian_sig pub def useful(rows val Vec(Vec(CkPat)), q val Vec(CkPat), env val Env) Bool
 useful :: Array (Array CkPat) -> Array CkPat -> Env -> Boolean
 useful rows q env = case uncons q of
   Nothing -> null rows
@@ -190,7 +190,7 @@ type Result = { exhaustive :: Boolean, missing :: Maybe (Array CkPat), unreachab
 
 -- | Analyze clauses. `n` is the scrutinee arity. Returns exhaustiveness, a witness
 -- | (when not exhaustive), and the 0-based indices of unreachable clauses.
--- @rian_sig pub def analyze(arms val Vec(_Unk), n val Int53, env val _Unk) _Unk
+-- @rian_sig pub def analyze(arms val Vec(Arm), n val Int53, env val Env) Result
 analyze :: Array Arm -> Int -> Env -> Result
 analyze arms n env =
   let
@@ -207,7 +207,7 @@ analyze arms n env =
 
 -- ── Rendering (for diagnostics + parity) ─────────────────────────────────────
 
--- @rian_sig pub def render(node val _Unk) String
+-- @rian_sig pub def render(node val CkPat) String
 render :: CkPat -> String
 render Wild = "_"
 render (Ctor (CLit v) []) = inspectLit v

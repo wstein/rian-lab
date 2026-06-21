@@ -42,7 +42,7 @@ overflowOps = map (\n -> "__prim_" <> n) [ "wrapping_add", "saturating_add", "ch
 -- | Rewrite `Prim.<name>(args)` → `__prim_<name>(args)` (and bare `panic(msg)`)
 -- | throughout an expression. Idempotent; non-`Prim` calls pass through; an unknown
 -- | `Prim.<name>` raises.
--- @rian_sig pub def normalize(node val _Unk) _Unk
+-- @rian_sig pub def normalize(node val Surface) Surface
 normalize :: P.Surface -> P.Surface
 normalize (P.SCall (P.SDot (P.SId "Prim") name) args)
   | name `elem` names = P.SCall (P.SId ("__prim_" <> name)) (map normalize args)

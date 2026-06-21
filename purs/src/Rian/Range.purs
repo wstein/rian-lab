@@ -32,7 +32,7 @@ lookupBound n = map snd <<< Array.find (\t -> fst t == n)
 
 -- | Rewrite every `Name.of(n)` (for a `Name` in `table`) in a core expression; identity when
 -- | the table is empty.
--- @rian_sig pub def expandOf(node val Expr, table val Dict(String, _Unk)) Expr
+-- @rian_sig pub def expandOf(node val Expr, table val Dict(String, Bound)) Expr
 expandOf :: Table -> CExpr -> CExpr
 expandOf table node = if Array.null table then node else go node
   where

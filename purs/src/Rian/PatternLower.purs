@@ -125,7 +125,7 @@ isLowerOrDigit c = isLowerAlpha c || (c >= '0' && c <= '9')
 -- ── Lowering ─────────────────────────────────────────────────────────────────
 
 -- | Lower one Core pattern → `Tuple checker introduced_guard?`.
--- @rian_sig pub def lower(pat val Pat, env val _Unk) _Unk
+-- @rian_sig pub def lower(pat val Pat, env val Env) (CkPat, Bool)
 lower :: CPat -> Env -> Tuple CkPat Boolean
 lower PWild _ = Tuple Wild false
 lower (PVar _) _ = Tuple Wild false
@@ -184,7 +184,7 @@ lowerList elems tail env = case uncons elems of
       Tuple (Ctor CCons [ hc, tc ]) (hi || ti)
 
 -- | Lower one clause: parse the source pattern vector, lower each, OR the guard flags.
--- @rian_sig pub def lowerClause(src val String, guard val Bool, env val _Unk) _Unk
+-- @rian_sig pub def lowerClause(src val String, guard val Bool, env val Env) Clause
 lowerClause :: String -> Boolean -> Env -> Clause
 lowerClause src guard env =
   let
@@ -194,7 +194,7 @@ lowerClause src guard env =
     { pat: pats, guard: guard || intro }
 
 -- | Register a product type (struct) so struct patterns can be ordered + decomposed.
--- @rian_sig pub def addStruct(env val _Unk, name val String, fields val Vec(String)) _Unk
+-- @rian_sig pub def addStruct(env val Env, name val String, fields val Vec(String)) Env
 addStruct :: Env -> String -> Array String -> Env
 addStruct env name fields =
   let s = toSnake name in

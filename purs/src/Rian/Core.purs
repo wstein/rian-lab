@@ -104,7 +104,7 @@ data CMapPatPair
 --------------------------------------------------------------------------------
 
 -- | Translate a surface expression (`Rian.Pratt` output) into the typed core.
--- @rian_sig pub def fromExpr(surface val _Unk) Expr
+-- @rian_sig pub def fromExpr(surface val Surface) Expr
 fromExpr :: P.Surface -> CExpr
 fromExpr (P.SNum n) = ENum n
 fromExpr (P.SStr s) = EStr s
@@ -181,7 +181,7 @@ desugarFor clauses body = case Array.uncons clauses of
 --------------------------------------------------------------------------------
 
 -- | Translate a surface pattern (`Rian.Pratt` output) into the typed core.
--- @rian_sig pub def fromPat(surface val _Unk) Pat
+-- @rian_sig pub def fromPat(surface val Surface) Pat
 fromPat :: P.Pat -> CPat
 fromPat P.PWild = PWild
 fromPat (P.PVar name) = PVar name

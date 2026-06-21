@@ -132,7 +132,7 @@ data MapPatPair
 
 type Parsed a = Tuple a (List Token)
 
--- @rian_sig pub def parse(src val String) _Unk
+-- @rian_sig pub def parse(src val String) Surface
 parse :: String -> Surface
 parse src =
   let Tuple ast rest = parseExpr (List.fromFoldable (exprTokens src)) 0
