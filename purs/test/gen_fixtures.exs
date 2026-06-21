@@ -41,9 +41,140 @@ defmodule Canon do
   def hex(s), do: Base.encode16(s, case: :lower)
 end
 
+# Canonical s-expression for the typed Core (Rian.Core.from_expr/from_pat output) — the `cor`
+# parity oracle. Mirrors `coreSexpr`/`corePatSexpr` in purs/src/Rian/Core.purs byte-for-byte.
+defmodule CoreCanon do
+  alias Rian.Core.{ENum, EStr, EChar, EId, EAtom, EUnary, EBin, ECall, EDot, EIf, ECase}
+  alias Rian.Core.{EWith, EBlock, EList, EMap, ETuple, ELambda, ECapture, ECaptureNamed}
+  alias Rian.Core.{ECapArg, ELabel, PWild, PVar, PLit, PChar, PAtom, PTuple, PList, PCtor}
+  alias Rian.Core.{PAs, PStruct, PMap, PPin, PTyped}
+
+  def expr(%ENum{text: t}), do: t
+  def expr(%EStr{value: s}), do: "\"#{s}\""
+  def expr(%EChar{value: c}), do: "?#{c}"
+  def expr(%EId{name: x}), do: x
+  def expr(%EAtom{name: a}), do: ":" <> a
+  def expr(%EUnary{op: op, arg: x}), do: "(#{op} #{expr(x)})"
+  def expr(%EBin{op: op, left: l, right: r}), do: "(#{op} #{expr(l)} #{expr(r)})"
+
+  def expr(%ECall{fun: f, args: args}),
+    do: "(call #{expr(f)}#{Enum.map_join(args, "", fn a -> " " <> expr(a) end)})"
+
+  def expr(%EDot{head: h, name: n}), do: "(. #{expr(h)} #{n})"
+  def expr(%EIf{cond: c, then: t, else: e}), do: "(if #{expr(c)} #{expr(t)} #{expr(e)})"
+
+  def expr(%ECase{scrut: s, arms: arms}),
+    do:
+      "(case #{expr(s)}#{Enum.map_join(arms, "", fn {p, _g, b} -> " (#{pat(p)} -> #{expr(b)})" end)})"
+
+  def expr(%EWith{clauses: cls, body: body, els: els}) do
+    cs = Enum.map_join(cls, " ", fn {p, e} -> "(<- #{pat(p)} #{expr(e)})" end)
+
+    e =
+      if els == [],
+        do: "",
+        else:
+          " (else#{Enum.map_join(els, "", fn {p, _g, b} -> " (#{pat(p)} -> #{expr(b)})" end)})"
+
+    "(with #{cs} #{expr(body)}#{e})"
+  end
+
+  def expr(%EBlock{stmts: stmts}),
+    do: "(block#{Enum.map_join(stmts, "", fn s -> " " <> stmt(s) end)})"
+
+  def expr(%EList{elems: es, tail: :close}), do: "[#{Enum.map_join(es, " ", &expr/1)}]"
+  def expr(%EList{elems: es, tail: t}), do: "[#{Enum.map_join(es, " ", &expr/1)} | #{expr(t)}]"
+  def expr(%EMap{pairs: ps}), do: "%{#{Enum.map_join(ps, " ", &map_pair/1)}}"
+  def expr(%ETuple{elems: es}), do: "{#{Enum.map_join(es, " ", &expr/1)}}"
+
+  def expr(%ELambda{params: ps, body: b}),
+    do: "(lambda (#{Enum.map_join(ps, " ", fn {n, _} -> n end)}) #{expr(b)})"
+
+  def expr(%ECapture{body: b}), do: "(& #{expr(b)})"
+  def expr(%ECaptureNamed{path: p, arity: a}), do: "(&/ #{expr(p)} #{a})"
+  def expr(%ECapArg{n: n}), do: "&#{n}"
+  def expr(%ELabel{name: n, expr: e}), do: "#{n}: #{expr(e)}"
+
+  defp map_pair({{:key, k}, v}), do: "#{expr(k)} => #{expr(v)}"
+  defp map_pair({k, v}), do: "#{k}: #{expr(v)}"
+
+  defp stmt({:bind, n, e}), do: "(:= #{n} #{expr(e)})"
+  defp stmt({:typed_bind, n, t, e}), do: "(:= #{n} #{t} #{expr(e)})"
+  defp stmt({:expr, e}), do: expr(e)
+
+  def pat(%PWild{}), do: "_"
+  def pat(%PVar{name: x}), do: x
+  def pat(%PLit{value: v}) when is_binary(v), do: "\"#{v}\""
+  def pat(%PLit{value: v}), do: to_string(v)
+  def pat(%PChar{value: cp}), do: "?#{cp}"
+  def pat(%PAtom{name: a}), do: ":" <> a
+  def pat(%PTuple{elems: ps}), do: "{#{Enum.map_join(ps, ", ", &pat/1)}}"
+  def pat(%PList{elems: ps, tail: :close}), do: "[#{Enum.map_join(ps, ", ", &pat/1)}]"
+  def pat(%PList{elems: ps, tail: t}), do: "[#{Enum.map_join(ps, ", ", &pat/1)} | #{pat(t)}]"
+  def pat(%PCtor{ctor: n, args: []}), do: n
+  def pat(%PCtor{ctor: n, args: args}), do: "#{n}(#{Enum.map_join(args, ", ", &pat/1)})"
+  def pat(%PAs{name: n, pat: p}), do: "(@ #{n} #{pat(p)})"
+
+  def pat(%PStruct{name: n, fields: fs}),
+    do: "#{n}(#{Enum.map_join(fs, ", ", fn {k, p} -> "#{k}: #{pat(p)}" end)})"
+
+  def pat(%PMap{pairs: ps}), do: "%{#{Enum.map_join(ps, ", ", &map_pat_pair/1)}}"
+
+  # pins + type-patterns are excluded from the Core corpus (no shared renderer / no reference clause).
+  def pat(%PPin{}), do: raise("pin pattern is excluded from the Core parity corpus")
+  def pat(%PTyped{}), do: raise("type-pattern has no sexpr clause")
+
+  defp map_pat_pair({{:key, k}, p}), do: "#{expr(k)} => #{pat(p)}"
+  defp map_pat_pair({k, p}), do: "#{k}: #{pat(p)}"
+end
+
 alias Rian.Lexer
 alias Rian.TypeStr
 alias Rian.Pratt
+alias Rian.Core
+
+# Rian.Core corpus (Phase 2): exercises from_expr/from_pat + the desugarings (pipe `|>` →
+# call, range `..` → List.seq, comprehension → flat_map). Excludes pins, pattern generators,
+# interpolation, bitstrings, map update (no shared Core oracle / staged).
+core_corpus = [
+  "a + b",
+  "a |> f(b)",
+  "x |> f",
+  "1 .. 10",
+  "n - 1 .. m + 1",
+  "f(a, b)",
+  "M.f(x)",
+  "a.b.c",
+  "[1, 2, 3]",
+  "[h | t]",
+  "{1, 2}",
+  "%{a: 1, b: 2}",
+  ~S|%{"k" => v}|,
+  ":ok",
+  "if c do a else b end",
+  "if c do a end",
+  "case x do 1 -> a\n_ -> b end",
+  "case t do {a, b} -> a\n_ -> 0 end",
+  "case r do Ok(v) -> v\nErr(e) -> e end",
+  "case xs do [] -> 0\n[h | t] -> h end",
+  "case p do Point(x: a, y: b) -> a\n_ -> 0 end",
+  "case v do n @ Foo(x) -> n\n_ -> v end",
+  "case w do \"hi\" -> 1\n_ -> 0 end",
+  "case n do -1 -> a\n0 -> b\n_ -> c end",
+  "case m do %{a: x} -> x\n_ -> 0 end",
+  "(x) -> x + 1",
+  "(x, y) -> x",
+  "for x <- xs do x + 1 end",
+  "for x <- xs, x > 0 do x end",
+  "for x <- xs, y <- ys do x + y end",
+  "with Ok(x) <- r do x end",
+  "with Ok(x) <- r do x else Err(e) -> e end",
+  "&foo/1",
+  "&(&1 + &2)",
+  "Point(x: 1, y: 2)",
+  "if c do x := 1; x + 2 end",
+  "if c do x Int64 := 5; x end"
+]
 
 # Pratt expression-core corpus (ADR-0084 Phase 3, stage 1). Scoped to the ported forms —
 # no if/case/with/for/lambda/blocks/patterns/bitstrings/interpolation/map-update — and
@@ -253,6 +384,9 @@ lines =
     end) ++
     Enum.map(pratt_corpus, fn s ->
       "psx\t#{Canon.hex(s)}\t#{Canon.hex(Pratt.parse_sexpr(s))}"
+    end) ++
+    Enum.map(core_corpus, fn s ->
+      "cor\t#{Canon.hex(s)}\t#{Canon.hex(CoreCanon.expr(Core.from_expr(Pratt.parse(s))))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])

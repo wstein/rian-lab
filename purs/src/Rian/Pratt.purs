@@ -23,6 +23,7 @@ module Rian.Pratt
   , IPart(..)
   , parse
   , parseSexpr
+  , sexpr
   ) where
 
 import Prelude

@@ -53,10 +53,11 @@ the full escape/`Char`/interpolation/`:`-atom/number grammar, in `purs/src/Rian/
 **No regex or FFI** — the scanners are hand-rolled over codepoints, which also dodges
 purerl's byte-wise `Data.String.CodePoints.uncons` (only `toCodePointArray`/`singleton` are
 UTF-8-correct there). **Parity:** `purs/test/gen_fixtures.exs` emits canonical token streams
-from the Elixir reference over a 60-source corpus; the Erlang harness `lexer_parity.erl`
-re-lexes with the purerl build and asserts byte-equality — **204/204 records match**, wired
-into `scripts/purerl-build.sh`. The Elixir `Lexer` stays (parity oracle + all of `lib/`
-still depends on it — see the DoD removal-order note).
+from the Elixir reference; the Erlang harness — the generalized, module-dispatched
+`purs/test/parity.erl` — re-lexes with the purerl build and asserts byte-equality (the lexer's
+204 records, of 327 total across all ported modules), wired into `scripts/purerl-build.sh`.
+The Elixir `Lexer` stays (parity oracle + all of `lib/` still depends on it — see the DoD
+removal-order note).
 
 ### Phase 2 — Core IR (the spine)
 
@@ -64,8 +65,8 @@ still depends on it — see the DoD removal-order note).
 | --------------- | --- | --------------------------------------------------------------- |
 | `Rian.Ann`      | 173 | **Reader dropped; convention retained.** The Elixir `Rian.Ann` module (reads `@rian_sig` from Elixir AST/`.beam`) is obsolete, but `@rian_sig` annotation *comments* live on in PureScript source — they carry the **capabilities** (`val`/`iso`/`ref`/`tag`) and **type bridge** (`Int`→`Int53`, `Array`→`Vec`, …) that PS types underdetermine, read by the Phase-7 PS→Rian transpiler. See `purs/README.md`. |
 | `Rian.TypeStr`  | 155 | ✅ ported (`splitTopCommas`/`splitTopPipes`/`normalize`); parity-gated (48 fixtures). |
-| `Rian.IR`       | 262 | shared IR structs (data definitions).                           |
-| `Rian.Core`     | 717 | `from_expr`/`from_pat`; the sealed-sum Core IR. Surface-AST input comes from `Pratt` (Phase 3), so its parity test composes with the parser. |
+| `Rian.IR`       | 262 | shared IR structs (data definitions). **Next module.**          |
+| `Rian.Core`     | 717 | ✅ ported (`fromExpr`/`fromPat` + the desugarings: pipe `\|>`→call, range `..`→`List.seq`, comprehension→`flat_map`); parity-gated via the `cor` stream (37 records) composing `lexer → Pratt → Core` through a shared `coreSexpr` oracle. The inferred `type` field + per-node `@rian_sig` arrive with `Rian.Check`. Staged out (excluded): pins, for-pattern generators, bitstrings, map update. |
 
 ### Phase 3 — Parsers
 
@@ -74,18 +75,13 @@ still depends on it — see the DoD removal-order note).
 | `Rian.Pratt`  | 1218 | **Ported (parity-gated, `psx` stream):** the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms, patterns, `if`/`case`/`lambda`/blocks, **and `with`/`for`/`${}` interpolation**. **Remaining (raise a clear message, excluded from the corpus):** bitstrings (+pattern, BEAM-only), map *update* and type-patterns (no reference `sexpr` clause → not parity-testable), and error-propagation `<-` + speculative destructuring binds. |
 | `Rian.Decl`   | 1901 | declaration parser; newline-tolerant `:=` bodies.              |
 
-**Parity plan (Pratt).** Pratt has a built-in AST→s-expression renderer
-(`parse_sexpr/1`); use it as the canonical oracle — add a `psx` stream to
-`gen_fixtures.exs` comparing `Pratt.parse_sexpr(src)` against the ported
-`parseSexpr`, so the harness only ever serializes output (no surface-AST
-round-trip). Dependencies to port alongside: the surface-AST type (Pratt's
-output), `parse`/`parse_body`/`parse_pat`, and the relevant slice of
-`Rian.Prim.normalize` (`Prim.*` → `__prim_*` rewrite; identity on a `Prim`-free
-corpus). Pratt is large and interconnected; if staged, scope the corpus to the
-ported forms and document the gap (like the partial JS/JVM emitters). **Then**
-`Core.from_expr`/`from_pat` is parity-tested by composing `lexer → Pratt → Core`
-(serialize the Core canonically) — its surface-AST input comes from the ported
-Pratt in-process, so no surface deserialization is needed.
+**Parity oracle (Pratt → Core).** Pratt is verified via its built-in `parse_sexpr/1` (the
+`psx` stream — output-only, no surface round-trip). `Core.from_expr`/`from_pat` then composes
+on the ported Pratt (`lexer → Pratt → Core`): since Core has no built-in renderer, a shared
+`coreSexpr` serializer (matching halves in `gen_fixtures.exs` and `purs/src/Rian/Core.purs`)
+canonicalizes the typed Core, and the `cor` stream diffs it. The desugarings `from_expr` does
+(pipe `|>` → call, range `..` → `List.seq`, comprehension → nested `flat_map`) are exactly
+what the Core oracle confirms over the surface form.
 
 ### Phase 4 — Gates
 
@@ -145,10 +141,10 @@ purerl-built BEAM modules (ADR-0031), or native `rian` CLI subcommands.
 
 ## Status
 
-Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` ported (parity-gated); `Rian.Ann` reader
-dropped (annotation convention retained); `Rian.IR`/`Rian.Core` remain. **Phase 3**:
-`Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks + `with`/`for`/
-interpolation, parity-gated via `psx`, 55 corpus records); remaining: bitstrings, map-update +
-type-patterns (no reference `sexpr`), and error-propagation. `Rian.Decl` is the next module.
-`Core`'s `from_expr` now composes on the ported Pratt (lexer→Pratt→Core) for its parity test.
-Each module is parity-gated and committed on its own (Conventional Commits, ADR-0084).
+Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (parity-gated);
+`Rian.Ann` reader dropped (annotation convention retained); `Rian.IR` (data structs) remains.
+**Phase 3**: `Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks +
+`with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
+error-propagation. **Next:** `Rian.IR` (data structs), then `Rian.Decl` (the declaration
+parser). Total **364/364** parity records across Lexer/TypeStr/Pratt/Core. Each module is
+parity-gated and committed on its own (Conventional Commits, ADR-0084).
