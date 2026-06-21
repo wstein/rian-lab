@@ -21,8 +21,8 @@ purs/
   packages.dhall      the purerl (Erlang-FFI) package set
   package.json        pins purs + legacy spago (via npm)
   src/Rian/           the migrated compiler modules (Elixir lib/rian/* -> here)
-  test/               spec suites + parity fixtures vs the Elixir reference
-  scripts/            build + smoke-test gate
+  test/               parity harness (.erl) + fixtures + generator (.exs) vs the reference
+  scripts/            build + smoke-test + parity gate
 ```
 
 ## Toolchain
@@ -67,11 +67,27 @@ cd purs && ./scripts/purerl-build.sh
 
 `scripts/purerl-build.sh` is the gate for every migrated module: it runs the full chain —
 `spago build` (purs typecheck + purerl codegen of the sources **and** the package set) →
-`erlc` (Erlang → BEAM) → runs the result on Erlang/OTP. Raw `spago build` typechecks +
-emits `.erl` without the run step.
+`erlc` (Erlang → BEAM) → runs the result on Erlang/OTP, then the **lexer parity check**.
+Raw `spago build` typechecks + emits `.erl` without the run step.
 
-### Known caveat — compiler-version skew
+### Parity testing (the real gate)
 
-purerl 0.0.24 was built against purs 0.15.x and prints `Found externs for wrong compiler
-version (continuing anyway)` against purs 0.15.16. It is harmless for codegen today (the
-chain builds and runs); pin `purs` to purerl's exact target if it ever bites.
+A ported module is "migrated" only when it matches the Elixir reference behaviourally,
+not just when it compiles. The pattern (see `Rian.Lexer`):
+
+1. `mix run purs/test/gen_fixtures.exs` (from the repo root) runs the Elixir reference over
+   a corpus and writes canonical fixtures to `purs/test/fixtures/`. Re-run this when the
+   reference changes; the fixtures are committed.
+2. `purs/test/*.erl` is an Erlang harness that re-runs the purerl-compiled module over the
+   same inputs and asserts byte-equality with the fixtures.
+3. `scripts/purerl-build.sh` runs the harness as part of the gate.
+
+### Known caveats
+
+1. **Compiler-version skew.** purerl 0.0.24 was built against purs 0.15.x and prints `Found
+   externs for wrong compiler version (continuing anyway)` against purs 0.15.16. Harmless for
+   codegen today; pin `purs` to purerl's exact target if it ever bites.
+2. **purerl `Data.String.CodePoints` is byte-wise.** In this `strings` version, `uncons`/
+   `drop`/`splitAt` iterate UTF-8 *bytes*, not codepoints — only `toCodePointArray`,
+   `singleton`, and `take` are Unicode-correct. Decode to a codepoint `Array`/`List` once at
+   the boundary and scan that (as `Rian.Lexer` does); do not `uncons` a `String` directly.

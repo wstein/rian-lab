@@ -7,9 +7,13 @@ migrated module (`Rian.Token`, the leaf data spine, **idiomatic**: Prelude, deri
 set: legacy `spago` 0.21 + the purerl *dhall* package set → `purs` typecheck → `purerl`
 0.0.24 codegen of the sources **and** the package set → `erlc` → runs correctly on
 Erlang/OTP 29 (`purs/scripts/purerl-build.sh`, a reproducible gate). This proves the
-chosen architecture with a runnable artifact, not an assertion (ADR-0000). Phase 1
-**Task 1a (wire the package set) is done** — library-dependent modules now build; Task 1b
-(port `Rian.Lexer`) is next. See `purs/README.md` and `docs/purescript-migration.md`.
+chosen architecture with a runnable artifact, not an assertion (ADR-0000). **Phase 1 is
+complete:** the package set is wired (Task 1a), and `Rian.Lexer` is ported (Task 1b) — a
+pure, no-FFI scanner over a decoded codepoint stream, verified at **byte-for-byte parity**
+against the Elixir reference (204/204 fixture records: all three streams + detokenize, via
+`purs/test/{gen_fixtures.exs,lexer_parity.erl}`, gated by `scripts/purerl-build.sh`). The
+Elixir `Lexer` remains as the parity oracle (removal is root-first; see the migration plan).
+Next: Phase 2 (the Core IR). See `purs/README.md` and `docs/purescript-migration.md`.
 **Refs:** ADR-0000 (honesty bar — no asserted-not-proven build claims), ADR-0050
 (typed Core IR as the spine the migration follows; per-target emitter structure),
 ADR-0031 (toolchain-free `rian` CLI — the purerl build is a BEAM artifact, same as
@@ -74,7 +78,7 @@ Elixir reference, not a redesign.
 - **Parity is the gate (ADR-0000).** Each ported module ships a spec suite that asserts
   its output against the Elixir reference's recorded fixtures (the `Rian.Fixpoint`
   discipline: a port is a regression test, not a demo). A module is "migrated" only when
-  `spago test` is green **and** parity holds; "compiles" is not "correct".
+  the parity harness is green **and** parity holds; "compiles" is not "correct".
 
 ### FFI boundary (the BEAM-coupled modules)
 

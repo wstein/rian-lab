@@ -5,6 +5,7 @@
 -- | depend on it.
 module Rian.Token
   ( Token(..)
+  , StrPart(..)
   , isNewline
   , isTrivia
   , tokenName
@@ -14,6 +15,19 @@ import Prelude
 
 import Data.Generic.Rep (class Generic)
 import Data.Show.Generic (genericShow)
+
+-- | One segment of an interpolated string (`TIstr`): a literal run (escape-decoded)
+-- | or a `${expr}` hole carrying the raw expression source (parsed later by the Pratt
+-- | parser). Mirrors the Elixir `{:lit, s}` / `{:hole, src}` parts (ADR-0069).
+data StrPart
+  = Lit String
+  | Hole String
+
+derive instance Eq StrPart
+derive instance Generic StrPart _
+
+instance Show StrPart where
+  show = genericShow
 
 -- | A lexer token. Mirrors `Rian.Lexer`'s `@type token` (lib/rian/lexer.ex) and the
 -- | self-hosted `Token` sum one-for-one, so the migrated lexer can emit it directly.
@@ -39,6 +53,7 @@ data Token
   | TAnnot String
   | TComment String
   | THeredoc String
+  | TIstr (Array StrPart)
 
 derive instance Eq Token
 derive instance Generic Token _
@@ -84,3 +99,4 @@ tokenName (TId _) = "TId"
 tokenName (TAnnot _) = "TAnnot"
 tokenName (TComment _) = "TComment"
 tokenName (THeredoc _) = "THeredoc"
+tokenName (TIstr _) = "TIstr"
