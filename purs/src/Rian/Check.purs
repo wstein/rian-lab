@@ -58,7 +58,7 @@ import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
 import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Func, Param, Prog, Type, bodySurface)
+import Rian.IR (Cap(..), Func, Param, Prog, Type, bodySurface)
 import Rian.Prelude (withPrelude)
 import Rian.Pratt (Arm, ForClause(..), IPart(..), MapPair(..), Param, Pat, Stmt(..), Surface(..), WithClause, parse, parseBody) as P
 import Rian.Prim (normalize)
@@ -898,16 +898,18 @@ checkProgram prog = findMap checkFunc funcs
   ic = ic0 { funs = fillLocalRets funcs ic0 }
   tsets = errorSetsTable prog
   table = solveErrorSets funcs tsets
-  -- per function, in reference order: no `_Unk` hole in the signature, no value-union with two
-  -- members sharing a runtime discriminator, then the body must be assignable to the declared
-  -- return, then a Result return's produced error set ⊆ its `E`.
+  -- per function, in reference order: no `_Unk` hole in the signature; an `@external`'s params are
+  -- `val`/`tag`; no value-union with two members sharing a runtime discriminator; the body must be
+  -- assignable to the declared return; then a Result return's produced error set ⊆ its `E`.
   checkFunc f = case checkUnk f of
     Just msg -> Just msg
-    Nothing -> case checkUnionClash f of
+    Nothing -> case checkExternalCaps f of
       Just msg -> Just msg
-      Nothing -> case checkReturn ic f of
+      Nothing -> case checkUnionClash f of
         Just msg -> Just msg
-        Nothing -> checkErrorSet tsets table f
+        Nothing -> case checkReturn ic f of
+          Just msg -> Just msg
+          Nothing -> checkErrorSet tsets table f
 
 -- `_Unk` is an UNFINISHED inference hole, not a type (ADR-0034): a fill-me marker the transpiler
 -- leaves. A declared `_Unk` in a signature must be resolved before compiling, so the gated path
@@ -925,6 +927,29 @@ checkUnk f = case findMap holeOf (map _.ty f.params <> [ f.ret ]) of
   where
   holeOf (Just t) = if Str.contains (Str.Pattern "_Unk") t then Just t else Nothing
   holeOf Nothing = Nothing
+
+-- An `@external` (ADR-0068) crosses an FFI boundary, so its parameters must be `val`/`tag` —
+-- linearity (`iso`/`ref`) is not enforceable across it (ADR-0055). The reference also resolves a
+-- `Mod.fun`/`:erlang.fun` ref's arity via host reflection (`function_exported?`); that part is
+-- host-coupled — the same BEAM reflection `Rian.External.resolve` needs, deliberately unported —
+-- so the portable gate enforces only the cap rule (a string spec, a file ref, and any module ref
+-- the reflection can't refute all pass, exactly as the reference returns `:ok` for them).
+checkExternalCaps :: Func -> Maybe String
+checkExternalCaps f =
+  if null f.externals then Nothing
+  else case find (\p -> p.cap == Iso || p.cap == Ref) f.params of
+    Just p ->
+      Just
+        ( "`" <> f.name <> "`: an `@external` parameter must be `val` or `tag` — `" <> p.name <> "` is `"
+            <> capWord p.cap <> "` (linearity is not enforceable across an FFI boundary, ADR-0068/0055)"
+        )
+    Nothing -> Nothing
+
+capWord :: Cap -> String
+capWord Val = "val"
+capWord Iso = "iso"
+capWord Ref = "ref"
+capWord Tag = "tag"
 
 -- A value union (`A | B`, ADR-0083) narrows by runtime type, so two members sharing a runtime
 -- discriminator (`Int32 | Char` — both `is_integer`/`number`) can never be told apart: the second

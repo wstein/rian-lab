@@ -719,7 +719,14 @@ gate_corpus = [
   "pub def ucr() Int8 | Int16 := 1",
   "pub def ucf(x Float32 | Float64) Int53 := 1",
   "pub def und(x Int53 | String) Int53 := 1",
-  "pub def ucm(x Int8 | Char) String := 1"
+  "pub def ucm(x Int8 | Char) String := 1",
+  # check_external_caps (ADR-0068/0055): an `@external` param must be `val`/`tag` — `iso`/`ref`
+  # linearity is not enforceable across an FFI boundary. A `val`/`tag` param, a string spec, and a
+  # module ref the reference's reflection can't refute (`:erlang.length/1` is exported) all pass.
+  "@external(:js, \"x => x\")\ndef ecbad(x iso Vec(Int53)) Int53",
+  "@external(:js, \"x => x\")\ndef ecref(x ref Int53) Int53",
+  "@external(:js, \"x => x\")\ndef ecok(x tag Int53) Int53",
+  "@external(:js, :erlang.length)\ndef eclen(xs Vec(Int53)) Int53"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the
