@@ -508,6 +508,29 @@ shadow_corpus = [
   "{a, b} := p ; x <- f(a) ; g(x, b)"
 ]
 
+# Rian.Macro corpus — the `mac` stream. A FIXED macro env (mirrored byte-for-byte in
+# `Rian.Macro.testDefs`, PS); a call expression is expanded, lowered to Core, and serialized
+# via the shared `coreSexpr` oracle. Templates are binder-free (so `freshen`'s non-deterministic
+# gensym never fires). The corpus exercises substitution, nested expansion, and `mapNode`.
+macro_defs = [
+  %{name: "double", params: ["x"], template: "x + x"},
+  %{name: "inc", params: ["x"], template: "x + 1"},
+  %{name: "swap", params: ["a", "b"], template: "(b, a)"},
+  %{name: "apply", params: ["f", "x"], template: "f(x)"},
+  %{name: "pick", params: ["c", "a", "b"], template: "if c do a else b end"}
+]
+
+mac_corpus = [
+  "double(3)",
+  "inc(double(2))",
+  "swap(1, 2)",
+  "apply(g, 5)",
+  "pick(true, 1, 2)",
+  "double(a) + inc(b)",
+  "double(inc(x))",
+  "not_a_macro(1)"
+]
+
 # Rian.Builtins corpus — the `bui` stream: host/stdlib foreign-call signatures
 # (`mod;fun;arity`; `mod=nil` = Kernel auto-import). Covers table hits across modules,
 # the `Int`-vs-`Int53` arbitrary-precision returns, misses, and poly-only entries (which
@@ -1227,6 +1250,11 @@ lines =
     end) ++
     Enum.map(shadow_corpus, fn s ->
       "shd\t#{Canon.hex(s)}\t#{Canon.hex(ShadowCanon.run(s))}"
+    end) ++
+    Enum.map(mac_corpus, fn s ->
+      env = Rian.Macro.build_env(macro_defs)
+      expanded = Rian.Macro.expand(env, Rian.Pratt.parse(s))
+      "mac\t#{Canon.hex(s)}\t#{Canon.hex(CoreCanon.expr(Rian.Core.from_expr(expanded)))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])

@@ -87,7 +87,9 @@ run_stream(<<"bdy">>, Src) -> hexbin('rian_check@ps':inferBodySexpr(Src));
 %% Rian.Builtins host/stdlib signature table (canon = known?/ret/poly_sig for a mod;fun;arity)
 run_stream(<<"bui">>, Src) -> hexbin('rian_builtins@ps':builtinSexpr(Src));
 %% Rian.Shadow capture-avoiding := rename (canon = the deduped block's coreSexpr)
-run_stream(<<"shd">>, Src) -> hexbin('rian_shadow@ps':dedupSexpr(Src)).
+run_stream(<<"shd">>, Src) -> hexbin('rian_shadow@ps':dedupSexpr(Src));
+%% Rian.Macro expand (canon = coreSexpr of a call expanded under the fixed macro env)
+run_stream(<<"mac">>, Src) -> hexbin('rian_macro@ps':expandSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.
