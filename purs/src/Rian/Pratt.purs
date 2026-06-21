@@ -23,7 +23,9 @@ module Rian.Pratt
   , IPart(..)
   , parse
   , parseSexpr
+  , parsePats
   , sexpr
+  , sexprPat
   ) where
 
 import Prelude
@@ -138,6 +140,21 @@ parse src =
 -- @rian_sig pub def parseSexpr(src val String) String
 parseSexpr :: String -> String
 parseSexpr = sexpr <<< parse
+
+-- | Parse a comma-separated pattern list (a clause head's parameters) — the one pattern
+-- | parser, shared with `case` arms (ADR-0050 §2).
+-- @rian_sig pub def parsePats(src val String) Vec(Pat)
+parsePats :: String -> Array Pat
+parsePats str = case List.fromFoldable (exprTokens str) of
+  Nil -> []
+  toks -> go toks []
+  where
+  go tokens acc =
+    let Tuple p rest = parsePat tokens
+    in case rest of
+      Nil -> Array.snoc acc p
+      (TComma : r) -> go r (Array.snoc acc p)
+      other -> unsafeCrashWith ("Pratt: trailing tokens in pattern list: " <> here other)
 
 --------------------------------------------------------------------------------
 -- Operator precedence (opinfo/bp, mirroring pratt.ex)

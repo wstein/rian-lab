@@ -19,19 +19,21 @@ module Rian.Decl
 import Prelude
 
 import Data.Array as Array
+import Data.Array.NonEmpty as NEA
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (elem, foldMap, foldl)
 import Data.List (List(..), (:))
 import Data.List as List
-import Data.Maybe (Maybe(..), fromJust)
+import Data.Maybe (Maybe(..), fromJust, fromMaybe)
 import Data.String (Pattern(..)) as Str
 import Data.String as Str
 import Data.String.CodePoints as CP
 import Data.String.Common (joinWith, trim)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Rian.IR (Field, Prog, Struct, Type, Variant)
-import Rian.Lexer (detokenize, tokenize)
+import Rian.IR (Cap(..), Clause, Field, Func, Param, Prog, Struct, Type, Variant)
+import Rian.Lexer (detokenize, exprTokens, tokenize)
+import Rian.Pratt (Pat, parsePats, sexprPat)
 import Rian.Token (Token(..))
 import Rian.TypeStr as TypeStr
 
@@ -45,9 +47,23 @@ parseToProg src = assemble (splitDecls (List.fromFoldable (tokenize src)))
 -- Declaration splitting (token stream → raw decls)
 --------------------------------------------------------------------------------
 
+-- a raw `def` (pre-grouping): params/ret/guard/body are detokenized source strings.
+type RawDef =
+  { name :: String
+  , params :: String
+  , ret :: Maybe String
+  , guard :: Maybe String
+  , body :: Maybe String
+  , pub :: Boolean
+  , tvars :: Array String
+  , bounds :: Array (Tuple String (Array String))
+  , doc :: Maybe String
+  }
+
 data RawDecl
   = DType String Boolean (Maybe String)
   | DStruct String Boolean (Maybe String)
+  | DDef RawDef
 
 declKws :: Array String
 declKws =
@@ -68,6 +84,7 @@ takeDecl (TAnnot a : _) = stage2 ("annotation `@" <> a <> "`")
 takeDecl (TKw "pub" : rest) = let Tuple decl rest' = takeDecl rest in Tuple (markPub decl) rest'
 takeDecl (TKw "type" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DType (detok toks) false Nothing) rest'
 takeDecl (TKw "struct" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DStruct (detok toks) false Nothing) rest'
+takeDecl (TKw "def" : rest) = let Tuple raw rest' = takeDef rest in Tuple (DDef raw) rest'
 takeDecl (TKw k : _) = stage2 ("declaration `" <> k <> "`")
 takeDecl other = unsafeCrashWith ("Decl: expected a declaration, got " <> here other)
 
@@ -92,10 +109,12 @@ skipNl toks = toks
 attachDoc :: String -> RawDecl -> RawDecl
 attachDoc doc (DType s p _) = DType s p (Just doc)
 attachDoc doc (DStruct s p _) = DStruct s p (Just doc)
+attachDoc doc (DDef r) = DDef (r { doc = Just doc })
 
 markPub :: RawDecl -> RawDecl
 markPub (DType s _ d) = DType s true d
 markPub (DStruct s _ d) = DStruct s true d
+markPub (DDef r) = DDef (r { pub = true })
 
 detok :: List Token -> String
 detok = detokenize <<< Array.fromFoldable
@@ -108,6 +127,7 @@ assemble :: List RawDecl -> Prog
 assemble decls =
   { types: Array.mapMaybe typeOf arr
   , structs: Array.mapMaybe structOf arr
+  , funcs: map (buildFunc <<< NEA.toArray) (Array.groupBy sameFunc (Array.mapMaybe defOf arr))
   }
   where
   arr = Array.fromFoldable decls
@@ -115,6 +135,322 @@ assemble decls =
   typeOf _ = Nothing
   structOf (DStruct s p d) = Just (parseStruct s p d)
   structOf _ = Nothing
+  defOf (DDef r) = Just r
+  defOf _ = Nothing
+  sameFunc a b = a.name == b.name && rawArity a == rawArity b
+
+--------------------------------------------------------------------------------
+-- `def` token parsing (→ RawDef)
+--------------------------------------------------------------------------------
+
+takeDef :: List Token -> Tuple RawDef (List Token)
+takeDef (TId name : rest) =
+  let Tuple paramToks rest' = balancedParens rest
+  in takeHead name (detok paramToks) rest' Nil
+takeDef other = unsafeCrashWith ("Decl: expected a function name after `def`: " <> here other)
+
+balancedParens :: List Token -> Tuple (List Token) (List Token)
+balancedParens (TLparen : rest) = takeParens rest 0 Nil
+balancedParens other = unsafeCrashWith ("Decl: expected `(` after the function name: " <> here other)
+
+takeParens :: List Token -> Int -> List Token -> Tuple (List Token) (List Token)
+takeParens (TRparen : rest) 0 acc = Tuple (List.reverse acc) rest
+takeParens (TLparen : rest) d acc = takeParens rest (d + 1) (TLparen : acc)
+takeParens (TRparen : rest) d acc = takeParens rest (d - 1) (TRparen : acc)
+takeParens (t : rest) d acc = takeParens rest d (t : acc)
+takeParens Nil _ _ = unsafeCrashWith "Decl: unbalanced `(` in the parameter list"
+
+-- collect the head (return type / `when` guard) then the body: `:= expr` (to newline), a
+-- bodiless signature, or — staged out — a `<nl> … end` block body.
+takeHead :: String -> String -> List Token -> List Token -> Tuple RawDef (List Token)
+takeHead name params (TOp ":=" : rest) head =
+  let Tuple bodyToks rest' = takeLine rest Nil 0
+  in Tuple (defRaw name params head (Just (detok bodyToks))) rest'
+takeHead name params (TNl : rest) head =
+  if rest == Nil || declBoundary rest then Tuple (defRaw name params head Nothing) rest
+  else stage2 "def block body (`<nl> … end`)"
+takeHead name params Nil head = Tuple (defRaw name params head Nothing) Nil
+takeHead name params (t : rest) head = takeHead name params rest (t : head)
+
+defRaw :: String -> String -> List Token -> Maybe String -> RawDef
+defRaw name params headRev body =
+  let
+    headStr = detok (List.reverse headRev)
+    sf = splitForall headStr
+    ph = parseHead sf.ret
+    ret = map (TypeStr.normalize <<< collapseParens) ph.ret
+  in
+    { name, params, ret, guard: ph.guard, body, pub: false, tvars: sf.tvars, bounds: sf.bounds, doc: Nothing }
+
+-- a `:=` body: a newline ends it unless the body plainly continues (inside unbalanced
+-- brackets, a `do…end`, or across a trailing/leading continuation operator).
+takeLine :: List Token -> List Token -> Int -> Tuple (List Token) (List Token)
+takeLine Nil acc _ = Tuple (List.reverse acc) Nil
+takeLine (TNl : rest) Nil depth =
+  if declBoundary rest then Tuple Nil rest else takeLine rest Nil depth
+takeLine (TKw k : rest) acc depth
+  | accHeadColonDot acc = takeLine rest (TKw k : acc) depth
+takeLine (TKw "do" : rest) acc depth = takeLine rest (TKw "do" : acc) (depth + 1)
+takeLine (TKw "end" : rest) acc depth = takeLine rest (TKw "end" : acc) (max (depth - 1) 0)
+takeLine (TNl : rest) acc depth =
+  if depth > 0 || lineContinues acc rest then takeLine rest acc depth
+  else Tuple (List.reverse acc) rest
+takeLine (t : rest) acc depth
+  | isOpen t = takeLine rest (t : acc) (depth + 1)
+  | isClose t = takeLine rest (t : acc) (max (depth - 1) 0)
+  | otherwise = takeLine rest (t : acc) depth
+
+accHeadColonDot :: List Token -> Boolean
+accHeadColonDot (TOp ":" : _) = true
+accHeadColonDot (TOp "." : _) = true
+accHeadColonDot _ = false
+
+isOpen :: Token -> Boolean
+isOpen t = t `elem` [ TLparen, TLbracket, TLbrace, TMapopen, TBitopen ]
+
+isClose :: Token -> Boolean
+isClose t = t `elem` [ TRparen, TRbracket, TRbrace, TBitclose ]
+
+contOps :: Array String
+contOps =
+  [ "+", "-", "*", "/", "<", ">", "<=", ">=", "==", "!=", "<>", "|>", "and", "or", "in", "rem", "div" ]
+
+lineContinues :: List Token -> List Token -> Boolean
+lineContinues acc rest = trailing acc || leading rest
+  where
+  trailing (TOp o : _) = o `elem` contOps
+  trailing _ = false
+  leading (TOp o : _) = o `elem` contOps
+  leading _ = false
+
+-- `Ret forall T, U: Bound` → split off the binder list.
+splitForall :: String -> { ret :: String, tvars :: Array String, bounds :: Array (Tuple String (Array String)) }
+splitForall head = case Str.indexOf (Str.Pattern " forall ") head of
+  Nothing -> { ret: head, tvars: [], bounds: [] }
+  Just i ->
+    let
+      ret = Str.take i head
+      binders = Str.drop (i + Str.length " forall ") head
+      parsed = parseBinders binders
+    in
+      { ret, tvars: map fst parsed, bounds: Array.filter (\b -> not (Array.null (snd b))) parsed }
+
+parseBinders :: String -> Array (Tuple String (Array String))
+parseBinders binders = Array.filter (\b -> fst b /= "") (map parseBinder (splitTop ',' binders))
+
+parseBinder :: String -> Tuple String (Array String)
+parseBinder b = case splitFirst ":" b of
+  Nothing -> Tuple (trim b) []
+  Just { left: name, right: bounds } ->
+    Tuple (trim name) (Array.filter (_ /= "") (map trim (Str.split (Str.Pattern "+") bounds)))
+
+parseHead :: String -> { ret :: Maybe String, guard :: Maybe String }
+parseHead head
+  | head == "" = { ret: Nothing, guard: Nothing }
+  | startsWithStr "when " head = { ret: Nothing, guard: Just (trim (dropPrefix "when " head)) }
+  | contains " when " head =
+      case splitFirst " when " head of
+        Just { left, right } -> { ret: nz left, guard: Just (trim right) }
+        Nothing -> { ret: nz head, guard: Nothing }
+  | otherwise = { ret: nz head, guard: Nothing }
+
+--------------------------------------------------------------------------------
+-- build_func (raw defs → Func)
+--------------------------------------------------------------------------------
+
+buildFunc :: Array RawDef -> Func
+buildFunc group = case Array.uncons group of
+  Nothing -> unsafeCrashWith "Decl: empty function group"
+  Just { head: first, tail: rest } ->
+    if first.body == Nothing then
+      if Array.null rest then
+        unsafeCrashWith ("Decl: function `" <> first.name <> "` has a signature but no clauses (or @external — stage 2)")
+      else multiClauseFunc first rest
+    else if Array.null rest then singleClauseFunc first
+    else unsafeCrashWith ("Decl: cannot group clauses of `" <> first.name <> "`")
+
+-- bodiless signature + pattern clauses.
+multiClauseFunc :: RawDef -> Array RawDef -> Func
+multiClauseFunc sig clauses =
+  let
+    params0 = parseParams sig.params
+    params = if sig.pub then boundaryParams params0 else params0
+  in
+    { name: sig.name
+    , params
+    , ret: reqRet sig
+    , clauses: map (clauseOf (Array.length params)) clauses
+    , pub: sig.pub
+    , tvars: sig.tvars
+    , bounds: sig.bounds
+    , doc: sig.doc
+    }
+
+-- a single def whose head parameters double as the clause patterns.
+singleClauseFunc :: RawDef -> Func
+singleClauseFunc d =
+  let
+    hp = Array.mapWithIndex (\i p -> headParam p i) (splitTop ',' d.params)
+    params0 = map _.param hp
+    params = if d.pub then boundaryParams params0 else params0
+  in
+    { name: d.name
+    , params
+    , ret: reqRet d
+    , clauses: [ { pats: map _.pat hp, body: d.body, guard: d.guard } ]
+    , pub: d.pub
+    , tvars: d.tvars
+    , bounds: d.bounds
+    , doc: d.doc
+    }
+
+clauseOf :: Int -> RawDef -> Clause
+clauseOf arity d = case d.body of
+  Nothing -> unsafeCrashWith ("Decl: clause of `" <> d.name <> "` has no body")
+  Just _ ->
+    let pats = parsePats d.params
+    in if Array.length pats /= arity then unsafeCrashWith ("Decl: clause has " <> show (Array.length pats) <> " patterns but arity " <> show arity)
+       else { pats, body: d.body, guard: d.guard }
+
+reqRet :: RawDef -> Maybe String
+reqRet d = case d.ret of
+  Just r -> Just r
+  Nothing -> if d.pub then unsafeCrashWith ("Decl: public function `" <> d.name <> "` needs a return type") else Nothing
+
+-- on a `pub` boundary an infer-typed param keeps the legacy reading: the name becomes the type.
+boundaryParams :: Array Param -> Array Param
+boundaryParams = Array.mapWithIndex \i p -> case p.ty of
+  Nothing -> p { name = "arg" <> show i, ty = Just p.name }
+  _ -> p
+
+parseParams :: String -> Array Param
+parseParams str = Array.mapWithIndex build (splitTop ',' str)
+  where
+  build i p =
+    let r = param p
+    in { name: fromMaybe ("arg" <> show i) r.name, ty: r.ty, cap: r.cap }
+
+-- a `[cap] name [Type]` parameter → name / cap / type (`Nothing` = infer).
+param :: String -> { name :: Maybe String, cap :: Cap, ty :: Maybe String }
+param p =
+  let
+    parts = Array.partition (\t -> t `elem` capNames) (wordsWs (collapseParamParens p))
+    cap = case parts.yes of
+      [] -> Val
+      [ c ] -> capOf c
+      _ -> unsafeCrashWith ("Decl: multiple capabilities on `" <> p <> "`")
+  in case parts.no of
+    [] -> unsafeCrashWith ("Decl: parameter `" <> p <> "` has no name")
+    [ tok ] ->
+      if typeToken tok then { name: Nothing, cap, ty: Just (TypeStr.normalize tok) }
+      else { name: Just tok, cap, ty: Nothing }
+    toks -> case Array.uncons toks of
+      Just { head: first, tail: more } ->
+        if typeToken first then { name: Nothing, cap, ty: Just (unionType toks p) }
+        else { name: Just first, cap, ty: Just (unionType more p) }
+      Nothing -> unsafeCrashWith ("Decl: empty parameter `" <> p <> "`")
+
+capNames :: Array String
+capNames = caps
+
+capOf :: String -> Cap
+capOf "val" = Val
+capOf "iso" = Iso
+capOf "ref" = Ref
+capOf "tag" = Tag
+capOf c = unsafeCrashWith ("Decl: unknown capability `" <> c <> "`")
+
+-- one head parameter of a single-clause def → { param, clause pattern }.
+headParam :: String -> Int -> { param :: Param, pat :: Pat }
+headParam pstr i =
+  let t = trim pstr
+  in
+    if structuralPattern t then patternParam t i
+    else if ctorHead t then ctorHeadParam t i
+    else
+      let r = param t
+          nm = fromMaybe ("arg" <> show i) r.name
+      in { param: { name: nm, ty: r.ty, cap: r.cap }, pat: varPat nm }
+
+patternParam :: String -> Int -> { param :: Param, pat :: Pat }
+patternParam pstr i = case parsePats pstr of
+  [ pat ] -> { param: inferParam i, pat }
+  _ -> unsafeCrashWith ("Decl: bad pattern parameter `" <> pstr <> "`")
+
+ctorHeadParam :: String -> Int -> { param :: Param, pat :: Pat }
+ctorHeadParam t i = case parsePats t of
+  [ pat ] -> { param: inferParam i, pat }
+  _ -> unsafeCrashWith ("Decl: bad constructor-head parameter `" <> t <> "`")
+
+inferParam :: Int -> Param
+inferParam i = { name: "arg" <> show i, ty: Nothing, cap: Val }
+
+varPat :: String -> Pat
+varPat = parsePatOf
+
+-- a single var pattern via the shared parser (so the surface Pat type is constructed there).
+parsePatOf :: String -> Pat
+parsePatOf s = case parsePats s of
+  [ p ] -> p
+  _ -> unsafeCrashWith ("Decl: expected a single pattern: " <> s)
+
+-- a head parameter that is unambiguously a destructuring pattern.
+structuralPattern :: String -> Boolean
+structuralPattern pstr =
+  let t = trim pstr
+  in startsWithStr "{" t || startsWithStr "[" t || startsWithStr "%" t
+       || startsWithStr ":" t || startsWithStr "\"" t || startsWithStr "'" t
+       || startsWithStr "^" t || t == "_" || startsDigit t
+
+startsDigit :: String -> Boolean
+startsDigit s = case firstCp (dropMinus s) of
+  Just c -> c >= 48 && c <= 57
+  Nothing -> false
+  where
+  dropMinus x = fromMaybe x (Str.stripPrefix (Str.Pattern "-") x)
+
+-- a `Foo(args)` clause head: PascalCase name then a parenthesized group.
+ctorHead :: String -> Boolean
+ctorHead t = case firstCp t of
+  Just c | c >= 65 && c <= 90 -> contains "(" t && endsWithStr ")" t
+  _ -> false
+
+rawArity :: RawDef -> Int
+rawArity d = countParams d.params
+
+countParams :: String -> Int
+countParams p = case trim p of
+  "" -> 0
+  s -> 1 + (foldl step { c: 0, d: 0 } (List.fromFoldable (exprTokens s))).c
+  where
+  step st t
+    | t == TComma && st.d == 0 = st { c = st.c + 1 }
+    | isOpen t = st { d = st.d + 1 }
+    | isClose t = st { d = st.d - 1 }
+    | otherwise = st
+
+-- collapse_param_parens: like collapseParens but keep a space between a lowercase param
+-- name and a `(` opening an anonymous tuple type; glue an uppercase type to its `(`.
+collapseParamParens :: String -> String
+collapseParamParens s = fromCps (Array.reverse (go (toCps s) [] false))
+  where
+  go cs out skip = case Array.uncons cs of
+    Nothing -> out
+    Just { head: c, tail }
+      | c == 41 || c == 44 -> go tail (Array.cons c (Array.dropWhile isWs out)) true
+      | c == 40 -> go tail (Array.cons 40 (glueUpper out)) true
+      | isWs c -> if skip then go tail out true else go tail (Array.cons c out) false
+      | otherwise -> go tail (Array.cons c out) false
+  isWs c = c == 32 || c == 9
+  -- drop the whitespace before a `(` iff it follows an uppercase-headed word.
+  glueUpper out = case Array.uncons out of
+    Just { head: w, tail } | isWs w ->
+      let word = Array.takeWhile isWordCp tail
+      in case Array.last word of
+        Just c | c >= 65 && c <= 90 -> tail
+        _ -> out
+    _ -> out
+  isWordCp c = (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c == 95
 
 parseType :: String -> Boolean -> Maybe String -> Type
 parseType text pub doc = case splitOnce ":=" text of
@@ -240,6 +576,33 @@ collapseParens s = fromCps (Array.reverse (go (toCps s) [] false))
 wordsWs :: String -> Array String
 wordsWs = Array.filter (_ /= "") <<< Str.split (Str.Pattern " ")
 
+-- split on the first occurrence of `sep` (no trimming — unlike `splitOnce`).
+splitFirst :: String -> String -> Maybe { left :: String, right :: String }
+splitFirst sep s = case Str.indexOf (Str.Pattern sep) s of
+  Just i -> Just { left: Str.take i s, right: Str.drop (i + Str.length sep) s }
+  Nothing -> Nothing
+
+startsWithStr :: String -> String -> Boolean
+startsWithStr p s = case Str.stripPrefix (Str.Pattern p) s of
+  Just _ -> true
+  Nothing -> false
+
+endsWithStr :: String -> String -> Boolean
+endsWithStr p s = case Str.stripSuffix (Str.Pattern p) s of
+  Just _ -> true
+  Nothing -> false
+
+contains :: String -> String -> Boolean
+contains p s = case Str.indexOf (Str.Pattern p) s of
+  Just _ -> true
+  Nothing -> false
+
+dropPrefix :: String -> String -> String
+dropPrefix p s = fromMaybe s (Str.stripPrefix (Str.Pattern p) s)
+
+nz :: String -> Maybe String
+nz s = if trim s == "" then Nothing else Just (trim s)
+
 --------------------------------------------------------------------------------
 -- codepoint helpers
 --------------------------------------------------------------------------------
@@ -270,7 +633,42 @@ declSexpr :: String -> String
 declSexpr = progSexpr <<< parseToProg
 
 progSexpr :: Prog -> String
-progSexpr prog = joinWith "\n" (map typeSexpr prog.types <> map structSexpr prog.structs)
+progSexpr prog =
+  joinWith "\n" (map typeSexpr prog.types <> map structSexpr prog.structs <> map funcSexpr prog.funcs)
+
+funcSexpr :: Func -> String
+funcSexpr f =
+  "(func " <> f.name <> pubFlag f.pub <> docFlag f.doc
+    <> foldMap (\tv -> " tvar=" <> tv) f.tvars
+    <> foldMap (\b -> " bound=" <> fst b <> ":" <> joinWith "+" (snd b)) f.bounds
+    <> retFlag f.ret
+    <> " (params" <> foldMap paramSexpr f.params <> ")"
+    <> foldMap clauseSexpr f.clauses
+    <> ")"
+  where
+  retFlag Nothing = ""
+  retFlag (Just r) = " ret=" <> r
+
+paramSexpr :: Param -> String
+paramSexpr p = " (param " <> p.name <> " " <> capStr p.cap <> " " <> tyOf p.ty <> ")"
+  where
+  tyOf Nothing = "_infer"
+  tyOf (Just t) = t
+
+capStr :: Cap -> String
+capStr Val = "val"
+capStr Iso = "iso"
+capStr Ref = "ref"
+capStr Tag = "tag"
+
+clauseSexpr :: Clause -> String
+clauseSexpr c =
+  " (clause (" <> joinWith " " (map sexprPat c.pats) <> ")" <> guardOf c.guard <> bodyOf c.body <> ")"
+  where
+  guardOf Nothing = ""
+  guardOf (Just g) = " when=" <> g
+  bodyOf Nothing = ""
+  bodyOf (Just b) = " body=" <> b
 
 typeSexpr :: Type -> String
 typeSexpr t =

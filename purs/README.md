@@ -155,3 +155,8 @@ not just when it compiles. The pattern (see `Rian.Lexer`):
    `drop`/`splitAt` iterate UTF-8 *bytes*, not codepoints — only `toCodePointArray`,
    `singleton`, and `take` are Unicode-correct. Decode to a codepoint `Array`/`List` once at
    the boundary and scan that (as `Rian.Lexer` does); do not `uncons` a `String` directly.
+3. **Fall-through guards on a `case` pattern can crash under purerl.** A
+   `case x of P | guard -> a ; … -> b` where `guard` is false (so it should fall to the next
+   branch) compiled to a `function_clause` crash in one observed case (`Rian.Decl.buildFunc`).
+   Prefer `if`/`else` (or guards on top-level *function* clauses, which purerl handles
+   natively) when a guard can fail and a later branch must catch it.

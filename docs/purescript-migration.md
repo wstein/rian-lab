@@ -73,7 +73,7 @@ removal-order note).
 | Module        | LOC  | Notes / status                                                 |
 | ------------- | ---- | -------------------------------------------------------------- |
 | `Rian.Pratt`  | 1218 | **Ported (parity-gated, `psx` stream):** the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms, patterns, `if`/`case`/`lambda`/blocks, **and `with`/`for`/`${}` interpolation**. **Remaining (raise a clear message, excluded from the corpus):** bitstrings (+pattern, BEAM-only), map *update* and type-patterns (no reference `sexpr` clause → not parity-testable), and error-propagation `<-` + speculative destructuring binds. |
-| `Rian.Decl`   | 1901 | **Stage 1 ported** (parity-gated, `dcl` stream, 16 records): the **data-type declarations** — `type` (sum) + `struct` (product), with `@doc`/`pub`, the `[label] [cap] Type` field grammar (caps parsed-and-dropped), union-type fields, and multi-line decls. Stage 2 (raise/excluded): `def` (signatures/clauses/bodies/`forall`), `mod`, `const`, `alias`, `range`, `opaque`/`abstract`, `use`, `protocol`/`impl`, `macro`, and the tail passes (interp/stdlib/infer-local — need `Check`/`InferLocal`/`Protocol`). |
+| `Rian.Decl`   | 1901 | **Stages 1–2 ported** (parity-gated, `dcl` stream, 31 records): the **data-type declarations** (`type`/`struct` + `@doc`/`pub`/`[label] [cap] Type` fields/union fields/multi-line) **and `def`** — single- + multi-clause, `:=` bodies, signatures with capabilities (`parse_params`/`param`), grouping by name+arity (`build_func`), head patterns (`Pratt.parse_pats`), `forall`/tvars, guards. Bodies stored as source strings (parsed later). Stage 3 (raise/excluded): `def` **block bodies** + `@external`, `mod`, `const`, `alias`, `range`, `opaque`/`abstract`, `use`, `protocol`/`impl`, `macro`, and the tail passes (need `Check`/`InferLocal`/`Protocol`). |
 
 **Parity oracle (Pratt → Core).** Pratt is verified via its built-in `parse_sexpr/1` (the
 `psx` stream — output-only, no surface round-trip). `Core.from_expr`/`from_pat` then composes
@@ -148,9 +148,9 @@ Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (par
 `Rian.Ann` reader dropped (annotation convention retained); `Rian.IR` (data structs) remains.
 **Phase 3**: `Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks +
 `with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
-error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** (data-type records) + **`Rian.Decl` stage 1**
-(`type`/`struct` declarations) ported. **Next:** `Rian.Decl` stage 2 — `def` (the biggest
-sub-grammar: signatures with capabilities, multi-clause grouping, newline-tolerant bodies,
-`forall`/bounds), then `mod`/`const`/`alias`. Total **393/393** parity records across
+error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** (data-type + function records) + **`Rian.Decl`
+stages 1–2** (`type`/`struct` + `def`) ported. **Next:** `Rian.Decl` stage 3 — `def` block
+bodies (`take_block`/`detok_block`) + `@external`, then `mod`/`const`/`alias`; the tail passes
+wait on `Check`/`InferLocal`/`Protocol`. Total **408/408** parity records across
 Lexer/TypeStr/Pratt/Core/Prim/Decl. Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084).

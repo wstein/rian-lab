@@ -15,10 +15,18 @@ module Rian.IR
   , Variant
   , Type
   , Struct
+  , Cap(..)
+  , Param
+  , Clause
+  , Func
   , Prog
   ) where
 
+import Prelude
+
 import Data.Maybe (Maybe)
+import Data.Tuple (Tuple)
+import Rian.Pratt (Pat)
 
 -- @rian_sig struct Field(label Option(String), type val String)
 type Field = { label :: Maybe String, ty :: String }
@@ -32,6 +40,35 @@ type Type = { name :: String, variants :: Array Variant, pub :: Boolean, doc :: 
 -- @rian_sig struct Struct(name String, fields Vec(Field), is_pub Bool, doc Option(String))
 type Struct = { name :: String, fields :: Array Field, pub :: Boolean, doc :: Maybe String }
 
--- The whole-program IR (the slice ported so far: data-type declarations). `funcs`/`mods`/
--- `consts`/… join as `Rian.Decl`'s remaining stages land.
-type Prog = { types :: Array Type, structs :: Array Struct }
+-- @rian_sig type Cap := Val | Iso | Ref | Tag
+data Cap = Val | Iso | Ref | Tag
+
+derive instance Eq Cap
+
+-- A function parameter: `name`, reference `cap`ability, and `ty` (`Nothing` = infer-local,
+-- the Elixir `:infer`).
+-- @rian_sig struct Param(name String, ty String, cap Cap)
+type Param = { name :: String, ty :: Maybe String, cap :: Cap }
+
+-- One function clause: argument `pats` (surface patterns), a `body` source string (`Nothing`
+-- for a bodiless signature), and an optional `guard` source string.
+-- @rian_sig struct Clause(pats Vec(Pat), body Core, guard Option(Core))
+type Clause = { pats :: Array Pat, body :: Maybe String, guard :: Maybe String }
+
+-- A function: `name`, `params`, return type `ret`, `clauses`. `tvars`/`bounds` are the
+-- `forall` binders (ADR-0042). (synthetic/dispatch/externals/effects/test land later.)
+-- @rian_sig struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause), is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)), doc Option(String))
+type Func =
+  { name :: String
+  , params :: Array Param
+  , ret :: Maybe String
+  , clauses :: Array Clause
+  , pub :: Boolean
+  , tvars :: Array String
+  , bounds :: Array (Tuple String (Array String))
+  , doc :: Maybe String
+  }
+
+-- The whole-program IR (the slice ported so far: data-type + function declarations).
+-- `mods`/`consts`/… join as `Rian.Decl`'s remaining stages land.
+type Prog = { types :: Array Type, structs :: Array Struct, funcs :: Array Func }

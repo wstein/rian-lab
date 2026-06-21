@@ -132,13 +132,71 @@ end
 # Canonical s-expression for the declaration IR (Rian.Decl assemble → Prog) — the `dcl`
 # parity oracle. Mirrors `progSexpr`/`typeSexpr`/… in purs/src/Rian/Decl.purs byte-for-byte.
 defmodule DeclCanon do
-  alias Rian.IR.{Type, Variant, Field, Struct}
+  alias Rian.IR.{Type, Variant, Field, Struct, Func, Param, Clause}
 
   def prog(p) do
     types = Enum.map(Map.get(p, :types, []), &type_s/1)
     structs = Enum.map(Map.get(p, :structs, []), &struct_s/1)
-    Enum.join(types ++ structs, "\n")
+    funcs = Enum.map(Map.get(p, :funcs, []), &func_s/1)
+    Enum.join(types ++ structs ++ funcs, "\n")
   end
+
+  defp func_s(%Func{
+         name: n,
+         params: ps,
+         ret: ret,
+         clauses: cs,
+         pub?: pub,
+         tvars: tvars,
+         bounds: bounds,
+         doc: doc
+       }) do
+    tv = Enum.map_join(tvars, "", fn t -> " tvar=#{t}" end)
+
+    bd =
+      Enum.map_join(Enum.sort(Map.to_list(bounds)), "", fn {bn, bs} ->
+        " bound=#{bn}:#{Enum.join(bs, "+")}"
+      end)
+
+    "(func #{n}#{pub_flag(pub)}#{doc_flag(doc)}#{tv}#{bd}#{ret_flag(ret)} (params#{Enum.map_join(ps, "", &param_s/1)})#{Enum.map_join(cs, "", &clause_s/1)})"
+  end
+
+  defp ret_flag(nil), do: ""
+  defp ret_flag(r), do: " ret=#{r}"
+  defp param_s(%Param{name: n, type: t, cap: cap}), do: " (param #{n} #{cap} #{ty_of(t)})"
+  defp ty_of(:infer), do: "_infer"
+  defp ty_of(t), do: t
+
+  defp clause_s(%Clause{pats: ps, body: body, guard: guard}),
+    do: " (clause (#{Enum.map_join(ps, " ", &surf_pat/1)})#{guard_of(guard)}#{body_of(body)})"
+
+  defp guard_of(nil), do: ""
+  defp guard_of(g), do: " when=#{g}"
+  defp body_of(nil), do: ""
+  defp body_of(b), do: " body=#{b}"
+
+  # surface-pattern renderer — mirrors `sexprPat` in Pratt.purs (the reference's private one).
+  defp surf_pat(:wild), do: "_"
+  defp surf_pat({:lit, v}) when is_binary(v), do: "\"#{v}\""
+  defp surf_pat({:lit, v}), do: to_string(v)
+  defp surf_pat({:char_lit, cp}), do: "?#{cp}"
+  defp surf_pat({:atom, a}), do: ":#{a}"
+  defp surf_pat({:var, x}), do: x
+  defp surf_pat({:tuple, ps}), do: "{#{Enum.map_join(ps, ", ", &surf_pat/1)}}"
+  defp surf_pat({:list, ps, :close}), do: "[#{Enum.map_join(ps, ", ", &surf_pat/1)}]"
+
+  defp surf_pat({:list, ps, {:tail, t}}),
+    do: "[#{Enum.map_join(ps, ", ", &surf_pat/1)} | #{surf_pat(t)}]"
+
+  defp surf_pat({:as, n, p}), do: "(@ #{n} #{surf_pat(p)})"
+  defp surf_pat({:ctor, n, []}), do: n
+  defp surf_pat({:ctor, n, args}), do: "#{n}(#{Enum.map_join(args, ", ", &surf_pat/1)})"
+
+  defp surf_pat({:struct, n, fields}),
+    do: "#{n}(#{Enum.map_join(fields, ", ", fn {k, p} -> "#{k}: #{surf_pat(p)}" end)})"
+
+  defp surf_pat({:map, fields}),
+    do: "%{#{Enum.map_join(fields, ", ", fn {k, p} -> "#{k}: #{surf_pat(p)}" end)}}"
 
   defp type_s(%Type{name: n, variants: vs, pub?: pub, doc: doc}),
     do: "(type #{n}#{pub_flag(pub)}#{doc_flag(doc)}#{Enum.map_join(vs, "", &variant_s/1)})"
@@ -182,7 +240,23 @@ decl_corpus = [
   "type Maybe := Nothing | Just(val String)",
   "@doc \"a color\"\ntype Hue := Warm | Cool",
   "type Long :=\n  Red |\n  Green |\n  Blue",
-  "struct Nested(m Map(String, Vec(Int53)), n Int53)"
+  "struct Nested(m Map(String, Vec(Int53)), n Int53)",
+  # def: single-clause :=, typed/infer/parametric/structural params, pub, guard, forall, multi-clause
+  "def add(x Int64, y Int64) Int64 := x + y",
+  "def id(x) := x",
+  "def pi() Float64 := 3.14",
+  "pub def double(n Int53) Int53 := n * 2",
+  "def head(xs Vec(Int53)) Int53 := first(xs)",
+  "def first({a, b}) := a",
+  "def car([h | t]) := h",
+  "def unwrap(Some(x)) := x",
+  "def apply(f, x) := f(x)",
+  "def answer() Int53 := 42",
+  "def cmp(a Int53, b Int53) Bool when a > b := true",
+  "def identity(x T) T forall T := x",
+  "def both(a T, b U) Bool forall T, U := true",
+  "def store(data iso Vec(Int53)) Int53 := len(data)",
+  "def max2(a Int64, b Int64) Int64\ndef max2(a, b) when a >= b := a\ndef max2(a, b) := b"
 ]
 
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.
