@@ -1,16 +1,37 @@
-# PureScript emitter port plan — `Rian.JS` (+ `.ts` sidecars) and portable `Rian.Beam`
+# PureScript emitter port plan — JS (+ `.ts`), JVM, Rust, Elixir, and portable Beam
 
-Implementation plan for porting two emitters to PureScript/purerl under the ADR-0084
+Implementation plan for porting the five Rian emitters to PureScript/purerl under the ADR-0084
 migration, grounded in the established patterns (parity-gated stages, reflection-free Core
 traversal, `@rian_sig`, run-the-output verification for emitters). Companion to
 `docs/purescript-migration.md`.
 
-Two emitters, very different in difficulty:
+> **The gate on everything here is `Check.annotate` + the whole-program inference context
+> (`ic`).** All four *source* emitters depend on it; it is not yet ported. See the callout below
+> and §0 of the sequencing.
 
-- **Part A — `Rian.JS` + `.ts` sidecars.** Follows the proven source-emitter pattern plus one
-  new feature (TypeScript declaration sidecars). Well-bounded.
-- **Part B — portable `Rian.Beam`.** Research-grade, and it **conflicts with ADR-0084 as
-  written** — flagged in §B.0.
+Targets, by difficulty:
+
+- **Part A — `Rian.JS` + `.ts` sidecars.** Direct Core→string emitter plus a new
+  TypeScript-declaration-sidecar feature. Well-bounded.
+- **Part B — portable `Rian.Beam`.** Research-grade; **conflicts with ADR-0084 as written**
+  (§B.0).
+- **Part C — `Rian.JVM` (Kotlin).** A second direct Core→string emitter, ~80% shared shape with
+  JS (§C).
+- **Part D — `Rian.Rust`.** The deep one — ownership lowering, the bulk of `Rian.Lower`, gated on
+  `Rian.Capability` (§D).
+- **Part E — `Rian.Elixir` (text).** The reference's own admitted DEBUG/inspection view, not a
+  run path — last / optional (§E).
+
+> ## The prerequisite that gates ALL of these: `Check.annotate`
+>
+> **Every source emitter (JS, JVM, Rust, Elixir) calls `Check.annotate` + `Check.program_ic` +
+> `Check.clause_env`** — the pass that fills each typed-Core node's type (ADR-0050 §3) —
+> verified in `js.ex:180/224/502`, `jvm.ex:196/256/533`, `lower.ex:249/417`. None of these are
+> ported (only `Check.infer` stages 1–3 are). `annotate`/`program_ic`/`clause_env` need the
+> whole-program **inference context (`ic`)** that the Check port has deferred. So **the emitter
+> phase opens with the `ic` + `annotate` + `program_ic` + `clause_env`, full stop** — no emitter
+> work is real before it. (An earlier draft of §A.0 said "JS is largely portable now"; that was
+> wrong — corrected below.)
 
 ---
 
@@ -23,9 +44,11 @@ Two emitters, very different in difficulty:
 `BigInt`, ADR-0064), lowers a multi-clause function to a positional **dispatcher** with guarded
 fall-through blocks, lowers sum variants to tagged arrays (`["Ctor", …]`), and raises
 `Rian.JS.Unsupported` for staged forms (bitstrings, non-atom map keys, wide ints, FFI without a
-`:js` body). Dependencies are **light**: the IR (`Func`/`Type`/`Struct`), the ported `Core`, and
-a small slice of `Check` (the int-mode / `reject_wide_int!` checks read *signatures*, not full
-inference) — so it is **largely portable now**.
+`:js` body). **Dependency correction:** beyond the IR and the ported `Core`, JS calls
+`Check.program_ic`/`annotate`/`clause_env` (`js.ex:180/224/502`), so it is **gated on
+`Check.annotate`/`ic`** like every other emitter — *not* portable before that prerequisite lands
+(see the callout above). The int-mode `reject_wide_int!` reads signatures, but the per-node types
+come from `annotate`.
 
 ### A.1 Verification model
 
@@ -189,15 +212,135 @@ ADR-0084's central claim.
 
 ---
 
+## Part C — `Rian.JVM` → PureScript (Kotlin)
+
+### C.0 What it is today
+
+`lib/rian/jvm.ex` (1249 LOC) is a **direct Core→Kotlin emitter** (ADR-0049 Tier 2):
+`compile/1 :: String -> String`. Same shape as JS — a multi-clause `def` lowers to a positional
+**dispatcher**; a sum lowers to a Kotlin `sealed interface` + `data class` + smart-cast `is`
+patterns; it raises `Rian.JVM.Unsupported` for the Tier-2 staged forms (arity-≥4 tuples, tagged
+tuples, maps/structs/FFI). It is coupled to `Rian.Reach` (`jvm.ex:161`, `assoc_blocks_jvm?` — an
+associated-type shape that pins a function off `:jvm`).
+
+### C.1 Plan
+
+- **Gated on `Check.annotate`/`ic`** (`jvm.ex:196/256/533`), identical to JS.
+- **Port as a paired track with JS** — the dispatcher lowering, clause→guarded-block, and
+  pattern→structural-test logic are ~80% shared. Factor the common part into **`Rian.Emit.Common`**
+  so JS and JVM don't fork it (and Rust later reuses pieces). This roughly **halves** the JVM
+  port.
+- **Verification:** the `jvm` source-equality stream (byte-equal the emitted Kotlin against
+  `Rian.JVM.compile`) + a `kotlinc`+`java` **run lane** (`jvk`). The run lane is the **slowest in
+  the suite** — the reference batches ~20 cases into a single `kotlinc -include-runtime` compile
+  (`jvm_test.exs` `setup_all`); the port must reuse that batching or the lane dominates wall-clock.
+- **Stages (~3–4):** `jvm1` function core + dispatcher (shared with JS), `jvm2` sum `sealed
+  interface`/`data class` + smart-cast patterns, `jvm3` lists/`Vec(Char)` Str/Char + `${float}`,
+  `jvk` run lane.
+
+---
+
+## Part D — `Rian.Rust` → PureScript (extracted from `Rian.Lower`)
+
+### D.0 What it is today
+
+Rust lives inside `Rian.Lower` (3275 LOC) — **413 `rust`/`Rust` references**, the bulk of the
+module — alongside the Elixir-text emitter (Part E). It is the **only emitter coupled to
+ownership**: `lower.ex:408` calls `Rian.Capability.beam_legal!`, and the Rust path does
+owned↔borrow coercion, parametric-type instantiation, `Fn` closures (`&impl Fn` / `Box<dyn Fn>` /
+`Rc<dyn Fn>` enum fields), and the protocol→trait UFCS rewrite. This is the densest code in the
+compiler — **a project, not "an emitter."**
+
+### D.1 Plan
+
+- **Prerequisite chain:** `Check.annotate`/`ic` → **`Rian.Capability`** (BEAM linearity over Core,
+  ~290 LOC, a Core-consuming *gate* — discrete and parity-able, not backend magic) → **`Rian.Rust`**.
+- **Extraction:** port the `to_rust`/`rust_program`/`rust_protocols` functions (`lower.ex:1280/
+  1343/1302`) into a new **`Rian.Rust`** module, with the shared pattern-lowering / bound-name
+  threading in **`Rian.Emit.Common`**. The split is **oracle-neutral** — parity is on the emitted
+  Rust *string*, diffed against `Lower.to_rust` (the `rst` stream); the PS module structure is
+  invisible to the oracle (see the debate consensus).
+- **Verification:** the `rst` source-equality stream is the cheap drift-catcher; the truth is the
+  existing **`rustc --test`** honesty bar (`reach_rust_honesty_test.exs:85`) — emitted Rust must
+  *compile*, not merely byte-match. Reuse that lane.
+- **Stages (large, ~6–8):** rust core + dispatcher; capabilities→signatures (`val`→`&[T]`,
+  `iso`→owned, `tag`→`&T`); sum/struct→`enum`/`struct`; owned↔borrow coercion; parametric types;
+  `Fn` closures; protocol traits. Each is its own parity-gated commit.
+
+---
+
+## Part E — `Rian.Elixir` (text) → PureScript — last / optional
+
+### E.0 What it is
+
+The Elixir-text half of `Rian.Lower` (`to_elixir/5`, `lower.ex:346`). The reference's **own
+moduledoc** labels it a callout: *"the Elixir-text path is a DEBUG/inspection view, not the BEAM
+execution path… surfaced only behind `mix rian.compile --show-elixir`… never the run path"* —
+`Rian.Beam` (Part B) is the real BEAM backend.
+
+### E.1 Plan
+
+- **Lowest priority — possibly never.** Completion of "emitters ported" is defined by the
+  **run-path** targets (Beam, Rust, JS, JVM); the Elixir *text* is an inspection artifact whose
+  parity is a nice-to-have, not a gate.
+- If ported: extract `to_elixir` into **`Rian.Elixir`** (reusing `Rian.Emit.Common`), parity via
+  an `elx` stream vs `Lower.to_elixir`, and **mirror the reference's debug-only callout** in the
+  PS moduledoc so the artifact's status is never mistaken for a run path.
+
+---
+
+## Team decision (debate consensus, 2026-06-21)
+
+A controversial review of this plan settled five points:
+
+1. **The emitter phase is gated on `Check`.** All four source emitters call
+   `Check.annotate`/`program_ic`/`clause_env`; none are ported. **Land the `ic` + `annotate` +
+   `program_ic` + `clause_env` first** — *the* prerequisite. (The earlier "JS portable now" claim
+   was a factual error, now corrected.)
+2. **Order:** `Check.annotate`/`ic` → **JS + JVM as a pair** → **`Capability`** → **Rust** →
+   **Elixir-text last/optional**.
+3. **Split `Rian.Lower` into `Rian.Rust` + `Rian.Elixir` + a shared `Rian.Emit.Common`.** Parity
+   is on the emitted **output** (`rst`/`elx` streams vs `Lower.to_rust`/`to_elixir`), so the split
+   is oracle-neutral and idiomatic. Shared helpers must be a real module, not copy-paste.
+4. **Verification = run the output** per target — `node` (JS), `kotlinc`+`java` batched (JVM),
+   `rustc --test` (Rust); the source-equality streams are the cheap drift-catchers, the toolchain
+   lanes are the truth.
+5. **Completion does not require the Elixir-text emitter** — it is the reference's own admitted
+   debug view.
+
+**Future developments.** Once `annotate` lands, JS/JVM are ~80% shared (a common dispatcher
+lowering in `Rian.Emit.Common` ≈ halves the JVM port). The toolchain-run lanes (`node`/`kotlinc`/
+`rustc`/`tsc --noEmit`) are one pattern → a single parameterized batched runner harness. Porting
+`Capability`/`Reach` *before* Rust also tightens the reach matrix's PS-side honesty (the `rch`
+stream exists from concurrent work) — sequence for that synergy.
+
+**Concrete suggestions (rated).** Open the emitter phase with `Check.annotate`/`ic` (10/10);
+JS + JVM paired, sharing the dispatcher (9/10); Rust gated on `Capability`, honesty via
+`rustc --test` (9/10); split `Lower` → `Rust`/`Elixir`/`Emit.Common` (8/10); Elixir-text
+last/optional, labelled debug-only (7/10); one parameterized toolchain-run harness (7/10).
+
+---
+
 ## Suggested sequencing
 
-1. **Part A** (JS port + `.ts`) — well-understood, unblocks a Tier-1 target in PS, ~8 commits.
-2. **Part B0** (portable `Form` layer, keep `:compile.forms` FFI) — ~3 commits, faithful to
-   ADR-0084.
-3. **Part B1/B2** (portable bytecode) — only after an ADR ratifies the byte-identical →
-   behavioral shift; the big bet.
+0. **PREREQUISITE — `Check.annotate` + the `ic` + `program_ic` + `clause_env`.** Gates *all four*
+   source emitters (JS/JVM/Rust/Elixir). Nothing in Parts A/C/D/E is real before this. ~several
+   stages (it is the deferred whole-program inference context).
+1. **Part A** (JS) **+ Part C** (JVM) as a **paired track** sharing `Rian.Emit.Common`'s
+   dispatcher lowering — ~8 + ~3 commits, two Tier-relevant targets, output-run lanes
+   (`node` / `kotlinc`).
+2. **Part B0** (portable Beam `Form` layer, keep `:compile.forms` FFI) — ~3 commits, faithful to
+   ADR-0084; independent of the `Check` prerequisite (the `Form` layer is a Core pass like
+   `Shadow`), so it can run **in parallel** with step 1.
+3. **`Rian.Capability`** (the Rust prerequisite gate) → **Part D** (Rust) — the deep track, ~6–8
+   commits, honesty via `rustc --test`.
+4. **Part A's `.ts` sidecars** — after the JS core (needs an Elixir `.ts` oracle first; ADR-0049
+   amendment).
+5. **Part E** (Elixir-text) — last / optional; the reference's own debug view.
+6. **Part B1/B2** (portable bytecode) — the big bet, only after an ADR ratifies the
+   byte-identical → behavioral shift.
 
-Both parts also need, per the migration conventions: `@rian_sig` on every public function (caps +
+All parts also need, per the migration conventions: `@rian_sig` on every public function (caps +
 type bridge, no `_Unk` where a concrete type is known), and `@rian_host` on the genuinely
 host-effectful functions (`Beam.load`/`compile` touch `:code`/files → host; the pure
 `compile :: Prog -> String` / `Prog -> BeamBinary` cores do not).
