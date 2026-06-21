@@ -520,6 +520,25 @@ pex_corpus = [
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend"
 ]
 
+# Rian.Reach corpus — the `rch` stream (ADR-0057). First slice: the signature pins
+# (ref/Int/width/Any), the body scan (FFI / concurrency / Result / map / prims + call edges),
+# and the call-graph fixpoint. Avoids the deferred emitter-gap detectors (union / parametric /
+# Any-in-JVM-op / pin / dispatcher) and portable-prelude module calls (Prelude.defines? unported).
+rch_corpus = [
+  "def add(a Int53, b Int53) := a + b",
+  "def bump(x ref Int53) := x",
+  "def big(n Int) := n",
+  "def wide(n Int64) := n",
+  "def dyn(x Any) := x",
+  "def now() := :erlang.system_time()",
+  "def go(f Int53) := :erlang.spawn(f)",
+  "def ext() := Foo.bar()",
+  "def m() := %{a: 1}",
+  "def okv(x Int53) := {:ok, x}",
+  "def shw(x Int53) := __prim_to_string(x)",
+  "def host() := :erlang.now()\ndef caller() := host()"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1243,6 +1262,18 @@ lines =
 
       canon = Enum.map_join(defs, "\n", &DeclCanon.expand_def_s/1)
       "pex\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
+    end) ++
+    Enum.map(rch_corpus, fn s ->
+      rep = Rian.Reach.analyze(Decl.parse(s, assemble_only: true))
+
+      canon =
+        rep
+        |> Enum.sort_by(&elem(&1, 0))
+        |> Enum.map_join("\n", fn {k, %{reach: r, blockers: bs}} ->
+          "#{k} reach=#{Enum.join(Enum.sort(MapSet.to_list(r)), ",")} blockers=#{Enum.map_join(bs, "|", & &1.construct)}"
+        end)
+
+      "rch\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)
