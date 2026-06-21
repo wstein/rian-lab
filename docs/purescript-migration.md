@@ -189,14 +189,17 @@ and **`Rian.Capability`** (`cap`/`lin`) ported. **The Check `ic` landed:** `prog
 (`pic`), threaded through `infer` — a constructor / program-function / cross-module call (`ifc`),
 **ECase flow-narrowing** + generic-return instantiation + `.of` construction — plus
 `infer_return_type`/`fill_local_rets` (`irt`/`flr`), **`Rian.InferLocal.fill_returns`** (`ilr`), and
-**`check_program`'s return-assignability gate** (`gate`). **`Rian.Assemble`** (new top module,
-`asm`) runs the protocol-synthesis tail pass `Decl.parse` does but PS `parseToProg` defers
-(`Protocol.expand` → `prog.funcs`), sidestepping the `Decl`↔`Protocol` import cycle; macro
-expansion stays deferred (needs `Clause.body` → `String | Surface`). **Next:** the Check tail — `infer_param_type`
-(+ InferLocal's param generalization), `error_sets` (ADR-0040), `effect_sets` (needs
-`Reach.effect_sets`), the rest of `assignable?` — then the emitters (`Beam`/`JS`/`JVM`/`Lower`) and
-the Decl assemble-tail wiring of `Macro`/`Protocol`.
-Total **802/802** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+**`check_program`'s gate** (`gate`) — return-assignability (the FULL `assignable?`: value unions /
+`Any`-wildcard-at-depth / bare-head / constructed-opaque / numeric widening) **and error sets**
+(ADR-0040 — a `Result(T,E)`'s produced error set ⊆ `E`, by a call-graph fixpoint), `infer_param_type`
+(`ipt`), `effect_sets` (`efs`, in Reach). **`Rian.Assemble`** (new top module) runs the whole
+assemble tail `Decl.parse` does but PS `parseToProg` defers — **protocol synthesis** (`asm`,
+`Protocol.expand` → `prog.funcs`, sidestepping the `Decl`↔`Protocol` cycle) **and macro expansion**
+(`mxb`, `Macro.expand` → `Expanded` clause bodies). The clause body is now `data Body = Raw String |
+Expanded Surface` with a `bodySurface` accessor (the reference's `String | ast`, idempotent re-parse
+restored). **Next:** `Comptime` (`lower_meta`'s other half), then the emitters
+(`Beam`/`JS`/`JVM`/`Lower`).
+Total **806/806** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/**InferLocal**.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
