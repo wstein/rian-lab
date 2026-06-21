@@ -602,6 +602,19 @@ check_infer_corpus = [
   "Map.put(xs, x, n)"
 ]
 
+# Rian.Check.infer over function BODIES — the `bdy` stream (parseBody: `;`-separated
+# statements with binds threaded through the env; the block's type is its last statement).
+check_body_corpus = [
+  "x + 1",
+  "n",
+  "z := x ; z + 1",
+  "w Int8 := 5 ; w",
+  "a := 1 ; b := a + 2 ; b",
+  "p := n ; q := p * 10 ; q",
+  "t := s ; t",
+  "u := [x, y] ; u"
+]
+
 check_join_corpus = [
   "Int64;;Int64",
   ":bottom;;Int64",
@@ -967,6 +980,11 @@ defmodule CheckCanon do
   def infer(src) do
     out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse(src)), @fixed_env, %{}))
   end
+
+  # the `bdy` stream: infer a `;`-separated function body (binds threaded through the env).
+  def infer_body(src) do
+    out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse_body(src)), @fixed_env, %{}))
+  end
 end
 
 defmodule ExhFixtures do
@@ -1141,6 +1159,9 @@ lines =
     end) ++
     Enum.map(check_infer_corpus, fn s ->
       "inf\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer(s))}"
+    end) ++
+    Enum.map(check_body_corpus, fn s ->
+      "bdy\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer_body(s))}"
     end) ++
     Enum.map(builtins_corpus, fn s ->
       "bui\t#{Canon.hex(s)}\t#{Canon.hex(BuiltinsCanon.run(s))}"

@@ -82,6 +82,8 @@ run_stream(<<"uni">>, Src) -> hexbin('rian_check@ps':unifySexpr(Src));
 run_stream(<<"joi">>, Src) -> hexbin('rian_check@ps':joinSexpr(Src));
 %% Rian.Check.infer over the expression core (canon = the inferred type under a fixed env)
 run_stream(<<"inf">>, Src) -> hexbin('rian_check@ps':inferSexpr(Src));
+%% Rian.Check.infer over a function body (parseBody: ;-separated binds + value)
+run_stream(<<"bdy">>, Src) -> hexbin('rian_check@ps':inferBodySexpr(Src));
 %% Rian.Builtins host/stdlib signature table (canon = known?/ret/poly_sig for a mod;fun;arity)
 run_stream(<<"bui">>, Src) -> hexbin('rian_builtins@ps':builtinSexpr(Src)).
 

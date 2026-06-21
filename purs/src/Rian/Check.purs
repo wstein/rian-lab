@@ -25,6 +25,7 @@ module Rian.Check
   , unifySexpr
   , joinSexpr
   , inferSexpr
+  , inferBodySexpr
   ) where
 
 import Prelude hiding (join)
@@ -39,7 +40,7 @@ import Data.String.Common (joinWith, replaceAll, split)
 import Data.Tuple (Tuple(..), snd)
 import Rian.Builtins as Builtins
 import Rian.Core (CExpr(..), CMapPair(..), CStmt(..), fromExpr)
-import Rian.Pratt (Param, parse) as P
+import Rian.Pratt (Param, parse, parseBody) as P
 import Rian.Prim (normalize)
 import Rian.TypeStr (splitTopCommas)
 
@@ -630,6 +631,11 @@ pairOp f src = case split (Str.Pattern ";;") src of
 -- normalizing `Pratt.parse`; it is identity over non-`Prim` expressions.
 inferSexpr :: String -> String
 inferSexpr src = tyStr (infer (fromExpr (normalize (P.parse src))) fixedEnv)
+
+-- | The `bdy` stream: infer a function body (`;`-separated statements with binds threaded
+-- | through the env), composing `lexer → Pratt.parseBody → Prim.normalize → Core → infer`.
+inferBodySexpr :: String -> String
+inferBodySexpr src = tyStr (infer (fromExpr (normalize (P.parseBody src))) fixedEnv)
 
 -- the parity env (must match `CheckCanon.fixed_env` in gen_fixtures.exs).
 fixedEnv :: Env

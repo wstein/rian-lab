@@ -22,6 +22,7 @@ module Rian.Pratt
   , ForClause(..)
   , IPart(..)
   , parse
+  , parseBody
   , parseSexpr
   , parsePats
   , sexpr
@@ -136,6 +137,17 @@ parse :: String -> Surface
 parse src =
   let Tuple ast rest = parseExpr (List.fromFoldable (exprTokens src)) 0
   in if List.null rest then ast else unsafeCrashWith ("Pratt: trailing tokens: " <> here rest)
+
+-- | Parse a function body — a `;`-separated statement block with a final value expression
+-- | (a single expression is the one-statement case). Always a `SBlock` (`Core.fromExpr`
+-- | unwraps a single-`expr` block). Like `parse`, this stays `Prim.normalize`-free (callers
+-- | compose it) to avoid a Pratt↔Prim module cycle. The `<-` error-propagation desugar is
+-- | staged out, as elsewhere.
+-- @rian_sig pub def parseBody(src val String) Surface
+parseBody :: String -> Surface
+parseBody src =
+  let Tuple block rest = parseBlock (List.fromFoldable (exprTokens src))
+  in if List.null rest then block else unsafeCrashWith ("Pratt: trailing tokens in body: " <> here rest)
 
 -- @rian_sig pub def parseSexpr(src val String) String
 parseSexpr :: String -> String
