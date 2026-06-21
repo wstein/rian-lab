@@ -43,6 +43,54 @@ end
 
 alias Rian.Lexer
 alias Rian.TypeStr
+alias Rian.Pratt
+
+# Pratt expression-core corpus (ADR-0084 Phase 3, stage 1). Scoped to the ported forms —
+# no if/case/with/for/lambda/blocks/patterns/bitstrings/interpolation/map-update — and
+# Prim-free, so `parse` runs without `Rian.Prim.normalize` changing anything.
+pratt_corpus = [
+  "a + b",
+  "a + b * c",
+  "a * b + c",
+  "a - b - c",
+  "a <> b <> c",
+  "a == b",
+  "-a",
+  "not b",
+  "- a + b",
+  "n - 1 .. m + 1",
+  "a and b or c",
+  "a |> f(b)",
+  "f(x)",
+  "f(x, y)",
+  "M.f(x)",
+  "a.b.c",
+  "f(x)(y)",
+  "[]",
+  "[1, 2, 3]",
+  "[h | t]",
+  "[a, b | rest]",
+  "{}",
+  "{1, 2}",
+  "(a)",
+  "(a, b)",
+  "(a, b, c)",
+  "%{}",
+  "%{a: 1, b: 2}",
+  ~S|%{"k" => v, "j" => w}|,
+  "%{a: 1, b: 2 + 3}",
+  ":ok",
+  "Foo.bar",
+  "Point(x: 1, y: 2)",
+  "&foo/1",
+  "&Mod.fun/2",
+  "&(&1 + &2)",
+  "f(&1, b)",
+  "'A' == c",
+  "1_000 + 2",
+  "1e9",
+  "x"
+]
 
 # Type-string corpus for Rian.TypeStr (split_top_commas / split_top_pipes / normalize).
 typestr_corpus = [
@@ -164,6 +212,9 @@ lines =
         "tsp\t#{Canon.hex(s)}\t#{Canon.strlist(TypeStr.split_top_pipes(s))}",
         "tsn\t#{Canon.hex(s)}\t#{Canon.hex(TypeStr.normalize(s))}"
       ]
+    end) ++
+    Enum.map(pratt_corpus, fn s ->
+      "psx\t#{Canon.hex(s)}\t#{Canon.hex(Pratt.parse_sexpr(s))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])
