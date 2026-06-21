@@ -36,7 +36,7 @@ import Data.String.CodePoints as CP
 import Data.String.Common (joinWith, trim)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Rian.IR (Body(..), Cap(..), Clause, Const, ExtSpec(..), Field, Func, ImplDecl, ImplMethod, Method, Mod, Opaque, Param, Prog, Protocol, Range, Struct, Type, Use, Variant)
+import Rian.IR (Body(..), Cap(..), Clause, Const, ExtSpec(..), Field, Func, ImplDecl, ImplMethod, MacroDef, Method, Mod, Opaque, Param, Prog, Protocol, Range, Struct, Type, Use, Variant)
 import Rian.Lexer (detokenize, exprTokens, tokenize)
 import Rian.Pratt (Pat, parsePats, sexprPat)
 import Rian.Pratt as P
@@ -64,7 +64,16 @@ parseToProg src =
       , mods: buildMods decls aliases
       , protocols: inScope decls protocolStructs
       , implDecls: inScope decls implStructs
+      , macros: inScope decls macroDefs
       }
+
+-- `macro name(params) := template` definitions (ADR-0030), preserved for the assemble tail's
+-- expansion env (the reference consumes them in `lower_meta`; PS defers that pass).
+macroDefs :: List RawDecl -> Array MacroDef
+macroDefs ds = Array.mapMaybe macroOf (Array.fromFoldable ds)
+  where
+  macroOf (DMacro raw) = Just { name: raw.name, params: map _.name (parseParams raw.params), template: fromMaybe "" raw.body }
+  macroOf _ = Nothing
 
 -- apply `f` to the top-level decls and to each module's inner decls, concatenating —
 -- protocols/impls are program-global, hoisted out of any enclosing `mod` (ADR-0042 §3).

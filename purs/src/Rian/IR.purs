@@ -32,6 +32,7 @@ module Rian.IR
   , ImplDecl
   , Mod
   , Prog
+  , MacroDef
   ) where
 
 import Prelude
@@ -174,4 +175,10 @@ type Prog =
   , mods :: Array Mod
   , protocols :: Array Protocol
   , implDecls :: Array ImplDecl
+  , macros :: Array MacroDef
   }
+
+-- A `macro name(params) := template` definition (ADR-0030), preserved on the program so the
+-- assemble tail (`Rian.Assemble`) can build the expansion env. The reference consumes these in
+-- `lower_meta` and drops them; PS defers that pass, so it carries them here instead.
+type MacroDef = { name :: String, params :: Array String, template :: String }

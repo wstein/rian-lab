@@ -699,6 +699,17 @@ gate_corpus = [
 # reference's `Decl.parse` synthesizes (dispatcher + `impl_*`), serialized via the shared `prog`
 # oracle. Confirms PS `Assemble` reproduces `Decl.assemble`'s protocol-synthesis tail pass. (User
 # `def`s before the protocol/impl, types last — mirrors the `pex` corpus.)
+# Rian.Assemble macro expansion — the `mxb` stream (ADR-0030): the Core of every clause body
+# AFTER `lower_meta` expands `macro` calls, serialized via the shared `coreSexpr` oracle. (Tests
+# the macro WIRING — env from the program's macros, applied to func bodies — which the body-string
+# serializer can't show, since the reference can't render an expanded AST through it.)
+mxb_corpus = [
+  "macro double(x) := x + x\npub def u(n Int53) Int53 := double(n)",
+  "macro inc(x) := x + 1\npub def v(n Int53) Int53 := inc(n)",
+  "macro swap(a, b) := (b, a)\ndef w(n Int53) := swap(n, 1)",
+  "macro double(x) := x + x\npub def p(n Int53) Int53 := n + 1"
+]
+
 asm_corpus = [
   "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := f(x)\nend",
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
@@ -1599,6 +1610,20 @@ lines =
     end) ++
     Enum.map(asm_corpus, fn s ->
       "asm\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.prog(Decl.parse(s, assemble_only: true)))}"
+    end) ++
+    Enum.map(mxb_corpus, fn s ->
+      funcs = Map.get(Decl.parse(s, assemble_only: true), :funcs, [])
+
+      canon =
+        funcs
+        |> Enum.flat_map(fn f ->
+          Enum.map(f.clauses, fn c ->
+            CoreCanon.expr(Rian.Core.from_expr(Rian.Pratt.parse_body(c.body)))
+          end)
+        end)
+        |> Enum.join(";")
+
+      "mxb\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)
