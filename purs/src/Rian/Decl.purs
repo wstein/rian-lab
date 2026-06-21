@@ -121,6 +121,8 @@ data RawDecl
   | DAlias String
   | DRange String Boolean (Maybe String)
   | DOpaque String Boolean (Maybe String)
+  -- `abstract Name := Base do … end`: head string + the rendered `op`/`cast` rule strings.
+  | DAbstract String (Array String) (Array String) Boolean (Maybe String)
   | DMod String (List RawDecl) (Maybe String)
 
 declKws :: Array String
@@ -159,6 +161,17 @@ takeDecl (TKw "use" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple 
 takeDecl (TKw "alias" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DAlias (detok toks)) rest'
 takeDecl (TKw "range" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DRange (detok toks) false Nothing) rest'
 takeDecl (TKw "opaque" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DOpaque (detok toks) false Nothing) rest'
+-- `abstract Name := Base do op …(…) Ret … ; to base() Type end` (ADR-0067): `opaque` plus
+-- an operator/cast surface. The header parses like `opaque`; the `do … end` block holds the
+-- `op`/`to` members (one per line), rendered to canonical strings here.
+takeDecl (TKw "abstract" : rest) = case takeUntilDo rest Nil of
+  Tuple headToks (TKw "do" : r) ->
+    let
+      Tuple body rest' = takeBlock r 1 Nil
+      Tuple ops casts = parseAbstractMembers body
+    in
+      Tuple (DAbstract (detok headToks) ops casts false Nothing) rest'
+  _ -> unsafeCrashWith "Decl: `abstract` needs a `do … end` block"
 takeDecl (TKw "mod" : TId name : TKw "do" : rest) =
   let Tuple inner rest' = takeModBody rest Nil in Tuple (DMod name inner Nothing) rest'
 takeDecl (TKw "mod" : _) = unsafeCrashWith "Decl: expected `mod Name do … end`"
@@ -197,6 +210,7 @@ attachDoc doc (DDef r) = DDef (r { doc = Just doc })
 attachDoc doc (DConst s p _) = DConst s p (Just doc)
 attachDoc doc (DRange s p _) = DRange s p (Just doc)
 attachDoc doc (DOpaque s p _) = DOpaque s p (Just doc)
+attachDoc doc (DAbstract s o c p _) = DAbstract s o c p (Just doc)
 attachDoc doc (DMod n inner _) = DMod n inner (Just doc)
 attachDoc _ d = d
 
@@ -207,6 +221,7 @@ markPub (DDef r) = DDef (r { pub = true })
 markPub (DConst s _ d) = DConst s true d
 markPub (DRange s _ d) = DRange s true d
 markPub (DOpaque s _ d) = DOpaque s true d
+markPub (DAbstract s o c _ d) = DAbstract s o c true d
 markPub _ = unsafeCrashWith "Decl: `pub` may only precede `def` / `type` / `struct` / `const`"
 
 detok :: List Token -> String
@@ -241,6 +256,7 @@ assembleScope decls aliases =
   rangeOf (DRange s p d) = Just (parseRange s p d)
   rangeOf _ = Nothing
   opaqueOf (DOpaque s p d) = Just (parseOpaque s p d)
+  opaqueOf (DAbstract s o c p d) = Just (parseAbstract s o c p d)
   opaqueOf _ = Nothing
   sameFunc a b = a.name == b.name && rawArity a == rawArity b
 
@@ -373,6 +389,53 @@ parseOpaque text pub doc = case splitOnce ":=" text of
   Just { left, right } ->
     { name: stripTypeParams left, base: collapseParens (trim right), pub, doc, ops: [], casts: [] }
   Nothing -> unsafeCrashWith ("Decl: opaque declaration needs `:=`: " <> text)
+
+-- `abstract Name := Base` — the header parses like `opaque`; `ops`/`casts` are the rendered
+-- `op`/`to` rule strings collected from the `do … end` block.
+parseAbstract :: String -> Array String -> Array String -> Boolean -> Maybe String -> Opaque
+parseAbstract text ops casts pub doc = case splitOnce ":=" text of
+  Just { left, right } ->
+    { name: stripTypeParams left, base: collapseParens (trim right), pub, doc, ops, casts }
+  Nothing -> unsafeCrashWith ("Decl: abstract declaration needs `:=`: " <> text)
+
+-- `do … end` token body → `(op-rules, cast-rules)`, one member per line.
+parseAbstractMembers :: List Token -> Tuple (Array String) (Array String)
+parseAbstractMembers toks =
+  foldl classify (Tuple [] []) (Array.filter (_ /= "") (map (trim <<< detok) lines))
+  where
+  lines = Array.fromFoldable (abstractLines toks Nil Nil)
+  classify (Tuple ops casts) line
+    | startsWithStr "op " line = Tuple (Array.snoc ops (parseOpRule line)) casts
+    | startsWithStr "to " line = Tuple ops (Array.snoc casts (parseCastRule line))
+    | otherwise = unsafeCrashWith ("Decl: unexpected `abstract` member (need `op`/`to`): " <> line)
+
+-- group tokens into per-line lists, splitting on significant newlines.
+abstractLines :: List Token -> List Token -> List (List Token) -> List (List Token)
+abstractLines Nil cur acc = List.reverse (flush cur acc)
+abstractLines (TNl : r) cur acc = abstractLines r Nil (flush cur acc)
+abstractLines (t : r) cur acc = abstractLines r (t : cur) acc
+
+flush :: List Token -> List (List Token) -> List (List Token)
+flush Nil acc = acc
+flush cur acc = List.reverse cur : acc
+
+-- `op +(a T, b T) Ret` → the canonical `+(T, T) Ret`.
+parseOpRule :: String -> String
+parseOpRule line = case extractParens (trim (dropPrefix "op " line)) of
+  Just { name, inside, rest } ->
+    trim name <> "(" <> joinWith ", " (map (fromMaybe "_infer" <<< _.ty) (parseParams inside)) <> ") " <> trim rest
+  Nothing -> unsafeCrashWith ("Decl: malformed `op` in abstract: " <> line)
+
+-- `to base() Type` → the canonical `base() Type`.
+parseCastRule :: String -> String
+parseCastRule line = case extractParens (trim (dropPrefix "to " line)) of
+  Just { name, rest } -> trim name <> "() " <> trim rest
+  Nothing -> unsafeCrashWith ("Decl: malformed `to` cast in abstract: " <> line)
+
+takeUntilDo :: List Token -> List Token -> Tuple (List Token) (List Token)
+takeUntilDo (TKw "do" : r) acc = Tuple (List.reverse acc) (TKw "do" : r)
+takeUntilDo (t : r) acc = takeUntilDo r (t : acc)
+takeUntilDo Nil _ = unsafeCrashWith "Decl: `abstract` needs a `do … end` block"
 
 parseUse :: String -> Use
 parseUse text =

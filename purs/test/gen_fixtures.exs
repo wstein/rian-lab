@@ -181,8 +181,12 @@ defmodule DeclCanon do
   defp range_s(%Range{name: n, base: base, lo: lo, hi: hi, pub?: pub, doc: doc}),
     do: "(range #{n}#{pub_flag(pub)}#{doc_flag(doc)} #{base} #{lo}..#{hi})"
 
-  defp opaque_s(%Opaque{name: n, base: base, pub?: pub, doc: doc}),
-    do: "(opaque #{n}#{pub_flag(pub)}#{doc_flag(doc)} #{base})"
+  defp opaque_s(%Opaque{name: n, base: base, pub?: pub, doc: doc, ops: ops, casts: casts}),
+    do:
+      "(opaque #{n}#{pub_flag(pub)}#{doc_flag(doc)} #{base}#{Enum.map_join(ops, "", &op_s/1)}#{Enum.map_join(casts, "", &cast_s/1)})"
+
+  defp op_s(o), do: " op=#{o.op}(#{Enum.join(o.params, ", ")}) #{o.ret}"
+  defp cast_s(c), do: " cast=#{c.name}() #{c.ret}"
 
   defp use_s(%Use{path: path, names: names}),
     do: "(use #{path}#{Enum.map_join(names, "", fn n -> " " <> n end)})"
@@ -382,7 +386,12 @@ decl_corpus = [
   "@external(:ex, Mod.fun)\ndef ext3(a Int53) Int53",
   "@external(:js, :erlang.length)\ndef ext4(xs Vec(Int53)) Int53",
   "@external(:rs, \"src.rs\", \"helper\")\ndef ext5() Int53",
-  "mod F do\n@external(:jvm, \"Math.sqrt\")\npub def root(x Float64) Float64\nend"
+  "mod F do\n@external(:jvm, \"Math.sqrt\")\npub def root(x Float64) Float64\nend",
+  # stage 4d: abstract (opaque + op/cast rules in a do … end block)
+  "abstract Meters := Float64 do\n  op +(a Meters, b Meters) Meters\n  to base() Float64\nend",
+  "pub abstract Money := Int64 do\n  op +(a Money, b Money) Money\n  op *(a Money, b Int64) Money\n  to cents() Int64\nend",
+  "abstract Empty := Int53 do\nend",
+  "mod U do\nabstract Id := Int53 do\n  to raw() Int53\nend\nend"
 ]
 
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.

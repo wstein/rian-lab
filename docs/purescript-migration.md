@@ -73,7 +73,7 @@ removal-order note).
 | Module        | LOC  | Notes / status                                                 |
 | ------------- | ---- | -------------------------------------------------------------- |
 | `Rian.Pratt`  | 1218 | **Ported (parity-gated, `psx` stream):** the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms, patterns, `if`/`case`/`lambda`/blocks, **and `with`/`for`/`${}` interpolation**. **Remaining (raise a clear message, excluded from the corpus):** bitstrings (+pattern, BEAM-only), map *update* and type-patterns (no reference `sexpr` clause → not parity-testable), and error-propagation `<-` + speculative destructuring binds. |
-| `Rian.Decl`   | 1901 | **Stages 1–4c ported** (parity-gated, `dcl` stream, 63 records): **data-type declarations** (`type`/`struct`), **`def`** (single-/multi-clause, `:=` bodies, capabilities, `build_func` grouping, head patterns, `forall`), **`mod`/`const`/`use`/`alias`** (nested `assemble`, alias subst), and **`range`/`opaque`** (ordinal bounds; range name substitutes to its `base`), `const` (explicit + literal-inferred type), `use` (qualified + selective), **alias substitution** (whole-word, transitive to a fixpoint, over all type positions), **`def` block bodies** (`def … Ret <nl> body <nl> end` — `take_block` depth-counts the matching `end`; `block_seps`/`detok_block` rewrites a top-level newline to a `;` while tracking nested `do`/`end`, brackets, and `with`-headers), and **`@external(:target, spec)`** (ADR-0068 — target-scoped FFI bodies on a bodiless `def`: a string spec, a `Mod.fun`/`:erlang.fun` reference, or a `"path", "fun"` file ref; the target vocabulary is hardcoded since `Reach` is unported). Stage 4 remaining (raise/excluded): `abstract`, `protocol`/`impl`, `macro`, and the program-wide tail passes (need `Check`/`InferLocal`/`Protocol`). |
+| `Rian.Decl`   | 1901 | **Stages 1–4 ported** (parity-gated, `dcl` stream, 67 records): **data-type declarations** (`type`/`struct`), **`def`** (single-/multi-clause, `:=` bodies, capabilities, `build_func` grouping, head patterns, `forall`), **`mod`/`const`/`use`/`alias`** (nested `assemble`, alias subst), and **`range`/`opaque`** (ordinal bounds; range name substitutes to its `base`), `const` (explicit + literal-inferred type), `use` (qualified + selective), **alias substitution** (whole-word, transitive to a fixpoint, over all type positions), **`def` block bodies** (`def … Ret <nl> body <nl> end` — `take_block` depth-counts the matching `end`; `block_seps`/`detok_block` rewrites a top-level newline to a `;` while tracking nested `do`/`end`, brackets, and `with`-headers), and **`@external(:target, spec)`** (ADR-0068 — target-scoped FFI bodies on a bodiless `def`: a string spec, a `Mod.fun`/`:erlang.fun` reference, or a `"path", "fun"` file ref; the target vocabulary is hardcoded since `Reach` is unported), and **`abstract Name := Base do … end`** (ADR-0067 — an `opaque` carrying `op`/`to` operator/cast rules, parsed via `extractParens`/`parseParams` and rendered to a canonical per-member string). Stage 4 remaining (raise/excluded): `protocol`/`impl`, `macro`, and the program-wide tail passes (need `Check`/`InferLocal`/`Protocol`). |
 
 **Parity oracle (Pratt → Core).** Pratt is verified via its built-in `parse_sexpr/1` (the
 `psx` stream — output-only, no surface round-trip). `Core.from_expr`/`from_pat` then composes
@@ -158,11 +158,11 @@ Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (par
 `Rian.Ann` reader dropped (annotation convention retained); `Rian.IR` (data structs) remains.
 **Phase 3**: `Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks +
 `with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
-error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` stages 1–4c**
+error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` stage 4 complete**
 (`type`/`struct`/`def`/`mod`/`const`/`use`/`alias`/`range`/`opaque` + `def` block bodies +
-`@external`) ported. **Phase 4 gates:** **`Rian.PatternLower`** + **`Rian.Exhaustiveness`**
-ported (Maranget usefulness over the ported Core; `plw`/`exh` streams). **Next:** `Rian.Decl`
-`abstract`/`protocol`/`impl`/`macro`; the program-wide tail passes wait on
-`Check`/`InferLocal`/`Protocol`. Total **483/483** parity records across
+`@external` + `abstract`) ported. **Phase 4 gates:** **`Rian.PatternLower`** +
+**`Rian.Exhaustiveness`** ported (Maranget usefulness over the ported Core; `plw`/`exh`
+streams). **Next:** `Rian.Decl` `protocol`/`impl`/`macro`; the program-wide tail passes wait
+on `Check`/`InferLocal`/`Protocol`. Total **487/487** parity records across
 Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness. Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
