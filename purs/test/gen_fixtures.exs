@@ -492,6 +492,45 @@ check_unify_corpus = [
   "Vec(Int53);;Vec(Bool)"
 ]
 
+# Rian.Check.infer stage 2 — the expression core, over the fixed env (x,y:Int64; n:Int53;
+# b:Bool; s:String; f:Float64; c:Char; xs:Vec(Int53)). Excludes if/case/call/lambda/.field.
+check_infer_corpus = [
+  "1",
+  "1.5",
+  "2e3",
+  "\"hi\"",
+  "'a'",
+  "true",
+  "x",
+  "n",
+  "xs",
+  "-x",
+  "not b",
+  "x + y",
+  "x + 1",
+  "1 + x",
+  "n - 1",
+  "x * y",
+  "(13 - n) * 10",
+  "x < y",
+  "b and b",
+  "n == n",
+  "s <> s",
+  "x / y",
+  "n div n",
+  "c - c",
+  "c + 1",
+  "[1, 2, 3]",
+  "[x, y]",
+  "[x, 1]",
+  "[]",
+  "{x, s}",
+  "{1, b}",
+  "{n}",
+  "%{a: 1, b: 2}",
+  "%{a: x, b: n}"
+]
+
 check_join_corpus = [
   "Int64;;Int64",
   ":bottom;;Int64",
@@ -818,6 +857,23 @@ defmodule CheckCanon do
   defp out(:mismatch), do: ":mismatch"
   defp out(:bottom), do: ":bottom"
   defp out(s) when is_binary(s), do: s
+
+  # the `inf` stream: infer an expression under a fixed env (mirrors `Check.fixedEnv` in PS),
+  # composing lexer → Pratt → Core → Check.infer (empty inference context).
+  @fixed_env %{
+    "x" => "Int64",
+    "y" => "Int64",
+    "n" => "Int53",
+    "b" => "Bool",
+    "s" => "String",
+    "f" => "Float64",
+    "c" => "Char",
+    "xs" => "Vec(Int53)"
+  }
+
+  def infer(src) do
+    out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse(src)), @fixed_env, %{}))
+  end
 end
 
 defmodule ExhFixtures do
@@ -989,6 +1045,9 @@ lines =
     end) ++
     Enum.map(check_join_corpus, fn s ->
       "joi\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.run(:join, s))}"
+    end) ++
+    Enum.map(check_infer_corpus, fn s ->
+      "inf\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer(s))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])

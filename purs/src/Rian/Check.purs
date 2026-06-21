@@ -20,19 +20,25 @@ module Rian.Check
   , tyOf
   , unify
   , join
+  , Env
+  , infer
   , unifySexpr
   , joinSexpr
+  , inferSexpr
   ) where
 
 import Prelude hiding (join)
 
-import Data.Array (find, length, uncons, zipWith)
-import Data.Foldable (all, any)
+import Data.Array (find, foldl, head, length, uncons, zipWith)
+import Data.Foldable (all, any, elem)
 import Data.Int as Int
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.String as Str
 import Data.String.CodeUnits (toCharArray)
 import Data.String.Common (joinWith, split)
+import Data.Tuple (Tuple(..), snd)
+import Rian.Core (CExpr(..), CMapPair(..), fromExpr)
+import Rian.Pratt (parse) as P
 import Rian.TypeStr (splitTopCommas)
 
 -- | An inferred type: a type-name string (`"Int53"`, `"Fn(_,Int64)"`, `"Vec(Int53)"`), or
@@ -266,6 +272,166 @@ isLower c = c >= 'a' && c <= 'z'
 isDigit :: Char -> Boolean
 isDigit c = c >= '0' && c <= '9'
 
+-- ── inference (stage 2: the expression core) ─────────────────────────────────
+-- | A per-scope variable environment: name → inferred type. Modelled as an association
+-- | list (no `Data.Map` in the purerl set), like the rest of the port.
+type Env = Array (Tuple String Ty)
+
+-- | Infer the type of an expression under `env`; `Unknown` when unsure. This stage covers
+-- | the pure expression core (literals, vars, unary/binary ops, list/tuple/map literals).
+-- | `if`/`case` (branch-join + value unions), lambdas, calls/generics, `.field`, atoms, and
+-- | the inference context (`ic` — ctors/fsigs/abstract ops) arrive in later stages, so those
+-- | nodes defer to `Unknown` here (the conservative slice never over-claims).
+infer :: CExpr -> Env -> Ty
+infer (ENum n) _ = if hasDotOrE n then TName "Float64" else TName "Int53"
+infer (EStr _) _ = TName "String"
+infer (EChar _) _ = TName "Char"
+infer (EId "true") _ = TName "Bool"
+infer (EId "false") _ = TName "Bool"
+infer (EId x) env = fromMaybe Unknown (envLookup x env)
+infer (EUnary "-" x) env = infer x env
+infer (EUnary "not" _) _ = TName "Bool"
+infer (EBin op l r) env = inferBin op l r env
+infer (EList elems tail) env = inferList elems tail env
+infer (ETuple elems) env = inferTuple elems env
+infer (EMap pairs) env = inferMap pairs env
+infer _ _ = Unknown
+
+envLookup :: String -> Env -> Maybe Ty
+envLookup k = map snd <<< find (\(Tuple k' _) -> k' == k)
+
+-- ── binary operators ─────────────────────────────────────────────────────────
+
+boolOps :: Array String
+boolOps = [ "<", "<=", ">", ">=", "==", "!=", "and", "or", "in" ]
+
+intOps :: Array String
+intOps = [ "div", "rem" ]
+
+arithOps :: Array String
+arithOps = [ "+", "-", "*" ]
+
+inferBin :: String -> CExpr -> CExpr -> Env -> Ty
+inferBin op l r env =
+  let
+    lt = infer l env
+    rt = infer r env
+  in
+    -- (abstract-operator resolution needs the inference context; empty here, so it falls
+    -- through to the default arithmetic rules — a later stage threads `ic`.)
+    if op `elem` boolOps then TName "Bool"
+    else if op == "<>" then TName "String"
+    else if op == "/" then TName "Float64"
+    else if op `elem` intOps || op `elem` arithOps then arithType l r lt rt
+    else Unknown
+
+-- Arithmetic result type: an integer *literal* operand is width-flexible (adopts a concrete
+-- same-kind neighbour), so `typed op literal` keeps the typed width; else the two ordinal
+-- bases unify (`Char` widens to `Int53`). A proven clash is conservatively `Unknown`.
+arithType :: CExpr -> CExpr -> Ty -> Ty -> Ty
+arithType l r lt rt
+  | intLitExpr l && adoptableInt rt = ordinalBase rt
+  | intLitExpr r && adoptableInt lt = ordinalBase lt
+  | otherwise = conservative (unify (ordinalBase lt) (ordinalBase rt))
+
+adoptableInt :: Ty -> Boolean
+adoptableInt = intType
+
+-- `Char ± _` widens to its `Int53` ordinal base (`'9' - '0' = 9 ∉ Char`, ADR-0036).
+ordinalBase :: Ty -> Ty
+ordinalBase (TName "Char") = TName "Int53"
+ordinalBase t = t
+
+-- `^U?Int\d*$` — a (possibly bare) signed/unsigned integer type name.
+intType :: Ty -> Boolean
+intType (TName s) =
+  case Str.stripPrefix (Str.Pattern "Int") (fromMaybe s (Str.stripPrefix (Str.Pattern "U") s)) of
+    Just rest -> all isDigit (toCharArray rest)
+    Nothing -> false
+intType _ = false
+
+-- an integer-literal expression (a literal, a negation of one, or arithmetic over them) —
+-- the operand that adopts its neighbour's width.
+intLitExpr :: CExpr -> Boolean
+intLitExpr (ENum t) = intLiteral t
+intLitExpr (EUnary "-" a) = intLitExpr a
+intLitExpr (EBin op l r) | op `elem` arithOps || op `elem` intOps = intLitExpr l && intLitExpr r
+intLitExpr _ = false
+
+intLiteral :: String -> Boolean
+intLiteral n = not (hasDotOrE n)
+
+-- ── list / tuple / map literals ──────────────────────────────────────────────
+
+inferList :: Array CExpr -> Maybe CExpr -> Env -> Ty
+inferList elems tail env =
+  let
+    elemT = debottom (foldl (\acc e -> join (infer e env) acc) Bottom elems)
+    te = listElem (inferTail tail env)
+  in
+    if te == Unknown || te == elemT then listOf (conservative elemT) else Unknown
+
+inferTail :: Maybe CExpr -> Env -> Ty
+inferTail Nothing _ = Unknown
+inferTail (Just t) env = infer t env
+
+listElem :: Ty -> Ty
+listElem (TName s) = case Str.stripPrefix (Str.Pattern "Vec(") s of
+  Just rest -> TName (fromMaybe rest (Str.stripSuffix (Str.Pattern ")") rest))
+  Nothing -> Unknown
+listElem _ = Unknown
+
+listOf :: Ty -> Ty
+listOf (TName t) = TName ("Vec(" <> t <> ")")
+listOf _ = TName "Vec(Any)"
+
+-- a tuple literal infers its structural shape `(Ta,Tb,…)` — an unpinnable element defers to
+-- `Any`. An ATOM-tagged tuple (`{:ok, v}`) is a tagged sum value, not a raw tuple → `Unknown`.
+inferTuple :: Array CExpr -> Env -> Ty
+inferTuple elems env = case head elems of
+  Just (EAtom _) -> Unknown
+  _ -> TName ("(" <> joinWith "," (map (\e -> tyStr (conservativeUnk (infer e env))) elems) <> ")")
+
+-- a `%{…}` literal infers `Dict(KeyT,ValT)` — key/value types each LUB-join across the pairs.
+inferMap :: Array CMapPair -> Env -> Ty
+inferMap pairs env =
+  let
+    kt = joinAll (map (inferMapKey env) pairs)
+    vt = joinAll (map (\p -> infer (mapVal p) env) pairs)
+  in
+    TName ("Dict(" <> tyStr (conservativeUnk kt) <> "," <> tyStr (conservativeUnk vt) <> ")")
+
+inferMapKey :: Env -> CMapPair -> Ty
+inferMapKey _ (CMAtom _ _) = TName "Symbol"
+inferMapKey env (CMKey k _) = infer k env
+
+mapVal :: CMapPair -> CExpr
+mapVal (CMAtom _ v) = v
+mapVal (CMKey _ v) = v
+
+-- ── small inference helpers ──────────────────────────────────────────────────
+
+joinAll :: Array Ty -> Ty
+joinAll = debottom <<< foldl (\acc t -> join t acc) Bottom
+
+debottom :: Ty -> Ty
+debottom Bottom = Unknown
+debottom t = t
+
+-- a proven clash relaxes to `Unknown` (the checker only reports a provable mismatch later).
+conservative :: Ty -> Ty
+conservative Mismatch = Unknown
+conservative t = t
+
+-- a structural element the checker can't pin becomes `Any` (the dynamic top), so the
+-- enclosing tuple/map type stays concrete instead of collapsing to `:unknown`.
+conservativeUnk :: Ty -> Ty
+conservativeUnk (TName s) = TName s
+conservativeUnk _ = TName "Any"
+
+hasDotOrE :: String -> Boolean
+hasDotOrE n = Str.contains (Str.Pattern ".") n || Str.contains (Str.Pattern "e") n || Str.contains (Str.Pattern "E") n
+
 -- ── parity entries ───────────────────────────────────────────────────────────
 
 -- | The `uni` / `joi` streams: a `t;;u` pair (the sentinels spelled `:unknown` etc.).
@@ -279,3 +445,21 @@ pairOp :: (Ty -> Ty -> Ty) -> String -> String
 pairOp f src = case split (Str.Pattern ";;") src of
   [ a, b ] -> tyStr (f (tyOf a) (tyOf b))
   _ -> "?"
+
+-- | The `inf` stream: infer an expression's type under a fixed env (mirrored in the oracle),
+-- | composing `lexer → Pratt → Core → infer`.
+inferSexpr :: String -> String
+inferSexpr src = tyStr (infer (fromExpr (P.parse src)) fixedEnv)
+
+-- the parity env (must match `CheckCanon.fixed_env` in gen_fixtures.exs).
+fixedEnv :: Env
+fixedEnv =
+  [ Tuple "x" (TName "Int64")
+  , Tuple "y" (TName "Int64")
+  , Tuple "n" (TName "Int53")
+  , Tuple "b" (TName "Bool")
+  , Tuple "s" (TName "String")
+  , Tuple "f" (TName "Float64")
+  , Tuple "c" (TName "Char")
+  , Tuple "xs" (TName "Vec(Int53)")
+  ]
