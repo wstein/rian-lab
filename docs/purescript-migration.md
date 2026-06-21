@@ -196,7 +196,7 @@ expansion stays deferred (needs `Clause.body` → `String | Surface`). **Next:**
 (+ InferLocal's param generalization), `error_sets` (ADR-0040), `effect_sets` (needs
 `Reach.effect_sets`), the rest of `assignable?` — then the emitters (`Beam`/`JS`/`JVM`/`Lower`) and
 the Decl assemble-tail wiring of `Macro`/`Protocol`.
-Total **784/784** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **802/802** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/**InferLocal**.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
