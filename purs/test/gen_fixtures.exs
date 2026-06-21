@@ -486,6 +486,20 @@ coh_corpus = [
   "type Foo := A | B\nprotocol P do\n  def m(x Self) Bool\nend\nimpl P for Foo do\n  def m(x) := true\nend"
 ]
 
+# Rian.Coherence `@targets(:rs)` corpus — the `cohrs` stream. The SAME synthesis-free scope,
+# but run for a Rust-only scope: a Rust-only module dispatches on static types, so the
+# shared-runtime-discriminator rule is EXEMPT — while a `duplicate` (proto,type) or a
+# method-set/arity mismatch still fires (those are not target-gated). Exercises the
+# `runtime_dispatch_target([:rs]) == false` branch the `coh` stream (targets=nil) cannot reach.
+cohrs_corpus = [
+  # shared discriminator Int64+Char → exempt under :rs (empty); reported under nil (in `coh`).
+  "protocol P do\n  def m(x Self) Bool\nend\nimpl P for Int64 do\n  def m(x) := true\nend\nimpl P for Char do\n  def m(x) := false\nend",
+  # a duplicate (proto,type) still fires under :rs — not a discriminator rule.
+  "protocol P do\n  def m(x Self) Bool\nend\nimpl P for Int64 do\n  def m(x) := true\nend\nimpl P for Int64 do\n  def m(x) := false\nend",
+  # a method-set mismatch still fires under :rs.
+  "protocol P do\n  def m(x Self) Bool\nend\nimpl P for Int64 do\n  def wrong(x) := true\nend"
+]
+
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.
 # Oracle = Pratt.parse_sexpr (which already applies Prim.normalize inside `parse`); the PS
 # side composes Prim.normalize. Excludes unknown `Prim.x` (raises on both sides).
@@ -892,6 +906,14 @@ lines =
         end)
 
       "coh\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
+    end) ++
+    Enum.map(cohrs_corpus, fn s ->
+      canon =
+        Enum.map_join(Decl.coherence_violations(s, [:rs]), ";", fn vio ->
+          "#{vio.rule}:#{vio.proto}:#{vio.type}"
+        end)
+
+      "cohrs\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])

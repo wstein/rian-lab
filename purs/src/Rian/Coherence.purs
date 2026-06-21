@@ -15,6 +15,7 @@ module Rian.Coherence
   , Registry
   , violations
   , violationsSexpr
+  , violationsRsSexpr
   ) where
 
 import Prelude
@@ -152,8 +153,17 @@ v rule proto ty = { rule, proto, ty }
 -- | The `coh` parity unit: parse a single-scope source (synthesis-free, no desugar) and
 -- | serialize its coherence violations as `rule:proto:ty` joined by `;`.
 violationsSexpr :: String -> String
-violationsSexpr src =
-  joinWith ";" (map ser (violations prog.protocols prog.implDecls reg Nothing))
+violationsSexpr = violationsWith Nothing
+
+-- | The `cohrs` parity unit: the same, but for a Rust-only scope (`@targets(:rs)`) — so the
+-- | runtime-discriminator exemption applies (a `shared_discriminator` is suppressed, while a
+-- | `duplicate` or method-set/arity violation still fires).
+violationsRsSexpr :: String -> String
+violationsRsSexpr = violationsWith (Just [ "rs" ])
+
+violationsWith :: Maybe (Array String) -> String -> String
+violationsWith targets src =
+  joinWith ";" (map ser (violations prog.protocols prog.implDecls reg targets))
   where
   prog :: Prog
   prog = parseToProg src

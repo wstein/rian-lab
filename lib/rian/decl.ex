@@ -267,9 +267,13 @@ defmodule Rian.Decl do
   scope's protocols/impls/types/structs and run `Rian.Coherence.violations` *without*
   the desugar (so it returns the violations instead of raising). The cross-language
   `coh` parity unit (ADR-0084), mirroring the PureScript `Rian.Coherence.violationsSexpr`.
+
+  `targets` is the scope's `@targets` (`nil` = unannotated = all targets, the common case);
+  pass an explicit set (e.g. `[:rs]`) to exercise the runtime-dispatch exemption (a Rust-only
+  scope dispatches on static types, so the shared-runtime-discriminator rule does not apply).
   """
-  @spec coherence_violations(String.t()) :: [map()]
-  def coherence_violations(src) do
+  @spec coherence_violations(String.t(), [atom()] | nil) :: [map()]
+  def coherence_violations(src, targets \\ nil) do
     decls = src |> Lexer.tokenize() |> split_decls()
     aliases = collect_aliases(decls)
 
@@ -284,7 +288,7 @@ defmodule Rian.Decl do
     protocols = for p <- all_protocols(decls), into: %{}, do: {p.name, p.methods}
     impls = for i <- all_impl_decls(decls), do: {i.proto, i.type, i.methods, i.assoc}
 
-    Rian.Coherence.violations(protocols, impls, Rian.Coherence.registry(types, structs), nil)
+    Rian.Coherence.violations(protocols, impls, Rian.Coherence.registry(types, structs), targets)
   end
 
   # union the assembled programs: concatenate every list-valued field (`:mods`, top-level
