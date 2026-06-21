@@ -92,7 +92,7 @@ what the Core oracle confirms over the surface form.
 | `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
 | `Rian.Coherence`      | ~280 | ✅ ported — protocol/impl coherence rules (ADR-0061 §5): unknown-protocol, method-set/arity, runtime-discriminator presence + non-overlap, duplicate (`coh`/`cohrs` streams). **Enriched for `Protocol`:** the `Registry` carries sum variants and `classify` returns the **real BEAM guard string** (`sumGuard`/`structGuard`) — same overlap outcome as the old equivalence class, now also the dispatcher's discriminator — plus `guardFor`/`registry`. |
 | `Rian.Capability`     | 290  | ✅ ported — Rust capability lowering (`rustParam`: val/iso/ref/tag + Copy/borrow/owned, `Fn`→`&impl`, Vec/Map/tuple/parametric/nested) + BEAM linearity (`countUses`: branch-aware free-var occurrence count; iso/ref use-once). Pure. `cap`/`lin` streams. |
-| `Rian.Check`          | 2724 | 🟡 **type algebra + inference + the `ic` + the gate ported** — `unify`/`join`, `infer`/`inferBody` (expression core), and the **whole-program inference context `ic`**: `program_ic`'s 9 tables (`pic`), threaded through `infer` so a constructor / program-function / cross-module call (`ifc`), **ECase flow-narrowing** (`ic.tdefs`), generic-return instantiation (`ic.fsigs`), and `.of` range/opaque construction all resolve; **`infer_return_type` + `fill_local_rets`** (`irt`/`flr`); **`infer_param_type`** (`ipt`, the bidirectional parameter constraint, consumed by `InferLocal`); the **full `assignable?`** (value-union membership/mismatch, `Any`-wildcard, bare-sum head, constructed→opaque, numeric widening); and **`check_program`**'s gate (`gate` stream), which runs the reference `check_func` chain in order — **`check_unk` → `check_external_caps` → `check_labels` → `check_union_clash` → return-assignability → `check_bounds` → `check_numeric_mix` → `check_value_position` → error-sets** (ADR-0040, `efs`) — so the first-error message matches. `uni`/`joi`/`inf`/`bdy`/`pic`/`ifc`/`irt`/`flr`/`ipt`/`gate`/`efs` streams. **Genuinely remaining (2 of the 11 `check_func` checks + `annotate`):** `annotate` (writes the inferred type onto each Core node — blocked on giving `Core.CExpr` a per-node type field, the emitter milestone's foundational refactor); `check_binds` (blocked on the deferred literal-width-adoption + range-bind machinery — porting it naively would *falsely reject* `x Int8 := 5`); and `check_effects` (blocked on the unported `@effects` declaration parse + `Func.effects` field — its inference half `effect_sets` is ported in `Rian.Reach`, but there is nothing declared to compare against). The gate is therefore sound but **conservative** on those two: it never wrongly rejects, it can only miss a binding-width / effect-set error. `check_external_caps`'s `Mod.fun` arity resolution stays host-coupled (shares the unported `External.resolve`). **reframe, not lift**. |
+| `Rian.Check`          | 2724 | 🟡 **type algebra + inference + the `ic` + the gate ported** — `unify`/`join`, `infer`/`inferBody` (expression core), and the **whole-program inference context `ic`**: `program_ic`'s 9 tables (`pic`), threaded through `infer` so a constructor / program-function / cross-module call (`ifc`), **ECase flow-narrowing** (`ic.tdefs`), generic-return instantiation (`ic.fsigs`), and `.of` range/opaque construction all resolve; **`infer_return_type` + `fill_local_rets`** (`irt`/`flr`); **`infer_param_type`** (`ipt`, the bidirectional parameter constraint, consumed by `InferLocal`); the **full `assignable?`** (value-union membership/mismatch, `Any`-wildcard, bare-sum head, constructed→opaque, numeric widening); and **`check_program`**'s gate (`gate` stream), which runs the reference `check_func` chain in order — **`check_unk` → `check_external_caps` → `check_labels` → `check_union_clash` → return-assignability → `check_bounds` → `check_numeric_mix` → `check_value_position` → `check_effects` → error-sets** (ADR-0040, `efs`) — so the first-error message matches. `uni`/`joi`/`inf`/`bdy`/`pic`/`ifc`/`irt`/`flr`/`ipt`/`gate`/`efs` streams. **Genuinely remaining (1 of the 11 `check_func` checks + `annotate`):** `annotate` (writes the inferred type onto each Core node — blocked on giving `Core.CExpr` a per-node type field, the emitter milestone's foundational refactor); and `check_binds` (blocked on the deferred literal-width-adoption + range-bind machinery — porting it naively would *falsely reject* `x Int8 := 5`). (`check_effects` is now wired — its `@effects` declaration parse + `Func.effects` field are ported, and its inference half `effect_sets` lives in `Rian.Reach`.) The gate is therefore sound but **conservative** on that one: it never wrongly rejects, it can only miss a binding-width error. `check_external_caps`'s `Mod.fun` arity resolution stays host-coupled (shares the unported `External.resolve`). **reframe, not lift**. |
 | `Rian.Reach`          | 1235 | ✅ ported — target-set portability inference (ADR-0057/58, `rch` stream). `analyze` + the call-graph reach fixpoint; the signature pins (ref→off`:ex`, Int→off`:rs`/`:jvm`, wide-int→off`:js`, Any→off`:rs`), the body scan (host FFI/concurrency, Result, map literal/update, BEAM-only prims + local-call edges), the emitter-gap detectors (value-union narrowability, Any-in-JVM-operator, clause-head pin), and the **parametric-`:rs` monomorphic subset** (the `expandPtypes`/`emittableMap` fixpoints + the F1/F2/F3 builder-shape gate). **`preludeDefines`** (a snapshot of `Rian.Prelude.defines?`) makes a `List`/`Dict`/`Str`/`Int` portable-prelude module call portable by construction rather than host FFI. `dispatch`/`bitstr` detectors moot in PS (no `Func.dispatch`; no bitstr in portable Core). |
 
 ### Phase 5 — Emitters
@@ -192,14 +192,14 @@ and **`Rian.Capability`** (`cap`/`lin`) ported. **The Check `ic` landed:** `prog
 (`pic`), threaded through `infer` — a constructor / program-function / cross-module call (`ifc`),
 **ECase flow-narrowing** + generic-return instantiation + `.of` construction — plus
 `infer_return_type`/`fill_local_rets` (`irt`/`flr`), **`Rian.InferLocal.fill_returns`** (`ilr`), and
-**`check_program`'s gate** (`gate`) — now 9 of the reference's 11 `check_func` checks in order:
+**`check_program`'s gate** (`gate`) — now 10 of the reference's 11 `check_func` checks in order:
 `check_unk`, `check_external_caps`, `check_labels`, `check_union_clash`, return-assignability (the
 FULL `assignable?`: value unions / `Any`-wildcard-at-depth / bare-head / constructed-opaque /
 numeric widening), `check_bounds` (`forall T: Bound`), `check_numeric_mix`, `check_value_position`,
-**and error sets** (ADR-0040 — a `Result(T,E)`'s produced error set ⊆ `E`, by a call-graph
-fixpoint). Only `check_binds` (blocked on the deferred literal-width-adoption + range-bind
-machinery) and `check_effects` (blocked on the unported `@effects` parse + `Func.effects` field)
-remain — sound-but-conservative gaps. Plus `infer_param_type` (`ipt`) and `effect_sets` (`efs`, in
+`check_effects` (each declared effect set matches the body's inferred effects — `@effects` parse +
+`Func.effects` now ported), **and error sets** (ADR-0040 — a `Result(T,E)`'s produced error set ⊆
+`E`, by a call-graph fixpoint). Only `check_binds` (blocked on the deferred literal-width-adoption +
+range-bind machinery) remains — a sound-but-conservative gap. Plus `infer_param_type` (`ipt`) and `effect_sets` (`efs`, in
 Reach). **`Rian.Assemble`** (new top module) runs the whole
 `lower_meta` assemble tail `Decl.parse` does but PS `parseToProg` defers — **protocol synthesis**
 (`asm`, `Protocol.expand` → `prog.funcs`, sidestepping the `Decl`↔`Protocol` cycle), **macro
@@ -211,10 +211,11 @@ restored); `lower_meta` change-detects via the canonical `sexpr` so an untouched
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **844/844** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **847/847** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
-InferLocal/Assemble/Comptime/**Opaque** (the count is the harness's own `N/N` total — `parity.erl`
-reports `length(Results)`, so it tracks the fixture file and cannot drift from it).
+InferLocal/Assemble/Comptime/**Opaque** (= the fixture file's line count; the harness reports its own
+`N/N` — `parity.erl`'s `length(Results)` — so its PASS line never asserts a number the run did not
+produce, though this prose figure is a snapshot and is the one place to keep current).
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
 
@@ -238,7 +239,7 @@ back, and `check_program` enforces return-assignability (the full `assignable?`:
 `Protocol.expand` synthesis (`asm`) plus `Macro.expand` + `Comptime.fold` into `Expanded` clause
 bodies (`mxb`). **Phase 4 is closed.** **What remains before end-to-end compile**: the **emitters**
 (`Beam`/`JS`/`JVM`/`Lower`) — the value backend — plus, in `Check`, `annotate` (needs a per-node Core
-type field) and the two still-deferred gate checks (`check_binds`, `check_effects`). The parity-record count measures
+type field) and the one still-deferred gate check (`check_binds`). The parity-record count measures
 front-end + inference + gate + assemble-tail *fidelity*, not compiler completeness; the **emitters** are now the
 gate that flips "checks a program" to "emits one."
 

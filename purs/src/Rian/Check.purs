@@ -889,11 +889,11 @@ fillLocalRetsSexpr src =
 -- | The compile-time gate: the first function that fails a check (`Just message`), else `Nothing`
 -- | (`:ok`). Runs the reference `check_func` chain in order so the first-error message matches:
 -- | `check_unk` → `check_external_caps` → `check_labels` → `check_union_clash` → return-
--- | assignability → `check_bounds` → `check_numeric_mix` → `check_value_position` → error sets
--- | (ADR-0040). Two reference checks are NOT wired yet: `check_binds` (blocked on the deferred
--- | literal-width-adoption + range-bind machinery — porting it naively would falsely reject
--- | `x Int8 := 5`) and `check_effects` (deferred). The gate is therefore sound but conservative on
--- | those two — it never wrongly rejects, it can only miss a binding-width / effect-set error.
+-- | assignability → `check_bounds` → `check_numeric_mix` → `check_value_position` → `check_effects`
+-- | → error sets (ADR-0040). One reference check is NOT wired yet: `check_binds` (blocked on the
+-- | deferred literal-width-adoption + range-bind machinery — porting it naively would falsely reject
+-- | `x Int8 := 5`). The gate is therefore sound but conservative on that one — it never wrongly
+-- | rejects, it can only miss a binding-width error.
 -- @rian_sig pub def check_program(prog val Prog) _Unk
 checkProgram :: Prog -> Maybe String
 checkProgram prog = findMap checkFunc funcs
@@ -908,8 +908,9 @@ checkProgram prog = findMap checkFunc funcs
   -- `@external`'s params are `val`/`tag`; no labeled call args; no value-union with two members
   -- sharing a runtime discriminator; the body is assignable to the declared return; each bounded-
   -- generic call site satisfies its bounds; no implicit Int↔Float mix; no unit in value position;
-  -- then a Result return's produced error set ⊆ its `E`. `check_binds` and `check_effects` are not
-  -- wired yet (see the module note), so the gate stays sound-but-conservative on those two.
+  -- each declared effect set matches the body's inferred effects; then a Result return's produced
+  -- error set ⊆ its `E`. Only `check_binds` is not wired yet (see the module note), so the gate
+  -- stays sound-but-conservative on that one.
   checkFunc f = firstErr
     [ \_ -> checkUnk f
     , \_ -> checkExternalCaps f

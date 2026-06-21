@@ -14,9 +14,9 @@ reproducible **local** gate). This proves the architecture with a runnable artif
 assertion (ADR-0000). **What remains:** the value backend — the `Beam`/`Lower`/`JS`/`JVM`
 emitters — plus the `Check.annotate`/`forall T: Bound` tail. The Elixir reference stays as the
 parity oracle until each module's PureScript counterpart reaches parity (removal is root-first).
-The per-module status table, the exact parity-record breakdown (currently **825/825**, the
-harness's own `N/N` total), and the remaining work live in **`docs/purescript-migration.md`** —
-the single source of truth, so this header does not drift; see also `purs/README.md`. **Honesty
+The per-module status table, the live parity-record count (the harness's own `N/N` total), and
+the remaining work live in **`docs/purescript-migration.md`** — the single source of truth, so this
+header carries no number to drift; see also `purs/README.md`. **Honesty
 caveat:** the parity gate runs **locally per commit**, not in CI — fetching the pinned `purerl`
 release + dhall set is a network step the CI image does not perform today (see "Consequences").
 **Refs:** ADR-0000 (honesty bar — no asserted-not-proven build claims), ADR-0050
