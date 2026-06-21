@@ -25,14 +25,14 @@ import Data.Foldable (elem, foldMap, foldl)
 import Data.Int as Int
 import Data.List (List(..), (:))
 import Data.List as List
-import Data.Maybe (Maybe(..), fromJust, fromMaybe)
+import Data.Maybe (Maybe(..), fromJust, fromMaybe, isJust)
 import Data.String (Pattern(..)) as Str
 import Data.String as Str
 import Data.String.CodePoints as CP
 import Data.String.Common (joinWith, trim)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Rian.IR (Cap(..), Clause, Const, Field, Func, Mod, Opaque, Param, Prog, Range, Struct, Type, Use, Variant)
+import Rian.IR (Cap(..), Clause, Const, ExtSpec(..), Field, Func, Mod, Opaque, Param, Prog, Range, Struct, Type, Use, Variant)
 import Rian.Lexer (detokenize, exprTokens, tokenize)
 import Rian.Pratt (Pat, parsePats, sexprPat)
 import Rian.Pratt as P
@@ -109,6 +109,7 @@ type RawDef =
   , tvars :: Array String
   , bounds :: Array (Tuple String (Array String))
   , doc :: Maybe String
+  , externals :: Array (Tuple String ExtSpec)
   }
 
 data RawDecl
@@ -137,6 +138,17 @@ takeDecl :: List Token -> Tuple RawDecl (List Token)
 takeDecl (TAnnot a : TStr doc : rest)
   | a `elem` [ "doc", "moduledoc", "typedoc" ] =
       let Tuple decl rest' = takeDecl (skipNl rest) in Tuple (attachDoc doc decl) rest'
+-- `@external(:target, spec)` — a target-scoped FFI body (ADR-0068); one or more precede a
+-- bodiless `def`, attaching a per-target host body to it.
+takeDecl (TAnnot "external" : TLparen : rest) =
+  let
+    Tuple argToks rest' = takeParens rest 0 Nil
+    Tuple target spec = parseExternal argToks
+    Tuple decl rest'' = takeDecl (skipNl rest')
+  in
+    Tuple (attachExternal decl target spec) rest''
+takeDecl (TAnnot "external" : _) =
+  unsafeCrashWith "Decl: expected `@external(:target, \"host expression\")`"
 takeDecl (TAnnot a : _) = stage2 ("annotation `@" <> a <> "`")
 takeDecl (TKw "pub" : rest) = let Tuple decl rest' = takeDecl rest in Tuple (markPub decl) rest'
 takeDecl (TKw "type" : rest) = let Tuple toks rest' = takeType rest Nil in Tuple (DType (detok toks) false Nothing) rest'
@@ -421,6 +433,40 @@ takeHead name params (TNl : rest) head =
 takeHead name params Nil head = Tuple (defRaw name params head Nothing) Nil
 takeHead name params (t : rest) head = takeHead name params rest (t : head)
 
+-- the closed target vocabulary (`Rian.Reach.targets()`, unported — hardcoded, ADR-0058 §2).
+extTargets :: Array String
+extTargets = [ "ex", "rs", "js", "jvm" ]
+
+-- `@external(:target, spec)` args → `{target, spec}`. The target is validated; the spec is a
+-- raw host-expression string, a function reference (`Mod.fun` / `:erlang.fun`), or a foreign
+-- file reference (`"path", "fun"`). FFI is trusted, not parsed beyond its shape (ADR-0068).
+parseExternal :: List Token -> Tuple String ExtSpec
+parseExternal (TOp ":" : TId t : TComma : rest) =
+  if t `elem` extTargets then Tuple t (parseExternalSpec rest)
+  else unsafeCrashWith ("Decl: unknown target `:" <> t <> "` in `@external`; known: ex, rs, js, jvm")
+parseExternal _ = unsafeCrashWith "Decl: `@external` takes a target atom and a spec: `@external(:js, \"expr\")`"
+
+parseExternalSpec :: List Token -> ExtSpec
+parseExternalSpec (TStr s : Nil) = ExtStr s
+parseExternalSpec (TStr path : TComma : TStr fun : Nil) = ExtFile path fun
+parseExternalSpec (TOp ":" : TId m : rest) = ExtRef (Array.cons m (dottedTail rest)) true
+parseExternalSpec (TId m : rest) = ExtRef (Array.cons m (dottedTail rest)) false
+parseExternalSpec _ =
+  unsafeCrashWith "Decl: `@external` spec must be a string `\"expr\"` or a reference `Mod.fun`/`:erlang.fun`"
+
+dottedTail :: List Token -> Array String
+dottedTail (TOp "." : TId x : rest) = Array.cons x (dottedTail rest)
+dottedTail Nil = []
+dottedTail _ = unsafeCrashWith "Decl: malformed `@external` reference (expected `Mod.fun`)"
+
+attachExternal :: RawDecl -> String -> ExtSpec -> RawDecl
+attachExternal (DDef r) target spec
+  | isJust r.body = unsafeCrashWith ("Decl: `" <> r.name <> "`: `@external` cannot accompany a portable body")
+  | isJust (Array.find (\(Tuple k _) -> k == target) r.externals) =
+      unsafeCrashWith ("Decl: `" <> r.name <> "`: duplicate `@external(:" <> target <> ", …)`")
+  | otherwise = DDef (r { externals = Array.snoc r.externals (Tuple target spec) })
+attachExternal _ _ _ = unsafeCrashWith "Decl: `@external(…)` may only precede a `def`"
+
 -- A `do … end` block body: collect the tokens up to the matching `end` (depth-counted;
 -- an atom/field keyword `:do`/`x.end` does not move the counter), then `block_seps`
 -- rewrites a top-level newline to a `;` statement separator.
@@ -463,7 +509,7 @@ defRaw name params headRev body =
     ph = parseHead sf.ret
     ret = map (TypeStr.normalize <<< collapseParens) ph.ret
   in
-    { name, params, ret, guard: ph.guard, body, pub: false, tvars: sf.tvars, bounds: sf.bounds, doc: Nothing }
+    { name, params, ret, guard: ph.guard, body, pub: false, tvars: sf.tvars, bounds: sf.bounds, doc: Nothing, externals: [] }
 
 -- a `:=` body: a newline ends it unless the body plainly continues (inside unbalanced
 -- brackets, a `do…end`, or across a trailing/leading continuation operator).
@@ -546,11 +592,28 @@ buildFunc group = case Array.uncons group of
   Nothing -> unsafeCrashWith "Decl: empty function group"
   Just { head: first, tail: rest } ->
     if first.body == Nothing then
-      if Array.null rest then
-        unsafeCrashWith ("Decl: function `" <> first.name <> "` has a signature but no clauses (or @external — stage 2)")
+      if not (Array.null first.externals) && Array.null rest then externalFunc first
+      else if Array.null rest then
+        unsafeCrashWith ("Decl: function `" <> first.name <> "` has a signature but no clauses")
       else multiClauseFunc first rest
     else if Array.null rest then singleClauseFunc first
     else unsafeCrashWith ("Decl: cannot group clauses of `" <> first.name <> "`")
+
+-- a bodiless `def` carrying only `@external(:target, …)` bodies (ADR-0068): no portable
+-- clauses; `Rian.Reach` reads the externals for an honest target set.
+externalFunc :: RawDef -> Func
+externalFunc sig =
+  let params = boundaryParams (parseParams sig.params) in
+  { name: sig.name
+  , params
+  , ret: reqRet sig
+  , clauses: []
+  , externals: sig.externals
+  , pub: sig.pub
+  , tvars: sig.tvars
+  , bounds: sig.bounds
+  , doc: sig.doc
+  }
 
 -- bodiless signature + pattern clauses.
 multiClauseFunc :: RawDef -> Array RawDef -> Func
@@ -563,6 +626,7 @@ multiClauseFunc sig clauses =
     , params
     , ret: reqRet sig
     , clauses: map (clauseOf (Array.length params)) clauses
+    , externals: []
     , pub: sig.pub
     , tvars: sig.tvars
     , bounds: sig.bounds
@@ -581,6 +645,7 @@ singleClauseFunc d =
     , params
     , ret: reqRet d
     , clauses: [ { pats: map _.pat hp, body: d.body, guard: d.guard } ]
+    , externals: []
     , pub: d.pub
     , tvars: d.tvars
     , bounds: d.bounds
@@ -967,10 +1032,21 @@ funcSexpr f =
     <> retFlag f.ret
     <> " (params" <> foldMap paramSexpr f.params <> ")"
     <> foldMap clauseSexpr f.clauses
+    <> externalsSexpr f.externals
     <> ")"
   where
   retFlag Nothing = ""
   retFlag (Just r) = " ret=" <> r
+
+externalsSexpr :: Array (Tuple String ExtSpec) -> String
+externalsSexpr [] = ""
+externalsSexpr ext =
+  " (externals" <> foldMap (\(Tuple t s) -> " (ext " <> t <> " " <> extSpecStr s <> ")") (Array.sortWith fst ext) <> ")"
+
+extSpecStr :: ExtSpec -> String
+extSpecStr (ExtStr s) = "str:" <> s
+extSpecStr (ExtRef parts erl) = "ref:" <> (if erl then ":" else "") <> joinWith "." parts
+extSpecStr (ExtFile p f) = "file:" <> p <> "," <> f
 
 paramSexpr :: Param -> String
 paramSexpr p = " (param " <> p.name <> " " <> capStr p.cap <> " " <> tyOf p.ty <> ")"

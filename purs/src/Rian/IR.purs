@@ -18,6 +18,7 @@ module Rian.IR
   , Cap(..)
   , Param
   , Clause
+  , ExtSpec(..)
   , Func
   , Const
   , Use
@@ -60,14 +61,27 @@ type Param = { name :: String, ty :: Maybe String, cap :: Cap }
 -- @rian_sig struct Clause(pats Vec(Pat), body Core, guard Option(Core))
 type Clause = { pats :: Array Pat, body :: Maybe String, guard :: Maybe String }
 
+-- A target-scoped FFI body (`@external(:target, spec)`, ADR-0068): a raw host-expression
+-- `String`, a function reference (`Mod.fun` local / `:erlang.fun`, the `Boolean` = erlang?),
+-- or a foreign-file reference (`"path", "fun"`).
+-- @rian_sig type ExtSpec := ExtStr(String) | ExtRef(Vec(String), Bool) | ExtFile(String, String)
+data ExtSpec
+  = ExtStr String
+  | ExtRef (Array String) Boolean
+  | ExtFile String String
+
+derive instance Eq ExtSpec
+
 -- A function: `name`, `params`, return type `ret`, `clauses`. `tvars`/`bounds` are the
--- `forall` binders (ADR-0042). (synthetic/dispatch/externals/effects/test land later.)
--- @rian_sig struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause), is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)), doc Option(String))
+-- `forall` binders (ADR-0042); `externals` are per-target FFI bodies (ADR-0068) on a
+-- bodiless `def` (mutually exclusive with `clauses`). (synthetic/dispatch/effects/test land later.)
+-- @rian_sig struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause), externals Map(Symbol, ExtSpec), is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)), doc Option(String))
 type Func =
   { name :: String
   , params :: Array Param
   , ret :: Maybe String
   , clauses :: Array Clause
+  , externals :: Array (Tuple String ExtSpec)
   , pub :: Boolean
   , tvars :: Array String
   , bounds :: Array (Tuple String (Array String))

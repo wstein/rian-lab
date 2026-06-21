@@ -198,6 +198,7 @@ defmodule DeclCanon do
          params: ps,
          ret: ret,
          clauses: cs,
+         externals: ext,
          pub?: pub,
          tvars: tvars,
          bounds: bounds,
@@ -210,8 +211,25 @@ defmodule DeclCanon do
         " bound=#{bn}:#{Enum.join(bs, "+")}"
       end)
 
-    "(func #{n}#{pub_flag(pub)}#{doc_flag(doc)}#{tv}#{bd}#{ret_flag(ret)} (params#{Enum.map_join(ps, "", &param_s/1)})#{Enum.map_join(cs, "", &clause_s/1)})"
+    "(func #{n}#{pub_flag(pub)}#{doc_flag(doc)}#{tv}#{bd}#{ret_flag(ret)} (params#{Enum.map_join(ps, "", &param_s/1)})#{Enum.map_join(cs, "", &clause_s/1)}#{externals_s(ext)})"
   end
+
+  defp externals_s(ext) when map_size(ext) == 0, do: ""
+
+  defp externals_s(ext) do
+    " (externals" <>
+      Enum.map_join(Enum.sort(Map.to_list(ext)), "", fn {t, s} ->
+        " (ext #{t} #{ext_spec_s(s)})"
+      end) <>
+      ")"
+  end
+
+  defp ext_spec_s(s) when is_binary(s), do: "str:" <> s
+
+  defp ext_spec_s({:ref, parts, erl}),
+    do: "ref:" <> if(erl, do: ":", else: "") <> Enum.join(parts, ".")
+
+  defp ext_spec_s({:file, p, f}), do: "file:" <> p <> "," <> f
 
   defp ret_flag(nil), do: ""
   defp ret_flag(r), do: " ret=#{r}"
@@ -357,7 +375,14 @@ decl_corpus = [
   "def multi() Int53\n  a := [1, 2,\n        3]\n  sum(a)\nend",
   "def two(a, b)\ndef two(a, b)\n  a + b\nend",
   "def mk(a Int53) P\n  P(x: a,\n    y: a)\nend",
-  "mod B do\npub def run() Int53\n  x := 10\n  x\nend\nend"
+  "mod B do\npub def run() Int53\n  x := 10\n  x\nend\nend",
+  # stage 4c: @external — target-scoped FFI bodies (string spec, refs, file ref, stacked, in a mod)
+  "@external(:js, \"x => x\")\ndef ext1(x Int53) Int53",
+  "@external(:rs, \"todo!()\")\n@external(:js, \"0\")\npub def ext2() Int53",
+  "@external(:ex, Mod.fun)\ndef ext3(a Int53) Int53",
+  "@external(:js, :erlang.length)\ndef ext4(xs Vec(Int53)) Int53",
+  "@external(:rs, \"src.rs\", \"helper\")\ndef ext5() Int53",
+  "mod F do\n@external(:jvm, \"Math.sqrt\")\npub def root(x Float64) Float64\nend"
 ]
 
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.
