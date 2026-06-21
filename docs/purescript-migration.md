@@ -92,7 +92,7 @@ what the Core oracle confirms over the surface form.
 | `Rian.Exhaustiveness` | 290  | ✅ ported — Maranget usefulness/witness/unreachable + `program_env` (`exh`/`pge` streams). |
 | `Rian.Coherence`      | ~240 | ✅ ported — protocol/impl coherence rules (ADR-0061 §5): unknown-protocol, method-set/arity, runtime-discriminator presence + non-overlap, duplicate. Pure pass over the parsed IR; parity-gated via the `coh` stream (8 records), serializing `rule:proto:type` synthesis-free so incoherent inputs (which the desugar raises on) compare too. The runtime discriminator is keyed by an equivalence class (`int`/`bool`/…/`sum:<name>`) rather than the BEAM guard string — same overlap outcome, no codegen coupling. |
 | `Rian.Capability`     | 290  | BEAM linearity (`iso`/`ref`); FFI-adjacent.     |
-| `Rian.Check`          | 2724 | 🟡 **stages 1-3c ported** — `unify`/`join` + `infer` (expression core, `if`/`lambda`/`block`, `ECall` to prims/builtins/`Fn`-vars/poly-stdlib-generics). `infer` case-narrowing/`.of`-cast/the `ic`, `annotate`, error-sets, the program gates pending. **reframe, not lift**. |
+| `Rian.Check`          | 2724 | 🟡 **type algebra + inference ported** — `unify`/`join` + `infer`/`inferBody` (expression core, `if`/`lambda`/`block`, `ECall` to prims/builtins/`Fn`-vars/poly-stdlib-generics, + function-body re-parse; `uni`/`joi`/`inf`/`bdy` streams). `infer` case-narrowing/`.of`-cast/the `ic`, `annotate`, error-sets, the program gates pending. **reframe, not lift**. |
 | `Rian.Reach`          | 1235 | target-set portability inference (ADR-0057/58). |
 
 ### Phase 5 — Emitters
@@ -113,10 +113,13 @@ oracle = the reference `parse_sexpr`).
 `Range` (73) **✅ ported** — the `Name.of(n)` → in-bounds `if`-`Result` rewrite over the
 typed Core (the leaf-gate pattern: a structural Core→Core pass); parity via the `rng` stream
 (9 records, composing `lexer → Pratt → Core → expand_of → coreSexpr` over a fixed table).
-Remaining: `Builtins` (204), `Protocol` (388, the dispatcher/trait synthesis), `ShowStdlib`
-(29), `Shadow` (114) **✅ ported** (reflection-free Core var-dedup; `shd` stream), `Opaque` (159), `Comptime` (79), `Macro` (251, expansion), `External`
-(279), `Manifest` (315).
+Remaining: `Protocol` (388, the dispatcher/trait synthesis), `ShowStdlib` (29), `Opaque` (159),
+`Comptime` (79), `Macro` (251, expansion), the BEAM-coupled rest of `External` (279 — only
+`render` is ported), `Manifest` (315).
 `Builtins` (204) **✅ ported** — the host/stdlib foreign-call signature table (`ret`/`known`/`polySig` over `{module,fun,arity}`; `bui` stream). Consumed by `Check`/`Reach`.
+`Shadow` (114) **✅ ported** — capture-avoiding `:=` shadow rename over Core (ADR-0034): a rebind
+`x := …; x := …` is renamed for targets that forbid same-scope re-declaration (JS `let`, Kotlin
+`val`); `dedup`, parity via the `shd` stream.
 `Prelude` (115) **✅ ported** (pure part) — `types` (the built-in `Option(T) = Some(T) | None`,
 ADR-0047 §3) + `with_prelude`; parity via the `prl` stream. The BEAM/Reach-coupled function
 linkage (`module_names`/`defines?`/`atom`/`beams`/`load` — bundles `prelude_*.rian` and compiles
@@ -170,10 +173,13 @@ error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl
 `@external` + `abstract` + `protocol`/`impl`/`macro`) ported, plus **`Rian.Prelude`** (the pure
 `Option`/`with_prelude` part). **Phase 4 gates:** **`Rian.PatternLower`** + **`Rian.Exhaustiveness`**
 ported (Maranget usefulness over the ported Core, incl. `program_env`; `plw`/`exh`/`pge` streams).
-**`Rian.Check` stage 1** ported — the `unify`/`join` type algebra (the `Ty` sum; `uni`/`joi`
-streams), the first slice of the inference engine; `infer`/`annotate`/error-sets/the program
-gates are later stages. **Next:** `Check.infer` (the Core-node dispatch), then the program-wide
-tail passes (macro expansion, protocol synthesis, interpolation/stdlib/infer-local).
+**`Rian.Check` ported through inference** — the `unify`/`join` type algebra (the `Ty` sum;
+`uni`/`joi` streams) **and `infer`** over the expression core + **`inferBody`** (re-parse + infer
+a function body; `inf`/`bdy` streams). Still later stages: `infer`'s case-narrowing/`.of`-cast,
+`annotate`, the error-sets, and the program-level gates (`check_program`/bounds/the coherence-gate
+wiring). **`Rian.Shadow`** (capture-avoiding `:=` rename, ADR-0034; `shd` stream) ported. **Next:**
+the rest of `Check.infer` + `annotate`, then `Reach`, then the program-wide tail passes (macro
+expansion, protocol synthesis, interpolation/stdlib/infer-local).
 Total **678/678** parity records across
 Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow.
 Each module is parity-gated and committed on its own
@@ -181,12 +187,15 @@ Each module is parity-gated and committed on its own
 
 **What "ported" means here — read this before trusting the module count.** The **entire
 front-end is ported and cross-checked**: lex → parse → typed Core IR → the refutation gates
-(`PatternLower`/`Exhaustiveness`) → leaf passes (`Range`/`Prelude`/`External.render`/`Coherence`).
-**None of the inference or back-end is**: `Check` (2724), `Reach`, `InferLocal`, the emitters
-(`Beam`/`JS`/`JVM`/`Lower`), and the expansion/synthesis tail passes (`Macro`/`Protocol.expand`,
-`Opaque.erase`'s cast inference) are unported — so the port **cannot yet compile a program
-end-to-end**. The parity-record count measures front-end *fidelity*, not compiler completeness;
-`Check` is the gate that flips "front-end ported" to "can compile."
+(`PatternLower`/`Exhaustiveness`) → leaf passes (`Range`/`Prelude`/`External.render`/`Coherence`/
+`Builtins`/`Shadow`). **The inference core is partway, the back-end is not**: `Check`'s type
+algebra (`unify`/`join`) + `infer`/`inferBody` over the expression core are ported, but its
+**program gates** (`check_program`/error-sets/bounds/the coherence-gate wiring/`annotate`), plus
+`Reach`, `InferLocal`, the emitters (`Beam`/`JS`/`JVM`/`Lower`), and the expansion/synthesis tail
+passes (`Macro`/`Protocol.expand`, `Opaque.erase`'s cast inference) are unported — so the port
+**cannot yet compile a program end-to-end**. The parity-record count measures front-end +
+inference-core *fidelity*, not compiler completeness; the rest of `Check` + `Reach` is the gate
+that flips "front-end ported" to "can compile."
 
 **Known parity-corpus gaps (low severity, named not hidden).** The fixed-scenario streams cover
 every `lower`/`analyze`/`parse` branch *except*: `PMap` pattern lowering (BEAM-only, refutable);
