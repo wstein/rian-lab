@@ -17,12 +17,19 @@ defmodule Rian.ReachHonestyPropertyTest do
       the width fits `2^53` (ADR-0064). These catch a reach *regression* a fixed
       corpus would not.
 
-  `@tag :rust` — excluded from the default `mix test`; runs under `mix test.all`
-  (the toolchain lane). Deterministic: the fixed `@seed` reproduces every program;
-  a failure prints the offending source and the seed.
+  Stage 2 (ADR-0087 §2-4) adds **type-directed generation** over compound `Option`/`Vec`
+  return types and **capability-preserving shrinking**: a failing type is reduced to its
+  minimal still-failing form before reporting (the shrinker is itself unit-tested against
+  a synthetic predicate, in the default loop). It asserts the same two SAFE invariants —
+  never replicating Reach's logic.
 
-  Stage 2 (ADR-0087 §2-4) — a type-directed Core generator with shrinking, and the
-  `:js`/`node` emit-and-run direction — is its own effort.
+  `@tag :rust` — the property tests are excluded from the default `mix test` and run under
+  `mix test.all` (the toolchain lane); the shrinker unit test needs no toolchain.
+  Deterministic: the fixed `@seed` (and a deterministic per-type value) reproduce every
+  program; a failure prints the minimal source and the seed.
+
+  Remaining (Stage 2 cont.): the `:js`/`node` and BEAM emit-**and-run** directions (this
+  checks `rustc` *compilation*).
   """
   use ExUnit.Case, async: false
 
@@ -31,6 +38,14 @@ defmodule Rian.ReachHonestyPropertyTest do
   @seed {0x5EED, 0x0087, 0x64}
   @runs 40
   @depth 3
+
+  # Stage 2 (type-directed compound types) — the generated return types nest
+  # `Option`/`Vec` over the leaf set below; the value is a deterministic type-directed
+  # term, the type is random.
+  @runs2 40
+  @depth2 3
+  @leaves [:bool, :int53, :int64, :string]
+  @all MapSet.new([:ex, :rs, :js, :jvm])
 
   # Every fixed width is Rust-representable (two's-complement wrap, ADR-0064), so it
   # reaches `:rs`; the arbitrary-precision `Int` (BEAM bignum / JS BigInt) does not.
@@ -69,6 +84,46 @@ defmodule Rian.ReachHonestyPropertyTest do
     end
   end
 
+  # Stage 2 (ADR-0087 §2-4): type-directed generation over compound `Option`/`Vec`
+  # return types + shrinking. Two SAFE invariants (no Reach logic is replicated):
+  #   * over-claim — a :rs claim must compile under rustc (an emitter raise is a lie);
+  #   * under-claim — a *fully-portable* type (no `Int64`/bignum) must reach all four.
+  # A bare `Int64` literal does not adopt its width through a constructor, so exact
+  # membership for non-portable compounds is deliberately NOT asserted.
+  @tag :rust
+  test "type-directed compound programs: :rs claims compile + portable types reach all four" do
+    case System.find_executable("rustc") do
+      nil ->
+        :ok
+
+      rustc ->
+        for _ <- 1..@runs2 do
+          t = gen_type(@depth2)
+
+          if fail_reason(rustc, t) != nil do
+            # shrink the failing type to its minimal still-failing form before reporting.
+            min = minimize(t, fn x -> fail_reason(rustc, x) != nil end)
+
+            flunk(
+              "reach-honesty #{fail_reason(rustc, min)}: minimal failing type #{ty_str(min)}\n" <>
+                "def f() #{ty_str(min)} := #{val_det(min)}\nseed=#{inspect(@seed)}"
+            )
+          end
+        end
+    end
+  end
+
+  test "the shrinker minimizes a failing type to its smallest still-failing form" do
+    # a synthetic failure predicate (no toolchain): an `Int64` nested under at least one
+    # constructor. Proves `minimize/2` converges to a minimal reproducer.
+    fails? = fn t -> nested_int64?(t) end
+    big = {:vec, {:option, {:vec, :int64}}}
+
+    assert fails?.(big)
+    assert minimize(big, fails?) in [{:option, :int64}, {:vec, :int64}]
+    refute fails?.(:int64)
+  end
+
   # a well-typed expression of the function's width over its params: a var, a small
   # literal (a bare int literal adopts the neighbouring declared width, ADR-0064 — and
   # stays under the Int8 ceiling), or a wrapping arithmetic combination of the same.
@@ -105,6 +160,15 @@ defmodule Rian.ReachHonestyPropertyTest do
           )
       end
 
+    {ok?, out} = rustc_compiles?(rustc, rust)
+
+    assert ok?,
+           "Reach claims :rs (width #{w}) but rustc rejected the emitted Rust:\n" <>
+             "#{src}\n--- rust ---\n#{rust}\n--- rustc ---\n#{out}\nseed=#{inspect(@seed)}"
+  end
+
+  # write `rust` to a temp lib crate and compile it — `{compiled?, output}`.
+  defp rustc_compiles?(rustc, rust) do
     base = Path.join(System.tmp_dir!(), "rian_rhp_#{System.unique_integer([:positive])}")
     rs = base <> ".rs"
     lib = base <> ".rlib"
@@ -118,12 +182,96 @@ defmodule Rian.ReachHonestyPropertyTest do
           stderr_to_stdout: true
         )
 
-      assert code == 0,
-             "Reach claims :rs (width #{w}) but rustc rejected the emitted Rust:\n" <>
-               "#{src}\n--- rust ---\n#{rust}\n--- rustc ---\n#{out}\nseed=#{inspect(@seed)}"
+      {code == 0, out}
     after
       File.rm(rs)
       File.rm(lib)
     end
   end
+
+  # ── Stage 2: type-directed generation + shrinking ───────────────────────────
+
+  # `nil` if return type `t` is reach-honest, else the failing kind. SAFE: asserts
+  # over-claim (a :rs claim must compile) and the portable-base under-claim only;
+  # never replicates Reach. A parse/reach crash on a valid program is itself a fail.
+  defp fail_reason(rustc, t) do
+    src = "def f() #{ty_str(t)} := #{val_det(t)}"
+
+    try do
+      reach = src |> Decl.parse() |> Reach.analyze() |> reach_of("f")
+
+      cond do
+        portable?(t) and not MapSet.subset?(@all, reach) -> :underclaim
+        :rs in reach and not elem(rustc_ok?(rustc, src), 0) -> :overclaim
+        true -> nil
+      end
+    rescue
+      _ -> :crash
+    end
+  end
+
+  # emit + compile, treating an emitter raise as a (rejected, message) pair.
+  defp rustc_ok?(rustc, src) do
+    rustc_compiles?(rustc, Lower.rust_program(Decl.parse(src)))
+  rescue
+    e -> {false, Exception.message(e)}
+  end
+
+  # greedily shrink `t` to a minimal value still satisfying `fails?`.
+  defp minimize(t, fails?) do
+    case Enum.find(shrink_type(t), fails?) do
+      nil -> t
+      smaller -> minimize(smaller, fails?)
+    end
+  end
+
+  # structurally-smaller types, each still a valid type (capability/shape-preserving):
+  # unwrap a constructor, simplify a width, or shrink a child and re-wrap.
+  defp shrink_type(:int64), do: [:int53]
+  defp shrink_type({:option, t}), do: [t | Enum.map(shrink_type(t), &{:option, &1})]
+  defp shrink_type({:vec, t}), do: [t | Enum.map(shrink_type(t), &{:vec, &1})]
+  defp shrink_type(_atomic), do: []
+
+  defp gen_type(0), do: Enum.random(@leaves)
+
+  defp gen_type(depth) do
+    case :rand.uniform(6) do
+      n when n <= 4 -> Enum.random(@leaves)
+      5 -> {:option, gen_type(depth - 1)}
+      6 -> {:vec, gen_type(depth - 1)}
+    end
+  end
+
+  defp ty_str(:bool), do: "Bool"
+  defp ty_str(:int53), do: "Int53"
+  defp ty_str(:int64), do: "Int64"
+  defp ty_str(:string), do: "String"
+  defp ty_str({:option, t}), do: "Option(#{ty_str(t)})"
+  defp ty_str({:vec, t}), do: "Vec(#{ty_str(t)})"
+
+  # a deterministic, type-directed value of `t` (so generation + shrinking reproduce):
+  # `Some`/single-element `[_]` so a nested leaf actually manifests.
+  defp val_det(:bool), do: "true"
+  defp val_det(:int53), do: "1"
+  defp val_det(:int64), do: "1"
+  defp val_det(:string), do: "\"s\""
+  defp val_det({:option, t}), do: "Some(#{val_det(t)})"
+  defp val_det({:vec, t}), do: "[#{val_det(t)}]"
+
+  # a type is fully portable iff it contains no `Int64` (bignum widths aside, the
+  # leaf set here is otherwise all-target).
+  defp portable?(:int64), do: false
+  defp portable?({:option, t}), do: portable?(t)
+  defp portable?({:vec, t}), do: portable?(t)
+  defp portable?(_), do: true
+
+  # an `Int64` nested under at least one constructor (the shrinker's synthetic oracle).
+  defp nested_int64?({:option, t}), do: has_int64?(t)
+  defp nested_int64?({:vec, t}), do: has_int64?(t)
+  defp nested_int64?(_), do: false
+
+  defp has_int64?(:int64), do: true
+  defp has_int64?({:option, t}), do: has_int64?(t)
+  defp has_int64?({:vec, t}), do: has_int64?(t)
+  defp has_int64?(_), do: false
 end
