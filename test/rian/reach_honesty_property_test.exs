@@ -108,11 +108,14 @@ defmodule Rian.ReachHonestyPropertyTest do
   # Stage 2 (ADR-0087 §2-4): type-directed generation over compound `Option`/`Vec`
   # return types + multi-target run + shrinking. SAFE invariants (no Reach logic is
   # replicated): each reach claim is checked against the real toolchain (:rs compiles
-  # under rustc, :ex runs on the BEAM, :js runs under node), and a fully-portable type
-  # (no `Int64`) must reach all four. A bare `Int64` literal does not adopt its width
-  # through a constructor, so exact membership for non-portable compounds is NOT asserted.
+  # under rustc, :ex runs on the BEAM, :js runs under node), and the reach must EQUAL the
+  # independent `expected_reach/1` spec oracle — exact membership BOTH directions (so an
+  # under-claim is caught, not just an over-claim). The compound value is a `2^53 + 1`
+  # `Int64` (it exceeds `Int53`, so it adopts the declared width through its constructor),
+  # which makes the cross-target equality check stress precision — a `:js` claim that
+  # emitted it as a 64-bit float would diverge from the BEAM/Rust value.
   @tag :rust
-  test "type-directed compound programs: :rs claims compile + portable types reach all four" do
+  test "type-directed compound programs: reach == expected_reach + cross-target value equality" do
     case System.find_executable("rustc") do
       nil ->
         :ok
@@ -213,12 +216,15 @@ defmodule Rian.ReachHonestyPropertyTest do
   # ── Stage 2: type-directed generation + shrinking ───────────────────────────
 
   # `nil` if return type `t` is reach-honest (or outside the well-typed domain — see
-  # `valid?`), else the failing kind. SAFE: never replicates Reach. Each reach claim is
-  # verified by *running* `f()` on the real toolchain (`:ex` BEAM, `:rs` rustc binary,
-  # `:js` node) and serializing the result to one canonical form (Rust `{:?}`):
-  #   * over-claim — a claimed target must run + produce a value (`:run_failure`);
-  #   * cross-target equality — every reached, runnable target must agree (`:divergence`);
-  #   * under-claim — a fully-portable type must reach all four.
+  # `valid?`), else the failing kind. SAFE: never replicates Reach's implementation. Each
+  # reach claim is verified by *running* `f()` on the real toolchain (`:ex` BEAM, `:rs` rustc
+  # binary, `:js` node) and serializing the result to one canonical form (Rust `{:?}`):
+  #   * reach mismatch — the reach must EQUAL `expected_reach(t)` (an independent spec oracle),
+  #     closing BOTH the over- and under-claim directions for every type (`:reach_mismatch`);
+  #   * over-claim (run) — a claimed target must run + produce a value (`:run_failure`);
+  #   * cross-target equality — every reached, runnable target must agree (`:divergence`).
+  # The compound value uses a `2^53 + 1` `Int64` (see `val_det`), so the equality check
+  # actually stresses precision — a `:js` claim that emitted it as a float would diverge.
   # (`:jvm` is reached-checked but not run here — no kotlinc in this lane.)
   defp fail_reason(rustc, t) do
     src = "def f() #{ty_str(t)} := #{val_det(t)}"
@@ -237,7 +243,10 @@ defmodule Rian.ReachHonestyPropertyTest do
             if(:js in reach, do: [{:js, js_value(src)}], else: [])
 
         cond do
-          portable?(t) and not MapSet.subset?(@all, reach) -> :underclaim
+          # exact membership BOTH directions (closes the under-claim gap for compounds,
+          # ADR-0087 §3): the reach must EQUAL the independently-derived spec reach, not
+          # merely be a superset of the claimed-and-run targets.
+          reach != expected_reach(t) -> :reach_mismatch
           Enum.any?(values, fn {_, v} -> v == :error end) -> :run_failure
           not consistent?(values) -> :divergence
           true -> nil
@@ -364,17 +373,25 @@ defmodule Rian.ReachHonestyPropertyTest do
   # `Some`/single-element `[_]` so a nested leaf actually manifests.
   defp val_det(:bool), do: "true"
   defp val_det(:int53), do: "1"
-  defp val_det(:int64), do: "1"
+  # 2^53 + 1 — exceeds Int53, so the literal MUST adopt the declared `Int64` width (a small
+  # literal stays Int53 and would not manifest the width). It is exact in BEAM bignum and
+  # rustc `i64`, and would LOSE precision as a JS 64-bit float — so the cross-target value
+  # check actually stresses the densest honesty surface (a `:js` claim that can't represent it).
+  defp val_det(:int64), do: "9007199254740993"
   defp val_det(:string), do: "\"s\""
   defp val_det({:option, t}), do: "Some(#{val_det(t)})"
   defp val_det({:vec, t}), do: "[#{val_det(t)}]"
 
-  # a type is fully portable iff it contains no `Int64` (bignum widths aside, the
-  # leaf set here is otherwise all-target).
-  defp portable?(:int64), do: false
-  defp portable?({:option, t}), do: portable?(t)
-  defp portable?({:vec, t}), do: portable?(t)
-  defp portable?(_), do: true
+  # The reach a well-typed return of type `t` MUST have — derived independently of
+  # `Rian.Reach` (the spec outcome, not its implementation; the same discipline as the
+  # width test's `@js_widths` oracle). Every leaf/compound here reaches all four targets
+  # EXCEPT a **bare** `Int64` return (> 2^53), which the JS boundary rejects
+  # (`reject_wide_int!`, off `:js`). An `Int64` **nested** in an `Option`/`Vec` is faithfully
+  # `:js`-reachable as a BigInt — verified empirically by running a `2^53 + 1` value
+  # cross-target (BEAM bignum, rustc `i64`, and node BigInt all print it exactly). So only
+  # the top-level bare-`Int64` leaf loses `:js`; everything else reaches all four.
+  defp expected_reach(:int64), do: MapSet.new([:ex, :rs, :jvm])
+  defp expected_reach(_t), do: @all
 
   # an `Int64` nested under at least one constructor (the shrinker's synthetic oracle).
   defp nested_int64?({:option, t}), do: has_int64?(t)
