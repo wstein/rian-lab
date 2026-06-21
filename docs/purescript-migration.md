@@ -189,11 +189,14 @@ and **`Rian.Capability`** (`cap`/`lin`) ported. **The Check `ic` landed:** `prog
 (`pic`), threaded through `infer` — a constructor / program-function / cross-module call (`ifc`),
 **ECase flow-narrowing** + generic-return instantiation + `.of` construction — plus
 `infer_return_type`/`fill_local_rets` (`irt`/`flr`), **`Rian.InferLocal.fill_returns`** (`ilr`), and
-**`check_program`'s return-assignability gate** (`gate`). **Next:** the Check tail — `infer_param_type`
+**`check_program`'s return-assignability gate** (`gate`). **`Rian.Assemble`** (new top module,
+`asm`) runs the protocol-synthesis tail pass `Decl.parse` does but PS `parseToProg` defers
+(`Protocol.expand` → `prog.funcs`), sidestepping the `Decl`↔`Protocol` import cycle; macro
+expansion stays deferred (needs `Clause.body` → `String | Surface`). **Next:** the Check tail — `infer_param_type`
 (+ InferLocal's param generalization), `error_sets` (ADR-0040), `effect_sets` (needs
 `Reach.effect_sets`), the rest of `assignable?` — then the emitters (`Beam`/`JS`/`JVM`/`Lower`) and
 the Decl assemble-tail wiring of `Macro`/`Protocol`.
-Total **780/780** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **784/784** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/**InferLocal**.
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
