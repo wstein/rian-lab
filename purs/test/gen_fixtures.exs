@@ -347,7 +347,17 @@ decl_corpus = [
   "pub opaque Tok := String",
   "opaque Wrapped := Vec(Int53)",
   "range Digit := 0..9\nstruct Pos(d Digit)",
-  "mod R do\nrange Small := 0..3\nopaque Handle := Int64\nend"
+  "mod R do\nrange Small := 0..3\nopaque Handle := Int64\nend",
+  # stage 4b: def block bodies (`def … Ret <nl> body <nl> end`; no `do` — a top-level
+  # newline becomes `;`, while nested `do`/`end`, brackets, and `with`-headers don't split)
+  "def f()\n  x := 1\n  x + 1\nend",
+  "def g(n Int53) Int53\n  n * 2\nend",
+  "def h(x Int53) Int53\n  case x do\n    0 -> 1\n    _ -> x\n  end\nend",
+  "def k(xs Vec(Int53)) Int53\n  with [h | _] <- xs do\n    h\n  end\nend",
+  "def multi() Int53\n  a := [1, 2,\n        3]\n  sum(a)\nend",
+  "def two(a, b)\ndef two(a, b)\n  a + b\nend",
+  "def mk(a Int53) P\n  P(x: a,\n    y: a)\nend",
+  "mod B do\npub def run() Int53\n  x := 10\n  x\nend\nend"
 ]
 
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.

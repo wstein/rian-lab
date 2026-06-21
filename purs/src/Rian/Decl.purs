@@ -415,9 +415,45 @@ takeHead name params (TOp ":=" : rest) head =
   in Tuple (defRaw name params head (Just (detok bodyToks))) rest'
 takeHead name params (TNl : rest) head =
   if rest == Nil || declBoundary rest then Tuple (defRaw name params head Nothing) rest
-  else stage2 "def block body (`<nl> … end`)"
+  else
+    let Tuple blockToks rest' = takeBlock rest 1 Nil
+    in Tuple (defRaw name params head (Just (detokBlock blockToks))) rest'
 takeHead name params Nil head = Tuple (defRaw name params head Nothing) Nil
 takeHead name params (t : rest) head = takeHead name params rest (t : head)
+
+-- A `do … end` block body: collect the tokens up to the matching `end` (depth-counted;
+-- an atom/field keyword `:do`/`x.end` does not move the counter), then `block_seps`
+-- rewrites a top-level newline to a `;` statement separator.
+takeBlock :: List Token -> Int -> List Token -> Tuple (List Token) (List Token)
+takeBlock (TKw k : rest) depth acc
+  | accHeadColonDot acc = takeBlock rest depth (TKw k : acc)
+takeBlock (TKw "do" : rest) depth acc = takeBlock rest (depth + 1) (TKw "do" : acc)
+takeBlock (TKw "end" : rest) 1 acc = Tuple (List.reverse acc) rest
+takeBlock (TKw "end" : rest) depth acc = takeBlock rest (depth - 1) (TKw "end" : acc)
+takeBlock (t : rest) depth acc = takeBlock rest depth (t : acc)
+takeBlock Nil _ _ = unsafeCrashWith "Decl: block body not closed by `end`"
+
+detokBlock :: List Token -> String
+detokBlock tokens = detok (blockSeps tokens 0 0 0 Nil)
+
+-- `d` = `do`/`end` depth, `w` = open `with`-headers (between `with` and its `do`, where
+-- newlines separate comma-joined clauses, not statements), `p` = bracket depth. A
+-- top-level newline (all zero) becomes a `;`; any other newline is dropped.
+blockSeps :: List Token -> Int -> Int -> Int -> List Token -> List Token
+blockSeps Nil _ _ _ acc = List.reverse acc
+blockSeps (TKw k : r) d w p acc
+  | accHeadColonDot acc = blockSeps r d w p (TKw k : acc)
+blockSeps (TKw "with" : r) d w p acc = blockSeps r d (w + 1) p (TKw "with" : acc)
+blockSeps (TKw "do" : r) d w p acc
+  | w > 0 = blockSeps r (d + 1) (w - 1) p (TKw "do" : acc)
+  | otherwise = blockSeps r (d + 1) w p (TKw "do" : acc)
+blockSeps (TKw "end" : r) d w p acc = blockSeps r (d - 1) w p (TKw "end" : acc)
+blockSeps (TNl : r) 0 0 0 acc = blockSeps r 0 0 0 (TSemi : acc)
+blockSeps (TNl : r) d w p acc = blockSeps r d w p acc
+blockSeps (t : r) d w p acc
+  | isOpen t = blockSeps r d w (p + 1) (t : acc)
+  | isClose t = blockSeps r d w (max (p - 1) 0) (t : acc)
+  | otherwise = blockSeps r d w p (t : acc)
 
 defRaw :: String -> String -> List Token -> Maybe String -> RawDef
 defRaw name params headRev body =

@@ -73,7 +73,7 @@ removal-order note).
 | Module        | LOC  | Notes / status                                                 |
 | ------------- | ---- | -------------------------------------------------------------- |
 | `Rian.Pratt`  | 1218 | **Ported (parity-gated, `psx` stream):** the full operator-precedence core, prefix/primary/postfix, calls/dots, parens/tuples/lists/maps, captures, labels, atoms, patterns, `if`/`case`/`lambda`/blocks, **and `with`/`for`/`${}` interpolation**. **Remaining (raise a clear message, excluded from the corpus):** bitstrings (+pattern, BEAM-only), map *update* and type-patterns (no reference `sexpr` clause → not parity-testable), and error-propagation `<-` + speculative destructuring binds. |
-| `Rian.Decl`   | 1901 | **Stages 1–4a ported** (parity-gated, `dcl` stream, 49 records): **data-type declarations** (`type`/`struct`), **`def`** (single-/multi-clause, `:=` bodies, capabilities, `build_func` grouping, head patterns, `forall`), **`mod`/`const`/`use`/`alias`** (nested `assemble`, alias subst), and **`range`/`opaque`** (ordinal bounds; range name substitutes to its `base`), `const` (explicit + literal-inferred type), `use` (qualified + selective), and **alias substitution** (whole-word, transitive to a fixpoint, over all type positions). Stage 4 (raise/excluded): `def` **block bodies** + `@external`, `range`, `opaque`/`abstract`, `protocol`/`impl`, `macro`, and the program-wide tail passes (need `Check`/`InferLocal`/`Protocol`). |
+| `Rian.Decl`   | 1901 | **Stages 1–4b ported** (parity-gated, `dcl` stream, 57 records): **data-type declarations** (`type`/`struct`), **`def`** (single-/multi-clause, `:=` bodies, capabilities, `build_func` grouping, head patterns, `forall`), **`mod`/`const`/`use`/`alias`** (nested `assemble`, alias subst), and **`range`/`opaque`** (ordinal bounds; range name substitutes to its `base`), `const` (explicit + literal-inferred type), `use` (qualified + selective), **alias substitution** (whole-word, transitive to a fixpoint, over all type positions), and **`def` block bodies** (`def … Ret <nl> body <nl> end` — `take_block` depth-counts the matching `end`; `block_seps`/`detok_block` rewrites a top-level newline to a `;` while tracking nested `do`/`end`, brackets, and `with`-headers). Stage 4 remaining (raise/excluded): `@external`, `abstract`, `protocol`/`impl`, `macro`, and the program-wide tail passes (need `Check`/`InferLocal`/`Protocol`). |
 
 **Parity oracle (Pratt → Core).** Pratt is verified via its built-in `parse_sexpr/1` (the
 `psx` stream — output-only, no surface round-trip). `Core.from_expr`/`from_pat` then composes
@@ -158,11 +158,11 @@ Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (par
 `Rian.Ann` reader dropped (annotation convention retained); `Rian.IR` (data structs) remains.
 **Phase 3**: `Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks +
 `with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
-error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` stages 1–4a**
-(`type`/`struct`/`def`/`mod`/`const`/`use`/`alias`/`range`/`opaque`) ported. **Phase 4 gates:**
-**`Rian.PatternLower`** + **`Rian.Exhaustiveness`** ported (Maranget usefulness over the ported
-Core; `plw`/`exh` streams). **Next:** `Rian.Decl` stage 4b/4c — `def` block bodies
-(`take_block`/`detok_block`) + `@external`; the program-wide tail passes wait on
-`Check`/`InferLocal`/`Protocol`. Total **469/469** parity records across
+error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` stages 1–4b**
+(`type`/`struct`/`def`/`mod`/`const`/`use`/`alias`/`range`/`opaque` + `def` block bodies)
+ported. **Phase 4 gates:** **`Rian.PatternLower`** + **`Rian.Exhaustiveness`** ported (Maranget
+usefulness over the ported Core; `plw`/`exh` streams). **Next:** `Rian.Decl` stage 4c —
+`@external`; the program-wide tail passes wait on `Check`/`InferLocal`/`Protocol`. Total
+**477/477** parity records across
 Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/Exhaustiveness. Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
