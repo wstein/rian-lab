@@ -22,24 +22,34 @@ module Rian.Check
   , join
   , Env
   , infer
+  , Ic
+  , Fsig
+  , RangeInfo
+  , OpaqueInfo
+  , Fbound
+  , programIc
   , unifySexpr
   , joinSexpr
   , inferSexpr
   , inferBodySexpr
+  , programIcSexpr
   ) where
 
 import Prelude hiding (join)
 
-import Data.Array (filter, find, foldl, head, last, length, nubEq, null, snoc, uncons, zip, zipWith)
+import Data.Array (concatMap, filter, find, foldl, head, last, length, mapMaybe, nub, nubEq, null, snoc, sortWith, uncons, zip, zipWith)
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String as Str
 import Data.String.CodeUnits (toCharArray)
 import Data.String.Common (joinWith, replaceAll, split)
-import Data.Tuple (Tuple(..), snd)
+import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
 import Rian.Core (CExpr(..), CMapPair(..), CStmt(..), fromExpr)
+import Rian.Decl (parseToProg)
+import Rian.IR (Func, Prog, Type)
+import Rian.Prelude (withPrelude)
 import Rian.Pratt (Param, parse, parseBody) as P
 import Rian.Prim (normalize)
 import Rian.TypeStr (splitTopCommas)
@@ -653,3 +663,118 @@ fixedEnv =
   , Tuple "xs" (TName "Vec(Int53)")
   , Tuple "g" (TName "Fn(Int64,Bool)")
   ]
+
+--------------------------------------------------------------------------------
+-- the whole-program inference context (`ic`) — `program_ic`'s base tables
+--------------------------------------------------------------------------------
+
+-- | The whole-program inference context the program-level `infer` clauses consult: ctor field
+-- | types (flow narrowing), single-variant field types (`.f`), function returns + signatures,
+-- | ctor→type, range/opaque/impl/bound tables. (The `funs` fixpoint fill — `fill_local_rets`,
+-- | which needs `infer_return_type` — lands with the inference threading; here `funs` is raw.)
+type Ic =
+  { tdefs :: Array (Tuple String (Array String))
+  , fields :: Array (Tuple String (Array (Tuple String String)))
+  , funs :: Array (Tuple (Tuple String Int) (Maybe String))
+  , fsigs :: Array (Tuple (Tuple String Int) Fsig)
+  , ctors :: Array (Tuple String String)
+  , ranges :: Array (Tuple String RangeInfo)
+  , opaques :: Array (Tuple String OpaqueInfo)
+  , impls :: Array (Tuple String (Array String))
+  , fbounds :: Array (Tuple String Fbound)
+  }
+
+type Fsig = { params :: Array (Maybe String), ret :: Maybe String, tvars :: Array String }
+type RangeInfo = { base :: String, lo :: Int, hi :: Int }
+type OpaqueInfo = { base :: String, ops :: Array String, casts :: Array String }
+type Fbound = { params :: Array (Maybe String), tvars :: Array String, bounds :: Array (Tuple String (Array String)) }
+
+-- | Build the inference context from a parsed program (mirrors `Rian.Check.program_ic`).
+programIc :: Prog -> Ic
+programIc prog =
+  { tdefs: typeTable types
+  , fields: fieldTable types
+  , funs: map (\f -> Tuple (key f) f.ret) allFuncs
+  , fsigs: map (\f -> Tuple (key f) (fsig f)) allFuncs
+  , ctors: ctorTypes types prog
+  , ranges: map (\r -> Tuple r.name { base: r.base, lo: r.lo, hi: r.hi }) allRanges
+  , opaques: map (\o -> Tuple o.name { base: o.base, ops: o.ops, casts: o.casts }) allOpaques
+  , impls: implTable prog
+  , fbounds: fboundTable allFuncs
+  }
+  where
+  types = allTypes prog
+  allFuncs = prog.funcs <> concatMap _.funcs prog.mods
+  allRanges = prog.ranges <> concatMap _.ranges prog.mods
+  allOpaques = prog.opaques <> concatMap _.opaques prog.mods
+  key f = Tuple f.name (length f.params)
+
+-- prelude `Option` is prepended (a `case` over it is total, ADR-0047 §3).
+allTypes :: Prog -> Array Type
+allTypes prog = withPrelude (prog.types <> concatMap _.types prog.mods)
+
+-- every sum-variant ctor → its ordered field types (flow narrowing).
+typeTable :: Array Type -> Array (Tuple String (Array String))
+typeTable types = concatMap (\t -> map (\v -> Tuple v.ctor (map _.ty v.fields)) t.variants) types
+
+-- a single-variant struct/record's ctor → its named `(field, type)` pairs (for `p.field`).
+fieldTable :: Array Type -> Array (Tuple String (Array (Tuple String String)))
+fieldTable types = mapMaybe single types
+  where
+  single t = if length t.variants == 1 then map variantFields (head t.variants) else Nothing
+  variantFields v = Tuple v.ctor (mapMaybe labeled v.fields)
+  labeled fl = map (\l -> Tuple l fl.ty) fl.label
+
+fsig :: Func -> Fsig
+fsig f = { params: map _.ty f.params, ret: f.ret, tvars: f.tvars }
+
+-- variant ctor → its sum type's name; a struct ctor builds its own type.
+ctorTypes :: Array Type -> Prog -> Array (Tuple String String)
+ctorTypes types prog =
+  concatMap (\t -> map (\v -> Tuple v.ctor t.name) t.variants) types
+    <> map (\s -> Tuple s.name s.name) (prog.structs <> concatMap _.structs prog.mods)
+
+-- protocol name → the (sorted) set of types that `impl` it.
+implTable :: Prog -> Array (Tuple String (Array String))
+implTable prog =
+  map (\p -> Tuple p (sortWith identity (nub (typesOf p)))) protos
+  where
+  pairs = map (\i -> Tuple i.proto i.ty) prog.implDecls
+  protos = nub (map fst pairs)
+  typesOf p = map snd (filter (\(Tuple pr _) -> pr == p) pairs)
+
+-- bounded generics only: fn name → its params / tvars / bounds (call-site instantiation).
+fboundTable :: Array Func -> Array (Tuple String Fbound)
+fboundTable funcs =
+  map (\f -> Tuple f.name { params: map _.ty f.params, tvars: f.tvars, bounds: f.bounds })
+    (filter (\f -> not (null f.bounds)) funcs)
+
+-- | The `pic` parity unit: dump `programIc`'s tables (each sorted by key) for a parsed scope.
+programIcSexpr :: String -> String
+programIcSexpr src =
+  joinWith "\n"
+    [ "tdefs " <> dump (\fts -> joinWith "," fts) ic.tdefs
+    , "fields " <> dump (\fs -> joinWith "," (map (\(Tuple f t) -> f <> ":" <> t) fs)) ic.fields
+    , "funs " <> dumpK keyStr maybeStr ic.funs
+    , "fsigs " <> dumpK keyStr fsigStr ic.fsigs
+    , "ctors " <> dump identity ic.ctors
+    , "ranges " <> dump (\r -> r.base <> ":" <> show r.lo <> ":" <> show r.hi) ic.ranges
+    , "opaques " <> dump (\o -> o.base <> "|" <> joinWith "," o.ops <> "|" <> joinWith "," o.casts) ic.opaques
+    , "impls " <> dump (joinWith ",") ic.impls
+    , "fbounds " <> dump fboundStr ic.fbounds
+    ]
+  where
+  ic = programIc (parseToProg src)
+  keyStr (Tuple n a) = n <> "/" <> show a
+  maybeStr = fromMaybe "_"
+  fsigStr s = joinWith "," (map maybeStr s.params) <> "|" <> maybeStr s.ret <> "|" <> joinWith "," s.tvars
+  fboundStr fb = joinWith "," (map maybeStr fb.params) <> "|" <> joinWith "," fb.tvars
+    <> "|" <> joinWith "," (map (\(Tuple t bs) -> t <> ":" <> joinWith "+" bs) fb.bounds)
+
+-- render a `key → value` table sorted by key (String key).
+dump :: forall v. (v -> String) -> Array (Tuple String v) -> String
+dump f tbl = joinWith ";" (map (\(Tuple k v) -> k <> "=>" <> f v) (sortWith fst tbl))
+
+-- render a table with a non-String key, sorted by its rendered key.
+dumpK :: forall k v. (k -> String) -> (v -> String) -> Array (Tuple k v) -> String
+dumpK kf vf tbl = joinWith ";" (sortWith identity (map (\(Tuple k v) -> kf k <> "=>" <> vf v) tbl))

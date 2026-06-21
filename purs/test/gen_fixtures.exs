@@ -593,6 +593,18 @@ lin_corpus = [
   "[a, a, b]"
 ]
 
+# Rian.Check `program_ic` corpus — the `pic` stream: dump the whole-program inference-context
+# tables. **Protocol-free** — the reference's `assemble` synthesizes dispatcher/`impl_*` funcs
+# into `prog.funcs` (a tail pass not yet wired into PS `Decl`), so an `impl` would make `funs`/
+# `fsigs`/`ctors` diverge; the `impls` table is therefore exercised empty for now. Functions are
+# explicitly-typed so `fill_local_rets` is a no-op (PS builds `funs` raw). Covers tdefs (sum
+# variants + prelude Option), fields (single-variant labels), funs/fsigs, ctors, ranges, opaques.
+ic_corpus = [
+  "type Color := Red | Green | Blue(shade Int53)\ntype Box := Bx(val Int53, tag String)\nstruct Point(x Int53, y Int53)\ndef area(p Point) Int53 := 0\nrange Bit := 0..1\nopaque Id := Int64",
+  "",
+  "def add(a Int53, b Int53) Int53 := a + b"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1141,6 +1153,47 @@ defmodule CheckCanon do
     out(apply(Rian.Check, op, [tin(a), tin(b)]))
   end
 
+  # the `pic` stream: dump `Rian.Check.program_ic`'s 9 tables, each sorted by key.
+  def ic_dump(src) do
+    ic = Rian.Check.program_ic(Rian.Decl.parse(src, assemble_only: true))
+
+    Enum.join(
+      [
+        "tdefs " <> ic_t(ic.tdefs, fn fts -> Enum.join(fts, ",") end),
+        "fields " <>
+          ic_t(ic.fields, fn fs -> Enum.map_join(fs, ",", fn {f, ty} -> "#{f}:#{ty}" end) end),
+        "funs " <> ic_tk(ic.funs, &ic_ms/1),
+        "fsigs " <> ic_tk(ic.fsigs, &ic_fs/1),
+        "ctors " <> ic_t(ic.ctors, & &1),
+        "ranges " <> ic_t(ic.ranges, fn r -> "#{r.base}:#{r.lo}:#{r.hi}" end),
+        "opaques " <>
+          ic_t(ic.opaques, fn o ->
+            "#{o.base}|#{Enum.join(o.ops, ",")}|#{Enum.join(o.casts, ",")}"
+          end),
+        "impls " <> ic_t(ic.impls, fn ts -> Enum.join(Enum.sort(MapSet.to_list(ts)), ",") end),
+        "fbounds " <> ic_t(ic.fbounds, &ic_fb/1)
+      ],
+      "\n"
+    )
+  end
+
+  defp ic_t(m, vf),
+    do: m |> Enum.map(fn {k, v} -> "#{k}=>#{vf.(v)}" end) |> Enum.sort() |> Enum.join(";")
+
+  defp ic_tk(m, vf),
+    do:
+      m |> Enum.map(fn {{n, a}, v} -> "#{n}/#{a}=>#{vf.(v)}" end) |> Enum.sort() |> Enum.join(";")
+
+  defp ic_ms(nil), do: "_"
+  defp ic_ms(s), do: s
+
+  defp ic_fs(%{params: p, ret: r, tvars: tv}),
+    do: "#{Enum.map_join(p, ",", &ic_ms/1)}|#{ic_ms(r)}|#{Enum.join(tv, ",")}"
+
+  defp ic_fb(%{params: p, tvars: tv, bounds: b}),
+    do:
+      "#{Enum.map_join(p, ",", &ic_ms/1)}|#{Enum.join(tv, ",")}|#{b |> Enum.sort() |> Enum.map_join(",", fn {tt, ps} -> "#{tt}:#{Enum.join(ps, "+")}" end)}"
+
   defp tin(":unknown"), do: :unknown
   defp tin(":mismatch"), do: :mismatch
   defp tin(":bottom"), do: :bottom
@@ -1340,6 +1393,9 @@ lines =
         |> Enum.map_join(";", fn {k, n} -> "#{k}:#{n}" end)
 
       "lin\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
+    end) ++
+    Enum.map(ic_corpus, fn s ->
+      "pic\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.ic_dump(s))}"
     end) ++
     Enum.map(prelude_corpus, fn s ->
       types = Rian.Prelude.with_prelude(Decl.parse(s, assemble_only: true).types)
