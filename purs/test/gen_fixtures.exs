@@ -157,6 +157,28 @@ defmodule DeclCanon do
     Enum.join(types ++ ranges ++ opaques ++ structs ++ funcs ++ mods, "\n")
   end
 
+  # the `prc` stream: ONLY the program-global protocols + impl-decls (synthesis-free).
+  def proto_impl(p) do
+    protocols = Enum.map(Map.get(p, :protocols, []), &protocol_s/1)
+    impls = Enum.map(Map.get(p, :impl_decls, []), &impl_s/1)
+    Enum.join(protocols ++ impls, "\n")
+  end
+
+  defp protocol_s(p) do
+    "(protocol #{p.name}#{Enum.map_join(p.methods, "", &method_s/1)}#{Enum.map_join(p.assoc, "", fn a -> " assoc=#{a}" end)})"
+  end
+
+  defp method_s(m), do: " (method #{m.name} params=#{m.params}#{ret_flag(m.ret)})"
+
+  defp impl_s(i) do
+    "(impl #{i.proto} #{i.type}#{Enum.map_join(i.methods, "", &imethod_s/1)}#{Enum.map_join(Enum.sort(Map.to_list(i.assoc)), "", &assoc_s/1)})"
+  end
+
+  defp imethod_s(m),
+    do: " (imethod #{m.name} params=#{m.params}#{guard_of(m.guard)}#{body_of(m.body)})"
+
+  defp assoc_s({n, ty}), do: " assoc=#{n}" <> if(ty, do: ":=#{ty}", else: "")
+
   defp mod_s(%Mod{
          name: n,
          uses: us,
@@ -391,7 +413,25 @@ decl_corpus = [
   "abstract Meters := Float64 do\n  op +(a Meters, b Meters) Meters\n  to base() Float64\nend",
   "pub abstract Money := Int64 do\n  op +(a Money, b Money) Money\n  op *(a Money, b Int64) Money\n  to cents() Int64\nend",
   "abstract Empty := Int53 do\nend",
-  "mod U do\nabstract Id := Int53 do\n  to raw() Int53\nend\nend"
+  "mod U do\nabstract Id := Int53 do\n  to raw() Int53\nend\nend",
+  # stage 4e (macro): a macro emits no IR (expanded before the checker); pair with a type/
+  # struct (not a `def`, whose body assemble would macro-expand from a string to an AST) to
+  # show the macro decl is consumed and dropped while the sibling survives.
+  "macro twice(x) := x + x\ntype Tag := A | B",
+  "macro inc(x) := x + 1\nstruct Box(v Int53)"
+]
+
+# Rian.Decl protocol/impl corpus — the `prc` stream (ADR-0042 §3). Serializes ONLY the
+# program-global protocols + impl-decls, NOT the full program: the Elixir `Protocol.expand`
+# synthesizes dispatcher / `impl_*` funcs into `funcs` during assembly (a pass not ported),
+# so the full `funcs` diverge while the protocol/impl IR matches. An `impl` needs its
+# `protocol` in the same source (coherence runs in `assemble`), so they are paired.
+proto_impl_corpus = [
+  "protocol Show do\n  def show(x Self) String\nend",
+  "protocol Container do\n  type Elem\n  def empty() Self\n  def insert(c Self, e Elem) Self\nend",
+  "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := int_to_str(x)\nend",
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
+  "mod P do\nprotocol Ord do\n  def lt(a Self, b Self) Bool\nend\nimpl Ord for Int53 do\n  def lt(a, b) := a < b\nend\nend"
 ]
 
 # Rian.Prim corpus: `Prim.<name>(args)` → `__prim_<name>(args)` and bare `panic(msg)`.
@@ -745,6 +785,9 @@ lines =
         "plw\t#{Canon.hex(name)}\t#{Canon.hex(ExhFixtures.plow(env, arms))}",
         "exh\t#{Canon.hex(name)}\t#{Canon.hex(ExhFixtures.exh(env, arms, n))}"
       ]
+    end) ++
+    Enum.map(proto_impl_corpus, fn s ->
+      "prc\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.proto_impl(Decl.parse(s, assemble_only: true)))}"
     end)
 
 path = Path.join([__DIR__, "fixtures", "parity.fixtures"])

@@ -24,6 +24,10 @@ module Rian.IR
   , Use
   , Range
   , Opaque
+  , Method
+  , ImplMethod
+  , Protocol
+  , ImplDecl
   , Mod
   , Prog
   ) where
@@ -109,6 +113,26 @@ type Range = { name :: String, base :: String, lo :: Int, hi :: Int, pub :: Bool
 type Opaque =
   { name :: String, base :: String, pub :: Boolean, doc :: Maybe String, ops :: Array String, casts :: Array String }
 
+-- A protocol method signature (`def name(params) Ret`, no body) — `params` is the raw
+-- detokenized parameter string, `ret` is the optional declared return type (ADR-0042 §3).
+-- @rian_sig struct Method(name String, params String, ret String)
+type Method = { name :: String, params :: String, ret :: Maybe String }
+
+-- An impl method (`def name(params) := body`): the same plus its body / guard source.
+-- @rian_sig struct ImplMethod(name String, params String, body Core, guard Option(Core))
+type ImplMethod = { name :: String, params :: String, body :: Maybe String, guard :: Maybe String }
+
+-- A `protocol Name do <method heads> end` (ADR-0042 §3): method signatures + the declared
+-- associated type names (`type Elem`). Program-global (hoisted out of any enclosing `mod`).
+-- @rian_sig struct Protocol(name String, methods Vec(Method), assoc Vec(String))
+type Protocol = { name :: String, methods :: Array Method, assoc :: Array String }
+
+-- An `impl Protocol for Type do <defs> end` (ADR-0042 §3): the method bodies + associated-type
+-- bindings (`type Elem := Concrete`, the value `Nothing` for a binding-less `type Elem`).
+-- @rian_sig struct ImplDecl(proto String, type String, methods Vec(ImplMethod), assoc Map(String, String))
+type ImplDecl =
+  { proto :: String, ty :: String, methods :: Array ImplMethod, assoc :: Array (Tuple String (Maybe String)) }
+
 -- A module (`mod Name do … end`) grouping uses/types/ranges/opaques/structs/consts/funcs.
 -- @rian_sig struct Mod(name String, uses Vec(Use), types Vec(Type), ranges Vec(Range), opaques Vec(Opaque), structs Vec(Struct), consts Vec(Const), funcs Vec(Func), doc Option(String))
 type Mod =
@@ -125,6 +149,8 @@ type Mod =
 
 -- The whole-program IR. Top-level `const`/`use` are module-scoped (rejected at top level),
 -- so the top scope carries only types/ranges/opaques/structs/funcs; `mods` hold their own.
+-- `protocols`/`implDecls` are program-global (collected from the top scope AND every `mod`,
+-- flattened, ADR-0042 §3).
 type Prog =
   { types :: Array Type
   , ranges :: Array Range
@@ -132,4 +158,6 @@ type Prog =
   , structs :: Array Struct
   , funcs :: Array Func
   , mods :: Array Mod
+  , protocols :: Array Protocol
+  , implDecls :: Array ImplDecl
   }

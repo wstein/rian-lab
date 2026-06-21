@@ -14,6 +14,7 @@ module Rian.Decl
   ( parseToProg
   , progSexpr
   , declSexpr
+  , protoImplSexpr
   ) where
 
 import Prelude
@@ -25,14 +26,14 @@ import Data.Foldable (elem, foldMap, foldl)
 import Data.Int as Int
 import Data.List (List(..), (:))
 import Data.List as List
-import Data.Maybe (Maybe(..), fromJust, fromMaybe, isJust)
+import Data.Maybe (Maybe(..), fromJust, fromMaybe, isJust, maybe)
 import Data.String (Pattern(..)) as Str
 import Data.String as Str
 import Data.String.CodePoints as CP
 import Data.String.Common (joinWith, trim)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith, unsafePartial)
-import Rian.IR (Cap(..), Clause, Const, ExtSpec(..), Field, Func, Mod, Opaque, Param, Prog, Range, Struct, Type, Use, Variant)
+import Rian.IR (Cap(..), Clause, Const, ExtSpec(..), Field, Func, ImplDecl, ImplMethod, Method, Mod, Opaque, Param, Prog, Protocol, Range, Struct, Type, Use, Variant)
 import Rian.Lexer (detokenize, exprTokens, tokenize)
 import Rian.Pratt (Pat, parsePats, sexprPat)
 import Rian.Pratt as P
@@ -58,7 +59,62 @@ parseToProg src =
       , structs: top.structs
       , funcs: top.funcs
       , mods: buildMods decls aliases
+      , protocols: inScope decls protocolStructs
+      , implDecls: inScope decls implStructs
       }
+
+-- apply `f` to the top-level decls and to each module's inner decls, concatenating —
+-- protocols/impls are program-global, hoisted out of any enclosing `mod` (ADR-0042 §3).
+inScope :: forall a. List RawDecl -> (List RawDecl -> Array a) -> Array a
+inScope decls f = f decls <> Array.concatMap modInner (Array.fromFoldable decls)
+  where
+  modInner (DMod _ inner _) = f inner
+  modInner _ = []
+
+protocolStructs :: List RawDecl -> Array Protocol
+protocolStructs ds = Array.mapMaybe protoOf (Array.fromFoldable ds)
+  where
+  protoOf (DProtocol name inner _) = Just (protocolStruct name inner)
+  protoOf _ = Nothing
+
+protocolStruct :: String -> List RawDecl -> Protocol
+protocolStruct name inner =
+  { name
+  , methods: Array.mapMaybe methodOf arr
+  , assoc: Array.mapMaybe assocName arr
+  }
+  where
+  arr = Array.fromFoldable inner
+  methodOf (DDef r) = Just { name: r.name, params: r.params, ret: r.ret }
+  methodOf _ = Nothing
+  assocName (DType t _ _) = Just (trim t)
+  assocName _ = Nothing
+
+implStructs :: List RawDecl -> Array ImplDecl
+implStructs ds = Array.mapMaybe implOf (Array.fromFoldable ds)
+  where
+  implOf (DImpl proto ty inner _) = Just (implStruct proto ty inner)
+  implOf _ = Nothing
+
+implStruct :: String -> String -> List RawDecl -> ImplDecl
+implStruct proto ty inner =
+  { proto
+  , ty
+  , methods: Array.mapMaybe imethodOf arr
+  , assoc: Array.mapMaybe assocBinding arr
+  }
+  where
+  arr = Array.fromFoldable inner
+  imethodOf (DDef r) = Just { name: r.name, params: r.params, body: r.body, guard: r.guard }
+  imethodOf _ = Nothing
+  assocBinding (DType t _ _) = Just (parseAssocBinding t)
+  assocBinding _ = Nothing
+
+-- `"Elem := Int53"` → `("Elem", Just "Int53")`; a binding-less `"Elem"` → `("Elem", Nothing)`.
+parseAssocBinding :: String -> Tuple String (Maybe String)
+parseAssocBinding t = case splitOnce ":=" t of
+  Just { left, right } -> Tuple (trim left) (Just (trim right))
+  Nothing -> Tuple (trim t) Nothing
 
 type Aliases = Array (Tuple String String)
 
@@ -124,6 +180,10 @@ data RawDecl
   -- `abstract Name := Base do … end`: head string + the rendered `op`/`cast` rule strings.
   | DAbstract String (Array String) (Array String) Boolean (Maybe String)
   | DMod String (List RawDecl) (Maybe String)
+  -- `protocol Name do … end` / `impl P for T do … end` / `macro name(…) := template` (ADR-0042/0030).
+  | DProtocol String (List RawDecl) (Maybe String)
+  | DImpl String String (List RawDecl) (Maybe String)
+  | DMacro RawDef
 
 declKws :: Array String
 declKws =
@@ -175,6 +235,18 @@ takeDecl (TKw "abstract" : rest) = case takeUntilDo rest Nil of
 takeDecl (TKw "mod" : TId name : TKw "do" : rest) =
   let Tuple inner rest' = takeModBody rest Nil in Tuple (DMod name inner Nothing) rest'
 takeDecl (TKw "mod" : _) = unsafeCrashWith "Decl: expected `mod Name do … end`"
+-- `protocol Name do <def heads> end` (ADR-0042 §3): method signatures, reusing the mod-body
+-- collector (each line is a bodiless `def` or a `type Elem` associated-type line).
+takeDecl (TKw "protocol" : TId name : TKw "do" : rest) =
+  let Tuple inner rest' = takeModBody rest Nil in Tuple (DProtocol name inner Nothing) rest'
+takeDecl (TKw "protocol" : _) = unsafeCrashWith "Decl: expected `protocol Name do … end`"
+-- `impl Protocol for Type do <defs> end` (ADR-0042 §3); `for` is a keyword token here.
+takeDecl (TKw "impl" : TId proto : TKw "for" : TId ty : TKw "do" : rest) =
+  let Tuple inner rest' = takeModBody rest Nil in Tuple (DImpl proto ty inner Nothing) rest'
+takeDecl (TKw "impl" : _) = unsafeCrashWith "Decl: expected `impl Protocol for Type do … end`"
+-- `macro name(p, …) := template` (ADR-0030): reuses the `def` head/body grammar; emits no IR
+-- (expanded into call sites before the checker), so it is excluded from the assembled funcs.
+takeDecl (TKw "macro" : rest) = let Tuple raw rest' = takeDef rest in Tuple (DMacro raw) rest'
 takeDecl (TKw k : _) = stage2 ("declaration `" <> k <> "`")
 takeDecl other = unsafeCrashWith ("Decl: expected a declaration, got " <> here other)
 
@@ -211,6 +283,9 @@ attachDoc doc (DConst s p _) = DConst s p (Just doc)
 attachDoc doc (DRange s p _) = DRange s p (Just doc)
 attachDoc doc (DOpaque s p _) = DOpaque s p (Just doc)
 attachDoc doc (DAbstract s o c p _) = DAbstract s o c p (Just doc)
+attachDoc doc (DProtocol n inner _) = DProtocol n inner (Just doc)
+attachDoc doc (DImpl p t inner _) = DImpl p t inner (Just doc)
+attachDoc doc (DMacro r) = DMacro (r { doc = Just doc })
 attachDoc doc (DMod n inner _) = DMod n inner (Just doc)
 attachDoc _ d = d
 
@@ -1053,6 +1128,38 @@ progSexpr prog =
         <> map funcSexpr prog.funcs
         <> map modSexpr prog.mods
     )
+
+-- The `prc` stream: ONLY the program-global protocols + impl-decls (ADR-0042 §3). Kept
+-- separate from `dcl` because the Elixir reference's `Rian.Protocol.expand` SYNTHESIZES
+-- dispatcher / `impl_*` functions into the program's `funcs` during assembly — a pass not
+-- ported here — so the full-program `funcs` diverge while the protocol/impl IR does not.
+protoImplSexpr :: String -> String
+protoImplSexpr src =
+  let prog = parseToProg src
+  in joinWith "\n" (map protocolSexpr prog.protocols <> map implSexpr prog.implDecls)
+
+protocolSexpr :: Protocol -> String
+protocolSexpr p =
+  "(protocol " <> p.name <> foldMap methodS p.methods <> foldMap (\a -> " assoc=" <> a) p.assoc <> ")"
+  where
+  methodS :: Method -> String
+  methodS m = " (method " <> m.name <> " params=" <> m.params <> retF m.ret <> ")"
+  retF Nothing = ""
+  retF (Just r) = " ret=" <> r
+
+implSexpr :: ImplDecl -> String
+implSexpr i =
+  "(impl " <> i.proto <> " " <> i.ty <> foldMap imethodS i.methods
+    <> foldMap assocS (Array.sortWith fst i.assoc)
+    <> ")"
+  where
+  imethodS :: ImplMethod -> String
+  imethodS m = " (imethod " <> m.name <> " params=" <> m.params <> guardF m.guard <> bodyF m.body <> ")"
+  guardF Nothing = ""
+  guardF (Just g) = " when=" <> g
+  bodyF Nothing = ""
+  bodyF (Just b) = " body=" <> b
+  assocS (Tuple n mt) = " assoc=" <> n <> maybe "" (\t -> ":=" <> t) mt
 
 modSexpr :: Mod -> String
 modSexpr m =
