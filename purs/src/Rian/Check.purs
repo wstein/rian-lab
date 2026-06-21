@@ -59,7 +59,7 @@ import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), from
 import Rian.Decl (parseToProg)
 import Rian.IR (Func, Param, Prog, Type)
 import Rian.Prelude (withPrelude)
-import Rian.Pratt (Param, Pat, parse, parseBody) as P
+import Rian.Pratt (Arm, ForClause(..), IPart(..), MapPair(..), Param, Pat, Stmt(..), Surface(..), WithClause, parse, parseBody) as P
 import Rian.Prim (normalize)
 import Rian.TypeStr (splitTopCommas)
 
@@ -888,11 +888,18 @@ fillLocalRetsSexpr src =
 -- | return-assignability check (the headline gate); error-sets/effects/bounds/coherence and the
 -- | literal-width-adoption relaxation are later — the corpus avoids them.
 checkProgram :: Prog -> Maybe String
-checkProgram prog = findMap (checkReturn ic) funcs
+checkProgram prog = findMap checkFunc funcs
   where
   funcs = prog.funcs <> concatMap _.funcs prog.mods
   ic0 = programIc prog
   ic = ic0 { funs = fillLocalRets funcs ic0 }
+  tsets = errorSetsTable prog
+  table = solveErrorSets funcs tsets
+  -- per function: the body must be assignable to the declared return, AND a Result return's
+  -- produced error set ⊆ its declared `E` (ADR-0040).
+  checkFunc f = case checkReturn ic f of
+    Just msg -> Just msg
+    Nothing -> checkErrorSet tsets table f
 
 -- a function's declared (non-generic) return must accept every clause body's inferred type.
 checkReturn :: Ic -> Func -> Maybe String
@@ -1142,6 +1149,156 @@ inferParamTypeSexpr src =
   ic0 = programIc prog
   ic = ic0 { funs = fillLocalRets funcs ic0 }
   perFunc f = mapWithIndex (\i _ -> f.name <> "/" <> show i <> "=>" <> tyStr (inferParamType f i ic)) f.params
+
+--------------------------------------------------------------------------------
+-- error sets (ADR-0040 §4): a Result(T, E) return's produced error set ⊆ E
+--------------------------------------------------------------------------------
+
+-- sum type name → its variant tag names (the error-set table).
+errorSetsTable :: Prog -> Array (Tuple String (Array String))
+errorSetsTable prog = map (\t -> Tuple t.name (map _.ctor t.variants)) (allTypes prog)
+
+-- a `Result(T, E)` return's declared error set: `E` expanded to its variant tags (`{E}` for a bare
+-- name), with the error-type name — else `Nothing` (not a Result).
+declaredSet :: Array (Tuple String (Array String)) -> String -> Maybe (Tuple String (Array String))
+declaredSet tsets ret = case Str.stripPrefix (Str.Pattern "Result(") ret of
+  Nothing -> Nothing
+  Just rest ->
+    let parts = splitTopCommas (chopLastParen rest)
+    in
+      if length parts == 2 then case index parts 0, index parts 1 of
+        Just okT, Just errT -> if okT /= "" then Just (Tuple errT (fromMaybe [ errT ] (map snd (find (\(Tuple n _) -> n == errT) tsets)))) else Nothing
+        _, _ -> Nothing
+      else Nothing
+
+-- the tags a function directly builds (`{:error, Tag}`) over its clause bodies.
+directTags :: Func -> Array String
+directTags f = nub (concatMap (\c -> maybe [] (\b -> errorTags (P.parseBody b)) c.body) f.clauses)
+
+-- functions whose errors propagate (a `with`-clause source when the `with` has no `else`).
+propagatedCallees :: Func -> Array String
+propagatedCallees f = concatMap (\c -> maybe [] (\b -> withCallees (P.parseBody b)) c.body) f.clauses
+
+errorTags :: P.Surface -> Array String
+errorTags node = case node of
+  P.STuple elems -> case errorPayload elems of
+    Just e -> maybe [] (\t -> [ t ]) (tagName e) <> errorTags e
+    Nothing -> concatMap errorTags (surfaceChildren node)
+  _ -> concatMap errorTags (surfaceChildren node)
+
+errorPayload :: Array P.Surface -> Maybe P.Surface
+errorPayload elems = case index elems 0 of
+  Just (P.SAtom "error") -> if length elems == 2 then index elems 1 else Nothing
+  _ -> Nothing
+
+tagName :: P.Surface -> Maybe String
+tagName (P.SId n) = if pascalStr n then Just n else Nothing
+tagName (P.SCall (P.SId n) _) = if pascalStr n then Just n else Nothing
+tagName _ = Nothing
+
+pascalStr :: String -> Boolean
+pascalStr s = maybe false isUpper (head (toCharArray s))
+
+withCallees :: P.Surface -> Array String
+withCallees node = case node of
+  P.SWith clauses body arms ->
+    if null arms then concatMap (\c -> callName c.expr) clauses <> withCallees body <> concatMap (\c -> withCallees c.expr) clauses
+    else concatMap withCallees (surfaceChildren node)
+  _ -> concatMap withCallees (surfaceChildren node)
+
+callName :: P.Surface -> Array String
+callName (P.SCall (P.SId n) _) = [ n ]
+callName _ = []
+
+-- direct sub-expressions of a surface node (the generic error_tags / with_callees recurse).
+surfaceChildren :: P.Surface -> Array P.Surface
+surfaceChildren = case _ of
+  P.SUnary _ x -> [ x ]
+  P.SBin _ l r -> [ l, r ]
+  P.SCall f as -> [ f ] <> as
+  P.SDot h _ -> [ h ]
+  P.SLabel _ e -> [ e ]
+  P.SCapture b -> [ b ]
+  P.SCaptureNamed p _ -> [ p ]
+  P.SLambda _ b -> [ b ]
+  P.SIf c t e -> [ c, t, e ]
+  P.SCase s arms -> [ s ] <> concatMap armSurf arms
+  P.SWith cls body arms -> map _.expr cls <> [ body ] <> concatMap armSurf arms
+  P.SBlock stmts -> concatMap stmtSurf stmts
+  P.SListLit es tl -> es <> fromFoldable tl
+  P.SMapLit ps -> concatMap mapPairSurf ps
+  P.SMapUpdate base ps -> [ base ] <> concatMap mapPairSurf ps
+  P.STuple es -> es
+  P.SFor cls body -> concatMap forSurf cls <> [ body ]
+  P.SStrInterp parts -> concatMap ipartSurf parts
+  _ -> []
+
+armSurf :: P.Arm -> Array P.Surface
+armSurf a = fromFoldable a.guard <> [ a.body ]
+
+stmtSurf :: P.Stmt -> Array P.Surface
+stmtSurf (P.StBind _ e) = [ e ]
+stmtSurf (P.StTypedBind _ _ e) = [ e ]
+stmtSurf (P.StBindArrow _ e) = [ e ]
+stmtSurf (P.StBindPat _ e) = [ e ]
+stmtSurf (P.StExpr e) = [ e ]
+
+mapPairSurf :: P.MapPair -> Array P.Surface
+mapPairSurf (P.MAtom _ v) = [ v ]
+mapPairSurf (P.MKey k v) = [ k, v ]
+
+forSurf :: P.ForClause -> Array P.Surface
+forSurf (P.FGen _ src) = [ src ]
+forSurf (P.FFilter c) = [ c ]
+
+ipartSurf :: P.IPart -> Array P.Surface
+ipartSurf (P.ILit _) = []
+ipartSurf (P.IHole e) = [ e ]
+
+-- | Solve every function's error set by call-graph fixpoint: a declared `E` exposes exactly `E`;
+-- | an unannotated one infers `direct ∪ ⋃ callee-set`, iterated until stable (sets only grow).
+solveErrorSets :: Array Func -> Array (Tuple String (Array String)) -> Array (Tuple (Tuple String Int) (Array String))
+solveErrorSets funcs tsets = esFixpoint facts (map (\(Tuple n fc) -> Tuple n (fromMaybe fc.direct fc.declared)) facts)
+  where
+  facts = map (\f -> Tuple (Tuple f.name (length f.params)) { direct: directTags f, callees: propagatedCallees f, declared: f.ret >>= \r -> map snd (declaredSet tsets r) }) funcs
+
+esFixpoint
+  :: Array (Tuple (Tuple String Int) { direct :: Array String, callees :: Array String, declared :: Maybe (Array String) })
+  -> Array (Tuple (Tuple String Int) (Array String))
+  -> Array (Tuple (Tuple String Int) (Array String))
+esFixpoint facts table =
+  let
+    step (Tuple n fc) = case fc.declared of
+      Just d -> Tuple n d
+      Nothing -> Tuple n (foldl (\acc c -> unionTags acc (propagatedFor table c)) fc.direct fc.callees)
+    next = map step facts
+  in
+    if next == table then table else esFixpoint facts next
+
+propagatedFor :: Array (Tuple (Tuple String Int) (Array String)) -> String -> Array String
+propagatedFor table name = foldl unionTags [] (map snd (filter (\(Tuple (Tuple n _) _) -> n == name) table))
+
+unionTags :: Array String -> Array String -> Array String
+unionTags a b = sortWith identity (nub (a <> b))
+
+-- a function's produced error set: directly-built tags ∪ propagated callee sets.
+producedSet :: Array (Tuple (Tuple String Int) (Array String)) -> Func -> Array String
+producedSet table f = unionTags (directTags f) (foldl (\acc c -> unionTags acc (propagatedFor table c)) [] (propagatedCallees f))
+
+-- a Result return's produced set must be a subset of its declared `E`.
+checkErrorSet :: Array (Tuple String (Array String)) -> Array (Tuple (Tuple String Int) (Array String)) -> Func -> Maybe String
+checkErrorSet tsets table f = case f.ret of
+  Nothing -> Nothing
+  Just ret -> case declaredSet tsets ret of
+    Nothing -> Nothing
+    Just (Tuple errT declared) ->
+      let extra = filter (\t -> not (elem t declared)) (producedSet table f)
+      in
+        if null extra then Nothing
+        else Just ("`" <> f.name <> "`: returns error(s) " <> inspectStrs extra <> " not in its declared set `" <> errT <> "`")
+
+inspectStrs :: Array String -> String
+inspectStrs xs = "[" <> joinWith ", " (map (\x -> "\"" <> x <> "\"") xs) <> "]"
 
 -- the parity env (must match `CheckCanon.fixed_env` in gen_fixtures.exs).
 fixedEnv :: Env

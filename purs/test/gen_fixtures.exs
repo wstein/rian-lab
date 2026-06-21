@@ -688,7 +688,11 @@ gate_corpus = [
   "pub def um(x String) Int32 | Bool := x",
   "pub def bh(x Int53) Option(Int53) := Some(x)",
   "pub def st() Pair := [1, 2]\ntype Pair := P(a Int53, b Int53)",
-  "pub def w(x Int8) Int64 := x"
+  "pub def w(x Int8) Int64 := x",
+  # error sets (ADR-0040): a Result return's produced error set must be ⊆ its declared E.
+  "pub def safe() Result(Int53, MyErr) := {:ok, 1}\ntype MyErr := Bad",
+  "pub def bad() Result(Int53, MyErr) := {:error, Other}\ntype MyErr := Bad",
+  "pub def okerr() Result(Int53, MyErr) := {:error, Bad}\ntype MyErr := Bad"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the
