@@ -286,6 +286,60 @@ defmodule Rian.ProtocolTest do
     end
   end
 
+  describe "Rian.Check coherence gate (ADR-0061 §5)" do
+    test "check_program independently rejects an incoherent program (gate, not just the desugar)" do
+      # a hand-built program that never went through the parse-time desugar: the
+      # gate must still reject the duplicate `(P, Int64)`.
+      sig = %{name: "m", params: "self Self", ret: "Bool"}
+      meth = %{name: "m", params: "x", body: "true", guard: nil}
+
+      prog = %{
+        funcs: [],
+        types: [],
+        structs: [],
+        mods: [],
+        protocols: [%{name: "P", methods: [sig], assoc: [], module: nil}],
+        impl_decls: [
+          %{proto: "P", type: "Int64", methods: [meth], assoc: %{}, module: nil},
+          %{proto: "P", type: "Int64", methods: [meth], assoc: %{}, module: nil}
+        ]
+      }
+
+      assert {:error, msg} = Check.check_program(prog)
+      assert msg =~ "duplicate `impl P for Int64`"
+    end
+
+    test "the same `(protocol, type)` in two separate modules is NOT a false duplicate" do
+      # `impl P for Int64` appears in both `mod A` and `mod B`, each over its own
+      # `protocol P`. Coherence is per-module (ADR-0061 §5), so the gate must pass —
+      # the attribution is what keeps the whole-program view from cross-reporting.
+      prog =
+        Decl.parse("""
+        mod A do
+          protocol P do
+            def m(self Self) Bool
+          end
+
+          impl P for Int64 do
+            def m(x) := true
+          end
+        end
+
+        mod B do
+          protocol P do
+            def m(self Self) Bool
+          end
+
+          impl P for Int64 do
+            def m(x) := true
+          end
+        end
+        """)
+
+      assert Check.check_program(prog) == :ok
+    end
+  end
+
   describe "sum-type dispatch (ADR-0042 — dispatch on the constructor tag)" do
     test "dispatches a sum value by its constructor tag (tupled and nullary)" do
       m =

@@ -93,9 +93,10 @@ ad-hoc polymorphism *because* it is narrow (two homogeneous GC'd runtimes where 
 behaves identically on both); Rian lowers the *same* dispatch to **monomorphized Rust**, where an
 incoherent instance is a type error or a silently divergent binary — a soundness bug the reach matrix
 (§2) cannot catch because it does not model instance identity. That rationale, **and the sharpening it
-forces** — promoting 0061's *implicitly*-enforced orphan rule to an explicitly-checked, property-tested
-one (ADR-0061 §5, `Amended 2026-06-21`) — live in ADR-0061, the single authority for coherence. This
-ADR only records that the strategy rests on it.
+forces** — extracting coherence to `Rian.Coherence` and running it as an explicit, per-module
+`Rian.Check` gate plus a property test (ADR-0061 §5, `Amended 2026-06-21`; the orphan rule stays
+*structural* until cross-module impls exist) — live in ADR-0061, the single authority for coherence.
+This ADR only records that the strategy rests on it.
 
 ### 5. TypeScript as a typed *view* over the JS backend (not a fifth semantic target)
 
@@ -147,7 +148,7 @@ type-theoretic version is justified.
 | 1 — compete only on the inferred-ownership × honest-reach intersection; refuse rivals' home turf | 5/5 | the only defensible framing; makes every other call judgeable |
 | 2 — gate on a generative reach-honesty property (mechanism split to ADR-0087) | 5/5 | closes the one crack under the whole moat; non-negotiable, comes first |
 | 3 — depth before breadth; candidates gated behind §2; self-host outranks targets | 5/5 | the drift tax is multiplicative — sequencing *is* solvency |
-| 4 — record coherence as a precondition; delegate the rule to ADR-0061 §5 | 4/5 | the right *home* for an already-shipped rule; −1 the real work is the 0061 implicit→explicit amendment |
+| 4 — record coherence as a precondition; delegate the rule to ADR-0061 §5 | 4/5 | the right *home* for an already-shipped rule; −1 the real work is the 0061 extract-to-`Rian.Coherence` + Check-gate amendment |
 | 5 — TypeScript as a typed view over the JS backend | 4/5 | high-leverage, low-machinery adoption unlock; −1 TS types are doc, not a gate |
 | 6 — legible reach diagnostics (`file:line` + cause) | 4/5 | unifies DX + inference; −1 it is polish, ranked below §2/§4 |
 | 7 — written one-sentence competitor deltas | 5/5 | free, and disciplines every downstream decision |

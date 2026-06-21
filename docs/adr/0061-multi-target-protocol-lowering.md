@@ -1,8 +1,8 @@
 # ADR-0061 — Multi-target protocol & generics lowering: native-per-target dispatch, target-relative coherence
 
-**Status:** Proposed (design) · BEAM dispatch is **shipped** (ADR-0042 MVP — runtime guarded dispatcher + `check_bounds`); this ADR specifies the **Rust** (static traits) and **JS** (runtime dispatch) lowerings and **reconciles the coherence rules** across the three so one source compiles everywhere it is allowed to. **Foundation landed** (§1): structured protocol/impl IR is preserved (`prog.protocols`/`prog.impl_decls`) and the BEAM runtime-dispatch desugaring is tagged on `IR.Func` (`dispatch: :dispatcher` for the dispatcher, `:impl` for the impl methods) so the Rust path drops its text and the JS emitter skips the dispatcher (regenerating its own). The **JS dispatcher (§3) is shipped** — `Rian.JS` regenerates the dispatcher from the protocol IR with JS-native guards (`typeof` for primitives, tagged-array head for sums); verified in node, including the `Eq`/`Ord` stdlib (`sort`/`contains`/`maximum`). The **Rust trait path (§2) is shipped** — `Rian.Lower.rust_protocols` emits a fresh `trait Rian<P>` + `impl Rian<P> for <rust(T)>` (receiver → `&self`), bounded generics become `fn f<T: RianEq + …>`, and protocol-method calls rewrite to Rust **method-call** syntax (`recv.m(args)`, which auto-refs the receiver); rustc-verified for primitives (Eq/Ord) and sums (Show-for-Expr with a `case` body). **Whole-program assembly shipped** — `Rian.Lower.rust_program/1` / `mix rian.build --rust` emit one module with each `enum`/`struct`/`trait`/`impl` once, so the stdlib + protocols + generics compose (rustc-verified: a sum + two protocols + a cons-recursive bounded generic, one module); generic params carry `+ Clone`. **Target-relative coherence (§5) is shipped** — the runtime-discriminator rule (`Int64`+`Char` share a guard) now applies only to runtime-dispatch targets (`:ex`/`:js`, and unannotated = all); a Rust-only `@targets(rs)` module allows both. The orphan rule was enforced *implicitly* (a side effect of per-scope processing); the 2026-06-21 amendment promotes it to an *explicit, checked, property-tested* gate (§5 *Amendment*). **Remaining:** struct protocol dispatch on JS raises `Unsupported` (gate via `@targets` once a JS-excluding set is declared); generics that *construct an owned collection from borrowed elements* (`insert`/`sort` building `Vec<T>` from `&T`) need element-cloning at the `vec!`/`to_vec` site for generic `T` (a Rust owned-construction refinement); Rust-keyword identifiers (a Rian var named `as`) need raw-identifier (`r#`) escaping; dynamic (`dyn`) dispatch.
+**Status:** Proposed (design) · BEAM dispatch is **shipped** (ADR-0042 MVP — runtime guarded dispatcher + `check_bounds`); this ADR specifies the **Rust** (static traits) and **JS** (runtime dispatch) lowerings and **reconciles the coherence rules** across the three so one source compiles everywhere it is allowed to. **Foundation landed** (§1): structured protocol/impl IR is preserved (`prog.protocols`/`prog.impl_decls`) and the BEAM runtime-dispatch desugaring is tagged on `IR.Func` (`dispatch: :dispatcher` for the dispatcher, `:impl` for the impl methods) so the Rust path drops its text and the JS emitter skips the dispatcher (regenerating its own). The **JS dispatcher (§3) is shipped** — `Rian.JS` regenerates the dispatcher from the protocol IR with JS-native guards (`typeof` for primitives, tagged-array head for sums); verified in node, including the `Eq`/`Ord` stdlib (`sort`/`contains`/`maximum`). The **Rust trait path (§2) is shipped** — `Rian.Lower.rust_protocols` emits a fresh `trait Rian<P>` + `impl Rian<P> for <rust(T)>` (receiver → `&self`), bounded generics become `fn f<T: RianEq + …>`, and protocol-method calls rewrite to Rust **method-call** syntax (`recv.m(args)`, which auto-refs the receiver); rustc-verified for primitives (Eq/Ord) and sums (Show-for-Expr with a `case` body). **Whole-program assembly shipped** — `Rian.Lower.rust_program/1` / `mix rian.build --rust` emit one module with each `enum`/`struct`/`trait`/`impl` once, so the stdlib + protocols + generics compose (rustc-verified: a sum + two protocols + a cons-recursive bounded generic, one module); generic params carry `+ Clone`. **Target-relative coherence (§5) is shipped** — the runtime-discriminator rule (`Int64`+`Char` share a guard) now applies only to runtime-dispatch targets (`:ex`/`:js`, and unannotated = all); a Rust-only `@targets(rs)` module allows both. Coherence checking is now extracted to `Rian.Coherence` (single source of truth) and run as an **explicit, per-module `Rian.Check` gate** plus a seeded property test (§5 *Amendment*, 2026-06-21); the orphan rule stays *structurally* enforced (an impl's protocol must be in scope) pending cross-module impls. **Remaining:** struct protocol dispatch on JS raises `Unsupported` (gate via `@targets` once a JS-excluding set is declared); generics that *construct an owned collection from borrowed elements* (`insert`/`sort` building `Vec<T>` from `&T`) need element-cloning at the `vec!`/`to_vec` site for generic `T` (a Rust owned-construction refinement); Rust-keyword identifiers (a Rian var named `as`) need raw-identifier (`r#`) escaping; dynamic (`dyn`) dispatch.
 **Extended by:** ADR-0074 — associated types (the Rust `trait { type Elem; }` projection + BEAM/JS erasure, for element-generic protocols).
-**Amended 2026-06-21 (§5):** the **orphan rule is promoted from *implicitly* enforced (a side effect of per-scope processing) to an *explicitly checked* gate** with a diagnostic, **property-tested** under the ADR-0087 reach-honesty harness — an "enforced by construction" invariant is exactly the unproven claim that harness exists to catch (see §5 *Amendment* below). ADR-0086 §4 records that the competitive/breadth strategy *depends on* this coherence; the rule itself lives here, the single authority. Reach honesty for coherence is owned by ADR-0087.
+**Amended 2026-06-21 (§5):** coherence checking is extracted to **`Rian.Coherence`** (single source of truth, structured violations) and run as an **explicit, per-module `Rian.Check` gate** — so `gate!` rejects an incoherent program even off the desugar path — plus a **seeded property test** (`coherence_property_test`). The **orphan rule** is honestly scoped: it stays *structurally* enforced (an impl's protocol must be in scope) and is **not** a firing gate, because cross-module impls are not yet supported (the per-scope dispatcher cannot see impls in other modules), so an orphan is currently unconstructible (see §5 *Amendment* below). ADR-0086 §4 records that the breadth strategy *depends on* this coherence; the rule lives here, the single authority. When the ADR-0087 harness lands, coherence becomes a consumer of it.
 **Implemented:** partial — BEAM dispatch (`Rian.Protocol`), JS dispatcher (`Rian.JS`) and Rust trait path (`Rian.Lower.rust_protocols`) shipped (`test/rian/protocol_test.exs`, `test/rian/js_test.exs`, `test/rian/lower_test.exs`); struct dispatch on JS, owned-collection-from-borrowed generics, `r#` escaping and `dyn` dispatch not
 **Refs:** ADR-0042 (protocols/impls/bounded generics — what this lowers), ADR-0057 (concurrency is native-per-target — the *principle* this borrows: a feature can be one source, three native mechanisms), ADR-0058 (configurable `@targets` — coherence is gated by the declared target set), ADR-0049 (backend tiers — Rust/JS are Tier-1), ADR-0050 (one typed core IR — emitters consume it), ADR-0041 (target model — per-target representation), ADR-0047 (stdlib written over protocols — the first multi-target consumer), ADR-0055 (capability on the protocol-method receiver — survives `dyn` erasure), ADR-0035 (no hidden control flow)
 **Owners:** Maya Lin (multi-target/emitters) · Elena Rostova (Rust traits / coherence) · Arthur Pendelton (bounds / type-directed dispatch) · Kira Neri (determinism) · Samir Patel (coherence rigor) · Liam Davis (ergonomics) · Rachel Okafor (PM)
@@ -112,31 +112,44 @@ Consequences of target-relativity:
 - This is the same shape as ADR-0058's FFI gating: *the constraints follow from which targets you
   picked.* Coherence stops being one global rule and becomes a reachability-gated contract.
 
-#### Amendment (2026-06-21) — enforcement promoted from *implicit* to *explicit + property-tested*
+#### Amendment (2026-06-21) — coherence becomes an explicit, property-tested gate; the orphan rule is honestly scoped
 
-The original §5 enforced the orphan rule **implicitly**: protocols/impls are processed per scope, so an
-`impl` happened to be co-located with its protocol *as a side effect of how the checker walks scopes*.
-That is an "enforced by construction" invariant — precisely the class of unproven claim the ADR-0087
-reach-honesty harness exists to catch (an honesty gap survives only until the next refactor of scope
-handling). The amendment makes coherence a **first-class, checked gate:**
+Coherence checking lived incidentally inside the BEAM desugar (`Rian.Protocol.expand`, run per scope at
+parse time). The amendment extracts it to a single authority and makes it a first-class gate, while being
+honest about what is and is not yet a *firing* rule:
 
-1. **Explicit check with a diagnostic.** `Rian.Check` (not scope-processing side effects) verifies the
-   coherence rule table above and emits a *located* error on violation — `file:line` + which rule
-   (`one-impl-per-(proto,type)` / orphan / runtime-discriminator / overlap), matching the legible-pin
-   bar of ADR-0086 §6 — rather than letting an incoherent program reach an emitter and fail there.
-2. **Property-tested, not fixture-tested.** Coherence enforcement becomes a *consumer of the ADR-0087
-   harness*: a generated program whose declared `@targets` make it incoherent **must be rejected by the
-   check**, and a coherent one **must lower legally on every declared target**. This is the first
-   non-reach invariant the harness gates, and it validates that the harness generalizes beyond reach.
-3. **`@targets`-relative, unchanged.** The amendment changes enforcement *strength*, not the rule
-   *set*: the runtime-discriminator rule stays `:ex`/`:js`-only, a `@targets(rs)`-only module may still
-   carry both `Int64` and `Char` impls (§5 table). Explicit ≠ stricter; it is *checked* instead of
-   *incidental*.
+1. **Single source of truth.** `Rian.Coherence` now owns the rule table — one impl per `(proto, type)`,
+   method-set + arity match, runtime-discriminator presence and non-overlap, associated-type binding —
+   as a pure pass returning structured `%{rule, proto, type, message}` violations. Both the parse-time
+   fast-fail (`Rian.Protocol.expand`/`Rian.Decl`) and the type gate consume the *same* logic.
 
-Propagation (per `docs/README.md` "Amending a decision-lock"): the implicit-enforcement wording in this
-ADR's Status summary is corrected above; the executable pin is the ADR-0087 coherence property; sibling
-sites are the three other coherence rows (each must move from "implicit/structural" to checked together,
-not piecemeal).
+2. **Explicit `Rian.Check` gate.** `Rian.Check.check_program/1` runs `Rian.Coherence` over the whole
+   program, **grouped per home module** (`Rian.Decl` attributes each `impl`/`protocol` with its scope)
+   and that module's `@targets`, so a `(proto, type)` legitimately repeated in two separate modules is
+   never a false duplicate. `gate!` therefore rejects an incoherent program even on a path that bypassed
+   the desugar (e.g. a hand-built `Prog`), rather than relying on a parse-time side effect.
+
+3. **Property-tested, not only fixture-tested.** `coherence_property_test` (seeded `:rand`) asserts every
+   generated coherent program parses and every planted violation is rejected with its rule — the firing
+   rules are exercised generatively, not just by the hand-picked corpus. When the ADR-0087 harness lands,
+   coherence becomes a consumer of it (ADR-0087 §5), the natural generalisation of this property.
+
+4. **`@targets`-relative, unchanged.** Enforcement *strength* changed, not the rule *set*: the
+   runtime-discriminator rule stays `:ex`/`:js`-only; a `@targets(rs)`-only module may still carry both
+   `Int64` and `Char` impls (§5 table).
+
+**The orphan rule is the honest exception.** It remains **structurally enforced**, not a separate firing
+gate: an `impl`'s protocol must be in its scope, so an impl is forced to be co-located with its protocol
+(an out-of-scope protocol reference is rejected as "unknown protocol"). A standalone, *firing* orphan
+diagnostic ("`impl P for T` lives in neither's module") presupposes **cross-module impls**, which Rian
+does not yet support (the dispatcher is generated per scope; a protocol's dispatcher cannot see impls in
+other modules). Until cross-module impls land, there is no orphan a check could reject, so adding one
+would be unreachable code. This ADR records the rule's *intent* (the §5 table) and its *current*
+structural enforcement honestly, rather than claiming a gate that cannot fire.
+
+Propagation (per `docs/README.md` "Amending a decision-lock"): the Status-summary wording is corrected
+above; the executable pins are `coherence_property_test` and the `Rian.Check` gate tests in
+`protocol_test`; the sibling coherence rows moved to the explicit gate together (not piecemeal).
 
 ## Ratings
 

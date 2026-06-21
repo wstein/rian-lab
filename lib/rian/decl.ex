@@ -309,8 +309,9 @@ defmodule Rian.Decl do
   # the BEAM desugar (`protocol_defs/3`) discards them, but Rust reads protocols as
   # traits and JS generates its own dispatcher, so both need the original shapes.
   defp all_protocols(decls) do
-    in_scope(decls, fn d ->
-      for {:protocol, name, inner, _doc} <- d, do: protocol_struct(name, inner)
+    in_scope(decls, fn mod, d ->
+      for {:protocol, name, inner, _doc} <- d,
+          do: Map.put(protocol_struct(name, inner), :module, mod)
     end)
   end
 
@@ -324,8 +325,9 @@ defmodule Rian.Decl do
   end
 
   defp all_impl_decls(decls) do
-    in_scope(decls, fn d ->
-      for {:impl, proto, type, inner, _doc} <- d, do: impl_struct(proto, type, inner)
+    in_scope(decls, fn mod, d ->
+      for {:impl, proto, type, inner, _doc} <- d,
+          do: Map.put(impl_struct(proto, type, inner), :module, mod)
     end)
   end
 
@@ -349,11 +351,14 @@ defmodule Rian.Decl do
     end
   end
 
-  # apply `f` to the top-level decls and to each module's inner decls, concatenating
+  # apply `f.(module, scope_decls)` to the top-level decls (`module` = nil) and to
+  # each module's inner decls (`module` = the mod name), concatenating. The module
+  # tag is the *home scope* an `impl`/`protocol` is written in — the attribution the
+  # coherence gate groups on (ADR-0061 §5).
   defp in_scope(decls, f) do
-    f.(decls) ++
+    f.(nil, decls) ++
       Enum.flat_map(decls, fn
-        {:mod, _n, inner, _d, _t} -> f.(inner)
+        {:mod, n, inner, _d, _t} -> f.(n, inner)
         _ -> []
       end)
   end

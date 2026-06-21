@@ -2462,18 +2462,58 @@ defmodule Rian.Check do
   @rian_sig "pub def check_program(prog Prog) _Unk"
   @spec check_program(map()) :: term()
   def check_program(%{funcs: funcs} = prog) do
-    ic = program_ic(prog)
-    all_funcs = funcs ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
-    tsets = error_sets(all_types(prog))
-    # the inferred effect set per function (ADR-0048 §3); `Rian.Reach` owns the
-    # host-FFI leaf signal, so the effect view never disagrees with the reach view.
-    eset = %{
-      tsets: tsets,
-      table: solve_error_sets(all_funcs, tsets),
-      effects: Rian.Reach.effect_sets(prog)
-    }
+    with :ok <- check_coherence(prog) do
+      ic = program_ic(prog)
+      all_funcs = funcs ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
+      tsets = error_sets(all_types(prog))
+      # the inferred effect set per function (ADR-0048 §3); `Rian.Reach` owns the
+      # host-FFI leaf signal, so the effect view never disagrees with the reach view.
+      eset = %{
+        tsets: tsets,
+        table: solve_error_sets(all_funcs, tsets),
+        effects: Rian.Reach.effect_sets(prog)
+      }
 
-    Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, eset), do: nil end)
+      Enum.find_value(all_funcs, :ok, fn f -> with :ok <- check_func(f, ic, eset), do: nil end)
+    end
+  end
+
+  # Protocol/impl coherence (ADR-0061 §5) as an explicit gate: the same
+  # `Rian.Coherence` rules the parse-time desugar enforces, re-checked here so
+  # `gate!` rejects an incoherent program even on a path that did not go through the
+  # desugar. Grouped by each impl's home module (`:module`, attributed by
+  # `Rian.Decl`) and that module's `@targets`, so a `(proto, type)` legitimately
+  # repeated in two separate modules is never a false duplicate.
+  @spec check_coherence(map()) :: :ok | {:error, String.t()}
+  defp check_coherence(prog) do
+    protocols = Map.get(prog, :protocols, [])
+
+    prog
+    |> Map.get(:impl_decls, [])
+    |> Enum.group_by(&Map.get(&1, :module))
+    |> Enum.find_value(:ok, fn {mod, impls} ->
+      protos = for p <- protocols, Map.get(p, :module) == mod, into: %{}, do: {p.name, p.methods}
+      {types, structs, targets} = coherence_scope(prog, mod)
+      reg = Rian.Coherence.registry(types, structs)
+      tuples = for i <- impls, do: {i.proto, i.type, i.methods, i.assoc}
+
+      case Rian.Coherence.violations(protos, tuples, reg, targets) do
+        [] -> nil
+        [%{message: msg} | _] -> {:error, msg}
+      end
+    end)
+  end
+
+  # the resolved types/structs and `@targets` of a coherence scope: top level
+  # (`mod == nil`) or one named module.
+  defp coherence_scope(prog, nil),
+    do: {Map.get(prog, :types, []), Map.get(prog, :structs, []), nil}
+
+  defp coherence_scope(prog, mod) do
+    case Enum.find(Map.get(prog, :mods, []), &(&1.name == mod)) do
+      nil -> {[], [], nil}
+      m -> {m.types, m.structs, m.targets}
+    end
   end
 
   # The program inference context — the type/function/ctor tables `program_ic/1`
