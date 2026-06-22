@@ -41,9 +41,9 @@ defmodule Mix.Tasks.Rian.Transpile do
   adds a fixpoint test. See `Rian.Transpile` for the translated-vs-flagged split.
 
       mix rian.transpile lib/rian/range.ex
-      mix rian.transpile lib/rian/range.ex -o compiler/range.rian
-      mix rian.transpile lib/rian/ -o compiler/drafts
-      mix rian.transpile lib/rian/ -o compiler/drafts --infer
+      mix rian.transpile lib/rian/range.ex -o tmp/range.rian
+      mix rian.transpile lib/rian/ -o tmp/drafts
+      mix rian.transpile lib/rian/ -o tmp/drafts --infer
       mix rian.transpile lib/rian --check                  # CI gate (exit non-zero on regression)
       mix rian.transpile lib/rian --check --update-baseline # re-record after resolving constructs
   """

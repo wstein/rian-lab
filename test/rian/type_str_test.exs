@@ -89,7 +89,7 @@ defmodule Rian.TypeStrTest do
 
     test "agrees with the reference over a corpus of real and edge-case type strings" do
       from_sources =
-        (Path.wildcard("examples/rian/*.rian") ++ Path.wildcard("compiler/*.rian"))
+        Path.wildcard("examples/rian/*.rian")
         |> Enum.flat_map(&Regex.scan(~r/\(([A-Za-z_][A-Za-z0-9_, ()|]*)\)/, File.read!(&1)))
         |> Enum.map(fn [_, inner] -> inner end)
 

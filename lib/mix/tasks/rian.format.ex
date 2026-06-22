@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Rian.Format do
   Examples:
 
       mix rian.format examples/rian/08_lambdas_collections.rian
-      mix rian.format --check compiler/*.rian
+      mix rian.format --check examples/rian/*.rian
       mix rian.format --diff lib/foo.rian
       cat foo.rian | mix rian.format -
   """

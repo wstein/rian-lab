@@ -2075,9 +2075,8 @@ defmodule Rian.Lower do
     end)
   end
 
-  # Whole-word string substitution — the char-scan port of `~r/\bname\b/` from the
-  # self-hosted compiler/rust.rian (`splice_one`/`splice_scan`). No regex engine, no
-  # `Regex.escape` foot-gun: a match fires only when the chars bracketing `name` are
+  # Whole-word string substitution — a char-scan equivalent of `~r/\bname\b/`. No
+  # regex engine, no `Regex.escape` foot-gun: a match fires only when the chars bracketing `name` are
   # non-word (word chars are `[A-Za-z0-9_]`, matching `\w`). `prev` carries whether
   # the char just emitted was a word char (the left boundary).
   defp word_replace(str, name, repl),

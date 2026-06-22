@@ -61,8 +61,7 @@ defmodule Rian.Interp do
   # String)` threaded through `Rian.Check.infer/3`. `show` is genuinely a *set* of
   # type names (a `MapSet`); Rian has no `Set(T)` type yet, so it is an honest
   # `_Unk` ("type still to be defined", ADR-0034) — not `Any`, and not a `Vec`,
-  # which would imply order/duplicates it does not have. (The self-hosted
-  # `compiler/interp.rian` models it as `Vec(String)` pending a portable `Set`.)
+  # which would imply order/duplicates it does not have.
   @rian_sig "pub def resolve(ast Expr, env Dict(String, String), ic Ic) Expr"
   @rian_sig "pub def resolve(ast Expr, env Dict(String, String), ic Ic, show _Unk) Expr"
   @doc """
@@ -212,7 +211,7 @@ defmodule Rian.Interp do
         # Emitting this call is the *only* signal that the program needs the `Show`
         # stdlib module — `Rian.Decl.inject_stdlib/1` supplies it by inspecting the
         # rewritten program for this call, so this pass stays a pure function (no
-        # process-dict side-channel). Cf. the self-hosted `compiler/interp.rian`.
+        # process-dict side-channel).
         {:call, {:dot, {:id, "Show"}, "float"}, [expr]}
 
       type == "Float32" ->

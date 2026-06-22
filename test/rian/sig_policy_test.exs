@@ -133,7 +133,7 @@ defmodule Rian.SigPolicyTest do
   # `classify`/`runtime_dispatch_target?` made private to keep the bump to the irreducible residual.
   # 270 -> 271: `Rian.Decl.coherence_violations/1` (the `coh` parity unit, ADR-0084) returns the same
   # honestly-`_Unk` violation list.
-  @unk_baseline 271
+  @unk_baseline 260
 
   defp unk_count do
     lib_rian_modules()

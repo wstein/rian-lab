@@ -303,11 +303,10 @@ defmodule Rian.FormatTest do
   end
 
   describe "correctness bars over the real corpus" do
-    # examples + the self-hosted compiler + the snapshot inputs (`format_snapshot_test`
-    # owns their exact output; here their *meaning preservation* + idempotence is swept
-    # alongside the real corpus, so a golden file can never encode an unsound transform).
+    # examples + the snapshot inputs (`format_snapshot_test` owns their exact output; here
+    # their *meaning preservation* + idempotence is swept alongside the real corpus, so a
+    # golden file can never encode an unsound transform).
     @corpus Path.wildcard("examples/rian/*.rian") ++
-              Path.wildcard("compiler/*.rian") ++
               Path.wildcard("test/rian/fixtures/format/*.in.rian")
 
     test "the corpus is non-empty (guards against a bad glob)" do

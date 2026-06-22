@@ -336,7 +336,7 @@ defmodule Rian.Pratt do
   # `if … do … end`. The explicit delimiter is deliberate: a bare `;`-block body
   # (`(x) -> a; b`) is ambiguous at statement position — `pb := (f) -> e; next` could
   # not tell the lambda's `;` from the enclosing block's — so `;` continuation requires
-  # the `do … end` bounds. (The hand-written compiler/examples corpus uses only
+  # the `do … end` bounds. (The hand-written examples corpus uses only
   # single-expression lambdas; multi-statement logic lives in named helpers.)
   defp parse_lambda_body([{:kw, "do"} | rest]) do
     {block, rest} = parse_block(rest)
