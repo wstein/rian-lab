@@ -4,6 +4,15 @@ The phase plan for porting the reference compiler (`lib/`) to PureScript/purerl
 (`purs/`). Governed by **ADR-0084**. Order is **dependency order = build order**: a
 module is ported only after everything it depends on has reached parity.
 
+> **Target reframe (ADR-0090).** The port's *primary* deliverable is the **JS compiler**
+> (browser playground + npm/node CLI), built by stock `purs`'s native **JS backend**. **purerl /
+> BEAM is recast as the parity oracle** (byte-equality vs the Elixir reference, the DoD below) plus
+> the self-host / BEAM-retention path (ADR-0063). The type-safety-over-Dialyzer win of ADR-0084
+> stands as a *means*, not the motive. Concretely: **`Rian.JS` (Phase 5) is the priority emitter** —
+> it is both the next migration step *and* the live-playground engine (ADR-0090 §1, §7). A JS-backend
+> build profile (standard package set; the one `HostRef` FFI stubbed; `Beam` skipped in-browser) is a
+> new deliverable tracked under Phase 5 / Phase 10.
+
 ## Definition of done (per module)
 
 A module is **migrated** — not merely "ported" — when all hold:
@@ -172,10 +181,30 @@ wrap `:compile.forms`/code-loading/`GenServer` — the bulk of the Erlang FFI.
 `lib/mix/tasks/*` entry points. The Mix tasks become a thin Elixir/escript shim over the
 purerl-built BEAM modules (ADR-0031), or native `rian` CLI subcommands.
 
+## Gap scoreboard — every unported `lib/rian` module
+
+The front-end + gates + inference + `Reach` + assemble tail are **done** (26 PS modules,
+parity-gated). What's left, by category — `lib/rian/*.ex` with **no** `purs/src/Rian` twin:
+
+| Category | Elixir modules (unported) | Status / why |
+| --- | --- | --- |
+| **⛔ Emitters — the compile-spine gap** | `js`, `jvm`, `lower`, `beam` | The value backend. **`Rian.JS` is the priority** (ADR-0090: playground engine + next step; its `annotate`/`ic` prereq has landed). `Lower` (Rust+Elixir) and `JVM` are display-pane emitters; `Beam` is FFI-heavy → Phase 8. *Nothing emits a program until at least `JS` lands.* |
+| **🔧 Pipeline desugars still unported** | `interp` (252, `${}` resolution), `show_stdlib` (29) | Pure Core→Core passes the emitters need. `Interp` rewrites `${expr}` → `<>` chains *before* emit (mis-filed under Phase 8 — it is **not** FFI). `ShowStdlib` blocked on `Decl.inject_stdlib` (no consumer yet). |
+| **⚙️ Execution & self-host (FFI-heavy, Phase 8)** | `run`, `repl`, `fixpoint`, `self_host`, `roundtrip`, `forms_equiv`, `doctest`, `test` | Wrap `:compile.forms` / code-loading / `GenServer`. Expected-late: they need the BEAM emitter + Erlang FFI. For the **JS** build these are skipped in-browser. |
+| **📐 Formatter (Phase 9)** | `format` (+ `format/{Doc,CST,CLI}`), `lsp/*` | Zero-config formatter (ADR-0045). A real feature, off the compile spine; ports after the emitters. |
+| **📦 CLI / packaging / integrations (Phase 10)** | `cli`, `build`, `manifest`, `pkg/*`, `tour`, `livebook/*`, `application` | Host shims + build toolchain. `Manifest` (`rian.toml` reader) gates the Phase 7–10 build. Becomes a thin Elixir/escript or node-CLI shell over the ported core. |
+| **🚫 Superseded / out of scope** | `transpile` (+ `transpile/*`), `ann` (reader) | **Not ported by design.** Elixir→Rian `Transpile` is *re-aimed* to **PureScript → Rian** (Phase 7), not lifted. `Ann`'s reader is dropped; the `@rian_sig` *comment convention* is retained. |
+
+**One-line read:** the only thing between "checks a program" and "emits/runs one" is **Phase 5
+emitters** (+ the two pure desugars `Interp`/`ShowStdlib`). Everything else unported is host
+tooling that rides *behind* the emitters or is deliberately superseded. Per ADR-0090, port order
+within Phase 5 is **`JS` first** (unlocks the playground), then `Lower`/`JVM` (display panes),
+`Beam` last (FFI, Phase 8).
+
 ## Status
 
 Phases 0–1 complete. **Phase 2**: `Rian.TypeStr` + **`Rian.Core`** ported (parity-gated);
-`Rian.Ann` reader dropped (annotation convention retained); `Rian.IR` (data structs) remains.
+`Rian.Ann` reader dropped (annotation convention retained); **`Rian.IR`** (data structs) ported.
 **Phase 3**: `Rian.Pratt` ported (expression core + patterns + `if`/`case`/`lambda`/blocks +
 `with`/`for`/interpolation, via `psx`); remaining: bitstrings, map-update + type-patterns,
 error-propagation. **Phase 6**: `Rian.Prim` ported. **`Rian.IR`** + **`Rian.Decl` — every declaration form**
@@ -205,7 +234,8 @@ expansion** (`mxb`, `Macro.expand`) **and `Rian.Comptime`** (`comptime(e)` → a
 also in `mxb`) → `Expanded` clause bodies. The clause body is now `data Body = Raw String | Expanded
 Surface` with a `bodySurface` accessor (the reference's `String | ast`, idempotent re-parse
 restored); `lower_meta` change-detects via the canonical `sexpr` so an untouched body stays `Raw`.
-**Next:** the **emitters** (`Beam`/`JS`/`JVM`/`Lower`) — the value backend. The checker spine, its
+**Next:** the **emitters** — **`JS` first** (ADR-0090: the playground engine), then `Lower`/`JVM`
+(display panes) and `Beam` (FFI, Phase 8) — the value backend. The checker spine, its
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
@@ -235,7 +265,7 @@ back, and `check_program` enforces return-assignability (the full `assignable?`:
 `forall T`** (`ilp`). **And the assemble tail is ported**: `Rian.Assemble` runs `lower_meta` —
 `Protocol.expand` synthesis (`asm`) plus `Macro.expand` + `Comptime.fold` into `Expanded` clause
 bodies (`mxb`). **Phase 4 is closed.** **What remains before end-to-end compile**: the **emitters**
-(`Beam`/`JS`/`JVM`/`Lower`) — the value backend. **`Rian.Check` is now fully ported** (inference +
+(`JS` first per ADR-0090, then `Lower`/`JVM`/`Beam`) — the value backend. **`Rian.Check` is now fully ported** (inference +
 the complete 11-check `check_program` gate + `annotate` as a separate `TExpr` tree), and the port has
 its first Erlang-FFI boundary (`Rian.HostRef`, for `@external` ref-arity reflection). The parity-record count measures
 front-end + inference + gate + assemble-tail *fidelity*, not compiler completeness; the **emitters** are now the
