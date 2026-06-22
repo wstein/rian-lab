@@ -246,6 +246,9 @@ ADR-0031 already identifies.
 - **JVM value-type story** — boxing vs Project Valhalla value classes for opaque types / ranges
   (ADR-0043/0036) and `Int*` (ADR-0034) on the JVM.
 - **ECMAScript module/interop conventions** — ESM vs CJS output; npm interop (the JS analogue of the
-  ADR-0026 Hex/rebar3 ecosystem work).
+  ADR-0026 Hex/rebar3 ecosystem work). *Partly resolved:* output is **ESM** (`.mjs`, `"type":
+  "module"`), and the npm package now ships a **TypeScript declaration sidecar** `<name>.d.mts`
+  (`Rian.JS.compile_types/1`, `"types"` in `package.json`) — the typed FFI-boundary view of
+  **ADR-0086 §5**. CJS interop remains open.
 - **Per-tier conformance-matrix contents** — the concrete cross-target test set each tier must pass.
 - **Promotion criteria** — what advances a target from Tier 2 → Tier 1 (or Tier 3 → Tier 2).

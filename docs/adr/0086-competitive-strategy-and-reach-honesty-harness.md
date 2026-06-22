@@ -1,7 +1,7 @@
 # ADR-0086 — Competitive strategy: prove the reach matrix, then depth before breadth
 
-**Status:** Proposed
-**Implemented:** no — a *strategy* (sequencing + positioning), whose one load-bearing mechanism (the generative reach-honesty harness) is split into ADR-0087. No code lands on the strength of this ADR until ADR-0087's gate (§2) is green; everything downstream is *ordered* by it, not by this document.
+**Status:** Proposed · **§5 (TypeScript view) Accepted + implemented 2026-06-22**
+**Implemented:** partial — the *strategy* (sequencing + positioning) is direction-only, and its one load-bearing reach mechanism (the generative reach-honesty harness) is split into ADR-0087; **no reach-affecting code lands on this ADR until ADR-0087's gate (§2) is green.** The exception is **§5, now shipped** (`Rian.JS.compile_types/1` + the `.d.mts` sidecar in the npm package): the TS view is *documentation, not a gate*, so it neither rests on §2 nor widens the portable core — it is the one part of this ADR safe to build ahead of the gate.
 **Refines:** ADR-0000 (honesty bar — strengthens *how* the matrix is verified: generative property, not a hand-picked corpus), ADR-0058 (reachability + CI parity — adds the property the parity lane must satisfy), ADR-0049 §5a (backend tiers / target budget — supplies the gate Swift/Python/Lua-PHP-Neko candidates pass *through*).
 **Depends on / delegates to:** ADR-0087 (generative reach-honesty harness — owns the §2 mechanism this strategy gates on), ADR-0061 §5 (target-set-relative coherence — owns the §4 precondition this strategy rests on; this ADR re-decides neither).
 **Refs:** ADR-0050 (typed Core IR is the emitter spine), ADR-0057 (concurrency native-per-target — the deliberate non-portability the thesis depends on), ADR-0064 (portable numeric contract — the largest existing honest-pin surface), ADR-0070 (`val` default capability), ADR-0071 (Python — *gated* behind §2/§3), ADR-0072 (Swift — *gated* behind §2/§3), ADR-0084 (PureScript port — the mid-flight cost §3 protects), ADR-0085 (Haxe-style dynamic triad — the §5a discipline this ADR generalizes).
@@ -110,6 +110,34 @@ consumer-side documentation, **not** a capability/reach gate; the gate stays `Ri
 it is one backend with two print modes, it adds a bounded annotation cost, not a new emitter's full
 drift-tax row. This is also the direct answer to "why not just write TypeScript": *typed once, lowered
 to BEAM/Rust/JVM too — a claim TS cannot make by construction.*
+
+**Amended 2026-06-22 — emit detail decided and shipped (resolves the §5 open item).**
+The typed view is a **declaration sidecar**, not `.ts` source: `Rian.JS.compile_types/1` is
+a **second print mode** of the JS backend (same `Decl.parse` → `Check.gate!` → `Opaque.erase`
+prologue as `compile/1`) that emits a TypeScript declaration file for the module's **exported**
+surface — `export function`/`export const` for every `pub` declaration plus `type`/`interface`/range
+aliases for the user types they reference. The runtime `.mjs` is untouched.
+
+- **Filename: `<name>.d.mts`, not `<name>.d.ts`.** The runtime is ESM (`.mjs`), and TypeScript
+  resolves an ESM module's declarations from the sibling `.d.mts` (a `.d.ts` does *not* resolve for
+  a relative `import "./m.mjs"` — verified with `tsc`). The npm `package.json` also gains a
+  `"types"` field pointing at it, so a package-name import is typed too. The build
+  (`rian build --js -o`, ADR-0082 step 4) writes the sidecar beside the `.mjs`.
+- **Capabilities leave no TS trace.** `val`/`iso`/`tag`/`ref` shape Rust/BEAM only (ADR-0055) and
+  have no JS runtime meaning, so they are fully erased in the view (a `Vec(T)` param is `T[]` whether
+  it arrived `val` or `iso`).
+- **Reach surfaces only by omission.** The view declares only what the `.mjs` actually exports; a
+  function that is not JS-reachable never reaches this print mode (`compile/1` fails first). The
+  declarations *describe runtime values* — a sum is `["Ctor", …]`, a struct `{__struct__: "Name", …}`,
+  a `Result` an `["ok", v]` / `["error", e]` pair, an `Int` a `bigint`, an `Int53`/`Char` a `number`.
+  A type outside the faithfully-mappable subset becomes `unknown` (honest), never a misleading `any`.
+- **Types are documentation, not a gate** (unchanged): the reach gate stays `Rian.Reach` + §2.
+
+This sets the **pattern** a future typed view over another *dynamic* target (the ADR-0085 Lua/PHP/Neko
+triad, or ADR-0071 Python — all type-erasing like JS) would reuse: a second print mode over the same
+lowering, not a new emitter. It **adds no target and widens nothing** — the §5a admission gate and the
+target budget (ADR-0049 §5a) stand; a typed view is a print mode of an *already-admitted* target, never
+a way to smuggle one in.
 
 ### 6. Reach blockers must read like diagnostics, not mysteries
 

@@ -96,7 +96,10 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
      limitation, see its moduledoc); **`Rian.Beam` is the real BEAM backend.** So BEAM has two
      emitters — don't confuse them.
    - **`Rian.JS`** — ECMAScript (ADR-0049 Tier 1); partial (`struct`/`with`/lambdas/FFI raise
-     `Unsupported`).
+     `Unsupported`). Has **two print modes** over one lowering (ADR-0086 §5): `compile/1` (the
+     runtime `.mjs`) and `compile_types/1` (a TypeScript `.d.mts` declaration sidecar — the typed
+     FFI-boundary *view*; doc-not-gate, capabilities erased, unmappable types → `unknown`; written
+     beside the `.mjs` by `rian build --js`).
    - **`Rian.JVM`** — Kotlin/JVM (ADR-0049 **Tier 2**); a direct source emitter on Core, like JS.
      MVP: functions, primitives, operators, `if`, `case`, sum variants (→ `sealed interface` +
      `data class` + smart-cast patterns), lists (`listOf` literals + cons/closed clause patterns →
