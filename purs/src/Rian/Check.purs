@@ -1785,27 +1785,22 @@ constInt (P.SUnary "-" e) = map negate (constInt e)
 constInt _ = Nothing
 
 -- two's-complement bounds for the fixed-width integer types; `Nothing` for arbitrary-precision
--- `Int` / non-integer types. Built via `Int.fromString` (purerl `Int` = Erlang bignum), so the
--- wide bounds need no out-of-32-bit-range source literals.
+-- `Int` / non-integer types. purerl `Int` is an Erlang bignum, so the wide bounds are plain
+-- literals (the purs frontend accepts arbitrary-precision `Int` literals on this backend).
 widthBounds :: String -> Maybe (Tuple Int Int)
 widthBounds t = case t of
-  "Int8" -> bnd "-128" "127"
-  "Int16" -> bnd "-32768" "32767"
-  "Int32" -> bnd "-2147483648" "2147483647"
-  "Int53" -> bnd "-9007199254740991" "9007199254740991"
-  "Int64" -> bnd "-9223372036854775808" "9223372036854775807"
-  "Int128" -> bnd "-170141183460469231731687303715884105728" "170141183460469231731687303715884105727"
-  "UInt8" -> bnd "0" "255"
-  "UInt16" -> bnd "0" "65535"
-  "UInt32" -> bnd "0" "4294967295"
-  "UInt64" -> bnd "0" "18446744073709551615"
-  "UInt128" -> bnd "0" "340282366920938463463374607431768211455"
+  "Int8" -> Just (Tuple (-128) 127)
+  "Int16" -> Just (Tuple (-32768) 32767)
+  "Int32" -> Just (Tuple (-2147483648) 2147483647)
+  "Int53" -> Just (Tuple (-9007199254740991) 9007199254740991)
+  "Int64" -> Just (Tuple (-9223372036854775808) 9223372036854775807)
+  "Int128" -> Just (Tuple (-170141183460469231731687303715884105728) 170141183460469231731687303715884105727)
+  "UInt8" -> Just (Tuple 0 255)
+  "UInt16" -> Just (Tuple 0 65535)
+  "UInt32" -> Just (Tuple 0 4294967295)
+  "UInt64" -> Just (Tuple 0 18446744073709551615)
+  "UInt128" -> Just (Tuple 0 340282366920938463463374607431768211455)
   _ -> Nothing
-  where
-  bnd lo hi = Just (Tuple (intOf lo) (intOf hi))
-
-intOf :: String -> Int
-intOf s = fromMaybe 0 (Int.fromString s)
 
 stripUnderscores :: String -> String
 stripUnderscores = replaceAll (Str.Pattern "_") (Str.Replacement "")
