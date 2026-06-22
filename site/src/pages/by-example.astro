@@ -158,6 +158,68 @@ const onThis = [
   </div>
 </SiteShell>
 
+<script>
+  import { highlight } from "../lib/highlight";
+  import { loadCompiler, looksIncomplete, runInSandbox, cleanError } from "../lib/rian-live";
+
+  // Make every by-example cell a live editor: edit the source and it re-compiles +
+  // runs in your browser (the same in-browser Rian → JS compiler the playground uses),
+  // forgiving of half-typed input (`looksIncomplete`) and keeping the last good JS
+  // pane on a transient error. The other target panes stay the verified reference.
+  document.querySelectorAll<HTMLElement>("[data-cell-id]").forEach((cell) => {
+    const ta = cell.querySelector<HTMLTextAreaElement>("[data-cell-src]");
+    const hlEl = cell.querySelector<HTMLElement>("[data-cell-hl]");
+    const outEl = cell.querySelector<HTMLElement>("[data-cell-out]");
+    const jsPane = cell.querySelector<HTMLElement>('[data-cell-pane="js"]');
+    if (!ta || !hlEl || !outEl || !jsPane) return;
+    const original = ta.value;
+    const refJs = jsPane.innerHTML; // the verified reference emission, restored when unedited
+
+    let timer = 0;
+    let gen = 0;
+    const setOut = (kind: string, text: string) => ((outEl.dataset.kind = kind), (outEl.textContent = text));
+
+    async function liveEval() {
+      const g = ++gen;
+      const source = ta!.value;
+      if (source === original) {
+        jsPane!.innerHTML = refJs;
+        setOut("idle", "▷ edit the source to compile + run it live");
+        return;
+      }
+      if (looksIncomplete(source)) {
+        setOut("hint", "▍ keep typing…");
+        return;
+      }
+      let js: string;
+      try {
+        const { compile } = await loadCompiler();
+        if (g !== gen) return; // a newer keystroke superseded this run
+        js = compile(source);
+      } catch (e) {
+        if (g !== gen) return;
+        setOut("soft", "… " + cleanError(e)); // keep the last good JS pane
+        return;
+      }
+      jsPane!.innerHTML = highlight(js);
+      setOut("ok", "✓ compiled to JS — running…");
+      const res = await runInSandbox(js);
+      if (g !== gen) return;
+      setOut(res.ok ? "ok" : "soft", res.ok ? "▷ " + res.text : "✗ runtime: " + res.text);
+    }
+
+    ta.addEventListener("input", () => {
+      hlEl.innerHTML = highlight(ta.value) + "\n";
+      clearTimeout(timer);
+      timer = window.setTimeout(liveEval, 320);
+    });
+    ta.addEventListener("scroll", () => {
+      hlEl.scrollTop = ta.scrollTop;
+      hlEl.scrollLeft = ta.scrollLeft;
+    });
+  });
+</script>
+
 <style>
   .be-wrap {
     max-width: 1240px;

@@ -100,6 +100,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
 
 <script>
   import { highlight } from "../lib/highlight";
+  import { loadCompiler, compilerLoaded, looksIncomplete, runInSandbox, cleanError } from "../lib/rian-live";
   import tour from "../data/tour.json";
 
   type Cell = (typeof tour.cells)[number];
@@ -120,16 +121,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   // the live JS the in-browser compiler emits for the current buffer (null = show the reference pane)
   let liveJs: string | null = null;
 
-  // the real Rian compiler, compiled to JS by stock purs (ADR-0090) — lazy-loaded once on first Run.
-  // Served from `public/` beside the site; the URL must carry the deploy base (`/rian-lab` on GitHub
-  // Pages, `/` locally) or it resolves against the domain root and 404s. `BASE_URL` is build-time
-  // replaced but its trailing slash is NOT guaranteed (`configure-pages` emits `/rian-lab` with none),
-  // so strip-and-re-add exactly one — the pattern the rest of the site uses. The variable +
-  // `@vite-ignore` keep it a runtime import (a static literal would make Rollup resolve it at build).
-  let compilerP: Promise<{ compile: (src: string) => string }> | null = null;
-  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-  const compilerUrl = base + "/rian-compiler.mjs";
-  const getCompiler = () => (compilerP ??= import(/* @vite-ignore */ compilerUrl));
+  // the real Rian compiler + live-eval helpers are shared with the tutorial (`lib/rian-live`).
 
   function renderEditor() {
     const code = src.value;
@@ -172,90 +164,15 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     out.textContent = "Start typing — it compiles + runs live in your browser. Or press ▷ Run.";
   }
 
-  // Execute an emitted ECMAScript module in a sandboxed iframe (`allow-scripts`, opaque origin — no
-  // page access). Imports it from a blob URL; calls `main()` if exported, else reports it loaded.
-  function runInSandbox(jsModule: string, timeoutMs = 4000): Promise<{ ok: boolean; text: string }> {
-    return new Promise((resolve) => {
-      const frame = document.createElement("iframe");
-      frame.sandbox.add("allow-scripts");
-      frame.style.display = "none";
-      let done = false;
-      const finish = (r: { ok: boolean; text: string }) => {
-        if (done) return;
-        done = true;
-        window.removeEventListener("message", onMsg);
-        frame.remove();
-        resolve(r);
-      };
-      const onMsg = (ev: MessageEvent) => {
-        if (ev.source === frame.contentWindow && ev.data && ev.data.__rian) finish(ev.data.r);
-      };
-      window.addEventListener("message", onMsg);
-      const runner =
-        '<!doctype html><script type="module">' +
-        "const code = " + JSON.stringify(jsModule) + ";" +
-        "(async () => { let r; try {" +
-        "  const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));" +
-        "  const mod = await import(url);" +
-        "  if (typeof mod.main === 'function') r = { ok: true, text: 'main() = ' + JSON.stringify(mod.main()) };" +
-        "  else r = { ok: true, text: 'module loaded · exports: ' + Object.keys(mod).join(', ') + ' (define `main()` to see a value)' };" +
-        "} catch (e) { r = { ok: false, text: String((e && e.message) || e) }; }" +
-        "  parent.postMessage({ __rian: true, r }, '*'); })();" +
-        "<\/script>";
-      frame.srcdoc = runner;
-      document.body.appendChild(frame);
-      setTimeout(() => finish({ ok: false, text: "timed out (" + timeoutMs + "ms) — a runaway loop?" }), timeoutMs);
-    });
-  }
-
   // ── live, forgiving evaluation ──────────────────────────────────────────────
   // Compile (and run) the buffer as the user types, debounced. The Rian parser is
   // not error-recovering, so a half-typed line throws — so we (1) stay quiet for
-  // input that is *obviously* mid-edit (unbalanced delimiters/strings, an unclosed
-  // `do`, a dangling operator), and (2) on any compile error keep the LAST GOOD
-  // panes and report it gently instead of flashing red. A generation token drops
-  // stale results when a newer keystroke supersedes an in-flight compile/run.
+  // input that is *obviously* mid-edit (`looksIncomplete`, shared), and (2) on any
+  // compile error keep the LAST GOOD panes and report it gently instead of flashing
+  // red. A generation token drops stale results when a newer keystroke supersedes
+  // an in-flight compile/run.
   let liveTimer = 0;
   let evalGen = 0;
-
-  // A cheap "is the buffer obviously incomplete?" check — NOT a parser, just enough
-  // to avoid yelling at code the user is still in the middle of writing.
-  function looksIncomplete(srcText: string): boolean {
-    const code = srcText.replace(/#[^\n]*/g, " "); // drop line comments
-    if (code.trim() === "") return true;
-    // single walk: balance delimiters AND collapse each string literal to a `0`
-    // placeholder, so the `do`/`end` and trailing-operator checks below see only
-    // real code (a string like "do" or a trailing "text" must not mislead them).
-    let inStr = false,
-      q = "",
-      par = 0,
-      brk = 0,
-      brc = 0,
-      bare = "";
-    for (let i = 0; i < code.length; i++) {
-      const c = code[i];
-      if (inStr) {
-        if (c === q && code[i - 1] !== "\\") inStr = false;
-        continue; // string contents contribute nothing to `bare`
-      }
-      if (c === '"' || c === "'") (inStr = true), (q = c), (bare += "0");
-      else {
-        if (c === "(") par++;
-        else if (c === ")") par--;
-        else if (c === "[") brk++;
-        else if (c === "]") brk--;
-        else if (c === "{") brc++;
-        else if (c === "}") brc--;
-        bare += c;
-      }
-    }
-    if (inStr || par > 0 || brk > 0 || brc > 0) return true; // unterminated string / open delimiter
-    const doN = (bare.match(/\bdo\b/g) || []).length;
-    const endN = (bare.match(/\bend\b/g) || []).length;
-    if (doN > endN) return true; // an unclosed `do` block
-    // a buffer ending on an operator/keyword is mid-expression
-    return /(:=|<~|<-|->|\|>|<>|[-+*\/<>=.,]|\b(?:and|or|not|when|do|else|div|rem|in)\b)\s*$/.test(bare.trim());
-  }
 
   function setOut(kind: string, text: string) {
     out.dataset.kind = kind;
@@ -271,13 +188,13 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     }
     let js: string;
     try {
-      const { compile } = await getCompiler();
+      const { compile } = await loadCompiler();
       if (gen !== evalGen) return; // a newer keystroke superseded this run
       js = compile(source);
     } catch (e: any) {
       if (gen !== evalGen) return;
       // forgiving: a gate/parse error keeps the last good panes; report it softly.
-      setOut("soft", "… " + String((e && e.message) || e).replace(/^\w+: /, ""));
+      setOut("soft", "… " + cleanError(e));
       return;
     }
     liveJs = js;
@@ -299,7 +216,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
       loadFile((b as HTMLElement).dataset.file!);
       // once the compiler is loaded (the reader has engaged), switching cells
       // evaluates the new one immediately — no need to re-press Run.
-      if (compilerP) liveEval(false);
+      if (compilerLoaded()) liveEval(false);
     }),
   );
   document.querySelectorAll(".pg-otab").forEach((b) =>
@@ -326,7 +243,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   $("#pg-reset").addEventListener("click", () => {
     src.value = current.source;
     renderEditor();
-    if (compilerP) liveEval(false);
+    if (compilerLoaded()) liveEval(false);
     else setOut("hint", "Reset to " + current.file + ".");
   });
 

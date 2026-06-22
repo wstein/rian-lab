@@ -22,7 +22,7 @@ const { cell, heading = true } = Astro.props as Props;
 const order = ["ex", "rs", "js", "jvm"];
 ---
 
-<section id={cell.id} class="rl-cell">
+<section id={cell.id} class="rl-cell" data-cell-id={cell.id}>
   {
     heading && (
       <header class="rl-cell-head">
@@ -41,9 +41,15 @@ const order = ["ex", "rs", "js", "jvm"];
       <div class="rl-pane-head">
         <span class="rl-rtile">R</span>
         <span class="rl-pane-name">{cell.file}</span>
-        <span class="rl-mono" style="margin-left:auto; font-size:10.5px; color:#64748b; letter-spacing:0.06em;">SOURCE</span>
+        <span class="rl-mono rl-edithint" title="Edit the source — it compiles and runs live in your browser">
+          ✎ EDIT · LIVE
+        </span>
       </div>
-      <pre class="rl-code" set:html={highlight(cell.source)}></pre>
+      <div class="rl-codearea">
+        <pre class="rl-code rl-hl" data-cell-hl set:html={highlight(cell.source)}></pre>
+        <textarea class="rl-code rl-src" data-cell-src spellcheck="false" autocomplete="off" autocapitalize="off">{cell.source}</textarea>
+      </div>
+      <pre class="rl-cell-out rl-mono" data-cell-out data-kind="idle">▷ edit the source to compile + run it live</pre>
     </div>
     <div class="rl-col">
       {
@@ -55,7 +61,7 @@ const order = ["ex", "rs", "js", "jvm"];
                 {TARGET_META[t].label}
               </span>
             </div>
-            <pre class="rl-code" set:html={highlight(cell.panes[t])} />
+            <pre class="rl-code" data-cell-pane={t} set:html={highlight(cell.panes[t])} />
           </div>
         ))
       }
@@ -126,5 +132,55 @@ const order = ["ex", "rs", "js", "jvm"];
       border-right: none;
       border-bottom: 1px solid var(--border);
     }
+  }
+
+  /* ── live editable source (overlay editor, same metrics as .rl-code) ──────── */
+  .rl-edithint {
+    margin-left: auto;
+    font-size: 10.5px;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+  }
+  .rl-codearea {
+    position: relative;
+    min-width: 0;
+  }
+  .rl-codearea .rl-hl {
+    pointer-events: none;
+  }
+  .rl-codearea .rl-src {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    resize: none;
+    white-space: pre;
+    background: transparent;
+    color: transparent;
+    caret-color: var(--accent);
+    border: 0;
+    outline: none;
+  }
+  /* live execution line under the source */
+  .rl-cell-out {
+    margin: 0;
+    padding: 9px 18px;
+    font-size: 11.5px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    border-top: 1px solid var(--border);
+    background: var(--code-chrome, var(--code-bg));
+    color: #94a3b8;
+    transition: color 0.12s ease;
+  }
+  .rl-cell-out[data-kind="hint"],
+  .rl-cell-out[data-kind="idle"] {
+    color: #64748b;
+  }
+  .rl-cell-out[data-kind="soft"] {
+    color: #d9a441;
+  }
+  .rl-cell-out[data-kind="ok"] {
+    color: #34d399;
   }
 </style>
