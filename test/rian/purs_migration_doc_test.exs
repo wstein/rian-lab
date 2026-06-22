@@ -54,6 +54,10 @@ defmodule Rian.PursMigrationDocTest do
     ref_count = reference_chain() |> count(~r/check_\w+\(/)
     ps_count = read(@check) |> count(~r/\\_ -> check[A-Z]\w+/)
 
+    # self-validation: a broken extractor must fail loudly, not pass vacuously.
+    assert ref_count > 0 and ps_count > 0,
+           "check_func extractor is stale (ref=#{ref_count}, ps=#{ps_count}) — fix the regex before trusting this guard."
+
     assert ps_count == ref_count,
            "purs check_program wires #{ps_count} check_func checks but the reference runs #{ref_count}. " <>
              "Wire the missing check — or, if intentionally behind, the doc must say " <>
@@ -83,6 +87,15 @@ defmodule Rian.PursMigrationDocTest do
       |> List.flatten()
       |> Enum.map(&snake/1)
       |> Enum.uniq()
+
+    # self-validation: if either extractor breaks, its list goes empty and the
+    # loops below guard nothing — pin to sentinels that are known to exist so a
+    # stale regex fails here instead of silently disabling the guard.
+    assert "EStruct" in core_ctors and "ENum" in core_ctors,
+           "Core-constructor extractor is stale (#{length(core_ctors)} found, missing known nodes) — fix the regex."
+
+    assert "check_binds" in wired_checks,
+           "wired-check extractor is stale (#{inspect(wired_checks)}) — fix the regex."
 
     for path <- @status_docs do
       text = read(path)
