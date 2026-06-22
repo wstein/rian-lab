@@ -1,20 +1,31 @@
 # Rian by example
 
 A guided tour of **Rian's surface syntax and character** — a typed,
-capability-disciplined language that lowers the *same source* to two targets:
-idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
+capability-disciplined language that lowers the *same source* to four targets:
+idiomatic **Elixir/BEAM**, ownership-checked **Rust**, **ECMAScript**, and
+**Kotlin/JVM**. Portability is *inferred* per function (`Rian.Reach`), so a file
+reaches the subset its features allow — not every example reaches all four, and
+that is the point (see [15_targets.rian](15_targets.rian)).
 
 > **Status — read this first.** These files use the **ADR-0033 surface** (`def`,
-> `case`, juxtaposed types, Crystal primitives like `Int64`). A **Stage 0.1
-> declaration parser** ([`Rian.Decl`](../../lib/rian/decl.ex),
-> [ADR-0031](../../docs/adr/0031-bootstrap-strategy.md)) now compiles the
-> `type` + `def` subset of this surface end-to-end — parse → Elixir + Rust → run
-> (`mix run examples/decl_run.exs`). These tour files reach **beyond** that MVP
-> (`mod`, `struct`, `alias`, `case` bodies, macros, `extern`), so they stay
-> **illustrative** until the parser broadens; the verified passes are also
-> exercised through the hand-built-IR drivers in the
-> [project README](../../README.md). See the
-> [design corpus](../../docs/README.md) for the spec/ADR map.
+> `case`, juxtaposed types, `Int53` as the portable default integer). The
+> [`Rian.Decl`](../../lib/rian/decl.ex) front-end now parses most of this surface,
+> and the four emitters (BEAM, Rust, ECMAScript, Kotlin/JVM) lower it.
+>
+> **Verified vs. illustrative.** Every numbered file is one of two kinds, gated by
+> CI ([`Rian.TourReachTest`](../../test/rian/tour_reach_test.exs), also run by
+> `mix rian.tour --check`):
+>
+> - **gated** — the file parses and its per-function target reachability is pinned
+>   to a declared `#@reach` header (below the title banner). CI fails if the real
+>   `Rian.Reach` analysis drifts from the declaration, so the portability claims in
+>   these files cannot rot. Inline `expr ==> value` comments are executed too.
+> - **illustrative** — the file uses surface the `Rian.Decl` front-end does not yet
+>   accept (`@partial`, `extern`, `@wire`, `else if` chains). These carry a loud
+>   `# ILLUSTRATIVE` banner and are *not* compiled; CI asserts they stay marked so
+>   a reader is never misled about what runs.
+>
+> See the [design corpus](../../docs/README.md) for the spec/ADR map.
 
 ## The files
 
@@ -31,13 +42,13 @@ idiomatic **Elixir/BEAM** and idiomatic, ownership-checked **Rust**.
 | [09_capstone_calc.rian](09_capstone_calc.rian) | A complete tiny evaluator tying it all together, including the portable-core vs BEAM-only boundary |
 | [10_function_forms.rian](10_function_forms.rian) | Every function body form — `:=` one-liner, multiline **block body** (`… end`), multi-clause groups mixing both, and lambdas |
 | [11_wire_formats.rian](11_wire_formats.rian) | Binary wire formats — `@wire` structs deriving byte-exact `decode`/`encode` (length-prefixed, nested, streaming), erroring as values |
-| [12_error_handling.rian](12_error_handling.rian) | Errors as values — sealed error sets, the `T \| E` Result sugar, `{:ok,_}`/`{:error,_}`, and `with`/`else` propagation (compiles end-to-end) |
+| [12_error_handling.rian](12_error_handling.rian) | Errors as values — sealed error sets, the explicit `Result(T, E)` return type (the `T \| E` sugar was **removed** — ADR-0083 makes `\|` a value union everywhere), `{:ok,_}`/`{:error,_}`, and `with`/`else` propagation. Reaches `ex`/`rs`/`js` (Result pins it off `:jvm`) |
 | [13_protocols.rian](13_protocols.rian) | Protocols & impls (ADR-0042) — `protocol`/`impl … for …`, first-argument dispatch, the orphan-rule coherence checks; primitive-type impls compile to a guarded BEAM dispatcher and run |
 | [14_test_framework.rian](14_test_framework.rian) | Tests in Rian (ADR-0057) — `@test def name() Bool`, run by `Rian.Test` and bridged to ExUnit (one case per `@test`); the dogfooding wedge |
 | [15_targets.rian](15_targets.rian) | Portability as a declaration (ADR-0058) — `@targets(ex, rs, js)` on a `mod`; the compiler gates every `pub` fn's reachability against the contract |
 | [16_doctests.rian](16_doctests.rian) | Doctests (ADR-0060 tier B) — `expr #=> expected` in a `@doc` heredoc, executed by `Rian.Doctest`; a drifted example fails the build |
 | [17_stdlib_eq_ord.rian](17_stdlib_eq_ord.rian) | A portable stdlib slice over `Eq`/`Ord` (ADR-0042) — `contains`/`sort`/`maximum` as **bounded generics** (`forall T: Eq`/`Ord`); the protocol's first real customer, with `@test`s + doctests |
-| [18_dict_eq.rian](18_dict_eq.rian) | A `Dict` over `Eq` — `get`/`has`/`put` bounded `forall K: Eq` over a generic `Pair(k K, v V)`; "Dict keys need Eq" made real (Int64 + String keys), runs on BEAM/JS, with `@test`s + doctests |
+| [18_dict_eq.rian](18_dict_eq.rian) | A `Dict` over `Eq` — `get`/`has`/`put` bounded `forall K: Eq` over a generic `Pair(k K, v V)`; "Dict keys need Eq" made real (Int53 + String keys), runs on BEAM/JS, with `@test`s + doctests |
 | [19_prelude_consumer.rian](19_prelude_consumer.rian) | **Consuming the `List` prelude with closures** — `map`/`filter`/`reduce`/`member` fed `Fn` callbacks, all reaching `ex`/`rs`/`js` (the consumer side of ADR-0061 closure-as-value: `&impl Fn` params, lambdas lower per target); runs on BEAM with the prelude linked |
 | [conformance_core.rian](conformance_core.rian) | The **Tier-1 admission gate** corpus (ADR-0049 §5a) — `@test`s over the portable core (`Int53` arithmetic, `div`/`rem`, comparison/boolean, multi-clause recursion + guards) that `Rian.ConformanceTest` runs on **every** Tier-1 target (`:ex`/`:rs`/`:js`); a regression on any fails the build |
 
@@ -309,7 +320,7 @@ A `def` body is one of two shapes (no semantic difference — both yield a value
 via implicit return), plus the anonymous lambda form:
 
 ```elixir
-def double(n Int64) Int64 := n * 2          # 1. single-expression body (the one-liner)
+def double(n Int53) Int53 := n * 2          # 1. single-expression body (the one-liner)
 
 def norm(v val Vec(Float64)) Float64            # 2. block body — multiline, last expr is the value
   total := v |> sum
@@ -327,10 +338,13 @@ a multi-clause group may mix them clause by clause (see
 
 ```elixir
 # comments start with `#`
+# `Int53` is the portable default integer (a native JS `number`, an `i64`
+# elsewhere); a bare integer literal infers it. Use a fixed-width `Int8`…`Int64`
+# / `UInt*` only when the WIDTH is the point — `Int64` is off `:js` (ADR-0064).
 
-def add(x Int64, y Int64) Int64 := x + y          # single clause: typed head is the boundary
+def add(x Int53, y Int53) Int53 := x + y          # single clause: typed head is the boundary
 
-def classify(Int64) String                       # bodiless SIGNATURE line ...
+def classify(Int53) String                       # bodiless SIGNATURE line ...
 def classify(0)            := "zero"         # ... followed by contiguous
 def classify(n) when n > 0 := "positive"    #     pattern-head clauses
 def classify(_)            := "negative"
@@ -346,7 +360,7 @@ case x do P -> e   ...   end              # `case` is an expression; arms use `-
 
 type T := A | B(payload Float64)               # sealed sum (ADT)
 struct P(x Float64, y Float64)                     # product / record
-alias Id := Int64                            # transparent synonym
+alias Id := Int53                            # transparent synonym
 
 def f(s val Shape) ...   # val (default, borrow) | iso (owned/use-once) | ref (&mut) | tag (identity)
 

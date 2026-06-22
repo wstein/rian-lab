@@ -1,3 +1,4 @@
+#@reach ex, rs, js, jvm
 # ===========================================================================
 # 02 — Type declarations & the `case` expression
 # ===========================================================================
@@ -27,11 +28,19 @@ struct Point(x Float64, y Float64)
 # Transparent synonym. `Id` and `Int53` are interchangeable; no runtime cost.
 alias Id := Int53
 
-# --- `range` — a finite ordinal SUBRANGE type (ADR-0036, proposed) -------
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │ ⚠ PROPOSED DIRECTION — ADR-0036 is "Accepted (direction)", NOT shipped.   │
+# │ The `range` declaration below PARSES today (it builds a `Rian.IR.Range`),  │
+# │ but the feature is incomplete: bounds-checked construction (`Name.of`),    │
+# │ `Char` ranges, and the `RangeError` set are not finished, and the surface  │
+# │ may still change. Treat this block as a roadmap teaser, not stable syntax. │
+# └─────────────────────────────────────────────────────────────────────────┘
+# --- `range` — a finite ordinal SUBRANGE type (ADR-0036) -----------------
 # A closed, INCLUSIVE ordinal interval over `Int53` or `Char`. Unlike `alias`
 # (transparent, interchangeable with its base), a `range` is a DISTINCT,
-# bounds-checked type whose value set is FINITE. Out-of-range construction
-# yields the error set `Digit | RangeError` (ADR-0035) — never a hidden panic.
+# bounds-checked type whose value set is FINITE. Out-of-range construction is
+# intended to yield the error set `Digit | RangeError` (ADR-0035) — never a
+# hidden panic.
 #   Digit  -> Elixir `@type digit :: 0..9`    | Rust `i64` + checked ctor
 #   Letter -> Elixir `@type letter :: ?A..?Z` | Rust `char` + checked ctor
 range Digit  := 0..9         # over Int53

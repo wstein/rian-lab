@@ -1,3 +1,5 @@
+#@reach ex, rs, js, jvm
+#@reach-pin fold_sum=ex map_double=ex origin_record=ex,js
 # ===========================================================================
 # 08 — Lambdas, blocks & collection literals
 # ===========================================================================
