@@ -22,7 +22,7 @@ jobs:
       # JDK 21 compiles the emitted output). Local dev uses its own kotlinc.
       KOTLIN_VERSION: "2.1.0"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Erlang/Elixir
         uses: erlef/setup-beam@v1
@@ -31,7 +31,7 @@ jobs:
           elixir-version: "1.20"
 
       - name: Cache deps and build
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
@@ -91,13 +91,13 @@ jobs:
       # contract. The JVM emitter is ADR-0049 Tier 2; this becomes blocking only
       # if/when JVM is promoted to Tier 1 (which would also move it into test.all).
       - name: Set up JDK (kotlinc runtime)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
 
       - name: Cache the Kotlin compiler
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: ~/kotlin-compiler
           key: kotlinc-${{ env.KOTLIN_VERSION }}
@@ -130,7 +130,7 @@ jobs:
     runs-on: ubuntu-latest
     container: elixir:latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install hex + rebar
         run: mix local.hex --force && mix local.rebar --force
@@ -138,7 +138,7 @@ jobs:
       # Cache deps, build, and the PLTs (`priv/plts/{core,project}.plt`, mix.exs
       # `dialyzer/0`) — the first PLT build is minutes-long; later runs are fast.
       - name: Cache deps, build, and PLTs
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
