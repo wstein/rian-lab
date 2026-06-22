@@ -1,5 +1,5 @@
-#@illustrative — the `@wire` annotation isn't accepted by the `Rian.Decl`
-# front-end yet, so this file is NOT compiled. See README "Verified vs. illustrative".
+#@illustrative — uses the `@wire` annotation, which the `Rian.Decl` front-end does not accept yet.
+# This file is NOT compiled. See README "Verified vs. illustrative".
 # ILLUSTRATIVE
 # ===========================================================================
 # 11 — Binary wire formats: `@wire` structs with derived decode/encode

@@ -163,6 +163,1012 @@
       "title": "String interpolation"
     }
   ],
+  "examples": [
+    {
+      "file": "01_basics.rian",
+      "kind": "illustrative",
+      "reason": "uses an `else if` chain (in `grade`) that the `Rian.Decl` front-end does not accept yet.",
+      "title": "Basics: expressions, bindings, operators, if, blocks"
+    },
+    {
+      "doctests": [],
+      "file": "02_types_match.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "area": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "flip": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "origin": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "type_of": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "unit_circle": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Type declarations & the `case` expression"
+    },
+    {
+      "file": "03_clauses_guards.rian",
+      "kind": "illustrative",
+      "reason": "uses the `@partial` annotation, which the `Rian.Decl` front-end does not accept yet.",
+      "title": "Multi-clause functions, guards, exhaustiveness, partiality"
+    },
+    {
+      "doctests": [],
+      "file": "04_capabilities.rian",
+      "kind": "gated",
+      "pins": {
+        "scale": [
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "area": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "consume": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "same": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "scale": [
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Reference capabilities: the heart of Rian"
+    },
+    {
+      "doctests": [],
+      "file": "05_modules.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "area": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "perimeter": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "square": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Modules, visibility & imports"
+    },
+    {
+      "doctests": [],
+      "file": "06_macros_comptime.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "always": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "demo_hygiene": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "demo_square": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "demo_unless": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "scaled": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "table_size": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Macros & comptime: metaprogramming without quote/unquote"
+    },
+    {
+      "file": "07_ffi.rian",
+      "kind": "illustrative",
+      "reason": "uses the `extern` declaration, which the `Rian.Decl` front-end does not accept yet.",
+      "title": "FFI: interop is free on the BEAM"
+    },
+    {
+      "doctests": [],
+      "file": "08_lambdas_collections.rian",
+      "kind": "gated",
+      "pins": {
+        "fold_sum": [
+          "ex"
+        ],
+        "map_double": [
+          "ex"
+        ],
+        "origin_record": [
+          "ex",
+          "js"
+        ]
+      },
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "fold_sum": [
+          "ex"
+        ],
+        "map_double": [
+          "ex"
+        ],
+        "origin_record": [
+          "ex",
+          "js"
+        ],
+        "prepend": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "sign": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "small_primes": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "step": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Lambdas, blocks & collection literals"
+    },
+    {
+      "doctests": [
+        {
+          "expected": "0 - 20",
+          "expr": "eval(Mul(Add(Lit(2), Lit(3)), Neg(Lit(4))))"
+        },
+        {
+          "expected": "3",
+          "expr": "depth(Mul(Add(Lit(2), Lit(3)), Neg(Lit(4))))"
+        }
+      ],
+      "file": "09_capstone_calc.rian",
+      "kind": "gated",
+      "pins": {
+        "show": [
+          "ex"
+        ]
+      },
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "depth": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "eval": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "max2": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "show": [
+          "ex"
+        ]
+      },
+      "title": "Capstone: a tiny arithmetic evaluator"
+    },
+    {
+      "doctests": [],
+      "file": "10_function_forms.rian",
+      "kind": "gated",
+      "pins": {
+        "clamp_each": [
+          "ex"
+        ],
+        "depth": [
+          "ex",
+          "js",
+          "jvm"
+        ],
+        "map_double": [
+          "ex"
+        ],
+        "show2": [
+          "ex"
+        ],
+        "stats": [
+          "ex"
+        ]
+      },
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "adder": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "apply_twice": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "clamp_each": [
+          "ex"
+        ],
+        "depth": [
+          "ex",
+          "js",
+          "jvm"
+        ],
+        "double": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "doubled": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "doubled_cap": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "map": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "map_double": [
+          "ex"
+        ],
+        "max2": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "norm": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "show2": [
+          "ex"
+        ],
+        "stats": [
+          "ex"
+        ]
+      },
+      "title": "Function forms: every way to write a function body"
+    },
+    {
+      "file": "11_wire_formats.rian",
+      "kind": "illustrative",
+      "reason": "uses the `@wire` annotation, which the `Rian.Decl` front-end does not accept yet.",
+      "title": "Binary wire formats: `@wire` structs with derived decode/encode"
+    },
+    {
+      "doctests": [],
+      "file": "12_error_handling.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "rs"
+      ],
+      "reachByFn": {
+        "checked_div": [
+          "ex",
+          "js",
+          "rs"
+        ],
+        "ratio": [
+          "ex",
+          "js",
+          "rs"
+        ]
+      },
+      "title": "Error handling: Result(T, E), `with` propagation"
+    },
+    {
+      "doctests": [
+        {
+          "expected": "\"true\"",
+          "expr": "show(true)"
+        },
+        {
+          "expected": "\"an integer\"",
+          "expr": "show(42)"
+        },
+        {
+          "expected": "true",
+          "expr": "eq(3, 3)"
+        },
+        {
+          "expected": "\"num\"",
+          "expr": "show(Num(5))"
+        },
+        {
+          "expected": "\"zero\"",
+          "expr": "show(Zero)"
+        },
+        {
+          "expected": "true",
+          "expr": "all_one()"
+        }
+      ],
+      "file": "13_protocols.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "all_one": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "equal3": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_eq_bool_eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_eq_int53_eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_show_bool_show": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_show_expr_show": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_show_int53_show": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_show_string_show": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "show": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Protocols & impls: bounded, opted-in, totality-safe (ADR-0042 part 2)"
+    },
+    {
+      "doctests": [],
+      "file": "14_test_framework.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "double": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "double_is_additive": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "double_positive": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "double_zero": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "fib": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "fib_base_cases": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "fib_recurses": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Tests in Rian: `@test def` (ADR-0057)"
+    },
+    {
+      "doctests": [],
+      "file": "15_targets.rian",
+      "kind": "gated",
+      "pins": {
+        "now": [
+          "ex"
+        ]
+      },
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "area_of_rect": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "now": [
+          "ex"
+        ],
+        "square": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Portability as a declaration: `@targets(…)` (ADR-0058)"
+    },
+    {
+      "doctests": [
+        {
+          "expected": "0",
+          "expr": "double(0)"
+        },
+        {
+          "expected": "42",
+          "expr": "double(21)"
+        },
+        {
+          "expected": "0 - 10",
+          "expr": "double(-5)"
+        },
+        {
+          "expected": "0",
+          "expr": "fib(0)"
+        },
+        {
+          "expected": "1",
+          "expr": "fib(1)"
+        },
+        {
+          "expected": "55",
+          "expr": "fib(10)"
+        }
+      ],
+      "file": "16_doctests.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "double": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "fib": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Doctests: documentation that cannot drift (ADR-0060 tier B)"
+    },
+    {
+      "doctests": [
+        {
+          "expected": "true",
+          "expr": "contains([1, 2, 3], 2)"
+        },
+        {
+          "expected": "false",
+          "expr": "contains([1, 2, 3], 9)"
+        },
+        {
+          "expected": "false",
+          "expr": "contains([], 1)"
+        },
+        {
+          "expected": "[1, 2, 3]",
+          "expr": "sort([3, 1, 2])"
+        },
+        {
+          "expected": "[1, 2, 3, 4, 5]",
+          "expr": "sort([5, 4, 3, 2, 1])"
+        },
+        {
+          "expected": "[]",
+          "expr": "sort([])"
+        }
+      ],
+      "file": "17_stdlib_eq_ord.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "contains": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "contains_absent": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "contains_finds": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "eq3": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_eq_bool_eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_eq_int53_eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_eq_string_eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_ord_int53_lt": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_ord_string_lt": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "insert": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "lt": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "maximum": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "maximum_folds": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "sort": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "sort_idempotent": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "sort_orders": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "A portable stdlib slice over `Eq` / `Ord` (ADR-0042 · ADR-0047)"
+    },
+    {
+      "doctests": [
+        {
+          "expected": "20",
+          "expr": "demo_get_hit()"
+        },
+        {
+          "expected": "0 - 1",
+          "expr": "demo_get_miss()"
+        },
+        {
+          "expected": "true",
+          "expr": "demo_has()"
+        },
+        {
+          "expected": "false",
+          "expr": "demo_absent()"
+        }
+      ],
+      "file": "18_dict_eq.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "demo_absent": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "demo_get_hit": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "demo_get_miss": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "demo_has": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "demo_string_key": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "get": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "get_finds_value": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "get_returns_default": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "has": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "has_absent": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "has_present": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_eq_int53_eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "impl_eq_string_eq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "names": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "put": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "put_shadows_earlier_key": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "sample": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "string_keys_work": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "A Dict over `Eq`: keys compared by the protocol (ADR-0042 · ADR-0047)"
+    },
+    {
+      "doctests": [],
+      "file": "19_prelude_consumer.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "doubled": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "evens": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "has": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "sum_of_doubled_evens": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "total": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Consuming the portable `List` prelude (higher-order, closures-as-values)"
+    }
+  ],
   "reachExamples": [
     {
       "blurb": "Pure, portable — reaches every target.",

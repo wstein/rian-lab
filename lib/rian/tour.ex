@@ -11,6 +11,13 @@ defmodule Rian.Tour do
   this compiler produces, never a hand-transcribed approximation: the page cannot
   drift from the language.
 
+  Alongside the curated `@cells` (hand-tuned minimal teaching snippets) the
+  dataset carries an `"examples"` section built by `Rian.Tour.Examples.dataset/0`
+  directly from the `examples/rian/NN_*.rian` corpus — each file's title, kind,
+  declared/inferred reach, and extracted doctests (ADR-0091). So the by-example
+  files are *inputs* to the published tour, not a parallel copy: a drift between a
+  file and the site data fails the same freshness gate.
+
   The committed `site/src/data/tour.json` is the JSON of `generate/0`; the
   `mix rian.tour` task regenerates it and `Rian.TourTest` fails the build if the
   committed file and `generate/0` ever disagree.
@@ -163,6 +170,7 @@ defmodule Rian.Tour do
     %{
       "targets" => @targets,
       "cells" => Enum.map(@cells, &build_cell/1),
+      "examples" => Rian.Tour.Examples.dataset(),
       "reachExamples" => Enum.map(@reach_examples, &build_reach_example/1)
     }
   end
@@ -229,11 +237,15 @@ defmodule Rian.Tour do
   end
 
   # ── deterministic JSON encoder (sorted object keys, 2-space indent) ──
-  # `generate/0` produces a closed JSON shape — non-empty objects, non-empty
-  # arrays, and strings — so the encoder handles exactly those. Should a future
-  # cell introduce another value type (a number/bool/empty collection), the
-  # round-trip test (`Rian.TourTest`) fails loudly on the missing clause rather
-  # than letting an untested branch ship; add the clause with its case then.
+  # `generate/0` produces a closed JSON shape — objects, arrays, and strings (the
+  # `examples` section can carry empty `pins`/`doctests`). Should a future cell
+  # introduce another value type (a number/bool), the round-trip test
+  # (`Rian.TourTest`) fails loudly on the missing clause rather than letting an
+  # untested branch ship; add the clause with its case then.
+
+  defp encode(map, _indent) when map == %{}, do: "{}"
+
+  defp encode([], _indent), do: "[]"
 
   defp encode(map, indent) when is_map(map) do
     pad = String.duplicate("  ", indent + 1)

@@ -16,16 +16,21 @@ that is the point (see [15_targets.rian](15_targets.rian)).
 > CI ([`Rian.TourReachTest`](../../test/rian/tour_reach_test.exs), also run by
 > `mix rian.tour --check`):
 >
-> - **gated** — the file parses and its per-function target reachability is pinned
->   to a declared `#@reach` header (below the title banner). CI fails if the real
->   `Rian.Reach` analysis drifts from the declaration, so the portability claims in
->   these files cannot rot. Inline `expr ==> value` comments are executed too.
+> - **gated** — the file parses and carries a `#@reach <targets>` header (below the
+>   title banner), with a `#@reach-pin name=…` line for any function that reaches
+>   less than the file's union. CI fails if the real `Rian.Reach` analysis drifts
+>   from the declaration, so the portability claims cannot rot. Worked examples are
+>   `expr #=> value` doctests, executed on the BEAM ([`Rian.TourDoctestTest`](../../test/rian/tour_doctest_test.exs)).
 > - **illustrative** — the file uses surface the `Rian.Decl` front-end does not yet
->   accept (`@partial`, `extern`, `@wire`, `else if` chains). These carry a loud
->   `# ILLUSTRATIVE` banner and are *not* compiled; CI asserts they stay marked so
->   a reader is never misled about what runs.
+>   accept (`@partial`, `extern`, `@wire`, `else if` chains). These carry an
+>   `#@illustrative` banner with a reason and are *not* compiled; CI asserts they
+>   stay unparseable, so the marker cannot outlive the gap.
 >
-> See the [design corpus](../../docs/README.md) for the spec/ADR map.
+> These files are also the **source of the generated tour dataset**
+> (`site/src/data/tour.json`, ADR-0091): `mix rian.tour` folds each file's title,
+> reach matrix, and doctests into the data the site renders, so the page shows
+> exactly what CI gates. See the [design corpus](../../docs/README.md) for the
+> spec/ADR map.
 
 ## The files
 

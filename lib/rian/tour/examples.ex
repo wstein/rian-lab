@@ -78,6 +78,18 @@ defmodule Rian.Tour.Examples do
   end
 
   @doc """
+  The whole corpus as JSON-shaped data (string keys) for `tour.json`: each file's
+  title, kind, and — for gated files — its declared `reach`, `pins`, the honest
+  per-function `reachByFn` matrix, and its extracted `doctests`. This is what
+  makes the `examples/rian` files inputs to the generated, site-consumed dataset
+  (ADR-0091): a drift between a file and the published data fails the freshness
+  gate (`Rian.TourTest` / `mix rian.tour --check`).
+  """
+  @rian_sig "pub def dataset() Any"
+  @spec dataset() :: [map()]
+  def dataset, do: Enum.map(files(), &describe/1)
+
+  @doc """
   Execute the `expr #=> expected` doctests in every gated file and raise if any
   fail. Files with no doctests (or marked `#@illustrative`) are skipped without
   compiling, so a BEAM-illegal-but-doctest-free file is never touched. Returns
@@ -116,6 +128,51 @@ defmodule Rian.Tour.Examples do
       {:gated, reach, pins} -> check_gated(src, reach, pins)
     end
   end
+
+  # ── dataset (tour.json input) ─────────────────────────────────────────────
+
+  defp describe(file) do
+    src = File.read!(file)
+    base = %{"file" => Path.basename(file), "title" => title(src)}
+
+    case header(src) do
+      {:gated, reach, pins} ->
+        Map.merge(base, %{
+          "kind" => "gated",
+          "reach" => sorted(reach),
+          "pins" => Map.new(pins, fn {name, set} -> {name, sorted(set)} end),
+          "reachByFn" => Map.new(reach_by_name(src), fn {name, set} -> {name, sorted(set)} end),
+          "doctests" =>
+            Enum.map(Doctest.extract(src), &%{"expr" => elem(&1, 0), "expected" => elem(&1, 1)})
+        })
+
+      {:illustrative, reason} ->
+        Map.merge(base, %{"kind" => "illustrative", "reason" => reason})
+
+      :none ->
+        raise Error, "#{Path.basename(file)} has no `#@reach` or `#@illustrative` header"
+    end
+  end
+
+  defp reach_by_name(src) do
+    src
+    |> Decl.parse()
+    |> Reach.analyze()
+    |> Map.new(fn {key, %{reach: reach}} -> {Reach.bare_name(key), reach} end)
+  end
+
+  defp title(src) do
+    src
+    |> String.split("\n")
+    |> Enum.find_value("", fn line ->
+      case Regex.run(~r/^#\s*\d+\s*(?:—|-)\s*(.+?)\s*$/u, line) do
+        [_, t] -> t
+        _ -> nil
+      end
+    end)
+  end
+
+  defp sorted(set), do: set |> MapSet.to_list() |> Enum.map(&to_string/1) |> Enum.sort()
 
   # ── per-file checks ───────────────────────────────────────────────────────
 

@@ -1,5 +1,5 @@
-#@illustrative — the `@partial` annotation isn't accepted by the `Rian.Decl`
-# front-end yet, so this file is NOT compiled. See README "Verified vs. illustrative".
+#@illustrative — uses the `@partial` annotation, which the `Rian.Decl` front-end does not accept yet.
+# This file is NOT compiled. See README "Verified vs. illustrative".
 # ILLUSTRATIVE
 # ===========================================================================
 # 03 — Multi-clause functions, guards, exhaustiveness, partiality

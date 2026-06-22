@@ -1,5 +1,5 @@
-#@illustrative — the `extern` declaration isn't accepted by the `Rian.Decl`
-# front-end yet, so this file is NOT compiled. See README "Verified vs. illustrative".
+#@illustrative — uses the `extern` declaration, which the `Rian.Decl` front-end does not accept yet.
+# This file is NOT compiled. See README "Verified vs. illustrative".
 # ILLUSTRATIVE
 # ===========================================================================
 # 07 — FFI: interop is free on the BEAM

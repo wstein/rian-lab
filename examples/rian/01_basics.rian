@@ -1,5 +1,5 @@
-#@illustrative — the `else if` chain in `grade` isn't accepted by the `Rian.Decl`
-# front-end yet, so this file is NOT compiled. See README "Verified vs. illustrative".
+#@illustrative — uses an `else if` chain (in `grade`) that the `Rian.Decl` front-end does not accept yet.
+# This file is NOT compiled. See README "Verified vs. illustrative".
 # ILLUSTRATIVE
 # ===========================================================================
 # 01 — Basics: expressions, bindings, operators, if, blocks
