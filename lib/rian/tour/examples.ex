@@ -190,6 +190,7 @@ defmodule Rian.Tour.Examples do
     tag_issue ++ size_issue ++ pane_emit_issues(file)
   end
 
+  @rian_host "tour gate: a `Decl.parse`/emitter raise becomes a 'does not parse/emit' issue list"
   defp pane_emit_issues(file) do
     body = file |> Path.basename(".rian") |> pane_source()
     prog = Decl.parse(body)
@@ -312,6 +313,7 @@ defmodule Rian.Tour.Examples do
     end
   end
 
+  @rian_host "tour gate: an emitter's unsupported-construct raise becomes `{:raise, msg}`"
   defp safe_emit(target, src, prog) do
     case target do
       :ex -> Rian.Beam.compile_program(src)
@@ -403,12 +405,14 @@ defmodule Rian.Tour.Examples do
 
   # ── helpers ───────────────────────────────────────────────────────────────
 
+  @rian_host "tour gate: `Decl.parse/1`'s malformed-source raise becomes `:error`"
   defp safe_parse(src) do
     {:ok, Decl.parse(src)}
   rescue
     _ -> :error
   end
 
+  @rian_host "tour gate: `Doctest.run/1`'s compile raise becomes a failure record"
   defp run_doctests(file, src) do
     results = Doctest.run(src)
     fails = for {expr, {:fail, got, want}} <- results, do: {Path.basename(file), expr, got, want}

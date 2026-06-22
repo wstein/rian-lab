@@ -361,7 +361,14 @@ defmodule Rian.JS do
       s.fields
       |> Enum.with_index()
       |> Enum.map_join(" ", fn {f, i} ->
-        "#{f.label || "f#{i}"}: #{ts_type(f.type, known, tset)};"
+        # a positional (label-less) field is named `f<i>` (no truthy `||`, ADR-0035).
+        label =
+          case f.label do
+            nil -> "f#{i}"
+            l -> l
+          end
+
+        "#{label}: #{ts_type(f.type, known, tset)};"
       end)
 
     "export interface #{s.name}#{generics(tvars)} { __struct__: #{inspect(s.name)}; #{fields} }"
