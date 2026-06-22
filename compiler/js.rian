@@ -78,9 +78,79 @@ mod Js do
   pub def compile_prog([f | rest]) := function_js(f) <> "\n\n" <> compile_prog(rest)
 
   def function_js(Func) String
-  def function_js(Func(name, pb, arity, clauses)) :=
-    export(pb) <> "function " <> name <> "(" <> params(0, arity) <> ") {\n" <>
-      clauses_js(clauses) <> "  throw new Error(" <> js_str(name <> ": no clause matched") <> ");\n}"
+  def function_js(Func(name, pb, arity, clauses))
+    if is_simple(clauses) do
+      export(pb) <> "function " <> name <> "(" <> join_comma(simple_vars(clauses)) <>
+        ") { " <> simple_return(clauses) <> " }"
+    else
+      export(pb) <> "function " <> name <> "(" <> params(0, arity) <> ") {\n" <>
+        clauses_js(clauses) <> throw_tail(name, clauses)
+    end
+  end
+
+  # A single guardless clause whose params are all plain variables: the trivial
+  # total function. Name the JS params directly — no `a0` rebind, no per-clause
+  # block, no fallthrough throw (parity with `Rian.JS`).
+  def is_simple(Vec(Clause)) Bool
+  def is_simple([c]) := clause_simple(c)
+  def is_simple(_) := false
+
+  def clause_simple(Clause) Bool
+  def clause_simple(Clause(pats, GNone, _)) := all_pvar(pats)
+  def clause_simple(Clause(_, GSome(_), _)) := false
+
+  def all_pvar(Vec(Pat)) Bool
+  def all_pvar([]) := true
+  def all_pvar([PVar(_) | rest]) := all_pvar(rest)
+  def all_pvar([_ | rest]) := false
+
+  def simple_vars(Vec(Clause)) Vec(String)
+  def simple_vars([c]) := clause_pvars(c)
+
+  def clause_pvars(Clause) Vec(String)
+  def clause_pvars(Clause(pats, _, _)) := pvar_names(pats)
+
+  def pvar_names(Vec(Pat)) Vec(String)
+  def pvar_names([]) := []
+  def pvar_names([PVar(n) | rest]) := [n | pvar_names(rest)]
+  def pvar_names([_ | rest]) := pvar_names(rest)
+
+  def simple_return(Vec(Clause)) String
+  def simple_return([c]) := clause_ret(c)
+
+  def clause_ret(Clause) String
+  def clause_ret(Clause(_, _, body)) := clause_return(body)
+
+  def join_comma(Vec(String)) String
+  def join_comma([]) := ""
+  def join_comma([s]) := s
+  def join_comma([s | rest]) := s <> ", " <> join_comma(rest)
+
+  # The fallthrough throw is the runtime "no clause matched" — needed only when the
+  # clause set is non-total. A clause with no tests and no guard always matches, so
+  # it makes the function total; drop the dead throw then.
+  def throw_tail(String, Vec(Clause)) String
+  def throw_tail(name, clauses)
+    if total(clauses) do
+      "}"
+    else
+      "  throw new Error(" <> js_str(name <> ": no clause matched") <> ");\n}"
+    end
+  end
+
+  def total(Vec(Clause)) Bool
+  def total([]) := false
+  def total([c | rest]) := unconditional(c) or total(rest)
+
+  def unconditional(Clause) Bool
+  def unconditional(Clause(pats, GNone, _)) := all_irrefutable(pats)
+  def unconditional(Clause(_, GSome(_), _)) := false
+
+  def all_irrefutable(Vec(Pat)) Bool
+  def all_irrefutable([]) := true
+  def all_irrefutable([PWild | rest]) := all_irrefutable(rest)
+  def all_irrefutable([PVar(_) | rest]) := all_irrefutable(rest)
+  def all_irrefutable([_ | rest]) := false
 
   def export(Bool) String
   def export(pb)

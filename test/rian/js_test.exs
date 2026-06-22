@@ -57,7 +57,8 @@ defmodule Rian.JSTest do
   describe "ECMAScript emitter on the typed core IR (ADR-0049 / ADR-0050)" do
     test "a one-liner: Int -> BigInt, local function" do
       js = JS.compile("def double(n Int) Int := n * 2")
-      assert js =~ "function double(a0)"
+      # a single all-var clause names its params directly — no `a0` rebind, no throw
+      assert js =~ "function double(n)"
       assert js =~ "n * 2n"
 
       case node_eval(js, "double(21n)") do
@@ -86,7 +87,7 @@ defmodule Rian.JSTest do
 
     test "an `Any` parameter is a dynamic untyped value and runs (ADR-0034)" do
       js = JS.compile("def pick(b Bool, x Any, y Any) Any := if b do x else y end")
-      assert js =~ "function pick(a0, a1, a2)"
+      assert js =~ "function pick(b, x, y)"
 
       case node_eval(js, "[pick(true, 7, 9), pick(false, 'a', 'b')].join(',')") do
         :no_node -> :ok
@@ -197,7 +198,8 @@ defmodule Rian.JSTest do
       assert js =~ "function max2(a0, a1)"
       assert js =~ "const a = a0;"
       assert js =~ "if ((a >= b))"
-      assert js =~ ~s|throw new Error("max2: no clause matched")|
+      # the `def max2(_, b)` catch-all makes the set total, so no fallthrough throw
+      refute js =~ "no clause matched"
 
       case node_eval(js, "[max2(3n,7n), max2(9n,2n)].join(',')") do
         :no_node -> :ok
@@ -529,8 +531,9 @@ defmodule Rian.JSTest do
       # cap must not leak into the emitted parameter. Locks the documented decision:
       # if in-place mutation is ever added, this assertion forces JS to handle it.
       js = JS.compile("def bump(x ref Int) Int := x + 1")
-      assert js =~ "function bump(a0)"
-      assert js =~ "const x = a0"
+      # the `ref` cap leaves no trace — the param is a plain `x`, value-lowered
+      assert js =~ "function bump(x)"
+      assert js =~ "return (x + 1n);"
 
       case node_eval(js, "bump(41n)") do
         :no_node -> :ok
@@ -811,7 +814,7 @@ defmodule Rian.JSTest do
 
     test "`Prim.char_code` is identity in JS (a Char is its codepoint number; Int53)" do
       js = JS.compile("def code(c Char) Int53 := Prim.char_code(c)")
-      assert js =~ "const c = a0;"
+      assert js =~ "function code(c)"
       assert js =~ "return c;"
       assert node_eval(js, "String(code(65))") in [:no_node, "65"]
     end
@@ -911,7 +914,7 @@ defmodule Rian.JSTest do
         """)
 
       refute js =~ "function n("
-      assert js =~ "function f(a0)"
+      assert js =~ "function f(x)"
     end
   end
 
@@ -1138,10 +1141,10 @@ defmodule Rian.JSTest do
 
   describe "`:=` shadowing renames (no JS re-declaration SyntaxError)" do
     test "rebinding a clause parameter renames it (the param is `const`-bound)" do
-      # regression: `const n = a0; let n = …` is a re-declaration SyntaxError, so a
-      # `:=` rebinding the parameter must take a fresh `n$1` (RHS reads the param).
+      # regression: the param is in scope as `n`, so a `:=` rebinding it would be a
+      # re-declaration SyntaxError — it must take a fresh `n$1` (RHS reads the param).
       js = JS.compile("def f(n Int53) Int53\n  n := n + 1\n  n * 2\nend")
-      assert js =~ "const n = a0;"
+      assert js =~ "function f(n)"
       assert js =~ "let n$1 = (n + 1);"
       assert js =~ "return (n$1 * 2);"
       assert node_eval(js, "f(5)") in [:no_node, "12"]

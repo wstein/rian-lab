@@ -11,7 +11,7 @@
       "id": "basics",
       "panes": {
         "ex": "def twice(n) do n * 2 end",
-        "js": "function twice(a0) {\n  { const n = a0; return (n * 2); }\n  throw new Error(\"twice: no clause matched\");\n}",
+        "js": "function twice(n) { return (n * 2); }",
         "jvm": "private fun twice(a0: Long): Long {\n  val n = a0; return (n * 2L)\n}",
         "rs": "fn twice(n: i64) -> i64 {\n    match n {\n        n => n * 2,\n    }\n}"
       },
@@ -63,7 +63,7 @@
       "id": "clauses",
       "panes": {
         "ex": "def classify(n) when n < 0 do \"negative\" end\ndef classify(0) do \"zero\" end\ndef classify(n) do \"positive\" end",
-        "js": "function classify(a0) {\n  { const n = a0; if ((n < 0)) { return \"negative\"; } }\n  { if (a0 === 0) { return \"zero\"; } }\n  { const n = a0; return \"positive\"; }\n  throw new Error(\"classify: no clause matched\");\n}",
+        "js": "function classify(a0) {\n  { const n = a0; if ((n < 0)) { return \"negative\"; } }\n  { if (a0 === 0) { return \"zero\"; } }\n  { const n = a0; return \"positive\"; }\n}",
         "jvm": "private fun classify(a0: Long): String {\n  run { val n = a0; if ((n < 0L)) { return \"negative\" } }\n  if (a0 == 0L) { return \"zero\" }\n  val n = a0; return \"positive\"\n}",
         "rs": "fn classify(n: i64) -> String {\n    match n {\n        n if n < 0 => (\"negative\").to_string(),\n        0 => (\"zero\").to_string(),\n        n => (\"positive\").to_string(),\n    }\n}"
       },
@@ -89,7 +89,7 @@
       "id": "capabilities",
       "panes": {
         "ex": "@type shape :: {:circle, float()} | {:square, float()}\ndef area({:circle, r}) do 3.14159 * r * r end\ndef area({:square, s}) do s * s end\ndef consume(s) do area(s) end",
-        "js": "function area(a0) {\n  { if (a0[0] === \"Circle\") { const r = a0[1]; return ((3.14159 * r) * r); } }\n  { if (a0[0] === \"Square\") { const s = a0[1]; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}\n\nfunction consume(a0) {\n  { const s = a0; return area(s); }\n  throw new Error(\"consume: no clause matched\");\n}",
+        "js": "function area(a0) {\n  { if (a0[0] === \"Circle\") { const r = a0[1]; return ((3.14159 * r) * r); } }\n  { if (a0[0] === \"Square\") { const s = a0[1]; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}\n\nfunction consume(s) { return area(s); }",
         "jvm": "sealed interface Shape\ndata class Circle(val f0: Double) : Shape\ndata class Square(val f0: Double) : Shape\n\nprivate fun area(a0: Shape): Double {\n  if (a0 is Circle) { val r = a0.f0; return ((3.14159 * r) * r) }\n  if (a0 is Square) { val s = a0.f0; return (s * s) }\n  throw RuntimeException(\"area: no clause matched\")\n}\n\nprivate fun consume(a0: Shape): Double {\n  val s = a0; return area(s)\n}",
         "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Shape {\n    Circle { radius: f64 },\n    Square { side: f64 },\n}\n\nfn area(s: &Shape) -> f64 {\n    match s {\n        Shape::Circle { radius: r } => 3.14159 * r * r,\n        Shape::Square { side: s } => s * s,\n    }\n}\n\nfn consume(s: Shape) -> f64 {\n    match s {\n        s => area(s),\n    }\n}"
       },
@@ -121,7 +121,7 @@
       "id": "case",
       "panes": {
         "ex": "@type color :: :red | :green | :blue\ndef code(c) do case c do :red -> 1; :green -> 2; :blue -> 3 end end",
-        "js": "function code(a0) {\n  { const c = a0; return (() => { const _s = c; if (_s[0] === \"Red\") { return 1; } if (_s[0] === \"Green\") { return 2; } if (_s[0] === \"Blue\") { return 3; } throw new Error(\"case: no clause matched\"); })(); }\n  throw new Error(\"code: no clause matched\");\n}",
+        "js": "function code(c) { return (() => { const _s = c; if (_s[0] === \"Red\") { return 1; } if (_s[0] === \"Green\") { return 2; } if (_s[0] === \"Blue\") { return 3; } throw new Error(\"case: no clause matched\"); })(); }",
         "jvm": "sealed interface Color\nobject Red : Color\nobject Green : Color\nobject Blue : Color\n\nprivate fun code(a0: Color): Long {\n  val c = a0; return run rcase@{\nif (c is Red) { return@rcase 1L }\nif (c is Green) { return@rcase 2L }\nif (c is Blue) { return@rcase 3L }\nthrow RuntimeException(\"case: no clause matched\")\n}\n}",
         "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Color {\n    Red,\n    Green,\n    Blue,\n}\n\nfn code(c: &Color) -> i64 {\n    match c {\n        c => match c { Color::Red => 1, Color::Green => 2, Color::Blue => 3, },\n    }\n}"
       },
@@ -147,7 +147,7 @@
       "id": "interpolation",
       "panes": {
         "ex": "def greet(name, age) do <<\"hi \"::binary, name::binary, \", you are \"::binary, Integer.to_string(age)::binary>> end",
-        "js": "function greet(a0, a1) {\n  { const name = a0; const age = a1; return (\"hi \" + name + \", you are \" + String(age)); }\n  throw new Error(\"greet: no clause matched\");\n}",
+        "js": "function greet(name, age) { return (\"hi \" + name + \", you are \" + String(age)); }",
         "jvm": "private fun greet(a0: String, a1: Long): String {\n  val name = a0; val age = a1; return (\"hi \" + name + \", you are \" + (age).toString())\n}",
         "rs": "fn greet(name: &str, age: i64) -> String {\n    match (name, age) {\n        (name, age) => (format!(\"{}{}{}{}\", \"hi \", name, \", you are \", age.to_string())).to_string(),\n    }\n}"
       },

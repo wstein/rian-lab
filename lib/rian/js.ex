@@ -694,14 +694,63 @@ defmodule Rian.JS do
 
   defp function_js(%{name: name, clauses: clauses, pub?: pub?} = f, i53, ic) do
     reject_wide_int!(name, f)
-    arity = length(hd(clauses).pats)
-    params = Enum.map_join(0..(arity - 1)//1, ", ", &"a#{&1}")
+    export = if pub?, do: "export ", else: ""
     # integer mode (`i53`) is computed once, program-wide, in `compile/1`.
     # Wide fixed-width (`Int64`+) is rejected above, never silently elevated.
-    body = Enum.map_join(clauses, "\n", &clause_js(&1, i53, f.params, ic))
-    export = if pub?, do: "export ", else: ""
+    case simple_clause(clauses) do
+      {:simple, vars} ->
+        # A single clause whose every parameter is a plain variable, no guard: the
+        # trivial total function. Name the JS params directly (no `a0` rebind), with
+        # neither a per-clause block nor a `no clause matched` throw (it is total) —
+        # so `def twice(n) := n * 2` lowers to `function twice(n) { return … }`,
+        # matching the Elixir/Rust panes. The body still runs through `clause_return`,
+        # so const-resolution, union-disc baking, typing, and the `:=` shadow-rename
+        # (seeded with the param names) are unchanged.
+        [c] = clauses
+        tenv = Check.clause_env(c.pats, f.params, ic)
+        ret = clause_return(c.body, vars, i53, tenv, ic)
+        "#{export}function #{name}(#{Enum.join(vars, ", ")}) { #{ret} }"
 
-    "#{export}function #{name}(#{params}) {\n#{body}\n  throw new Error(\"#{name}: no clause matched\");\n}"
+      :dispatch ->
+        arity = length(hd(clauses).pats)
+        params = Enum.map_join(0..(arity - 1)//1, ", ", &"a#{&1}")
+        body = Enum.map_join(clauses, "\n", &clause_js(&1, i53, f.params, ic))
+        # The fallthrough `throw` is the runtime "no clause matched" (ADR-0035 §4),
+        # needed only when the clause set is non-total. A clause with no structural
+        # tests and no guard always matches, so it makes the function total — drop
+        # the dead throw then (parity with the JVM emitter).
+        tail =
+          if total_clauses?(clauses, i53),
+            do: "",
+            else: "\n  throw new Error(\"#{name}: no clause matched\");"
+
+        "#{export}function #{name}(#{params}) {\n#{body}#{tail}\n}"
+    end
+  end
+
+  # A single, guardless clause whose every parameter is a plain variable pattern —
+  # the trivial total function. Returns `{:simple, var_names}` or `:dispatch`.
+  defp simple_clause([%{pats: pats, guard: nil}]) do
+    cores = Enum.map(pats, &Core.from_pat/1)
+
+    if Enum.all?(cores, &match?(%PVar{}, &1)),
+      do: {:simple, Enum.map(cores, & &1.name)},
+      else: :dispatch
+  end
+
+  defp simple_clause(_), do: :dispatch
+
+  # The clause set is total iff some clause has no structural tests and no guard —
+  # it always matches, so the dispatcher can never fall through.
+  defp total_clauses?(clauses, i53), do: Enum.any?(clauses, &unconditional?(&1, i53))
+
+  defp unconditional?(%{guard: g}, _i53) when g != nil, do: false
+
+  defp unconditional?(%{pats: pats}, i53) do
+    Enum.all?(pats, fn p ->
+      {tests, _binds} = pat_match(Core.from_pat(p), "a0", i53)
+      tests == []
+    end)
   end
 
   # wrap a `:js` host expression as the function body, binding each Rian param to its

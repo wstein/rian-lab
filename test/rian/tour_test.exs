@@ -33,6 +33,13 @@ defmodule Rian.TourTest do
     # the tour data, not emitter correctness (ADR-0091). The non-empty-pane check
     # above is the tour-level guarantee.
 
+    test "the basics JS pane is the clean single-clause form (no `a0`/throw)", %{data: data} do
+      basics = Enum.find(data["cells"], &(&1["id"] == "basics"))
+      # a single all-var clause names its param directly and drops the dead throw,
+      # matching the Elixir pane's cleanliness (the playground's first impression).
+      assert basics["panes"]["js"] == "function twice(n) { return (n * 2); }"
+    end
+
     test "the reachability strip is the honest, inferred matrix (ADR-0057)", %{data: data} do
       by_name = Map.new(data["reachExamples"], &{&1["name"], &1["reach"]})
 
