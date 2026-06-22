@@ -108,7 +108,7 @@ what the Core oracle confirms over the surface form.
 
 | Module       | LOC  | Notes / FFI                                          |
 | ------------ | ---- | --------------------------------------------------- |
-| `Rian.JS`    | 1053 | 🟡 **runtime emitter (`compile`) ported** — a direct JS source emitter on the typed Core (works on plain `CExpr`; node types are unused by JS, only signature types + a whole-program number/BigInt mode, ADR-0064). Functions/clauses/patterns, operators (`div`→`Math.trunc`, `in`, `<>`→`+`), `if`/`case`(→IIFE)/sum/list/tuple/struct/map/string/lambda/capture/`with`(local `desugarWith`) + `__prim_*`/stdlib calls. `js` stream (oracle = `Rian.JS.compile`). **Deferred** (need a Core/Func extension): `const` refs (no `EConstRef`), protocol dispatch (no `Func.dispatch`), `@external`, value-union patterns over a user type (no `PTyped` disc), and the `.d.ts` sidecar (`compile_types`). |
+| `Rian.JS`    | 1053 | 🟡 **both print modes ported** — `compile` (runtime module) + `compileTypes` (the `.d.ts` sidecar, ADR-0086 §5). A direct JS source emitter on the typed Core (works on plain `CExpr`; node types are unused by JS, only signature types + a whole-program number/BigInt mode, ADR-0064). `compile`: functions/clauses/patterns, operators (`div`→`Math.trunc`, `in`, `<>`→`+`), `if`/`case`(→IIFE)/sum/list/tuple/struct/map/string/lambda/capture/`with`(local `desugarWith`) + `__prim_*`/stdlib calls. `compileTypes`: the JS-valid type subset → faithful TS carriers (prims/`Vec`/`Fn`/`Option`/`Result`/`Map`/tuple/`forall T`; else `unknown`). `js`/`jsdts` streams (oracle = `Rian.JS.compile`/`compile_types`). **Deferred** (each needs a Core/Func extension): `const` refs (no `EConstRef`), protocol dispatch (no `Func.dispatch`), `@external`, value-union patterns over a user type (no `PTyped` disc). |
 | `Rian.JVM`   | 1249 | Kotlin source emitter (pure).                       |
 | `Rian.Lower` | 3275 | Elixir-text + Rust source emitter (pure).           |
 | `Rian.Beam`  | 1355 | **Erlang abstract forms → `.beam`**; the core FFI.  |
@@ -241,7 +241,7 @@ runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tie
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **886/886** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **896/896** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
 InferLocal/Assemble/Comptime/Opaque/**JS** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it).

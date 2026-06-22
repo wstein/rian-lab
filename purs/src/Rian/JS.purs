@@ -9,10 +9,10 @@
 -- | else BigInt-mode (`Int` → `42n`). `Int`+number widths cannot mix (`rejectMixedIntMode`);
 -- | `Int64`+ are rejected (`rejectWideInt`), never silently elevated to BigInt.
 -- |
--- | This is the runtime-module print mode (`compile`). NOT yet ported (need a Core/Func extension):
--- | `const` references (no `EConstRef` in PS Core), protocol dispatch (no `Func.dispatch` marker),
--- | `@external` bodies, value-union type-patterns over a user type (no `PTyped` discriminator), and
--- | the `.d.ts` sidecar (`compile_types`). The parity corpus avoids those.
+-- | Both print modes are ported: `compile` (the runtime module) and `compileTypes` (the `.d.ts`
+-- | sidecar, ADR-0086 §5). NOT yet ported (each needs a Core/Func extension): `const` references
+-- | (no `EConstRef` in PS Core), protocol dispatch (no `Func.dispatch` marker), `@external` bodies,
+-- | and value-union type-patterns over a user type (no `PTyped` discriminator). The corpus avoids those.
 module Rian.JS
   ( compile
   , compileSexpr
