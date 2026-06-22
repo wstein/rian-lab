@@ -10,11 +10,11 @@
 -- | `Int64`+ are rejected (`rejectWideInt`), never silently elevated to BigInt.
 -- |
 -- | Both print modes are ported: `compile` (the runtime module) and `compileTypes` (the `.d.mts`
--- | sidecar, ADR-0086 §5). NOT yet ported (each needs a Core/Func extension): `const` references
--- | (no `EConstRef` in PS Core), protocol dispatch (no `Func.dispatch` marker), `@external` bodies,
--- | value-union type-patterns over a user type (no `PTyped` discriminator), and struct *construction*
--- | (`Name(f: v)` — no `EStruct` in PS Core; struct field access + `case` patterns DO lower). The
--- | corpus avoids those.
+-- | sidecar, ADR-0086 §5). Module `const`s + references are ported (`resolveConsts`/`constJs`, the
+-- | `EConstRef` Core node). NOT yet ported: protocol dispatch, `@external` bodies, value-union
+-- | discrimination over a user type (the `PTyped` disc field exists; the baking pass is unported),
+-- | and struct *construction* `Name(f: v)` (no `EStruct` in PS Core; field access + `case` patterns
+-- | DO lower). The corpus avoids those.
 module Rian.JS
   ( compile
   , compileSexpr
