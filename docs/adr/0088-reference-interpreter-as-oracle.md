@@ -13,6 +13,12 @@ Core IR — the interpreter is a **pure consumer of Core**, like an emitter; **n
 **Amends:** ADR-0052 §"Playground architecture" — the live-playground engine is no longer *only*
 self-host → JS; the reference interpreter compiled to WASM/JS is a second, **earlier** engine that
 ships ahead of the `v1==v2` bootstrap (see §3).
+**Amended 2026-06-22 (ADR-0090):** §3 (interpreter → WASM/JS as the *playground engine*) is
+**superseded** — once the compiler is PureScript (ADR-0084), its native JS backend ships the *whole
+real compiler* to the browser, which dominates a separate interpreter-to-WASM artifact. **§1–2 and
+§6 stand unchanged:** `Rian.Eval` remains the conformance **oracle** (the executable spec every
+backend, PureScript-on-JS included, is checked against). Only §3's *engine/packaging* role is
+retired.
 **Refs:** ADR-0057 (concurrency native-per-target — removes the one thing a runtime VM would be *for*),
 ADR-0063 (bootstrap / self-host — the standing #1 priority a VM would compete with; the playground now
 ships *ahead* of it), ADR-0049 §5a / ADR-0085 (backend-tier admission + target budget — a future VM
