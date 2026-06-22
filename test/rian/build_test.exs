@@ -146,7 +146,8 @@ defmodule Rian.BuildTest do
 
       File.write!(
         rian,
-        ~S|@external(:js, "./codec.ffi.mjs", "encode") pub def enc(x val Int53) Int53| <> "\n"
+        ~S|@external(:js, "./codec.ffi.mjs", "encode") pub def enc(x val Int53) Int53| <>
+          "\n" <> "pub def twice(n Int53) Int53 := n * 2\n"
       )
 
       out = tmp_dir()
@@ -157,11 +158,19 @@ defmodule Rian.BuildTest do
       assert pkg =~ ~s("name": "prog")
       assert pkg =~ ~s("type": "module")
       assert pkg =~ ~s("main": "prog.mjs")
+      assert pkg =~ ~s("types": "prog.d.mts")
 
       mjs = Path.join(proj, "prog.mjs")
       assert File.read!(mjs) =~ ~s|import { encode } from "./codec.ffi.mjs";|
       # the FFI is copied beside the entry so the emitted relative import resolves
       assert File.exists?(Path.join(proj, "codec.ffi.mjs"))
+
+      # the TypeScript declaration sidecar is written beside the `.mjs` (ADR-0086 §5):
+      # the portable `twice` is exported with real types; the `@external` `enc` is
+      # imported, not re-exported, so it is not part of the typed surface.
+      dts = File.read!(Path.join(proj, "prog.d.mts"))
+      assert dts =~ "export function twice(n: number): number;"
+      refute dts =~ "enc"
 
       # npm validates package.json (parses it, checks required fields), offline
       case System.find_executable("npm") do

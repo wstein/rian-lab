@@ -4,8 +4,13 @@ defmodule Rian.Pkg.Npm do
   deterministic `Rian.Manifest` → `package.json` generator.
 
   `rian build --js -o ROOT` writes a self-contained npm package under `ROOT/_build/js/`:
-  `package.json` + the emitted ESM `<name>.mjs` + each `@external(:js)` `.ffi.mjs` copied
-  beside it (the emitted relative `import` already resolves it — ADR-0082 invariant 5).
+  `package.json` + the emitted ESM `<name>.mjs` + the TypeScript declaration sidecar
+  `<name>.d.mts` (ADR-0086 §5) + each `@external(:js)` `.ffi.mjs` copied beside it (the
+  emitted relative `import` already resolves it — ADR-0082 invariant 5).
+
+  The `"types"` field points at the `.d.mts` sidecar (derived from `main` — an ESM
+  `.mjs` resolves its declarations from `.d.mts`, not `.d.ts`), so a package-name
+  import (`import … from "<name>"`) is typed by the consumer's `tsc`.
 
   The `package.json` is hand-built with a **fixed key order** (not a map encode, whose
   order is undefined) so the output is byte-deterministic (ADR-0082 invariant 2); it
@@ -30,7 +35,7 @@ defmodule Rian.Pkg.Npm do
     fields =
       [{"name", m.name}, {"version", m.version}] ++
         license_field(m.license) ++
-        [{"type", "module"}, {"main", main}]
+        [{"type", "module"}, {"main", main}, {"types", types_of(main)}]
 
     body = Enum.map_join(fields, ",\n", fn {k, v} -> ~s(  "#{esc(k)}": "#{esc(v)}") end)
     "{\n#{body}\n}\n"
@@ -38,6 +43,10 @@ defmodule Rian.Pkg.Npm do
 
   defp license_field(nil), do: []
   defp license_field(l), do: [{"license", l}]
+
+  # the declaration sidecar that types `main`: an ESM `.mjs` resolves its types from
+  # the sibling `.d.mts` (ADR-0086 §5). A non-`.mjs` entry keeps its stem + `.d.mts`.
+  defp types_of(main), do: (main |> Path.rootname(".mjs")) <> ".d.mts"
 
   # minimal JSON string escaping — the values are project names/versions/SPDX/filenames,
   # but escape `\` and `"` so a stray character can never produce invalid JSON.

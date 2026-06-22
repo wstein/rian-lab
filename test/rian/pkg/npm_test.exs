@@ -14,6 +14,8 @@ defmodule Rian.Pkg.NpmTest do
     assert j =~ ~s("license": "Apache-2.0")
     assert j =~ ~s("type": "module")
     assert j =~ ~s("main": "my_app.mjs")
+    # the TS declaration sidecar resolves from `.d.mts` for an ESM `.mjs` (ADR-0086 §5)
+    assert j =~ ~s("types": "my_app.d.mts")
     # deterministic: same manifest -> byte-identical output (invariant 2)
     assert Npm.package_json(m, "my_app.mjs") == j
   end

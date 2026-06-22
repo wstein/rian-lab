@@ -100,20 +100,26 @@ defmodule Rian.Build do
 
   # `rian build --js -o ROOT` (ADR-0082 step 4): generate a self-contained npm package
   # under ROOT/_build/js/ — `package.json` from the manifest, the emitted ESM as
-  # `<name>.mjs`, and each `@external(:js)` `.ffi.mjs` copied beside it (where the emitted
-  # relative `import` resolves it, ADR-0082 invariant 5). Manifest generation runs first,
-  # so a non-empty `[deps]` fails before any write.
+  # `<name>.mjs`, its TypeScript declaration sidecar as `<name>.d.mts` (ADR-0086 §5,
+  # the typed view a TS consumer checks across the FFI boundary), and each
+  # `@external(:js)` `.ffi.mjs` copied beside it (where the emitted relative `import`
+  # resolves it, ADR-0082 invariant 5). `Rian.JS.compile/1` runs first, so a program
+  # that is not JS-valid fails before any `.d.mts` is written. Manifest generation runs
+  # first too, so a non-empty `[deps]` fails before any write.
   defp build_npm(root, file, prog, src, src_dir) do
     manifest = project_manifest(file, src_dir)
-    main = Path.basename(file, ".rian") <> ".mjs"
+    base = Path.basename(file, ".rian")
+    main = base <> ".mjs"
     pkg = Rian.Pkg.Npm.package_json(manifest, main)
     js = Rian.JS.compile(src)
+    dts = Rian.JS.compile_types(src)
 
     proj = Path.join([root, "_build", "js"])
     File.mkdir_p!(proj)
 
     write_file(Path.join(proj, "package.json"), pkg)
     write_file(Path.join(proj, main), js)
+    write_file(Path.join(proj, base <> ".d.mts"), dts)
     copy_foreign(prog, :js, src_dir, proj)
     0
   end
