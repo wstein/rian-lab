@@ -16,11 +16,13 @@
 module Rian.JS
   ( compile
   , compileSexpr
+  , compileTypes
+  , compileTypesSexpr
   ) where
 
 import Prelude
 
-import Data.Array (any, elem, filter, foldl, head, index, length, mapMaybe, mapWithIndex, null, range, snoc, uncons, unsnoc)
+import Data.Array (any, concatMap, elem, filter, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, uncons, unsnoc)
 import Data.Foldable (foldMap)
 import Data.Enum (fromEnum)
 import Data.Int as Int
@@ -35,11 +37,12 @@ import Rian.Assemble (assemble)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Body, Clause, Func, Prog, bodySurface)
+import Rian.IR (Body, Clause, Const, Func, Prog, Range, Struct, Type, Variant, bodySurface)
 import Rian.Opaque (erase)
 import Rian.Pratt (Surface(..), parse) as P
 import Rian.Prim (overflowOps)
 import Rian.Shadow (dedup)
+import Rian.TypeStr (normalize, splitTopCommas) as TS
 
 -- | Compile `src`'s functions to a single ECMAScript module (a string).
 -- @rian_sig pub def compile(src val String) String
@@ -531,6 +534,219 @@ pascal s = case head (toCharArray s) of
   Just c -> c >= 'A' && c <= 'Z'
   Nothing -> false
 
+--------------------------------------------------------------------------------
+-- compile_types: the TypeScript `.d.ts` sidecar (ADR-0086 §5) — a typed *view* of the runtime
+-- module: `export function`/`const` per `pub` decl + `type`/`interface`/range aliases describing
+-- the values `compile` actually emits (a sum = `["Ctor",…]`, a struct = `{__struct__,…}`). A type
+-- outside the mapped subset becomes `unknown` (honest), never a misleading `any`. Pure type-string
+-- mapping — no Core IR — so no Core extension is needed.
+--------------------------------------------------------------------------------
+
+-- | Emit a TypeScript declaration sidecar (`.d.ts`) for `src`.
+-- @rian_sig pub def compile_types(src val String) String
+compileTypes :: String -> String
+compileTypes src =
+  let prog0 = assemble (parseToProg src)
+  in case checkProgram prog0 of
+    Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
+    Nothing ->
+      let
+        prog = erase prog0
+        known = knownTypeNames prog
+        rangeDts = joinWith "\n" (map dtsRange (allRanges prog))
+        typeDts = joinWith "\n" (map (dtsSum known) (allTypes prog))
+        structDts = joinWith "\n" (map (dtsStruct known) (allStructs prog))
+        constDts = joinWith "\n" (map (dtsConst known) (filter _.pub (allConsts prog)))
+        fnDts = joinWith "\n" (map (dtsFunc known) (filter dtsEligible (allFuncs prog)))
+        body = joinWith "\n\n" (filter (_ /= "") [ rangeDts, typeDts, structDts, constDts, fnDts ])
+      in
+        if body == "" then "" else body <> "\n"
+
+-- only `pub` functions with a portable body export (a private `def` or an `@external` with
+-- `clauses == []` is not part of the surface).
+dtsEligible :: Func -> Boolean
+dtsEligible f = f.pub && not (null f.clauses)
+
+allTypes :: Prog -> Array Type
+allTypes prog = prog.types <> concatMap _.types prog.mods
+
+allStructs :: Prog -> Array Struct
+allStructs prog = prog.structs <> concatMap _.structs prog.mods
+
+allRanges :: Prog -> Array Range
+allRanges prog = prog.ranges <> concatMap _.ranges prog.mods
+
+-- top-level `const` is rejected by `Decl` (it must live in a `mod`), so consts come only from mods.
+allConsts :: Prog -> Array Const
+allConsts prog = concatMap _.consts prog.mods
+
+-- every user type-name in scope (so a reference resolves instead of being read as a type variable).
+knownTypeNames :: Prog -> Array String
+knownTypeNames prog = map _.name (allTypes prog) <> map _.name (allStructs prog) <> map _.name (allRanges prog)
+
+dtsRange :: Range -> String
+dtsRange r = "export type " <> r.name <> " = number;"
+
+-- a sum → a discriminated union of tagged tuples (`["Ctor", …]`), exactly the runtime arrays.
+dtsSum :: Array String -> Type -> String
+dtsSum known t =
+  let
+    tvars = collectTvars known (concatMap _.fields t.variants)
+    variants = case joinWith " | " (map (dtsVariant known tvars) t.variants) of
+      "" -> "never"
+      vs -> vs
+  in
+    "export type " <> t.name <> generics tvars <> " = " <> variants <> ";"
+
+dtsVariant :: Array String -> Array String -> Variant -> String
+dtsVariant known tvars v = case v.fields of
+  [] -> "[" <> dquote v.ctor <> "]"
+  fs -> "[" <> dquote v.ctor <> ", " <> joinWith ", " (map (\f -> tsType known tvars f.ty) fs) <> "]"
+
+-- a struct → a `{__struct__: "Name", …}` interface with a discriminant literal.
+dtsStruct :: Array String -> Struct -> String
+dtsStruct known s =
+  let
+    tvars = collectTvars known s.fields
+    fields = joinWith " " (mapWithIndex (\i f -> fromMaybe ("f" <> show i) f.label <> ": " <> tsType known tvars f.ty <> ";") s.fields)
+  in
+    "export interface " <> s.name <> generics tvars <> " { __struct__: " <> dquote s.name <> "; " <> fields <> " }"
+
+dtsConst :: Array String -> Const -> String
+dtsConst known c = "export const " <> c.name <> ": " <> tsTypeM known [] c.ty <> ";"
+
+dtsFunc :: Array String -> Func -> String
+dtsFunc known f =
+  let params = joinWith ", " (map (\p -> p.name <> ": " <> tsTypeM known f.tvars p.ty) f.params)
+  in "export function " <> f.name <> generics f.tvars <> "(" <> params <> "): " <> tsTypeM known f.tvars f.ret <> ";"
+
+generics :: Array String -> String
+generics tvars = if null tvars then "" else "<" <> joinWith ", " tvars <> ">"
+
+-- the type variables a declaration introduces (every tvar-shaped identifier in its field types,
+-- first-appearance order).
+collectTvars :: forall r. Array String -> Array { ty :: String | r } -> Array String
+collectTvars known fields = nub (concatMap (\f -> scanTvars known f.ty) fields)
+
+scanTvars :: Array String -> String -> Array String
+scanTvars known t = filter (isTvar known) (typeWords t)
+
+isTvar :: Array String -> String -> Boolean
+isTvar known name =
+  upperFirst name && tsPrim name == Nothing && not (elem name tsReserved) && not (elem name known)
+
+-- the JS-valid Rian primitives and their faithful TypeScript carriers (ADR-0064).
+tsPrim :: String -> Maybe String
+tsPrim t = case t of
+  "Int" -> Just "bigint"
+  "Int8" -> Just "number"
+  "Int16" -> Just "number"
+  "Int32" -> Just "number"
+  "Int53" -> Just "number"
+  "UInt8" -> Just "number"
+  "UInt16" -> Just "number"
+  "UInt32" -> Just "number"
+  "Float32" -> Just "number"
+  "Float64" -> Just "number"
+  "Bool" -> Just "boolean"
+  "String" -> Just "string"
+  "Char" -> Just "number"
+  "Symbol" -> Just "string"
+  "Any" -> Just "unknown"
+  _ -> Nothing
+
+-- structural heads handled by name (never a tvar) + the wide ints that map to `unknown`.
+tsReserved :: Array String
+tsReserved = [ "Int64", "Int128", "UInt64", "UInt128", "Vec", "Fn", "Map", "Dict", "Result", "Option", "Union" ]
+
+-- map a Rian type-string to its faithful TypeScript carrier; anything outside the mapped subset is
+-- `unknown` (honest). `known` = declared type-names, `tvars` = in-scope generics.
+tsTypeM :: Array String -> Array String -> Maybe String -> String
+tsTypeM known tvars = case _ of
+  Nothing -> "unknown"
+  Just t -> tsType known tvars t
+
+tsType :: Array String -> Array String -> String -> String
+tsType known tvars t = tsApp known tvars (TS.normalize (Str.trim t))
+
+tsApp :: Array String -> Array String -> String -> String
+tsApp known tvars t =
+  if t == "" then "unknown"
+  else case tsPrim t of
+    Just p -> p
+    Nothing ->
+      if elem t tvars then t
+      else if isJustPrefix "(" t && isJustSuffix ")" t then tsTuple known tvars t
+      else case parseApp t of
+        Just (Tuple hd args) -> tsApplication known tvars hd args
+        Nothing -> if elem t known then t else "unknown"
+
+-- `Head(arg, …)` → `Just (Head, [arg, …])`, else `Nothing` (a bare name / tuple).
+parseApp :: String -> Maybe (Tuple String (Array String))
+parseApp t = case Str.indexOf (Str.Pattern "(") t of
+  Just i | isJustSuffix ")" t ->
+    let
+      hd = Str.take i t
+      inner = dropLastChar (Str.drop (i + 1) t)
+    in
+      if identStr hd then Just (Tuple hd (TS.splitTopCommas inner)) else Nothing
+  _ -> Nothing
+
+tsTuple :: Array String -> Array String -> String -> String
+tsTuple known tvars t = "[" <> joinWith ", " (map (tsType known tvars) (TS.splitTopCommas (innerParens t))) <> "]"
+
+tsApplication :: Array String -> Array String -> String -> Array String -> String
+tsApplication known tvars hd args = case hd of
+  "Vec" | length args == 1 -> "Array<" <> tsType known tvars (ax 0) <> ">"
+  "Option" | length args == 1 -> "[" <> dquote "Some" <> ", " <> tsType known tvars (ax 0) <> "] | [" <> dquote "None" <> "]"
+  "Result" | length args == 2 -> "[" <> dquote "ok" <> ", " <> tsType known tvars (ax 0) <> "] | [" <> dquote "error" <> ", " <> tsType known tvars (ax 1) <> "]"
+  "Union" | not (null args) -> joinWith " | " (map (tsType known tvars) args)
+  "Fn" | not (null args) -> case unsnoc args of
+    Just { init, last } -> "(" <> joinWith ", " (mapWithIndex (\i a -> "a" <> show i <> ": " <> tsType known tvars a) init) <> ") => " <> tsType known tvars last
+    Nothing -> "unknown"
+  _ | (hd == "Map" || hd == "Dict") && length args == 2 ->
+    let kts = tsType known tvars (ax 0)
+    in if kts == "string" || kts == "number" then "Record<" <> kts <> ", " <> tsType known tvars (ax 1) <> ">" else "unknown"
+  _ -> if elem hd known then hd <> "<" <> joinWith ", " (map (tsType known tvars) args) <> ">" else "unknown"
+  where
+  ax i = fromMaybe "" (index args i)
+
+-- ── tiny string helpers for the .d.ts mapper ──
+isJustPrefix :: String -> String -> Boolean
+isJustPrefix p s = case Str.stripPrefix (Str.Pattern p) s of
+  Just _ -> true
+  Nothing -> false
+
+isJustSuffix :: String -> String -> Boolean
+isJustSuffix p s = case Str.stripSuffix (Str.Pattern p) s of
+  Just _ -> true
+  Nothing -> false
+
+dropLastChar :: String -> String
+dropLastChar s = Str.take (Str.length s - 1) s
+
+innerParens :: String -> String
+innerParens s = dropLastChar (Str.drop 1 s)
+
+upperFirst :: String -> Boolean
+upperFirst s = case head (toCharArray s) of
+  Just c -> c >= 'A' && c <= 'Z'
+  Nothing -> false
+
+-- a non-empty identifier: first char a letter/`_`, the rest word chars.
+identStr :: String -> Boolean
+identStr s = case uncons (toCharArray s) of
+  Just { head: c, tail } -> (isAlpha c || c == '_') && allWord (snoc tail c)
+  Nothing -> false
+  where
+  isAlpha c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+  isWord c = isAlpha c || (c >= '0' && c <= '9') || c == '_'
+  allWord = foldl (\acc x -> acc && isWord x) true
+
 -- | The `js` parity unit: the compiled ECMAScript module for `src`.
 compileSexpr :: String -> String
 compileSexpr = compile
+
+-- | The `jsdts` parity unit: the TypeScript `.d.ts` sidecar for `src`.
+compileTypesSexpr :: String -> String
+compileTypesSexpr = compileTypes

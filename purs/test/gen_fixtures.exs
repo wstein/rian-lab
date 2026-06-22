@@ -888,6 +888,22 @@ js_corpus = [
   "pub def m2() Dict(Symbol, Int53) := %{a: 1, b: 2}"
 ]
 
+# Rian.JS.compile_types — the `jsdts` stream (ADR-0086 §5): the TypeScript `.d.ts` sidecar. Maps
+# the JS-valid type subset (prims, Vec/Fn/Option/Result/tuple/Map, user sum/struct/range, `forall`
+# generics) to its faithful TS carrier. Oracle = `Rian.JS.compile_types`.
+jsdts_corpus = [
+  "pub def add(x Int53, y Int53) Int53 := x + y",
+  "pub def idg(x T) T forall T := x",
+  "pub def hof(f Fn(Int53, Int53), xs Vec(Int53)) Vec(Int53) := xs",
+  "pub def opt(o Option(Int53)) Int53 := 0",
+  "pub def res(r Result(Int53, String)) Int53 := 0",
+  "pub def dct(d Dict(String, Int53)) Int53 := 0",
+  "type Color := Red | Green | Blue\npub def nm(c Color) String := \"x\"",
+  "struct Point(x Int53, y Int53)\npub def gx(p Point) Int53 := p.x",
+  "range Digit := 0..9\npub def dd(x Digit) Int53 := 0",
+  "mod M do\n  pub const PI Int53 := 3\nend"
+]
+
 asm_corpus = [
   "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := f(x)\nend",
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
@@ -1857,6 +1873,9 @@ lines =
     end) ++
     Enum.map(js_corpus, fn s ->
       "js\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JS.compile(s))}"
+    end) ++
+    Enum.map(jsdts_corpus, fn s ->
+      "jsdts\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JS.compile_types(s))}"
     end) ++
     Enum.map(mxb_corpus, fn s ->
       funcs = Map.get(Decl.parse(s, assemble_only: true), :funcs, [])
