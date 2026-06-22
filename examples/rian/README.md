@@ -62,51 +62,16 @@ that is the point (see [15_targets.rian](15_targets.rian)).
 Suggested reading order is numeric; 04 is the one to linger on — it is what
 distinguishes Rian from "Elixir with different keywords."
 
-Outside the numbered tour, two **self-hosting spikes** are written in Rian and
-compile + run on real BEAM bytecode:
+Outside the numbered tour, a set of **compiler-construction spikes** are written in
+Rian and compile + run on real BEAM bytecode:
 
 - [lexer.rian](../../test/fixtures/rian/lexer.rian) — a real arithmetic lexer (its own
   `Token` sum, list-pattern recursion).
-- [lexer_v2.rian](../compiler/lexer_v2.rian) — porting the *real*
-  `Rian.Lexer` to Rian (slice 1): adds **identifiers and keywords** on top of
-  numbers/operators/parens, using `Char` comparisons and ordinal arithmetic
-  (ADR-0036). Checked against the reference lexer by `Rian.Fixpoint`.
 - [parser.rian](../../test/fixtures/rian/parser.rian) — a precedence-climbing
   expression parser (a slice of `Rian.Pratt`) that consumes the lexer's
   `Vec(Token)`, builds its own `Expr` sum, and threads `(Expr, Vec(Token))` as a
   `Parse` pair. It exercises higher-order-free recursion, sum construction,
   nested list/variant patterns, and `case` — and hits **no** backend wall.
-- [parse.rian](../compiler/parse.rian) — the expression/pattern parser,
-  fully self-hosted: a port of the **whole `Rian.Pratt` grammar** (self-hosting
-  rung 2, ADR-0063). It builds Pratt's exact surface tuples as raw Rian tuples/
-  atoms threaded through a parametric `R(node, rest)`, so the output term-equals
-  `Rian.Pratt.parse` with **no projection** (`test/rian/parse_fixpoint_test.exs`).
-  Covers prefix (`-`/`not`/`&`-capture), primaries (if/case/with, list/map/tuple,
-  paren-or-lambda, atom/str/char/num/id), postfix (dot/call), labelled args,
-  precedence climbing, AND the full pattern grammar (wild/var/lit/char/atom/tuple/
-  list+tail/map/ctor/struct) + blocks. Found two real Rian limits along the way:
-  the closed-list tail `nil` is produced as `:nil` (== Elixir `nil`), and the
-  keyword-named tags `:if`/`:case`/`:with`/`:struct` can't be spelled as atoms, so
-  they're built via a single counted `String.to_atom` crutch (the only FFI).
-  String-interpolation and `<-`-propagation sugar (resolved by later passes) are
-  out of scope.
-- [core.rian](../compiler/core.rian) — the **surface→Core lowering**, fully
-  self-hosted (the pipeline stage after the parser, ADR-0063/0050): translates the
-  whole `Rian.Pratt` surface AST into the typed **Core IR**. Every expression node
-  (literals, unary/binary, calls with labelled args, dot, `if`, tuples, lists with
-  tails, maps, blocks, `case` with guards, lambdas, captures, `with`) and every
-  pattern (wild/var/lit/char/atom/tuple/ctor/list/struct/map) is rendered to a
-  canonical s-expression and **equivalence-locked** against `Rian.Core.from_expr`/
-  `from_pat` (`test/rian/core_fixpoint_test.exs`). The Lower-internal resolved
-  nodes and the never-parsed `as`/pin patterns are not surface-reachable.
-- [decl.rian](../compiler/decl.rian) — a Rian **declaration** front-end
-  (self-hosting **Stage 2**, ADR-0063): parses `type` sums and `def` functions
-  into a `Decl` representation that, projected to `Rian.IR`, **equals what
-  `Rian.Decl.parse` builds** and is then **compiled and run by the real backend**
-  (`Rian.Beam.compile_ir/2`) — a Rian front-end producing IR the existing backend
-  consumes (`test/rian/decl_fixpoint_test.exs`). Core forms; the long tail of
-  `Rian.Decl` (multi-clause, capabilities, parametric types, mod/struct/protocol)
-  remains.
 - [eval.rian](../../test/fixtures/rian/eval.rian) — an evaluator that folds the `Expr`
   sum to an `Int64`, threading a **symbol table** (`Map(String, Int64)`) with
   `let`-binding and `Var` lookup. The symbol table is the first place that
@@ -117,102 +82,6 @@ compile + run on real BEAM bytecode:
   error** via a `struct Mismatch(op, expected, got)`. The diagnostic record is
   the first place a checker wants a `struct`; it drove the BEAM **struct**
   increment (a struct value is a tagged map, read by field access).
-- [cap.rian](../compiler/cap.rian) — the **capability checker**, fully
-  self-hosted (ADR-0063, ADR-0055): the complete capability→Rust mapping
-  (`val`/`iso`/`tag`/`ref` × every `Copy` width, `String`, nominal types, nested
-  `Vec(...)`, parametric generics `Name(A, B)` — including the reference quirk that
-  `val` of a generic borrows the unlowered spelling) plus `ref`-rejecting BEAM
-  legality, **equivalence-locked** against `Rian.Capability` over the whole matrix
-  (`test/rian/cap_fixpoint_test.exs`). `val` borrows a non-`Copy` type but passes a
-  `Copy` scalar by value; `ref` is the BEAM-illegal `&mut` outside the portable
-  core (P5). Type-string tokenisation is the type-parser's stage; the BEAM
-  linearity check is native typestate.
-- [exhaust.rian](../compiler/exhaust.rian) — the **exhaustiveness gate**,
-  fully self-hosted (ADR-0063): the complete Maranget usefulness check `U(P, q)`
-  with `specialize`/`default`/`signature` over single- and multi-column matrices,
-  constructors with arguments (arity-specialised), wildcards, and finite/infinite
-  signatures — patterns are `PWild | PCtor(name, args)`, so lists/tuples/sums are
-  all just constructors. **Equivalence-locked** against the real
-  `Rian.Exhaustiveness.useful?` (`test/rian/exhaust_fixpoint_test.exs`); the typing
-  env is searched linearly, so the port is FFI-free. Exhaustiveness is then `not
-  useful(…, [PWild…])`; only the witness/counterexample diagnostic remains.
-- [js.rian](../compiler/js.rian) — the **ECMAScript backend**, fully
-  self-hosted (ADR-0063, ADR-0049 Tier 1): a whole-module emitter — functions with
-  multi-clause **pattern dispatch**, sum variants as tagged arrays
-  (`["Ctor", …]`), structs (`{__struct__: …}`), tuples/lists (with `...`-spread
-  tail)/maps, `.field`, `if` (ternary), `case` (IIFE), operators (`and`→`&&`,
-  `==`→`===`, `<>`→`+`, `div`→`Math.trunc`), atoms→strings, primitives.
-  **Equivalence-locked** against `Rian.JS.compile` over its expression+function
-  surface (`test/rian/js_module_fixpoint_test.exs`). Protocol dispatch, the
-  whole-program int-mode, and `Rian.Shadow` are out of scope (program-level /
-  separate-subsystem concerns).
-- [rust.rian](../compiler/rust.rian) — the **Rust text backend**, fully
-  self-hosted (ADR-0063, ADR-0049/0055/0061): a whole-module emitter — sum types →
-  `#[derive(…)] enum`, functions with `match`-over-the-param-tuple multi-clause
-  dispatch (capability-lowered signatures like `o: &Opt`), the precedence-aware
-  expression emitter, `if`, variant construct (`Enum::Ctor`) + ctor-pattern match,
-  guards. **Equivalence-locked** against `Rian.Lower.rust_program`
-  (`test/rian/rust_module_fixpoint_test.exs`). The emitter consumes *resolved* +
-  *capability-lowered* Core — resolution is the parser/Core stage's job and
-  capability lowering is the (self-hosted) capability stage's. Generics (tvars +
-  owned↔borrow coercion), iso/cons lists, String-returns, structs/maps, and the
-  Elixir text target are out of scope.
-- [jvm.rian](../compiler/jvm.rian) — the **Kotlin/JVM backend**, fully
-  self-hosted (ADR-0063, ADR-0049 Tier 2): a whole-module emitter — sum types →
-  `sealed interface` + `object`/`data class`, functions with **multi-clause
-  pattern dispatch** (`is` smart-cast tests + `val` binds + the trailing throw),
-  `if`, operators, primitives — **equivalence-locked** against `Rian.JVM.compile`
-  over its full supported surface (`test/rian/jvm_module_fixpoint_test.exs`). The
-  stage consumes Core (parsing is the parser/Core stage's job); lists/maps/case/
-  lambda/`@external`/`Rian.Shadow` are reference gaps, not port gaps.
-- [beam.rian](../compiler/beam.rian) — the **BEAM abstract-forms backend**,
-  fully self-hosted (ADR-0063, the default self-host target): builds the Erlang
-  abstract forms for a whole module's functions. BEAM uses Erlang's **native**
-  clause matching, so the patterns ARE the dispatch forms (no test/bind generation
-  like JVM/JS). Covers functions, multi-clause dispatch, operators, `if`, `case`,
-  variants/tuples/lists, guards. The fixpoint compiles via `:compile.forms` and
-  **RUNS** the module, asserting it behaves identically to `Rian.Beam`
-  (`test/rian/beam_module_fixpoint_test.exs`). Operators/names ride as strings
-  (Rian can't spell `:+` or Erlang var atoms), inflated by the fixpoint;
-  strings/prims/maps/structs/shadowed-binds are out of scope.
-- [checker.rian](../compiler/checker.rian) — the **real type checker**
-  (inference) port (ADR-0063, ADR-0064): a slice of the REAL `Rian.Check.infer`
-  (not the toy-language `check`), inferring `Int53`/`Bool`/`String`/
-  `Float64`/`unknown` for closed integer expressions and **fixpoint-locked**
-  against `Rian.Check.infer` (`test/rian/checker_infer_fixpoint_test.exs`). It is
-  conservative — an unbound identifier is `unknown`, not a guess. Env, floats,
-  calls, lambdas, and `case` remain.
-- [compose_real_sum.rian](../compiler/compose_real_sum.rian) — **the composed
-  `build` driver** (ADR-0063 Step 3): the whole front-end and back-end are verified
-  ports, composed cross-module with no glue that reimplements a stage. The
-  [lexer_v2.rian](../compiler/lexer_v2.rian) port (`LexerV2.tokenize`) feeds
-  [decl.rian](../compiler/decl.rian) directly (token tags a superset of the
-  parser's — **no projection**), whose `Decl`/`Expr`/`Pat` IR is lowered to `beam`
-  Core/Pat and compiled by the cross-module `Beam.compile_forms` — all loaded under
-  `:"Elixir.*"` atoms (ADR-0041), so each stage's Rian output is the next stage's
-  Rian input. The only driver-local code is the surface→Core lowering and the
-  `Form`→abstract-form inflater (incl. `type`-erasure: nullary ctor `Red`→`:red`,
-  applied ctor `Pair(a,b)`→`{:pair,a,b}` via a `to_snake` matching
-  `Rian.PatternLower.to_snake`). The surface spans sum types + constructor-pattern
-  dispatch, and the build runs the exhaustiveness + capability gates.
-  `test/rian/compose_real_sum_fixpoint_test.exs` compiles `Color`/`Shape`/`Box`
-  programs identical to `Rian.Beam`; host FFI: `:compile.forms`/`:code.load_binary`
-  (+ `:erlang.binary_to_list` for string-literal byte segments, `:erlang.error` for
-  gate refusal). *(The earlier graduated rungs 7–10 — `compose_real_beam`/`front`/
-  `decl`/`lex`, which wired one verified port at a time over toy parsers for the
-  others — were retired once this driver superseded them; none was depended on by the
-  bootstrap loop.)*
-
-**The loop closes on real source** — [test/rian/compose_selfcompile_fixpoint_test.exs](../../test/rian/compose_selfcompile_fixpoint_test.exs)
-feeds the composed `build` a **verbatim slice of a real compiler stage** —
-[cap.rian](../compiler/cap.rian)'s `Ty` sum type + `copyt` function — and asserts
-it runs identically to `Rian.Beam`. This is the first time a stage compiles its *own*
-source, not a hand-written corpus (the test even asserts each `copyt` clause is verbatim
-in the real file, so it can't drift into a toy). **Honest scope:** the loop is
-*self-compiling* (codegen), **not** *self-checking* — `Rian.Check`/`Exhaustiveness`/
-`Capability` are not in the `build` loop — and it's a *slice*: the whole file needs
-`if`/strings/`Prim`, which the surface doesn't cover yet. Widening that surface until
-`build` compiles a whole real `*.rian` file is the work before `v1==v2`.
 - [codegen.rian](../../test/fixtures/rian/codegen.rian) — a **code generator + stack
   VM**: it compiles the `Expr` sum to a post-order list of `Instr` and executes
   them on a stack (`Vec(Int64)`). It handles **variables and `let`** via
@@ -318,8 +187,6 @@ in the real file, so it can't drift into a toy). **Honest scope:** the loop is
   `Fail("expected 42, got 41")`, formatted via interpolation, ADR-0069); `Rian.Test`
   surfaces that message on every target. `contain` (membership) stays deferred — it needs
   the `List` prelude linked, like `assert_in`.
-
-See [SELFHOST.md](../../SELFHOST.md) for the blocker ledger they produced.
 
 ### Function body forms
 

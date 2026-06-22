@@ -1,6 +1,6 @@
 defmodule Rian.StringEmitFixpointTest do
   @moduledoc """
-  String-emit fixpoint with teeth (ADR-0063 §4 / SELFHOST.md — Maya's "string-emit
+  String-emit fixpoint with teeth (ADR-0063 §4 — Maya's "string-emit
   fragility" critique). The self-hosting lexer emits no string literals, so emitter
   escaping (quotes, backslashes, control chars, unicode, `$`) was *latent, untested* —
   yet a compiler-in-Rian emits code full of string literals, where a single bad escape

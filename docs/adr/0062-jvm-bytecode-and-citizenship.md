@@ -54,7 +54,7 @@ three candidate mechanisms; the choice is the substance of this rung:
   but it re-implements a large surface the JDK already gives us — likely not worth it before C1.
 - **C3 — in-process, post-self-hosting.** Once Rian self-hosts *on the JVM*, a JVM-hosted Rian
   compiler calls `java.lang.classfile` in-process — the genuine Clojure-shaped end state. This is the
-  natural terminus, and it ties rung C to the self-hosting roadmap (SELFHOST.md) rather than being a
+  natural terminus, and it ties rung C to the self-hosting roadmap (ADR-0063) rather than being a
   parallel effort.
 
 **Direction:** pursue **C1** when rung C is scheduled (standard API, no bundled runtime, no

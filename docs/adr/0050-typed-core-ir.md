@@ -8,7 +8,7 @@ per-clause typing env). §3 *consumption* pending — no emitter yet reads `node
 choice (ADR-0041/0043/0046 still derive types the old way); reading it off the node is the remaining step.
 **Refs:** ADR-0027 (self-hosting), ADR-0031 (abstract-forms backend; Stage 0.1), ADR-0034 (types; exhaustiveness over sums), ADR-0041 (representation needs types at emission), ADR-0043 (opaque erasure), ADR-0046 (monomorphization), ADR-0049 (three new emitters incoming)
 **Owners:** Maya Lin (pipeline/emitters) · Arthur Pendelton (typed IR) · Chloe Bennett (parser unification) · Elena Rostova (migration) · Samir Patel (metric/dogfood) · Kira Neri (backend swap) · Rachel Okafor (PM)
-**Evidence:** [SELFHOST.md](../../SELFHOST.md) verdict #3 (B1 fixed in *three* places — "the fork a self-hosted front end would inherit"); README "known gaps" #1.
+**Evidence:** the B1 fork-triplication — fixed in *three* places, "the fork a self-hosted front end would inherit"; README "known gaps" #1.
 
 ## Context
 

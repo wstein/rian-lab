@@ -662,7 +662,7 @@ defmodule Rian.DeclTest do
 
     test "a SINGLE-clause constructor-pattern head binds its arguments (corpus shapes)" do
       # `def owned(TScalar(s)) := …` and `def func_form(Func(name, arity, clauses)) := …`
-      # are the dominant compiler/*.rian head shape — `Foo(args)` with binding args is a
+      # are a dominant compiler head shape — `Foo(args)` with binding args is a
       # constructor PATTERN in clause position, not a typed parameter.
       one = fn src ->
         Decl.parse(src)

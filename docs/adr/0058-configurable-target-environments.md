@@ -112,7 +112,7 @@ lowering and made *honest per declared target* instead of discovered at emit tim
   `@doc`/`@moduledoc`/`@typedoc`) and add the gate at `decl.ex:229` between `Check.gate!` and lowering.
 - **Open — build default:** read `rian: [targets: …]` from `mix.exs` config.
 - **Supersedes the dormant `@shared` idea** floated in the prior debate.
-- **Honesty pass:** reconcile `examples/rian/README.md` / `SELFHOST.md` multi-target claims with
+- **Honesty pass:** reconcile `examples/rian/README.md` multi-target claims with
   `mix rian.targets` output.
 
 ### CI default scope (2026-06-13 design review)

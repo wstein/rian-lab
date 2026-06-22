@@ -4,7 +4,7 @@ defmodule Rian.IR do
   parser (`Rian.Decl`) emits and the lowering backend (`Rian.Lower`) consumes.
 
   > **ADR-0050 (migrated).** The old "expr/pattern stay tuples as the IR" stance was overturned
-  > (evidence: the B1 triplication in `SELFHOST.md`, three incoming emitters in ADR-0049). The
+  > (evidence: the B1 fork-triplication, three incoming emitters in ADR-0049). The
   > typed sealed-sum core IR is now `Rian.Core`, and **all four emitters (`Beam`/`Lower`/`JS`/`JVM`)
   > consume it** — each builds its Core via `Rian.Check.annotate/3`, so every node carries its
   > inferred `type` (§3 infrastructure). The expr/pattern tuples below are now the **transient

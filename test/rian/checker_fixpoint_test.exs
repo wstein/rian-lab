@@ -1,6 +1,6 @@
 defmodule Rian.CheckerFixpointTest do
   @moduledoc """
-  Checker fixpoint with teeth (ADR-0063 §4 / SELFHOST.md — Samir's "inert checker"
+  Checker fixpoint with teeth (ADR-0063 §4 — Samir's "inert checker"
   critique). The Rian-written type-checker (`check.rian`) is run, compiled to
   real `.beam`, over a golden corpus of well- and ill-typed toy `Expr` programs; its
   verdicts must match exactly. The **teeth**: ill-typed programs must be *rejected*

@@ -125,10 +125,6 @@ formatter's correctness specification.
 - **GenLSP transport** — `Rian.LSP.Formatting` is the data-level backend (returns `TextEdit[]` for
   whole-document and range formatting); the actual JSON-RPC server (ADR-0038 Tier 0) is still to be
   built and would call it.
-- **Full formatter self-host** — the **Doc engine** is ported (`compiler/format.rian`, fixpoint-locked);
-  the trivia lexer, bracket CST, and line/indent + chain-wrap lowering remain BEAM-only (they lean on
-  the host lexer and richer collections). Porting them is gated on the self-host collection/lexer work
-  (SELFHOST.md).
 - **`rangeFormatting` granularity** — formats the selection as a fragment (re-indented to context); best
   on whole-declaration/statement selections, total but possibly odd on a cut-across-`do…end` selection.
 
