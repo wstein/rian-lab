@@ -128,13 +128,13 @@ defmodule Rian.JsModuleFixpointTest do
   end
 
   describe "teeth — variants, dispatch, and JS operator/value encoding are real" do
-    test "a sum variant is a tagged array; a ctor pattern checks the head", %{mod: mod} do
+    test "a sum variant is a tagged object; a ctor pattern checks the `$` tag", %{mod: mod} do
       assert ported(mod, "def mk(n Int53) Opt\ndef mk(0) := None\ndef mk(n) := Some(n)") =~
-               ~s(["Some", n])
+               ~s({ $: "Some", _0: n })
 
       out = ported(mod, "def get(o Opt) Int53\ndef get(Some(v)) := v")
-      assert out =~ ~s(a0[0] === "Some")
-      assert out =~ "a0[1]"
+      assert out =~ ~s(a0.$ === "Some")
+      assert out =~ "a0._0"
     end
 
     test "JS operator/value encoding (===, &&, atoms→strings, div→Math.trunc)", %{mod: mod} do

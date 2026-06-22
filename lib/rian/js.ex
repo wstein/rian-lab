@@ -40,9 +40,11 @@ defmodule Rian.JS do
 
   Functions (single/multi-clause) over `Int64`/`Float64`/`Bool`; variables;
   unary/binary operators; `if`; local calls; tuples (→ JS arrays); `when`
-  guards; **sum variants** — construction `Ctor(a, …)` → a tagged array
-  `["Ctor", a, …]` (nullary → `["Ctor"]`), with **clause patterns** that check
-  the tag and recurse into fields (nested + literal patterns supported);
+  guards; **sum variants** — construction `Ctor(a, …)` → a tagged object
+  `{ $: "Ctor", _0: a, … }` (nullary → `{ $: "Ctor" }`; positional `_n` field keys),
+  with **clause patterns** that check the `$` tag and recurse into fields
+  (nested + literal patterns supported). A tagged object (not the old array)
+  distinguishes a variant from a list/tuple and is consistent with structs;
   **lists** (→ JS arrays, cons `[h | t]` → `[h, ...t]`, with closed/cons clause
   patterns via `length`/`slice`); **`case`** (→ an IIFE if-chain over the arm
   patterns); **strings** (`<>` → `+`); **maps** (`%{k: v}` → a JS object); and a
@@ -51,17 +53,18 @@ defmodule Rian.JS do
   `List.to_string`, `:lists.reverse`) — a stopgap until the portable prelude
   (ADR-0047) owns them. **Protocol dispatch** (ADR-0061 §3): a `protocol` lowers
   to a JS dispatcher generated from the protocol IR — it selects the impl by the
-  first argument's runtime shape (`typeof` for primitives, the tagged-array head
+  first argument's runtime shape (`typeof` for primitives, the variant `$` tag
   for sums), mirroring the BEAM strategy with JS-native guards; the `impl_*`
   methods lower as plain functions, and bounded generics are plain functions
   (the bound was checked statically and is erased). **Structs**: named
   construction `Name(f: v, …)` → a `__struct__`-tagged object `{__struct__:
   "Name", f: v}`, with field access `p.f` and struct clause patterns; struct
   protocol dispatch tests `a0.__struct__ === "Name"`. Atoms/`Symbol` (→ JS
-  strings) and `Result` (`{:ok,v}`/`{:error,e}` → tagged arrays, matched in a
-  `case`) lower too. A **value union** `A | B` (ADR-0083) is narrowed by a
-  type-pattern `n Int53 ->`: a primitive tests `typeof`, a sum the tagged-array head,
-  a struct `__struct__` — the sum/struct discriminator is *baked into the pattern*
+  strings) and `Result` (`{:ok,v}`/`{:error,e}` → tagged arrays — a tuple, *not* a
+  sum, so it stays an array — matched in a `case`) lower too. A **value union**
+  `A | B` (ADR-0083) is narrowed by a type-pattern `n Int53 ->`: a primitive tests
+  `typeof`, a sum the variant `$` tag, a struct `__struct__` — the discriminator is
+  *baked into the pattern*
   (`bake_union_disc`) before emit, as the `expr_js` recursion threads no type
   registry. A **lambda** `(a) -> body` lowers to a JS arrow function `(a) => body`,
   capturing its environment natively (no `Box`/`move` ceremony as Rust needs —
@@ -222,8 +225,8 @@ defmodule Rian.JS do
   beside `<name>.mjs` (a `.d.ts` does *not* resolve for a `.mjs`, ADR-0086 §5).
 
   **The declarations describe the values the `.mjs` actually produces** (a sum is a
-  tagged array `["Ctor", …]`, a struct a `{__struct__: "Name", …}` object, a
-  `Result` an `["ok", v]` / `["error", e]` pair) — never an aspirational shape.
+  tagged object `{ $: "Ctor", _0: … }`, a struct a `{__struct__: "Name", …}` object,
+  a `Result` an `["ok", v]` / `["error", e]` tuple) — never an aspirational shape.
 
   **Honest scope limits** (ADR-0086 §5 — types are *documentation, not a gate*; the
   reach gate stays `Rian.Reach`):
@@ -328,7 +331,7 @@ defmodule Rian.JS do
   defp dts_range(r), do: "export type #{r.name} = number;"
 
   # a sum type lowers to a discriminated union of fixed-length tagged tuples, exactly
-  # the `["Ctor", …]` arrays the runtime emits.
+  # the `{ $: "Ctor", … }` objects the runtime emits.
   defp dts_sum(t, known) do
     tvars = t.variants |> Enum.flat_map(& &1.fields) |> collect_tvars(known)
     tset = MapSet.new(tvars)
@@ -346,8 +349,16 @@ defmodule Rian.JS do
     tag = inspect(to_string(v.ctor))
 
     case v.fields do
-      [] -> "[#{tag}]"
-      fs -> "[#{tag}, #{Enum.map_join(fs, ", ", &ts_type(&1.type, known, tvars))}]"
+      [] ->
+        "{ $: #{tag} }"
+
+      fs ->
+        body =
+          fs
+          |> Enum.with_index()
+          |> Enum.map_join(", ", fn {f, i} -> "_#{i}: #{ts_type(f.type, known, tvars)}" end)
+
+        "{ $: #{tag}, #{body} }"
     end
   end
 
@@ -459,7 +470,7 @@ defmodule Rian.JS do
     do: "Array<#{ts_type(a, known, tvars)}>"
 
   defp ts_application("Option", [a], known, tvars),
-    do: ~s(["Some", #{ts_type(a, known, tvars)}] | ["None"])
+    do: ~s({ $: "Some", _0: #{ts_type(a, known, tvars)} } | { $: "None" })
 
   defp ts_application("Result", [a, b], known, tvars),
     do: ~s(["ok", #{ts_type(a, known, tvars)}] | ["error", #{ts_type(b, known, tvars)}])
@@ -545,7 +556,7 @@ defmodule Rian.JS do
 
   # ── protocol dispatch (ADR-0061 §3): a JS dispatcher per protocol method ──
   # mirrors the BEAM strategy — select the impl by the first argument's runtime
-  # shape — but with JS-native guards (`typeof`, tagged-array head).
+  # shape — but with JS-native guards (`typeof`, the variant `$` tag).
   defp protocol_dispatchers_js(prog, i53) do
     reg = %{sums: sum_ctor_map(prog), structs: struct_name_set(prog)}
     protocols = Map.get(prog, :protocols, [])
@@ -639,8 +650,8 @@ defmodule Rian.JS do
   # value is a tagged array `["Ctor", …]`, so "is a `T`" tests the head against `T`'s
   # ctor tags (mirrors `sum_guard_js`).
   defp sum_disc_js(ctors, acc) do
-    tags = Enum.map_join(ctors, " || ", &~s(#{acc}[0] === "#{&1}"))
-    "Array.isArray(#{acc}) && (#{tags})"
+    tags = Enum.map_join(ctors, " || ", &~s(#{acc}.$ === "#{&1}"))
+    "#{acc} != null && (#{tags})"
   end
 
   # the JS test for a STRUCT member: a struct is `{__struct__: "Name", …}` (mirrors
@@ -657,8 +668,8 @@ defmodule Rian.JS do
 
   # a sum value is a tagged array `["Ctor", …]` (this module's representation)
   defp sum_guard_js(ctors) do
-    tags = Enum.map_join(ctors, " || ", &~s(a0[0] === "#{&1}"))
-    "Array.isArray(a0) && (#{tags})"
+    tags = Enum.map_join(ctors, " || ", &~s(a0.$ === "#{&1}"))
+    "a0 != null && (#{tags})"
   end
 
   # split a parameter string on top-level commas (respecting nested `(`/`)`), to
@@ -983,11 +994,11 @@ defmodule Rian.JS do
       args
       |> Enum.with_index()
       |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
-        {t, b} = pat_match(p, "#{acc}[#{i + 1}]", i53)
+        {t, b} = pat_match(p, "#{acc}._#{i}", i53)
         {ts ++ t, bs ++ b}
       end)
 
-    {["#{acc}[0] === #{inspect(ctor)}" | ts], bs}
+    {["#{acc}.$ === #{inspect(ctor)}" | ts], bs}
   end
 
   # a list is a JS array; a closed pattern fixes the length, a cons pattern
@@ -1143,9 +1154,9 @@ defmodule Rian.JS do
   # `{:ok, v}` is then `["ok", v]`, exactly parallel to a sum variant `["Ctor", …]`.
   defp expr_js(%EAtom{name: a}, _i53), do: js_atom(a)
 
-  # a bare PascalCase id is a nullary sum variant -> a one-element tagged array
+  # a bare PascalCase id is a nullary sum variant -> a tagged object `{ $: "Red" }`
   defp expr_js(%EId{name: x}, _i53) do
-    if pascal?(x), do: "[#{inspect(x)}]", else: x
+    if pascal?(x), do: "{ $: #{inspect(x)} }", else: x
   end
 
   defp expr_js(%EUnary{op: "-", arg: x}, i53), do: "-#{expr_js(x, i53)}"
@@ -1321,7 +1332,15 @@ defmodule Rian.JS do
 
   defp expr_js(%ECall{fun: %EId{name: f}, args: args}, i53) do
     if pascal?(f) do
-      "[#{Enum.join([inspect(f) | Enum.map(args, &expr_js(&1, i53))], ", ")}]"
+      # a sum variant -> a tagged object `{ $: "Ctor", _0: a, _1: b }` (positional
+      # field keys; distinguishes a variant from a list/tuple, unlike the old array)
+      fields =
+        args
+        |> Enum.with_index()
+        |> Enum.map_join(", ", fn {a, i} -> "_#{i}: #{expr_js(a, i53)}" end)
+
+      sep = if args == [], do: "", else: ", "
+      "{ $: #{inspect(f)}#{sep}#{fields} }"
     else
       "#{f}(#{Enum.map_join(args, ", ", &expr_js(&1, i53))})"
     end

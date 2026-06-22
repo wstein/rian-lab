@@ -7,7 +7,7 @@
 #
 # Coverage is the full expression + function surface: functions with multi-clause
 # pattern dispatch (each clause `{ [if (tests) {] binds; return … [}] }`, the
-# trailing throw), sum variants (tagged arrays `["Ctor", …]`), structs
+# trailing throw), sum variants (tagged objects `{ $: "Ctor", … }`), structs
 # (`{__struct__: "Name", …}`), tuples/lists (with `...`-spread tail)/maps, `.field`,
 # `if` (ternary), `case` (IIFE), operators, atoms (→ strings), and primitives.
 #
@@ -251,8 +251,8 @@ mod Js do
   def pat_match(PChar(cp), acc) := Match(tests: [acc <> " === " <> int_str(cp)], binds: [])
   def pat_match(PAtom(a), acc) := Match(tests: [acc <> " === " <> js_str(a)], binds: [])
   def pat_match(PCtor(ctor, args), acc)
-    inner := pm_seq(args, acc, 1, [], [])
-    Match(tests: [acc <> "[0] === " <> js_str(ctor) | inner.tests], binds: inner.binds)
+    inner := pm_seq(args, acc, 0, [], [])
+    Match(tests: [acc <> ".$ === " <> js_str(ctor) | inner.tests], binds: inner.binds)
   end
   def pat_match(PTuple(es), acc)
     inner := pm_idx(es, acc, 0, [], [])
@@ -271,11 +271,11 @@ mod Js do
   def plist_match(acc String, n Int53, inner Match, tm Match) Match :=
     Match(tests: [acc <> ".length >= " <> int_str(n) | app(inner.tests, tm.tests)], binds: app(inner.binds, tm.binds))
 
-  # sequence sub-patterns at `acc[base], acc[base+1], …` (ctor fields: base 1).
+  # sequence a tagged-object variant's positional fields at `acc._0, acc._1, …`.
   def pm_seq(Vec(Pat), String, Int53, Vec(String), Vec(Bind)) Match
   def pm_seq([], _, _, ts, bs) := Match(tests: ts, binds: bs)
   def pm_seq([p | rest], acc, i, ts, bs)
-    m := pat_match(p, acc <> "[" <> int_str(i) <> "]")
+    m := pat_match(p, acc <> "._" <> int_str(i))
     pm_seq(rest, acc, i + 1, app(ts, m.tests), app(bs, m.binds))
   end
 
@@ -310,7 +310,7 @@ mod Js do
   def emit(CStr(s)) := js_str(s)
   def emit(CId(x))
     if pascal(x) do
-      "[" <> js_str(x) <> "]"
+      "{ $: " <> js_str(x) <> " }"
     else
       x
     end
@@ -325,7 +325,7 @@ mod Js do
   def emit(CCall("__prim_str_concat", [a, b])) := "(" <> emit(a) <> " + " <> emit(b) <> ")"
   def emit(CCall(f, args))
     if pascal(f) do
-      "[" <> js_str(f) <> comma_rest(args) <> "]"
+      "{ $: " <> js_str(f) <> ctor_fields(args, 0) <> " }"
     else
       f <> "(" <> emit_args(args) <> ")"
     end
@@ -351,10 +351,10 @@ mod Js do
   def emit_args([x]) := emit(x)
   def emit_args([x | rest]) := emit(x) <> ", " <> emit_args(rest)
 
-  # ", a, b" — for a tagged array head `["Ctor"` + these.
-  def comma_rest(Vec(Core)) String
-  def comma_rest([]) := ""
-  def comma_rest([x | rest]) := ", " <> emit(x) <> comma_rest(rest)
+  # ", _0: a, _1: b" — the positional fields of a tagged-object variant `{ $: "Ctor"` + these + ` }`.
+  def ctor_fields(Vec(Core), Int53) String
+  def ctor_fields([], _) := ""
+  def ctor_fields([x | rest], i) := ", _" <> int_str(i) <> ": " <> emit(x) <> ctor_fields(rest, i + 1)
 
   def list_spread(es Vec(Core), t Core) String := join_spread(es) <> "..." <> emit(t)
 

@@ -37,7 +37,7 @@
       "id": "types",
       "panes": {
         "ex": "@type shape :: {:circle, float()} | {:square, float()}\ndef area({:circle, r}) do 3.14159 * r * r end\ndef area({:square, s}) do s * s end",
-        "js": "function area(a0) {\n  { if (a0[0] === \"Circle\") { const r = a0[1]; return ((3.14159 * r) * r); } }\n  { if (a0[0] === \"Square\") { const s = a0[1]; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}",
+        "js": "function area(a0) {\n  { if (a0.$ === \"Circle\") { const r = a0._0; return ((3.14159 * r) * r); } }\n  { if (a0.$ === \"Square\") { const s = a0._0; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}",
         "jvm": "sealed interface Shape\ndata class Circle(val f0: Double) : Shape\ndata class Square(val f0: Double) : Shape\n\nprivate fun area(a0: Shape): Double {\n  if (a0 is Circle) { val r = a0.f0; return ((3.14159 * r) * r) }\n  if (a0 is Square) { val s = a0.f0; return (s * s) }\n  throw RuntimeException(\"area: no clause matched\")\n}",
         "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Shape {\n    Circle { radius: f64 },\n    Square { side: f64 },\n}\n\nfn area(s: &Shape) -> f64 {\n    match s {\n        Shape::Circle { radius: r } => 3.14159 * r * r,\n        Shape::Square { side: s } => s * s,\n    }\n}"
       },
@@ -89,7 +89,7 @@
       "id": "capabilities",
       "panes": {
         "ex": "@type shape :: {:circle, float()} | {:square, float()}\ndef area({:circle, r}) do 3.14159 * r * r end\ndef area({:square, s}) do s * s end\ndef consume(s) do area(s) end",
-        "js": "function area(a0) {\n  { if (a0[0] === \"Circle\") { const r = a0[1]; return ((3.14159 * r) * r); } }\n  { if (a0[0] === \"Square\") { const s = a0[1]; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}\n\nfunction consume(s) { return area(s); }",
+        "js": "function area(a0) {\n  { if (a0.$ === \"Circle\") { const r = a0._0; return ((3.14159 * r) * r); } }\n  { if (a0.$ === \"Square\") { const s = a0._0; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}\n\nfunction consume(s) { return area(s); }",
         "jvm": "sealed interface Shape\ndata class Circle(val f0: Double) : Shape\ndata class Square(val f0: Double) : Shape\n\nprivate fun area(a0: Shape): Double {\n  if (a0 is Circle) { val r = a0.f0; return ((3.14159 * r) * r) }\n  if (a0 is Square) { val s = a0.f0; return (s * s) }\n  throw RuntimeException(\"area: no clause matched\")\n}\n\nprivate fun consume(a0: Shape): Double {\n  val s = a0; return area(s)\n}",
         "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Shape {\n    Circle { radius: f64 },\n    Square { side: f64 },\n}\n\nfn area(s: &Shape) -> f64 {\n    match s {\n        Shape::Circle { radius: r } => 3.14159 * r * r,\n        Shape::Square { side: s } => s * s,\n    }\n}\n\nfn consume(s: Shape) -> f64 {\n    match s {\n        s => area(s),\n    }\n}"
       },
@@ -121,7 +121,7 @@
       "id": "case",
       "panes": {
         "ex": "@type color :: :red | :green | :blue\ndef code(c) do case c do :red -> 1; :green -> 2; :blue -> 3 end end",
-        "js": "function code(c) { return (() => { const _s = c; if (_s[0] === \"Red\") { return 1; } if (_s[0] === \"Green\") { return 2; } if (_s[0] === \"Blue\") { return 3; } throw new Error(\"case: no clause matched\"); })(); }",
+        "js": "function code(c) { return (() => { const _s = c; if (_s.$ === \"Red\") { return 1; } if (_s.$ === \"Green\") { return 2; } if (_s.$ === \"Blue\") { return 3; } throw new Error(\"case: no clause matched\"); })(); }",
         "jvm": "sealed interface Color\nobject Red : Color\nobject Green : Color\nobject Blue : Color\n\nprivate fun code(a0: Color): Long {\n  val c = a0; return run rcase@{\nif (c is Red) { return@rcase 1L }\nif (c is Green) { return@rcase 2L }\nif (c is Blue) { return@rcase 3L }\nthrow RuntimeException(\"case: no clause matched\")\n}\n}",
         "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Color {\n    Red,\n    Green,\n    Blue,\n}\n\nfn code(c: &Color) -> i64 {\n    match c {\n        c => match c { Color::Red => 1, Color::Green => 2, Color::Blue => 3, },\n    }\n}"
       },

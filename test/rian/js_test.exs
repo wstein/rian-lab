@@ -12,7 +12,11 @@ defmodule Rian.JSTest do
 
       node ->
         path = Path.join(System.tmp_dir!(), "rian_js_#{System.unique_integer([:positive])}.mjs")
-        File.write!(path, js <> "\nconsole.log(String(#{expr}));\n")
+        # `V(tag, ...fields)` builds a sum value in the emitted object form
+        # `{ $: tag, _0, _1, … }` — so tests construct variants without hand-writing
+        # every `{ $: … }` (ADR-0049: a variant lowers to a tagged object).
+        helper = "const V=(t,...a)=>({$:t,...Object.fromEntries(a.map((x,i)=>['_'+i,x]))});\n"
+        File.write!(path, js <> "\n" <> helper <> "console.log(String(#{expr}));\n")
         {out, 0} = System.cmd(node, [path])
         File.rm(path)
         String.trim(out)
@@ -95,7 +99,7 @@ defmodule Rian.JSTest do
       end
     end
 
-    test "a value union of SUM members narrows by the tagged-array head and runs (ADR-0083)" do
+    test "a value union of SUM members narrows by the variant tag and runs (ADR-0083)" do
       js =
         JS.compile("""
         type Box := BoxV(Int53)
@@ -106,11 +110,11 @@ defmodule Rian.JSTest do
         end
         """)
 
-      # a sum value is `["Ctor", …]`, so "is a Box" tests the head against Box's tags
-      assert js =~ ~s|Array.isArray(_s) && (_s[0] === "BoxV")|
-      assert js =~ ~s|Array.isArray(_s) && (_s[0] === "BagV")|
+      # a sum value is `{ $: "Ctor", … }`, so "is a Box" tests `.$` against Box's tags
+      assert js =~ ~s|_s != null && (_s.$ === "BoxV")|
+      assert js =~ ~s|_s != null && (_s.$ === "BagV")|
 
-      case node_eval(js, "[kind(['BoxV',5]), kind(['BagV',9])].join(',')") do
+      case node_eval(js, "[kind({$:'BoxV',_0:5}), kind({$:'BagV',_0:9})].join(',')") do
         :no_node -> :ok
         out -> assert out == "1,2"
       end
@@ -239,14 +243,14 @@ defmodule Rian.JSTest do
         pub def evalexpr(Add(a, b)) := evalexpr(a) + evalexpr(b)
         """)
 
-      # a constructor pattern checks the tag and binds positional fields
-      assert js =~ ~s|a0[0] === "Num"|
-      assert js =~ ~s|a0[0] === "Add"|
-      assert js =~ "const a = a0[1];"
-      assert js =~ "const b = a0[2];"
+      # a constructor pattern checks the `$` tag and binds positional `_n` fields
+      assert js =~ ~s|a0.$ === "Num"|
+      assert js =~ ~s|a0.$ === "Add"|
+      assert js =~ "const a = a0._0;"
+      assert js =~ "const b = a0._1;"
 
-      # Add(Num(2), Add(Num(3), Num(4)))  ->  9 (tagged arrays = how a variant lowers)
-      expr = ~s|["Add",["Num",2n],["Add",["Num",3n],["Num",4n]]]|
+      # Add(Num(2), Add(Num(3), Num(4)))  ->  9 (tagged objects = how a variant lowers)
+      expr = ~s|V("Add",V("Num",2n),V("Add",V("Num",3n),V("Num",4n)))|
 
       case node_eval(js, "evalexpr(#{expr})") do
         :no_node -> :ok
@@ -254,7 +258,7 @@ defmodule Rian.JSTest do
       end
     end
 
-    test "sum-variant construction emits a tagged array, round-tripping under node" do
+    test "sum-variant construction emits a tagged object, round-tripping under node" do
       js =
         JS.compile("""
         type Color := Red | Green
@@ -263,13 +267,13 @@ defmodule Rian.JSTest do
         pub def flip(Green) := Red
         """)
 
-      # nullary construction -> a one-element tagged array
-      assert js =~ ~s|return ["Green"];|
-      assert js =~ ~s|a0[0] === "Red"|
+      # nullary construction -> a bare tagged object
+      assert js =~ ~s|return { $: "Green" };|
+      assert js =~ ~s|a0.$ === "Red"|
 
-      case node_eval(js, "JSON.stringify(flip(['Red']))") do
+      case node_eval(js, ~s|JSON.stringify(flip(V('Red')))|) do
         :no_node -> :ok
-        out -> assert out == ~s|["Green"]|
+        out -> assert out == ~s|{"$":"Green"}|
       end
     end
 
@@ -291,33 +295,34 @@ defmodule Rian.JSTest do
       js = JS.compile(File.read!("test/fixtures/rian/opt.rian"))
 
       # (2 + 3) * 4  ->  Num(20);  a constant tree folds to one literal
-      tree = ~s|["Mul",["Add",["Num",2n],["Num",3n]],["Num",4n]]|
+      tree = ~s|V("Mul",V("Add",V("Num",2n),V("Num",3n)),V("Num",4n))|
       # x * 1 + 0  ->  Var("x");  algebraic identities, matched by shape
-      ident = ~s|["Add",["Mul",["Var","x"],["Num",1n]],["Num",0n]]|
+      ident = ~s|V("Add",V("Mul",V("Var","x"),V("Num",1n)),V("Num",0n))|
 
       case node_eval(
              js,
              "JSON.stringify(fold(#{tree}), (k,v)=>typeof v==='bigint'?v.toString():v)"
            ) do
         :no_node -> :ok
-        out -> assert out == ~s|["Num","20"]|
+        out -> assert out == ~s|{"$":"Num","_0":"20"}|
       end
 
       case node_eval(js, "JSON.stringify(fold(#{ident}))") do
         :no_node -> :ok
-        out -> assert out == ~s|["Var","x"]|
+        out -> assert out == ~s|{"$":"Var","_0":"x"}|
       end
     end
 
     test "the self-hosting parser lowers to JS and parses under node (cons-recursive)" do
       js = JS.compile(File.read!("test/fixtures/rian/parser.rian"))
 
-      # token arrays use the variant convention: TNum(5) -> ["TNum", 5n], TPlus -> ["TPlus"]
+      # a token list is a `Vec` (array) of variant objects: TNum(5) -> {$:"TNum",_0:5n}
       toks =
-        ~s|[["TNum",1n],["TPlus"],["TNum",2n],["TStar"],["TLParen"],["TNum",3n],["TMinus"],["TNum",4n],["TRParen"]]|
+        ~s|[V("TNum",1n),V("TPlus"),V("TNum",2n),V("TStar"),V("TLParen"),V("TNum",3n),V("TMinus"),V("TNum",4n),V("TRParen")]|
 
       # 1 + 2 * (3 - 4)  ->  Add(Num 1, Mul(Num 2, Sub(Num 3, Num 4)))
-      expected = ~s|["Add",["Num","1"],["Mul",["Num","2"],["Sub",["Num","3"],["Num","4"]]]]|
+      expected =
+        ~s|{"$":"Add","_0":{"$":"Num","_0":"1"},"_1":{"$":"Mul","_0":{"$":"Num","_0":"2"},"_1":{"$":"Sub","_0":{"$":"Num","_0":"3"},"_1":{"$":"Num","_0":"4"}}}}|
 
       case node_eval(
              js,
@@ -434,9 +439,9 @@ defmodule Rian.JSTest do
 
       # `whole` binds the scrutinee; the inner `Box(n)` still matches + binds `n`
       assert js =~ "const whole = _s;"
-      assert js =~ "const n = _s[1];"
+      assert js =~ "const n = _s._0;"
 
-      case node_eval(js, "inner(['Box', 7])") do
+      case node_eval(js, "inner(V('Box', 7))") do
         :no_node -> :ok
         out -> assert out == "7"
       end
@@ -568,14 +573,13 @@ defmodule Rian.JSTest do
     end
     """
 
-    test "the dispatcher uses JS-native guards (typeof + tagged-array head)" do
+    test "the dispatcher uses JS-native guards (typeof + the variant `$` tag)" do
       js = JS.compile(@show)
       assert js =~ "export function show(a0)"
       assert js =~ ~s(typeof a0 === "bigint")
       assert js =~ ~s(typeof a0 === "boolean")
-      assert js =~ "Array.isArray(a0)"
-      assert js =~ ~s(a0[0] === "Num")
-      assert js =~ ~s(a0[0] === "Zero")
+      assert js =~ ~s|a0 != null && (a0.$ === "Num"|
+      assert js =~ ~s|a0.$ === "Zero"|
       # no BEAM guard leaked through
       refute js =~ "is_integer"
       refute js =~ "element("
@@ -585,8 +589,8 @@ defmodule Rian.JSTest do
       js = JS.compile(@show)
       assert node_eval(js, "show(42n)") in [:no_node, "int"]
       assert node_eval(js, "show(true)") in [:no_node, "bool"]
-      assert node_eval(js, ~s/show(["Num", 5n])/) in [:no_node, "num"]
-      assert node_eval(js, ~s/show(["Zero"])/) in [:no_node, "zero"]
+      assert node_eval(js, ~s/show(V("Num", 5n))/) in [:no_node, "num"]
+      assert node_eval(js, ~s/show(V("Zero"))/) in [:no_node, "zero"]
     end
 
     test "the integer Eq/Ord stdlib is JS-portable (literals are Int53) and runs in node" do
@@ -700,9 +704,10 @@ defmodule Rian.JSTest do
         end
         """)
 
-      # construction: a Result is a tagged array, parallel to a sum variant
+      # construction: a Result is a tagged array (a tuple); a sum variant inside it
+      # (`Bad`) is now a tagged object
       assert js =~ ~s|["ok", n]|
-      assert js =~ ~s|["error", ["Bad"]]|
+      assert js =~ ~s|["error", { $: "Bad" }]|
       # matching: positional length + tag-string test
       assert js =~ ~s|_s[0] === "ok"|
 
@@ -1180,7 +1185,7 @@ defmodule Rian.JSTest do
       refute dts =~ "hidden"
     end
 
-    test "a sum type lowers to a discriminated union of tagged tuples" do
+    test "a sum type lowers to a discriminated union of tagged objects" do
       dts =
         JS.compile_types("""
         type Expr := Num(Int53) | Add(Expr, Expr)
@@ -1190,7 +1195,9 @@ defmodule Rian.JSTest do
         end
         """)
 
-      assert dts =~ ~s/export type Expr = ["Num", number] | ["Add", Expr, Expr];/
+      assert dts =~
+               ~s/export type Expr = { $: "Num", _0: number } | { $: "Add", _0: Expr, _1: Expr };/
+
       assert dts =~ "export function show(e: Expr): number;"
     end
 
@@ -1215,7 +1222,9 @@ defmodule Rian.JSTest do
         pub def apply(f Fn(Int53, Int53), n Int53) Int53 := f(n)
         """)
 
-      assert dts =~ ~s/export function first<T>(xs: Array<T>): ["Some", T] | ["None"];/
+      assert dts =~
+               ~s/export function first<T>(xs: Array<T>): { $: "Some", _0: T } | { $: "None" };/
+
       assert dts =~ "export function apply(f: (a0: number) => number, n: number): number;"
     end
 
@@ -1265,7 +1274,7 @@ defmodule Rian.JSTest do
       import { area, label } from "./prog.mjs";
       const p = { __struct__: "Point" as const, x: 6, y: 7 };
       const a: number = area(p);
-      const l: number = label(["Red"]);
+      const l: number = label({ $: "Red" });
       """
 
       case tsc_check([{"prog.mjs", mjs}, {"prog.d.mts", dts}, {"prog.ts", good}]) do
