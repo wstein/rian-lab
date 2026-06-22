@@ -727,6 +727,12 @@ gate_corpus = [
   "@external(:js, \"x => x\")\ndef ecref(x ref Int53) Int53",
   "@external(:js, \"x => x\")\ndef ecok(x tag Int53) Int53",
   "@external(:js, :erlang.length)\ndef eclen(xs Vec(Int53)) Int53",
+  # ref-arity resolution (ADR-0041 §2, host reflection via Rian.HostRef): a loaded module that
+  # exports no such fun/arity is rejected (`:erlang.length/2` and `:erlang.no_such_bif/1` don't
+  # exist); a ref to an unloadable module is conservatively accepted.
+  "@external(:js, :erlang.length)\ndef ewrongarity(a Int53, b Int53) Int53",
+  "@external(:js, :erlang.no_such_bif)\ndef enobif(x Int53) Int53",
+  "@external(:ex, Mod.fun)\ndef eunloadable(a Int53) Int53",
   # check_labels (ADR-0065): a labeled arg is valid only on PascalCase construction — a lowercase
   # call and a qualified `Mod.foo` call are rejected; construction is fine.
   "pub def lblbad(x Int53) Int53 := g(a: x)",

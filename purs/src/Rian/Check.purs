@@ -58,7 +58,8 @@ import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
 import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Cap(..), Func, Param, Prog, Type, bodySurface)
+import Rian.IR (Cap(..), ExtSpec(..), Func, Param, Prog, Type, bodySurface)
+import Rian.HostRef (refExported)
 import Rian.Macro (childrenOf)
 import Rian.Reach (effectSets)
 import Rian.Prelude (withPrelude)
@@ -1130,11 +1131,9 @@ checkUnk f = case findMap holeOf (map _.ty f.params <> [ f.ret ]) of
   holeOf Nothing = Nothing
 
 -- An `@external` (ADR-0068) crosses an FFI boundary, so its parameters must be `val`/`tag` —
--- linearity (`iso`/`ref`) is not enforceable across it (ADR-0055). The reference also resolves a
--- `Mod.fun`/`:erlang.fun` ref's arity via host reflection (`function_exported?`); that part is
--- host-coupled — the same BEAM reflection `Rian.External.resolve` needs, deliberately unported —
--- so the portable gate enforces only the cap rule (a string spec, a file ref, and any module ref
--- the reflection can't refute all pass, exactly as the reference returns `:ok` for them).
+-- linearity (`iso`/`ref`) is not enforceable across it (ADR-0055) — and each `Mod.fun`/`:erlang.fun`
+-- reference must name a function of matching arity (the no-silent-stub guarantee, ADR-0041 §2),
+-- resolved via BEAM reflection through `Rian.HostRef` (the host-FFI boundary).
 checkExternalCaps :: Func -> Maybe String
 checkExternalCaps f =
   if null f.externals then Nothing
@@ -1144,13 +1143,33 @@ checkExternalCaps f =
         ( "`" <> f.name <> "`: an `@external` parameter must be `val` or `tag` — `" <> p.name <> "` is `"
             <> capWord p.cap <> "` (linearity is not enforceable across an FFI boundary, ADR-0068/0055)"
         )
-    Nothing -> Nothing
+    Nothing -> checkExternalRefs f.name (length f.params) f.externals
 
 capWord :: Cap -> String
 capWord Val = "val"
 capWord Iso = "iso"
 capWord Ref = "ref"
 capWord Tag = "tag"
+
+-- resolve each `@external` *reference* spec against the host (a string / file spec is trusted host
+-- text, not resolved); a `Mod.fun`/`:erlang.fun` whose module loads but exports no `fun/arity` is a
+-- compile error. A not-yet-loadable module is conservatively accepted (`Rian.HostRef.refExported`).
+checkExternalRefs :: String -> Int -> Array (Tuple String ExtSpec) -> Maybe String
+checkExternalRefs name arity externals = findMap refErr externals
+  where
+  refErr (Tuple target spec) = case spec of
+    ExtRef parts erlang ->
+      if refExported parts erlang arity then Nothing
+      else
+        Just
+          ( "`" <> name <> "`: `@external(:" <> target <> ", …)` references `" <> refStr parts erlang
+              <> "` but no `" <> fromMaybe "" (last parts) <> "/" <> show arity <> "` is exported"
+          )
+    _ -> Nothing
+
+refStr :: Array String -> Boolean -> String
+refStr parts true = ":" <> joinWith "." parts
+refStr parts false = joinWith "." parts
 
 -- A value union (`A | B`, ADR-0083) narrows by runtime type, so two members sharing a runtime
 -- discriminator (`Int32 | Char` — both `is_integer`/`number`) can never be told apart: the second
