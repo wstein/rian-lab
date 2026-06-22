@@ -126,7 +126,9 @@ run_stream(<<"opq">>, Src) -> hexbin('rian_opaque@ps':eraseSexpr(Src));
 %% Rian.JS (canon = the compiled ECMAScript module — ADR-0049 Tier 1)
 run_stream(<<"js">>, Src) -> hexbin('rian_jS@ps':compileSexpr(Src));
 %% Rian.JS compile_types (canon = the TypeScript `.d.ts` sidecar — ADR-0086 §5)
-run_stream(<<"jsdts">>, Src) -> hexbin('rian_jS@ps':compileTypesSexpr(Src)).
+run_stream(<<"jsdts">>, Src) -> hexbin('rian_jS@ps':compileTypesSexpr(Src));
+%% Rian.ShowStdlib (canon = the serialized `Show` stdlib module, input ignored — ADR-0069 §6)
+run_stream(<<"shs">>, Src) -> hexbin('rian_showStdlib@ps':moduleSexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

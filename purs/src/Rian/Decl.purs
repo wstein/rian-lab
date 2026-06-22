@@ -13,6 +13,7 @@
 module Rian.Decl
   ( parseToProg
   , progSexpr
+  , modSexpr
   , declSexpr
   , protoImplSexpr
   , typeSexpr

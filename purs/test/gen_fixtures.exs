@@ -272,6 +272,9 @@ defmodule DeclCanon do
 
   defp assoc_s({n, ty}), do: " assoc=#{n}" <> if(ty, do: ":=#{ty}", else: "")
 
+  # public wrapper for the `shs` stream: serialize one module (mirrors PS `Decl.modSexpr`).
+  def mod_one(m), do: mod_s(m)
+
   defp mod_s(%Mod{
          name: n,
          uses: us,
@@ -1892,6 +1895,11 @@ lines =
     Enum.map(jsdts_corpus, fn s ->
       "jsdts\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JS.compile_types(s))}"
     end) ++
+    [
+      # Rian.ShowStdlib — the `shs` stream: the parsed `Show` stdlib module (ADR-0069 §6). Input
+      # ignored (the module is fixed); asserts the PS inlined source parses to the reference module.
+      "shs\t#{Canon.hex("show")}\t#{Canon.hex(DeclCanon.mod_one(Rian.ShowStdlib.module()))}"
+    ] ++
     Enum.map(mxb_corpus, fn s ->
       funcs = Map.get(Decl.parse(s, assemble_only: true), :funcs, [])
 
