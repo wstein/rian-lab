@@ -539,7 +539,7 @@ defmodule Rian.Decl do
       end)
 
     assembled_funcs =
-      (user_defs ++ protocol_defs(decls, types, structs, targets, wp))
+      (user_defs ++ protocol_defs(decls, targets, wp))
       # group by name AND arity, so same-name clauses of different arity form
       # separate functions (`f/1` vs `f/2`, like Elixir/Erlang — exported per
       # `{name, arity}` on the BEAM). Same-arity clauses stay one multi-clause group.
@@ -651,7 +651,7 @@ defmodule Rian.Decl do
   # protocol declared in another module (or nowhere) is left for the whole-program
   # `check_cross_module!/1` (orphan rule / own-type diagnostic), not expanded into a
   # per-scope dispatcher — so it never raises a misleading "unknown protocol".
-  defp protocol_defs(decls, types, structs, targets, wp) do
+  defp protocol_defs(decls, targets, wp) do
     protocols =
       for {:protocol, name, inner, _doc} <- decls, into: %{} do
         {name, for({:def, raw} <- inner, do: raw)}
@@ -667,7 +667,7 @@ defmodule Rian.Decl do
         {proto, type, for({:def, raw} <- inner, do: raw), assoc}
       end
 
-    {reg_types, reg_structs} = wp || {types, structs}
+    {reg_types, reg_structs} = wp
 
     if protocols == %{} and impls == [],
       do: [],
