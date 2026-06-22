@@ -1262,24 +1262,21 @@ constInt _ = Nothing
 widthBounds :: String -> Maybe (Tuple Int Int)
 widthBounds "Int8" = Just (Tuple (-128) 127)
 widthBounds "Int16" = Just (Tuple (-32768) 32767)
-widthBounds "Int32" = Just (Tuple (negParse "2147483648") 2147483647)
-widthBounds "Int53" = Just (Tuple (negParse "9007199254740991") (parseIntLit "9007199254740991"))
-widthBounds "Int64" = Just (Tuple (negParse "9223372036854775808") (parseIntLit "9223372036854775807"))
-widthBounds "Int128" = Just (Tuple (negParse "170141183460469231731687303715884105728") (parseIntLit "170141183460469231731687303715884105727"))
+widthBounds "Int32" = Just (Tuple (-2147483648) 2147483647)
+widthBounds "Int53" = Just (Tuple (-9007199254740991) 9007199254740991)
+widthBounds "Int64" = Just (Tuple (-9223372036854775808) 9223372036854775807)
+widthBounds "Int128" = Just (Tuple (-170141183460469231731687303715884105728) 170141183460469231731687303715884105727)
 widthBounds "UInt8" = Just (Tuple 0 255)
 widthBounds "UInt16" = Just (Tuple 0 65535)
-widthBounds "UInt32" = Just (Tuple 0 (parseIntLit "4294967295"))
-widthBounds "UInt64" = Just (Tuple 0 (parseIntLit "18446744073709551615"))
-widthBounds "UInt128" = Just (Tuple 0 (parseIntLit "340282366920938463463374607431768211455"))
+widthBounds "UInt32" = Just (Tuple 0 4294967295)
+widthBounds "UInt64" = Just (Tuple 0 18446744073709551615)
+widthBounds "UInt128" = Just (Tuple 0 340282366920938463463374607431768211455)
 widthBounds _ = Nothing
 
 -- parse a decimal integer literal (underscores stripped). On purerl `Int.fromString`
 -- is Erlang `binary_to_integer/2` — arbitrary precision, no 32-bit clamp.
 parseIntLit :: String -> Int
 parseIntLit s = fromMaybe 0 (Int.fromString (replaceAll (Str.Pattern "_") (Str.Replacement "") s))
-
-negParse :: String -> Int
-negParse s = negate (parseIntLit s)
 
 -- `Vec(ElemT)` → `Just ElemT`, else `Nothing` (the reference's `^Vec\((.+)\)$`).
 vecElem :: String -> Maybe String
@@ -1643,178 +1640,6 @@ assocFind k = foldl step Nothing
   step acc (Tuple k2 v) = case acc of
     Just _ -> acc
     Nothing -> if k2 == k then Just v else Nothing
-
--- ── check_binds (ADR-0034 §1 / ADR-0064): a typed binding `x T := e` in a block body checks `e`
--- against `T` — a numeric *literal* adopts `T` (bidirectional; it must still FIT the width's range),
--- while any already-typed RHS must be *assignable* to `T` (lossless widening, never narrowing). An
--- `:unknown` RHS is left unchecked (the gate reports only provable clashes). Only the body's
--- top-level block statements are walked, threading each bind's type into the env.
-checkBinds :: Ic -> Func -> Maybe String
-checkBinds ic f = findMap clauseBinds f.clauses
-  where
-  clauseBinds c = maybe Nothing (\b -> checkBindStmts ic (clauseEnv c.pats f.params ic) (blockStmts (bodySurface b))) c.body
-
-blockStmts :: P.Surface -> Array P.Stmt
-blockStmts (P.SBlock stmts) = stmts
-blockStmts other = [ P.StExpr other ]
-
-checkBindStmts :: Ic -> Env -> Array P.Stmt -> Maybe String
-checkBindStmts ic env stmts = case uncons stmts of
-  Nothing -> Nothing
-  Just { head: s, tail } -> case s of
-    P.StTypedBind name ann e -> case bindMismatch ic env name ann e of
-      Just err -> Just err
-      Nothing -> checkBindStmts ic (snoc env (Tuple name (resolveRange (TName ann) ic))) tail
-    P.StBind name e -> checkBindStmts ic (snoc env (Tuple name (infer (fromExpr e) env ic))) tail
-    P.StBindArrow name e -> checkBindStmts ic (snoc env (Tuple name (infer (fromExpr e) env ic))) tail
-    P.StBindPat _ _ -> checkBindStmts ic env tail
-    P.StExpr _ -> checkBindStmts ic env tail
-
--- `Nothing` when a binding is well-typed (or unprovable); `Just msg` on a proven clash.
-bindMismatch :: Ic -> Env -> String -> String -> P.Surface -> Maybe String
-bindMismatch ic env name ann e =
-  let ce = fromExpr e in
-  case assocFind ann ic.ranges of
-    Just r -> rangeBind ic env name ann r ce
-    Nothing ->
-      -- a constant-of-literals value adopts the declared width (scalars, list literals, and
-      -- `if`/`case`/arith of literals) — it must still fit the width's range (ADR-0064).
-      if litExprAdopts e ann then litRangeError e ann name
-      -- an integer literal does not silently become a float (ADR-0035): `x Float64 := 66` is an error.
-      else if intLitExpr ce && floatType ann then
-        Just ("`" <> name <> "`: an integer literal does not adopt the float type `" <> ann <> "` — write an explicit float")
-      else
-        let t = infer ce env ic in
-          if assignable t (TName ann) then Nothing
-          else Just ("`" <> name <> "`: binding declared `" <> ann <> "` but its value has type `" <> tyStr t <> "`")
-
--- a binding against a `range` type: a literal must fall in the ordinal bounds; a runtime value of
--- the range's base type is assignable (use `Name.of(n)` to construct one), else a proven mismatch.
-rangeBind :: Ic -> Env -> String -> String -> RangeInfo -> CExpr -> Maybe String
-rangeBind ic env name ann r ce = case literalOrdinal ce r.base of
-  LOk v ->
-    if v >= r.lo && v <= r.hi then Nothing
-    else Just ("`" <> name <> "`: literal " <> show v <> " is outside range `" <> ann <> "` (" <> show r.lo <> ".." <> show r.hi <> ")")
-  LKindMismatch got ->
-    Just ("`" <> name <> "`: range `" <> ann <> "` is over `" <> r.base <> "`, but the literal is a `" <> got <> "`")
-  LNotLiteral ->
-    let t = infer ce env ic in
-      if assignable (resolveRange t ic) (TName r.base) then Nothing
-      else Just ("`" <> name <> "`: value of type `" <> tyStr t <> "` is not assignable to range `" <> ann <> "` (base `" <> r.base <> "`); use `" <> ann <> ".of(n)` for a runtime value")
-
--- a `range` name resolves to its ordinal base; any other type is itself.
-resolveRange :: Ty -> Ic -> Ty
-resolveRange (TName n) ic = case assocFind n ic.ranges of
-  Just r -> TName r.base
-  Nothing -> TName n
-resolveRange t _ = t
-
--- the ordinal value of a literal against a range base (`Int64`/`Char`); a kind clash or a
--- non-literal are reported distinctly (mirrors the reference `literal_ordinal`).
-data OrdResult = LOk Int | LKindMismatch String | LNotLiteral
-
-literalOrdinal :: CExpr -> String -> OrdResult
-literalOrdinal (ENum n) "Int64" = if intLiteral n then maybe LNotLiteral LOk (Int.fromString (stripUnderscores n)) else LNotLiteral
-literalOrdinal (EUnary "-" a) "Int64" = case literalOrdinal a "Int64" of
-  LOk v -> LOk (-v)
-  other -> other
-literalOrdinal (EChar cp) "Char" = LOk cp
-literalOrdinal (ENum _) "Char" = LKindMismatch "Int64"
-literalOrdinal (EChar _) "Int64" = LKindMismatch "Char"
-literalOrdinal _ _ = LNotLiteral
-
--- ── literal-width adoption (ADR-0064): does a constant-of-literals expression adopt the type `ret`?
--- recurses through `if`/`case`/single-expr-block/arith and a closed list literal (each element
--- adopts the element type), bottoming out at a bare/negated numeric literal (`literalAdopts`).
-litExprAdopts :: P.Surface -> String -> Boolean
-litExprAdopts node ret = case node of
-  P.SIf _ t e -> litExprAdopts t ret && litExprAdopts e ret
-  P.SCase _ arms -> not (null arms) && all (\a -> litExprAdopts a.body ret) arms
-  P.SBin op l r | elem op litAdoptOps -> litExprAdopts l ret && litExprAdopts r ret
-  P.SListLit elems Nothing -> case vecElemOf ret of
-    Just et -> all (\el -> litExprAdopts el et) elems
-    Nothing -> false
-  P.SBlock stmts -> case singleExpr stmts of
-    Just e -> litExprAdopts e ret
-    Nothing -> literalAdopts (fromExpr node) ret
-  _ -> literalAdopts (fromExpr node) ret
-
-litAdoptOps :: Array String
-litAdoptOps = [ "+", "-", "*", "div", "rem" ]
-
-literalAdopts :: CExpr -> String -> Boolean
-literalAdopts (ENum n) ann = if intLiteral n then intType (TName ann) else floatType ann
-literalAdopts (EUnary "-" a) ann = literalAdopts a ann
-literalAdopts _ _ = false
-
-floatType :: String -> Boolean
-floatType t = case Str.stripPrefix (Str.Pattern "Float") t of
-  Just rest -> allDigits rest
-  Nothing -> false
-
-allDigits :: String -> Boolean
-allDigits s = all isDigit (toCharArray s)
-
--- ── fixed-width literal range check (ADR-0064): a constant integer literal adopting a fixed-width
--- type must fit that width's two's-complement range — `x Int8 := 9999` is a compile error. Scans a
--- bare/negated literal, a list element, or an `if`/`case`/block branch; arithmetic of literals is
--- left to the runtime wrap contract.
-litRangeError :: P.Surface -> String -> String -> Maybe String
-litRangeError expr ty name = case vecElemOf ty of
-  Just et -> findMap (\el -> litRangeError el et name) (listElems expr)
-  Nothing -> case widthBounds ty of
-    Nothing -> Nothing
-    Just (Tuple lo hi) -> oorScan expr ty lo hi name
-
-listElems :: P.Surface -> Array P.Surface
-listElems (P.SListLit elems _) = elems
-listElems (P.SBlock stmts) = maybe [] listElems (singleExpr stmts)
-listElems _ = []
-
-oorScan :: P.Surface -> String -> Int -> Int -> String -> Maybe String
-oorScan (P.SIf _ t e) ty lo hi n = case oorScan t ty lo hi n of
-  Nothing -> oorScan e ty lo hi n
-  v -> v
-oorScan (P.SCase _ arms) ty lo hi n = findMap (\a -> oorScan a.body ty lo hi n) arms
-oorScan node ty lo hi n = case node of
-  P.SBlock stmts -> maybe Nothing (\e -> oorScan e ty lo hi n) (singleExpr stmts)
-  _ -> case constInt node of
-    Just v | v < lo || v > hi -> Just ("`" <> n <> "`: literal " <> show v <> " is out of range for `" <> ty <> "` (" <> show lo <> ".." <> show hi <> ")")
-    _ -> Nothing
-
-constInt :: P.Surface -> Maybe Int
-constInt (P.SNum t) = if intLiteral t then Int.fromString (stripUnderscores t) else Nothing
-constInt (P.SUnary "-" e) = map negate (constInt e)
-constInt _ = Nothing
-
--- two's-complement bounds for the fixed-width integer types; `Nothing` for arbitrary-precision
--- `Int` / non-integer types. purerl `Int` is an Erlang bignum, so the wide bounds are plain
--- literals (the purs frontend accepts arbitrary-precision `Int` literals on this backend).
-widthBounds :: String -> Maybe (Tuple Int Int)
-widthBounds t = case t of
-  "Int8" -> Just (Tuple (-128) 127)
-  "Int16" -> Just (Tuple (-32768) 32767)
-  "Int32" -> Just (Tuple (-2147483648) 2147483647)
-  "Int53" -> Just (Tuple (-9007199254740991) 9007199254740991)
-  "Int64" -> Just (Tuple (-9223372036854775808) 9223372036854775807)
-  "Int128" -> Just (Tuple (-170141183460469231731687303715884105728) 170141183460469231731687303715884105727)
-  "UInt8" -> Just (Tuple 0 255)
-  "UInt16" -> Just (Tuple 0 65535)
-  "UInt32" -> Just (Tuple 0 4294967295)
-  "UInt64" -> Just (Tuple 0 18446744073709551615)
-  "UInt128" -> Just (Tuple 0 340282366920938463463374607431768211455)
-  _ -> Nothing
-
-stripUnderscores :: String -> String
-stripUnderscores = replaceAll (Str.Pattern "_") (Str.Replacement "")
-
-vecElemOf :: String -> Maybe String
-vecElemOf s = if isVecOf s then Just (vecInner s) else Nothing
-
-singleExpr :: Array P.Stmt -> Maybe P.Surface
-singleExpr stmts = case uncons stmts of
-  Just { head: P.StExpr e, tail } | null tail -> Just e
-  _ -> Nothing
 
 -- a function's declared (non-generic) return must accept every clause body's inferred type.
 checkReturn :: Ic -> Func -> Maybe String
