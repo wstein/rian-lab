@@ -37,7 +37,7 @@
       "id": "types",
       "panes": {
         "ex": "@type shape :: {:circle, float()} | {:square, float()}\ndef area({:circle, r}) do 3.14159 * r * r end\ndef area({:square, s}) do s * s end",
-        "js": "function area(a0) {\n  { if (a0.$ === \"Circle\") { const r = a0._0; return ((3.14159 * r) * r); } }\n  { if (a0.$ === \"Square\") { const s = a0._0; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}",
+        "js": "function area(a0) {\n  { if (a0.$ === \"Circle\") { const r = a0.radius; return ((3.14159 * r) * r); } }\n  { if (a0.$ === \"Square\") { const s = a0.side; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}",
         "jvm": "sealed interface Shape\ndata class Circle(val f0: Double) : Shape\ndata class Square(val f0: Double) : Shape\n\nprivate fun area(a0: Shape): Double {\n  if (a0 is Circle) { val r = a0.f0; return ((3.14159 * r) * r) }\n  if (a0 is Square) { val s = a0.f0; return (s * s) }\n  throw RuntimeException(\"area: no clause matched\")\n}",
         "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Shape {\n    Circle { radius: f64 },\n    Square { side: f64 },\n}\n\nfn area(s: &Shape) -> f64 {\n    match s {\n        Shape::Circle { radius: r } => 3.14159 * r * r,\n        Shape::Square { side: s } => s * s,\n    }\n}"
       },
@@ -89,7 +89,7 @@
       "id": "capabilities",
       "panes": {
         "ex": "@type shape :: {:circle, float()} | {:square, float()}\ndef area({:circle, r}) do 3.14159 * r * r end\ndef area({:square, s}) do s * s end\ndef consume(s) do area(s) end",
-        "js": "function area(a0) {\n  { if (a0.$ === \"Circle\") { const r = a0._0; return ((3.14159 * r) * r); } }\n  { if (a0.$ === \"Square\") { const s = a0._0; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}\n\nfunction consume(s) { return area(s); }",
+        "js": "function area(a0) {\n  { if (a0.$ === \"Circle\") { const r = a0.radius; return ((3.14159 * r) * r); } }\n  { if (a0.$ === \"Square\") { const s = a0.side; return (s * s); } }\n  throw new Error(\"area: no clause matched\");\n}\n\nfunction consume(s) { return area(s); }",
         "jvm": "sealed interface Shape\ndata class Circle(val f0: Double) : Shape\ndata class Square(val f0: Double) : Shape\n\nprivate fun area(a0: Shape): Double {\n  if (a0 is Circle) { val r = a0.f0; return ((3.14159 * r) * r) }\n  if (a0 is Square) { val s = a0.f0; return (s * s) }\n  throw RuntimeException(\"area: no clause matched\")\n}\n\nprivate fun consume(a0: Shape): Double {\n  val s = a0; return area(s)\n}",
         "rs": "#[derive(Clone, Debug, PartialEq)]\nenum Shape {\n    Circle { radius: f64 },\n    Square { side: f64 },\n}\n\nfn area(s: &Shape) -> f64 {\n    match s {\n        Shape::Circle { radius: r } => 3.14159 * r * r,\n        Shape::Square { side: s } => s * s,\n    }\n}\n\nfn consume(s: Shape) -> f64 {\n    match s {\n        s => area(s),\n    }\n}"
       },

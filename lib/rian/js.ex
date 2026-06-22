@@ -107,6 +107,7 @@ defmodule Rian.JS do
     ENum,
     EStr,
     EStruct,
+    EVariant,
     ELabel,
     ETuple,
     EUnary,
@@ -202,6 +203,10 @@ defmodule Rian.JS do
       Check.program_ic(prog)
       |> Map.put(:consts, MapSet.new(consts, & &1.name))
       |> Map.put(:js_reg, reg)
+      # ctor → {enum, named, labels} for `bake_variants`: a sum construction becomes
+      # an `EVariant` (named fields where the variant has labels, `_n` otherwise) and
+      # a ctor pattern gains its `labels`, so emit can spell `v.radius` not `v._0`.
+      |> Map.put(:js_vmeta, variant_meta(prog))
 
     const_js = Enum.map_join(consts, "\n", &const_js(&1, i53, ic))
     fn_js = Enum.map_join(funcs, "\n\n", &function_js(&1, i53, ic))
@@ -356,7 +361,9 @@ defmodule Rian.JS do
         body =
           fs
           |> Enum.with_index()
-          |> Enum.map_join(", ", fn {f, i} -> "_#{i}: #{ts_type(f.type, known, tvars)}" end)
+          |> Enum.map_join(", ", fn {f, i} ->
+            "#{Map.get(f, :label) || "_#{i}"}: #{ts_type(f.type, known, tvars)}"
+          end)
 
         "{ $: #{tag}, #{body} }"
     end
@@ -536,6 +543,7 @@ defmodule Rian.JS do
       |> Pratt.parse_body()
       |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
       |> Check.annotate(%{}, ic)
+      |> bake_variants(Map.get(ic, :js_vmeta, %{}))
 
     val =
       case Rian.Shadow.dedup(stmts, [], &js_fresh/2) do
@@ -902,9 +910,11 @@ defmodule Rian.JS do
   # *inside* the structural test so a nested field access (`a0[1][1]`) only runs
   # once the shape is known; a `when` guard, written in the bound names, follows.
   defp clause_js(%{pats: pats, body: body, guard: guard}, i53, params, ic) do
+    vm = Map.get(ic, :js_vmeta, %{})
+
     {tests, binds} =
       pats
-      |> Enum.map(&Core.from_pat/1)
+      |> Enum.map(&(&1 |> Core.from_pat() |> bake_variants(vm)))
       |> Enum.with_index()
       |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
         {t, b} = pat_match(p, "a#{i}", i53)
@@ -989,12 +999,12 @@ defmodule Rian.JS do
     {["#{acc}.length === #{length(es)}" | ts], bs}
   end
 
-  defp pat_match(%PCtor{ctor: ctor, args: args}, acc, i53) do
+  defp pat_match(%PCtor{ctor: ctor, args: args, labels: labels}, acc, i53) do
     {ts, bs} =
       args
       |> Enum.with_index()
       |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
-        {t, b} = pat_match(p, "#{acc}._#{i}", i53)
+        {t, b} = pat_match(p, "#{acc}.#{field_key(labels, i)}", i53)
         {ts ++ t, bs ++ b}
       end)
 
@@ -1078,8 +1088,87 @@ defmodule Rian.JS do
       |> bake_union_disc(Map.get(ic, :js_reg, %{sums: %{}, structs: MapSet.new()}))
       |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
       |> Check.annotate(tenv, ic)
+      # resolve sum constructions to `EVariant` (labeled fields) + label ctor
+      # patterns in `case` arms, on the typed Core (ADR-0049 §3b).
+      |> bake_variants(Map.get(ic, :js_vmeta, %{}))
 
     block_return(Rian.Shadow.dedup(stmts, params, &js_fresh/2), i53)
+  end
+
+  # ctor name → `%{enum, ctor, named, labels}` for every sum variant (top level +
+  # every `mod`); `labels` is the per-field `label | nil` list.
+  defp variant_meta(prog) do
+    types = Map.get(prog, :types, []) ++ for(m <- Map.get(prog, :mods, []), t <- m.types, do: t)
+
+    for t <- types, v <- t.variants, into: %{} do
+      labels = Enum.map(v.fields, &Map.get(&1, :label))
+      named = v.fields != [] and Enum.all?(labels, & &1)
+      {v.ctor, %{enum: t.name, ctor: v.ctor, named: named, labels: labels}}
+    end
+  end
+
+  # Reflective Core walk: a sum construction (`Ctor(args)` / nullary `Ctor`) becomes
+  # an `EVariant` carrying `{label | nil, value}` pairs, and a ctor pattern gains its
+  # `labels` — so emit spells named fields where present and `_n` otherwise, off the
+  # node (no registry threaded into `expr_js`/`pat_match`). Non-variant nodes recurse
+  # generically; a non-sum `Ctor(...)` (a struct/function call) is left untouched.
+  defp bake_variants(%EVariant{} = n, _vm), do: n
+
+  defp bake_variants(%ECall{fun: %EId{name: c}, args: args} = n, vm) do
+    case Map.get(vm, c) do
+      nil ->
+        bake_struct(n, vm)
+
+      info ->
+        %EVariant{
+          enum: info.enum,
+          ctor: info.ctor,
+          named: info.named,
+          pairs: variant_pairs(info, args, vm)
+        }
+    end
+  end
+
+  defp bake_variants(%EId{name: c} = n, vm) do
+    case Map.get(vm, c) do
+      %{labels: []} = info ->
+        %EVariant{enum: info.enum, ctor: info.ctor, named: info.named, pairs: []}
+
+      _ ->
+        n
+    end
+  end
+
+  defp bake_variants(%PCtor{ctor: c, args: args} = n, vm) do
+    labels = if info = Map.get(vm, c), do: info.labels, else: nil
+    %PCtor{n | labels: labels, args: Enum.map(args, &bake_variants(&1, vm))}
+  end
+
+  defp bake_variants(%_struct{} = n, vm), do: bake_struct(n, vm)
+  defp bake_variants(l, vm) when is_list(l), do: Enum.map(l, &bake_variants(&1, vm))
+
+  defp bake_variants(t, vm) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.map(&bake_variants(&1, vm)) |> List.to_tuple()
+
+  defp bake_variants(x, _vm), do: x
+
+  defp bake_struct(%mod{} = n, vm) do
+    struct(mod, n |> Map.from_struct() |> Map.new(fn {k, v} -> {k, bake_variants(v, vm)} end))
+  end
+
+  # the JS object key for a variant's i-th field: its declared label, else `_i`.
+  defp field_key(labels, i), do: (labels && Enum.at(labels, i)) || "_#{i}"
+
+  # `{label | nil, value}` pairs in declared field order — positional args zip onto
+  # the labels; all-named args (`Circle(radius: 1.0)`) are placed by name (mirrors
+  # `Rian.Lower.variant_pairs`).
+  defp variant_pairs(info, args, vm) do
+    if args != [] and Enum.all?(args, &match?(%ELabel{}, &1)) do
+      given = Map.new(args, fn %ELabel{name: l, expr: e} -> {l, bake_variants(e, vm)} end)
+      Enum.map(info.labels, fn l -> {l, Map.fetch!(given, l)} end)
+    else
+      Enum.zip(info.labels, Enum.map(args, &bake_variants(&1, vm)))
+    end
   end
 
   # Bake a value-union type-pattern's discriminator (ADR-0083) into the surface so
@@ -1354,6 +1443,18 @@ defmodule Rian.JS do
   defp expr_js(%EStruct{name: name, pairs: pairs}, i53) do
     fields = Enum.map_join(pairs, ", ", fn {label, v} -> "#{label}: #{expr_js(v, i53)}" end)
     "{ __struct__: #{inspect(to_string(name))}#{if fields == "", do: "", else: ", " <> fields} }"
+  end
+
+  # a resolved sum-variant construction (ADR-0049 §3b) -> a tagged object
+  # `{ $: "Ctor", radius: r }` (a labeled field) or `{ $: "Ctor", _0: a, _1: b }`
+  # (anonymous). `bake_variants` produces this from a `Ctor(args)` call.
+  defp expr_js(%EVariant{ctor: ctor, pairs: pairs}, i53) do
+    fields =
+      pairs
+      |> Enum.with_index()
+      |> Enum.map_join("", fn {{label, v}, i} -> ", #{label || "_#{i}"}: #{expr_js(v, i53)}" end)
+
+    "{ $: #{inspect(ctor)}#{fields} }"
   end
 
   # bare field access `value.field` (a remote call `Mod.fun(…)` is handled above

@@ -40,6 +40,17 @@ defmodule Rian.TourTest do
       assert basics["panes"]["js"] == "function twice(n) { return (n * 2); }"
     end
 
+    test "a labeled sum variant lowers to a named-field object (`a0.radius`, ADR-0049 §3b)", %{
+      data: data
+    } do
+      js = Enum.find(data["cells"], &(&1["id"] == "types"))["panes"]["js"]
+      # `Circle(radius Float64)` binds by the field name, not a positional `_0`
+      assert js =~ ~s|a0.$ === "Circle"|
+      assert js =~ "const r = a0.radius;"
+      assert js =~ "const s = a0.side;"
+      refute js =~ "a0._0"
+    end
+
     test "the reachability strip is the honest, inferred matrix (ADR-0057)", %{data: data} do
       by_name = Map.new(data["reachExamples"], &{&1["name"], &1["reach"]})
 

@@ -126,9 +126,14 @@ defmodule Rian.Core do
   end
 
   defmodule PCtor do
-    @moduledoc "A sum-variant pattern `Ctor(args…)` (nullary when `args == []`)."
+    @moduledoc """
+    A sum-variant pattern `Ctor(args…)` (nullary when `args == []`). `labels` is an
+    optional per-field name list (`["radius"]`, `nil` for anonymous), populated by the
+    JS emitter's `bake_variants` so it can bind `v.radius` instead of `v._0`; other
+    backends ignore it.
+    """
     @enforce_keys [:ctor]
-    defstruct ctor: nil, args: [], type: nil
+    defstruct ctor: nil, args: [], type: nil, labels: nil
   end
 
   defmodule PAs do

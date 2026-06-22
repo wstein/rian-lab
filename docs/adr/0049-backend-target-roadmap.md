@@ -164,17 +164,21 @@ tagged **array** `["ok", v]`. The repr is parity-locked across `Rian.JS` and the
 purs `JS.purs` (`js`-parity), with
 `compile_types` emitting the matching discriminated object union.
 
-**Field keys are positional `_0`/`_1`** today. A *labeled-object* refinement — use
-the variant's field labels where present (`{ $: "Circle", radius: r }`), `_n` for
-anonymous — is the agreed next step but **deferred**: the prototype showed the IR
-that dominates real Rian is ~90% anonymous variants (so labels help a small, mostly
-user-facing subset, and structs already cover named fields), while the cost is a
-ctor→label resolution pass (the `EVariant`/`Rian.Lower.resolve_variants` machinery)
-wired through three emitters. A **hybrid** (labeled→object, anonymous→array) was
-**rejected**: it reintroduces the variant≠list ambiguity for the anonymous majority,
-makes the runtime shape depend on whether the author wrote field names, has no
-coherent answer for *partially*-labeled variants (`Foo(x Int, Int)`), and degrades
-the `.d.mts` from a discriminated-object union to literal tuples.
+**Field keys are the variant's labels where present, `_0`/`_1` otherwise** —
+`Circle(radius Float64)` → `{ $: "Circle", radius: r }` (matched `v.radius`), while an
+anonymous `Add(Expr, Expr)` stays `{ $: "Add", _0: a, _1: b }`. A reflective pre-emit
+pass (`Rian.JS.bake_variants`) resolves a construction to an `EVariant` carrying its
+`{label｜nil, value}` pairs (handling positional **and** named `Circle(radius: …)`
+construction) and tags a `PCtor` with its `labels`, so `expr_js`/`pat_match` read the
+names off the node — no type registry threaded into the deep emit. `compile_types`
+emits the matching named union (`{ $: "Circle", radius: number } | …`). The prototype
+that drove the design: IR is ~90% anonymous variants, so the named-field win is
+concentrated in user-facing types (and structs already cover named fields) — but the
+one-model object form carries it cleanly. A **hybrid** (labeled→object,
+anonymous→array) was **rejected**: it reintroduces the variant≠list ambiguity for the
+anonymous majority, makes the runtime shape depend on whether the author wrote field
+names, has no coherent answer for *partially*-labeled variants (`Foo(x Int, Int)`),
+and degrades the `.d.mts` from a discriminated-object union to literal tuples.
 
 ### 4. Relationship to the bootstrap stages (ADR-0031)
 
