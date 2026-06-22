@@ -27,11 +27,11 @@ module Rian.JS
 
 import Prelude
 
-import Data.Array (any, concatMap, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, sort, uncons, unsnoc)
+import Data.Array (all, any, concatMap, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, sort, uncons, unsnoc)
 import Data.Foldable (foldMap)
 import Data.Enum (fromEnum)
 import Data.Int as Int
-import Data.Maybe (Maybe(..), fromMaybe, maybe)
+import Data.Maybe (Maybe(..), fromMaybe, isNothing, maybe)
 import Data.String as Str
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (singleton, toCharArray)
@@ -216,15 +216,64 @@ functionJs i53 cset reg f =
   if not (null f.externals) then externalFn f
   else case wideIntType f of
     Just t -> unsafeCrashWith ("`" <> f.name <> "`: fixed-width integer `" <> t <> "` is not supported on JS (ADR-0064)")
-    Nothing ->
+    Nothing -> case simpleFn i53 cset reg f of
+      Just s -> s
+      Nothing ->
+        let
+          export = if f.pub then "export " else ""
+          arity = maybe 0 (\c -> length c.pats) (head f.clauses)
+          params = joinWith ", " (map (\i -> "a" <> show i) (upto arity))
+          body = joinWith "\n" (map (clauseJs i53 cset reg) f.clauses)
+          -- the fallthrough throw is the runtime "no clause matched"; needed only
+          -- when the set is non-total. A clause with no tests and no guard always
+          -- matches, so it is total — drop the dead throw (parity with the JVM emitter).
+          tail =
+            if totalClauses i53 f.clauses then "\n}"
+            else "\n  throw new Error(\"" <> f.name <> ": no clause matched\");\n}"
+        in
+          export <> "function " <> f.name <> "(" <> params <> ") {\n" <> body <> tail
+
+-- A single guardless clause whose params are all plain variables: the trivial
+-- total function. Name the JS params directly — no `a0` rebind, no per-clause
+-- block, no fallthrough throw (parity with `Rian.JS`). The body still flows
+-- through `clauseReturn`, so the `:=` shadow-rename (seeded with the param names)
+-- is unchanged. Returns `Nothing` for any other shape (NB: written as a guardless
+-- case + inner `if`, not a guarded case alternative — purerl does not fall through
+-- a failed guard to the next alternative).
+simpleFn :: Boolean -> Array String -> JsReg -> Func -> Maybe String
+simpleFn i53 cset reg f = case f.clauses of
+  [ c ] ->
+    if isNothing c.guard && allPVar (map fromPat c.pats) then
       let
-        arity = maybe 0 (\c -> length c.pats) (head f.clauses)
-        params = joinWith ", " (map (\i -> "a" <> show i) (upto arity))
-        body = joinWith "\n" (map (clauseJs i53 cset reg) f.clauses)
+        vars = pvarNames (map fromPat c.pats)
         export = if f.pub then "export " else ""
       in
-        export <> "function " <> f.name <> "(" <> params <> ") {\n" <> body
-          <> "\n  throw new Error(\"" <> f.name <> ": no clause matched\");\n}"
+        Just (export <> "function " <> f.name <> "(" <> joinWith ", " vars <> ") { " <> clauseReturn i53 cset reg vars c.body <> " }")
+    else Nothing
+  _ -> Nothing
+
+-- all of a clause's params are plain variable patterns; their var names, in order.
+allPVar :: Array CPat -> Boolean
+allPVar = all isPVar
+
+isPVar :: CPat -> Boolean
+isPVar (PVar _) = true
+isPVar _ = false
+
+pvarNames :: Array CPat -> Array String
+pvarNames = mapMaybe pvarName
+
+pvarName :: CPat -> Maybe String
+pvarName (PVar n) = Just n
+pvarName _ = Nothing
+
+-- the clause set is total iff some clause has no tests and no guard (it always matches).
+totalClauses :: Boolean -> Array Clause -> Boolean
+totalClauses i53 = any (unconditional i53)
+
+unconditional :: Boolean -> Clause -> Boolean
+unconditional i53 c =
+  isNothing c.guard && all (\p -> null (fst (patMatch i53 p "a0"))) (map fromPat c.pats)
 
 -- ── protocol dispatch (ADR-0061 §3): a JS dispatcher per protocol method ──
 -- select the impl by the first argument's runtime shape, with JS-native guards. Mirrors
