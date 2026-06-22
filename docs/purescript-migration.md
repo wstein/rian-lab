@@ -188,18 +188,19 @@ parity-gated). What's left, by category — `lib/rian/*.ex` with **no** `purs/sr
 
 | Category | Elixir modules (unported) | Status / why |
 | --- | --- | --- |
-| **⛔ Emitters — the compile-spine gap** | `js`, `jvm`, `lower`, `beam` | The value backend. **`Rian.JS` is the priority** (ADR-0090: playground engine + next step; its `annotate`/`ic` prereq has landed). `Lower` (Rust+Elixir) and `JVM` are display-pane emitters; `Beam` is FFI-heavy → Phase 8. *Nothing emits a program until at least `JS` lands.* |
+| **⛔ Emitters — the compile-spine gap** | `jvm`, `lower`, `beam` | The value backend. **`Rian.JS` runtime `compile` has LANDED** (🟡 Phase 5 begun, `js` stream; ADR-0090's priority emitter) — so a program now *emits JS*. Remaining JS sub-features deferred on Core/Func extensions (`const` refs, protocol dispatch, `@external`, value-union patterns, the `.d.ts` `compile_types` sidecar). `Lower` (Rust+Elixir) and `JVM` are display-pane emitters; `Beam` is FFI-heavy → Phase 8. |
 | **🔧 Pipeline desugars still unported** | `interp` (252, `${}` resolution), `show_stdlib` (29) | Pure Core→Core passes the emitters need. `Interp` rewrites `${expr}` → `<>` chains *before* emit (mis-filed under Phase 8 — it is **not** FFI). `ShowStdlib` blocked on `Decl.inject_stdlib` (no consumer yet). |
 | **⚙️ Execution & self-host (FFI-heavy, Phase 8)** | `run`, `repl`, `fixpoint`, `self_host`, `roundtrip`, `forms_equiv`, `doctest`, `test` | Wrap `:compile.forms` / code-loading / `GenServer`. Expected-late: they need the BEAM emitter + Erlang FFI. For the **JS** build these are skipped in-browser. |
 | **📐 Formatter (Phase 9)** | `format` (+ `format/{Doc,CST,CLI}`), `lsp/*` | Zero-config formatter (ADR-0045). A real feature, off the compile spine; ports after the emitters. |
 | **📦 CLI / packaging / integrations (Phase 10)** | `cli`, `build`, `manifest`, `pkg/*`, `tour`, `livebook/*`, `application` | Host shims + build toolchain. `Manifest` (`rian.toml` reader) gates the Phase 7–10 build. Becomes a thin Elixir/escript or node-CLI shell over the ported core. |
 | **🚫 Superseded / out of scope** | `transpile` (+ `transpile/*`), `ann` (reader) | **Not ported by design.** Elixir→Rian `Transpile` is *re-aimed* to **PureScript → Rian** (Phase 7), not lifted. `Ann`'s reader is dropped; the `@rian_sig` *comment convention* is retained. |
 
-**One-line read:** the only thing between "checks a program" and "emits/runs one" is **Phase 5
-emitters** (+ the two pure desugars `Interp`/`ShowStdlib`). Everything else unported is host
-tooling that rides *behind* the emitters or is deliberately superseded. Per ADR-0090, port order
-within Phase 5 is **`JS` first** (unlocks the playground), then `Lower`/`JVM` (display panes),
-`Beam` last (FFI, Phase 8).
+**One-line read:** the compile spine now **emits** — `Rian.JS`'s runtime mode has landed (ADR-0090's
+JS-first order), so a checked program lowers to JS. What's left to *complete* the value backend:
+the JS sub-features above, the two pure desugars (`Interp`/`ShowStdlib`), then `Lower`/`JVM`
+(display panes) and `Beam` (FFI, Phase 8). Plus the new ADR-0090 deliverable — a JS-backend build
+profile (stock `purs`→JS) to ship that emitter in the browser. Everything else unported is host
+tooling that rides *behind* the emitters or is deliberately superseded.
 
 ## Status
 
