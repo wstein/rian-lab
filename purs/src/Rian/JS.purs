@@ -203,7 +203,7 @@ patMatch i53 pat acc = case pat of
   PPin s -> case s of
     P.SId name -> Tuple [ acc <> " === " <> name ] []
     _ -> unsafeCrashWith "ecmascript: pin (only `^var` is supported)"
-  PTyped n t -> Tuple [ typeTestJs i53 t acc ] [ Tuple n acc ]
+  PTyped n t _ -> Tuple [ typeTestJs i53 t acc ] [ Tuple n acc ]
   PLit (LInt v) -> Tuple [ acc <> " === " <> litInt i53 v ] []
   PLit (LStr v) -> Tuple [ acc <> " === " <> jsStr v ] []
   PChar cp -> Tuple [ acc <> " === " <> cpLit i53 cp ] []

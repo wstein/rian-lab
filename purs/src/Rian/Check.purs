@@ -808,6 +808,9 @@ liftNode e = case e of
   ECaptureNamed p a -> TCaptureNamed (liftUntyped p) a
   ECapArg n -> TCapArg n
   ELabel n x -> TLabel n (liftUntyped x)
+  -- `annotate` runs before any emitter's const-resolution, so an `EConstRef` never reaches here;
+  -- its faithful untyped lift is a named reference (`TId`), kept for totality.
+  EConstRef n -> TId n
 
 liftArm :: CArm -> TArm
 liftArm a = { pat: a.pat, guard: map liftUntyped a.guard, body: liftUntyped a.body }
@@ -928,7 +931,7 @@ rangeBase ic n = map (\(Tuple _ info) -> info.base) (find (\(Tuple k _) -> k == 
 -- ── `case` flow narrowing (refine arm-pattern bindings against the scrutinee) ──
 narrow :: CPat -> Ty -> Ic -> Env -> Env
 narrow (PVar name) ty _ env = envPut name (concretize ty) env
-narrow (PTyped name tname) _ _ env = envPut name (TName tname) env
+narrow (PTyped name tname _) _ _ env = envPut name (TName tname) env
 narrow (PCtor ctor args) _ ic env =
   foldl (\e (Tuple i p) -> narrow p (fieldTy i) ic e) env (mapWithIndex Tuple args)
   where

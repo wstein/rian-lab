@@ -130,7 +130,7 @@ lower :: CPat -> Env -> Tuple CkPat Boolean
 lower PWild _ = Tuple Wild false
 lower (PVar _) _ = Tuple Wild false
 -- a type-pattern (`n Type`, a union arm) BINDS `n`; for coverage it is a binding wildcard.
-lower (PTyped _ _) _ = Tuple Wild false
+lower (PTyped _ _ _) _ = Tuple Wild false
 lower (PAs _ p) env = lower p env
 lower (PPin _) _ = Tuple Wild true
 lower (PLit (LInt v)) _ = Tuple (Ctor (CLit (LvInt v)) []) false

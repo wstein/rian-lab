@@ -68,6 +68,11 @@ data CExpr
   | ECaptureNamed CExpr Int
   | ECapArg Int
   | ELabel String CExpr
+  -- a reference to a module `const` (ADR-0034). `Core.fromExpr` never produces it (the parser
+  -- emits a plain `EId`); an emitter's const-resolution pass rewrites a known-const `EId` to
+  -- `EConstRef` so it lowers to the const's accessor rather than a local read. Carried here so
+  -- every emitter shares one node (mirrors the reference `EConstRef`, ADR-0050).
+  | EConstRef String
 
 type CArm = { pat :: CPat, guard :: Maybe CExpr, body :: CExpr }
 type CWithClause = { pat :: CPat, expr :: CExpr }
@@ -94,7 +99,11 @@ data CPat
   | PPin P.Surface -- the pinned expression, carried verbatim (matched at runtime)
   | PStruct String (Array (Tuple String CPat))
   | PMap (Array CMapPatPair)
-  | PTyped String String
+  -- a value-union type-pattern `name Type` (ADR-0083). The third field is the runtime
+  -- discriminator an emitter bakes in before lowering (`Nothing` from the parser; `Just disc`
+  -- once a union-discrimination pass has resolved how to tell this member apart at runtime —
+  -- the JS tag array / struct marker). Mirrors the reference `PTyped`'s `disc` field (ADR-0050).
+  | PTyped String String (Maybe String)
 
 data CMapPatPair
   = CMPAtom String CPat
@@ -198,7 +207,7 @@ fromPat (P.PTuple ps) = PTuple (map fromPat ps)
 fromPat (P.PCtor ctor args) = PCtor ctor (map fromPat args)
 fromPat (P.PListP ps tail) = PList (map fromPat ps) (map fromPat tail)
 fromPat (P.PAs name p) = PAs name (fromPat p)
-fromPat (P.PTyped name tname) = PTyped name tname
+fromPat (P.PTyped name tname) = PTyped name tname Nothing
 fromPat (P.PPin e) = PPin e
 fromPat (P.PStruct name fields) = PStruct name (map (\(Tuple f p) -> Tuple f (fromPat p)) fields)
 fromPat (P.PMap pairs) = PMap (map fromMapPatPair pairs)
@@ -247,6 +256,8 @@ coreSexpr (ECapture b) = "(& " <> coreSexpr b <> ")"
 coreSexpr (ECaptureNamed p a) = "(&/ " <> coreSexpr p <> " " <> show a <> ")"
 coreSexpr (ECapArg n) = "&" <> show n
 coreSexpr (ELabel n e) = n <> ": " <> coreSexpr e
+-- emitter-synthesized, never in the `cor` corpus (the parser emits `EId`); rendered for totality.
+coreSexpr (EConstRef n) = "(const-ref " <> n <> ")"
 
 coreMapPair :: CMapPair -> String
 coreMapPair (CMAtom k v) = k <> ": " <> coreSexpr v
@@ -274,7 +285,9 @@ corePatSexpr (PPin e) = "(^ " <> P.sexpr e <> ")"
 corePatSexpr (PStruct n fields) =
   n <> "(" <> joinWith ", " (map (\(Tuple k p) -> k <> ": " <> corePatSexpr p) fields) <> ")"
 corePatSexpr (PMap fields) = "%{" <> joinWith ", " (map coreMapPatPair fields) <> "}"
-corePatSexpr (PTyped name ty) = "(: " <> name <> " " <> ty <> ")"
+corePatSexpr (PTyped name ty Nothing) = "(: " <> name <> " " <> ty <> ")"
+-- the baked-discriminator form is emitter-internal (never in the `cor` corpus); shown for totality.
+corePatSexpr (PTyped name ty (Just disc)) = "(: " <> name <> " " <> ty <> " " <> disc <> ")"
 
 coreMapPatPair :: CMapPatPair -> String
 coreMapPatPair (CMPAtom k p) = k <> ": " <> corePatSexpr p
