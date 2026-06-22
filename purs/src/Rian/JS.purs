@@ -38,11 +38,11 @@ import Data.String.CodeUnits (singleton, toCharArray)
 import Data.String.Common (joinWith)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
-import Rian.External (render) as Ext
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
+import Rian.External (render) as Ext
 import Rian.IR (Body, Clause, Const, ExtSpec(..), Func, Method, Prog, Range, Struct, Type, Variant, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
