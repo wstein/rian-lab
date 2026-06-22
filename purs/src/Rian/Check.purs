@@ -63,9 +63,9 @@ import Data.Array (concatMap, filter, find, findMap, foldl, fromFoldable, head, 
 import Data.Foldable (all, any, elem)
 import Data.Int as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing, maybe)
-import Data.Number (fromString) as Number
 import Data.String as Str
 import Data.String.CodeUnits (singleton, toCharArray)
+import Data.String.CodeUnits (dropWhile) as SCU
 import Data.String.Common (joinWith, replaceAll, split)
 import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
@@ -1250,14 +1250,12 @@ listElems (P.SListLit elems _) = elems
 listElems (P.SBlock [ P.StExpr e ]) = listElems e
 listElems _ = []
 
--- The bound comparison runs in `Number`, not `Int`: on the JS backend `Int` is 32-bit, so a wide
--- two's-complement bound (`UInt32` 4294967295, `Int53` 2⁵³−1) would be both an out-of-range *literal*
--- (a compile error) and an unrepresentable *value*. `Number` (IEEE-754) is exact through 2⁵³ — every
--- type up to `Int53`/`UInt32` and every realistic literal — and approximate beyond (the `Int64`+
--- bounds, which the parity corpus does not exercise; a documented JS-build limitation, ADR-0090 §6).
--- The error message renders from the literal's source token and the bound *strings* (carried in
--- `Bounds`), so it matches the reference's integer `show` byte-for-byte without `Number`-formatting.
-type Bounds = { lo :: Number, hi :: Number, loS :: String, hiS :: String }
+-- The bound check compares the literal and the bounds as decimal integer STRINGS, digit-wise — so it
+-- is arbitrary-precision-exact for **every** width, `Int64`/`Int128`/`UInt64`/`UInt128` included.
+-- (`Number` is IEEE-754 double on *both* backends and cannot represent those bounds exactly, and
+-- `Int` is 32-bit on the JS backend; `Data.BigInt` is a JS-only library with no purerl FFI. A
+-- string bignum compare needs none of them and is identical on both backends — ADR-0090 §6.)
+type Bounds = { loS :: String, hiS :: String }
 
 oorScan :: P.Surface -> String -> Bounds -> String -> Maybe String
 oorScan (P.SIf _ t e) ty b n = case oorScan t ty b n of
@@ -1266,32 +1264,55 @@ oorScan (P.SIf _ t e) ty b n = case oorScan t ty b n of
 oorScan (P.SCase _ arms) ty b n = findMap (\arm -> oorScan arm.body ty b n) arms
 oorScan (P.SBlock [ P.StExpr e ]) ty b n = oorScan e ty b n
 oorScan expr ty b n = case constInt expr of
-  Just (Tuple v vs) | v < b.lo || v > b.hi -> Just ("`" <> n <> "`: literal " <> vs <> " is out of range for `" <> ty <> "` (" <> b.loS <> ".." <> b.hiS <> ")")
+  Just v | cmpIntStr v b.loS == LT || cmpIntStr v b.hiS == GT ->
+    Just ("`" <> n <> "`: literal " <> v <> " is out of range for `" <> ty <> "` (" <> b.loS <> ".." <> b.hiS <> ")")
   _ -> Nothing
 
--- a constant integer literal as both its `Number` value (for the bound comparison) and its decimal
--- source string (for the message — avoids formatting a `Number` back to an integer).
-constInt :: P.Surface -> Maybe (Tuple Number String)
-constInt (P.SNum t) =
-  let s = replaceAll (Str.Pattern "_") (Str.Replacement "") t
-  in if intLiteral t then map (\v -> Tuple v s) (Number.fromString s) else Nothing
-constInt (P.SUnary "-" e) = map (\(Tuple v s) -> Tuple (negate v) ("-" <> s)) (constInt e)
+-- a constant integer literal as its decimal source string (underscores stripped, a unary minus
+-- prefixed) — used for both the bound comparison and the message.
+constInt :: P.Surface -> Maybe String
+constInt (P.SNum t) = if intLiteral t then Just (replaceAll (Str.Pattern "_") (Str.Replacement "") t) else Nothing
+constInt (P.SUnary "-" e) = map ("-" <> _) (constInt e)
 constInt _ = Nothing
 
--- two's-complement bounds for the fixed-width integer types; `Nothing` for `Int` (arbitrary
--- precision) and any non-integer type. Each carries the comparison `Number`s and the message strings.
+-- compare two clean decimal integer strings (optional leading `-`, then digits) as integers.
+cmpIntStr :: String -> String -> Ordering
+cmpIntStr a b = case signMag a, signMag b of
+  Tuple false ma, Tuple false mb -> cmpMag ma mb
+  Tuple true ma, Tuple true mb -> cmpMag mb ma -- both negative: the larger magnitude is the smaller value
+  Tuple true _, Tuple false _ -> LT
+  Tuple false _, Tuple true _ -> GT
+
+-- `(isNegative, magnitude-without-leading-zeros)`; `0`/`-0`/`00` are non-negative zero.
+signMag :: String -> Tuple Boolean String
+signMag s = case Str.stripPrefix (Str.Pattern "-") s of
+  Just rest -> let m = stripZeros rest in Tuple (m /= "0") m
+  Nothing -> Tuple false (stripZeros s)
+
+-- compare two non-negative magnitudes (no leading zeros): more digits wins, else lexicographic
+-- (which equals numeric order for equal-length digit strings).
+cmpMag :: String -> String -> Ordering
+cmpMag x y = case compare (Str.length x) (Str.length y) of
+  EQ -> compare x y
+  o -> o
+
+stripZeros :: String -> String
+stripZeros s = let d = SCU.dropWhile (_ == '0') s in if d == "" then "0" else d
+
+-- two's-complement bounds for the fixed-width integer types as decimal strings; `Nothing` for `Int`
+-- (arbitrary precision) and any non-integer type.
 widthBounds :: String -> Maybe Bounds
-widthBounds "Int8" = Just { lo: -128.0, hi: 127.0, loS: "-128", hiS: "127" }
-widthBounds "Int16" = Just { lo: -32768.0, hi: 32767.0, loS: "-32768", hiS: "32767" }
-widthBounds "Int32" = Just { lo: -2147483648.0, hi: 2147483647.0, loS: "-2147483648", hiS: "2147483647" }
-widthBounds "Int53" = Just { lo: -9007199254740991.0, hi: 9007199254740991.0, loS: "-9007199254740991", hiS: "9007199254740991" }
-widthBounds "Int64" = Just { lo: -9223372036854775808.0, hi: 9223372036854775807.0, loS: "-9223372036854775808", hiS: "9223372036854775807" }
-widthBounds "Int128" = Just { lo: -170141183460469231731687303715884105728.0, hi: 170141183460469231731687303715884105727.0, loS: "-170141183460469231731687303715884105728", hiS: "170141183460469231731687303715884105727" }
-widthBounds "UInt8" = Just { lo: 0.0, hi: 255.0, loS: "0", hiS: "255" }
-widthBounds "UInt16" = Just { lo: 0.0, hi: 65535.0, loS: "0", hiS: "65535" }
-widthBounds "UInt32" = Just { lo: 0.0, hi: 4294967295.0, loS: "0", hiS: "4294967295" }
-widthBounds "UInt64" = Just { lo: 0.0, hi: 18446744073709551615.0, loS: "0", hiS: "18446744073709551615" }
-widthBounds "UInt128" = Just { lo: 0.0, hi: 340282366920938463463374607431768211455.0, loS: "0", hiS: "340282366920938463463374607431768211455" }
+widthBounds "Int8" = Just { loS: "-128", hiS: "127" }
+widthBounds "Int16" = Just { loS: "-32768", hiS: "32767" }
+widthBounds "Int32" = Just { loS: "-2147483648", hiS: "2147483647" }
+widthBounds "Int53" = Just { loS: "-9007199254740991", hiS: "9007199254740991" }
+widthBounds "Int64" = Just { loS: "-9223372036854775808", hiS: "9223372036854775807" }
+widthBounds "Int128" = Just { loS: "-170141183460469231731687303715884105728", hiS: "170141183460469231731687303715884105727" }
+widthBounds "UInt8" = Just { loS: "0", hiS: "255" }
+widthBounds "UInt16" = Just { loS: "0", hiS: "65535" }
+widthBounds "UInt32" = Just { loS: "0", hiS: "4294967295" }
+widthBounds "UInt64" = Just { loS: "0", hiS: "18446744073709551615" }
+widthBounds "UInt128" = Just { loS: "0", hiS: "340282366920938463463374607431768211455" }
 widthBounds _ = Nothing
 
 -- parse a decimal integer literal (underscores stripped). On purerl `Int.fromString`

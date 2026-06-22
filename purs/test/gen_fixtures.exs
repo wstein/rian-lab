@@ -832,7 +832,13 @@ gate_corpus = [
   "range Digit := 0..9\ndef bnd8(n Int64) Int64 := d Digit := 12 ; n",
   "range Digit := 0..9\ndef bnd9(n Int64) Int64 := d Digit := 7 ; n",
   "range Digit := 0..9\ndef bnd10(n Int64) Int64 := d Digit := 'a' ; n",
-  "range Digit := 0..9\ndef bnd11(n Int64) Int64 := d Digit := n ; n"
+  "range Digit := 0..9\ndef bnd11(n Int64) Int64 := d Digit := n ; n",
+  # wide two's-complement bounds beyond 2^53 — exact via the string bignum compare (ADR-0090 §6).
+  # The over-bound literals differ from the bound only in the last digit (a `Number` would miss them).
+  "def bnd12(n Int64) Int64 := x Int64 := 9223372036854775808 ; n",
+  "def bnd13(n Int64) Int64 := x Int64 := 9223372036854775807 ; n",
+  "def bnd14(n Int64) Int64 := x UInt64 := 18446744073709551616 ; n",
+  "def bnd15(n Int64) Int64 := x Int128 := 170141183460469231731687303715884105728 ; n"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the
