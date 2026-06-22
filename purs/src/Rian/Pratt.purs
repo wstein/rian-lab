@@ -75,6 +75,9 @@ data Surface
   | SWith (Array WithClause) Surface (Array Arm)
   | SFor (Array ForClause) Surface
   | SStrInterp (Array IPart) -- `"… ${e} …"` (ADR-0069), holes re-parsed as expressions
+  -- a resolved reference to a module `const` (ADR-0034). The parser never produces it; an
+  -- emitter's const-resolution pass rewrites a known-const `SId` to it (→ `Core.EConstRef`).
+  | SConstRef String
 
 -- a map-literal pair: atom-key shorthand `k: v`, or a computed key `keyExpr => v`.
 data MapPair
@@ -900,6 +903,8 @@ sexpr (SStrInterp parts) = "(str-interp " <> joinWith " " (map iPart parts) <> "
   where
   iPart (ILit s) = "\"" <> s <> "\""
   iPart (IHole e) = "${" <> sexpr e <> "}"
+-- emitter-synthesized, never parsed (so never in the `psx` corpus); rendered for totality.
+sexpr (SConstRef n) = "(const-ref " <> n <> ")"
 
 sexprMapPair :: MapPair -> String
 sexprMapPair (MAtom k v) = k <> ": " <> sexpr v

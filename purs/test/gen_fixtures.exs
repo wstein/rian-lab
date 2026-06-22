@@ -861,7 +861,7 @@ opq_corpus = [
 ]
 
 # Rian.JS — the `js` stream (ADR-0049 Tier 1): the compiled ECMAScript module. Number-mode
-# (`Int53`) programs; avoids the deferred constructs (consts/protocols/@external/value-union over a
+# (`Int53`) programs; avoids the still-deferred constructs (protocols/@external/value-union over a
 # user type). Oracle = `Rian.JS.compile`.
 js_corpus = [
   "pub def add(x Int53, y Int53) Int53 := x + y",
@@ -885,7 +885,11 @@ js_corpus = [
   "pub def nl() String := \"a\\nb\\t\\\"c\"",
   "pub def isA(c Char) Bool := c == 'a'",
   # map literal + map-update
-  "pub def m2() Dict(Symbol, Int53) := %{a: 1, b: 2}"
+  "pub def m2() Dict(Symbol, Int53) := %{a: 1, b: 2}",
+  # module `const` → top-level JS `const`; a reference in a function body resolves to it (ADR-0033)
+  "mod M do\n  const K Int53 := 10\n  pub def f(x Int53) Int53 := x + K\nend",
+  # a `pub` const exports; a sibling const references another; the function uses the result
+  "mod M do\n  pub const Base Int53 := 100\n  const Step Int53 := Base + 1\n  pub def g(n Int53) Int53 := n * Step\nend"
 ]
 
 # Rian.JS.compile_types — the `jsdts` stream (ADR-0086 §5): the TypeScript `.d.ts` sidecar. Maps

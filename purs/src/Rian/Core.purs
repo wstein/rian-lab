@@ -120,6 +120,7 @@ fromExpr (P.SNum n) = ENum n
 fromExpr (P.SStr s) = EStr s
 fromExpr (P.SChar c) = EChar c
 fromExpr (P.SId x) = EId x
+fromExpr (P.SConstRef n) = EConstRef n
 fromExpr (P.SAtom a) = EAtom a
 fromExpr (P.SStrInterp _) =
   unsafeCrashWith "Core: string interpolation is not supported here (resolved before Core, ADR-0069)"

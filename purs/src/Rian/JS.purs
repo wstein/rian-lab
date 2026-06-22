@@ -40,8 +40,9 @@ import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Body, Clause, Const, Func, Prog, Range, Struct, Type, Variant, bodySurface)
+import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
-import Rian.Pratt (Surface(..), parse) as P
+import Rian.Pratt (Surface(..), parse, parseBody) as P
 import Rian.Prim (overflowOps)
 import Rian.Shadow (dedup)
 import Rian.TypeStr (normalize, splitTopCommas) as TS
@@ -61,11 +62,16 @@ compile src =
           _ = rejectMixedIntMode prog
           i53 = programNumberMode prog
           funcs = allFuncs prog
-          fnJs = joinWith "\n\n" (map (functionJs i53) funcs)
+          -- `const NAME := value` (ADR-0033) → a top-level JS `const`; a reference resolves to it,
+          -- threaded through `cset` so every clause body and sibling const sees the const set.
+          consts = allConsts prog
+          cset = map _.name consts
+          constJsOut = joinWith "\n" (map (constJs i53 cset) consts)
+          fnJs = joinWith "\n\n" (map (functionJs i53 cset) funcs)
         in
-          -- imports / consts / protocol dispatchers are deferred; the join keeps their slots so the
+          -- imports / protocol dispatchers are still deferred; the join keeps their slots so the
           -- shape composes once they land (matches the reference's reject-empty-then-join).
-          joinWith "\n\n" (filter (_ /= "") [ fnJs ])
+          joinWith "\n\n" (filter (_ /= "") [ constJsOut, fnJs ])
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> concatModFuncs prog.mods
@@ -121,8 +127,35 @@ wideIntType :: Func -> Maybe String
 wideIntType f = head (filter (\t -> elem t wideInts) (mapMaybe identity (map _.ty f.params <> [ f.ret ])))
 
 -- ── functions / clauses ──────────────────────────────────────────────────────
-functionJs :: Boolean -> Func -> String
-functionJs i53 f =
+-- Rewrite a reference to a declared `const` (`SId NAME`, NAME in the set) into an `SConstRef`,
+-- which `Core.fromExpr` lifts to `EConstRef` and this emitter spells as the const's name. Empty
+-- set short-circuits (most programs have no consts). Mirrors `Rian.JS.resolve_consts`.
+resolveConsts :: Array String -> P.Surface -> P.Surface
+resolveConsts cset node
+  | null cset = node
+  | otherwise = walk node
+      where
+      walk (P.SId name) | name `elem` cset = P.SConstRef name
+      walk other = mapNode walk other
+
+-- `const NAME := value` → a top-level JS `const` (exported when `pub`). The value parses, resolves
+-- sibling const references, and emits in the program integer mode: a single-expression value emits
+-- inline; a multi-statement block wraps in an IIFE so the `const` still binds one expression.
+constJs :: Boolean -> Array String -> Const -> String
+constJs i53 cset c =
+  let
+    stmts = case fromExpr (resolveConsts cset (P.parseBody c.value)) of
+      EBlock ss -> ss
+      other -> [ CExprStmt other ]
+    val = case dedup stmts [] jsFresh of
+      [ CExprStmt e ] -> exprJs i53 e
+      deduped -> "(() => { " <> blockReturn i53 deduped <> " })()"
+    export = if c.pub then "export " else ""
+  in
+    export <> "const " <> c.name <> " = " <> val <> ";"
+
+functionJs :: Boolean -> Array String -> Func -> String
+functionJs i53 cset f =
   if not (null f.externals) then unsafeCrashWith ("`" <> f.name <> "`: `@external` is not yet ported in the PS JS emitter")
   else case wideIntType f of
     Just t -> unsafeCrashWith ("`" <> f.name <> "`: fixed-width integer `" <> t <> "` is not supported on JS (ADR-0064)")
@@ -130,7 +163,7 @@ functionJs i53 f =
       let
         arity = maybe 0 (\c -> length c.pats) (head f.clauses)
         params = joinWith ", " (map (\i -> "a" <> show i) (upto arity))
-        body = joinWith "\n" (map (clauseJs i53) f.clauses)
+        body = joinWith "\n" (map (clauseJs i53 cset) f.clauses)
         export = if f.pub then "export " else ""
       in
         export <> "function " <> f.name <> "(" <> params <> ") {\n" <> body
@@ -142,13 +175,13 @@ upto n = if n <= 0 then [] else range 0 (n - 1)
 
 -- `{ if (<tests>) { <binds> <guarded return> } }` — binds live inside the test so a nested field
 -- access only runs once the shape is known; a `when` guard follows.
-clauseJs :: Boolean -> Clause -> String
-clauseJs i53 clause =
+clauseJs :: Boolean -> Array String -> Clause -> String
+clauseJs i53 cset clause =
   let
     step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p ("a" <> show i) in Tuple (ts <> t) (bs <> b)
     Tuple tests binds = foldl step (Tuple [] []) (mapWithIndex Tuple (map fromPat clause.pats))
     paramNames = map fst binds
-    inner = bindLines binds <> [ guardedReturn i53 paramNames clause.body clause.guard ]
+    inner = bindLines binds <> [ guardedReturn i53 cset paramNames clause.body clause.guard ]
     bodyStr = joinWith " " inner
     guarded = if null tests then bodyStr else "if (" <> joinWith " && " tests <> ") { " <> bodyStr <> " }"
   in
@@ -157,17 +190,17 @@ clauseJs i53 clause =
 bindLines :: Array (Tuple String String) -> Array String
 bindLines = map (\(Tuple n a) -> "const " <> n <> " = " <> a <> ";")
 
-guardedReturn :: Boolean -> Array String -> Maybe Body -> Maybe String -> String
-guardedReturn i53 params body guard = case guard of
-  Nothing -> clauseReturn i53 params body
-  Just g -> "if (" <> exprJs i53 (fromExpr (P.parse g)) <> ") { " <> clauseReturn i53 params body <> " }"
+guardedReturn :: Boolean -> Array String -> Array String -> Maybe Body -> Maybe String -> String
+guardedReturn i53 cset params body guard = case guard of
+  Nothing -> clauseReturn i53 cset params body
+  Just g -> "if (" <> exprJs i53 (fromExpr (resolveConsts cset (P.parse g))) <> ") { " <> clauseReturn i53 cset params body <> " }"
 
 -- a clause body parses to a block: `let`s then `return` the final value; `:=` shadowing is resolved
 -- on the Core IR by `Rian.Shadow` (JS `let`/`const` forbid same-scope re-declaration).
-clauseReturn :: Boolean -> Array String -> Maybe Body -> String
-clauseReturn i53 params body = case body of
+clauseReturn :: Boolean -> Array String -> Array String -> Maybe Body -> String
+clauseReturn i53 cset params body = case body of
   Nothing -> unsafeCrashWith "Rian.JS: a clause has no body"
-  Just b -> case fromExpr (bodySurface b) of
+  Just b -> case fromExpr (resolveConsts cset (bodySurface b)) of
     EBlock stmts -> blockReturn i53 (dedup stmts params jsFresh)
     other -> blockReturn i53 (dedup [ CExprStmt other ] params jsFresh)
 
@@ -275,6 +308,8 @@ exprJs i53 = case _ of
   EStr s -> jsStr s
   EId b | b == "true" || b == "false" -> b
   EId x -> if pascal x then "[" <> dquote x <> "]" else x
+  -- a reference to a declared `const` → the top-level `const`'s name (emitted by `constJs`).
+  EConstRef name -> name
   EAtom a -> jsAtom a
   EUnary "-" x -> "-" <> exprJs i53 x
   EUnary "not" x -> "!" <> exprJs i53 x
