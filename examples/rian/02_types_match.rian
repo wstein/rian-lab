@@ -50,7 +50,12 @@ range Bit    := 0..1
 # Because a `range` is FINITE, covering its whole interval is exhaustive — so
 # this `case` is TOTAL with NO `_` arm (contrast a bare `Int53`, an open
 # universe, which would require a catch-all). A `_` here would be UNREACHABLE.
-def flip(Bit) Bit
+#
+# The return type is `Int53`, not `Bit`: range value-typing on *results* (a body
+# checked against a `range` bound) is part of the unfinished ADR-0036 work fenced
+# above. `Bit` is used where it IS supported today — as the parameter type whose
+# finite domain drives the exhaustive `case`.
+def flip(Bit) Int53
 def flip(b)
   case b do
     0 -> 1

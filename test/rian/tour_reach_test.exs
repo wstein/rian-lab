@@ -96,6 +96,19 @@ defmodule Rian.TourReachTest do
       assert Enum.any?(Examples.issues(src), &(&1 =~ "now parses"))
     end
 
+    test "a claimed target the emitter cannot actually produce is reported" do
+      # `Shape` is undeclared: the BEAM tolerates the dynamic tag but Rust needs
+      # the `enum`, so the rs emitter raises even though reach claims rs.
+      src = """
+      #@reach ex, rs, js, jvm
+      def area(s val Shape) Float64
+      def area(Circle(r)) := r
+      def area(Square(s)) := s
+      """
+
+      assert Enum.any?(Examples.issues(src), &(&1 =~ "rs emitter raises"))
+    end
+
     test "an `#@illustrative` file that does not parse is accepted" do
       # `extern` is not accepted by the front-end, so this genuinely cannot compile.
       assert Examples.issues("#@illustrative — extern\nextern foo()\n") == []

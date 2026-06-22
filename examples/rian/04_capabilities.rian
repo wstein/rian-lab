@@ -27,6 +27,10 @@
 #   ref        | &mut i64     | &mut..  | &mut Vec<f64> | &mut Shape
 #   tag        | &i64         | &String | &Vec<f64>     | &Shape
 
+# The sum type the examples below pattern-match on (declared so the file is a
+# complete, all-target-emittable program — Rust needs the real `enum`):
+type Shape := Circle(radius Float64) | Square(side Float64)
+
 # `val` (default): a read-only borrow. On Rust this is `&Shape` and uses the
 # idiomatic borrowed forms (`&str` not `&String`, `&[T]` not `&Vec<T>`). On the
 # BEAM a `val` is freely shareable — usable any number of times. That is WHY
@@ -46,7 +50,9 @@ def consume(s iso Shape) Float64 := area(s)         # ok: `s` consumed exactly o
 # `ref`: mutable borrow. On Rust this is `&mut T`. On the BEAM target `ref` is
 # REJECTED in the PoC (no process-local aliasing proof) — emitting a
 # `ref`-parameter function to the BEAM raises at compile time. It is a
-# Rust-superset feature, honestly fenced off rather than faked.
+# Rust-superset feature, honestly fenced off rather than faked. (The `mul_each`
+# body is illustrative — the capability/signature is the lesson here.)
+def mul_each(xs val Vec(Float64), k Float64) Vec(Float64) := xs
 def scale(s ref Vec(Float64), k Float64) Vec(Float64) := mul_each(s, k)   # &mut Vec<f64> on Rust
 
 # `tag`: identity only (a pid/ref on the BEAM, a borrow on Rust). Shareable;

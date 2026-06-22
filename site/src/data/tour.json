@@ -251,6 +251,12 @@
           "jvm",
           "rs"
         ],
+        "mul_each": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
         "same": [
           "ex",
           "js",

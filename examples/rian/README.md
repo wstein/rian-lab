@@ -19,8 +19,10 @@ that is the point (see [15_targets.rian](15_targets.rian)).
 > - **gated** — the file parses and carries a `#@reach <targets>` header (below the
 >   title banner), with a `#@reach-pin name=…` line for any function that reaches
 >   less than the file's union. CI fails if the real `Rian.Reach` analysis drifts
->   from the declaration, so the portability claims cannot rot. Worked examples are
->   `expr #=> value` doctests, executed on the BEAM ([`Rian.TourDoctestTest`](../../test/rian/tour_doctest_test.exs)).
+>   from the declaration, *and* it runs the real emitter for every target in the
+>   file's floor (rejecting a claim the compiler cannot actually produce), so the
+>   portability claims cannot rot. Worked examples are `expr #=> value` doctests,
+>   executed on the BEAM ([`Rian.TourDoctestTest`](../../test/rian/tour_doctest_test.exs)).
 > - **illustrative** — the file uses surface the `Rian.Decl` front-end does not yet
 >   accept (`@partial`, `extern`, `@wire`, `else if` chains). These carry an
 >   `#@illustrative` banner with a reason and are *not* compiled; CI asserts they

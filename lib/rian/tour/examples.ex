@@ -12,7 +12,11 @@ defmodule Rian.Tour.Examples do
     * `#@reach <targets>` — the union of target environments the file's functions
       reach (`ex`/`rs`/`js`/`jvm`). `check!/0` runs the real `Rian.Reach` analysis
       and fails the build if the computed union drifts from the declaration, so the
-      portability claims in these teaching files cannot rot.
+      portability claims in these teaching files cannot rot. Because reach is an
+      over-approximation (it does not run the full `Check`), `check!/0` *also* runs
+      the real emitter for every target in the file's **floor** (the targets every
+      function reaches) and fails if it raises — so a claimed target the compiler
+      cannot actually produce is caught (ADR-0091).
     * `#@reach-pin name=<targets>` — every function whose reach is *below* the
       file's union must be pinned with its exact reach (e.g. `show=ex` because it
       uses host FFI). This keeps mixed-portability files honest about which
@@ -27,7 +31,7 @@ defmodule Rian.Tour.Examples do
 
   use Rian.Ann
 
-  alias Rian.{Decl, Doctest, Reach}
+  alias Rian.{Decl, Doctest, JS, JVM, Lower, Reach}
   alias Rian.Tour.Examples.Error
 
   @dir "examples/rian"
@@ -205,8 +209,41 @@ defmodule Rian.Tour.Examples do
           |> Map.new(fn {key, %{reach: reach}} -> {Reach.bare_name(key), reach} end)
 
         union = by_name |> Map.values() |> Enum.reduce(MapSet.new(), &MapSet.union/2)
-        reach_issue(declared, union) ++ pin_issues(by_name, union, pins)
+
+        reach_issue(declared, union) ++
+          pin_issues(by_name, union, pins) ++
+          emit_issues(src, prog, by_name)
     end
+  end
+
+  # Reachability is an over-approximation (`Rian.Reach` does not run the full
+  # `Check`), so a file can "reach" a target the emitter then refuses. We verify
+  # the **floor** — the targets EVERY function reaches — by running that target's
+  # real emitter and requiring it not to raise. (Union-but-not-floor targets on a
+  # mixed file can't be whole-file-emitted, since the emitters compile the whole
+  # module and a pinned-off function would raise; those rest on reach + doctests.)
+  defp emit_issues(src, prog, by_name) do
+    floor =
+      by_name
+      |> Map.values()
+      |> Enum.reduce(MapSet.new(Reach.targets()), &MapSet.intersection/2)
+
+    for target <- Enum.sort(floor), {:raise, msg} <- [safe_emit(target, src, prog)] do
+      "claims `#{target}` (floor) but the #{target} emitter raises: #{msg}"
+    end
+  end
+
+  defp safe_emit(target, src, prog) do
+    case target do
+      :ex -> Rian.Beam.compile_program(src)
+      :rs -> Lower.rust_program(prog)
+      :js -> JS.compile(src)
+      :jvm -> JVM.compile(src)
+    end
+
+    :ok
+  rescue
+    e -> {:raise, Exception.message(e) |> String.replace("\n", " ") |> String.slice(0, 80)}
   end
 
   defp reach_issue(declared, union) do
