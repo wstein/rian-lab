@@ -81,6 +81,10 @@ data Surface
   -- a resolved struct construction `Name(f: v, …)` (the parser emits a labeled `SCall`; an
   -- emitter's struct-resolution pass rewrites it to this → `Core.EStruct`).
   | SStructLit String (Array (Tuple String Surface))
+  -- a resolved sum-variant construction `Ctor(args)` — the JS emitter's `bakeVariants`
+  -- pass rewrites a sum-ctor `SCall`/`SId` to this (pairs are `{label｜Nothing, value}`
+  -- in declared field order) → `Core.EVariant`.
+  | SVariantLit String (Array (Tuple (Maybe String) Surface))
 
 -- a map-literal pair: atom-key shorthand `k: v`, or a computed key `keyExpr => v`.
 data MapPair
@@ -123,7 +127,10 @@ data Pat
   | PAtom String
   | PTuple (Array Pat)
   | PListP (Array Pat) (Maybe Pat)
-  | PCtor String (Array Pat)
+  -- a sum-variant pattern `Ctor(args)`. The trailing `Array (Maybe String)` is the per-field
+  -- label list (`[]` until the JS emitter's `bakePat` fills it; `Nothing` for an anonymous field)
+  -- so `patMatch` binds `v.radius` rather than `v._0` (ADR-0049 §3b). Other backends ignore it.
+  | PCtor String (Array Pat) (Array (Maybe String))
   | PStruct String (Array (Tuple String Pat))
   | PVar String
   | PAs String Pat
@@ -782,8 +789,8 @@ parsePat (TId name : rest) =
   if isUpperHead name then case rest of
     (TLparen : TId _ : TOp ":" : _) -> parsePatStruct name rest
     (TLparen : TKw _ : TOp ":" : _) -> parsePatStruct name rest
-    (TLparen : r) -> let Tuple args r2 = parsePatArgs r [] in Tuple (PCtor name args) r2
-    _ -> Tuple (PCtor name []) rest
+    (TLparen : r) -> let Tuple args r2 = parsePatArgs r [] in Tuple (PCtor name args []) r2
+    _ -> Tuple (PCtor name [] []) rest
   else Tuple (PVar name) rest
 parsePat other = unsafeCrashWith ("Pratt: unsupported pattern: " <> here other)
 
@@ -909,6 +916,7 @@ sexpr (SStrInterp parts) = "(str-interp " <> joinWith " " (map iPart parts) <> "
 -- emitter-synthesized, never parsed (so never in the `psx` corpus); rendered for totality.
 sexpr (SConstRef n) = "(const-ref " <> n <> ")"
 sexpr (SStructLit n fields) = "(struct " <> n <> foldMap (\(Tuple k v) -> " " <> k <> ": " <> sexpr v) fields <> ")"
+sexpr (SVariantLit n fields) = "(variant " <> n <> foldMap (\(Tuple k v) -> " " <> show k <> ": " <> sexpr v) fields <> ")"
 
 sexprMapPair :: MapPair -> String
 sexprMapPair (MAtom k v) = k <> ": " <> sexpr v
@@ -933,8 +941,8 @@ sexprPat (PListP ps Nothing) = "[" <> joinWith ", " (map sexprPat ps) <> "]"
 sexprPat (PListP ps (Just t)) = "[" <> joinWith ", " (map sexprPat ps) <> " | " <> sexprPat t <> "]"
 sexprPat (PVar x) = x
 sexprPat (PAs n p) = "(@ " <> n <> " " <> sexprPat p <> ")"
-sexprPat (PCtor n []) = n
-sexprPat (PCtor n args) = n <> "(" <> joinWith ", " (map sexprPat args) <> ")"
+sexprPat (PCtor n [] _) = n
+sexprPat (PCtor n args _) = n <> "(" <> joinWith ", " (map sexprPat args) <> ")"
 sexprPat (PMap fields) = "%{" <> joinWith ", " (map sexprMapPatPair fields) <> "}"
 sexprPat (PStruct n fields) =
   n <> "(" <> joinWith ", " (map (\(Tuple k p) -> k <> ": " <> sexprPat p) fields) <> ")"

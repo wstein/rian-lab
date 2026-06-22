@@ -15,8 +15,9 @@
 -- | value-union discrimination over a user type (`bakeUnionDisc` bakes the `PTyped` disc; a sum
 -- | member tests the variant `$` tag, a struct member tests `__struct__`), and protocol dispatch
 -- | (`protocolDispatchersJs` regenerates the JS dispatcher from `Prog.protocols`/`implDecls`, skipping
--- | the BEAM-shaped `dispatch == "dispatcher"` func), struct *construction* `Name(f: v)` (`bakeStructs`
--- | → the `EStruct` Core node → a `__struct__`-tagged object), and string interpolation (the program
+-- | the BEAM-shaped `dispatch == "dispatcher"` func), struct/sum *construction* (`bakeCtors` → the
+-- | `EStruct` Core node → a `__struct__`-tagged object, or `EVariant` → a `{ $: "Ctor", radius: … }`
+-- | labeled object, ADR-0049 §3b), and string interpolation (the program
 -- | tail `Rian.Assemble.runProgramTail`, composed before the gate) are all ported.
 module Rian.JS
   ( compile
@@ -29,11 +30,11 @@ module Rian.JS
 
 import Prelude
 
-import Data.Array (all, any, concatMap, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, sort, uncons, unsnoc)
+import Data.Array (all, any, concatMap, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, sort, uncons, unsnoc, zipWith)
 import Data.Foldable (foldMap)
 import Data.Enum (fromEnum)
 import Data.Int as Int
-import Data.Maybe (Maybe(..), fromMaybe, isNothing, maybe)
+import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing, maybe)
 import Data.String as Str
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (singleton, toCharArray)
@@ -156,7 +157,7 @@ resolveConsts cset node
 constJs :: Boolean -> Array String -> JsReg -> Const -> String
 constJs i53 cset reg c =
   let
-    stmts = case fromExpr (bakeStructs reg (resolveConsts cset (normalize (P.parseBody c.value)))) of
+    stmts = case fromExpr (bakeCtors reg (resolveConsts cset (normalize (P.parseBody c.value)))) of
       EBlock ss -> ss
       other -> [ CExprStmt other ]
     val = case dedup stmts [] jsFresh of
@@ -168,13 +169,24 @@ constJs i53 cset reg c =
 
 -- the value-union discriminator registry (ADR-0083): each sum type → its ctor tags, plus the set
 -- of struct names. `bakeUnionDisc` consults it so `patMatch` can emit a sum/struct runtime test.
-type JsReg = { sums :: Array (Tuple String (Array String)), structs :: Array String }
+-- `ctors` maps each variant ctor → its per-field label list (`Nothing` = anonymous), so
+-- `bakeVariants`/`bakePat` can spell `{ $: "Circle", radius: … }` (ADR-0049 §3b).
+type JsReg =
+  { sums :: Array (Tuple String (Array String))
+  , structs :: Array String
+  , ctors :: Array (Tuple String (Array (Maybe String)))
+  }
 
 jsReg :: Prog -> JsReg
 jsReg prog =
   { sums: map (\t -> Tuple t.name (map _.ctor t.variants)) (allTypes prog)
   , structs: map _.name (allStructs prog)
+  , ctors: allTypes prog >>= \t -> map (\v -> Tuple v.ctor (map _.label v.fields)) t.variants
   }
+
+-- the declared field labels for a variant ctor (`[]` if unknown / not a variant).
+ctorLabels :: JsReg -> String -> Array (Maybe String)
+ctorLabels reg ctor = maybe [] snd (find (\(Tuple c _) -> c == ctor) reg.ctors)
 
 -- Bake a value-union type-pattern's discriminator into the surface so `patMatch` (which threads no
 -- type registry) can emit a sum's tag / a struct's `__struct__` test. `mapNode` skips arm PATTERNS,
@@ -194,14 +206,20 @@ bakePat reg (P.PTyped name tname Nothing) =
     Nothing ->
       if elem tname reg.structs then P.PTyped name tname (Just ("struct:" <> tname))
       else P.PTyped name tname Nothing
+-- a sum-variant pattern: fill its per-field labels (so `patMatch` binds `v.radius`) and recurse
+-- into nested patterns (ADR-0049 §3b).
+bakePat reg (P.PCtor ctor args _) = P.PCtor ctor (map (bakePat reg) args) (ctorLabels reg ctor)
 bakePat _ p = p
 
--- Resolve struct construction (ADR-0050): a labeled call to a declared struct (`Name(f: v, …)`,
--- the parser's `SCall (SId Name) [SLabel …]`) is rewritten to `SStructLit` (→ `Core.EStruct`), so
--- it lowers to a `__struct__`-tagged object instead of a function call. A non-struct name or any
--- non-label arg falls through. Mirrors the reference's annotate-time struct resolution.
-bakeStructs :: JsReg -> P.Surface -> P.Surface
-bakeStructs reg = walk
+-- Resolve construction (ADR-0050 / ADR-0049 §3b) in one walk so nesting works (a struct inside a
+-- variant inside a struct): a labeled call to a declared struct (`Name(f: v, …)`) → `SStructLit`
+-- (→ `Core.EStruct`, a `__struct__`-tagged object), and a call to a sum ctor (positional `Circle(r)`
+-- or named `Circle(radius: r)`) → `SVariantLit` (→ `Core.EVariant`, a `{ $: "Circle", radius: … }`
+-- object). Pairs carry the declared field labels (`Nothing` = anonymous → `_n`). A nullary ctor
+-- referenced bare (`Red`) stays an `SId` and is emitted by `exprJs (EId …)` as `{ $: "Red" }`. A
+-- non-struct/non-ctor name or a partial struct arg list falls through.
+bakeCtors :: JsReg -> P.Surface -> P.Surface
+bakeCtors reg = walk
   where
   walk node = case node of
     P.SCall (P.SId name) args | elem name reg.structs ->
@@ -209,9 +227,22 @@ bakeStructs reg = walk
       in
         if length labels == length args then P.SStructLit name (map (\(Tuple l v) -> Tuple l (walk v)) labels)
         else mapNode walk node
+    P.SCall (P.SId name) args | isJust (find (\(Tuple c _) -> c == name) reg.ctors) ->
+      P.SVariantLit name (variantPairs name args)
     _ -> mapNode walk node
   asLabel (P.SLabel l v) = Just (Tuple l v)
   asLabel _ = Nothing
+  -- `{label｜Nothing, value}` pairs in declared field order: all-named args are placed by name,
+  -- positional args zip onto the labels (mirrors `Rian.JS.variant_pairs`).
+  variantPairs name args =
+    let labels = ctorLabels reg name
+    in
+      if not (null args) && length (mapMaybe asLabel args) == length args then
+        let given = mapMaybe asLabel args
+        in map (\l -> Tuple l (walk (labelVal given l))) labels
+      else zipWith (\l a -> Tuple l (walk a)) labels args
+  labelVal given (Just l) = maybe (P.SId l) snd (find (\(Tuple n _) -> n == l) given)
+  labelVal _ Nothing = P.SId "_"
 
 functionJs :: Boolean -> Array String -> JsReg -> Func -> String
 functionJs i53 cset reg f =
@@ -366,7 +397,9 @@ clauseJs :: Boolean -> Array String -> JsReg -> Clause -> String
 clauseJs i53 cset reg clause =
   let
     step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p ("a" <> show i) in Tuple (ts <> t) (bs <> b)
-    Tuple tests binds = foldl step (Tuple [] []) (mapWithIndex Tuple (map fromPat clause.pats))
+    -- bake clause-head patterns (variant field labels, ADR-0049 §3b) before lowering, so a ctor
+    -- head binds `s.radius` not `s._0` — mirrors the `bakeUnionDisc` pass over `case` arms.
+    Tuple tests binds = foldl step (Tuple [] []) (mapWithIndex Tuple (map (fromPat <<< bakePat reg) clause.pats))
     paramNames = map fst binds
     inner = bindLines binds <> [ guardedReturn i53 cset reg paramNames clause.body clause.guard ]
     bodyStr = joinWith " " inner
@@ -380,7 +413,7 @@ bindLines = map (\(Tuple n a) -> "const " <> n <> " = " <> a <> ";")
 guardedReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> Maybe String -> String
 guardedReturn i53 cset reg params body guard = case guard of
   Nothing -> clauseReturn i53 cset reg params body
-  Just g -> "if (" <> exprJs i53 (fromExpr (bakeStructs reg (resolveConsts cset (bakeUnionDisc reg (normalize (P.parse g)))))) <> ") { " <> clauseReturn i53 cset reg params body <> " }"
+  Just g -> "if (" <> exprJs i53 (fromExpr (bakeCtors reg (resolveConsts cset (bakeUnionDisc reg (normalize (P.parse g)))))) <> ") { " <> clauseReturn i53 cset reg params body <> " }"
 
 -- a clause body parses to a block: `let`s then `return` the final value; `:=` shadowing is resolved
 -- on the Core IR by `Rian.Shadow` (JS `let`/`const` forbid same-scope re-declaration). The body is
@@ -388,7 +421,7 @@ guardedReturn i53 cset reg params body guard = case guard of
 clauseReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> String
 clauseReturn i53 cset reg params body = case body of
   Nothing -> unsafeCrashWith "Rian.JS: a clause has no body"
-  Just b -> case fromExpr (bakeStructs reg (resolveConsts cset (bakeUnionDisc reg (normalize (bodySurface b))))) of
+  Just b -> case fromExpr (bakeCtors reg (resolveConsts cset (bakeUnionDisc reg (normalize (bodySurface b))))) of
     EBlock stmts -> blockReturn i53 (dedup stmts params jsFresh)
     other -> blockReturn i53 (dedup [ CExprStmt other ] params jsFresh)
 
@@ -432,8 +465,8 @@ patMatch i53 pat acc = case pat of
   PChar cp -> Tuple [ acc <> " === " <> cpLit i53 cp ] []
   PAtom a -> Tuple [ acc <> " === " <> jsAtom a ] []
   PTuple es -> let Tuple ts bs = matchElems i53 es acc in Tuple (cons1 (acc <> ".length === " <> show (length es)) ts) bs
-  PCtor ctor args ->
-    let Tuple ts bs = matchCtorArgs i53 args acc
+  PCtor ctor args labels ->
+    let Tuple ts bs = matchCtorArgs i53 args labels acc
     in Tuple (cons1 (acc <> ".$ === " <> dquote ctor) ts) bs
   PList es Nothing -> let Tuple ts bs = matchElems i53 es acc in Tuple (cons1 (acc <> ".length === " <> show (length es)) ts) bs
   PList es (Just tail) ->
@@ -454,10 +487,18 @@ matchElems i53 es acc = foldl step (Tuple [] []) (mapWithIndex Tuple es)
   where
   step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p (acc <> "[" <> show i <> "]") in Tuple (ts <> t) (bs <> b)
 
-matchCtorArgs :: Boolean -> Array CPat -> String -> Tuple (Array String) (Array (Tuple String String))
-matchCtorArgs i53 args acc = foldl step (Tuple [] []) (mapWithIndex Tuple args)
+-- bind a variant's positional args by their declared field key (`v.radius` where labeled, `v._n`
+-- otherwise), ADR-0049 §3b.
+matchCtorArgs :: Boolean -> Array CPat -> Array (Maybe String) -> String -> Tuple (Array String) (Array (Tuple String String))
+matchCtorArgs i53 args labels acc = foldl step (Tuple [] []) (mapWithIndex Tuple args)
   where
-  step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p (acc <> "._" <> show i) in Tuple (ts <> t) (bs <> b)
+  step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p (acc <> "." <> fieldKey labels i) in Tuple (ts <> t) (bs <> b)
+
+-- the JS field key for a variant's i-th arg: its declared label, else positional `_i`.
+fieldKey :: Array (Maybe String) -> Int -> String
+fieldKey labels i = case index labels i of
+  Just (Just name) -> name
+  _ -> "_" <> show i
 
 matchStruct :: Boolean -> String -> Array (Tuple String CPat) -> String -> Tuple (Array String) (Array (Tuple String String))
 matchStruct i53 name fields acc = foldl step (Tuple [ acc <> ".__struct__ === " <> dquote name ] []) fields
@@ -504,6 +545,12 @@ exprJs i53 = case _ of
   EStruct name pairs ->
     "{ __struct__: " <> dquote name
       <> (if null pairs then "" else ", " <> joinWith ", " (map (\(Tuple l v) -> l <> ": " <> exprJs i53 v) pairs))
+      <> " }"
+  -- a sum-variant construction → a tagged object `{ $: "Ctor", radius: … }` (named field where the
+  -- variant declared a label, positional `_n` otherwise), ADR-0049 §3b.
+  EVariant ctor pairs ->
+    "{ $: " <> dquote ctor
+      <> joinWith "" (mapWithIndex (\i (Tuple l v) -> ", " <> fromMaybe ("_" <> show i) l <> ": " <> exprJs i53 v) pairs)
       <> " }"
   EAtom a -> jsAtom a
   EUnary "-" x -> "-" <> exprJs i53 x
@@ -916,7 +963,7 @@ jsExternalFnTs known f host =
 constTs :: Array String -> Boolean -> Array String -> JsReg -> Const -> String
 constTs known i53 cset reg c =
   let
-    stmts = case fromExpr (bakeStructs reg (resolveConsts cset (normalize (P.parseBody c.value)))) of
+    stmts = case fromExpr (bakeCtors reg (resolveConsts cset (normalize (P.parseBody c.value)))) of
       EBlock ss -> ss
       other -> [ CExprStmt other ]
     val = case dedup stmts [] jsFresh of
@@ -965,7 +1012,7 @@ dtsSum known t =
 dtsVariant :: Array String -> Array String -> Variant -> String
 dtsVariant known tvars v = case v.fields of
   [] -> "{ $: " <> dquote v.ctor <> " }"
-  fs -> "{ $: " <> dquote v.ctor <> ", " <> joinWith ", " (mapWithIndex (\i f -> "_" <> show i <> ": " <> tsType known tvars f.ty) fs) <> " }"
+  fs -> "{ $: " <> dquote v.ctor <> ", " <> joinWith ", " (mapWithIndex (\i f -> fromMaybe ("_" <> show i) f.label <> ": " <> tsType known tvars f.ty) fs) <> " }"
 
 -- a struct → a `{__struct__: "Name", …}` interface with a discriminant literal.
 dtsStruct :: Array String -> Struct -> String

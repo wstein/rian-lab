@@ -205,7 +205,7 @@ countBlock bound acc stmts = case Array.uncons stmts of
 -- variables a pattern binds (only var + ctor, mirroring the reference's `pat_vars`).
 patVars :: P.Pat -> Array String
 patVars (P.PVar x) = [ x ]
-patVars (P.PCtor _ args) = Array.concatMap patVars args
+patVars (P.PCtor _ args _) = Array.concatMap patVars args
 patVars _ = []
 
 maybe' :: Maybe Uses -> Uses

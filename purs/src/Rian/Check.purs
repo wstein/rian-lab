@@ -813,10 +813,12 @@ liftNode e = case e of
   ECaptureNamed p a -> TCaptureNamed (liftUntyped p) a
   ECapArg n -> TCapArg n
   ELabel n x -> TLabel n (liftUntyped x)
-  -- `annotate` runs before any emitter's const-/struct-resolution, so neither `EConstRef` nor
-  -- `EStruct` reaches here; lifted for totality (a named reference / a map of the lifted fields).
+  -- `annotate` runs before any emitter's const-/struct-/variant-resolution, so none of `EConstRef`,
+  -- `EStruct`, `EVariant` reaches here; lifted for totality (a named reference / a map of the lifted
+  -- fields / the ctor applied to its lifted field values).
   EConstRef n -> TId n
   EStruct _ fields -> TMap (map (\(Tuple k v) -> TMAtom k (liftUntyped v)) fields)
+  EVariant _ pairs -> TMap (map (\(Tuple l v) -> TMAtom (fromMaybe "_" l) (liftUntyped v)) pairs)
 
 liftArm :: CArm -> TArm
 liftArm a = { pat: a.pat, guard: map liftUntyped a.guard, body: liftUntyped a.body }
@@ -938,7 +940,7 @@ rangeBase ic n = map (\(Tuple _ info) -> info.base) (find (\(Tuple k _) -> k == 
 narrow :: CPat -> Ty -> Ic -> Env -> Env
 narrow (PVar name) ty _ env = envPut name (concretize ty) env
 narrow (PTyped name tname _) _ _ env = envPut name (TName tname) env
-narrow (PCtor ctor args) _ ic env =
+narrow (PCtor ctor args _) _ ic env =
   foldl (\e (Tuple i p) -> narrow p (fieldTy i) ic e) env (mapWithIndex Tuple args)
   where
   fieldTypes = fromMaybe [] (map snd (find (\(Tuple k _) -> k == ctor) ic.tdefs))
@@ -1816,7 +1818,7 @@ patternType :: Ic -> CPat -> Ty
 patternType _ (PLit (LInt _)) = TName "Int53"
 patternType _ (PLit (LStr _)) = TName "String"
 patternType _ (PChar _) = TName "Char"
-patternType ic (PCtor c _) = maybe Unknown TName (ctorType ic c)
+patternType ic (PCtor c _ _) = maybe Unknown TName (ctorType ic c)
 patternType _ _ = Unknown
 
 -- fold two parameter constraints: `Unknown` = identity, a concrete wins, two differing concretes

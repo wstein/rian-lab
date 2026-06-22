@@ -76,6 +76,10 @@ data CExpr
   -- a struct construction `Name(f: v, …)` (ADR-0050). The parser emits a labeled `SCall`; an
   -- emitter's struct-resolution pass rewrites it to `P.SStructLit`, which `fromExpr` lifts here.
   | EStruct String (Array (Tuple String CExpr))
+  -- a sum-variant construction `Ctor(args)` (ADR-0049 §3b). `Rian.JS.bakeVariants` rewrites a
+  -- sum-ctor call to `P.SVariantLit`, which `fromExpr` lifts here; pairs are `{label｜Nothing,
+  -- value}` in declared field order so the JS emitter spells `{ $: "Ctor", radius: … }`.
+  | EVariant String (Array (Tuple (Maybe String) CExpr))
 
 type CArm = { pat :: CPat, guard :: Maybe CExpr, body :: CExpr }
 type CWithClause = { pat :: CPat, expr :: CExpr }
@@ -97,7 +101,10 @@ data CPat
   | PAtom String
   | PTuple (Array CPat)
   | PList (Array CPat) (Maybe CPat)
-  | PCtor String (Array CPat)
+  -- a sum-variant pattern; the trailing `Array (Maybe String)` is the per-field label list
+  -- (`[]` unbaked/anonymous), filled by `Rian.JS.bakePat` so the JS emitter binds `v.radius`
+  -- rather than `v._0` (ADR-0049 §3b). Other backends ignore it.
+  | PCtor String (Array CPat) (Array (Maybe String))
   | PAs String CPat
   | PPin P.Surface -- the pinned expression, carried verbatim (matched at runtime)
   | PStruct String (Array (Tuple String CPat))
@@ -125,6 +132,7 @@ fromExpr (P.SChar c) = EChar c
 fromExpr (P.SId x) = EId x
 fromExpr (P.SConstRef n) = EConstRef n
 fromExpr (P.SStructLit n fields) = EStruct n (map (\(Tuple k v) -> Tuple k (fromExpr v)) fields)
+fromExpr (P.SVariantLit n fields) = EVariant n (map (\(Tuple k v) -> Tuple k (fromExpr v)) fields)
 fromExpr (P.SAtom a) = EAtom a
 fromExpr (P.SStrInterp _) =
   unsafeCrashWith "Core: string interpolation is not supported here (resolved before Core, ADR-0069)"
@@ -209,7 +217,7 @@ fromPat (P.PLitStr s) = PLit (LStr s)
 fromPat (P.PCharLit cp) = PChar cp
 fromPat (P.PAtom name) = PAtom name
 fromPat (P.PTuple ps) = PTuple (map fromPat ps)
-fromPat (P.PCtor ctor args) = PCtor ctor (map fromPat args)
+fromPat (P.PCtor ctor args labels) = PCtor ctor (map fromPat args) labels
 fromPat (P.PListP ps tail) = PList (map fromPat ps) (map fromPat tail)
 fromPat (P.PAs name p) = PAs name (fromPat p)
 fromPat (P.PTyped name tname disc) = PTyped name tname disc
@@ -264,6 +272,7 @@ coreSexpr (ELabel n e) = n <> ": " <> coreSexpr e
 -- emitter-synthesized, never in the `cor` corpus (the parser emits `EId`); rendered for totality.
 coreSexpr (EConstRef n) = "(const-ref " <> n <> ")"
 coreSexpr (EStruct n fields) = "(struct " <> n <> foldMap (\(Tuple k v) -> " " <> k <> ":" <> coreSexpr v) fields <> ")"
+coreSexpr (EVariant n fields) = "(variant " <> n <> foldMap (\(Tuple k v) -> " " <> show k <> ":" <> coreSexpr v) fields <> ")"
 
 coreMapPair :: CMapPair -> String
 coreMapPair (CMAtom k v) = k <> ": " <> coreSexpr v
@@ -284,8 +293,8 @@ corePatSexpr (PAtom a) = ":" <> a
 corePatSexpr (PTuple ps) = "{" <> joinWith ", " (map corePatSexpr ps) <> "}"
 corePatSexpr (PList ps Nothing) = "[" <> joinWith ", " (map corePatSexpr ps) <> "]"
 corePatSexpr (PList ps (Just t)) = "[" <> joinWith ", " (map corePatSexpr ps) <> " | " <> corePatSexpr t <> "]"
-corePatSexpr (PCtor n []) = n
-corePatSexpr (PCtor n args) = n <> "(" <> joinWith ", " (map corePatSexpr args) <> ")"
+corePatSexpr (PCtor n [] _) = n
+corePatSexpr (PCtor n args _) = n <> "(" <> joinWith ", " (map corePatSexpr args) <> ")"
 corePatSexpr (PAs n p) = "(@ " <> n <> " " <> corePatSexpr p <> ")"
 corePatSexpr (PPin e) = "(^ " <> P.sexpr e <> ")"
 corePatSexpr (PStruct n fields) =

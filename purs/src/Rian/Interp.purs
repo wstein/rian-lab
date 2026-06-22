@@ -134,7 +134,7 @@ patBindings (P.PVar x) st = [ Tuple x st ]
 patBindings (P.PAs x p) st = snoc (patBindings p Unknown) (Tuple x st)
 patBindings (P.PTuple ps) _ = concatMap (\p -> patBindings p Unknown) ps
 patBindings (P.PListP ps tl) _ = concatMap (\p -> patBindings p Unknown) ps <> maybe [] (\t -> patBindings t Unknown) tl
-patBindings (P.PCtor _ args) _ = concatMap (\p -> patBindings p Unknown) args
+patBindings (P.PCtor _ args _) _ = concatMap (\p -> patBindings p Unknown) args
 patBindings (P.PStruct _ fields) _ = concatMap (\(Tuple _ p) -> patBindings p Unknown) fields
 patBindings _ _ = []
 

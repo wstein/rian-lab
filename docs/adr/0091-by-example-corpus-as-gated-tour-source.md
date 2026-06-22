@@ -107,6 +107,9 @@ A follow-up debate revisited "should the two corpora merge?" with new evidence:
 **Not done (parked):** a literal single corpus (one file serving both the minimal pane and the deep
 tour). Revisit if the site grows collapsible/lazy panes, which would remove the teaching-UX objection.
 
-**Live cells emit tagged-object sums.** The by-example cells (and the playground) now show a sum
-variant as `{ $: "Ctor", _0: … }`, not a tagged array — the JS-value-representation decision and its
-rejected hybrid alternative are recorded in **ADR-0049 §3b**.
+**Live cells emit labeled tagged-object sums.** The by-example cells (and the playground) now show a
+sum variant as a tagged object with its declared field names — `Circle(radius Float64)` →
+`{ $: "Circle", radius: r }` (an anonymous field falls back to `_n`), not a tagged array. The
+live bundle (purs `JS.purs`) is parity-locked to the Elixir reference, so the static `tour.json`
+panes and the live-recompiled panes agree. The JS-value-representation decision and its rejected
+hybrid alternative are recorded in **ADR-0049 §3b**.

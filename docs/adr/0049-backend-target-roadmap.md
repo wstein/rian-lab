@@ -147,10 +147,12 @@ Most of the ECMAScript target is already specified across the corpus:
 
 ### 3b. A sum value is a tagged **object**, not an array
 
-A user sum variant lowers to a **discriminated tagged object** — `Circle(r)` →
-`{ $: "Circle", _0: r }`, nullary `Red` → `{ $: "Red" }`, matched `v.$ === "Circle"`
-binding `v._0`. (It originally lowered to a tagged **array** `["Circle", r]` / `a0[1]`,
-mirroring the BEAM tuple.) The object form was adopted because it:
+A user sum variant lowers to a **discriminated tagged object** — `Circle(radius Float64)` →
+`{ $: "Circle", radius: r }`, an anonymous `Add(Expr, Expr)` → `{ $: "Add", _0: a, _1: b }`,
+nullary `Red` → `{ $: "Red" }`, matched `v.$ === "Circle"` binding `v.radius`/`v._0` (the
+field-key rule is in the labeled-object paragraph below). (It originally lowered to a tagged
+**array** `["Circle", r]` / `a0[1]`, mirroring the BEAM tuple.) The object form was adopted
+because it:
 
 - **distinguishes a variant from a list/tuple** — both were arrays, so a variant
   was runtime-indistinguishable from a `Vec`, and a TS consumer saw both as

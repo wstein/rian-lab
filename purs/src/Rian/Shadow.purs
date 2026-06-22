@@ -111,7 +111,7 @@ dedMapPair fresh r (CMKey k v) = CMKey (dedExpr fresh k r) (dedExpr fresh v r)
 -- literals do not), so a shadowed name re-bound by an arm pattern resolves to the arm var.
 patVarNames :: CPat -> Array String
 patVarNames (PVar n) = [ n ]
-patVarNames (PCtor _ args) = bind args patVarNames
+patVarNames (PCtor _ args _) = bind args patVarNames
 patVarNames (PList ps tail) = maybe [] patVarNames tail <> bind ps patVarNames
 patVarNames (PTuple ps) = bind ps patVarNames
 patVarNames (PStruct _ fs) = bind fs (\(Tuple _ p) -> patVarNames p)

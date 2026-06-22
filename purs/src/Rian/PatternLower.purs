@@ -141,7 +141,7 @@ lower (PChar cp) _ = Tuple (Ctor (CLit (LvInt cp)) []) false
 lower (PAtom a) _ = Tuple (Ctor (CLit (LvAtom a)) []) false
 lower (PTuple ps) env =
   let Tuple cps intro = lowerMany ps env in Tuple (Ctor (CTuple (length ps)) cps) intro
-lower (PCtor name ps) env =
+lower (PCtor name ps _) env =
   let Tuple cps intro = lowerMany ps env in Tuple (Ctor (CName (toSnake name)) cps) intro
 lower (PList elems tail) env = lowerList elems tail env
 -- open maps are refutable (unless empty): treat like a guarded clause for coverage.
