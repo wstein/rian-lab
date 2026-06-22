@@ -889,7 +889,11 @@ js_corpus = [
   # module `const` → top-level JS `const`; a reference in a function body resolves to it (ADR-0033)
   "mod M do\n  const K Int53 := 10\n  pub def f(x Int53) Int53 := x + K\nend",
   # a `pub` const exports; a sibling const references another; the function uses the result
-  "mod M do\n  pub const Base Int53 := 100\n  const Step Int53 := Base + 1\n  pub def g(n Int53) Int53 := n * Step\nend"
+  "mod M do\n  pub const Base Int53 := 100\n  const Step Int53 := Base + 1\n  pub def g(n Int53) Int53 := n * Step\nend",
+  # `@external(:js, "expr")` inline host body (ADR-0068): params bound positionally by name
+  ~S|@external(:js, "x + 1") pub def inc(x val Int53) Int53|,
+  # `@external(:js, "./file.mjs", "fun")` file-reference: an ESM import + a call to the imported fn
+  ~S|@external(:js, "./codec.ffi.mjs", "encode") pub def enc(x val Int53) Int53|
 ]
 
 # Rian.JS.compile_types — the `jsdts` stream (ADR-0086 §5): the TypeScript `.d.ts` sidecar. Maps

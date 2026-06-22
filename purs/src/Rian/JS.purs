@@ -10,11 +10,11 @@
 -- | `Int64`+ are rejected (`rejectWideInt`), never silently elevated to BigInt.
 -- |
 -- | Both print modes are ported: `compile` (the runtime module) and `compileTypes` (the `.d.mts`
--- | sidecar, ADR-0086 §5). Module `const`s + references are ported (`resolveConsts`/`constJs`, the
--- | `EConstRef` Core node). NOT yet ported: protocol dispatch, `@external` bodies, value-union
--- | discrimination over a user type (the `PTyped` disc field exists; the baking pass is unported),
--- | and struct *construction* `Name(f: v)` (no `EStruct` in PS Core; field access + `case` patterns
--- | DO lower). The corpus avoids those.
+-- | sidecar, ADR-0086 §5). Module `const`s + references (`resolveConsts`/`constJs`, the `EConstRef`
+-- | Core node) and `@external` bodies (`externalFn`/`importsJs`, the 3 `ExtSpec` forms + ESM imports)
+-- | are ported. NOT yet ported: protocol dispatch, value-union discrimination over a user type (the
+-- | `PTyped` disc field exists; the baking pass is unported), and struct *construction* `Name(f: v)`
+-- | (no `EStruct` in PS Core; field access + `case` patterns DO lower). The corpus avoids those.
 module Rian.JS
   ( compile
   , compileSexpr
@@ -24,7 +24,7 @@ module Rian.JS
 
 import Prelude
 
-import Data.Array (any, concatMap, elem, filter, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, uncons, unsnoc)
+import Data.Array (any, concatMap, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, sort, uncons, unsnoc)
 import Data.Foldable (foldMap)
 import Data.Enum (fromEnum)
 import Data.Int as Int
@@ -33,13 +33,14 @@ import Data.String as Str
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (singleton, toCharArray)
 import Data.String.Common (joinWith)
-import Data.Tuple (Tuple(..), fst)
+import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
+import Rian.External (render) as Ext
 import Rian.Assemble (assemble)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Body, Clause, Const, Func, Prog, Range, Struct, Type, Variant, bodySurface)
+import Rian.IR (Body, Clause, Const, ExtSpec(..), Func, Prog, Range, Struct, Type, Variant, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
 import Rian.Pratt (Surface(..), parse, parseBody) as P
@@ -68,10 +69,11 @@ compile src =
           cset = map _.name consts
           constJsOut = joinWith "\n" (map (constJs i53 cset) consts)
           fnJs = joinWith "\n\n" (map (functionJs i53 cset) funcs)
+          importJsOut = importsJs funcs
         in
-          -- imports / protocol dispatchers are still deferred; the join keeps their slots so the
-          -- shape composes once they land (matches the reference's reject-empty-then-join).
-          joinWith "\n\n" (filter (_ /= "") [ constJsOut, fnJs ])
+          -- protocol dispatchers are still deferred; the join keeps their slot so the shape composes
+          -- once they land (matches the reference's reject-empty-then-join).
+          joinWith "\n\n" (filter (_ /= "") [ importJsOut, constJsOut, fnJs ])
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> concatModFuncs prog.mods
@@ -156,7 +158,7 @@ constJs i53 cset c =
 
 functionJs :: Boolean -> Array String -> Func -> String
 functionJs i53 cset f =
-  if not (null f.externals) then unsafeCrashWith ("`" <> f.name <> "`: `@external` is not yet ported in the PS JS emitter")
+  if not (null f.externals) then externalFn f
   else case wideIntType f of
     Just t -> unsafeCrashWith ("`" <> f.name <> "`: fixed-width integer `" <> t <> "` is not supported on JS (ADR-0064)")
     Nothing ->
@@ -168,6 +170,47 @@ functionJs i53 cset f =
       in
         export <> "function " <> f.name <> "(" <> params <> ") {\n" <> body
           <> "\n  throw new Error(\"" <> f.name <> ": no clause matched\");\n}"
+
+-- the `:js` external spec, if any (the target key is the bare `"js"`, as `Decl` stores it).
+jsExternal :: Func -> Maybe ExtSpec
+jsExternal f = map snd (find (\(Tuple t _) -> t == "js") f.externals)
+
+-- an `@external` function (ADR-0068): emit the `:js` host body verbatim. No `:js` body → the
+-- function is off `:js` (Reach pins it); reaching here is an off-target compile, a clear error.
+-- A file-reference calls the imported function (its `import` is at the module top, `importsJs`).
+externalFn :: Func -> String
+externalFn f = case jsExternal f of
+  Nothing -> unsafeCrashWith ("`" <> f.name <> "`: no `@external(:js, …)` body — not reachable on :js")
+  Just (ExtFile _ fun) -> jsExternalFn f (fun <> "(" <> joinWith ", " (map _.name f.params) <> ")")
+  Just spec -> jsExternalFn f (Ext.render spec f.params)
+
+-- wrap a `:js` host expression as the function body, binding each Rian param to its positional
+-- argument by name so the expression can reference it (mirrors `Rian.JS.js_external_fn`).
+jsExternalFn :: Func -> String -> String
+jsExternalFn f host =
+  let
+    args = joinWith ", " (map (\i -> "a" <> show i) (upto (length f.params)))
+    binds = joinWith " " (mapWithIndex (\i p -> "const " <> p.name <> " = a" <> show i <> ";") f.params)
+    export = if f.pub then "export " else ""
+  in
+    export <> "function " <> f.name <> "(" <> args <> ") { " <> binds <> " return (" <> host <> "); }"
+
+-- ESM imports for `@external(:js, "./ffi.mjs", "fun")` file-references (ADR-0080 §7 b): one
+-- `import { … } from "path"` per referenced file, the imported functions deduped + sorted, the
+-- paths sorted (mirrors `Rian.JS.imports_js`).
+importsJs :: Array Func -> String
+importsJs funcs =
+  let
+    refs = concatMap fileRefs funcs
+    fileRefs f = case jsExternal f of
+      Just (ExtFile path fun) -> [ Tuple path fun ]
+      _ -> []
+    paths = nub (sort (map fst refs))
+    importLine path =
+      let funs = nub (sort (mapMaybe (\(Tuple p fn) -> if p == path then Just fn else Nothing) refs))
+      in "import { " <> joinWith ", " funs <> " } from \"" <> path <> "\";"
+  in
+    joinWith "\n" (map importLine paths)
 
 -- `0..n-1` (empty for `n <= 0`; `Array.range 0 (-1)` would wrongly give `[0,-1]`).
 upto :: Int -> Array Int
