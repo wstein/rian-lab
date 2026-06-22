@@ -68,8 +68,7 @@ return `Int53` both recovered. `Rian.Decl.parse` runs the pass after assembly; a
   stays an anonymous-typed param (a TYPE) — Rian's existing PascalCase-type / lowercase-value convention.
   `pub`/`@external` boundaries keep the legacy permissive reading, so the self-hosted dispatchers
   (`pub def lower_pat(p) Pat`, raw-AST params with no nominal type) are untouched; the prior "deferred,
-  needs dedicated syntax" blocker is closed. (Self-host *parity* — a `fill_params` in the Rian-written
-  `compiler/decl.rian` — is the tracked follow-up; the token-based `parse_program` is a separate parser.)
+  needs dedicated syntax" blocker is closed. (The token-based `parse_program` is a separate parser.)
 - **Inference widens portability**: a recovered concrete param type lets a private helper reach
   `:rs`/`:jvm` (`Rian.Reach` reads the now-concrete signature) instead of forcing an annotation.
 
@@ -80,8 +79,8 @@ ADR does not yet have (target-aware enforcement or union types):
 - **A structural clause-head pattern (`[h|t]`, `{a, b}`, `%{…}`) contributes no param-type
   constraint** (`Rian.Check.pattern_type` returns `:unknown` for it). Making it contribute a
   constraint — so a scalar-vs-list clause clash is a conflict — was implemented and **reverted**: it
-  rejected valid **dynamically-typed, BEAM-only self-host code** that legitimately matches one untyped
-  param at several shapes (a union), e.g. `compiler/compose_real_sum.rian`'s `lower_body(body)`. The
+  rejected valid **dynamically-typed, BEAM-only code** that legitimately matches one untyped
+  param at several shapes (a union), e.g. a `lower_body(body)` that dispatches on the body's shape. The
   inference is conservative by design (it infers `:unknown` rather than guess), so it generalizes such
   a param rather than inventing a false conflict. A sound version would enforce the conflict **only for
   functions required to reach a statically-typed target** (`:rs`/`:js`/`:jvm` via an `@targets`

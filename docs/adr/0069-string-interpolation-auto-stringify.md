@@ -235,8 +235,7 @@ a shortest-search, since its `Double.toString` is not always shortest at the den
   interpolation (lean: forbid nesting strings in holes, suggest a `let`).
 - **Surface freeze (ADR-0065 P7):** `${…}` is explicitly *outside* the freeze until this ADR settles.
 - **Detokenizer round-trip:** the lexer's re-escape path (`escape_str`/`char_source`) must round-trip
-  `${…}` as interpolation, not as a literal — a test the self-host lexer fixpoint (`Rian.Fixpoint`) will
-  catch if missed.
+  `${…}` as interpolation, not as a literal — guarded by the detokenizer round-trip tests.
 
 ## Implementation (partial, 2026-06-14)
 

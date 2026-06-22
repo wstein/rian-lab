@@ -82,10 +82,8 @@ ESM `import`), **Rust** (`--rust -o DIR` copies the `.ffi.rs` and includes it as
 is verified end-to-end against its toolchain.
 
 **Deprecation path for the inline string.** The reference form is the destination; the string form is
-demoted to a constrained convenience. It is **not removed yet** because the self-hosting compiler
-(`compiler/compose_real_sum.rian`) relies on construct-the-args inline FFI, which has no reference image
-without authored foreign wrappers. The ADR-0080 §7 build integration that wrapper migration needs is now
-**complete** (file-references bundle on all four targets), so removal is gated only on that migration
+demoted to a constrained convenience. The ADR-0080 §7 build integration that wrapper migration needs is
+now **complete** (file-references bundle on all four targets), so removal is gated only on that migration
 ("once references are ergonomic enough" — the 2026-06-18 debate consensus).
 
 The string and module-reference forms lower through **one** emitter helper (`Rian.External.render/2`): a

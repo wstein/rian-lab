@@ -75,10 +75,9 @@ plus interim source emission — **not** the compiler source.
 
 ## Roadmap (refines ADR-0027)
 
-State legend: ✅ done · 🟡 in progress · ⬜ not started. Stages 0–0.5 (the backend
-sequence this ADR decides) are stable. **Stage 1–2 self-host status is owned by
-[ADR-0063](0063-bootstrap-plan-and-fixed-point.md)** (the live authority) — the rows
-below summarize it; defer to ADR-0063 if they ever lag.
+State legend: ✅ done · 🟡 in progress · ⬜ not started · 🗑️ retired. Stages 0–0.5 (the
+backend sequence this ADR decides) are stable and live. **Stages 1–2 (the Rian self-host)
+are retired** — see [ADR-0084](0084-purescript-port.md) for the active re-platforming path.
 
 | Stage | Deliverable | Backend | State |
 |---|---|---|---|
@@ -86,17 +85,17 @@ below summarize it; defer to ADR-0063 if they ever lag.
 | **0.1 — the gate** | **Lexer + declaration parser**: parse whole `mod`/`type`/`fn` files into the structures the pipeline consumes | — | ✅ **Done** — [`Rian.Lexer`](../../lib/rian/lexer.ex) + [`Rian.Decl`](../../lib/rian/decl.ex) parse `type`/`range`/`struct`/`alias`/`const`/`use`/`def` and `mod` files (`:=` / `… end` block / `case`, `with`, `when` guards, multi-param) |
 | **0.2** | Module emitter + driver: parsed defs → one module → run | Elixir source / BEAM | ✅ **Done** — [`Decl.compile/1`](../../lib/rian/decl.ex) and [`Rian.Beam.load_program/1`](../../lib/rian/beam.ex) compile a `mod` (or several) to one module and run it |
 | **0.3** | **Functioning language**: compile & run real `.rian` files; iterate syntax/behavior freely | BEAM | ✅ **Done** — real files compile & run; surface now covers sums, `struct`, `range`/`Char`, generics (`Vec(T)`), `case`/`with`, capabilities, typed bindings; exhaustiveness/error-set/linearity gates fire |
-| **0.5** | Swap backend to Erlang **abstract forms** (`:compile.forms`); invisible to the language | Erlang-native (ADR-0026) | ✅ **Done** — [`Rian.Beam`](../../lib/rian/beam.ex) lowers to the Erlang abstract format + `:compile.forms` → loadable `.beam` (no `eval`, no Elixir-compiler dep, line-tracked). The default execution path for BEAM tests and the self-hosting spikes |
-| **1** | Self-host: rewrite the compiler in Rian, FFI to `:lists`/`:maps`/`:compile` | BEAM | ✅ **Done** — the compiler is self-hosted in Rian (`compiler/*.rian`): lexer, decl parser, surface→Core lowering, capability + exhaustiveness gates, and all four backends (BEAM/Rust/JVM/JS), each diffed against its Elixir reference. **Authority: [ADR-0063](0063-bootstrap-plan-and-fixed-point.md)** (live status) |
-| **2** | Fixpoint: Stage1 compiles itself; compare artifacts | BEAM | ✅ **Done** — the bootstrap fixed point **`v1 == v2` is CLOSED**: gen1 (Elixir-host-compiled) recompiles the compiler sources to gen2, equal in canonical forms *and* bit-identical `.beam` under `:deterministic` (`selfhost_v1_v2_fixpoint_test.exs`). Scope (self-compiling + partially self-checking) is detailed in **[ADR-0063](0063-bootstrap-plan-and-fixed-point.md)** |
+| **0.5** | Swap backend to Erlang **abstract forms** (`:compile.forms`); invisible to the language | Erlang-native (ADR-0026) | ✅ **Done** — [`Rian.Beam`](../../lib/rian/beam.ex) lowers to the Erlang abstract format + `:compile.forms` → loadable `.beam` (no `eval`, no Elixir-compiler dep, line-tracked). The default execution path for BEAM tests |
+| **1** | Self-host: rewrite the compiler in Rian, FFI to `:lists`/`:maps`/`:compile` | BEAM | 🗑️ **Retired** — a Rian-in-Rian compiler corpus (`compiler/*.rian`) reached a `v1==v2` BEAM fixpoint but was **removed**; the self-host bootstrap is no longer pursued. The active re-platforming path is the **PureScript/purerl port** ([ADR-0084](0084-purescript-port.md)), which keeps the compiler on the BEAM without a Rian self-host |
+| **2** | Fixpoint: Stage1 compiles itself; compare artifacts | BEAM | 🗑️ **Retired** — superseded with Stage 1 (see [ADR-0084](0084-purescript-port.md)) |
 
-The highest-leverage work now is **Stage 1**: porting the real compiler modules
-to Rian one at a time, each diffed against the Elixir reference by `Rian.Fixpoint`
-so a ported slice is a regression test. The blockers are protocol-bounded
-generics (ADR-0042 part 2 — needed to type map/fold-shaped compiler code and a
-test framework) and a portable stdlib beyond `List`/`Dict`/`Str`. The front-end
-components (parser, checker, exhaustiveness, capabilities, the three emitters)
-all exist and are tested.
+**Stages 1–2 (Rian self-host) are retired.** A Rian-in-Rian compiler corpus once
+reached a `v1==v2` BEAM fixpoint, but it was removed and the self-host bootstrap is
+no longer pursued. The re-platforming goal it served — replacing the Dialyzer
+success-typing crutch with a real type system while keeping the compiler on the
+BEAM — is now met by the **PureScript/purerl port** ([ADR-0084](0084-purescript-port.md)).
+Stages 0–0.5 (the Elixir-hosted front-end + abstract-forms backend) stand and are
+the live compiler.
 
 > **Note — the Rust target is not a bootstrap stage.** The stages above track the
 > *BEAM* path (interim Elixir source → Erlang abstract forms at Stage 0.5).

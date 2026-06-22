@@ -1,8 +1,8 @@
 # ADR-0060 — Testing strategy: executable spec-by-example, value-returning assertions; Gherkin rejected
 
-**Status:** Accepted (direction) · **tier B doctest runner shipped (MVP)** — `Rian.Doctest` executes `expr #=> expected` examples in `@doc` heredocs on the BEAM (both sides real Rian; a drifted example fails the build), with `Rian.Doctest.exunit/1` surfacing each as an ExUnit case; **tier C shipped** — boolean assertion macros (`assert`/`refute`/`assert_eq`/`assert_neq`) **and** the value-returning matcher DSL with formatted diagnostics (`expect_eq`/`expect_neq`/`expect_true`/`expect_false` → `Outcome := Pass | Fail(String)`), both hygienic Rian macros in `examples/rian/prelude_test.rian`, injected by `Rian.Test` and lowering to all three targets; only `contain` (membership) stays deferred (needs the `List` prelude linked) and `describe`/`it` grouping is not a macro (§4); the property/fixpoint tier is **partly shipped** (`Rian.Fixpoint`, the exhaustiveness gate)
-**Implemented:** partial — doctest runner + fixpoint tier + the full assertion/matcher vocabulary shipped (`Rian.Doctest`, `Rian.Fixpoint`, `examples/rian/prelude_test.rian`; `test/rian/doctest_test.exs`, `test/rian/fixpoint_test.exs`, `test/rian/rian_native_test.exs`); `contain` + `describe`/`it` grouping deferred
-**Refs:** ADR-0035 (no hidden control flow — errors are values; assertions return outcomes, never throw), ADR-0032 (one surface family — no second grammar), ADR-0030 (declarative/hygienic macros — an internal spec DSL, not injection), ADR-0051 (doc comments / heredocs — the doctest host), ADR-0042 (protocol-bounded generics — matchers need `Eq`/`Show`/`Ord`), ADR-0047 (portable prelude — `Test` is portable Rian), ADR-0052 (documentation site — renders proven-current specs), ADR-0057 (portable sequential logic **and tests** across targets), ADR-0027/0031 (self-hosting; `Rian.Fixpoint`)
+**Status:** Accepted (direction) · **tier B doctest runner shipped (MVP)** — `Rian.Doctest` executes `expr #=> expected` examples in `@doc` heredocs on the BEAM (both sides real Rian; a drifted example fails the build), with `Rian.Doctest.exunit/1` surfacing each as an ExUnit case; **tier C shipped** — boolean assertion macros (`assert`/`refute`/`assert_eq`/`assert_neq`) **and** the value-returning matcher DSL with formatted diagnostics (`expect_eq`/`expect_neq`/`expect_true`/`expect_false` → `Outcome := Pass | Fail(String)`), both hygienic Rian macros in `examples/rian/prelude_test.rian`, injected by `Rian.Test` and lowering to all three targets; only `contain` (membership) stays deferred (needs the `List` prelude linked) and `describe`/`it` grouping is not a macro (§4); the property/fixpoint tier is **partly shipped** (the exhaustiveness/error-set/linearity gates plus golden/reference-equivalence tests — `Rian.FormsEquiv` roundtrip and `Rian.ConformanceTest`)
+**Implemented:** partial — doctest runner + the full assertion/matcher vocabulary shipped (`Rian.Doctest`, `examples/rian/prelude_test.rian`; `test/rian/doctest_test.exs`, `test/rian/rian_native_test.exs`); `contain` + `describe`/`it` grouping deferred
+**Refs:** ADR-0035 (no hidden control flow — errors are values; assertions return outcomes, never throw), ADR-0032 (one surface family — no second grammar), ADR-0030 (declarative/hygienic macros — an internal spec DSL, not injection), ADR-0051 (doc comments / heredocs — the doctest host), ADR-0042 (protocol-bounded generics — matchers need `Eq`/`Show`/`Ord`), ADR-0047 (portable prelude — `Test` is portable Rian), ADR-0052 (documentation site — renders proven-current specs), ADR-0057 (portable sequential logic **and tests** across targets), ADR-0027/0031 (self-hosting — retired)
 **Owners:** Liam Davis (ergonomics/DX) · Samir Patel (rigor) · Maya Lin (multi-target/cost) · Kira Neri (honesty/determinism) · Arthur Pendelton (no-exceptions fit) · Elena Rostova (protocols) · Chloe Bennett (surface) · Rachel Okafor (PM)
 
 ## Context
@@ -34,7 +34,7 @@ Three facts about Rian shape the answer:
 
 | Tier | What | Job | Status |
 |---|---|---|---|
-| **A — Properties / fixpoint / golden** | generative + reference-equivalence (`Rian.Fixpoint`), the exhaustiveness/error-set/linearity gates | **rigor / coverage** | partly shipped |
+| **A — Properties / fixpoint / golden** | generative + reference-equivalence (`Rian.FormsEquiv` roundtrip, `Rian.ConformanceTest`), the exhaustiveness/error-set/linearity gates | **rigor / coverage** | partly shipped |
 | **B — Spec-by-example / doctests** | examples in `@doc`/`@moduledoc` heredocs (ADR-0051) and `docs/spec/*.md` fences, executed | **documentation that cannot drift** | **adopt first** |
 | **C — assertion macros + matchers** | boolean `assert`/`refute`/`assert_eq`/`assert_neq` + diagnostic matchers `expect_eq`/`expect_neq`/`expect_true`/`expect_false` (→ `Outcome`); `contain` + `describe`/`it` deferred | **readable unit specs** | shipped (`prelude_test.rian`); `contain` needs `List`, `describe` isn't a macro |
 
@@ -111,7 +111,7 @@ Recorded so the question stops recurring. A natural-language `.feature` layer is
 | Option | Rating | Note |
 |---|---|---|
 | Tier B — doctests / executable spec-by-example | 5/5 | kills a live bug-class; zero new surface; rides EEP-48/rustdoc doctest machinery |
-| Make the by-example tour runnable (assert stated outputs in CI) | 4/5 | extends the `Rian.Fixpoint` "demo → regression" move to the tour |
+| Make the by-example tour runnable (assert stated outputs in CI) | 4/5 | extends the "demo → regression" move (reference-equivalence golden tests) to the tour |
 | Tier A — property/generative + the existing gates | 4/5 | the rigor backbone; BDD must not displace it |
 | Tier C — internal `describe`/`it` + matchers | 3/5 | ergonomic; **downstream of protocols (ADR-0042)** — a *second* protocol customer, not their driver |
 | RSpec-style as a *separate* effort from the test framework | 1/5 | it *is* the test framework with grouping sugar — one effort, not two |
@@ -139,7 +139,7 @@ Recorded so the question stops recurring. A natural-language `.feature` layer is
   `docs/spec/*.md` (e.g. [expressions.md](../spec/expressions.md) §4, locked in CI). *Still open:*
   multi-module-internal doctests and the per-target (Rust/JS) doctest harness.
 - **Tour-as-regression.** Each `examples/rian/*.rian` already compiles; assert its documented
-  outputs in CI (the `Rian.Fixpoint` pattern, generalised).
+  outputs in CI (the reference-equivalence golden-test pattern, generalised).
 - **ExUnit → `@test def` transpilation.** *Shipped* (`Rian.Transpile`, ADR-0075): `mix rian.transpile`
   flattens an ExUnit test module to module-less `@test def`s and rewrites `assert`/`refute` to the
   assertion macros — so the test-porting track produces drafts that run end-to-end via `Rian.Test`,

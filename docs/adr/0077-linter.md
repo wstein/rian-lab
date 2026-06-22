@@ -21,8 +21,8 @@ what a formatter should be.
 But three classes of concern have no home in it, and the formatter review surfaced them concretely:
 
 1. **Layout the formatter can't safely produce yet.** A `def` head wider than 98 cols is *not*
-   wrapped, because `Rian.Decl`'s head parser is not newline-tolerant inside the param parens (and the
-   self-hosted `compiler/decl.rian` + the `sig` oracle would have to agree). A long pipeline *inside a
+   wrapped, because `Rian.Decl`'s head parser is not newline-tolerant inside the param parens. A long
+   pipeline *inside a
    block body* isn't wrapped either (its newline would become a `;` statement separator). The formatter
    correctly refuses to emit these rather than risk meaning — but a developer still wants to be *told*.
 2. **Style that needs the program's meaning.** Naming conventions (ADR-0034: PascalCase types,

@@ -160,8 +160,8 @@ mirroring the BEAM tuple.) The object form was adopted because it:
   plausibly faster (a fixed-shape object is monomorphic in V8).
 
 `Result` is **not** a sum — it is the `{:ok,_}`/`{:error,_}` tuple — so it stays a
-tagged **array** `["ok", v]`. The repr is parity-locked across `Rian.JS`, the
-self-host `compiler/js.rian`, and the purs `JS.purs` (fixpoint + `js`-parity), with
+tagged **array** `["ok", v]`. The repr is parity-locked across `Rian.JS` and the
+purs `JS.purs` (`js`-parity), with
 `compile_types` emitting the matching discriminated object union.
 
 **Field keys are positional `_0`/`_1`** today. A *labeled-object* refinement — use

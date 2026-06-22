@@ -81,7 +81,7 @@ lower it as calls, and `Rian.Reach` needs no comprehension blocker: a `for` is e
 * **One real portable surface gap closed** with zero emitter churn — the ADR-0050 thesis (a typed Core
   spine lets sugar land once) paying off again, as bitstrings/pins did not (those needed native forms).
 * The transpiler stops flagging `for` (incl. `lib/rian`'s destructuring `{:tag, …} <- decls` form,
-  the dominant residual); idiomatic Rian (and `compiler/*.rian`) can use comprehensions.
+  the dominant residual); idiomatic Rian can use comprehensions.
 * **Not** a laziness or stream surface — eager, list-producing only (ADR-0057 keeps laziness
   native-per-target).
 

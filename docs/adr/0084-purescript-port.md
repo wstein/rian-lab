@@ -47,9 +47,11 @@ weaknesses that compound as the language grows:
    through Pratt → Core → Check → every emitter" drift tax (see CLAUDE.md) is exactly
    the class of error a real type system catches at the boundary, not at runtime via a
    `FunctionClauseError`.
-2. **The transpiler tail.** A second copy of the compiler exists as Rian-in-Rian
+2. **The transpiler tail.** A second copy of the compiler once existed as Rian-in-Rian
    (`compiler/*.rian`) plus a generated `rian/src` mirror; keeping the Elixir reference
-   and the self-host port in step is ongoing manual work.
+   and that self-host port in step was ongoing manual work. That corpus has since been
+   **removed** (the Rian self-host is retired, ADR-0063), leaving this PureScript port as
+   the single re-platforming effort.
 
 A decision was taken (2026-06-21) to **port the reference compiler from Elixir to
 PureScript**, file by file, preserving behaviour. Two backend targets were weighed:
@@ -83,7 +85,7 @@ Elixir reference, not a redesign.
   types; `check.ex`'s `:unknown`-or-bust inference becomes types where it can. The goal
   is *idiomatic* PureScript, so a 1:1 syntactic port is explicitly rejected.
 - **Parity is the gate (ADR-0000).** Each ported module ships a spec suite that asserts
-  its output against the Elixir reference's recorded fixtures (the `Rian.Fixpoint`
+  its output against the Elixir reference's recorded fixtures (the parity
   discipline: a port is a regression test, not a demo). A module is "migrated" only when
   the parity harness is green **and** parity holds; "compiles" is not "correct".
 - **Annotate for the Phase-7 PS→Rian transpiler as you port.** The endgame transpiler is

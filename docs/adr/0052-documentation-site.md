@@ -105,8 +105,8 @@ The FlatBars `lab/` + `spec/` proves the stack; Rian adopts its patterns, with o
   core. The two alternatives once floated are **rejected**: **BEAM-in-WASM** (AtomVM/Firefly/Popcorn)
   — no effort to be spent building an interim WASM engine to then discard; and **server-side compile**
   — the playground is static, no backend. The gate is therefore the **bootstrap fixed point `v1==v2`
-  (ADR-0063) *plus* JS-reachability**: the portable-prelude breadth (ADR-0047, the `@selfhost_ffi`
-  ledger driven to zero) and the `Fn` Reach gap closed — exactly the ADR-0063 §4 "portable
+  (ADR-0063) *plus* JS-reachability**: the portable-prelude breadth (ADR-0047) and the `Fn` Reach gap
+  closed — exactly the ADR-0063 §4 "portable
   self-hosting" prerequisites. Keeping the self-host on the *portable* path (no BEAM-only/host-FFI
   shortcuts) makes `v1==v2` and the JS engine land together rather than as a second slog.
 - **Until then there is no *live* playground — only a static gallery.** A build-time `tour.json` of

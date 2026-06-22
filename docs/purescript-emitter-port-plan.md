@@ -119,7 +119,7 @@ This is the **most ambitious item in the migration**, and it **conflicts with AD
 written**. Three facts held in tension:
 
 1. **Today's architecture is already half-portable.** The Beam emitter lowers Core → a
-   **portable `Form` sum** (`compiler/beam.rian`: `FInt/FStr/FVar/FAtom/FCtor/FOp1/FOp2/FConcat/
+   **portable `Form` sum** (`Rian.Beam`'s `FInt/FStr/FVar/FAtom/FCtor/FOp1/FOp2/FConcat/
    FBinAll/FCharBin/…`, carrying ops/names as *strings*). Only the *last mile* — `Form → real
    Erlang abstract forms → :compile.forms/2 → .beam` — is FFI (`:compile.forms` is the Erlang
    compiler).
@@ -139,8 +139,8 @@ written**. Three facts held in tension:
 ### B.1 Recommended decomposition (de-risk by staging)
 
 **Stage B0 — Port the portable `Form` layer first (faithful to ADR-0084, immediate value).**
-Port `Core → Form` to PureScript (`compiler/beam.rian` already proves this is a pure,
-reflection-free, string-carrying Core pass — another Core consumer like `Shadow`). Keep `Form →
+Port `Core → Form` to PureScript (a pure, reflection-free, string-carrying Core pass —
+another Core consumer like `Shadow`). Keep `Form →
 :compile.forms → .beam` as a **thin checked-in `.erl` FFI module** (the existing ADR-0084
 boundary). **Parity:** a `bem` stream serializing the `Form` sum (a shared `formSexpr`), exactly
 like `cor`/`dcl`. **~3 stages, low risk** — delivers a working PS Beam emitter that still produces

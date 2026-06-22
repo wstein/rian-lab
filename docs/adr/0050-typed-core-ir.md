@@ -56,7 +56,7 @@ The one irreducible ambiguity is a constructor head whose arguments are *all typ
 in clause position it could be a constructor pattern (matching nullary constructors) or a typed
 parameter. The decl parser **rejects** it (`Rian.Decl.Error`, "name a variable or move the type to a
 signature line") rather than silently guessing — the no-silent-miscompile bar (ADR-0035). This case has
-zero occurrences across `compiler/*.rian` (~1000 clause heads); the constructor-pattern reading has ~673.
+zero occurrences across the surveyed compiler corpus (~1000 clause heads); the constructor-pattern reading had ~673.
 Surveyed prior art (Elixir, Haskell, Rust, Crystal) introduces no keyword for this — the positional rule
 plus the case convention (PascalCase = type/constructor, lowercase = binding, ADR-0033) suffices.
 
@@ -90,6 +90,12 @@ sealed sums / typed structs, **not loose tuples**. Two payoffs the old pragma co
   its own IR with Rian types, and a **sealed-sum IR gives it exhaustiveness over IR nodes**. The
   totality gate that is Rian's pitch then applies to the compiler's *own* passes — a missed IR case is
   a compile error in the self-hosted compiler.
+
+A node may carry an **optional emitter-specific annotation** — a field with a `nil` default that one
+backend's pre-emit pass fills and other consumers ignore. Example: `PCtor.labels` (the per-field name
+list) is populated by `Rian.JS`'s `bake_variants` so the JS emitter binds `v.radius` rather than
+`v._0` (ADR-0049 §3b); the BEAM/Rust/JVM emitters never read it. The annotation does not break the
+"one node shape" rule — it is a default-`nil` field on the canonical struct, not a parallel node.
 
 ### 5. Migration is incremental, behind tests, and sequenced first
 
@@ -147,9 +153,7 @@ before freezing the surface** (P7), not a design choice. `Rian.Decl`'s `:=`-body
 (`take_line`) is now **newline-tolerant**: a body continues across a newline when (a) inside
 unbalanced `(`/`[`/`{`/`%{`, (b) a binary operator trails the line or (c) leads the next, or (d) the
 body simply begins on the next line. A plain one-liner still ends at its newline. This is a *layout*
-relaxation only — tokens and the operator table are unchanged (and are what P7 will freeze). The
-self-host budget the review noted: `compiler/decl.rian` (which re-parses bodies) and the
-`Rian.Fixpoint` anchor will track this when the Rian-written front-end widens to multi-line bodies.
+relaxation only — tokens and the operator table are unchanged (and are what P7 will freeze).
 
 ## Spike finding (P6 — shared-traversal LCD check, 2026-06-14)
 

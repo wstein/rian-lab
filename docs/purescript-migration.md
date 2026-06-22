@@ -26,8 +26,8 @@ A module is **migrated** — not merely "ported" — when all hold:
 2. `./scripts/purerl-build.sh` is green — `spago build` (purs typecheck + purerl codegen)
    then the module compiles to BEAM and runs on Erlang/OTP.
 3. A **parity harness** (`purs/test/*.erl`) asserts byte-equality against fixtures
-   generated from the Elixir reference (`gen_fixtures.exs`) — the `Rian.Fixpoint`
-   discipline — and runs inside the gate. (`spago test`'s spec/aff stack does not run under
+   generated from the Elixir reference (`gen_fixtures.exs`) — the parity discipline (a
+   port is a regression test, not a demo) — and runs inside the gate. (`spago test`'s spec/aff stack does not run under
    purerl, so the Erlang harness is the test path.)
 4. FFI (if any) is a typed PureScript signature over a checked-in `.erl` foreign module.
 5. The Elixir counterpart stays as the **parity oracle** until no Elixir module depends
