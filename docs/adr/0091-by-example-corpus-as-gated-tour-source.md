@@ -106,3 +106,7 @@ A follow-up debate revisited "should the two corpora merge?" with new evidence:
 
 **Not done (parked):** a literal single corpus (one file serving both the minimal pane and the deep
 tour). Revisit if the site grows collapsible/lazy panes, which would remove the teaching-UX objection.
+
+**Live cells emit tagged-object sums.** The by-example cells (and the playground) now show a sum
+variant as `{ $: "Ctor", _0: … }`, not a tagged array — the JS-value-representation decision and its
+rejected hybrid alternative are recorded in **ADR-0049 §3b**.

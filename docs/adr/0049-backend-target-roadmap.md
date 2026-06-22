@@ -145,6 +145,37 @@ Most of the ECMAScript target is already specified across the corpus:
   no OTP off-BEAM).
 - Protocol dispatch → **dictionary/vtable objects** (ADR-0042 JS note, confirmed by the PureScript study).
 
+### 3b. A sum value is a tagged **object**, not an array
+
+A user sum variant lowers to a **discriminated tagged object** — `Circle(r)` →
+`{ $: "Circle", _0: r }`, nullary `Red` → `{ $: "Red" }`, matched `v.$ === "Circle"`
+binding `v._0`. (It originally lowered to a tagged **array** `["Circle", r]` / `a0[1]`,
+mirroring the BEAM tuple.) The object form was adopted because it:
+
+- **distinguishes a variant from a list/tuple** — both were arrays, so a variant
+  was runtime-indistinguishable from a `Vec`, and a TS consumer saw both as
+  `T[]`. `{ $: … }` is a discriminated union TS narrows on `.$`;
+- is **consistent with structs**, already `{ __struct__: "Name", … }` objects;
+- reads honestly on the live playground/tutorial (the `.mjs` is shown), and is
+  plausibly faster (a fixed-shape object is monomorphic in V8).
+
+`Result` is **not** a sum — it is the `{:ok,_}`/`{:error,_}` tuple — so it stays a
+tagged **array** `["ok", v]`. The repr is parity-locked across `Rian.JS`, the
+self-host `compiler/js.rian`, and the purs `JS.purs` (fixpoint + `js`-parity), with
+`compile_types` emitting the matching discriminated object union.
+
+**Field keys are positional `_0`/`_1`** today. A *labeled-object* refinement — use
+the variant's field labels where present (`{ $: "Circle", radius: r }`), `_n` for
+anonymous — is the agreed next step but **deferred**: the prototype showed the IR
+that dominates real Rian is ~90% anonymous variants (so labels help a small, mostly
+user-facing subset, and structs already cover named fields), while the cost is a
+ctor→label resolution pass (the `EVariant`/`Rian.Lower.resolve_variants` machinery)
+wired through three emitters. A **hybrid** (labeled→object, anonymous→array) was
+**rejected**: it reintroduces the variant≠list ambiguity for the anonymous majority,
+makes the runtime shape depend on whether the author wrote field names, has no
+coherent answer for *partially*-labeled variants (`Foo(x Int, Int)`), and degrades
+the `.d.mts` from a discriminated-object union to literal tuples.
+
 ### 4. Relationship to the bootstrap stages (ADR-0031)
 
 Only **BEAM** is the bootstrap path (interim Elixir-source → abstract forms at Stage 0.5). **Rust,
