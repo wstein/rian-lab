@@ -9,9 +9,12 @@ module is ported only after everything it depends on has reached parity.
 > BEAM is recast as the parity oracle** (byte-equality vs the Elixir reference, the DoD below) plus
 > the self-host / BEAM-retention path (ADR-0063). The type-safety-over-Dialyzer win of ADR-0084
 > stands as a *means*, not the motive. Concretely: **`Rian.JS` (Phase 5) is the priority emitter** —
-> it is both the next migration step *and* the live-playground engine (ADR-0090 §1, §7). A JS-backend
-> build profile (standard package set; the one `HostRef` FFI stubbed; `Beam` skipped in-browser) is a
-> new deliverable tracked under Phase 5 / Phase 10.
+> it is both the next migration step *and* the live-playground engine (ADR-0090 §1, §7). **The JS-backend
+> build profile has landed** (`purs/spago-js.dhall` + `packages-js.dhall` over the standard JS package
+> set; `HostRef.js` the conservative-accept FFI stub; `scripts/js-build.sh`): the whole PureScript
+> compiler compiles to JS via stock `purs` and `Rian.JS.compile` runs in node — the in-browser
+> playground's compiler prerequisite. (One named build-parity item: `Check`'s wide-int bounds run in
+> `Number`, exact ≤ 2⁵³; `Int64`+ approximate on JS, untested by the corpus — ADR-0090 §6.)
 
 ## Definition of done (per module)
 

@@ -11,6 +11,7 @@ node_modules
 # Generated files
 .psci
 output
+output-js
 
 # purerl / BEAM artifacts
 _build

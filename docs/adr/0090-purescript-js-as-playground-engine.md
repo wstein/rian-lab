@@ -1,13 +1,18 @@
 # ADR-0090 — PureScript → JS is the playground engine; purerl is the parity oracle
 
 **Status:** Proposed
-**Implemented:** no — direction + scope. The front-end, gates, inference, `Reach`, and the
-assemble tail are ported to PureScript and parity-gated (`purs/src/Rian/*`,
-`docs/purescript-migration.md`), and **`Rian.JS` is now ported** (Phase 5 — the ECMAScript emitter,
-both print modes, Tier-1 subset); the remaining emitters (`JVM`/`Lower`/`Beam`) stay Elixir-only, and
-**no JS-backend build profile exists** — the port has only ever been compiled through purerl. This
-ADR decides the *direction*; the `Rian.JS` port (the first prerequisite) has landed, but nothing here
-ships before a stock-`purs` JS build (the second).
+**Implemented:** partial — both prerequisites have landed. The front-end, gates, inference, `Reach`,
+and the assemble tail are ported to PureScript and parity-gated (`purs/src/Rian/*`,
+`docs/purescript-migration.md`); **`Rian.JS` is ported** (Phase 5 — the ECMAScript emitter, both
+print modes, full Tier-1 subset); and **the stock-`purs` JS-backend build profile now exists and is
+green** (`purs/spago-js.dhall` + `packages-js.dhall` over the standard JS package set, `HostRef.js`
+the conservative-accept FFI stub, `scripts/js-build.sh`): the *whole* PureScript compiler compiles to
+JS via stock `purs`, and `Rian.JS.compile` runs in node (emitting JS for functions, struct
+construction, and interpolation). What remains for the *playground* itself: bundling that JS + the
+sandboxed-iframe editor UI (§7 open items). The remaining emitters (`JVM`/`Lower`/`Beam`) stay
+Elixir-only. One named build-parity item (ADR-0090 §6): `Check`'s wide-int bounds run in `Number`
+(exact ≤ 2⁵³ — every type through `Int53`/`UInt32`); the `Int64`+ bounds are approximate on JS,
+untested by the corpus.
 **Refines:** ADR-0084 (PureScript port — this **re-frames its purpose**: the port's *primary
 deliverable* is a JS compiler for browser + node; type-safety-over-Dialyzer stands, but is no
 longer the headline; purerl is recast in §2).
