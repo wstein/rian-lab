@@ -121,10 +121,12 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   let liveJs: string | null = null;
 
   // the real Rian compiler, compiled to JS by stock purs (ADR-0090) — lazy-loaded once on first Run.
-  // Served from `public/` at `/rian-compiler.mjs`; the URL is a variable so the bundler treats it as
-  // a runtime import (a static literal would make Rollup try to resolve the public asset at build).
+  // Served from `public/` beside the site; the URL must carry the deploy base (`/rian-lab/` on GitHub
+  // Pages, `/` locally) or it resolves against the domain root and 404s. `BASE_URL` is build-time
+  // replaced and always ends in `/`; the variable + `@vite-ignore` keep it a runtime import (a static
+  // literal would make Rollup try to resolve the public asset at build).
   let compilerP: Promise<{ compile: (src: string) => string }> | null = null;
-  const compilerUrl = "/rian-compiler.mjs";
+  const compilerUrl = import.meta.env.BASE_URL + "rian-compiler.mjs";
   const getCompiler = () => (compilerP ??= import(/* @vite-ignore */ compilerUrl));
 
   function renderEditor() {
