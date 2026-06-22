@@ -19,6 +19,41 @@ defmodule Rian.JSTest do
     end
   end
 
+  # Type-check `files` (a list of `{relative_name, content}`) with `tsc --noEmit`
+  # under nodenext resolution; `:no_tsc` when `tsc` is absent (CI may lack it). The
+  # last file is the entry passed to `tsc`. Returns `:ok` or `{:error, output}`.
+  defp tsc_check(files) do
+    case System.find_executable("tsc") do
+      nil ->
+        :no_tsc
+
+      tsc ->
+        dir = Path.join(System.tmp_dir!(), "rian_dts_#{System.unique_integer([:positive])}")
+        File.mkdir_p!(dir)
+        for {name, content} <- files, do: File.write!(Path.join(dir, name), content)
+        entry = files |> List.last() |> elem(0)
+
+        {out, code} =
+          System.cmd(
+            tsc,
+            [
+              "--noEmit",
+              "--strict",
+              "--module",
+              "nodenext",
+              "--moduleResolution",
+              "nodenext",
+              entry
+            ],
+            cd: dir,
+            stderr_to_stdout: true
+          )
+
+        File.rm_rf(dir)
+        if code == 0, do: :ok, else: {:error, out}
+    end
+  end
+
   describe "ECMAScript emitter on the typed core IR (ADR-0049 / ADR-0050)" do
     test "a one-liner: Int -> BigInt, local function" do
       js = JS.compile("def double(n Int) Int := n * 2")
@@ -1081,6 +1116,139 @@ defmodule Rian.JSTest do
       assert js =~ "let x = n;"
       assert js =~ "let x$1 = (x * 10);"
       assert node_eval(js, "g(2)") in [:no_node, "20"]
+    end
+  end
+
+  describe "TypeScript `.d.mts` declaration sidecar (ADR-0086 §5)" do
+    test "primitives map to their faithful TS carriers (Int53 → number)" do
+      dts = JS.compile_types("pub def double(n Int53) Int53 := n * 2")
+      assert dts =~ "export function double(n: number): number;"
+    end
+
+    test "`Int` (arbitrary precision) maps to bigint" do
+      dts = JS.compile_types("pub def double(n Int) Int := n * 2")
+      assert dts =~ "export function double(n: bigint): bigint;"
+    end
+
+    test "only `pub` functions are part of the export surface" do
+      dts =
+        JS.compile_types("""
+        pub def shown(n Int53) Int53 := n
+        def hidden(n Int53) Int53 := n
+        """)
+
+      assert dts =~ "export function shown"
+      refute dts =~ "hidden"
+    end
+
+    test "a sum type lowers to a discriminated union of tagged tuples" do
+      dts =
+        JS.compile_types("""
+        type Expr := Num(Int53) | Add(Expr, Expr)
+        pub def show(e Expr) Int53 := case e do
+          Num(n) -> n
+          Add(a, b) -> show(a)
+        end
+        """)
+
+      assert dts =~ ~s/export type Expr = ["Num", number] | ["Add", Expr, Expr];/
+      assert dts =~ "export function show(e: Expr): number;"
+    end
+
+    test "a struct lowers to an interface with a `__struct__` discriminant literal" do
+      dts =
+        JS.compile_types("""
+        struct Point(x Int53, y Int53)
+        pub def area(p Point) Int53 := p.x * p.y
+        """)
+
+      assert dts =~ ~s|export interface Point { __struct__: "Point"; x: number; y: number; }|
+      assert dts =~ "export function area(p: Point): number;"
+    end
+
+    test "Vec / Fn / Option / generics map structurally" do
+      dts =
+        JS.compile_types("""
+        pub def first(xs Vec(T)) Option(T) forall T := case xs do
+          [] -> None
+          [h | _] -> Some(h)
+        end
+        pub def apply(f Fn(Int53, Int53), n Int53) Int53 := f(n)
+        """)
+
+      assert dts =~ ~s/export function first<T>(xs: Array<T>): ["Some", T] | ["None"];/
+      assert dts =~ "export function apply(f: (a0: number) => number, n: number): number;"
+    end
+
+    test "a value union (ADR-0083) maps to a native TS union" do
+      dts = JS.compile_types("pub def id(x Int53 | String) Int53 | String := x")
+      # members are normalized (sorted) by `Rian.TypeStr`
+      assert dts =~ "export function id(x: number | string): number | string;"
+    end
+
+    test "`Any` maps to `unknown` (honest, not `any`)" do
+      dts = JS.compile_types("pub def pick(b Bool, x Any, y Any) Any := if b do x else y end")
+      assert dts =~ "export function pick(b: boolean, x: unknown, y: unknown): unknown;"
+    end
+
+    test "a `pub const` is declared (inside a mod)" do
+      dts =
+        JS.compile_types("""
+        mod M do
+          pub const LIMIT Int53 := 10
+        end
+        """)
+
+      assert dts =~ "export const LIMIT: number;"
+    end
+
+    test "an empty / export-less program yields an empty sidecar" do
+      assert JS.compile_types("def secret(n Int53) Int53 := n") == ""
+    end
+
+    @tag :ts
+    test "the emitted `.d.mts` is well-formed TS and types the sibling `.mjs`" do
+      src = """
+      type Color := Red | Green | Blue
+      struct Point(x Int53, y Int53)
+      pub def area(p Point) Int53 := p.x * p.y
+      pub def label(c Color) Int53 := case c do
+        Red -> 0
+        Green -> 1
+        Blue -> 2
+      end
+      """
+
+      mjs = JS.compile(src)
+      dts = JS.compile_types(src)
+
+      good = """
+      import { area, label } from "./prog.mjs";
+      const p = { __struct__: "Point" as const, x: 6, y: 7 };
+      const a: number = area(p);
+      const l: number = label(["Red"]);
+      """
+
+      case tsc_check([{"prog.mjs", mjs}, {"prog.d.mts", dts}, {"prog.ts", good}]) do
+        :no_tsc -> :ok
+        :ok -> :ok
+        {:error, out} -> flunk("tsc rejected a correct consumer:\n#{out}")
+      end
+    end
+
+    @tag :ts
+    test "the `.d.mts` rejects a mis-typed consumer (the types are real)" do
+      src = "pub def area(p Int53) Int53 := p * p"
+      mjs = JS.compile(src)
+      dts = JS.compile_types(src)
+      # passing a string where the sidecar declares `number` must fail to type-check
+      bad = ~s|import { area } from "./prog.mjs";\nconst a: number = area("not a number");\n|
+
+      case tsc_check([{"prog.mjs", mjs}, {"prog.d.mts", dts}, {"prog.ts", bad}]) do
+        :no_tsc -> :ok
+        :ok -> flunk("tsc accepted a mis-typed call — the .d.mts is not actually checking")
+        {:error, _out} -> :ok
+      end
     end
   end
 end

@@ -7,6 +7,11 @@ defmodule Rian.JS do
   `Core.from_pat`, never the surface tuples. Being a fresh emitter on the core is
   the ADR-0050 thesis in practice — a third backend without a fourth fork.
 
+  The backend has **two print modes** over one lowering (ADR-0086 §5):
+  `compile/1` emits the runtime ECMAScript module, and `compile_types/1` emits a
+  TypeScript declaration sidecar (`.d.ts`) describing the same module's exported
+  surface — the typed *view* a TS consumer checks across the FFI boundary.
+
   JS has no native multi-clause pattern matching, so a multi-clause function
   lowers to a **dispatcher**: positional params `a0, a1, …`, one guarded block
   per clause that binds the clause's variables and `return`s its body, falling
@@ -187,6 +192,282 @@ defmodule Rian.JS do
     import_js = imports_js(funcs)
 
     [import_js, const_js, fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
+  end
+
+  # ── TypeScript `.d.ts` sidecar (ADR-0086 §5) ────────────────────────────────
+  @doc """
+  Emit a TypeScript declaration sidecar (`.d.ts`) for `src` — the **typed view**
+  of the JS backend (ADR-0086 §5).
+
+  The runtime `.mjs` (`compile/1`) erases every type at the boundary, so a
+  TypeScript consumer importing it sees `any`. This second print mode describes the
+  module's **exported runtime surface** — `export function`/`export const` for every
+  `pub` declaration, plus `type`/`interface`/range aliases for the user types they
+  reference — so the consumer is type-checked across the FFI boundary by their own
+  `tsc`. TypeScript resolves a `<name>.d.ts` automatically beside `<name>.mjs`.
+
+  **The declarations describe the values the `.mjs` actually produces** (a sum is a
+  tagged array `["Ctor", …]`, a struct a `{__struct__: "Name", …}` object, a
+  `Result` an `["ok", v]` / `["error", e]` pair) — never an aspirational shape.
+
+  **Honest scope limits** (ADR-0086 §5 — types are *documentation, not a gate*; the
+  reach gate stays `Rian.Reach`):
+
+    * **Capabilities are fully erased.** `val`/`iso`/`tag`/`ref` shape Rust/BEAM
+      only (ADR-0055) and have no JS runtime meaning, so they leave no TS trace.
+    * **Mapped subset:** the JS-valid primitives (`Int`→`bigint`,
+      `Int53`/`Int32`/smaller + `Float64`/`Char`→`number`, `Bool`→`boolean`,
+      `String`/`Symbol`→`string`), `Any`→`unknown`, `Vec(T)`→`Array<T>`, tuples,
+      `Fn(…)`, `Option`/`Result`, value-unions (ADR-0083), user sums/structs/ranges,
+      `Map`/`Dict` with a `string`/`number` key, and `forall T` generics.
+    * Anything else maps to **`unknown`** — an honest "cannot be faithfully
+      described" rather than a misleading `any`.
+  """
+  @rian_sig "pub def compile_types(src String) String"
+  @spec compile_types(String.t()) :: String.t()
+  def compile_types(src) do
+    prog = Decl.parse(src)
+    # Same gate prologue as `compile/1`: a type error is caught here, and opaque
+    # types are erased to their base before they reach the type mapper (ADR-0067).
+    :ok = Check.gate!(prog)
+    prog = Rian.Opaque.erase(prog)
+
+    known = known_type_names(prog)
+
+    range_dts = Enum.map_join(all_ranges(prog), "\n", &dts_range/1)
+    type_dts = Enum.map_join(all_types(prog), "\n", &dts_sum(&1, known))
+    struct_dts = Enum.map_join(all_structs(prog), "\n", &dts_struct(&1, known))
+
+    const_dts =
+      all_consts(prog) |> Enum.filter(& &1.pub?) |> Enum.map_join("\n", &dts_const(&1, known))
+
+    # Only `pub` functions with a portable body are part of the module's export
+    # surface: a private `def` is not emitted, a dispatcher is regenerated, and an
+    # `@external` (`clauses: []`) function is imported, never re-exported.
+    fn_dts =
+      all_funcs(prog)
+      |> Enum.filter(&(&1.pub? and &1.clauses != [] and Map.get(&1, :dispatch) != :dispatcher))
+      |> Enum.map_join("\n", &dts_func(&1, known))
+
+    body =
+      [range_dts, type_dts, struct_dts, const_dts, fn_dts]
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.join("\n\n")
+
+    if body == "", do: "", else: body <> "\n"
+  end
+
+  # the JS-valid Rian primitives and their faithful TypeScript carriers (ADR-0064).
+  # Wide fixed-width ints (`Int64`+) are absent on purpose — they have no JS rep and
+  # map to `unknown` (they never appear in a JS-valid program; `reject_wide_int!`).
+  @ts_prims %{
+    "Int" => "bigint",
+    "Int8" => "number",
+    "Int16" => "number",
+    "Int32" => "number",
+    "Int53" => "number",
+    "UInt8" => "number",
+    "UInt16" => "number",
+    "UInt32" => "number",
+    "Float32" => "number",
+    "Float64" => "number",
+    "Bool" => "boolean",
+    "String" => "string",
+    "Char" => "number",
+    "Symbol" => "string",
+    "Any" => "unknown"
+  }
+
+  # the structural type heads handled by name (so they are never mistaken for a type
+  # variable) plus the wide ints that map to `unknown`.
+  @ts_reserved ~w(Int64 Int128 UInt64 UInt128 Vec Fn Map Dict Result Option Union)
+
+  defp all_types(prog),
+    do:
+      Map.get(prog, :types, []) ++
+        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :types, []))
+
+  defp all_structs(prog),
+    do:
+      Map.get(prog, :structs, []) ++
+        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :structs, []))
+
+  defp all_ranges(prog),
+    do:
+      Map.get(prog, :ranges, []) ++
+        Enum.flat_map(Map.get(prog, :mods, []), &Map.get(&1, :ranges, []))
+
+  # every user type-name in scope, so a reference resolves to its declaration
+  # instead of being misclassified as a type variable.
+  defp known_type_names(prog) do
+    names =
+      Enum.map(all_types(prog), & &1.name) ++
+        Enum.map(all_structs(prog), & &1.name) ++
+        Enum.map(all_ranges(prog), & &1.name)
+
+    MapSet.new(names)
+  end
+
+  # a finite ordinal subrange (ADR-0036) is its base ordinal at runtime — an integer,
+  # i.e. a JS `number`.
+  defp dts_range(r), do: "export type #{r.name} = number;"
+
+  # a sum type lowers to a discriminated union of fixed-length tagged tuples, exactly
+  # the `["Ctor", …]` arrays the runtime emits.
+  defp dts_sum(t, known) do
+    tvars = t.variants |> Enum.flat_map(& &1.fields) |> collect_tvars(known)
+    tset = MapSet.new(tvars)
+
+    variants =
+      case Enum.map_join(t.variants, " | ", &dts_variant(&1, known, tset)) do
+        "" -> "never"
+        vs -> vs
+      end
+
+    "export type #{t.name}#{generics(tvars)} = #{variants};"
+  end
+
+  defp dts_variant(v, known, tvars) do
+    tag = inspect(to_string(v.ctor))
+
+    case v.fields do
+      [] -> "[#{tag}]"
+      fs -> "[#{tag}, #{Enum.map_join(fs, ", ", &ts_type(&1.type, known, tvars))}]"
+    end
+  end
+
+  # a struct lowers to a `{__struct__: "Name", …}` object — a TS interface with a
+  # discriminant literal so a consumer can narrow on it.
+  defp dts_struct(s, known) do
+    tvars = collect_tvars(s.fields, known)
+    tset = MapSet.new(tvars)
+
+    fields =
+      s.fields
+      |> Enum.with_index()
+      |> Enum.map_join(" ", fn {f, i} ->
+        "#{f.label || "f#{i}"}: #{ts_type(f.type, known, tset)};"
+      end)
+
+    "export interface #{s.name}#{generics(tvars)} { __struct__: #{inspect(s.name)}; #{fields} }"
+  end
+
+  defp dts_const(c, known),
+    do: "export const #{c.name}: #{ts_type(c.type, known, MapSet.new())};"
+
+  defp dts_func(f, known) do
+    tset = MapSet.new(f.tvars)
+    params = Enum.map_join(f.params, ", ", &"#{&1.name}: #{ts_type(&1.type, known, tset)}")
+    "export function #{f.name}#{generics(f.tvars)}(#{params}): #{ts_type(f.ret, known, tset)};"
+  end
+
+  defp generics([]), do: ""
+  defp generics(tvars), do: "<#{Enum.join(tvars, ", ")}>"
+
+  # the type variables a declaration introduces: every tvar-shaped identifier in its
+  # field types (recursing into `Vec(T)`/`Pair(K, V)`/…), in first-appearance order.
+  defp collect_tvars(fields, known) do
+    fields |> Enum.flat_map(&scan_tvars(&1.type, known)) |> Enum.uniq()
+  end
+
+  defp scan_tvars(type, known) when is_binary(type) do
+    ~r/[A-Za-z_][A-Za-z0-9_]*/
+    |> Regex.scan(type)
+    |> Enum.map(&hd/1)
+    |> Enum.filter(&tvar?(&1, known))
+  end
+
+  defp scan_tvars(_type, _known), do: []
+
+  defp tvar?(name, known) do
+    Regex.match?(~r/^[A-Z][A-Za-z0-9_]*$/, name) and
+      not Map.has_key?(@ts_prims, name) and
+      name not in @ts_reserved and
+      not MapSet.member?(known, name)
+  end
+
+  # map a Rian type-string to its faithful TypeScript carrier (the runtime values
+  # `compile/1` emits). `known` are declared type-names, `tvars` the in-scope
+  # generics; anything outside the mapped subset becomes `unknown` (honest).
+  defp ts_type(nil, _known, _tvars), do: "unknown"
+
+  defp ts_type(t, known, tvars) when is_binary(t),
+    do: t |> String.trim() |> Rian.TypeStr.normalize() |> ts_app(known, tvars)
+
+  defp ts_app("", _known, _tvars), do: "unknown"
+
+  defp ts_app(t, known, tvars) do
+    cond do
+      prim = Map.get(@ts_prims, t) ->
+        prim
+
+      MapSet.member?(tvars, t) ->
+        t
+
+      String.starts_with?(t, "(") and String.ends_with?(t, ")") ->
+        ts_tuple(t, known, tvars)
+
+      true ->
+        case parse_app(t) do
+          {head, args} -> ts_application(head, args, known, tvars)
+          :none -> if MapSet.member?(known, t), do: t, else: "unknown"
+        end
+    end
+  end
+
+  # `Head(arg, …)` → `{"Head", [arg, …]}`, else `:none` (a bare name / tuple).
+  defp parse_app(t) do
+    case Regex.run(~r/^([A-Za-z_][A-Za-z0-9_]*)\((.*)\)$/s, t) do
+      [_, head, inner] -> {head, split_top_commas(inner)}
+      _ -> :none
+    end
+  end
+
+  defp ts_tuple(t, known, tvars) do
+    elems =
+      t
+      |> binary_part(1, byte_size(t) - 2)
+      |> split_top_commas()
+      |> Enum.map_join(", ", &ts_type(&1, known, tvars))
+
+    "[#{elems}]"
+  end
+
+  defp ts_application("Vec", [a], known, tvars),
+    do: "Array<#{ts_type(a, known, tvars)}>"
+
+  defp ts_application("Option", [a], known, tvars),
+    do: ~s(["Some", #{ts_type(a, known, tvars)}] | ["None"])
+
+  defp ts_application("Result", [a, b], known, tvars),
+    do: ~s(["ok", #{ts_type(a, known, tvars)}] | ["error", #{ts_type(b, known, tvars)}])
+
+  defp ts_application("Union", args, known, tvars) when args != [],
+    do: Enum.map_join(args, " | ", &ts_type(&1, known, tvars))
+
+  defp ts_application("Fn", args, known, tvars) when args != [] do
+    {params, [ret]} = Enum.split(args, -1)
+
+    sig =
+      params
+      |> Enum.with_index()
+      |> Enum.map_join(", ", fn {a, i} -> "a#{i}: #{ts_type(a, known, tvars)}" end)
+
+    "(#{sig}) => #{ts_type(ret, known, tvars)}"
+  end
+
+  defp ts_application(head, [k, v], known, tvars) when head in ["Map", "Dict"] do
+    kts = ts_type(k, known, tvars)
+
+    if kts in ["string", "number"],
+      do: "Record<#{kts}, #{ts_type(v, known, tvars)}>",
+      else: "unknown"
+  end
+
+  defp ts_application(head, args, known, tvars) do
+    if MapSet.member?(known, head),
+      do: "#{head}<#{Enum.map_join(args, ", ", &ts_type(&1, known, tvars))}>",
+      else: "unknown"
   end
 
   # `@external(:js, "./ffi.mjs", "fun")` file-references (ADR-0080 §7 b): one ESM

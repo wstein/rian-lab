@@ -1,7 +1,8 @@
 # External-toolchain tests are EXCLUDED from the default `mix test` for inner-loop
 # speed. They spawn slow subprocesses — `@tag :jvm` (kotlinc + java; kotlinc's
 # `-include-runtime` rebundles the Kotlin stdlib per test, the dominant cost),
-# `@tag :rust` (rustc), `@tag :js` (node), `@tag :rebar` (rebar3) and `@tag :gradle`
+# `@tag :rust` (rustc), `@tag :js` (node), `@tag :ts` (tsc — the TypeScript `.d.mts`
+# sidecar check, ADR-0086 §5), `@tag :rebar` (rebar3) and `@tag :gradle`
 # (gradle — native packaging, ADR-0082) — that together dominate the runtime.
 # They are NOT dropped:
 #
@@ -29,7 +30,7 @@ dialyzer? = match?({:module, _}, Code.ensure_loaded(:dialyzer))
 exclude =
   cond do
     System.get_env("RIAN_TEST_ALL") != "1" ->
-      [:rust, :js, :jvm, :rebar, :gradle, :dialyzer, :bench]
+      [:rust, :js, :ts, :jvm, :rebar, :gradle, :dialyzer, :bench]
 
     dialyzer? ->
       [:bench]
