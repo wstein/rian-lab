@@ -43,6 +43,24 @@ defmodule Rian.LowerTest do
       assert out.rust =~ "Shape::Circle { radius: r } => std::f64::consts::PI * r * r,"
       assert out.rust =~ "Shape::Square { side: s } => s * s,"
     end
+
+    test "capabilities drive the borrow vs owned signature (val -> &Shape, iso -> Shape)" do
+      # The val-borrow vs iso-owned distinction the by-example capabilities tour
+      # teaches, asserted on the real emitter (was in Rian.TourTest).
+      src = """
+      type Shape := Circle(radius Float64) | Square(side Float64)
+
+      def area(s val Shape) Float64
+      def area(Circle(r)) := 3.14159 * r * r
+      def area(Square(s)) := s * s
+
+      def consume(s iso Shape) Float64 := area(s)
+      """
+
+      rust = Lower.rust_program(Rian.Decl.parse(src))
+      assert rust =~ "fn area(s: &Shape)"
+      assert rust =~ "fn consume(s: Shape)"
+    end
   end
 
   describe "exhaustiveness" do

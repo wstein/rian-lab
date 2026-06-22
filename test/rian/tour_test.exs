@@ -27,17 +27,11 @@ defmodule Rian.TourTest do
       end
     end
 
-    test "the capabilities cell shows the val-borrow vs iso-owned Rust distinction", %{data: data} do
-      rust = cell(data, "capabilities")["panes"]["rs"]
-      assert rust =~ "fn area(s: &Shape)"
-      assert rust =~ "fn consume(s: Shape)"
-    end
-
-    test "the clauses cell carries the JVM guard fix (no invalid empty `if ()`)", %{data: data} do
-      jvm = cell(data, "clauses")["panes"]["jvm"]
-      refute jvm =~ "if ()"
-      assert jvm =~ "run { val n = a0; if ((n < 0L)) { return \"negative\" } }"
-    end
+    # Specific emitter-output assertions for these cells live with the emitters
+    # they exercise — `fn area(s: &Shape)` / `fn consume(s: Shape)` in
+    # `Rian.LowerTest`, the JVM guard form in `Rian.JVMTest` — so the tour tests
+    # the tour data, not emitter correctness (ADR-0091). The non-empty-pane check
+    # above is the tour-level guarantee.
 
     test "the reachability strip is the honest, inferred matrix (ADR-0057)", %{data: data} do
       by_name = Map.new(data["reachExamples"], &{&1["name"], &1["reach"]})
@@ -83,6 +77,4 @@ defmodule Rian.TourTest do
       assert json =~ "\\n"
     end
   end
-
-  defp cell(data, id), do: Enum.find(data["cells"], &(&1["id"] == id))
 end

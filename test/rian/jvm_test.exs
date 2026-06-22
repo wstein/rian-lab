@@ -531,6 +531,21 @@ defmodule Rian.JVMTest do
       assert kt =~ "(n * 2L)"
     end
 
+    test "a guarded clause emits a valid `if (cond)`, never an empty `if ()`" do
+      # The by-example clauses tour's guard-lowering fix, asserted on the real
+      # emitter (was in Rian.TourTest).
+      kt =
+        JVM.compile("""
+        def classify(n Int53) String
+        def classify(n) when n < 0 := "negative"
+        def classify(0) := "zero"
+        def classify(n) := "positive"
+        """)
+
+      refute kt =~ "if ()"
+      assert kt =~ ~s|run { val n = a0; if ((n < 0L)) { return "negative" } }|
+    end
+
     @tag :jvm
     test "an `Any` parameter maps to Kotlin `Any` and runs (ADR-0034)", %{jvm_batch: jvm} do
       assert jvm_kt(jvm, :any_param) =~ "pick(a0: Boolean, a1: Any, a2: Any): Any"
