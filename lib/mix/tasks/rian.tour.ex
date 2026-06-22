@@ -54,6 +54,9 @@ defmodule Mix.Tasks.Rian.Tour do
     Rian.Tour.Examples.check!()
     n = length(Rian.Tour.Examples.files())
     Mix.shell().info("by-example reach gate: all #{n} files honour their headers ✓")
+
+    runs = Rian.Tour.Examples.check_doctests!()
+    Mix.shell().info("by-example doctests: #{runs} executed, all pass ✓")
   rescue
     e in Rian.Tour.Examples.Error -> Mix.raise(Exception.message(e))
   end

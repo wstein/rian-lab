@@ -59,7 +59,18 @@ end
 # case-arms and touch no exhaustiveness (ADR-0042 §6).
 def equal3(a T, b T, c T) Bool forall T: Eq := eq(a, b) and eq(b, c)
 
-# `equal3(1, 1, 1)` type-checks (Int53: Eq) and runs to `true`.
+# `equal3(1, 1, 1)` type-checks (Int53: Eq) and runs to `true`. The dispatcher's
+# behaviour is captured as EXECUTABLE doctests (ADR-0060): the reach gate
+# (`Rian.Tour.Examples.check_doctests!/0`) runs them on the BEAM, so these
+# results cannot drift from the `show`/`eq` impls.
+@doc """
+show(true) #=> "true"
+show(42) #=> "an integer"
+eq(3, 3) #=> true
+show(Num(5)) #=> "num"
+show(Zero) #=> "zero"
+all_one() #=> true
+"""
 def all_one() Bool := equal3(1, 1, 1)
 
 # Dispatch also works over a SUM type — by the runtime constructor tag. This is
@@ -77,6 +88,6 @@ impl Show for Expr do
   end
 end
 
-# `show(true)` -> "true" · `show(42)` -> "an integer" · `eq(3, 3)` -> true ·
-# `show(Num(5))` -> "num" · `show(Zero)` -> "zero". One BEAM module; the `show`
-# dispatcher now selects Bool / Int53 / String / Expr by runtime shape.
+# The `show`/`eq` results are the executable doctest on `all_one` above. One BEAM
+# module; the `show` dispatcher selects Bool / Int53 / String / Expr by runtime
+# shape.

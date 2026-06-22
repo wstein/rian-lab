@@ -25,6 +25,14 @@ mod Calc do
   # `iso` Expr: the evaluator consumes the tree it is given (owned `Expr` on
   # Rust, a use-once handle on the BEAM). Each recursive sub-tree is itself
   # consumed exactly once along every path — the linearity model is satisfied.
+  #
+  # The worked term (2 + 3) * -4 below is an EXECUTABLE doctest (ADR-0060): the
+  # reach gate (`Rian.Tour.Examples.check_doctests!/0`) runs it on the BEAM, so
+  # the "evaluates to -20" claim cannot drift from the code.
+  @doc """
+  eval(Mul(Add(Lit(2), Lit(3)), Neg(Lit(4)))) #=> 0 - 20
+  depth(Mul(Add(Lit(2), Lit(3)), Neg(Lit(4)))) #=> 3
+  """
   pub def eval(e iso Expr) Int53
   pub def eval(Lit(n))    := n
   pub def eval(Add(a, b)) := eval(a) + eval(b)
@@ -56,8 +64,8 @@ mod Calc do
   pub def show(Mul(a, b)) := "(" <> show(a) <> " * " <> show(b) <> ")"
 end
 
-# A worked term:  (2 + 3) * -4   ==>  eval = -20,  depth = 3
-#   Mul(Add(Lit(2), Lit(3)), Neg(Lit(4)))
+# The worked term is the executable `@doc` doctest on `eval` above:
+#   (2 + 3) * -4  =  Mul(Add(Lit(2), Lit(3)), Neg(Lit(4)))  ->  eval = -20, depth = 3
 #
 # eval  lowers to idiomatic Elixir AND idiomatic, ownership-checked Rust.
 # show  lowers to Elixir only (FFI is BEAM-only) — the three-ring boundary in

@@ -27,7 +27,7 @@ defmodule Rian.Tour.Examples do
 
   use Rian.Ann
 
-  alias Rian.{Decl, Reach}
+  alias Rian.{Decl, Doctest, Reach}
   alias Rian.Tour.Examples.Error
 
   @dir "examples/rian"
@@ -75,6 +75,32 @@ defmodule Rian.Tour.Examples do
       end)
 
     if issues == [], do: :ok, else: raise(Error, format(issues))
+  end
+
+  @doc """
+  Execute the `expr #=> expected` doctests in every gated file and raise if any
+  fail. Files with no doctests (or marked `#@illustrative`) are skipped without
+  compiling, so a BEAM-illegal-but-doctest-free file is never touched. Returns
+  the number of doctests run.
+  """
+  @rian_sig "pub def check_doctests!() Int53"
+  @spec check_doctests!() :: non_neg_integer()
+  def check_doctests! do
+    {failures, count} =
+      Enum.reduce(files(), {[], 0}, fn file, {fails, n} ->
+        src = File.read!(file)
+
+        case header(src) do
+          {:gated, _reach, _pins} ->
+            {results, ran} = run_doctests(file, src)
+            {fails ++ results, n + ran}
+
+          _ ->
+            {fails, n}
+        end
+      end)
+
+    if failures == [], do: count, else: raise(Error, format_doctests(failures))
   end
 
   @doc """
@@ -208,6 +234,23 @@ defmodule Rian.Tour.Examples do
     {:ok, Decl.parse(src)}
   rescue
     _ -> :error
+  end
+
+  defp run_doctests(file, src) do
+    results = Doctest.run(src)
+    fails = for {expr, {:fail, got, want}} <- results, do: {Path.basename(file), expr, got, want}
+    {fails, length(results)}
+  rescue
+    e -> {[{Path.basename(file), "<compile>", Exception.message(e), "a loadable module"}], 0}
+  end
+
+  defp format_doctests(failures) do
+    body =
+      Enum.map_join(failures, "\n", fn {file, expr, got, want} ->
+        "  #{file}: `#{expr}` => #{inspect(got)} (expected #{inspect(want)})"
+      end)
+
+    "by-example doctests failed:\n\n#{body}"
   end
 
   defp fmt(set), do: set |> MapSet.to_list() |> Enum.sort() |> Enum.join(", ")
