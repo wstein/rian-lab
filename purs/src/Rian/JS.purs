@@ -13,7 +13,7 @@
 -- | sidecar, ADR-0086 §5). Module `const`s + references (`resolveConsts`/`constJs`, the `EConstRef`
 -- | Core node), `@external` bodies (`externalFn`/`importsJs`, the 3 `ExtSpec` forms + ESM imports),
 -- | value-union discrimination over a user type (`bakeUnionDisc` bakes the `PTyped` disc; a sum
--- | member tests the tagged-array head, a struct member tests `__struct__`), and protocol dispatch
+-- | member tests the variant `$` tag, a struct member tests `__struct__`), and protocol dispatch
 -- | (`protocolDispatchersJs` regenerates the JS dispatcher from `Prog.protocols`/`implDecls`, skipping
 -- | the BEAM-shaped `dispatch == "dispatcher"` func), struct *construction* `Name(f: v)` (`bakeStructs`
 -- | → the `EStruct` Core node → a `__struct__`-tagged object), and string interpolation (the program
@@ -432,7 +432,7 @@ patMatch i53 pat acc = case pat of
   PTuple es -> let Tuple ts bs = matchElems i53 es acc in Tuple (cons1 (acc <> ".length === " <> show (length es)) ts) bs
   PCtor ctor args ->
     let Tuple ts bs = matchCtorArgs i53 args acc
-    in Tuple (cons1 (acc <> "[0] === " <> dquote ctor) ts) bs
+    in Tuple (cons1 (acc <> ".$ === " <> dquote ctor) ts) bs
   PList es Nothing -> let Tuple ts bs = matchElems i53 es acc in Tuple (cons1 (acc <> ".length === " <> show (length es)) ts) bs
   PList es (Just tail) ->
     let
@@ -455,7 +455,7 @@ matchElems i53 es acc = foldl step (Tuple [] []) (mapWithIndex Tuple es)
 matchCtorArgs :: Boolean -> Array CPat -> String -> Tuple (Array String) (Array (Tuple String String))
 matchCtorArgs i53 args acc = foldl step (Tuple [] []) (mapWithIndex Tuple args)
   where
-  step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p (acc <> "[" <> show (i + 1) <> "]") in Tuple (ts <> t) (bs <> b)
+  step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p (acc <> "._" <> show i) in Tuple (ts <> t) (bs <> b)
 
 matchStruct :: Boolean -> String -> Array (Tuple String CPat) -> String -> Tuple (Array String) (Array (Tuple String String))
 matchStruct i53 name fields acc = foldl step (Tuple [ acc <> ".__struct__ === " <> dquote name ] []) fields
@@ -495,7 +495,7 @@ exprJs i53 = case _ of
   EChar cp -> cpLit i53 cp
   EStr s -> jsStr s
   EId b | b == "true" || b == "false" -> b
-  EId x -> if pascal x then "[" <> dquote x <> "]" else x
+  EId x -> if pascal x then "{ $: " <> dquote x <> " }" else x
   -- a reference to a declared `const` → the top-level `const`'s name (emitted by `constJs`).
   EConstRef name -> name
   -- a struct construction → a `__struct__`-tagged object (the runtime struct shape).
@@ -559,11 +559,11 @@ typedDiscJs i53 t acc disc = case disc of
       Just sname -> structDiscJs sname acc
       Nothing -> typeTestJs i53 t acc
 
--- a sum member: a sum value is a tagged array `["Ctor", …]`, so "is a `T`" tests the head against
+-- a sum member: a sum value is a tagged object `{ $: "Ctor", … }`, so "is a `T`" tests `.$` against
 -- `T`'s ctor tags (mirrors `sum_disc_js`).
 sumDiscJs :: Array String -> String -> String
 sumDiscJs ctors acc =
-  "Array.isArray(" <> acc <> ") && (" <> joinWith " || " (map (\c -> acc <> "[0] === " <> dquote c) ctors) <> ")"
+  acc <> " != null && (" <> joinWith " || " (map (\c -> acc <> ".$ === " <> dquote c) ctors) <> ")"
 
 -- a struct member: a struct is `{__struct__: "Name", …}` (mirrors `struct_disc_js`).
 structDiscJs :: String -> String -> String
@@ -602,7 +602,7 @@ callId i53 name args
   | elem name overflowOps && length args == 2 =
       unsafeCrashWith ("`" <> name <> "` operates on `Int64`, not supported on JS (ADR-0064)")
   | firstIsLabel args = "{ __struct__: " <> dquote name <> ", " <> joinWith ", " (map (labelPair i53) args) <> " }"
-  | pascal name = "[" <> joinWith ", " (cons1 (dquote name) (map (exprJs i53) args)) <> "]"
+  | pascal name = "{ $: " <> dquote name <> joinWith "" (mapWithIndex (\i a -> ", _" <> show i <> ": " <> exprJs i53 a) args) <> " }"
   | otherwise = name <> "(" <> joinWith ", " (map (exprJs i53) args) <> ")"
 
 isPrim :: String -> Boolean
@@ -789,7 +789,7 @@ pascal s = case head (toCharArray s) of
 --------------------------------------------------------------------------------
 -- compile_types: the TypeScript `.d.mts` sidecar (ADR-0086 §5) — a typed *view* of the runtime
 -- module: `export function`/`const` per `pub` decl + `type`/`interface`/range aliases describing
--- the values `compile` actually emits (a sum = `["Ctor",…]`, a struct = `{__struct__,…}`). A type
+-- the values `compile` actually emits (a sum = `{ $: "Ctor", … }`, a struct = `{__struct__,…}`). A type
 -- outside the mapped subset becomes `unknown` (honest), never a misleading `any`. Pure type-string
 -- mapping — no Core IR — so no Core extension is needed.
 --------------------------------------------------------------------------------
@@ -839,7 +839,7 @@ knownTypeNames prog = map _.name (allTypes prog) <> map _.name (allStructs prog)
 dtsRange :: Range -> String
 dtsRange r = "export type " <> r.name <> " = number;"
 
--- a sum → a discriminated union of tagged tuples (`["Ctor", …]`), exactly the runtime arrays.
+-- a sum → a discriminated union of tagged objects (`{ $: "Ctor", … }`), exactly the runtime values.
 dtsSum :: Array String -> Type -> String
 dtsSum known t =
   let
@@ -852,8 +852,8 @@ dtsSum known t =
 
 dtsVariant :: Array String -> Array String -> Variant -> String
 dtsVariant known tvars v = case v.fields of
-  [] -> "[" <> dquote v.ctor <> "]"
-  fs -> "[" <> dquote v.ctor <> ", " <> joinWith ", " (map (\f -> tsType known tvars f.ty) fs) <> "]"
+  [] -> "{ $: " <> dquote v.ctor <> " }"
+  fs -> "{ $: " <> dquote v.ctor <> ", " <> joinWith ", " (mapWithIndex (\i f -> "_" <> show i <> ": " <> tsType known tvars f.ty) fs) <> " }"
 
 -- a struct → a `{__struct__: "Name", …}` interface with a discriminant literal.
 dtsStruct :: Array String -> Struct -> String
@@ -950,7 +950,7 @@ tsTuple known tvars t = "[" <> joinWith ", " (map (tsType known tvars) (TS.split
 tsApplication :: Array String -> Array String -> String -> Array String -> String
 tsApplication known tvars hd args = case hd of
   "Vec" | length args == 1 -> "Array<" <> tsType known tvars (ax 0) <> ">"
-  "Option" | length args == 1 -> "[" <> dquote "Some" <> ", " <> tsType known tvars (ax 0) <> "] | [" <> dquote "None" <> "]"
+  "Option" | length args == 1 -> "{ $: " <> dquote "Some" <> ", _0: " <> tsType known tvars (ax 0) <> " } | { $: " <> dquote "None" <> " }"
   "Result" | length args == 2 -> "[" <> dquote "ok" <> ", " <> tsType known tvars (ax 0) <> "] | [" <> dquote "error" <> ", " <> tsType known tvars (ax 1) <> "]"
   "Union" | not (null args) -> joinWith " | " (map (tsType known tvars) args)
   "Fn" | not (null args) -> case unsnoc args of
