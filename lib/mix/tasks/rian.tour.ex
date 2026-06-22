@@ -13,8 +13,11 @@ defmodule Mix.Tasks.Rian.Tour do
   the compiler produces — it cannot drift from the language.
 
     * (no flags)  write `site/src/data/tour.json`
-    * `--check`   exit non-zero if the committed file is stale (CI / `Rian.TourTest`
-                  runs the same comparison)
+    * `--check`   exit non-zero if the committed file is stale, **and** run the
+                  by-example reach gate (`Rian.Tour.Examples.check!/0`): every
+                  `examples/rian/NN_*.rian` file must honour its `#@reach` /
+                  `#@reach-pin` / `#@illustrative` header. CI and the
+                  `Rian.TourTest` / `Rian.TourReachTest` suites run the same checks.
   """
   use Mix.Task
 
@@ -29,6 +32,7 @@ defmodule Mix.Tasks.Rian.Tour do
 
     if opts[:check] do
       check(json)
+      check_examples()
     else
       File.mkdir_p!(Path.dirname(@path))
       File.write!(@path, json)
@@ -44,5 +48,13 @@ defmodule Mix.Tasks.Rian.Tour do
       _ ->
         Mix.raise("#{@path} is stale — run `mix rian.tour` and commit the result")
     end
+  end
+
+  defp check_examples do
+    Rian.Tour.Examples.check!()
+    n = length(Rian.Tour.Examples.files())
+    Mix.shell().info("by-example reach gate: all #{n} files honour their headers ✓")
+  rescue
+    e in Rian.Tour.Examples.Error -> Mix.raise(Exception.message(e))
   end
 end
