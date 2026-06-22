@@ -897,7 +897,10 @@ js_corpus = [
   # value-union of SUM members (ADR-0083): a `case` arm `a Box` narrows by the tagged-array head
   "type Box := BoxV(Int53)\ntype Bag := BagV(Int53)\ndef kind(x Box | Bag) Int53 := case x do\n  a Box -> 1\n  b Bag -> 2\nend",
   # value-union of STRUCT members: a `case` arm `b Box` narrows by the `__struct__` tag
-  "struct Box(v Int53)\nstruct Widget(n Int53)\ndef pick(x Box | Widget) Int53 := case x do\n  b Box -> b.v\n  w Widget -> w.n\nend"
+  "struct Box(v Int53)\nstruct Widget(n Int53)\ndef pick(x Box | Widget) Int53 := case x do\n  b Box -> b.v\n  w Widget -> w.n\nend",
+  # protocol dispatch (ADR-0061 §3): one dispatcher routes by the first arg's shape — a sum tag, a
+  # struct `__struct__`, and a primitive `typeof` — to the mangled `impl_*` methods
+  "type Color := Red | Green\nstruct Point(x Int53)\nprotocol K do\n  def k(self Self) Int53\nend\nimpl K for Color do\n  def k(c) := 1\nend\nimpl K for Point do\n  def k(p) := 2\nend\nimpl K for Bool do\n  def k(b) := 3\nend"
 ]
 
 # Rian.JS.compile_types — the `jsdts` stream (ADR-0086 §5): the TypeScript `.d.ts` sidecar. Maps

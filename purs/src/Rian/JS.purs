@@ -12,11 +12,11 @@
 -- | Both print modes are ported: `compile` (the runtime module) and `compileTypes` (the `.d.mts`
 -- | sidecar, ADR-0086 §5). Module `const`s + references (`resolveConsts`/`constJs`, the `EConstRef`
 -- | Core node), `@external` bodies (`externalFn`/`importsJs`, the 3 `ExtSpec` forms + ESM imports),
--- | and value-union discrimination over a user type (`bakeUnionDisc` bakes the `PTyped` disc; a sum
--- | member tests the tagged-array head, a struct member tests `__struct__`) are ported. NOT yet
--- | ported: protocol dispatch (the JS dispatcher from `Prog.protocols`/`impls`), and struct
+-- | value-union discrimination over a user type (`bakeUnionDisc` bakes the `PTyped` disc; a sum
+-- | member tests the tagged-array head, a struct member tests `__struct__`), and protocol dispatch
+-- | (`protocolDispatchersJs` regenerates the JS dispatcher from `Prog.protocols`/`implDecls`, skipping
+-- | the BEAM-shaped `dispatch == "dispatcher"` func) are all ported. NOT yet ported: struct
 -- | *construction* `Name(f: v)` (no `EStruct` in PS Core; field access + `case` patterns DO lower).
--- | The corpus avoids those.
 module Rian.JS
   ( compile
   , compileSexpr
@@ -42,7 +42,7 @@ import Rian.Assemble (assemble)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Body, Clause, Const, ExtSpec(..), Func, Prog, Range, Struct, Type, Variant, bodySurface)
+import Rian.IR (Body, Clause, Const, ExtSpec(..), Func, Method, Prog, Range, Struct, Type, Variant, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
 import Rian.Pratt (Pat(..), Surface(..), parse, parseBody) as P
@@ -64,7 +64,10 @@ compile src =
           prog = erase prog0
           _ = rejectMixedIntMode prog
           i53 = programNumberMode prog
-          funcs = allFuncs prog
+          -- the BEAM `:dispatcher` is a guarded runtime type-test, not the JS shape; drop it and
+          -- regenerate it with JS-native guards (`protocolDispatchersJs`). The `:impl` methods stay
+          -- as plain functions (ADR-0061 §3).
+          funcs = filter (\f -> f.dispatch /= Just "dispatcher") (allFuncs prog)
           -- `const NAME := value` (ADR-0033) → a top-level JS `const`; a reference resolves to it,
           -- threaded through `cset` so every clause body and sibling const sees the const set.
           consts = allConsts prog
@@ -73,10 +76,9 @@ compile src =
           constJsOut = joinWith "\n" (map (constJs i53 cset) consts)
           fnJs = joinWith "\n\n" (map (functionJs i53 cset reg) funcs)
           importJsOut = importsJs funcs
+          dispJsOut = protocolDispatchersJs i53 prog
         in
-          -- protocol dispatchers are still deferred; the join keeps their slot so the shape composes
-          -- once they land (matches the reference's reject-empty-then-join).
-          joinWith "\n\n" (filter (_ /= "") [ importJsOut, constJsOut, fnJs ])
+          joinWith "\n\n" (filter (_ /= "") [ importJsOut, constJsOut, fnJs, dispJsOut ])
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> concatModFuncs prog.mods
@@ -203,6 +205,44 @@ functionJs i53 cset reg f =
       in
         export <> "function " <> f.name <> "(" <> params <> ") {\n" <> body
           <> "\n  throw new Error(\"" <> f.name <> ": no clause matched\");\n}"
+
+-- ── protocol dispatch (ADR-0061 §3): a JS dispatcher per protocol method ──
+-- select the impl by the first argument's runtime shape, with JS-native guards. Mirrors
+-- `protocol_dispatchers_js`: one dispatcher per (protocol, method) that has ≥1 impl, in order.
+protocolDispatchersJs :: Boolean -> Prog -> String
+protocolDispatchersJs i53 prog =
+  let
+    reg = jsReg prog
+    dispatcher p m =
+      case map _.ty (filter (\i -> i.proto == p.name) prog.implDecls) of
+        [] -> Nothing
+        implTypes -> Just (dispatcherJs i53 reg p.name m implTypes)
+  in
+    joinWith "\n\n" (concatMap (\p -> mapMaybe (dispatcher p) p.methods) prog.protocols)
+
+dispatcherJs :: Boolean -> JsReg -> String -> Method -> Array String -> String
+dispatcherJs i53 reg proto method implTypes =
+  let
+    arity = length (TS.splitTopCommas method.params)
+    params = joinWith ", " (map (\i -> "a" <> show i) (upto arity))
+    clauses = joinWith "\n"
+      (map (\ty -> "  if (" <> jsGuard i53 reg ty <> ") return " <> mangle proto ty method.name <> "(" <> params <> ");") implTypes)
+  in
+    "export function " <> method.name <> "(" <> params <> ") {\n" <> clauses
+      <> "\n  throw new Error(\"" <> method.name <> ": no protocol impl\");\n}"
+
+-- the mangled impl-method name the dispatcher routes to (`Protocol.expand`'s naming).
+mangle :: String -> String -> String -> String
+mangle proto ty method = "impl_" <> Str.toLower proto <> "_" <> Str.toLower ty <> "_" <> method
+
+-- the JS guard selecting the impl for `ty` by the first argument's runtime shape (fixed to `a0`):
+-- a sum/struct member tests its discriminator, a primitive tests `typeof` (raises for a type with
+-- no runtime discriminator, as the reference does).
+jsGuard :: Boolean -> JsReg -> String -> String
+jsGuard i53 reg ty =
+  case find (\(Tuple n _) -> n == ty) reg.sums of
+    Just (Tuple _ ctors) -> sumDiscJs ctors "a0"
+    Nothing -> if elem ty reg.structs then structDiscJs ty "a0" else typeTestJs i53 ty "a0"
 
 -- the `:js` external spec, if any (the target key is the bare `"js"`, as `Decl` stores it).
 jsExternal :: Func -> Maybe ExtSpec

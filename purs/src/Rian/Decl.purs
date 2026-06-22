@@ -180,6 +180,7 @@ type RawDef =
   , doc :: Maybe String
   , externals :: Array (Tuple String ExtSpec)
   , effects :: Array String
+  , dispatch :: Maybe String
   }
 
 data RawDecl
@@ -703,7 +704,7 @@ defRaw name params headRev body =
     ph = parseHead sf.ret
     ret = map (TypeStr.normalize <<< collapseParens) ph.ret
   in
-    { name, params, ret, guard: ph.guard, body, pub: false, tvars: sf.tvars, bounds: sf.bounds, doc: Nothing, externals: [], effects: [] }
+    { name, params, ret, guard: ph.guard, body, pub: false, tvars: sf.tvars, bounds: sf.bounds, doc: Nothing, externals: [], effects: [], dispatch: Nothing }
 
 -- a `:=` body: a newline ends it unless the body plainly continues (inside unbalanced
 -- brackets, a `do…end`, or across a trailing/leading continuation operator).
@@ -808,6 +809,7 @@ externalFunc sig =
   , bounds: sig.bounds
   , doc: sig.doc
   , effects: sig.effects
+  , dispatch: sig.dispatch
   }
 
 -- bodiless signature + pattern clauses.
@@ -827,6 +829,7 @@ multiClauseFunc sig clauses =
     , bounds: sig.bounds
     , doc: sig.doc
     , effects: sig.effects
+    , dispatch: sig.dispatch
     }
 
 -- a single def whose head parameters double as the clause patterns.
@@ -847,6 +850,7 @@ singleClauseFunc d =
     , bounds: d.bounds
     , doc: d.doc
     , effects: d.effects
+    , dispatch: d.dispatch
     }
 
 clauseOf :: Int -> RawDef -> Clause

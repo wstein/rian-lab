@@ -71,6 +71,9 @@ defMapToRawDef d =
   , doc: Nothing
   , externals: []
   , effects: []
+  -- carry the protocol-desugar marker (`"dispatcher"`/`"impl"`) so the emitters can skip the
+  -- BEAM-shaped dispatcher and regenerate it per-target (ADR-0061 §3).
+  , dispatch: Just d.dispatch
   }
 
 -- ── `lower_meta` (ADR-0030): macro-expand then comptime-fold every clause body ──

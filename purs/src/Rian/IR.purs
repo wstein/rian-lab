@@ -96,7 +96,10 @@ derive instance Eq ExtSpec
 -- bodiless `def` (mutually exclusive with `clauses`); `effects` is the declared `@effects(…)`
 -- set (ADR-0048/0081), verified against `Reach.effect_sets` by `Check`. (synthetic/dispatch/test
 -- land later.)
--- @rian_sig struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause), externals Map(Symbol, ExtSpec), is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)), doc Option(String), effects Vec(Symbol))
+-- `dispatch` marks a protocol-desugar synthesized function (ADR-0061 §1): `Just "dispatcher"` is the
+-- guarded runtime dispatcher (regenerated per-target by the emitters), `Just "impl"` a mangled impl
+-- method, `Nothing` an ordinary function.
+-- @rian_sig struct Func(name String, params Vec(Param), ret String, clauses Vec(Clause), externals Map(Symbol, ExtSpec), is_pub Bool, tvars Vec(String), bounds Map(String, Vec(String)), doc Option(String), effects Vec(Symbol), dispatch Option(Symbol))
 type Func =
   { name :: String
   , params :: Array Param
@@ -108,6 +111,7 @@ type Func =
   , bounds :: Array (Tuple String (Array String))
   , doc :: Maybe String
   , effects :: Array String
+  , dispatch :: Maybe String
   }
 
 -- A module-scoped constant (`const NAME [Type] := value`). `ty` is `Nothing` when omitted
