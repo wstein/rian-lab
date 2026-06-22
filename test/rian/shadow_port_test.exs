@@ -10,6 +10,16 @@ defmodule Rian.ShadowPortTest do
   on Rian's own self-hosted Core representation and that it now compiles to JS.
   """
 
+  # `rian/src/shadow.rian` is gitignored self-host output (the hand-ported,
+  # reflection-free pass) and is NOT in version control, so it is absent in a clean
+  # checkout / CI. Skip rather than fail `setup_all` when it is missing — the same
+  # no-op-without-its-input contract the toolchain tests use (ADR-0026). Generate +
+  # hand-port it locally to run these (see commit a696ac6).
+  @port_src "rian/src/shadow.rian"
+  unless File.exists?(@port_src) do
+    @moduletag skip: "#{@port_src} not present (gitignored self-host output)"
+  end
+
   defp id(n), do: %{__struct__: :e_id, name: n}
   defp num(s), do: %{__struct__: :e_num, text: s}
   defp val(%{name: n}), do: n

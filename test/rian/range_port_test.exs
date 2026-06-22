@@ -11,6 +11,16 @@ defmodule Rian.RangePortTest do
   (2) it now compiles to JS (the portability the reflection-free walk buys).
   """
 
+  # `rian/src/range.rian` is gitignored self-host output (the hand-ported,
+  # reflection-free pass) and is NOT in version control, so it is absent in a clean
+  # checkout / CI. Skip rather than fail `setup_all` when it is missing — the same
+  # no-op-without-its-input contract the toolchain tests use (ADR-0026). Generate +
+  # hand-port it locally to run these (see commit fb40c96).
+  @port_src "rian/src/range.rian"
+  unless File.exists?(@port_src) do
+    @moduletag skip: "#{@port_src} not present (gitignored self-host output)"
+  end
+
   # a Core node in Rian's self-hosted convention (`%{__struct__: :e_*, …}`), the
   # shape `range.rian`'s own constructors build and its clause heads match.
   defp e_id(name), do: %{__struct__: :e_id, name: name, type: nil}
