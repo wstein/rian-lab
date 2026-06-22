@@ -1,6 +1,6 @@
 # ADR-0084 — Re-platform the reference compiler from Elixir to PureScript (purerl)
 
-**Status:** Accepted (in progress — Phase 4 closed; emitters remain)
+**Status:** Accepted (in progress — Phase 5 underway: `Rian.JS` emitter ported; `Lower`/`JVM`/`Beam` remain)
 **Implemented:** the **entire front-end + inference + gate stack is ported** and verified at
 **byte-for-byte parity** against the Elixir reference — lex → `Pratt`/`Decl` parse → typed
 `Core` IR → the refutation gates (`PatternLower`/`Exhaustiveness`) → the portability/capability/
@@ -11,8 +11,10 @@ purerl chain is verified end-to-end through the real library set: legacy `spago`
 purerl *dhall* package set → `purs` typecheck → `purerl` 0.0.24 codegen of the sources **and** the
 package set → `erlc` → runs correctly on Erlang/OTP 29 (`purs/scripts/purerl-build.sh`, a
 reproducible **local** gate). This proves the architecture with a runnable artifact, not an
-assertion (ADR-0000). **What remains:** the value backend — the `Beam`/`Lower`/`JS`/`JVM`
-emitters — plus the `Check.annotate`/`forall T: Bound` tail. The Elixir reference stays as the
+assertion (ADR-0000). **Phase 5 (the value backend) is underway:** `Rian.JS` is ported (the
+ECMAScript emitter — both print modes, Tier-1 subset; ADR-0049/0086 §5), and `Check` is fully ported
+(inference + the 11-check gate + `annotate`). **What remains:** the `Lower`/`JVM`/`Beam` emitters.
+The Elixir reference stays as the
 parity oracle until each module's PureScript counterpart reaches parity (removal is root-first).
 The per-module status table, the live parity-record count (the harness's own `N/N` total), and
 the remaining work live in **`docs/purescript-migration.md`** — the single source of truth, so this

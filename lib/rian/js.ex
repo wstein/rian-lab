@@ -9,7 +9,7 @@ defmodule Rian.JS do
 
   The backend has **two print modes** over one lowering (ADR-0086 §5):
   `compile/1` emits the runtime ECMAScript module, and `compile_types/1` emits a
-  TypeScript declaration sidecar (`.d.ts`) describing the same module's exported
+  TypeScript declaration sidecar (`.d.mts`) describing the same module's exported
   surface — the typed *view* a TS consumer checks across the FFI boundary.
 
   JS has no native multi-clause pattern matching, so a multi-clause function
@@ -194,9 +194,9 @@ defmodule Rian.JS do
     [import_js, const_js, fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
   end
 
-  # ── TypeScript `.d.ts` sidecar (ADR-0086 §5) ────────────────────────────────
+  # ── TypeScript `.d.mts` sidecar (ADR-0086 §5) ────────────────────────────────
   @doc """
-  Emit a TypeScript declaration sidecar (`.d.ts`) for `src` — the **typed view**
+  Emit a TypeScript declaration sidecar (`.d.mts`) for `src` — the **typed view**
   of the JS backend (ADR-0086 §5).
 
   The runtime `.mjs` (`compile/1`) erases every type at the boundary, so a
@@ -204,7 +204,8 @@ defmodule Rian.JS do
   module's **exported runtime surface** — `export function`/`export const` for every
   `pub` declaration, plus `type`/`interface`/range aliases for the user types they
   reference — so the consumer is type-checked across the FFI boundary by their own
-  `tsc`. TypeScript resolves a `<name>.d.ts` automatically beside `<name>.mjs`.
+  `tsc`. TypeScript resolves an ESM module's declarations from the sibling `<name>.d.mts`
+  beside `<name>.mjs` (a `.d.ts` does *not* resolve for a `.mjs`, ADR-0086 §5).
 
   **The declarations describe the values the `.mjs` actually produces** (a sum is a
   tagged array `["Ctor", …]`, a struct a `{__struct__: "Name", …}` object, a

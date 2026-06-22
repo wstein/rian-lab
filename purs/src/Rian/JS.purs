@@ -9,10 +9,12 @@
 -- | else BigInt-mode (`Int` → `42n`). `Int`+number widths cannot mix (`rejectMixedIntMode`);
 -- | `Int64`+ are rejected (`rejectWideInt`), never silently elevated to BigInt.
 -- |
--- | Both print modes are ported: `compile` (the runtime module) and `compileTypes` (the `.d.ts`
+-- | Both print modes are ported: `compile` (the runtime module) and `compileTypes` (the `.d.mts`
 -- | sidecar, ADR-0086 §5). NOT yet ported (each needs a Core/Func extension): `const` references
 -- | (no `EConstRef` in PS Core), protocol dispatch (no `Func.dispatch` marker), `@external` bodies,
--- | and value-union type-patterns over a user type (no `PTyped` discriminator). The corpus avoids those.
+-- | value-union type-patterns over a user type (no `PTyped` discriminator), and struct *construction*
+-- | (`Name(f: v)` — no `EStruct` in PS Core; struct field access + `case` patterns DO lower). The
+-- | corpus avoids those.
 module Rian.JS
   ( compile
   , compileSexpr
@@ -535,14 +537,14 @@ pascal s = case head (toCharArray s) of
   Nothing -> false
 
 --------------------------------------------------------------------------------
--- compile_types: the TypeScript `.d.ts` sidecar (ADR-0086 §5) — a typed *view* of the runtime
+-- compile_types: the TypeScript `.d.mts` sidecar (ADR-0086 §5) — a typed *view* of the runtime
 -- module: `export function`/`const` per `pub` decl + `type`/`interface`/range aliases describing
 -- the values `compile` actually emits (a sum = `["Ctor",…]`, a struct = `{__struct__,…}`). A type
 -- outside the mapped subset becomes `unknown` (honest), never a misleading `any`. Pure type-string
 -- mapping — no Core IR — so no Core extension is needed.
 --------------------------------------------------------------------------------
 
--- | Emit a TypeScript declaration sidecar (`.d.ts`) for `src`.
+-- | Emit a TypeScript declaration sidecar (`.d.mts`) for `src`.
 -- @rian_sig pub def compile_types(src val String) String
 compileTypes :: String -> String
 compileTypes src =
@@ -711,7 +713,7 @@ tsApplication known tvars hd args = case hd of
   where
   ax i = fromMaybe "" (index args i)
 
--- ── tiny string helpers for the .d.ts mapper ──
+-- ── tiny string helpers for the .d.mts mapper ──
 isJustPrefix :: String -> String -> Boolean
 isJustPrefix p s = case Str.stripPrefix (Str.Pattern p) s of
   Just _ -> true
@@ -747,6 +749,6 @@ identStr s = case uncons (toCharArray s) of
 compileSexpr :: String -> String
 compileSexpr = compile
 
--- | The `jsdts` parity unit: the TypeScript `.d.ts` sidecar for `src`.
+-- | The `jsdts` parity unit: the TypeScript `.d.mts` sidecar for `src`.
 compileTypesSexpr :: String -> String
 compileTypesSexpr = compileTypes

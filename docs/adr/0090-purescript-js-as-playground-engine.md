@@ -3,10 +3,11 @@
 **Status:** Proposed
 **Implemented:** no — direction + scope. The front-end, gates, inference, `Reach`, and the
 assemble tail are ported to PureScript and parity-gated (`purs/src/Rian/*`,
-`docs/purescript-migration.md`); the **emitters are not** (`Rian.JS`/`JVM`/`Lower`/`Beam` are
-Elixir-only), and **no JS-backend build profile exists** — the port has only ever been compiled
-through purerl. This ADR decides the *direction*; nothing here ships before the `Rian.JS` port
-(the next emitter step) and a stock-`purs` JS build.
+`docs/purescript-migration.md`), and **`Rian.JS` is now ported** (Phase 5 — the ECMAScript emitter,
+both print modes, Tier-1 subset); the remaining emitters (`JVM`/`Lower`/`Beam`) stay Elixir-only, and
+**no JS-backend build profile exists** — the port has only ever been compiled through purerl. This
+ADR decides the *direction*; the `Rian.JS` port (the first prerequisite) has landed, but nothing here
+ships before a stock-`purs` JS build (the second).
 **Refines:** ADR-0084 (PureScript port — this **re-frames its purpose**: the port's *primary
 deliverable* is a JS compiler for browser + node; type-safety-over-Dialyzer stands, but is no
 longer the headline; purerl is recast in §2).
