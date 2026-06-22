@@ -46,13 +46,13 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
           <div class="pg-console">
             <div class="pg-console-bar">
               <span class="rl-mono pg-console-title">OUTPUT</span>
-              <span class="pg-edited" id="pg-edited" hidden>● edited (not re-lowered)</span>
+              <span class="pg-edited" id="pg-edited" hidden>● edited · live</span>
               <div class="pg-console-btns">
                 <button class="pg-btn pg-run" id="pg-run">▷ Run</button>
                 <button class="pg-btn" id="pg-reset">↺ Reset</button>
               </div>
             </div>
-            <pre class="rl-mono pg-out" id="pg-out">Run to see the compiler's gate + reachability report.</pre>
+            <pre class="rl-mono pg-out" id="pg-out" data-kind="hint">Start typing — the buffer compiles + runs live in your browser.</pre>
           </div>
         </div>
 
@@ -168,7 +168,8 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     document.querySelectorAll(".pg-tab").forEach((b) => b.classList.toggle("on", (b as HTMLElement).dataset.file === id));
     renderEditor();
     renderPanes();
-    out.textContent = "Run to compile this buffer in your browser (the real Rian → JS compiler).";
+    out.dataset.kind = "hint";
+    out.textContent = "Start typing — it compiles + runs live in your browser. Or press ▷ Run.";
   }
 
   // Execute an emitted ECMAScript module in a sandboxed iframe (`allow-scripts`, opaque origin — no
@@ -207,34 +208,99 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     });
   }
 
-  async function run() {
+  // ── live, forgiving evaluation ──────────────────────────────────────────────
+  // Compile (and run) the buffer as the user types, debounced. The Rian parser is
+  // not error-recovering, so a half-typed line throws — so we (1) stay quiet for
+  // input that is *obviously* mid-edit (unbalanced delimiters/strings, an unclosed
+  // `do`, a dangling operator), and (2) on any compile error keep the LAST GOOD
+  // panes and report it gently instead of flashing red. A generation token drops
+  // stale results when a newer keystroke supersedes an in-flight compile/run.
+  let liveTimer = 0;
+  let evalGen = 0;
+
+  // A cheap "is the buffer obviously incomplete?" check — NOT a parser, just enough
+  // to avoid yelling at code the user is still in the middle of writing.
+  function looksIncomplete(srcText: string): boolean {
+    const code = srcText.replace(/#[^\n]*/g, " "); // drop line comments
+    if (code.trim() === "") return true;
+    // single walk: balance delimiters AND collapse each string literal to a `0`
+    // placeholder, so the `do`/`end` and trailing-operator checks below see only
+    // real code (a string like "do" or a trailing "text" must not mislead them).
+    let inStr = false,
+      q = "",
+      par = 0,
+      brk = 0,
+      brc = 0,
+      bare = "";
+    for (let i = 0; i < code.length; i++) {
+      const c = code[i];
+      if (inStr) {
+        if (c === q && code[i - 1] !== "\\") inStr = false;
+        continue; // string contents contribute nothing to `bare`
+      }
+      if (c === '"' || c === "'") (inStr = true), (q = c), (bare += "0");
+      else {
+        if (c === "(") par++;
+        else if (c === ")") par--;
+        else if (c === "[") brk++;
+        else if (c === "]") brk--;
+        else if (c === "{") brc++;
+        else if (c === "}") brc--;
+        bare += c;
+      }
+    }
+    if (inStr || par > 0 || brk > 0 || brc > 0) return true; // unterminated string / open delimiter
+    const doN = (bare.match(/\bdo\b/g) || []).length;
+    const endN = (bare.match(/\bend\b/g) || []).length;
+    if (doN > endN) return true; // an unclosed `do` block
+    // a buffer ending on an operator/keyword is mid-expression
+    return /(:=|<~|<-|->|\|>|<>|[-+*\/<>=.,]|\b(?:and|or|not|when|do|else|div|rem|in)\b)\s*$/.test(bare.trim());
+  }
+
+  function setOut(kind: string, text: string) {
+    out.dataset.kind = kind;
+    out.textContent = text;
+  }
+
+  async function liveEval(force = false) {
+    const gen = ++evalGen;
     const source = src.value;
-    out.textContent = "$ rian build --js  (compiling in your browser…)";
+    if (!force && looksIncomplete(source)) {
+      setOut("hint", "▍ keep typing… — live eval runs as soon as the buffer parses");
+      return;
+    }
     let js: string;
     try {
       const { compile } = await getCompiler();
+      if (gen !== evalGen) return; // a newer keystroke superseded this run
       js = compile(source);
     } catch (e: any) {
-      // a gate failure (type/exhaustiveness/capability) or an unsupported construct throws here.
-      liveJs = null;
-      renderPanes();
-      out.textContent = "$ rian build --js\n  ✗ " + String((e && e.message) || e).replace(/^\w+: /, "");
+      if (gen !== evalGen) return;
+      // forgiving: a gate/parse error keeps the last good panes; report it softly.
+      setOut("soft", "… " + String((e && e.message) || e).replace(/^\w+: /, ""));
       return;
     }
-    // the JS pane is now live (real in-browser emission); switch the panel to it.
     liveJs = js;
-    document.documentElement.dataset.target = "js";
+    if (force) document.documentElement.dataset.target = "js";
     renderPanes();
-    out.textContent = "$ rian build --js\n  ✓ compiled to ECMAScript (live, in your browser)\n  ▷ running the emitted module in a sandbox…";
+    setOut("ok", "$ rian build --js\n  ✓ compiled to ECMAScript (live, in your browser)\n  ▷ running…");
     const res = await runInSandbox(js);
-    out.textContent =
+    if (gen !== evalGen) return; // a newer edit superseded this run
+    setOut(
+      res.ok ? "ok" : "soft",
       "$ rian build --js\n  ✓ compiled to ECMAScript (live, in your browser)\n" +
-      (res.ok ? "  ✓ " + res.text + "\n  exit 0" : "  ✗ runtime: " + res.text);
+        (res.ok ? "  ✓ " + res.text + "\n  exit 0" : "  ✗ runtime: " + res.text),
+    );
   }
 
   // wire up
   document.querySelectorAll(".pg-tab").forEach((b) =>
-    b.addEventListener("click", () => loadFile((b as HTMLElement).dataset.file!)),
+    b.addEventListener("click", () => {
+      loadFile((b as HTMLElement).dataset.file!);
+      // once the compiler is loaded (the reader has engaged), switching cells
+      // evaluates the new one immediately — no need to re-press Run.
+      if (compilerP) liveEval(false);
+    }),
   );
   document.querySelectorAll(".pg-otab").forEach((b) =>
     b.addEventListener("click", () => {
@@ -245,17 +311,23 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
       } catch (e) {}
     }),
   );
-  src.addEventListener("input", renderEditor);
+  src.addEventListener("input", () => {
+    renderEditor();
+    clearTimeout(liveTimer);
+    liveTimer = window.setTimeout(() => liveEval(false), 280);
+  });
   src.addEventListener("scroll", () => {
     hl.scrollTop = src.scrollTop;
     hl.scrollLeft = src.scrollLeft;
     gutter.scrollTop = src.scrollTop;
   });
-  $("#pg-run").addEventListener("click", run);
+  // Run forces an immediate eval (bypasses the debounce + incompleteness gate).
+  $("#pg-run").addEventListener("click", () => liveEval(true));
   $("#pg-reset").addEventListener("click", () => {
     src.value = current.source;
     renderEditor();
-    out.textContent = "Reset to " + current.file + ".";
+    if (compilerP) liveEval(false);
+    else setOut("hint", "Reset to " + current.file + ".");
   });
 
   loadFile(cells[0].id);
@@ -450,6 +522,15 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     line-height: 1.65;
     color: #cbd5e1;
     background: var(--code-bg);
+    transition: color 0.12s ease;
+  }
+  /* forgiving live-eval states: a mid-edit buffer is muted, a transient gate/parse
+     error is a soft amber (not an alarming red) — only an explicit failure reads red */
+  .pg-out[data-kind="hint"] {
+    color: #64748b;
+  }
+  .pg-out[data-kind="soft"] {
+    color: #d9a441;
   }
   .pg-output {
     display: flex;
