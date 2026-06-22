@@ -95,11 +95,16 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
      one module. The Elixir-text path is a demo/inspection backend (it has a known higher-order
      limitation, see its moduledoc); **`Rian.Beam` is the real BEAM backend.** So BEAM has two
      emitters — don't confuse them.
-   - **`Rian.JS`** — ECMAScript (ADR-0049 Tier 1); partial (`struct`/`with`/lambdas/FFI raise
-     `Unsupported`). Has **two print modes** over one lowering (ADR-0086 §5): `compile/1` (the
-     runtime `.mjs`) and `compile_types/1` (a TypeScript `.d.mts` declaration sidecar — the typed
-     FFI-boundary *view*; doc-not-gate, capabilities erased, unmappable types → `unknown`; written
-     beside the `.mjs` by `rian build --js`).
+   - **`Rian.JS`** — ECMAScript (ADR-0049 Tier 1). Covers far beyond the portable core: sum
+     variants, lists, `case`, maps, **structs, protocols, value unions (ADR-0083), lambdas,
+     captures, `with`, and `@external(:js,…)` FFI** all lower; only **bitstrings** (BEAM-only) and
+     **implicit host FFI** raise `Unsupported` (a host `Mod.fun` call that is neither a program
+     function nor a portable-prelude namespace is rejected, not emitted as a dangling reference).
+     Has **two print modes** over one lowering (ADR-0086 §5): `compile/1` (the runtime `.mjs`) and
+     `compile_types/1` (a TypeScript `.d.mts` declaration sidecar — the typed FFI-boundary *view*;
+     doc-not-gate, capabilities erased, unmappable types → `unknown`; written beside the `.mjs` by
+     `rian build --js`). Beyond-Tier-1 features are node-executed via `node_eval` in
+     `js_test.exs` (opportunistic — no-ops when `node` is absent).
    - **`Rian.JVM`** — Kotlin/JVM (ADR-0049 **Tier 2**); a direct source emitter on Core, like JS.
      MVP: functions, primitives, operators, `if`, `case`, sum variants (→ `sealed interface` +
      `data class` + smart-cast patterns), lists (`listOf` literals + cons/closed clause patterns →
