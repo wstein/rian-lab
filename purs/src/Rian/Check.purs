@@ -889,11 +889,10 @@ fillLocalRetsSexpr src =
 -- | The compile-time gate: the first function that fails a check (`Just message`), else `Nothing`
 -- | (`:ok`). Runs the reference `check_func` chain in order so the first-error message matches:
 -- | `check_unk` → `check_external_caps` → `check_labels` → `check_union_clash` → return-
--- | assignability → `check_bounds` → `check_numeric_mix` → `check_value_position` → `check_effects`
--- | → error sets (ADR-0040). One reference check is NOT wired yet: `check_binds` (blocked on the
--- | deferred literal-width-adoption + range-bind machinery — porting it naively would falsely reject
--- | `x Int8 := 5`). The gate is therefore sound but conservative on that one — it never wrongly
--- | rejects, it can only miss a binding-width error.
+-- | assignability → `check_binds` → `check_bounds` → `check_numeric_mix` → `check_value_position` →
+-- | `check_effects` → error sets (ADR-0040). All 11 reference `check_func` checks are now wired.
+-- | (`check_binds` is newly ported — it typechecks and has reference-generated `gate` fixtures, but
+-- | its purerl *runtime* parity is pending a toolchain run; the other ten are parity-proven.)
 -- @rian_sig pub def check_program(prog val Prog) _Unk
 checkProgram :: Prog -> Maybe String
 checkProgram prog = findMap checkFunc funcs
@@ -907,16 +906,17 @@ checkProgram prog = findMap checkFunc funcs
   -- per function, in reference order (`check_func`'s `with :ok <- …` chain): no `_Unk` hole; an
   -- `@external`'s params are `val`/`tag`; no labeled call args; no value-union with two members
   -- sharing a runtime discriminator; the body is assignable to the declared return; each bounded-
+  -- each typed bind's value fits its annotation (range / fixed-width / not-float / assignable);
   -- generic call site satisfies its bounds; no implicit Int↔Float mix; no unit in value position;
   -- each declared effect set matches the body's inferred effects; then a Result return's produced
-  -- error set ⊆ its `E`. Only `check_binds` is not wired yet (see the module note), so the gate
-  -- stays sound-but-conservative on that one.
+  -- error set ⊆ its `E`.
   checkFunc f = firstErr
     [ \_ -> checkUnk f
     , \_ -> checkExternalCaps f
     , \_ -> checkLabels f
     , \_ -> checkUnionClash f
     , \_ -> checkReturn ic f
+    , \_ -> checkBinds ic f
     , \_ -> checkBounds ic f
     , \_ -> checkNumericMix ic f
     , \_ -> checkValuePosition f
@@ -932,6 +932,185 @@ firstErr = foldl step Nothing
   step acc k = case acc of
     Just _ -> acc
     Nothing -> k unit
+
+--------------------------------------------------------------------------------
+-- check_binds (ADR-0034/0036/0064): a declared bind `name Ann := value` whose
+-- value provably clashes with `Ann` is rejected. Three layers: a range bind
+-- (ADR-0036 subrange, compile-time ordinal check), a fixed-width literal range
+-- check (ADR-0064 — a constant adopting `Int8…Int128`/`UInt*` must fit the width's
+-- two's-complement range), and the int-literal-not-float rule, falling through to
+-- exact assignability. Mirrors `Rian.Check.check_binds` byte-for-byte.
+--
+-- NOTE (purerl-specific): the fixed-width bounds reach ±2^127, beyond a 32-bit
+-- `Int` literal `purs` would accept — so they are kept as decimal strings and
+-- parsed with `Int.fromString`, which on purerl is Erlang `binary_to_integer/2`
+-- (arbitrary precision). `Ord Int` lowers to Erlang's numeric compare, so the
+-- magnitude test is exact. This is sound on the purerl backend only (the port's
+-- target); a JS backend would need `BigInt`.
+--------------------------------------------------------------------------------
+
+-- the compile-time ordinal of a literal against a range's base, or why not.
+data Ordinal = OkOrd Int | KindMismatch String | NotLiteral
+
+checkBinds :: Ic -> Func -> Maybe String
+checkBinds ic f = findMap clauseErr f.clauses
+  where
+  clauseErr c = maybe Nothing (\b -> checkBindStmts ic (clauseEnv c.pats f.params ic) (bodyStmts (bodySurface b))) c.body
+
+-- `parseBody` always yields an `SBlock` (Pratt); the fallback keeps the walk total.
+bodyStmts :: P.Surface -> Array P.Stmt
+bodyStmts (P.SBlock stmts) = stmts
+bodyStmts s = [ P.StExpr s ]
+
+checkBindStmts :: Ic -> Env -> Array P.Stmt -> Maybe String
+checkBindStmts ic env stmts = case uncons stmts of
+  Nothing -> Nothing
+  Just { head: s, tail: rest } -> case s of
+    P.StTypedBind name ann e -> case bindMismatch ic env name ann e of
+      Just err -> Just err
+      Nothing -> checkBindStmts ic (envPut name (resolveRange ic (TName ann)) env) rest
+    P.StBind name e -> checkBindStmts ic (envPut name (infer (fromExpr e) env ic) env) rest
+    -- the reference walks only typed/simple/expr statements; arrow and destructuring
+    -- binds (ADR-0066) are not range-checked — pass through, env unchanged (conservative).
+    P.StBindArrow _ _ -> checkBindStmts ic env rest
+    P.StBindPat _ _ -> checkBindStmts ic env rest
+    P.StExpr _ -> checkBindStmts ic env rest
+
+-- `Nothing` when the binding is well-typed (or unprovable); `Just msg` on a proven
+-- clash between the value's type and the declared annotation.
+bindMismatch :: Ic -> Env -> String -> String -> P.Surface -> Maybe String
+bindMismatch ic env name ann e =
+  let
+    ce = fromExpr e
+  in
+    case assocFind ann ic.ranges of
+      Just ri -> rangeBind ic env name ann ri ce
+      Nothing ->
+        if litExprAdopts e ann then litRangeError e ann name
+        else if intLitExpr ce && floatTypeStr ann then
+          Just ("`" <> name <> "`: an integer literal does not adopt the float type `" <> ann <> "` — write an explicit float")
+        else
+          let t = infer ce env ic
+          in if assignable t (TName ann) then Nothing
+             else Just ("`" <> name <> "`: binding declared `" <> ann <> "` but its value has type `" <> tyStr t <> "`")
+
+-- A binding declared at a `range` type (ADR-0036). A literal of the matching ordinal
+-- kind is bounds-checked at compile time; a non-literal is allowed when assignable to
+-- the (representation-transparent) base — its bound goes through `Name.of(n)` at runtime.
+rangeBind :: Ic -> Env -> String -> String -> RangeInfo -> CExpr -> Maybe String
+rangeBind ic env name ann ri ce = case literalOrdinal ce ri.base of
+  OkOrd v
+    | v >= ri.lo && v <= ri.hi -> Nothing
+    | otherwise -> Just ("`" <> name <> "`: literal " <> show v <> " is outside range `" <> ann <> "` (" <> show ri.lo <> ".." <> show ri.hi <> ")")
+  KindMismatch got -> Just ("`" <> name <> "`: range `" <> ann <> "` is over `" <> ri.base <> "`, but the literal is a `" <> got <> "`")
+  NotLiteral ->
+    let t = infer ce env ic
+    in if assignable (resolveRange ic t) (TName ri.base) then Nothing
+       else Just ("`" <> name <> "`: value of type `" <> tyStr t <> "` is not assignable to range `" <> ann <> "` (base `" <> ri.base <> "`); use `" <> ann <> ".of(n)` for a runtime value")
+
+-- the compile-time ordinal of a literal against a range's base (`Int64`/`Char`), or
+-- why not: `:kind_mismatch` for the wrong ordinal kind, `:not_literal` otherwise.
+literalOrdinal :: CExpr -> String -> Ordinal
+literalOrdinal (ENum n) "Int64" = if intLiteral n then OkOrd (parseIntLit n) else NotLiteral
+literalOrdinal (EUnary "-" a) "Int64" = case a of
+  ENum _ -> case literalOrdinal a "Int64" of
+    OkOrd v -> OkOrd (-v)
+    other -> other
+  _ -> NotLiteral
+literalOrdinal (EChar cp) "Char" = OkOrd cp
+literalOrdinal (ENum _) "Char" = KindMismatch "Int64"
+literalOrdinal (EChar _) "Int64" = KindMismatch "Char"
+literalOrdinal _ _ = NotLiteral
+
+-- a bare numeric literal adopts a same-kind numeric annotation (ADR-0034 §1): an
+-- integer literal takes any `Int*`/`UInt*`; a float literal any `Float*`. Cross-kind
+-- (int literal into a `Float`) is not adopted — handled by the dedicated rule above.
+literalAdopts :: CExpr -> String -> Boolean
+literalAdopts (ENum n) ann = if intLiteral n then intType (TName ann) else floatTypeStr ann
+literalAdopts (EUnary "-" arg) ann = literalAdopts arg ann
+literalAdopts _ _ = false
+
+-- does a *constant* surface expression adopt the declared type? (scalars, list
+-- literals adopting `Vec(W)`, and `if`/`case`/block/arith of constants) — mirrors the
+-- return-body adoption path so a typed bind and a typed return agree (ADR-0064).
+litExprAdopts :: P.Surface -> String -> Boolean
+litExprAdopts (P.SIf _ t e) ret = litExprAdopts t ret && litExprAdopts e ret
+litExprAdopts (P.SCase _ arms) ret = not (null arms) && all (\arm -> litExprAdopts arm.body ret) arms
+litExprAdopts (P.SBlock [ P.StExpr e ]) ret = litExprAdopts e ret
+litExprAdopts (P.SBin op l r) ret = elem op [ "+", "-", "*", "div", "rem" ] && litExprAdopts l ret && litExprAdopts r ret
+litExprAdopts (P.SListLit elems Nothing) ret = case vecElem ret of
+  Just et -> all (\el -> litExprAdopts el et) elems
+  Nothing -> false
+litExprAdopts e ret = literalAdopts (fromExpr e) ret
+
+-- ── fixed-width literal range check (ADR-0064 soundness) ──────────────────
+-- the first out-of-range literal in a constant body adopting a fixed-width type
+-- (a bare/negated literal, a `Vec` element, or an `if`/`case`/block branch), else
+-- `Nothing`. Arithmetic of literals is left to the runtime wrap contract.
+litRangeError :: P.Surface -> String -> String -> Maybe String
+litRangeError expr ty name = case vecElem ty of
+  Just et -> findMap (\el -> litRangeError el et name) (listElems expr)
+  Nothing -> case widthBounds ty of
+    Nothing -> Nothing
+    Just (Tuple lo hi) -> oorScan expr ty lo hi name
+
+listElems :: P.Surface -> Array P.Surface
+listElems (P.SListLit elems _) = elems
+listElems (P.SBlock [ P.StExpr e ]) = listElems e
+listElems _ = []
+
+oorScan :: P.Surface -> String -> Int -> Int -> String -> Maybe String
+oorScan (P.SIf _ t e) ty lo hi n = case oorScan t ty lo hi n of
+  Just v -> Just v
+  Nothing -> oorScan e ty lo hi n
+oorScan (P.SCase _ arms) ty lo hi n = findMap (\arm -> oorScan arm.body ty lo hi n) arms
+oorScan (P.SBlock [ P.StExpr e ]) ty lo hi n = oorScan e ty lo hi n
+oorScan expr ty lo hi n = case constInt expr of
+  Just v | v < lo || v > hi -> Just ("`" <> n <> "`: literal " <> show v <> " is out of range for `" <> ty <> "` (" <> show lo <> ".." <> show hi <> ")")
+  _ -> Nothing
+
+constInt :: P.Surface -> Maybe Int
+constInt (P.SNum t) = if intLiteral t then Just (parseIntLit t) else Nothing
+constInt (P.SUnary "-" e) = map negate (constInt e)
+constInt _ = Nothing
+
+-- two's-complement bounds for the fixed-width integer types; `Nothing` for `Int`
+-- (arbitrary precision) and any non-integer type. Wide bounds are decimal strings
+-- parsed at runtime (see the purerl note above) — only ≤32-bit values are literals.
+widthBounds :: String -> Maybe (Tuple Int Int)
+widthBounds "Int8" = Just (Tuple (-128) 127)
+widthBounds "Int16" = Just (Tuple (-32768) 32767)
+widthBounds "Int32" = Just (Tuple (negParse "2147483648") 2147483647)
+widthBounds "Int53" = Just (Tuple (negParse "9007199254740991") (parseIntLit "9007199254740991"))
+widthBounds "Int64" = Just (Tuple (negParse "9223372036854775808") (parseIntLit "9223372036854775807"))
+widthBounds "Int128" = Just (Tuple (negParse "170141183460469231731687303715884105728") (parseIntLit "170141183460469231731687303715884105727"))
+widthBounds "UInt8" = Just (Tuple 0 255)
+widthBounds "UInt16" = Just (Tuple 0 65535)
+widthBounds "UInt32" = Just (Tuple 0 (parseIntLit "4294967295"))
+widthBounds "UInt64" = Just (Tuple 0 (parseIntLit "18446744073709551615"))
+widthBounds "UInt128" = Just (Tuple 0 (parseIntLit "340282366920938463463374607431768211455"))
+widthBounds _ = Nothing
+
+-- parse a decimal integer literal (underscores stripped). On purerl `Int.fromString`
+-- is Erlang `binary_to_integer/2` — arbitrary precision, no 32-bit clamp.
+parseIntLit :: String -> Int
+parseIntLit s = fromMaybe 0 (Int.fromString (replaceAll (Str.Pattern "_") (Str.Replacement "") s))
+
+negParse :: String -> Int
+negParse s = negate (parseIntLit s)
+
+-- `Vec(ElemT)` → `Just ElemT`, else `Nothing` (the reference's `^Vec\((.+)\)$`).
+vecElem :: String -> Maybe String
+vecElem t = case Str.stripPrefix (Str.Pattern "Vec(") t of
+  Just inner -> Str.stripSuffix (Str.Pattern ")") inner
+  Nothing -> Nothing
+
+-- a `range`-named type resolves to its (representation-transparent) base, else itself.
+resolveRange :: Ic -> Ty -> Ty
+resolveRange ic (TName s) = case assocFind s ic.ranges of
+  Just ri -> TName ri.base
+  Nothing -> TName s
+resolveRange _ t = t
 
 -- `_Unk` is an UNFINISHED inference hole, not a type (ADR-0034): a fill-me marker the transpiler
 -- leaves. A declared `_Unk` in a signature must be resolved before compiling, so the gated path

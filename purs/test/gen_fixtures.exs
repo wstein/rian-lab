@@ -750,7 +750,24 @@ gate_corpus = [
   # are both rejected.
   "@effects(host, io)\ndef effok(x Int53) Symbol := IO.puts(x)",
   "@effects(io)\ndef effunder(x Int53) Symbol := IO.puts(x)",
-  "@effects(host, io, fs)\ndef effover(x Int53) Symbol := IO.puts(x)"
+  "@effects(host, io, fs)\ndef effover(x Int53) Symbol := IO.puts(x)",
+  # check_binds (ADR-0034/0036/0064): a typed bind whose value clashes with its annotation is
+  # rejected. Fixed-width literal range (ADR-0064 — incl. a >32-bit `UInt32` bound and a `Vec`
+  # element); an in-range literal PASSES (a naive port would falsely reject `x Int8 := 5`); an
+  # integer literal does not adopt a float; an outright type clash; and the ADR-0036 range bind
+  # (out-of-bounds / in-bounds / kind-mismatch / non-literal assignable-to-base). The return gate
+  # passes first (the body's last expression `n` is the `Int64` param).
+  "def bnd1(n Int64) Int64 := x Int8 := 9999 ; n",
+  "def bnd2(n Int64) Int64 := x Int8 := 5 ; n",
+  "def bnd3(n Int64) Int64 := x UInt32 := 4294967296 ; n",
+  "def bnd4(n Int64) Int64 := x UInt32 := 4294967295 ; n",
+  "def bnd5(n Int64) Int64 := xs Vec(Int8) := [1, 2, 9999] ; n",
+  "def bnd6(n Int64) Int64 := x Float64 := 66 ; n",
+  "def bnd7(n Int64) Int64 := x Int53 := \"hi\" ; n",
+  "range Digit := 0..9\ndef bnd8(n Int64) Int64 := d Digit := 12 ; n",
+  "range Digit := 0..9\ndef bnd9(n Int64) Int64 := d Digit := 7 ; n",
+  "range Digit := 0..9\ndef bnd10(n Int64) Int64 := d Digit := 'a' ; n",
+  "range Digit := 0..9\ndef bnd11(n Int64) Int64 := d Digit := n ; n"
 ]
 
 # Rian.Assemble corpus — the `asm` stream: a `protocol`/`impl` program assembled to the funcs the
