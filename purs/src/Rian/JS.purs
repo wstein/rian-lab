@@ -23,6 +23,8 @@ module Rian.JS
   , compileSexpr
   , compileTypes
   , compileTypesSexpr
+  , compileTs
+  , compileTsSexpr
   ) where
 
 import Prelude
@@ -814,6 +816,109 @@ compileTypes src =
       in
         if body == "" then "" else body <> "\n"
 
+--------------------------------------------------------------------------------
+-- native TypeScript: the runtime + inline types in one `.ts` (vs the `.d.mts` sidecar)
+--------------------------------------------------------------------------------
+
+-- | Compile `src` to a self-contained TypeScript module: the SAME runtime `compile` emits, with the
+-- | value types declared up front (the `.d.mts` unions/interfaces) and a type annotation woven into
+-- | every function/const signature. So `compile` is the `.mjs` runtime, `compileTypes` the `.d.mts`
+-- | sidecar, and `compileTs` the typed `.ts` source — one Core lowering, three print modes (ADR-0086
+-- | §5). The bodies are byte-identical to `compile`; only the headers gain `: T`. Protocol dispatchers
+-- | reuse the runtime form (they dispatch on runtime shape; their `a0` is implicitly typed).
+-- @rian_sig pub def compile_ts(src val String) String
+compileTs :: String -> String
+compileTs src =
+  let prog0 = runProgramTail (assemble (parseToProg src))
+  in case checkProgram prog0 of
+    Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
+    Nothing ->
+      let
+        prog = erase prog0
+        _ = rejectMixedIntMode prog
+        i53 = programNumberMode prog
+        known = knownTypeNames prog
+        consts = allConsts prog
+        cset = map _.name consts
+        reg = jsReg prog
+        funcs = filter (\f -> f.dispatch /= Just "dispatcher") (allFuncs prog)
+        rangeTs = joinWith "\n" (map dtsRange (allRanges prog))
+        typeTs = joinWith "\n" (map (dtsSum known) (allTypes prog))
+        structTs = joinWith "\n" (map (dtsStruct known) (allStructs prog))
+        importTs = importsJs funcs
+        constTsOut = joinWith "\n" (map (constTs known i53 cset reg) consts)
+        fnTsOut = joinWith "\n\n" (map (functionTs known i53 cset reg) funcs)
+        dispTsOut = protocolDispatchersJs i53 prog
+      in
+        joinWith "\n\n" (filter (_ /= "") [ rangeTs, typeTs, structTs, importTs, constTsOut, fnTsOut, dispTsOut ])
+
+-- the i-th declared parameter's type (`Nothing` → `unknown` via `tsTypeM`).
+paramTyM :: Func -> Int -> Maybe String
+paramTyM f i = case index f.params i of
+  Just p -> p.ty
+  Nothing -> Nothing
+
+-- a function with typed signature over the unchanged runtime body (mirrors `functionJs`'s shapes).
+functionTs :: Array String -> Boolean -> Array String -> JsReg -> Func -> String
+functionTs known i53 cset reg f =
+  if not (null f.externals) then externalFnTs known f
+  else case wideIntType f of
+    Just t -> unsafeCrashWith ("`" <> f.name <> "`: fixed-width integer `" <> t <> "` is not supported on JS (ADR-0064)")
+    Nothing ->
+      let
+        export = if f.pub then "export " else ""
+        gen = generics f.tvars
+        ret = tsTypeM known f.tvars f.ret
+        ptype i = tsTypeM known f.tvars (paramTyM f i)
+      in
+        case f.clauses of
+          [ c ] | isNothing c.guard && allPVar (map fromPat c.pats) ->
+            let
+              vars = pvarNames (map fromPat c.pats)
+              tps = joinWith ", " (mapWithIndex (\i v -> v <> ": " <> ptype i) vars)
+            in
+              export <> "function " <> f.name <> gen <> "(" <> tps <> "): " <> ret <> " { " <> clauseReturn i53 cset reg vars c.body <> " }"
+          _ ->
+            let
+              arity = maybe 0 (\c -> length c.pats) (head f.clauses)
+              tps = joinWith ", " (map (\i -> "a" <> show i <> ": " <> ptype i) (upto arity))
+              body = joinWith "\n" (map (clauseJs i53 cset reg) f.clauses)
+              tail =
+                if totalClauses i53 f.clauses then "\n}"
+                else "\n  throw new Error(\"" <> f.name <> ": no clause matched\");\n}"
+            in
+              export <> "function " <> f.name <> gen <> "(" <> tps <> "): " <> ret <> " {\n" <> body <> tail
+
+-- an `@external` function with a typed signature over its verbatim host body.
+externalFnTs :: Array String -> Func -> String
+externalFnTs known f = case jsExternal f of
+  Nothing -> unsafeCrashWith ("`" <> f.name <> "`: no `@external(:js, …)` body — not reachable on :js")
+  Just (ExtFile _ fun) -> jsExternalFnTs known f (fun <> "(" <> joinWith ", " (map _.name f.params) <> ")")
+  Just spec -> jsExternalFnTs known f (Ext.render spec f.params)
+
+jsExternalFnTs :: Array String -> Func -> String -> String
+jsExternalFnTs known f host =
+  let
+    args = joinWith ", " (mapWithIndex (\i p -> "a" <> show i <> ": " <> tsTypeM known f.tvars p.ty) f.params)
+    binds = joinWith " " (mapWithIndex (\i p -> "const " <> p.name <> " = a" <> show i <> ";") f.params)
+    export = if f.pub then "export " else ""
+  in
+    export <> "function " <> f.name <> generics f.tvars <> "(" <> args <> "): " <> tsTypeM known f.tvars f.ret <> " { " <> binds <> " return (" <> host <> "); }"
+
+-- a `const` with a type annotation over the unchanged runtime value (mirrors `constJs`).
+constTs :: Array String -> Boolean -> Array String -> JsReg -> Const -> String
+constTs known i53 cset reg c =
+  let
+    stmts = case fromExpr (bakeStructs reg (resolveConsts cset (normalize (P.parseBody c.value)))) of
+      EBlock ss -> ss
+      other -> [ CExprStmt other ]
+    val = case dedup stmts [] jsFresh of
+      [ CExprStmt e ] -> exprJs i53 e
+      deduped -> "(() => { " <> blockReturn i53 deduped <> " })()"
+    export = if c.pub then "export " else ""
+  in
+    export <> "const " <> c.name <> ": " <> tsTypeM known [] c.ty <> " = " <> val <> ";"
+
 -- only `pub` functions with a portable body export (a private `def` or an `@external` with
 -- `clauses == []` is not part of the surface).
 dtsEligible :: Func -> Boolean
@@ -1002,3 +1107,7 @@ compileSexpr = compile
 -- | The `jsdts` parity unit: the TypeScript `.d.mts` sidecar for `src`.
 compileTypesSexpr :: String -> String
 compileTypesSexpr = compileTypes
+
+-- | The `jsts` parity unit: the native TypeScript `.ts` module for `src`.
+compileTsSexpr :: String -> String
+compileTsSexpr = compileTs

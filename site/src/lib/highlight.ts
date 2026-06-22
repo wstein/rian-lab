@@ -112,5 +112,6 @@ export const TARGET_META: Record<string, { label: string; dot: string }> = {
   ex: { label: "BEAM · Elixir", dot: "#a78bfa" },
   rs: { label: "Rust", dot: "#fb923c" },
   js: { label: "JavaScript", dot: "#7dd3fc" },
+  ts: { label: "TypeScript", dot: "#3178c6" },
   jvm: { label: "JVM · Kotlin", dot: "#2dd4bf" },
 };

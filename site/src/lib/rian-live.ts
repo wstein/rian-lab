@@ -3,7 +3,10 @@
 // tutorial (`pages/by-example.astro`). The compiler is the real Rian → JS
 // compiler, compiled to JS by stock purs and served from `public/`.
 
-export type Compiler = { compile: (src: string) => string };
+export type Compiler = {
+  compile: (src: string) => string; // the runtime ECMAScript module (.mjs)
+  compileTs: (src: string) => string; // a native, typed TypeScript module (.ts)
+};
 
 // The deploy base, slash-safe: `/rian-lab` on GitHub Pages (configure-pages emits
 // no trailing slash), `/` locally. `BASE_URL` is build-time replaced.

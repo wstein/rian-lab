@@ -3,7 +3,7 @@ import SiteShell from "../layouts/SiteShell.astro";
 import { TARGET_META } from "../lib/highlight";
 import tour from "../data/tour.json";
 
-const order = ["ex", "rs", "js", "jvm"];
+const order = ["ex", "rs", "js", "ts", "jvm"];
 const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
 ---
 
@@ -63,7 +63,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
               order.map((t) => (
                 <button class="pg-otab" data-set={t}>
                   <span class="rl-dot" style={`width:7px;height:7px;background:${TARGET_META[t].dot};`} />
-                  {t === "ex" ? "BEAM" : t === "rs" ? "Rust" : t === "js" ? "JS" : "JVM"}
+                  {t === "ex" ? "BEAM" : t === "rs" ? "Rust" : t === "js" ? "JS" : t === "ts" ? "TS" : "JVM"}
                 </button>
               ))
             }
@@ -118,8 +118,9 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   const statusLn = $("#pg-status-ln");
 
   let current: Cell = cells[0];
-  // the live JS the in-browser compiler emits for the current buffer (null = show the reference pane)
+  // the live JS/TS the in-browser compiler emits for the current buffer (null = reference / awaiting Run)
   let liveJs: string | null = null;
+  let liveTs: string | null = null;
 
   // the real Rian compiler + live-eval helpers are shared with the tutorial (`lib/rian-live`).
 
@@ -133,12 +134,16 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   }
 
   function renderPanes() {
-    for (const t of ["ex", "rs", "js", "jvm"]) {
+    for (const t of ["ex", "rs", "js", "ts", "jvm"]) {
       const el = document.querySelector(`.pg-pane-code[data-pane="${t}"]`);
       if (!el) continue;
-      // the JS pane is LIVE — the in-browser compiler's real emission for the current buffer once
-      // Run has compiled it; the other targets show the reference (their emitters aren't in-browser).
-      const code = t === "js" && liveJs != null ? liveJs : (current.panes as Record<string, string>)[t];
+      // the JS + TS panes are LIVE — the in-browser compiler's real `.mjs`/`.ts` emission for the
+      // current buffer once Run has compiled it; the other targets show the pre-generated reference
+      // (their emitters aren't in-browser). The `.ts` pane has no reference, so it waits for Run.
+      let code: string;
+      if (t === "js") code = liveJs != null ? liveJs : (current.panes as Record<string, string>).js;
+      else if (t === "ts") code = liveTs != null ? liveTs : "// Run to compile this buffer to native TypeScript.";
+      else code = (current.panes as Record<string, string>)[t];
       el.innerHTML = highlight(code);
     }
     const reach = Object.values(current.reach)[0] as string[];
@@ -157,6 +162,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     current = byId.get(id)!;
     src.value = current.source;
     liveJs = null;
+    liveTs = null;
     document.querySelectorAll(".pg-tab").forEach((b) => b.classList.toggle("on", (b as HTMLElement).dataset.file === id));
     renderEditor();
     renderPanes();
@@ -188,9 +194,10 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     }
     let js: string;
     try {
-      const { compile } = await loadCompiler();
+      const { compile, compileTs } = await loadCompiler();
       if (gen !== evalGen) return; // a newer keystroke superseded this run
       js = compile(source);
+      liveTs = compileTs(source); // the native typed `.ts` view, same gate
     } catch (e: any) {
       if (gen !== evalGen) return;
       // forgiving: a gate/parse error keeps the last good panes; report it softly.
@@ -479,6 +486,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   [data-target="ex"] .pg-otab[data-set="ex"],
   [data-target="rs"] .pg-otab[data-set="rs"],
   [data-target="js"] .pg-otab[data-set="js"],
+  [data-target="ts"] .pg-otab[data-set="ts"],
   [data-target="jvm"] .pg-otab[data-set="jvm"] {
     color: var(--text-strong);
     border-bottom-color: var(--accent);

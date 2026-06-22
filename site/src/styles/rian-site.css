@@ -268,6 +268,7 @@ a {
 [data-target="ex"] .rl-pane[data-t="ex"],
 [data-target="rs"] .rl-pane[data-t="rs"],
 [data-target="js"] .rl-pane[data-t="js"],
+[data-target="ts"] .rl-pane[data-t="ts"],
 [data-target="jvm"] .rl-pane[data-t="jvm"] {
   display: block;
 }
