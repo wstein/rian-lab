@@ -1,0 +1,2 @@
+#@pane
+def greet(name String, age Int53) String := "hi ${name}, you are ${age}"

@@ -35,11 +35,47 @@ defmodule Rian.Tour.Examples do
   alias Rian.Tour.Examples.Error
 
   @dir "examples/rian"
+  @pane_dir "examples/rian/panes"
+  @pane_max_lines 15
 
   @doc "The numbered by-example files, sorted."
   @rian_sig "pub def files() Vec(String)"
   @spec files() :: [String.t()]
   def files, do: @dir |> Path.join("[0-9]*.rian") |> Path.wildcard() |> Enum.sort()
+
+  @doc "The `#@pane` source files (the minimal site-pane snippets), sorted."
+  @rian_sig "pub def pane_files() Vec(String)"
+  @spec pane_files() :: [String.t()]
+  def pane_files, do: @pane_dir |> Path.join("*.rian") |> Path.wildcard() |> Enum.sort()
+
+  @doc "The Rian source of pane `id`, with the `#@pane` tag line stripped."
+  @rian_sig "pub def pane_source(id String) String"
+  @spec pane_source(String.t()) :: String.t()
+  def pane_source(id) do
+    @pane_dir
+    |> Path.join("#{id}.rian")
+    |> File.read!()
+    |> strip_pane_tag()
+  end
+
+  @doc """
+  Verify the `#@pane` files stay minimal teaching panes: tagged, at most
+  #{@pane_max_lines} lines, and emittable to **all four** targets (a pane is shown
+  in every language, so it must reach every one). Raises on any violation.
+  """
+  @rian_sig "pub def check_panes!() Symbol"
+  @spec check_panes!() :: :ok
+  def check_panes! do
+    issues =
+      Enum.flat_map(pane_files(), fn file ->
+        case check_pane(file) do
+          [] -> []
+          msgs -> [{Path.basename(file), msgs}]
+        end
+      end)
+
+    if issues == [], do: :ok, else: raise(Error, format(issues))
+  end
 
   @doc """
   Parse a source's machine-readable header from its leading comments. Returns
@@ -131,6 +167,49 @@ defmodule Rian.Tour.Examples do
       {:illustrative, reason} -> check_illustrative(src, reason)
       {:gated, reach, pins} -> check_gated(src, reach, pins)
     end
+  end
+
+  # ── pane checks ───────────────────────────────────────────────────────────
+
+  defp check_pane(file) do
+    raw = File.read!(file)
+    lines = raw |> String.trim_trailing() |> String.split("\n")
+
+    tag_issue =
+      if Enum.any?(lines, &String.starts_with?(String.trim(&1), "#@pane")),
+        do: [],
+        else: ["lacks a `#@pane` tag"]
+
+    size_issue =
+      if length(lines) > @pane_max_lines,
+        do: [
+          "#{length(lines)} lines exceeds the #{@pane_max_lines}-line pane limit — keep it minimal"
+        ],
+        else: []
+
+    tag_issue ++ size_issue ++ pane_emit_issues(file)
+  end
+
+  defp pane_emit_issues(file) do
+    body = file |> Path.basename(".rian") |> pane_source()
+    prog = Decl.parse(body)
+
+    for target <- Reach.targets(), {:raise, msg} <- [safe_emit(target, body, prog)] do
+      "does not emit to #{target}: #{msg}"
+    end
+  rescue
+    e ->
+      [
+        "does not parse: #{Exception.message(e) |> String.replace("\n", " ") |> String.slice(0, 80)}"
+      ]
+  end
+
+  defp strip_pane_tag(src) do
+    src
+    |> String.split("\n")
+    |> Enum.reject(&String.starts_with?(String.trim(&1), "#@pane"))
+    |> Enum.join("\n")
+    |> String.trim_trailing()
   end
 
   # ── dataset (tour.json input) ─────────────────────────────────────────────

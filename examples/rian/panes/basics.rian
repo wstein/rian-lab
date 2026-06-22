@@ -1,0 +1,3 @@
+#@pane
+# expression-oriented · := single assignment
+def twice(n Int53) Int53 := n * 2

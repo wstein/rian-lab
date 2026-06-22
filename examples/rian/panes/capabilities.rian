@@ -1,0 +1,9 @@
+#@pane
+type Shape := Circle(radius Float64) | Square(side Float64)
+
+def area(s val Shape) Float64
+def area(Circle(r)) := 3.14159 * r * r
+def area(Square(s)) := s * s
+
+# `iso`: owned, consumed exactly once
+def consume(s iso Shape) Float64 := area(s)

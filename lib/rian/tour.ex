@@ -32,8 +32,10 @@ defmodule Rian.Tour do
 
   @targets ~w(ex rs js jvm)
 
-  # Ordered tour cells. Each is a minimal program that teaches one idea and
-  # reaches all four targets, so every pane is real emitted code.
+  # Ordered tour cells: curated metadata only. Each cell's Rian source lives in a
+  # single `#@pane`-tagged file (`examples/rian/panes/<id>.rian`), read by
+  # `build_cell/1` — so the teaching source has one home, gated minimal by
+  # `Rian.Tour.Examples.check_panes!/0` (≤15 lines, emits to all four targets).
   @cells [
     %{
       id: "basics",
@@ -42,11 +44,7 @@ defmodule Rian.Tour do
       blurb:
         "Rian is expression-oriented and `:=` is single-assignment. A typed " <>
           "head is the type boundary; the body is the value.",
-      covers: ["def", ":=", "type ascription"],
-      source: """
-      # expression-oriented · := single assignment
-      def twice(n Int53) Int53 := n * 2
-      """
+      covers: ["def", ":=", "type ascription"]
     },
     %{
       id: "types",
@@ -56,14 +54,7 @@ defmodule Rian.Tour do
         "A sealed sum and clause-per-constructor dispatch. The same definition " <>
           "becomes a tagged match on the BEAM, an `enum` + `match` on Rust, a tag " <>
           "switch on JS, and a sealed `when` on Kotlin.",
-      covers: ["type", "constructors", "pattern clauses"],
-      source: """
-      type Shape := Circle(radius Float64) | Square(side Float64)
-
-      def area(s val Shape) Float64
-      def area(Circle(r)) := 3.14159 * r * r
-      def area(Square(s)) := s * s
-      """
+      covers: ["type", "constructors", "pattern clauses"]
     },
     %{
       id: "clauses",
@@ -73,13 +64,7 @@ defmodule Rian.Tour do
         "Ordered clauses with a restricted guard sublanguage. The Maranget " <>
           "exhaustiveness gate proves the set total before any target is emitted — " <>
           "a missing case is a compile error, not a runtime surprise.",
-      covers: ["when", "literal patterns", "exhaustiveness"],
-      source: """
-      def classify(n Int53) String
-      def classify(n) when n < 0 := "negative"
-      def classify(0) := "zero"
-      def classify(n) := "positive"
-      """
+      covers: ["when", "literal patterns", "exhaustiveness"]
     },
     %{
       id: "capabilities",
@@ -89,17 +74,7 @@ defmodule Rian.Tour do
         "A parameter's reference capability drives its Rust signature and its " <>
           "BEAM-side linearity — you never write a lifetime. `val` borrows " <>
           "(`&Shape`); `iso` owns and is consumed once (an owned `Shape`).",
-      covers: ["val", "iso", "ownership"],
-      source: """
-      type Shape := Circle(radius Float64) | Square(side Float64)
-
-      def area(s val Shape) Float64
-      def area(Circle(r)) := 3.14159 * r * r
-      def area(Square(s)) := s * s
-
-      # `iso`: owned, consumed exactly once
-      def consume(s iso Shape) Float64 := area(s)
-      """
+      covers: ["val", "iso", "ownership"]
     },
     %{
       id: "case",
@@ -109,16 +84,7 @@ defmodule Rian.Tour do
         "`case` is an expression that yields a value, proven total by the same " <>
           "exhaustiveness gate as clauses. It becomes a tagged match on the BEAM, " <>
           "an `enum` match on Rust, a tag switch on JS, and a labelled `run` on Kotlin.",
-      covers: ["case", "arms (`->`)", "exhaustiveness"],
-      source: """
-      type Color := Red | Green | Blue
-
-      def code(c val Color) Int53 := case c do
-        Red -> 1
-        Green -> 2
-        Blue -> 3
-      end
-      """
+      covers: ["case", "arms (`->`)", "exhaustiveness"]
     },
     %{
       id: "interpolation",
@@ -128,10 +94,7 @@ defmodule Rian.Tour do
         "A `${expr}` hole stringifies by its statically-inferred type and lowers " <>
           "to a single-shot join (ADR-0069). `String` and `Int*` holes are " <>
           "byte-identical across every target — no hidden `Show` dispatch.",
-      covers: ["${…}", "auto-stringify", "single-shot join"],
-      source: """
-      def greet(name String, age Int53) String := "hi ${name}, you are ${age}"
-      """
+      covers: ["${…}", "auto-stringify", "single-shot join"]
     }
   ]
 
@@ -180,8 +143,8 @@ defmodule Rian.Tour do
   @spec to_json() :: String.t()
   def to_json, do: generate() |> encode(0) |> IO.iodata_to_binary()
 
-  defp build_cell(%{id: id, source: source} = cell) do
-    src = String.trim_trailing(source) <> "\n"
+  defp build_cell(%{id: id} = cell) do
+    src = Rian.Tour.Examples.pane_source(id) <> "\n"
     prog = Decl.parse(src)
     reach = reach_map(prog)
 

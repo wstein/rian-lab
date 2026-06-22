@@ -57,6 +57,12 @@ defmodule Mix.Tasks.Rian.Tour do
 
     runs = Rian.Tour.Examples.check_doctests!()
     Mix.shell().info("by-example doctests: #{runs} executed, all pass ✓")
+
+    Rian.Tour.Examples.check_panes!()
+
+    Mix.shell().info(
+      "pane files: all #{length(Rian.Tour.Examples.pane_files())} minimal and emit to four targets ✓"
+    )
   rescue
     e in Rian.Tour.Examples.Error -> Mix.raise(Exception.message(e))
   end

@@ -1,0 +1,5 @@
+#@pane
+def classify(n Int53) String
+def classify(n) when n < 0 := "negative"
+def classify(0) := "zero"
+def classify(n) := "positive"

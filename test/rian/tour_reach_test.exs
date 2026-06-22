@@ -17,6 +17,19 @@ defmodule Rian.TourReachTest do
     end
   end
 
+  describe "#@pane files (the minimal site-pane sources)" do
+    test "all pane files are tagged, minimal, and emit to four targets" do
+      assert Examples.check_panes!() == :ok
+      assert length(Examples.pane_files()) == 6
+    end
+
+    test "pane_source/1 returns the source with the `#@pane` tag stripped" do
+      src = Examples.pane_source("basics")
+      refute src =~ "#@pane"
+      assert src =~ "def twice(n Int53) Int53 := n * 2"
+    end
+  end
+
   describe "header/1" do
     test "parses a `#@reach` line into a target set" do
       assert {:gated, reach, pins} = Examples.header("#@reach ex, rs, js, jvm\n# title\n")
