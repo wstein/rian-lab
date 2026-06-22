@@ -887,12 +887,13 @@ fillLocalRetsSexpr src =
 --------------------------------------------------------------------------------
 
 -- | The compile-time gate: the first function that fails a check (`Just message`), else `Nothing`
--- | (`:ok`). Runs the reference `check_func` chain in order so the first-error message matches:
--- | `check_unk` → `check_external_caps` → `check_labels` → `check_union_clash` → return-
+-- | (`:ok`). Runs all 11 of the reference `check_func` checks in order so the first-error message
+-- | matches: `check_unk` → `check_external_caps` → `check_labels` → `check_union_clash` → return-
 -- | assignability → `check_binds` → `check_bounds` → `check_numeric_mix` → `check_value_position` →
--- | `check_effects` → error sets (ADR-0040). All 11 reference `check_func` checks are now wired.
--- | (`check_binds` is newly ported — it typechecks and has reference-generated `gate` fixtures, but
--- | its purerl *runtime* parity is pending a toolchain run; the other ten are parity-proven.)
+-- | `check_effects` → error sets (ADR-0040). `check_binds` carries the full literal-width-adoption +
+-- | range-bind machinery (`litExprAdopts`/`rangeBind`), so `x Int8 := 5` is accepted while a
+-- | provable clash is rejected. The only reference pass still unported is `annotate` (writes the
+-- | inferred type onto each Core node — blocked on a per-node `Core.CExpr` type field).
 -- @rian_sig pub def check_program(prog val Prog) _Unk
 checkProgram :: Prog -> Maybe String
 checkProgram prog = findMap checkFunc funcs
@@ -905,11 +906,10 @@ checkProgram prog = findMap checkFunc funcs
   effects = effectSets prog
   -- per function, in reference order (`check_func`'s `with :ok <- …` chain): no `_Unk` hole; an
   -- `@external`'s params are `val`/`tag`; no labeled call args; no value-union with two members
-  -- sharing a runtime discriminator; the body is assignable to the declared return; each bounded-
-  -- each typed bind's value fits its annotation (range / fixed-width / not-float / assignable);
-  -- generic call site satisfies its bounds; no implicit Int↔Float mix; no unit in value position;
-  -- each declared effect set matches the body's inferred effects; then a Result return's produced
-  -- error set ⊆ its `E`.
+  -- sharing a runtime discriminator; the body is assignable to the declared return; each typed
+  -- binding fits its declared width/range; each bounded-generic call site satisfies its bounds; no
+  -- implicit Int↔Float mix; no unit in value position; each declared effect set matches the body's
+  -- inferred effects; then a Result return's produced error set ⊆ its `E`. All 11 checks are wired.
   checkFunc f = firstErr
     [ \_ -> checkUnk f
     , \_ -> checkExternalCaps f
