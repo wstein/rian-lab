@@ -117,6 +117,15 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   const statusLn = $("#pg-status-ln");
 
   let current: Cell = cells[0];
+  // the live JS the in-browser compiler emits for the current buffer (null = show the reference pane)
+  let liveJs: string | null = null;
+
+  // the real Rian compiler, compiled to JS by stock purs (ADR-0090) — lazy-loaded once on first Run.
+  // Served from `public/` at `/rian-compiler.mjs`; the URL is a variable so the bundler treats it as
+  // a runtime import (a static literal would make Rollup try to resolve the public asset at build).
+  let compilerP: Promise<{ compile: (src: string) => string }> | null = null;
+  const compilerUrl = "/rian-compiler.mjs";
+  const getCompiler = () => (compilerP ??= import(/* @vite-ignore */ compilerUrl));
 
   function renderEditor() {
     const code = src.value;
@@ -130,7 +139,11 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   function renderPanes() {
     for (const t of ["ex", "rs", "js", "jvm"]) {
       const el = document.querySelector(`.pg-pane-code[data-pane="${t}"]`);
-      if (el) el.innerHTML = highlight((current.panes as Record<string, string>)[t]);
+      if (!el) continue;
+      // the JS pane is LIVE — the in-browser compiler's real emission for the current buffer once
+      // Run has compiled it; the other targets show the reference (their emitters aren't in-browser).
+      const code = t === "js" && liveJs != null ? liveJs : (current.panes as Record<string, string>)[t];
+      el.innerHTML = highlight(code);
     }
     const reach = Object.values(current.reach)[0] as string[];
     const order = ["ex", "rs", "js", "jvm"];
@@ -147,23 +160,72 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   function loadFile(id: string) {
     current = byId.get(id)!;
     src.value = current.source;
+    liveJs = null;
     document.querySelectorAll(".pg-tab").forEach((b) => b.classList.toggle("on", (b as HTMLElement).dataset.file === id));
     renderEditor();
     renderPanes();
-    out.textContent = "Run to see the compiler's gate + reachability report.";
+    out.textContent = "Run to compile this buffer in your browser (the real Rian → JS compiler).";
   }
 
-  function run() {
-    const reach = (Object.values(current.reach)[0] as string[]).map((t) => ":" + t).join(" · ");
-    const fn = Object.keys(current.reach)[0];
-    const dirty = src.value !== current.source;
+  // Execute an emitted ECMAScript module in a sandboxed iframe (`allow-scripts`, opaque origin — no
+  // page access). Imports it from a blob URL; calls `main()` if exported, else reports it loaded.
+  function runInSandbox(jsModule: string, timeoutMs = 4000): Promise<{ ok: boolean; text: string }> {
+    return new Promise((resolve) => {
+      const frame = document.createElement("iframe");
+      frame.sandbox.add("allow-scripts");
+      frame.style.display = "none";
+      let done = false;
+      const finish = (r: { ok: boolean; text: string }) => {
+        if (done) return;
+        done = true;
+        window.removeEventListener("message", onMsg);
+        frame.remove();
+        resolve(r);
+      };
+      const onMsg = (ev: MessageEvent) => {
+        if (ev.source === frame.contentWindow && ev.data && ev.data.__rian) finish(ev.data.r);
+      };
+      window.addEventListener("message", onMsg);
+      const runner =
+        '<!doctype html><script type="module">' +
+        "const code = " + JSON.stringify(jsModule) + ";" +
+        "(async () => { let r; try {" +
+        "  const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));" +
+        "  const mod = await import(url);" +
+        "  if (typeof mod.main === 'function') r = { ok: true, text: 'main() = ' + JSON.stringify(mod.main()) };" +
+        "  else r = { ok: true, text: 'module loaded · exports: ' + Object.keys(mod).join(', ') + ' (define `main()` to see a value)' };" +
+        "} catch (e) { r = { ok: false, text: String((e && e.message) || e) }; }" +
+        "  parent.postMessage({ __rian: true, r }, '*'); })();" +
+        "<\/script>";
+      frame.srcdoc = runner;
+      document.body.appendChild(frame);
+      setTimeout(() => finish({ ok: false, text: "timed out (" + timeoutMs + "ms) — a runaway loop?" }), timeoutMs);
+    });
+  }
+
+  async function run() {
+    const source = src.value;
+    out.textContent = "$ rian build --js  (compiling in your browser…)";
+    let js: string;
+    try {
+      const { compile } = await getCompiler();
+      js = compile(source);
+    } catch (e: any) {
+      // a gate failure (type/exhaustiveness/capability) or an unsupported construct throws here.
+      liveJs = null;
+      renderPanes();
+      out.textContent = "$ rian build --js\n  ✗ " + String((e && e.message) || e).replace(/^\w+: /, "");
+      return;
+    }
+    // the JS pane is now live (real in-browser emission); switch the panel to it.
+    liveJs = js;
+    document.documentElement.dataset.target = "js";
+    renderPanes();
+    out.textContent = "$ rian build --js\n  ✓ compiled to ECMAScript (live, in your browser)\n  ▷ running the emitted module in a sandbox…";
+    const res = await runInSandbox(js);
     out.textContent =
-      `$ rian check ${current.file}\n` +
-      `  ✓ parsed\n  ✓ type-checked\n  ✓ exhaustive (Maranget)\n  ✓ capability\n` +
-      `  ${fn} reaches ${reach}\n` +
-      (dirty
-        ? `\n  note: the buffer was edited — the panes show the reference\n  emission for ${current.file}; in-browser re-lowering is not wired\n  (the hosted Lab recompiles server-side).`
-        : `\n  exit 0`);
+      "$ rian build --js\n  ✓ compiled to ECMAScript (live, in your browser)\n" +
+      (res.ok ? "  ✓ " + res.text + "\n  exit 0" : "  ✗ runtime: " + res.text);
   }
 
   // wire up
