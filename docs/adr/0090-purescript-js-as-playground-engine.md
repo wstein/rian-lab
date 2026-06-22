@@ -12,9 +12,11 @@ JS via stock `purs`, and `Rian.JS.compile` runs in node. **The live playground i
 (`site/public/rian-compiler.mjs`), and `site/src/pages/playground.astro` lazy-loads it — the JS pane
 re-lowers the edited buffer with the real compiler (a gate failure surfaces as the real error), and
 the emitted module executes in a sandboxed `allow-scripts` iframe (blob-URL import, `main()` if
-exported, a 4 s runaway-loop timeout). What remains is polish: the other-target panes (`:ex`/`:rs`/
-`:jvm`) stay the pre-generated reference until those emitters port; a committed-bundle freshness gate
-(à la `tour.json --check`); and Worker-based step-budget hardening. The remaining emitters
+exported, a 4 s runaway-loop timeout). The **committed-bundle freshness gate** has landed
+(`scripts/js-bundle.sh --check` rebuilds to a temp file and asserts byte-identity with the committed
+`rian-compiler.mjs` — esbuild `--minify` is deterministic — à la `tour.json --check`). What remains
+is polish: the other-target panes (`:ex`/`:rs`/`:jvm`) stay the pre-generated reference until those
+emitters port; and Worker-based step-budget hardening. The remaining emitters
 (`JVM`/`Lower`/`Beam`) stay Elixir-only. One named build-parity item (§6): `Check`'s wide-int bounds
 run in `Number` (exact ≤ 2⁵³ — every type through `Int53`/`UInt32`); the `Int64`+ bounds are
 approximate on JS, untested by the corpus.
