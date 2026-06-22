@@ -139,6 +139,14 @@ defmodule Rian.JS do
     Core.EBitstr => "a bitstring (BEAM-only, ADR-0078)"
   }
 
+  # The portable-prelude namespaces (ADR-0047) plus the built-in interop heads. A
+  # qualified call into one of these is portable-by-design — either specially
+  # lowered here (`Map.get`, `String.to_charlist`, `List.to_string`) or resolved
+  # when the prelude is linked (`List.map`, `Dict.get`, `Str.chars`, `Show.float`) —
+  # so it is NOT host FFI. Every OTHER qualified call (`Enum.map`, `Integer.to_string`,
+  # `IO.puts`) must resolve to a program function; see `reject_unknown_module_calls!/2`.
+  @js_portable_modules ~w(Map String Char List Dict Str Int Show)
+
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
   @rian_sig "pub def compile(src String) String"
   @spec compile(String.t()) :: String.t()
@@ -168,6 +176,12 @@ defmodule Rian.JS do
     # the dispatcher with JS-native guards (ADR-0061 §3).
     funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
     Core.reject_unsupported!(funcs, @js_unsupported, :js, Unsupported)
+    # A `Mod.fun(args)` call lowers to a bare `fun(args)` (modules flatten into one
+    # file), which is correct only when `fun` is a program function. A host-module
+    # call (`Enum.map`) or a wrong-arity stdlib call (`List.foo`) would otherwise
+    # emit a dangling reference silently — so reject it here, before emit.
+    known_fns = prog |> all_funcs() |> MapSet.new(& &1.name)
+    reject_unknown_module_calls!(funcs, known_fns)
     # `const NAME := value` (ADR-0033) lowers to a top-level `const`, and a reference
     # resolves to it — threaded through `ic[:consts]` so every clause body sees the
     # const set (parity with `Rian.Beam`/`Rian.Lower`; without this a const reference
@@ -765,6 +779,57 @@ defmodule Rian.JS do
   end
 
   defp reject_wide_int!(_name, _f), do: :ok
+
+  # A qualified call `Mod.fun(args)` (`%EDot{head: %EId{}}`) lowers to a bare
+  # `fun(args)` because JS erases module boundaries (every `mod`'s funcs flatten
+  # into one file). That is only sound when `fun` names a program function; a
+  # host-module call (`Enum.map`) or a wrong-arity stdlib call (`List.foo`) would
+  # otherwise emit an undefined reference. Reach pins such functions off `:js`, but
+  # the emitter must not silently produce broken JS if called directly — reject it
+  # with a clear message pointing at the sanctioned escape (`@external`).
+  defp reject_unknown_module_calls!(funcs, known) do
+    Enum.each(funcs, fn f ->
+      Enum.each(f.clauses, fn c ->
+        body = c.body |> Pratt.parse_body() |> Core.from_expr()
+
+        case unknown_module_call(body, known) do
+          nil ->
+            :ok
+
+          {mod, fun} ->
+            raise Unsupported,
+                  "`#{f.name}`: `#{mod}.#{fun}(…)` is neither a program function nor a " <>
+                    "supported interop call — host FFI is not reachable on :js (use " <>
+                    "`@external(:js, …)`, ADR-0068)."
+        end
+      end)
+    end)
+  end
+
+  defp unknown_module_call(%ECall{fun: %EDot{head: %EId{name: mod}, name: fun}} = node, known)
+       when mod not in @js_portable_modules do
+    if fun in known,
+      do: descend_unknown_call(node, known),
+      else: {mod, fun}
+  end
+
+  defp unknown_module_call(node, known) when is_struct(node),
+    do: descend_unknown_call(node, known)
+
+  defp unknown_module_call(l, known) when is_list(l),
+    do: Enum.find_value(l, &unknown_module_call(&1, known))
+
+  defp unknown_module_call(t, known) when is_tuple(t),
+    do: t |> Tuple.to_list() |> Enum.find_value(&unknown_module_call(&1, known))
+
+  defp unknown_module_call(_node, _known), do: nil
+
+  defp descend_unknown_call(node, known),
+    do:
+      node
+      |> Map.from_struct()
+      |> Map.values()
+      |> Enum.find_value(&unknown_module_call(&1, known))
 
   # `{ if (<structural tests>) { <binds> <guarded return> } }` — the binds live
   # *inside* the structural test so a nested field access (`a0[1][1]`) only runs

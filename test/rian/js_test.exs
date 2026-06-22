@@ -1078,6 +1078,42 @@ defmodule Rian.JSTest do
       assert Exception.message(err) =~ "not reachable on :js"
     end
 
+    test "a host PascalCase call raises instead of emitting a dangling reference" do
+      # `Enum.map` is host FFI; before, it lowered to a bare `map(...)` referencing
+      # nothing. It now raises, naming the call and the sanctioned escape.
+      err =
+        assert_raise JS.Unsupported, fn ->
+          JS.compile(~S|pub def f(xs val Vec(Int53)) Vec(Int53) := Enum.map(xs, g)
+          pub def g(n Int53) Int53 := n|)
+        end
+
+      assert Exception.message(err) =~ "Enum.map"
+      assert Exception.message(err) =~ "@external"
+    end
+
+    test "a user cross-module call still lowers to a bare flattened call" do
+      js =
+        JS.compile(~S|mod Calc do
+          pub def run(n Int53) Int53 := n + 1
+        end
+        mod Main do
+          pub def go(n Int53) Int53 := Calc.run(n)
+        end|)
+
+      assert js =~ "return run(n)"
+      refute js =~ "Calc.run"
+    end
+
+    test "a portable-prelude call (`List.map`) is allowed — resolved when the prelude links" do
+      # not host FFI: a `List.map` bare-lowers and resolves once `prelude_list` is
+      # linked, so it must not be rejected as a dangling host call.
+      js =
+        JS.compile(~S|pub def doubled(xs val Vec(Int53)) Vec(Int53) := List.map(xs, dbl)
+        pub def dbl(n Int53) Int53 := n * 2|)
+
+      assert js =~ "map(xs, dbl)"
+    end
+
     test "mixing `Int` (BigInt) and a JS-number width in one module is rejected (ADR-0064 §2a)" do
       # BigInt and `number` are incompatible in a JS expression and number-mode would
       # silently truncate `Int`, so a module mixing the two integer representations
