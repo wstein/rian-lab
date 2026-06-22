@@ -143,6 +143,62 @@ defmodule CoreCanon do
 
   defp map_pat_pair({{:key, k}, p}), do: "#{expr(k)} => #{pat(p)}"
   defp map_pat_pair({k, p}), do: "#{k}: #{pat(p)}"
+
+  # ── the `ann` oracle: an annotated tree's per-node types in pre-order (`_` = `nil`). The child
+  # order mirrors `expr/1` above (and `annPre`/`tKids` in purs/src/Rian/Check.purs). Proves
+  # `Check.annotate`'s typing; the structure is already proven by `cor`/`bdy`.
+  def ann_types(node), do: [mark(Map.get(node, :type)) | child_types(node)]
+
+  defp mark(nil), do: "_"
+  defp mark(t) when is_binary(t), do: t
+
+  defp child_types(%EUnary{arg: a}), do: ann_types(a)
+  defp child_types(%EBin{left: l, right: r}), do: ann_types(l) ++ ann_types(r)
+
+  defp child_types(%ECall{fun: f, args: args}),
+    do: ann_types(f) ++ Enum.flat_map(args, &ann_types/1)
+
+  defp child_types(%EDot{head: h}), do: ann_types(h)
+
+  defp child_types(%EIf{cond: c, then: t, else: e}),
+    do: ann_types(c) ++ ann_types(t) ++ ann_types(e)
+
+  defp child_types(%ECase{scrut: s, arms: arms}),
+    do: ann_types(s) ++ Enum.flat_map(arms, &arm_types/1)
+
+  defp child_types(%EWith{clauses: cls, body: body, els: els}),
+    do:
+      Enum.flat_map(cls, fn {_p, e} -> ann_types(e) end) ++
+        ann_types(body) ++ Enum.flat_map(els, &arm_types/1)
+
+  defp child_types(%EBlock{stmts: stmts}), do: Enum.flat_map(stmts, &stmt_types/1)
+
+  defp child_types(%EList{elems: es, tail: :close}), do: Enum.flat_map(es, &ann_types/1)
+
+  defp child_types(%EList{elems: es, tail: t}),
+    do: Enum.flat_map(es, &ann_types/1) ++ ann_types(t)
+
+  defp child_types(%EMap{pairs: ps}), do: Enum.flat_map(ps, &pair_types/1)
+
+  defp child_types(%EMapUpdate{base: b, pairs: ps}),
+    do: ann_types(b) ++ Enum.flat_map(ps, &pair_types/1)
+
+  defp child_types(%ETuple{elems: es}), do: Enum.flat_map(es, &ann_types/1)
+  defp child_types(%ELambda{body: b}), do: ann_types(b)
+  defp child_types(%ECapture{body: b}), do: ann_types(b)
+  defp child_types(%ECaptureNamed{path: p}), do: ann_types(p)
+  defp child_types(%ELabel{expr: e}), do: ann_types(e)
+  defp child_types(_leaf), do: []
+
+  defp arm_types({_pat, nil, body}), do: ann_types(body)
+  defp arm_types({_pat, g, body}), do: ann_types(g) ++ ann_types(body)
+
+  defp stmt_types({:bind, _n, e}), do: ann_types(e)
+  defp stmt_types({:typed_bind, _n, _t, e}), do: ann_types(e)
+  defp stmt_types({:expr, e}), do: ann_types(e)
+
+  defp pair_types({{:key, k}, v}), do: ann_types(k) ++ ann_types(v)
+  defp pair_types({_k, v}), do: ann_types(v)
 end
 
 # Canonical s-expression for the declaration IR (Rian.Decl assemble → Prog) — the `dcl`
@@ -999,6 +1055,21 @@ check_body_corpus = [
   "u := [x, y] ; u"
 ]
 
+# Rian.Check.annotate — the `ann` stream: per-node types of an annotated body, pre-order (`_` =
+# `nil`). Exercises typed nodes (leaves/bin/if/list/tuple/block-binds/call) and the reference's
+# `nil` catch-alls (a lambda body, a `Mod.fun` dot head). Prim-free so `normalize` is identity.
+ann_corpus = [
+  "x + 1",
+  "n",
+  "z := x ; z + 1",
+  "w Int8 := 5 ; w",
+  "if b do n else x end",
+  "[x, n]",
+  "{x, b}",
+  "(a Int64) -> a",
+  "String.length(s)"
+]
+
 check_join_corpus = [
   "Int64;;Int64",
   ":bottom;;Int64",
@@ -1519,6 +1590,13 @@ defmodule CheckCanon do
   def infer_body(src) do
     out(Rian.Check.infer(Rian.Core.from_expr(Rian.Pratt.parse_body(src)), @fixed_env, %{}))
   end
+
+  # the `ann` stream: `Check.annotate` over a body, dumped as its per-node types in pre-order.
+  def annotate_types(src) do
+    Rian.Check.annotate(Rian.Pratt.parse_body(src), @fixed_env, %{})
+    |> CoreCanon.ann_types()
+    |> Enum.join(",")
+  end
 end
 
 defmodule ExhFixtures do
@@ -1811,6 +1889,9 @@ lines =
     end) ++
     Enum.map(check_body_corpus, fn s ->
       "bdy\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.infer_body(s))}"
+    end) ++
+    Enum.map(ann_corpus, fn s ->
+      "ann\t#{Canon.hex(s)}\t#{Canon.hex(CheckCanon.annotate_types(s))}"
     end) ++
     Enum.map(builtins_corpus, fn s ->
       "bui\t#{Canon.hex(s)}\t#{Canon.hex(BuiltinsCanon.run(s))}"

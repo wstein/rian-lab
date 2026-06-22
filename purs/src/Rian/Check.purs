@@ -33,6 +33,14 @@ module Rian.Check
   , inferParamType
   , fillLocalRets
   , checkProgram
+  , TExpr
+  , TNode(..)
+  , TArm
+  , TWithClause
+  , TStmt(..)
+  , TMapPair(..)
+  , annotate
+  , annotateSexpr
   , unifySexpr
   , joinSexpr
   , inferSexpr
@@ -56,7 +64,7 @@ import Data.String.CodeUnits (singleton, toCharArray)
 import Data.String.Common (joinWith, replaceAll, split)
 import Data.Tuple (Tuple(..), fst, snd)
 import Rian.Builtins as Builtins
-import Rian.Core (CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CMapPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Cap(..), ExtSpec(..), Func, Param, Prog, Type, bodySurface)
 import Rian.HostRef (refExported)
@@ -682,6 +690,179 @@ inferSexpr src = tyStr (infer (fromExpr (normalize (P.parse src))) fixedEnv empt
 -- | through the env), composing `lexer → Pratt.parseBody → Prim.normalize → Core → infer`.
 inferBodySexpr :: String -> String
 inferBodySexpr src = tyStr (infer (fromExpr (normalize (P.parseBody src))) fixedEnv emptyIc)
+
+--------------------------------------------------------------------------------
+-- annotate (ADR-0050 §3): the typed Core IR the emitters consume
+--------------------------------------------------------------------------------
+
+-- | The annotated Core tree (`Check.annotate`'s output). PureScript has real sums, so rather than
+-- | a `nil`-defaulted `type` field bolted onto every `CExpr` constructor (the DoD's rejected "1:1
+-- | transliteration", + a ~100-site ripple across the parity-gated spine), the inferred type lives
+-- | in a *separate* annotated tree, 1:1 with `CExpr` so a future Rust/BEAM emitter port stays
+-- | mechanical. `ty` is `Maybe Ty`: `Just t` where the reference `annotate` types a node, `Nothing`
+-- | where it leaves `type: nil` (the catch-all nodes + a `with`'s clauses/else — faithfully partial).
+type TExpr = { ty :: Maybe Ty, node :: TNode }
+
+data TNode
+  = TNum String
+  | TStr String
+  | TChar Int
+  | TId String
+  | TAtom String
+  | TUnary String TExpr
+  | TBin String TExpr TExpr
+  | TCall TExpr (Array TExpr)
+  | TDot TExpr String
+  | TIf TExpr TExpr TExpr
+  | TCase TExpr (Array TArm)
+  | TWith (Array TWithClause) TExpr (Array TArm)
+  | TBlock (Array TStmt)
+  | TList (Array TExpr) (Maybe TExpr)
+  | TMap (Array TMapPair)
+  | TMapUpdate TExpr (Array TMapPair)
+  | TTuple (Array TExpr)
+  | TLambda (Array P.Param) TExpr
+  | TCapture TExpr
+  | TCaptureNamed TExpr Int
+  | TCapArg Int
+  | TLabel String TExpr
+
+type TArm = { pat :: CPat, guard :: Maybe TExpr, body :: TExpr }
+type TWithClause = { pat :: CPat, expr :: TExpr }
+data TStmt = TBind String TExpr | TTypedBind String String TExpr | TExprStmt TExpr
+data TMapPair = TMAtom String TExpr | TMKey TExpr TExpr
+
+-- | Annotate every Core node with its inferred type (mirrors `Rian.Check.annotate`). Faithfully
+-- | partial: the leaves + unary/bin/call/tuple/list/map/if/block/case and a `with`'s body are typed
+-- | (`infer node`); everything else is lifted untyped (the reference's `type: nil` catch-all).
+-- @rian_sig pub def annotate(ast val Expr, env val Dict(String, String), ic val Ic) Expr
+annotate :: CExpr -> Env -> Ic -> TExpr
+annotate e env ic = case e of
+  ENum n -> typed (TNum n)
+  EStr s -> typed (TStr s)
+  EChar c -> typed (TChar c)
+  EId n -> typed (TId n)
+  EUnary op a -> typed (TUnary op (annotate a env ic))
+  EBin op l r -> typed (TBin op (annotate l env ic) (annotate r env ic))
+  ECall f args -> typed (TCall (annotate f env ic) (map (\a -> annotate a env ic) args))
+  ETuple es -> typed (TTuple (map (\x -> annotate x env ic) es))
+  EList es tl -> typed (TList (map (\x -> annotate x env ic) es) (map (\t -> annotate t env ic) tl))
+  EMap pairs -> typed (TMap (map annMapPair pairs))
+  EIf c t el -> typed (TIf (annotate c env ic) (annotate t env ic) (annotate el env ic))
+  EBlock stmts -> typed (TBlock (annStmts stmts env ic))
+  ECase s arms -> typed (TCase (annotate s env ic) (map annArm arms))
+  -- the reference annotates ONLY the body of a `with` (clauses/else stay `nil`).
+  EWith cls body els -> typed (TWith (map liftWithClause cls) (annotate body env ic) (map liftArm els))
+  _ -> liftUntyped e
+  where
+  typed tn = { ty: Just (infer e env ic), node: tn }
+  annMapPair (CMAtom k v) = TMAtom k (annotate v env ic)
+  annMapPair (CMKey k v) = TMKey (annotate k env ic) (annotate v env ic)
+  -- a scrutinee narrows each arm's env (`narrow`); the pattern is not typed.
+  annArm a =
+    let aenv = narrow a.pat (infer (caseScrut e) env ic) ic env
+    in { pat: a.pat, guard: map (\g -> annotate g aenv ic) a.guard, body: annotate a.body aenv ic }
+
+-- the scrutinee of `e` when it is an `ECase` (for arm narrowing); `e` itself otherwise (unused).
+caseScrut :: CExpr -> CExpr
+caseScrut (ECase s _) = s
+caseScrut e = e
+
+-- block statements thread the env: a plain bind adds its inferred type, a typed bind its DECLARED
+-- type (the contract for `x` downstream, ADR-0034 §1); the RHS is annotated in the pre-bind env.
+annStmts :: Array CStmt -> Env -> Ic -> Array TStmt
+annStmts stmts env ic = case uncons stmts of
+  Nothing -> []
+  Just { head: s, tail } -> case s of
+    CBind x ex -> snocCons (TBind x (annotate ex env ic)) (annStmts tail (envPut x (infer ex env ic) env) ic)
+    CTypedBind x t ex -> snocCons (TTypedBind x t (annotate ex env ic)) (annStmts tail (envPut x (TName t) env) ic)
+    CExprStmt ex -> snocCons (TExprStmt (annotate ex env ic)) (annStmts tail env ic)
+  where
+  snocCons h rest = [ h ] <> rest
+
+-- ── structural lift: a node the reference leaves `type: nil` (un-recursed). Everything is `Nothing`. ──
+liftUntyped :: CExpr -> TExpr
+liftUntyped e = { ty: Nothing, node: liftNode e }
+
+liftNode :: CExpr -> TNode
+liftNode e = case e of
+  ENum n -> TNum n
+  EStr s -> TStr s
+  EChar c -> TChar c
+  EId n -> TId n
+  EAtom a -> TAtom a
+  EUnary op a -> TUnary op (liftUntyped a)
+  EBin op l r -> TBin op (liftUntyped l) (liftUntyped r)
+  ECall f args -> TCall (liftUntyped f) (map liftUntyped args)
+  EDot h n -> TDot (liftUntyped h) n
+  EIf c t el -> TIf (liftUntyped c) (liftUntyped t) (liftUntyped el)
+  ECase s arms -> TCase (liftUntyped s) (map liftArm arms)
+  EWith cls body els -> TWith (map liftWithClause cls) (liftUntyped body) (map liftArm els)
+  EBlock stmts -> TBlock (map liftStmt stmts)
+  EList es tl -> TList (map liftUntyped es) (map liftUntyped tl)
+  EMap pairs -> TMap (map liftMapPair pairs)
+  EMapUpdate b pairs -> TMapUpdate (liftUntyped b) (map liftMapPair pairs)
+  ETuple es -> TTuple (map liftUntyped es)
+  ELambda ps b -> TLambda ps (liftUntyped b)
+  ECapture b -> TCapture (liftUntyped b)
+  ECaptureNamed p a -> TCaptureNamed (liftUntyped p) a
+  ECapArg n -> TCapArg n
+  ELabel n x -> TLabel n (liftUntyped x)
+
+liftArm :: CArm -> TArm
+liftArm a = { pat: a.pat, guard: map liftUntyped a.guard, body: liftUntyped a.body }
+
+liftWithClause :: CWithClause -> TWithClause
+liftWithClause w = { pat: w.pat, expr: liftUntyped w.expr }
+
+liftStmt :: CStmt -> TStmt
+liftStmt (CBind x e) = TBind x (liftUntyped e)
+liftStmt (CTypedBind x t e) = TTypedBind x t (liftUntyped e)
+liftStmt (CExprStmt e) = TExprStmt (liftUntyped e)
+
+liftMapPair :: CMapPair -> TMapPair
+liftMapPair (CMAtom k v) = TMAtom k (liftUntyped v)
+liftMapPair (CMKey k v) = TMKey (liftUntyped k) (liftUntyped v)
+
+-- | The `ann` parity unit: the per-node types of an annotated body, in pre-order (`_` = `nil`).
+-- | The Core *structure* is already proven by the `cor`/`bdy` streams, so this fixes the typing.
+annotateSexpr :: String -> String
+annotateSexpr src = joinWith "," (annPre (annotate (fromExpr (normalize (P.parseBody src))) fixedEnv emptyIc))
+
+-- pre-order node-type marks; the child order mirrors `CoreCanon.expr` (and the Elixir `ann` oracle).
+annPre :: TExpr -> Array String
+annPre t = [ annMark t.ty ] <> concatMap annPre (tKids t.node)
+
+annMark :: Maybe Ty -> String
+annMark Nothing = "_"
+annMark (Just ty) = tyStr ty
+
+tKids :: TNode -> Array TExpr
+tKids n = case n of
+  TUnary _ a -> [ a ]
+  TBin _ l r -> [ l, r ]
+  TCall f args -> [ f ] <> args
+  TDot h _ -> [ h ]
+  TIf c t e -> [ c, t, e ]
+  TCase s arms -> [ s ] <> concatMap armKids arms
+  TWith cls body els -> map _.expr cls <> [ body ] <> concatMap armKids els
+  TBlock stmts -> concatMap stmtKid stmts
+  TList es tl -> es <> fromFoldable tl
+  TMap pairs -> concatMap pairKids pairs
+  TMapUpdate b pairs -> [ b ] <> concatMap pairKids pairs
+  TTuple es -> es
+  TLambda _ b -> [ b ]
+  TCapture b -> [ b ]
+  TCaptureNamed p _ -> [ p ]
+  TLabel _ x -> [ x ]
+  _ -> []
+  where
+  armKids a = fromFoldable a.guard <> [ a.body ]
+  stmtKid (TBind _ e) = [ e ]
+  stmtKid (TTypedBind _ _ e) = [ e ]
+  stmtKid (TExprStmt e) = [ e ]
+  pairKids (TMAtom _ v) = [ v ]
+  pairKids (TMKey k v) = [ k, v ]
 
 -- the empty inference context — `infer` with it reproduces the env-only behaviour.
 emptyIc :: Ic
