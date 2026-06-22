@@ -13,12 +13,11 @@ compiler written in Elixir that parses `.rian` source and emits idiomatic code p
 decisions live; `lib/rian/` implements them. When you change language *behaviour*, update the
 matching ADR — and conversely, an ADR marked "Accepted" may still be unimplemented or partially
 implemented (check the `**Status:**` header and the code before trusting it). `docs/spec/` holds
-prose specs; `examples/rian/` is the annotated by-example tour; `compiler/` holds the self-hosted
-compiler sources (the Rian-in-Rian ports — lexer/decl/beam/checker/… and the composing driver).
+prose specs; `examples/rian/` is the annotated by-example tour.
 
 **Migration in progress (ADR-0084):** `lib/` (Elixir) is being ported file-by-file to
 **PureScript/purerl** under `purs/` — a real type system replaces Dialyzer; purerl (PureScript→Erlang)
-keeps the BEAM self-host bootstrap via a small Erlang-FFI boundary. The repo is **hybrid** until each
+keeps the compiler running on the BEAM via a small Erlang-FFI boundary. The repo is **hybrid** until each
 module reaches parity, then its Elixir twin is dropped. Order + status: `docs/purescript-migration.md`;
 toolchain bootstrap: `purs/README.md`. Foundation only so far (`Rian.Token` typechecks offline; the
 purerl binary + package set need a network step). Work the migration leaf-first along the Core spine.
@@ -64,7 +63,7 @@ mix examples                                      # end-to-end lowering demo
   tests exercise the Rust/JVM emitters — so the honest number is `mix test.all --cover`. A plain
   `mix test --cover` runs the reduced default set and under-reports.
 - `mix test.all` is the real coverage signal, but much of it runs on hand-built source strings / a toy
-  corpus — see `Rian.Fixpoint` and `SELFHOST.md` for where self-hosting verification actually bites.
+  corpus.
 
 ## Architecture — the compile pipeline
 
@@ -90,7 +89,7 @@ Source flows through these stages; the **typed Core IR is the spine** that decou
    `Rian.Capability` (BEAM linearity for `iso`/`ref`).
 5. **Emitters**, all consuming Core:
    - **`Rian.Beam`** — Erlang **abstract forms** via `:compile.forms` → real loadable `.beam`. This
-     is the **default BEAM execution path and the self-hosting bootstrap target**.
+     is the **default BEAM execution path**.
    - **`Rian.Lower`** — a **text** emitter that produces *both* idiomatic Elixir source *and* Rust in
      one module. The Elixir-text path is a demo/inspection backend (it has a known higher-order
      limitation, see its moduledoc); **`Rian.Beam` is the real BEAM backend.** So BEAM has two
@@ -187,9 +186,6 @@ architectural cost.
   pinned. The remaining `:rs` gap is a recursion cycle / compound-nested parametric field, comparison of an
   `Fn`-field type, and the non-positional/non-tail-call builder shapes. Also: a `Map(K,V)` type → Rust
   `std::collections::HashMap` (ADR-0047, the `Dict` prelude reaches `:rs`).
-- **Self-hosting** (`SELFHOST.md`, `compiler/*.rian`): a compiler pipeline written in
-  Rian that compiles to `.beam`. `Rian.Fixpoint` diffs a Rian-written lexer's tokens against the
-  reference `Rian.Lexer` — that's how a ported slice becomes a regression test, not a demo.
 
 ## Conventions
 
@@ -219,7 +215,7 @@ architectural cost.
 - **Commit after each stage/phase**, not as one big drop. Use Conventional Commits and cite the
   governing ADR in the body (e.g. `feat(types): … (ADR-0036)`).
 - **A change isn't done until the docs match it — not just code and tests.** When behaviour changes,
-  update the governing **ADR** (and `docs/spec/`, `examples/rian/`, `SELFHOST.md`, the status tables
+  update the governing **ADR** (and `docs/spec/`, `examples/rian/`, the status tables
   in `docs/README.md`, and module/inline docs) in the *same* phase. Remove outdated content rather
   than leaving it flagged as stale; treat a contradiction between an ADR and the code as a bug to
   fix, not annotate.
