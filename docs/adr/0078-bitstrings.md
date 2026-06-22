@@ -260,6 +260,13 @@ bitstrings either become portable across *all* Tier-1 targets together (JS `Uint
 `ByteBuffer` mirror the same subset) or they remain a single-target escape hatch — and a single-target
 escape hatch is the Haxe `#if` sprawl we refuse (ADR-0085 §7). The consensus is the former.
 
+**Follow-on (2026-06-22): the portable surface is owned by ADR-0089.** A separate question — *what is
+the portable surface for byte data?* — was answered against a competing bit *syntax*: the portable
+surface is a **`Bytes` type + `BitReader`/`BitWriter` API** (the zero-alloc cursor Maya/Elena specced),
+and the byte-aligned `<<…>>` subset **lowers through it**. So `<<…>>` stays the BEAM-first / gold-standard
+binary-parsing surface, and **ADR-0089** owns the portable `Bytes`/reader/writer story this consensus
+pointed to.
+
 ### Future developments
 
 - **Sub-byte portability** could revisit P3 (a real prelude bit buffer) *iff* a concrete consumer needs
