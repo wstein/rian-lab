@@ -108,7 +108,7 @@ what the Core oracle confirms over the surface form.
 
 | Module       | LOC  | Notes / FFI                                          |
 | ------------ | ---- | --------------------------------------------------- |
-| `Rian.JS`    | 1053 | ECMAScript source emitter (pure).                   |
+| `Rian.JS`    | 1053 | 🟡 **runtime emitter (`compile`) ported** — a direct JS source emitter on the typed Core (works on plain `CExpr`; node types are unused by JS, only signature types + a whole-program number/BigInt mode, ADR-0064). Functions/clauses/patterns, operators (`div`→`Math.trunc`, `in`, `<>`→`+`), `if`/`case`(→IIFE)/sum/list/tuple/struct/map/string/lambda/capture/`with`(local `desugarWith`) + `__prim_*`/stdlib calls. `js` stream (oracle = `Rian.JS.compile`). **Deferred** (need a Core/Func extension): `const` refs (no `EConstRef`), protocol dispatch (no `Func.dispatch`), `@external`, value-union patterns over a user type (no `PTyped` disc), and the `.d.ts` sidecar (`compile_types`). |
 | `Rian.JVM`   | 1249 | Kotlin source emitter (pure).                       |
 | `Rian.Lower` | 3275 | Elixir-text + Rust source emitter (pure).           |
 | `Rian.Beam`  | 1355 | **Erlang abstract forms → `.beam`**; the core FFI.  |
@@ -235,13 +235,14 @@ also in `mxb`) → `Expanded` clause bodies. The clause body is now `data Body =
 Surface` with a `bodySurface` accessor (the reference's `String | ast`, idempotent re-parse
 restored); `lower_meta` change-detects via the canonical `sexpr` so an untouched body stays `Raw`.
 **Next:** the **emitters** — **`JS` first** (ADR-0090: the playground engine), then `Lower`/`JVM`
-(display panes) and `Beam` (FFI, Phase 8) — the value backend. The checker spine, its
+(display panes) and `Beam` (FFI, Phase 8) — the value backend. **Phase 5 has begun:** `Rian.JS`'s
+runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tier 1). The checker spine, its
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **870/870** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **886/886** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
-InferLocal/Assemble/Comptime/**Opaque** (the count is the harness's own `N/N` total — `parity.erl`
+InferLocal/Assemble/Comptime/Opaque/**JS** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it).
 Each module is parity-gated and committed on its own
 (Conventional Commits, ADR-0084). The branch is rebased onto `berta` (ADR-0085 included).
