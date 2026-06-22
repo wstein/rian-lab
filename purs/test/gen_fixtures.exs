@@ -893,7 +893,11 @@ js_corpus = [
   # `@external(:js, "expr")` inline host body (ADR-0068): params bound positionally by name
   ~S|@external(:js, "x + 1") pub def inc(x val Int53) Int53|,
   # `@external(:js, "./file.mjs", "fun")` file-reference: an ESM import + a call to the imported fn
-  ~S|@external(:js, "./codec.ffi.mjs", "encode") pub def enc(x val Int53) Int53|
+  ~S|@external(:js, "./codec.ffi.mjs", "encode") pub def enc(x val Int53) Int53|,
+  # value-union of SUM members (ADR-0083): a `case` arm `a Box` narrows by the tagged-array head
+  "type Box := BoxV(Int53)\ntype Bag := BagV(Int53)\ndef kind(x Box | Bag) Int53 := case x do\n  a Box -> 1\n  b Bag -> 2\nend",
+  # value-union of STRUCT members: a `case` arm `b Box` narrows by the `__struct__` tag
+  "struct Box(v Int53)\nstruct Widget(n Int53)\ndef pick(x Box | Widget) Int53 := case x do\n  b Box -> b.v\n  w Widget -> w.n\nend"
 ]
 
 # Rian.JS.compile_types — the `jsdts` stream (ADR-0086 §5): the TypeScript `.d.ts` sidecar. Maps

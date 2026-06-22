@@ -11,10 +11,12 @@
 -- |
 -- | Both print modes are ported: `compile` (the runtime module) and `compileTypes` (the `.d.mts`
 -- | sidecar, ADR-0086 §5). Module `const`s + references (`resolveConsts`/`constJs`, the `EConstRef`
--- | Core node) and `@external` bodies (`externalFn`/`importsJs`, the 3 `ExtSpec` forms + ESM imports)
--- | are ported. NOT yet ported: protocol dispatch, value-union discrimination over a user type (the
--- | `PTyped` disc field exists; the baking pass is unported), and struct *construction* `Name(f: v)`
--- | (no `EStruct` in PS Core; field access + `case` patterns DO lower). The corpus avoids those.
+-- | Core node), `@external` bodies (`externalFn`/`importsJs`, the 3 `ExtSpec` forms + ESM imports),
+-- | and value-union discrimination over a user type (`bakeUnionDisc` bakes the `PTyped` disc; a sum
+-- | member tests the tagged-array head, a struct member tests `__struct__`) are ported. NOT yet
+-- | ported: protocol dispatch (the JS dispatcher from `Prog.protocols`/`impls`), and struct
+-- | *construction* `Name(f: v)` (no `EStruct` in PS Core; field access + `case` patterns DO lower).
+-- | The corpus avoids those.
 module Rian.JS
   ( compile
   , compileSexpr
@@ -43,7 +45,7 @@ import Rian.Decl (parseToProg)
 import Rian.IR (Body, Clause, Const, ExtSpec(..), Func, Prog, Range, Struct, Type, Variant, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
-import Rian.Pratt (Surface(..), parse, parseBody) as P
+import Rian.Pratt (Pat(..), Surface(..), parse, parseBody) as P
 import Rian.Prim (overflowOps)
 import Rian.Shadow (dedup)
 import Rian.TypeStr (normalize, splitTopCommas) as TS
@@ -67,8 +69,9 @@ compile src =
           -- threaded through `cset` so every clause body and sibling const sees the const set.
           consts = allConsts prog
           cset = map _.name consts
+          reg = jsReg prog
           constJsOut = joinWith "\n" (map (constJs i53 cset) consts)
-          fnJs = joinWith "\n\n" (map (functionJs i53 cset) funcs)
+          fnJs = joinWith "\n\n" (map (functionJs i53 cset reg) funcs)
           importJsOut = importsJs funcs
         in
           -- protocol dispatchers are still deferred; the join keeps their slot so the shape composes
@@ -156,8 +159,38 @@ constJs i53 cset c =
   in
     export <> "const " <> c.name <> " = " <> val <> ";"
 
-functionJs :: Boolean -> Array String -> Func -> String
-functionJs i53 cset f =
+-- the value-union discriminator registry (ADR-0083): each sum type → its ctor tags, plus the set
+-- of struct names. `bakeUnionDisc` consults it so `patMatch` can emit a sum/struct runtime test.
+type JsReg = { sums :: Array (Tuple String (Array String)), structs :: Array String }
+
+jsReg :: Prog -> JsReg
+jsReg prog =
+  { sums: map (\t -> Tuple t.name (map _.ctor t.variants)) (allTypes prog)
+  , structs: map _.name (allStructs prog)
+  }
+
+-- Bake a value-union type-pattern's discriminator into the surface so `patMatch` (which threads no
+-- type registry) can emit a sum's tag / a struct's `__struct__` test. `mapNode` skips arm PATTERNS,
+-- so a `case` arm's pattern is baked explicitly; everything else recurses. Mirrors `bake_union_disc`.
+bakeUnionDisc :: JsReg -> P.Surface -> P.Surface
+bakeUnionDisc reg (P.SCase s arms) =
+  P.SCase (bakeUnionDisc reg s)
+    (map (\a -> a { pat = bakePat reg a.pat, guard = map (bakeUnionDisc reg) a.guard, body = bakeUnionDisc reg a.body }) arms)
+bakeUnionDisc reg node = mapNode (bakeUnionDisc reg) node
+
+-- `name T` → encode T's discriminator in the disc field for a user type (a primitive keeps `Nothing`,
+-- which `patMatch` tests with `typeof`). Encoded as `"sum:C1,C2"` / `"struct:Name"`.
+bakePat :: JsReg -> P.Pat -> P.Pat
+bakePat reg (P.PTyped name tname Nothing) =
+  case find (\(Tuple n _) -> n == tname) reg.sums of
+    Just (Tuple _ ctors) -> P.PTyped name tname (Just ("sum:" <> joinWith "," ctors))
+    Nothing ->
+      if elem tname reg.structs then P.PTyped name tname (Just ("struct:" <> tname))
+      else P.PTyped name tname Nothing
+bakePat _ p = p
+
+functionJs :: Boolean -> Array String -> JsReg -> Func -> String
+functionJs i53 cset reg f =
   if not (null f.externals) then externalFn f
   else case wideIntType f of
     Just t -> unsafeCrashWith ("`" <> f.name <> "`: fixed-width integer `" <> t <> "` is not supported on JS (ADR-0064)")
@@ -165,7 +198,7 @@ functionJs i53 cset f =
       let
         arity = maybe 0 (\c -> length c.pats) (head f.clauses)
         params = joinWith ", " (map (\i -> "a" <> show i) (upto arity))
-        body = joinWith "\n" (map (clauseJs i53 cset) f.clauses)
+        body = joinWith "\n" (map (clauseJs i53 cset reg) f.clauses)
         export = if f.pub then "export " else ""
       in
         export <> "function " <> f.name <> "(" <> params <> ") {\n" <> body
@@ -218,13 +251,13 @@ upto n = if n <= 0 then [] else range 0 (n - 1)
 
 -- `{ if (<tests>) { <binds> <guarded return> } }` — binds live inside the test so a nested field
 -- access only runs once the shape is known; a `when` guard follows.
-clauseJs :: Boolean -> Array String -> Clause -> String
-clauseJs i53 cset clause =
+clauseJs :: Boolean -> Array String -> JsReg -> Clause -> String
+clauseJs i53 cset reg clause =
   let
     step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p ("a" <> show i) in Tuple (ts <> t) (bs <> b)
     Tuple tests binds = foldl step (Tuple [] []) (mapWithIndex Tuple (map fromPat clause.pats))
     paramNames = map fst binds
-    inner = bindLines binds <> [ guardedReturn i53 cset paramNames clause.body clause.guard ]
+    inner = bindLines binds <> [ guardedReturn i53 cset reg paramNames clause.body clause.guard ]
     bodyStr = joinWith " " inner
     guarded = if null tests then bodyStr else "if (" <> joinWith " && " tests <> ") { " <> bodyStr <> " }"
   in
@@ -233,17 +266,18 @@ clauseJs i53 cset clause =
 bindLines :: Array (Tuple String String) -> Array String
 bindLines = map (\(Tuple n a) -> "const " <> n <> " = " <> a <> ";")
 
-guardedReturn :: Boolean -> Array String -> Array String -> Maybe Body -> Maybe String -> String
-guardedReturn i53 cset params body guard = case guard of
-  Nothing -> clauseReturn i53 cset params body
-  Just g -> "if (" <> exprJs i53 (fromExpr (resolveConsts cset (P.parse g))) <> ") { " <> clauseReturn i53 cset params body <> " }"
+guardedReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> Maybe String -> String
+guardedReturn i53 cset reg params body guard = case guard of
+  Nothing -> clauseReturn i53 cset reg params body
+  Just g -> "if (" <> exprJs i53 (fromExpr (resolveConsts cset (bakeUnionDisc reg (P.parse g)))) <> ") { " <> clauseReturn i53 cset reg params body <> " }"
 
 -- a clause body parses to a block: `let`s then `return` the final value; `:=` shadowing is resolved
--- on the Core IR by `Rian.Shadow` (JS `let`/`const` forbid same-scope re-declaration).
-clauseReturn :: Boolean -> Array String -> Array String -> Maybe Body -> String
-clauseReturn i53 cset params body = case body of
+-- on the Core IR by `Rian.Shadow` (JS `let`/`const` forbid same-scope re-declaration). The body is
+-- baked (union discriminators) then const-resolved before lowering, as the reference does.
+clauseReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> String
+clauseReturn i53 cset reg params body = case body of
   Nothing -> unsafeCrashWith "Rian.JS: a clause has no body"
-  Just b -> case fromExpr (resolveConsts cset (bodySurface b)) of
+  Just b -> case fromExpr (resolveConsts cset (bakeUnionDisc reg (bodySurface b))) of
     EBlock stmts -> blockReturn i53 (dedup stmts params jsFresh)
     other -> blockReturn i53 (dedup [ CExprStmt other ] params jsFresh)
 
@@ -279,7 +313,9 @@ patMatch i53 pat acc = case pat of
   PPin s -> case s of
     P.SId name -> Tuple [ acc <> " === " <> name ] []
     _ -> unsafeCrashWith "ecmascript: pin (only `^var` is supported)"
-  PTyped n t _ -> Tuple [ typeTestJs i53 t acc ] [ Tuple n acc ]
+  -- a type-pattern `n Type` (ADR-0083): bind `n` and test the runtime type. A primitive (`Nothing`)
+  -- tests `typeof`; a sum/struct member's discriminator was baked into `disc` by `bakeUnionDisc`.
+  PTyped n t disc -> Tuple [ typedDiscJs i53 t acc disc ] [ Tuple n acc ]
   PLit (LInt v) -> Tuple [ acc <> " === " <> litInt i53 v ] []
   PLit (LStr v) -> Tuple [ acc <> " === " <> jsStr v ] []
   PChar cp -> Tuple [ acc <> " === " <> cpLit i53 cp ] []
@@ -398,8 +434,30 @@ oneTo n = if n < 1 then [] else range 1 n
 intTypeof :: Boolean -> String
 intTypeof i53 = if i53 then "number" else "bigint"
 
--- a value-union type-pattern's primitive runtime test (ADR-0083); a non-primitive raises (the
--- user-type discriminator needs a `PTyped` field PS Core doesn't carry yet).
+-- a value-union type-pattern's runtime test (ADR-0083). A primitive (`Nothing`) tests `typeof`; a
+-- baked sum/struct disc tests the JS-native discriminator the dispatcher uses (tag array / `__struct__`).
+typedDiscJs :: Boolean -> String -> String -> Maybe String -> String
+typedDiscJs i53 t acc disc = case disc of
+  Nothing -> typeTestJs i53 t acc
+  Just d -> case Str.stripPrefix (Str.Pattern "sum:") d of
+    Just ctors -> sumDiscJs (Str.split (Str.Pattern ",") ctors) acc
+    Nothing -> case Str.stripPrefix (Str.Pattern "struct:") d of
+      Just sname -> structDiscJs sname acc
+      Nothing -> typeTestJs i53 t acc
+
+-- a sum member: a sum value is a tagged array `["Ctor", …]`, so "is a `T`" tests the head against
+-- `T`'s ctor tags (mirrors `sum_disc_js`).
+sumDiscJs :: Array String -> String -> String
+sumDiscJs ctors acc =
+  "Array.isArray(" <> acc <> ") && (" <> joinWith " || " (map (\c -> acc <> "[0] === " <> dquote c) ctors) <> ")"
+
+-- a struct member: a struct is `{__struct__: "Name", …}` (mirrors `struct_disc_js`).
+structDiscJs :: String -> String -> String
+structDiscJs sname acc =
+  "typeof " <> acc <> " === \"object\" && " <> acc <> " !== null && " <> acc <> ".__struct__ === " <> dquote sname
+
+-- a value-union type-pattern's primitive runtime test (ADR-0083); a non-primitive with no baked disc
+-- raises (a clause-head type-pattern over a user type is not baked, as in the reference).
 typeTestJs :: Boolean -> String -> String -> String
 typeTestJs i53 t acc =
   if t == "Bool" then tof "boolean"

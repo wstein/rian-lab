@@ -124,7 +124,7 @@ data Pat
   | PStruct String (Array (Tuple String Pat))
   | PVar String
   | PAs String Pat
-  | PTyped String String
+  | PTyped String String (Maybe String) -- `name Type`; the third field is the baked union disc (ADR-0083)
   | PPin Surface
   | PMap (Array MapPatPair)
 
@@ -774,7 +774,7 @@ parsePat (TMapopen : rest) = parsePatMap rest []
 parsePat (TBitopen : _) = stage2 "bitstring pattern"
 parsePat (TOp "^" : rest) = let Tuple e r = parseExpr rest 0 in Tuple (PPin e) r
 parsePat (TId name : TOp "@" : rest) = let Tuple p r = parsePat rest in Tuple (PAs name p) r
-parsePat (TId name : TId ty : rest) | isLowerHead name && isUpperHead ty = Tuple (PTyped name ty) rest
+parsePat (TId name : TId ty : rest) | isLowerHead name && isUpperHead ty = Tuple (PTyped name ty Nothing) rest
 parsePat (TId name : rest) =
   if isUpperHead name then case rest of
     (TLparen : TId _ : TOp ":" : _) -> parsePatStruct name rest
@@ -935,9 +935,12 @@ sexprPat (PMap fields) = "%{" <> joinWith ", " (map sexprMapPatPair fields) <> "
 sexprPat (PStruct n fields) =
   n <> "(" <> joinWith ", " (map (\(Tuple k p) -> k <> ": " <> sexprPat p) fields) <> ")"
 sexprPat (PPin e) = "(^ " <> sexpr e <> ")"
--- a type-pattern has no `sexpr_pat` clause in the reference (it crashes there too); it is
--- excluded from the parity corpus.
-sexprPat (PTyped _ _) = unsafeCrashWith "Pratt: sexpr of a type-pattern (no reference clause)"
+-- a type-pattern has no `sexpr_pat` clause in the reference (the `psx`/`cor` corpora exclude it),
+-- but `Assemble`'s body change-detection sexprs surfaces as an `Eq` proxy (Surface has no `Eq`), and
+-- a value-union `case` arm (`name Type`) legitimately carries one — so serialize it (matching
+-- `Core.corePatSexpr`). Internal-only: never compared against the reference's `sexpr_pat`.
+sexprPat (PTyped name ty Nothing) = "(: " <> name <> " " <> ty <> ")"
+sexprPat (PTyped name ty (Just disc)) = "(: " <> name <> " " <> ty <> " " <> disc <> ")"
 
 sexprMapPatPair :: MapPatPair -> String
 sexprMapPatPair (MPAtom k p) = k <> ": " <> sexprPat p
