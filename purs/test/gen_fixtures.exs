@@ -909,7 +909,10 @@ js_corpus = [
   ~S|pub def greet(s String) String := "hi ${s}"|,
   ~S|pub def lbl(n Int53) String := "n=${n}"|,
   # a Float64 hole calls Show.float, so `injectStdlib` supplies the portable Show module (ADR-0069 §6)
-  ~S|pub def f2s(x Float64) String := "${x}"|
+  ~S|pub def f2s(x Float64) String := "${x}"|,
+  # struct construction (ADR-0050): `Name(f: v)` → a `__struct__`-tagged object (one and two fields)
+  "struct Box(v Int53)\npub def mk(x Int53) Box := Box(v: x)",
+  "struct P(a Int53, b Int53)\npub def mk2(x Int53, y Int53) P := P(a: x, b: y)"
 ]
 
 # Rian.JS.compile_types — the `jsdts` stream (ADR-0086 §5): the TypeScript `.d.ts` sidecar. Maps

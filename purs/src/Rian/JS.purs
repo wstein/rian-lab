@@ -15,8 +15,9 @@
 -- | value-union discrimination over a user type (`bakeUnionDisc` bakes the `PTyped` disc; a sum
 -- | member tests the tagged-array head, a struct member tests `__struct__`), and protocol dispatch
 -- | (`protocolDispatchersJs` regenerates the JS dispatcher from `Prog.protocols`/`implDecls`, skipping
--- | the BEAM-shaped `dispatch == "dispatcher"` func) are all ported. NOT yet ported: struct
--- | *construction* `Name(f: v)` (no `EStruct` in PS Core; field access + `case` patterns DO lower).
+-- | the BEAM-shaped `dispatch == "dispatcher"` func), struct *construction* `Name(f: v)` (`bakeStructs`
+-- | → the `EStruct` Core node → a `__struct__`-tagged object), and string interpolation (the program
+-- | tail `Rian.Assemble.runProgramTail`, composed before the gate) are all ported.
 module Rian.JS
   ( compile
   , compileSexpr
@@ -75,7 +76,7 @@ compile src =
           consts = allConsts prog
           cset = map _.name consts
           reg = jsReg prog
-          constJsOut = joinWith "\n" (map (constJs i53 cset) consts)
+          constJsOut = joinWith "\n" (map (constJs i53 cset reg) consts)
           fnJs = joinWith "\n\n" (map (functionJs i53 cset reg) funcs)
           importJsOut = importsJs funcs
           dispJsOut = protocolDispatchersJs i53 prog
@@ -150,10 +151,10 @@ resolveConsts cset node
 -- `const NAME := value` → a top-level JS `const` (exported when `pub`). The value parses, resolves
 -- sibling const references, and emits in the program integer mode: a single-expression value emits
 -- inline; a multi-statement block wraps in an IIFE so the `const` still binds one expression.
-constJs :: Boolean -> Array String -> Const -> String
-constJs i53 cset c =
+constJs :: Boolean -> Array String -> JsReg -> Const -> String
+constJs i53 cset reg c =
   let
-    stmts = case fromExpr (resolveConsts cset (normalize (P.parseBody c.value))) of
+    stmts = case fromExpr (bakeStructs reg (resolveConsts cset (normalize (P.parseBody c.value)))) of
       EBlock ss -> ss
       other -> [ CExprStmt other ]
     val = case dedup stmts [] jsFresh of
@@ -192,6 +193,23 @@ bakePat reg (P.PTyped name tname Nothing) =
       if elem tname reg.structs then P.PTyped name tname (Just ("struct:" <> tname))
       else P.PTyped name tname Nothing
 bakePat _ p = p
+
+-- Resolve struct construction (ADR-0050): a labeled call to a declared struct (`Name(f: v, …)`,
+-- the parser's `SCall (SId Name) [SLabel …]`) is rewritten to `SStructLit` (→ `Core.EStruct`), so
+-- it lowers to a `__struct__`-tagged object instead of a function call. A non-struct name or any
+-- non-label arg falls through. Mirrors the reference's annotate-time struct resolution.
+bakeStructs :: JsReg -> P.Surface -> P.Surface
+bakeStructs reg = walk
+  where
+  walk node = case node of
+    P.SCall (P.SId name) args | elem name reg.structs ->
+      let labels = mapMaybe asLabel args
+      in
+        if length labels == length args then P.SStructLit name (map (\(Tuple l v) -> Tuple l (walk v)) labels)
+        else mapNode walk node
+    _ -> mapNode walk node
+  asLabel (P.SLabel l v) = Just (Tuple l v)
+  asLabel _ = Nothing
 
 functionJs :: Boolean -> Array String -> JsReg -> Func -> String
 functionJs i53 cset reg f =
@@ -311,7 +329,7 @@ bindLines = map (\(Tuple n a) -> "const " <> n <> " = " <> a <> ";")
 guardedReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> Maybe String -> String
 guardedReturn i53 cset reg params body guard = case guard of
   Nothing -> clauseReturn i53 cset reg params body
-  Just g -> "if (" <> exprJs i53 (fromExpr (resolveConsts cset (bakeUnionDisc reg (normalize (P.parse g))))) <> ") { " <> clauseReturn i53 cset reg params body <> " }"
+  Just g -> "if (" <> exprJs i53 (fromExpr (bakeStructs reg (resolveConsts cset (bakeUnionDisc reg (normalize (P.parse g)))))) <> ") { " <> clauseReturn i53 cset reg params body <> " }"
 
 -- a clause body parses to a block: `let`s then `return` the final value; `:=` shadowing is resolved
 -- on the Core IR by `Rian.Shadow` (JS `let`/`const` forbid same-scope re-declaration). The body is
@@ -319,7 +337,7 @@ guardedReturn i53 cset reg params body guard = case guard of
 clauseReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> String
 clauseReturn i53 cset reg params body = case body of
   Nothing -> unsafeCrashWith "Rian.JS: a clause has no body"
-  Just b -> case fromExpr (resolveConsts cset (bakeUnionDisc reg (normalize (bodySurface b)))) of
+  Just b -> case fromExpr (bakeStructs reg (resolveConsts cset (bakeUnionDisc reg (normalize (bodySurface b))))) of
     EBlock stmts -> blockReturn i53 (dedup stmts params jsFresh)
     other -> blockReturn i53 (dedup [ CExprStmt other ] params jsFresh)
 
@@ -431,6 +449,11 @@ exprJs i53 = case _ of
   EId x -> if pascal x then "[" <> dquote x <> "]" else x
   -- a reference to a declared `const` → the top-level `const`'s name (emitted by `constJs`).
   EConstRef name -> name
+  -- a struct construction → a `__struct__`-tagged object (the runtime struct shape).
+  EStruct name pairs ->
+    "{ __struct__: " <> dquote name
+      <> (if null pairs then "" else ", " <> joinWith ", " (map (\(Tuple l v) -> l <> ": " <> exprJs i53 v) pairs))
+      <> " }"
   EAtom a -> jsAtom a
   EUnary "-" x -> "-" <> exprJs i53 x
   EUnary "not" x -> "!" <> exprJs i53 x

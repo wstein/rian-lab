@@ -78,6 +78,9 @@ data Surface
   -- a resolved reference to a module `const` (ADR-0034). The parser never produces it; an
   -- emitter's const-resolution pass rewrites a known-const `SId` to it (→ `Core.EConstRef`).
   | SConstRef String
+  -- a resolved struct construction `Name(f: v, …)` (the parser emits a labeled `SCall`; an
+  -- emitter's struct-resolution pass rewrites it to this → `Core.EStruct`).
+  | SStructLit String (Array (Tuple String Surface))
 
 -- a map-literal pair: atom-key shorthand `k: v`, or a computed key `keyExpr => v`.
 data MapPair
@@ -905,6 +908,7 @@ sexpr (SStrInterp parts) = "(str-interp " <> joinWith " " (map iPart parts) <> "
   iPart (IHole e) = "${" <> sexpr e <> "}"
 -- emitter-synthesized, never parsed (so never in the `psx` corpus); rendered for totality.
 sexpr (SConstRef n) = "(const-ref " <> n <> ")"
+sexpr (SStructLit n fields) = "(struct " <> n <> foldMap (\(Tuple k v) -> " " <> k <> ": " <> sexpr v) fields <> ")"
 
 sexprMapPair :: MapPair -> String
 sexprMapPair (MAtom k v) = k <> ": " <> sexpr v

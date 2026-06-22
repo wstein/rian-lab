@@ -812,9 +812,10 @@ liftNode e = case e of
   ECaptureNamed p a -> TCaptureNamed (liftUntyped p) a
   ECapArg n -> TCapArg n
   ELabel n x -> TLabel n (liftUntyped x)
-  -- `annotate` runs before any emitter's const-resolution, so an `EConstRef` never reaches here;
-  -- its faithful untyped lift is a named reference (`TId`), kept for totality.
+  -- `annotate` runs before any emitter's const-/struct-resolution, so neither `EConstRef` nor
+  -- `EStruct` reaches here; lifted for totality (a named reference / a map of the lifted fields).
   EConstRef n -> TId n
+  EStruct _ fields -> TMap (map (\(Tuple k v) -> TMAtom k (liftUntyped v)) fields)
 
 liftArm :: CArm -> TArm
 liftArm a = { pat: a.pat, guard: map liftUntyped a.guard, body: liftUntyped a.body }

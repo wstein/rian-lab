@@ -73,6 +73,9 @@ data CExpr
   -- `EConstRef` so it lowers to the const's accessor rather than a local read. Carried here so
   -- every emitter shares one node (mirrors the reference `EConstRef`, ADR-0050).
   | EConstRef String
+  -- a struct construction `Name(f: v, …)` (ADR-0050). The parser emits a labeled `SCall`; an
+  -- emitter's struct-resolution pass rewrites it to `P.SStructLit`, which `fromExpr` lifts here.
+  | EStruct String (Array (Tuple String CExpr))
 
 type CArm = { pat :: CPat, guard :: Maybe CExpr, body :: CExpr }
 type CWithClause = { pat :: CPat, expr :: CExpr }
@@ -121,6 +124,7 @@ fromExpr (P.SStr s) = EStr s
 fromExpr (P.SChar c) = EChar c
 fromExpr (P.SId x) = EId x
 fromExpr (P.SConstRef n) = EConstRef n
+fromExpr (P.SStructLit n fields) = EStruct n (map (\(Tuple k v) -> Tuple k (fromExpr v)) fields)
 fromExpr (P.SAtom a) = EAtom a
 fromExpr (P.SStrInterp _) =
   unsafeCrashWith "Core: string interpolation is not supported here (resolved before Core, ADR-0069)"
@@ -259,6 +263,7 @@ coreSexpr (ECapArg n) = "&" <> show n
 coreSexpr (ELabel n e) = n <> ": " <> coreSexpr e
 -- emitter-synthesized, never in the `cor` corpus (the parser emits `EId`); rendered for totality.
 coreSexpr (EConstRef n) = "(const-ref " <> n <> ")"
+coreSexpr (EStruct n fields) = "(struct " <> n <> foldMap (\(Tuple k v) -> " " <> k <> ":" <> coreSexpr v) fields <> ")"
 
 coreMapPair :: CMapPair -> String
 coreMapPair (CMAtom k v) = k <> ": " <> coreSexpr v
