@@ -860,6 +860,34 @@ opq_corpus = [
   "abstract Meters := Int53 do\n  to base() Int53\nend\npub def m(d Meters) Int53 := d.base()"
 ]
 
+# Rian.JS — the `js` stream (ADR-0049 Tier 1): the compiled ECMAScript module. Number-mode
+# (`Int53`) programs; avoids the deferred constructs (consts/protocols/@external/value-union over a
+# user type). Oracle = `Rian.JS.compile`.
+js_corpus = [
+  "pub def add(x Int53, y Int53) Int53 := x + y",
+  "pub def neg(b Bool) Bool := not b",
+  "pub def cat(s String, t String) String := s <> t",
+  "pub def fac(n Int53) Int53 := if n <= 1 do 1 else n * fac(n - 1) end",
+  "def half(n Int53) Int53 := n div 2",
+  "pub def fst(x Int53, y Int53) Int53 := x",
+  # case + wildcards + strings
+  "pub def classify(n Int53) String := case n do\n  0 -> \"zero\"\n  _ -> \"other\"\nend",
+  # sum type construction + case over ctors
+  "type Color := Red | Green | Blue\npub def nm(c Color) String := case c do\n  Red -> \"r\"\n  Green -> \"g\"\n  Blue -> \"b\"\nend",
+  "type Box := Wrap(Int53) | Empty\npub def wrap(x Int53) Box := Wrap(x)",
+  # list literals + cons + closed/cons clause patterns over a list
+  "pub def pre(x Int53, xs Vec(Int53)) Vec(Int53) := [x | xs]",
+  "pub def len(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [_ | t] -> 1 + len(t)\nend",
+  # tuple value + membership + boolean ops
+  "pub def between(x Int53) Bool := x >= 0 and x <= 9",
+  # lambda value (JS arrow), a string escape, a Char literal/equality
+  "pub def mkInc() Fn(Int53, Int53) := (a) -> a + 1",
+  "pub def nl() String := \"a\\nb\\t\\\"c\"",
+  "pub def isA(c Char) Bool := c == 'a'",
+  # map literal + map-update
+  "pub def m2() Dict(Symbol, Int53) := %{a: 1, b: 2}"
+]
+
 asm_corpus = [
   "protocol Show do\n  def show(x Self) String\nend\nimpl Show for Int53 do\n  def show(x) := f(x)\nend",
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
@@ -1826,6 +1854,9 @@ lines =
         |> Enum.join(";")
 
       "opq\t#{Canon.hex(s)}\t#{Canon.hex(canon)}"
+    end) ++
+    Enum.map(js_corpus, fn s ->
+      "js\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JS.compile(s))}"
     end) ++
     Enum.map(mxb_corpus, fn s ->
       funcs = Map.get(Decl.parse(s, assemble_only: true), :funcs, [])
