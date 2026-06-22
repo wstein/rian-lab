@@ -38,7 +38,7 @@ import Data.String.Common (joinWith)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.External (render) as Ext
-import Rian.Assemble (assemble)
+import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
@@ -46,7 +46,7 @@ import Rian.IR (Body, Clause, Const, ExtSpec(..), Func, Method, Prog, Range, Str
 import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
 import Rian.Pratt (Pat(..), Surface(..), parse, parseBody) as P
-import Rian.Prim (overflowOps)
+import Rian.Prim (normalize, overflowOps)
 import Rian.Shadow (dedup)
 import Rian.TypeStr (normalize, splitTopCommas) as TS
 
@@ -55,7 +55,9 @@ import Rian.TypeStr (normalize, splitTopCommas) as TS
 compile :: String -> String
 compile src =
   let
-    prog0 = assemble (parseToProg src)
+    -- the program tail (interpolation resolution + `Show` injection) runs before the gate, matching
+    -- the reference's `Decl.parse` → `Check.gate!` order (ADR-0069).
+    prog0 = runProgramTail (assemble (parseToProg src))
   in
     case checkProgram prog0 of
       Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
@@ -151,7 +153,7 @@ resolveConsts cset node
 constJs :: Boolean -> Array String -> Const -> String
 constJs i53 cset c =
   let
-    stmts = case fromExpr (resolveConsts cset (P.parseBody c.value)) of
+    stmts = case fromExpr (resolveConsts cset (normalize (P.parseBody c.value))) of
       EBlock ss -> ss
       other -> [ CExprStmt other ]
     val = case dedup stmts [] jsFresh of
@@ -309,7 +311,7 @@ bindLines = map (\(Tuple n a) -> "const " <> n <> " = " <> a <> ";")
 guardedReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> Maybe String -> String
 guardedReturn i53 cset reg params body guard = case guard of
   Nothing -> clauseReturn i53 cset reg params body
-  Just g -> "if (" <> exprJs i53 (fromExpr (resolveConsts cset (bakeUnionDisc reg (P.parse g)))) <> ") { " <> clauseReturn i53 cset reg params body <> " }"
+  Just g -> "if (" <> exprJs i53 (fromExpr (resolveConsts cset (bakeUnionDisc reg (normalize (P.parse g))))) <> ") { " <> clauseReturn i53 cset reg params body <> " }"
 
 -- a clause body parses to a block: `let`s then `return` the final value; `:=` shadowing is resolved
 -- on the Core IR by `Rian.Shadow` (JS `let`/`const` forbid same-scope re-declaration). The body is
@@ -317,7 +319,7 @@ guardedReturn i53 cset reg params body guard = case guard of
 clauseReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> String
 clauseReturn i53 cset reg params body = case body of
   Nothing -> unsafeCrashWith "Rian.JS: a clause has no body"
-  Just b -> case fromExpr (resolveConsts cset (bakeUnionDisc reg (bodySurface b))) of
+  Just b -> case fromExpr (resolveConsts cset (bakeUnionDisc reg (normalize (bodySurface b)))) of
     EBlock stmts -> blockReturn i53 (dedup stmts params jsFresh)
     other -> blockReturn i53 (dedup [ CExprStmt other ] params jsFresh)
 

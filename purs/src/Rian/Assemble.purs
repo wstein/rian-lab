@@ -13,6 +13,7 @@
 -- | into the top scope; per-`mod` synthesis is the same shape, deferred with the corpus).
 module Rian.Assemble
   ( assemble
+  , runProgramTail
   , assembleSexpr
   , assembleBodiesSexpr
   ) where
@@ -24,14 +25,17 @@ import Data.Array.NonEmpty as NEA
 import Data.Foldable (any)
 import Data.Maybe (Maybe(..))
 import Data.String.Common (joinWith)
+import Rian.Check (Ic, clauseEnv, fillLocalRets, programIc)
 import Rian.Comptime (fold) as Comptime
 import Rian.Core (coreSexpr, fromExpr)
 import Rian.Decl (RawDef, buildFunc, parseToProg, progSexpr)
 import Rian.IR (Body(..), Clause, Func, Prog, bodySurface)
-import Rian.Macro (Env, buildEnv, expand) as Macro
-import Rian.Pratt (parseBody, sexpr) as P
+import Rian.Interp (resolve) as Interp
+import Rian.Macro (Env, buildEnv, childrenOf, expand) as Macro
+import Rian.Pratt (Surface(..), parseBody, sexpr) as P
 import Rian.Prim (normalize)
 import Rian.Protocol (DefMap, expand)
+import Rian.ShowStdlib (theModule) as ShowStdlib
 import Rian.TypeStr (splitTopCommas)
 
 -- | Run the assemble tail passes: synthesize the protocol dispatcher / `impl_*` functions
@@ -55,9 +59,9 @@ assemble prog = lowerMeta (prog { funcs = prog.funcs <> synthFuncs })
 sameDef :: RawDef -> RawDef -> Boolean
 sameDef a b = a.name == b.name && length (splitTopCommas a.params) == length (splitTopCommas b.params)
 
--- a synthesized `Protocol.DefMap` as the raw `def` map `buildFunc` consumes (the synthetic /
--- dispatch metadata is not carried — the IR `Func` has no such field, and the gate/emitters
--- read the func by name/params/clauses).
+-- a synthesized `Protocol.DefMap` as the raw `def` map `buildFunc` consumes; the dispatch marker
+-- (`"dispatcher"`/`"impl"`) is carried onto the `Func` so an emitter can skip the BEAM dispatcher
+-- and regenerate it per-target (ADR-0061 §3).
 defMapToRawDef :: DefMap -> RawDef
 defMapToRawDef d =
   { name: d.name
@@ -112,7 +116,66 @@ assembleSexpr src = progSexpr (assemble (parseToProg src))
 -- | via the shared `coreSexpr` oracle — proves the `lower_meta` macro wiring, sidestepping the
 -- | body-string serializer (which the reference can't run on an expanded AST).
 assembleBodiesSexpr :: String -> String
-assembleBodiesSexpr src = joinWith ";" (concatMap funcBodies (allFuncs (assemble (parseToProg src))))
+assembleBodiesSexpr src = joinWith ";" (concatMap funcBodies (allProgFuncs (assemble (parseToProg src))))
   where
-  allFuncs prog = prog.funcs <> concatMap _.funcs prog.mods
   funcBodies f = mapMaybe (\c -> map (\b -> coreSexpr (fromExpr (normalize (bodySurface b)))) c.body) f.clauses
+
+allProgFuncs :: Prog -> Array Func
+allProgFuncs prog = prog.funcs <> concatMap _.funcs prog.mods
+
+--------------------------------------------------------------------------------
+-- program tail: interpolation resolution + stdlib injection (ADR-0069)
+--------------------------------------------------------------------------------
+
+-- | Run the program-wide tail after `assemble` (the reference's `run_program_tail`, minus the
+-- | `InferLocal.fill_returns` pass, which is separate): resolve `${…}` interpolation, then inject the
+-- | `Show` stdlib if a `Float64` was interpolated. Kept distinct from `assemble` (= `assemble_only`)
+-- | so the `asm`/`mxb` parity streams are unaffected; the emitters compose it before lowering.
+runProgramTail :: Prog -> Prog
+runProgramTail = injectStdlib <<< resolveInterp
+
+-- Program-wide string-interpolation resolution (ADR-0069): one inference context over all modules'
+-- signatures/types/structs/ctors (funs filled by `fillLocalRets` so a `${f(x)}` over an un-annotated
+-- function resolves), then rewrite every clause body's holes. Mirrors `Decl.resolve_interp`.
+resolveInterp :: Prog -> Prog
+resolveInterp prog =
+  let
+    ic0 = programIc prog
+    ic = ic0 { funs = fillLocalRets (allProgFuncs prog) ic0 }
+    show = map _.ty (filter (\i -> i.proto == "Show") prog.implDecls)
+    resolveFuncs = map (resolveFuncInterp ic show)
+  in
+    prog { funcs = resolveFuncs prog.funcs, mods = map (\m -> m { funcs = resolveFuncs m.funcs }) prog.mods }
+
+resolveFuncInterp :: Ic -> Array String -> Func -> Func
+resolveFuncInterp ic show f = f { clauses = map (resolveClauseInterp f ic show) f.clauses }
+
+resolveClauseInterp :: Func -> Ic -> Array String -> Clause -> Clause
+resolveClauseInterp f ic show c = case c.body of
+  Nothing -> c
+  Just body ->
+    let
+      ast = bodySurface body
+      out = Interp.resolve (clauseEnv c.pats f.params ic) ic show ast
+    in
+      -- change-detect via the canonical sexpr (Surface has no `Eq`), keeping an untouched body Raw.
+      if P.sexpr out == P.sexpr ast then c else c { body = Just (Expanded out) }
+
+-- Prelude injection (ADR-0047 / ADR-0069 §6): a program that interpolates a `Float64` calls
+-- `Show.float`, so supply the `Show` module unless one is already defined. Read off the rewritten
+-- program (the `Show.float` call) rather than a flag, so the resolver stays pure. Mirrors
+-- `inject_stdlib`.
+injectStdlib :: Prog -> Prog
+injectStdlib prog =
+  if needsShowFloat prog && not (any (\m -> m.name == "Show") prog.mods) then prog { mods = [ ShowStdlib.theModule ] <> prog.mods }
+  else prog
+
+needsShowFloat :: Prog -> Boolean
+needsShowFloat prog = any (\f -> any (callsShowFloat <<< _.body) f.clauses) (allProgFuncs prog)
+
+callsShowFloat :: Maybe Body -> Boolean
+callsShowFloat Nothing = false
+callsShowFloat (Just body) = go (bodySurface body)
+  where
+  go (P.SCall (P.SDot (P.SId "Show") "float") _) = true
+  go node = any go (Macro.childrenOf node)

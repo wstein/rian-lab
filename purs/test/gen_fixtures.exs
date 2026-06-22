@@ -903,7 +903,13 @@ js_corpus = [
   "struct Box(v Int53)\nstruct Widget(n Int53)\ndef pick(x Box | Widget) Int53 := case x do\n  b Box -> b.v\n  w Widget -> w.n\nend",
   # protocol dispatch (ADR-0061 §3): one dispatcher routes by the first arg's shape — a sum tag, a
   # struct `__struct__`, and a primitive `typeof` — to the mangled `impl_*` methods
-  "type Color := Red | Green\nstruct Point(x Int53)\nprotocol K do\n  def k(self Self) Int53\nend\nimpl K for Color do\n  def k(c) := 1\nend\nimpl K for Point do\n  def k(p) := 2\nend\nimpl K for Bool do\n  def k(b) := 3\nend"
+  "type Color := Red | Green\nstruct Point(x Int53)\nprotocol K do\n  def k(self Self) Int53\nend\nimpl K for Color do\n  def k(c) := 1\nend\nimpl K for Point do\n  def k(p) := 2\nend\nimpl K for Bool do\n  def k(b) := 3\nend",
+  # string interpolation (ADR-0069): a String hole is identity, an Int hole stringifies — the
+  # program tail (`resolveInterp`) rewrites `${…}` before lowering
+  ~S|pub def greet(s String) String := "hi ${s}"|,
+  ~S|pub def lbl(n Int53) String := "n=${n}"|,
+  # a Float64 hole calls Show.float, so `injectStdlib` supplies the portable Show module (ADR-0069 §6)
+  ~S|pub def f2s(x Float64) String := "${x}"|
 ]
 
 # Rian.JS.compile_types — the `jsdts` stream (ADR-0086 §5): the TypeScript `.d.ts` sidecar. Maps
