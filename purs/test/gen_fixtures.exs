@@ -1742,6 +1742,51 @@ defmodule ExhFixtures do
   defp ctor_str(c) when is_atom(c), do: to_string(c)
 end
 
+# Rian.Interp — the `itp` stream (ADR-0069): resolve a function body's `${…}` holes under the same
+# fixed env as `inf`/`bdy`, then serialize through Core (the resolved surface must lower — no
+# `str_interp` survives). Oracle = Interp.resolve → Core.from_expr → CoreCanon.expr.
+defmodule InterpCanon do
+  @fixed_env %{
+    "x" => "Int64",
+    "y" => "Int64",
+    "n" => "Int53",
+    "b" => "Bool",
+    "s" => "String",
+    "f" => "Float64",
+    "c" => "Char",
+    "xs" => "Vec(Int53)",
+    "g" => "Fn(Int64,Bool)"
+  }
+
+  def resolve_body(src) do
+    src
+    |> Rian.Pratt.parse_body()
+    |> Rian.Interp.resolve(@fixed_env, %{}, MapSet.new())
+    |> Rian.Core.from_expr()
+    |> CoreCanon.expr()
+  end
+end
+
+itp_corpus = [
+  # String identity, the int/bool/char/float stringifiers, a multi-hole concat, an int literal
+  ~S|"hi ${s}"|,
+  ~S|"${n}"|,
+  ~S|"${x}"|,
+  ~S|"${b}"|,
+  ~S|"${c}"|,
+  ~S|"${f}"|,
+  ~S|"a${n}b${s}c"|,
+  ~S|"${42}"|,
+  # an unbound hole falls through to runtime `__prim_to_string`; an atom is a `Symbol`
+  ~S|"${zzz}"|,
+  ~S|"${:foo}"|,
+  # a non-interpolated string passes through unchanged
+  ~S|"plain"|,
+  # scope-aware: a `case` arm hole sees the scrutinee-typed bindings; a block `:=` extends the env
+  "case b do\n  true -> \"${n}\"\n  false -> \"${s}\"\nend",
+  ~S|m := n; "v=${m}"|
+]
+
 lines =
   Enum.flat_map(corpus, fn src ->
     [
@@ -1900,6 +1945,9 @@ lines =
       # ignored (the module is fixed); asserts the PS inlined source parses to the reference module.
       "shs\t#{Canon.hex("show")}\t#{Canon.hex(DeclCanon.mod_one(Rian.ShowStdlib.module()))}"
     ] ++
+    Enum.map(itp_corpus, fn s ->
+      "itp\t#{Canon.hex(s)}\t#{Canon.hex(InterpCanon.resolve_body(s))}"
+    end) ++
     Enum.map(mxb_corpus, fn s ->
       funcs = Map.get(Decl.parse(s, assemble_only: true), :funcs, [])
 

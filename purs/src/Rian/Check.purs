@@ -51,6 +51,10 @@ module Rian.Check
   , fillLocalRetsSexpr
   , checkProgramSexpr
   , inferParamTypeSexpr
+  , envPut
+  , fixedEnv
+  , clauseEnv
+  , fieldTable
   ) where
 
 import Prelude hiding (join)

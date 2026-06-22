@@ -128,7 +128,9 @@ run_stream(<<"js">>, Src) -> hexbin('rian_jS@ps':compileSexpr(Src));
 %% Rian.JS compile_types (canon = the TypeScript `.d.ts` sidecar — ADR-0086 §5)
 run_stream(<<"jsdts">>, Src) -> hexbin('rian_jS@ps':compileTypesSexpr(Src));
 %% Rian.ShowStdlib (canon = the serialized `Show` stdlib module, input ignored — ADR-0069 §6)
-run_stream(<<"shs">>, Src) -> hexbin('rian_showStdlib@ps':moduleSexpr(Src)).
+run_stream(<<"shs">>, Src) -> hexbin('rian_showStdlib@ps':moduleSexpr(Src));
+%% Rian.Interp (canon = the resolved body's Core sexpr — ADR-0069 §4 interpolation resolution)
+run_stream(<<"itp">>, Src) -> hexbin('rian_interp@ps':resolveBodySexpr(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.
