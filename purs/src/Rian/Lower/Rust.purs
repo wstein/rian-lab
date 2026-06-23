@@ -35,7 +35,8 @@ import Data.Int (hexadecimal, toStringAs) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing)
 import Data.String (Pattern(..), stripPrefix, stripSuffix)
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
-import Data.String.Common (joinWith, toUpper)
+import Data.String.CodeUnits (charAt) as CU
+import Data.String.Common (joinWith, toLower, toUpper)
 import Data.Tuple (Tuple(..), fst)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
@@ -44,7 +45,7 @@ import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.Exhaustiveness (analyze, programEnv)
-import Rian.IR (Clause, Func, Param, Prog, Range, Type, Variant, bodySurface)
+import Rian.IR (Clause, Func, Param, Prog, Range, Struct, Type, Variant, bodySurface)
 import Rian.Opaque (erase)
 import Rian.PatternLower (Env, lowerMany)
 import Rian.Pratt (Pat) as P
@@ -75,9 +76,10 @@ compile src =
           meta = buildMeta types
           env = programEnv types prog.structs prog.ranges
           enums = joinWith "\n\n" (map rustEnum types)
+          structDefs = joinWith "\n\n" (map rustStruct prog.structs)
           funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
         in
-          joinWith "\n\n" (map (\f -> rustUnit enums meta env f) funcs)
+          joinWith "\n\n" (map (\f -> rustUnit structDefs enums meta env f) funcs)
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> foldl (\acc m -> acc <> m.funcs) [] prog.mods
@@ -87,8 +89,16 @@ allTypes prog = prog.types <> foldl (\acc m -> acc <> m.types) [] prog.mods
 
 -- the per-function unit: the program's `enum` defs (repeated per unit, as the reference does),
 -- then this function. Empty parts (no types) drop out.
-rustUnit :: String -> Meta -> Env -> Func -> String
-rustUnit enums meta env f = joinWith "\n\n" (filter (_ /= "") [ enums, rustFn meta env f ])
+rustUnit :: String -> String -> Meta -> Env -> Func -> String
+rustUnit structDefs enums meta env f =
+  joinWith "\n\n" (filter (_ /= "") [ structDefs, enums, rustFn meta env f ])
+
+-- a `struct Name(f T, …)` → a `#[derive(Clone, Debug, PartialEq)] struct Name { f: T, … }`.
+rustStruct :: Struct -> String
+rustStruct s =
+  "#[derive(Clone, Debug, PartialEq)]\nstruct " <> s.name <> " { "
+    <> joinWith ", " (map (\f -> fromMaybe "" f.label <> ": " <> Cap.owned f.ty) s.fields)
+    <> " }"
 
 -- ── sum types → enums ──────────────────────────────────────────────────────────
 
@@ -329,12 +339,42 @@ emit meta (EBin op l r) =
     Tuple (p meta lc l <> " " <> disp op <> " " <> p meta rc r) pr
 emit meta (ECase scrut arms) = Tuple (rustCase meta scrut arms) 0
 emit meta (EBlock stmts) = Tuple (emitBlock meta (EBlock stmts)) 0
--- a call to a known sum ctor is construction (`Enum::Variant(…)`); otherwise a local call.
+-- a struct construction `Name { f: v, … }` (a PascalCase, all-labeled call that is not a sum ctor).
+emit meta (EStruct name pairs) =
+  Tuple (name <> " { " <> joinWith ", " (map (\(Tuple k v) -> k <> ": " <> p meta 0 v) pairs) <> " }") 12
+-- field access / module/variant path: `p.x`, `Type::Variant`, `module::fn`, `RianTrait::m` (UFCS).
+emit meta (EDot (EId m) n)
+  | isJust (stripPrefix (Pattern "Rian") m) && pascal m = Tuple (m <> "::" <> n) 12
+  | not (pascal m) = Tuple (m <> "." <> n) 12
+  | pascal n = Tuple (m <> "::" <> n) 12
+  | otherwise = Tuple (toLower m <> "::" <> n) 12
+emit meta (EDot hd n) = Tuple (p meta 12 hd <> "::" <> n) 12
+-- a call to a known sum ctor is construction (`Enum::Variant(…)`); a PascalCase all-labeled call
+-- is struct construction (`Name { f: v }`); otherwise a local call.
 emit meta (ECall (EId name) args)
   | isJust (find (\(Tuple c _) -> c == name) meta) = Tuple (ctorConstruct meta name args) 12
+  | pascal name && not (null args) && all isELabel args = Tuple (structConstruct meta name args) 12
 emit meta (ECall f args) =
   Tuple (p meta 12 f <> "(" <> joinWith ", " (map (p meta 0) args) <> ")") 12
 emit _ _ = unsafeCrashWith "rust: expression not yet ported (stage)"
+
+-- struct construction from labeled args (source order — Rust named fields are order-free).
+structConstruct :: Meta -> String -> Array CExpr -> String
+structConstruct meta name args =
+  name <> " { " <> joinWith ", " (map field args) <> " }"
+  where
+  field (ELabel l v) = l <> ": " <> p meta 0 v
+  field _ = unsafeCrashWith "rust: non-labeled struct field (stage)"
+
+isELabel :: CExpr -> Boolean
+isELabel (ELabel _ _) = true
+isELabel _ = false
+
+-- PascalCase? (first char A–Z) — distinguishes a type/ctor/struct name from a value.
+pascal :: String -> Boolean
+pascal s = case CU.charAt 0 s of
+  Just c -> c >= 'A' && c <= 'Z'
+  Nothing -> false
 
 -- positional construction of a sum variant — `Enum::Variant(v, …)`, or
 -- `Enum::Variant { label: v, … }` for a variant that declared field labels.

@@ -989,7 +989,13 @@ rust_corpus = [
   # the match shim (ADR-0036): a PARTIAL function (literal heads, no catch-all) → `_ => panic!(…)`
   "pub def lat(Int53) Int53\npub def lat(0) := 10\npub def lat(1) := 20",
   # a range-TOTAL literal match (`Bit := 0..1`, both covered) → `_ => unreachable!()` (rustc shim)
-  "range Bit := 0..1\npub def flip(Bit) Bit\npub def flip(0) := 1\npub def flip(1) := 0"
+  "range Bit := 0..1\npub def flip(Bit) Bit\npub def flip(0) := 1\npub def flip(1) := 0",
+  # structs — `struct Name(f T,…)` → `#[derive(…)] struct Name { f: T,… }`; `val Name` → `&Name`
+  # param; field access `p.x`; construction `Name { f: v }`. (Struct PATTERNS are unsupported in
+  # both text emitters — `pat_ex`/`pat_rs` have no `PStruct` clause — so none here.)
+  "struct Point(x Int53, y Int53)\npub def gx(p Point) Int53 := p.x",
+  "struct Pair(a Int53, b Int53)\npub def sum(p Pair) Int53 := p.a + p.b",
+  "struct Point(x Int53, y Int53)\npub def mk(a Int53, b Int53) Point := Point(x: a, y: b)"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
