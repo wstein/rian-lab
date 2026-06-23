@@ -24,32 +24,33 @@
 -- | crash, kept out of the `rust` parity corpus (oracle = `Rian.Decl.compile`'s `:rust`).
 module Rian.Lower.Rust
   ( compile
+  , rustProgram
   ) where
 
 import Prelude
 
-import Data.Array (all, any, concatMap, drop, elem, filter, find, foldl, head, index, length, mapWithIndex, null, reverse, uncons)
+import Data.Array (all, any, concatMap, drop, elem, filter, find, foldl, head, index, length, mapWithIndex, null, reverse, uncons, zipWith)
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing)
-import Data.String (Pattern(..), split, stripPrefix, stripSuffix)
+import Data.String (Pattern(..), Replacement(..), replaceAll, split, stripPrefix, stripSuffix)
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (charAt) as CU
-import Data.String.Common (joinWith, toLower, toUpper)
-import Data.Tuple (Tuple(..), fst)
+import Data.String.Common (joinWith, toLower, toUpper, trim)
+import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
-import Rian.Capability (owned, rustParam) as Cap
+import Rian.Capability (copy, owned, rustParam) as Cap
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.Exhaustiveness (analyze, programEnv)
-import Rian.IR (Clause, Func, Param, Prog, Protocol, Range, Struct, Type, Variant, bodySurface)
+import Rian.IR (Clause, Func, ImplDecl, ImplMethod, Method, Param, Prog, Protocol, Range, Struct, Type, Variant, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
 import Rian.PatternLower (Env, lowerMany)
-import Rian.Pratt (Pat, Surface(..)) as P
+import Rian.Pratt (Pat, Surface(..), parseBody) as P
 import Rian.Prelude (withPrelude)
 import Rian.Prim (normalize)
 import Rian.TypeStr (splitTopCommas) as TS
@@ -123,13 +124,14 @@ traitParams paramStr = case filter (_ /= "") (TS.splitTopCommas paramStr) of
   ps -> joinWith ", " ([ "&self" ] <> map sigParam (drop 1 ps))
 
 sigParam :: String -> String
-sigParam pstr = let Tuple nm ty = nameType pstr in nm <> ": " <> refType ty
+sigParam pstr = let Tuple nm ty = nameType pstr in nm <> ": " <> refType "Self" ty
 
--- a trait-method param type → its borrowed Rust form. `Self` → `&Self`; a non-`Self` trait param
--- is the later increment (needs the `val` capability lowering, whose `Cap` ctor isn't exported).
-refType :: String -> String
-refType "Self" = "&Self"
-refType _ = unsafeCrashWith "rust: non-Self trait param (stage)"
+-- a trait/impl-method param type → its borrowed Rust form. `Self` → `&<selfRepr>` (`&Self` in a
+-- trait, `&bool` in an impl). A non-`Self` param is the later increment (needs the `val`
+-- capability lowering, whose `Cap` ctor isn't exported).
+refType :: String -> String -> String
+refType selfRepr "Self" = "&" <> selfRepr
+refType _ _ = unsafeCrashWith "rust: non-Self trait param (stage)"
 
 -- split a `name Type` param into its name (or `_`) and type.
 nameType :: String -> Tuple String String
@@ -150,6 +152,72 @@ rewriteProtoCalls methods = walk
           Just { head: recv, tail: rest } -> P.SCall (P.SDot (walk recv) m) (map walk rest)
           Nothing -> mapNode walk node
     _ -> mapNode walk node
+
+-- | Assemble a whole program into **one** Rust module (ADR-0061): every `struct`/`enum`/
+-- | `trait`/`impl` once, then every non-dispatch function. The whole-program counterpart of
+-- | `compile` (which repeats type defs per unit) — the `rustprog` parity stream, oracle =
+-- | `Rian.Lower.rust_program`.
+-- @rian_sig pub def rustProgram(src val String) String
+rustProgram :: String -> String
+rustProgram src =
+  let
+    prog0 = runProgramTail (assemble (parseToProg src))
+  in
+    case checkProgram prog0 of
+      Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
+      Nothing ->
+        let
+          prog = erase prog0
+          types = allTypes prog
+          meta = buildMeta types
+          env = programEnv types prog.structs prog.ranges
+          methods = prog.protocols >>= \pr -> map _.name pr.methods
+          structs = joinWith "\n\n" (map rustStruct prog.structs)
+          enums = joinWith "\n\n" (map rustEnum types)
+          traits = joinWith "\n\n" (map rustTrait prog.protocols)
+          impls = joinWith "\n\n" (map (rustImpl meta methods prog.protocols) prog.implDecls)
+          traitImpl = joinWith "\n\n" (filter (_ /= "") [ traits, impls ])
+          funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
+          fns = joinWith "\n\n" (map (rustFn meta env methods) funcs)
+        in
+          joinWith "\n\n" (filter (_ /= "") [ structs, enums, traitImpl, fns ])
+
+-- an `impl P for T` → `impl RianP for <rust T> { fn m(&self, …) -> ret { let recv = self; body } }`
+-- (ADR-0061 §2). The method's param/return types come from the protocol's declared signature.
+rustImpl :: Meta -> Array String -> Array Protocol -> ImplDecl -> String
+rustImpl meta methods protocols impl =
+  let
+    rustType = Cap.owned impl.ty
+    copyRecv = Cap.copy impl.ty
+    sigFor = case find (\pr -> pr.name == impl.proto) protocols of
+      Just pr -> pr.methods
+      Nothing -> []
+    bodies = joinWith "\n" (map (rustImplMethod meta methods rustType copyRecv sigFor) impl.methods)
+  in
+    "impl Rian" <> impl.proto <> " for " <> rustType <> " {\n" <> bodies <> "\n}"
+
+rustImplMethod :: Meta -> Array String -> String -> Boolean -> Array Method -> ImplMethod -> String
+rustImplMethod meta methods rustType copyRecv sigFor m =
+  let
+    names = map trim (TS.splitTopCommas m.params)
+    recv = fromMaybe "_" (head names)
+    sig = case find (\sm -> sm.name == m.name) sigFor of
+      Just s -> s
+      Nothing -> { name: m.name, params: "", ret: Nothing }
+    restSig = drop 1 (TS.splitTopCommas sig.params)
+    params = joinWith ", " ([ "&self" ] <> zipWith (implParam rustType) (drop 1 names) restSig)
+    retTy = replaceAll (Pattern "Self") (Replacement rustType) (fromMaybe "" sig.ret)
+    otherSelf = any (\sp -> snd (nameType sp) == "Self") restSig
+    recvRhs = if copyRecv && not otherSelf then "*self" else "self"
+    bodySurf = P.parseBody (fromMaybe "" m.body)
+    body = coerceRet retTy (fst (emit meta (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
+  in
+    "    fn " <> m.name <> "(" <> params <> ") -> " <> rustRet retTy
+      <> " { let " <> recv <> " = " <> recvRhs <> "; " <> body <> " }"
+
+-- an impl-method param `name: <borrowed sig type>` (the name is the impl's, the type the protocol's).
+implParam :: String -> String -> String -> String
+implParam rustType name sigP = name <> ": " <> refType rustType (snd (nameType sigP))
 
 -- ── sum types → enums ──────────────────────────────────────────────────────────
 

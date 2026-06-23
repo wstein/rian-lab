@@ -136,7 +136,9 @@ run_stream(<<"itp">>, Src) -> hexbin('rian_interp@ps':resolveBodySexpr(Src));
 %% Rian.Lower.Rust (canon = the compiled Rust module — ADR-0049, the `to_rust` port)
 run_stream(<<"rust">>, Src) -> hexbin('rian_lower_rust@ps':compile(Src));
 %% Rian.JVM (canon = the compiled Kotlin module — ADR-0049 Tier 2, the `Rian.JVM.compile` port)
-run_stream(<<"jvm">>, Src) -> hexbin('rian_jVM@ps':compile(Src)).
+run_stream(<<"jvm">>, Src) -> hexbin('rian_jVM@ps':compile(Src));
+%% Rian.Lower.Rust whole-program (canon = `rust_program` — one module: structs/enums/traits/impls/fns)
+run_stream(<<"rustprog">>, Src) -> hexbin('rian_lower_rust@ps':rustProgram(Src)).
 
 %% canonical serialization of the purerl token terms (must equal Canon in the generator).
 %% A PureScript `Array` is a stdlib `array` under purerl, hence array:to_list.

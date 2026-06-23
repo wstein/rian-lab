@@ -1141,6 +1141,21 @@ def f(c) := 0|,
   "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(b) := 42\nend\npub def go(b Bag) Int64 := sz(b)"
 ]
 
+# Rian.Lower.rust_program — the `rustprog` stream: the WHOLE-PROGRAM Rust assembly (ADR-0061)
+# — one module, every struct/enum/trait/impl emitted ONCE (vs the per-unit-repeating `rust`
+# stream / `Decl.compile`), then every non-dispatch fn. Oracle = `Rian.Lower.rust_program`.
+# Covers: the once-assembly (no per-unit type repeat), protocol `trait`/`impl` blocks.
+rustprog_corpus = [
+  # baseline: a function-only program assembles to just the fn
+  "pub def add(x Int53, y Int53) Int53 := x + y",
+  # a sum type's `enum` is emitted ONCE here (the `rust` stream repeats it per unit)
+  "type Shape := Circle(Float64) | Square(Float64)\npub def area(Shape) Float64\npub def area(Circle(r)) := r\npub def area(Square(s)) := s",
+  # a protocol + impl → `trait RianEq { … }` + `impl RianEq for bool { fn eq(&self, b: &bool) … }`
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
+  # a bounded-generic consumer alongside the protocol (no impl): trait + `<T: RianEq + Clone>`
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\npub def same(a T, b T) Bool forall T: Eq := eq(a, b)"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -2167,6 +2182,9 @@ lines =
     end) ++
     Enum.map(jvm_corpus, fn s ->
       "jvm\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JVM.compile(s))}"
+    end) ++
+    Enum.map(rustprog_corpus, fn s ->
+      "rustprog\t#{Canon.hex(s)}\t#{Canon.hex(Rian.Lower.rust_program(Rian.Decl.parse(s)))}"
     end) ++
     [
       # Rian.ShowStdlib — the `shs` stream: the parsed `Show` stdlib module (ADR-0069 §6). Input
