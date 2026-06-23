@@ -36,6 +36,35 @@ defmodule Rian.Roundtrip do
   erases it to a tagged map (no accessor forms), while `Rian.Lower`'s Elixir text
   emits a real `defstruct` (with `__struct__/0,1`) — surfaced honestly as a
   `equiv_two_paths` divergence rather than hidden by dropping the nested module.
+
+  ## Subsumption note — is the Elixir-text path (path 3) load-bearing? (2026-06-23)
+
+  Asked while scoping the `Rian.Lower` PureScript port (ADR-0084): can `Rian.Beam`
+  forms alone serve roundtrip, so `Rian.Lower.to_elixir` need not be ported?
+
+  **The empirical signal of `equiv_two_paths` is null.** Across the whole corpus
+  (`roundtrip_test.exs`) the differential cross-check returns only:
+
+    * `:equiv` for **function** modules — the two backends *agree*; no signal; and
+    * `:diverges` for **struct** modules — the *by-design* gap (`Rian.Beam` erases to a
+      tagged map, ADR-0043; the Elixir text emits a `defstruct`). A documented
+      representation difference, never a caught bug.
+
+  **So the primary assertion is recoverable from `Rian.Beam` alone.** Because the two
+  backends are forms-`:equiv` on functions, `equiv_vs_origin` computed from path 3 equals
+  the same check computed from path 2 (`Rian.Beam` forms vs origin) on every function
+  module — the load-bearing case. On a `struct` both paths already diverge from origin;
+  the `Rian.Beam`-vs-origin verdict (erased map ≠ `defstruct`) is the *more honest* one,
+  since Rian ships the erased map, not a `defstruct`.
+
+  **Conclusion.** Path 3 (`Rian.Lower`'s Elixir text) is **not load-bearing**. Its unique
+  contribution — the `equiv_two_paths` differential — has demonstrated no bug-catching
+  value (its only divergence is the pre-known struct gap; cross-backend behavioural
+  coverage already comes from the `:ex`/`:rs`/`:js` conformance suite). Therefore the
+  `Rian.Lower` port carries **only `to_rust`**; the Elixir-text emitter need not be ported.
+  When it is retired, recompute `equiv_vs_origin` as `Rian.Beam`-forms-vs-origin and drop
+  `equiv_two_paths` (the one signal lost is a theoretical, never-fired independent-backend
+  check). Until then path 3 stays — this note records *why* it may go, not a removal.
   """
 
   alias Rian.{Beam, Decl, Format, FormsEquiv, Lower, Transpile}

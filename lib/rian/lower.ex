@@ -10,12 +10,32 @@ defmodule Rian.Lower do
     * expression parsing   (Rian.Pratt)                    -- precedence-aware
   and emits idiomatic Rust **and** Elixir text.
 
-  > #### The Elixir-text path is a DEBUG/inspection view, not the BEAM execution path
-  > **`Rian.Beam`** (Erlang abstract forms → `:compile.forms` → loadable `.beam`) is
-  > the real BEAM backend. The Elixir *text* this module emits is a pedagogical /
-  > inspection artifact — surfaced only behind `mix rian.compile --show-elixir` and
-  > labelled a debug view — never the run path. **Rust** is the genuine text target
-  > here. (P3, ADR-0031: the abstract-forms pivot retired Elixir-source emission.)
+  > #### Two text targets of unequal standing — and who consumes each
+  > **Rust is the genuine shipping text target** (`to_rust` — the capability/ownership
+  > compiler: `pat_rs` threads a `meta`, `rust_param` lowers `val`/`iso`/`ref`/`tag`, and
+  > the parametric-`:rs` monomorphization lives here). The **Elixir text** (`to_elixir`)
+  > is a *secondary* target: `Rian.Beam` (Erlang abstract forms → `:compile.forms` →
+  > loadable `.beam`) is the real BEAM **execution** path (P3, ADR-0031), so the Elixir
+  > text is never the run path — but it is **not "debug only."** Its live consumers
+  > (verified 2026-06-23):
+  >
+  >   * **`Rian.Roundtrip` (path 3).** `rian_to_elixir` → `compile_module_beam(m).elixir`,
+  >     recompiled to BEAM, is one half of the harness's **differential cross-check**:
+  >     `equiv_two_paths` compares `Rian.Beam` forms against this Elixir-text→recompile,
+  >     and it feeds `equiv_vs_origin` (vs the original module). Two independent backends
+  >     catching each other — N-version testing.
+  >   * **`Rian.Decl` (the display / `mix examples` path, decl.ex ~877).** A
+  >     **protocol-dispatcher** function (`f.dispatch`) is lowered *only* to its Elixir
+  >     view — its BEAM guards (`element/2`, `:tag`) are BEAM-only and would crash `to_rust`.
+  >   * **`mix rian.compile --show-elixir`.** The additive inspection view.
+  >
+  > Not a consumer: `mix rian.verify` (it compiles the *original* `.ex` via
+  > `Code.compile_string` and the Rian side via `Rian.Beam` — never this text path).
+  >
+  > **Migration note (ADR-0084).** Only `to_rust` need become a PureScript emitter. The
+  > Elixir-text path's *primary* roundtrip assertion (roundtripped ≡ original) is
+  > recoverable as `Rian.Beam`-forms-vs-origin (see `Rian.Roundtrip`'s subsumption note),
+  > so it is not load-bearing for the port — **Rust is the unit to port.**
 
   > #### Higher-order application on the Elixir text target
   > Applying a function-*valued variable* (`f(x)` where `f` is a parameter,
