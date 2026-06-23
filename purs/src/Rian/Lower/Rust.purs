@@ -29,9 +29,13 @@ module Rian.Lower.Rust
 import Prelude
 
 import Data.Array (all, filter, find, foldl, index, length, mapWithIndex, null)
+import Data.Enum (fromEnum, toEnum)
+import Data.Foldable (foldMap)
+import Data.Int (hexadecimal, toStringAs) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing)
 import Data.String (Pattern(..), stripPrefix, stripSuffix)
-import Data.String.Common (joinWith)
+import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
+import Data.String.Common (joinWith, toUpper)
 import Data.Tuple (Tuple(..), fst)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
@@ -177,6 +181,9 @@ patRs :: Meta -> CPat -> String
 patRs _ PWild = "_"
 patRs _ (PVar x) = x
 patRs _ (PLit (LInt v)) = show v
+patRs _ (PLit (LStr s)) = strLit s
+patRs _ (PAtom a) = strLit a
+patRs _ (PChar cp) = rustCharLit cp
 patRs meta (PCtor name args) =
   let info = lookupCtor meta name
   in
@@ -231,6 +238,11 @@ p meta ctx node =
 
 emit :: Meta -> CExpr -> Tuple String Int
 emit _ (ENum n) = Tuple n 12
+emit _ (EStr s) = Tuple (strLit s) 12
+-- a `Symbol` (`:ok`) is equality-only, lowered to a `&str` literal (ADR-0041).
+emit _ (EAtom a) = Tuple (strLit a) 12
+-- a `Char` (ADR-0036) is a native Rust `char` literal.
+emit _ (EChar cp) = Tuple (rustCharLit cp) 12
 emit _ (EId "pi") = Tuple "std::f64::consts::PI" 12
 -- a bare PascalCase id is a nullary variant value → `Enum::Variant`.
 emit meta (EId x) = case find (\(Tuple c _) -> c == x) meta of
@@ -240,6 +252,10 @@ emit meta (EUnary "-" x) = Tuple ("-" <> p meta 11 x) 11
 emit meta (EUnary "not" x) = Tuple ("!" <> p meta 11 x) 11
 emit meta (EIf c t e) =
   Tuple ("if " <> p meta 0 c <> " { " <> emitBlock meta t <> " } else { " <> emitBlock meta e <> " }") 0
+-- string concatenation `<>` → one `format!("{}{}…", …)` over the flattened operands.
+emit meta (EBin "<>" l r) =
+  let parts = flattenConcat (EBin "<>" l r)
+  in Tuple ("format!(\"" <> foldMap (const "{}") parts <> "\", " <> joinWith ", " (map (p meta 0) parts) <> ")") 12
 emit meta (EBin "div" l r) = Tuple (p meta 10 l <> " / " <> p meta 11 r) 10
 emit meta (EBin "rem" l r) = Tuple (p meta 10 l <> " % " <> p meta 11 r) 10
 emit meta (EBin "/" l r) = Tuple ("(" <> p meta 0 l <> " as f64) / (" <> p meta 0 r <> " as f64)") 10
@@ -332,3 +348,39 @@ disp "and" = "&&"
 disp "or" = "||"
 disp "<~" = "="
 disp op = op
+
+-- ── string / char literals (shared Elixir/Rust escapes; Rust `\u{HEX}`) ─────────
+
+-- flatten a left/right-nested `<>` chain into its operands (for the `format!` join).
+flattenConcat :: CExpr -> Array CExpr
+flattenConcat (EBin "<>" l r) = flattenConcat l <> flattenConcat r
+flattenConcat e = [ e ]
+
+-- a `String`/`Symbol` literal as a double-quoted Rust string (`\n \r \t \\ \"` + `\u{HEX}`).
+strLit :: String -> String
+strLit s = "\"" <> foldMap strLitCp (CP.toCodePointArray s) <> "\""
+
+strLitCp :: CP.CodePoint -> String
+strLitCp cp =
+  let n = fromEnum cp
+  in
+    if n == 92 then "\\\\"
+    else if n == 34 then "\\\""
+    else if n == 10 then "\\n"
+    else if n == 13 then "\\r"
+    else if n == 9 then "\\t"
+    else if n < 0x20 || n == 0x7F then "\\u{" <> toUpper (Int.toStringAs Int.hexadecimal n) <> "}"
+    else CP.singleton cp
+
+-- a Unicode codepoint as a Rust `char` literal, escaping the specials.
+rustCharLit :: Int -> String
+rustCharLit 10 = "'\\n'"
+rustCharLit 9 = "'\\t'"
+rustCharLit 13 = "'\\r'"
+rustCharLit 0 = "'\\0'"
+rustCharLit 92 = "'\\\\'"
+rustCharLit 39 = "'\\''"
+rustCharLit cp = "'" <> chr cp <> "'"
+
+chr :: Int -> String
+chr n = fromMaybe "" (map CP.singleton (toEnum n :: Maybe CP.CodePoint))

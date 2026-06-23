@@ -976,7 +976,16 @@ rust_corpus = [
   # a payload sum → `enum Shape { Circle(f64), … }`; construction `Shape::Circle(r)` + ctor patterns
   "type Shape := Circle(Float64) | Square(Float64)\npub def area(Shape) Float64\npub def area(Circle(r)) := 3.14 * r * r\npub def area(Square(s)) := s * s\npub def mk(r Float64) Shape := Circle(r)",
   # a `case` over a sum value → a nested `match` (full variant coverage)
-  "type Box := Wrap(Int53) | Empty\npub def unwrap(b Box) Int53 := case b do\n  Wrap(x) -> x\n  Empty -> 0\nend"
+  "type Box := Wrap(Int53) | Empty\npub def unwrap(b Box) Int53 := case b do\n  Wrap(x) -> x\n  Empty -> 0\nend",
+  # increment 3 — strings / chars / symbols. `String` → `&str` param / owned `String` return
+  # (`coerce_ret` `.to_string()`); `<>` → `format!`; `Char` → native `char`; `Symbol` → `&str`.
+  "pub def isA(c Char) Bool := c == 'a'",
+  "pub def greet() String := \"hi\"",
+  "pub def cat(a String, b String) String := a <> b",
+  "pub def tag() Symbol := :ok",
+  "pub def first(c Char) Char := c",
+  # a `\\n` escape in a string literal exercises the shared escape table
+  "pub def nl() String := \"a\\nb\""
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
