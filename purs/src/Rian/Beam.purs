@@ -5,15 +5,17 @@
 -- | Elixir-compiler dependency. The bulk (the forms construction) is pure PureScript over an opaque
 -- | `ETerm`; the Erlang FFI tail (the term constructors + compile/load/run) lives in `Beam.erl`.
 -- |
--- | **Staged port.** Inc 1 (this module): the foundation — the `ETerm` term-builders, module
--- | assembly (`-module`/`-export` + function forms), and the portable expression/pattern core
--- | (integer/float/char/atom/bool literals, the operator algebra, variables, `:=` binds, local
--- | calls, single-clause var-headed functions). Verified by EXECUTION: `runMain` compiles + loads +
--- | runs `main/0` and stringifies the result, parity-gated (the `beam` stream) against the Elixir
--- | reference running the same program. **Deferred (later increments):** the type-directed lowering
--- | (the annotated/range-expanded core — `Show`/overflow/value-union discrimination), multi-clause
--- | dispatch + guards, sum/struct/`case`/list/map/string lowering, `@external`, specs/`type` attrs,
--- | and the whole-program / cross-module + const machinery. An unported node raises a clear crash.
+-- | **Staged port.** Inc 1: the foundation — the `ETerm` term-builders, module assembly
+-- | (`-module`/`-export` + function forms), and the portable expression/pattern core (integer/float/
+-- | char/atom/bool literals, the operator algebra, variables, `:=` binds, local calls, `if`). Inc 2:
+-- | **multi-clause dispatch** (a multi-clause `def` → one Erlang function, one clause per group
+-- | member — Erlang dispatches natively), **`when` guards** (function-clause + `case`-arm → the
+-- | Erlang guard sequence `[[G]]`), and **`case`** expressions. Verified by EXECUTION: `runMain`
+-- | compiles + loads + runs `main/0` and stringifies the result, parity-gated (the `beam` stream)
+-- | against the Elixir reference running the same program. **Deferred (later increments):** the
+-- | type-directed lowering (the annotated/range-expanded core — `Show`/overflow/value-union
+-- | discrimination), sum/struct/list/map/string lowering + their patterns, `@external`, specs/`type`
+-- | attrs, and the whole-program / cross-module + const machinery. An unported node raises a clear crash.
 module Rian.Beam
   ( runMain
   ) where
@@ -28,9 +30,10 @@ import Data.String.Common (toUpper)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
-import Rian.Core (CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Body, Clause, Func, Prog, bodySurface)
+import Rian.Pratt (parse) as P
 import Rian.Prim (normalize)
 
 -- ── the Erlang-FFI boundary (Beam.erl) ───────────────────────────────────────
@@ -83,9 +86,22 @@ functionForm :: Func -> ETerm
 functionForm f =
   fFunction f.name (funcArity f) (map clauseForm f.clauses)
 
--- a clause → `{clause, 1, [PatForm], [], [BodyForm]}` (inc 1: no guards).
+-- a function clause → `{clause, 1, [PatForm], Guard, [BodyForm]}`. A multi-clause `def` is one
+-- Erlang function with one clause per group member (Erlang dispatches natively); a `when` guard
+-- lowers to the Erlang guard sequence `[[GuardExpr]]`.
 clauseForm :: Clause -> ETerm
-clauseForm c = fClause (map (patForm <<< fromPat) c.pats) (bodyForms (bodyExprOf c.body))
+clauseForm c =
+  fClause (map (patForm <<< fromPat) c.pats) (clauseGuardForm c.guard) (bodyForms (bodyExprOf c.body))
+
+-- a function clause's `when` guard (a source string) → the Erlang guard sequence; `Nothing` → `[]`.
+clauseGuardForm :: Maybe String -> ETerm
+clauseGuardForm Nothing = noGuard
+clauseGuardForm (Just g) = mkList [ mkList [ exprForm (fromExpr (normalize (P.parse g))) ] ]
+
+-- a `case`-arm guard (already core) → the Erlang guard sequence `[[GuardExpr]]`; `Nothing` → `[]`.
+armGuardForm :: Maybe CExpr -> ETerm
+armGuardForm Nothing = noGuard
+armGuardForm (Just g) = mkList [ mkList [ exprForm g ] ]
 
 -- a `:=` body parses to an `EBlock`; lower each statement to a body form (a bare expression is a
 -- one-statement body).
@@ -114,15 +130,21 @@ exprForm (EBin op l r) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm (erlOp op), e
 -- a local call `f(args)` → `{call, 1, {atom,1,f}, [args]}` (inc 1: a bare local call — no var
 -- application, imports, or cross-module resolution yet).
 exprForm (ECall (EId f) args) = fCall (fAtom f) (map exprForm args)
--- `if c then t else e` → an Erlang `case c of true -> t; false -> e end`.
+-- `if c do t else e end` → an Erlang `case c of true -> t; false -> e end`.
 exprForm (EIf c t e) =
   mkTuple
     [ mkAtomTerm "case"
     , ln
     , exprForm c
-    , mkList [ fClause [ fAtom "true" ] (bodyForms t), fClause [ fAtom "false" ] (bodyForms e) ]
+    , mkList [ fClause [ fAtom "true" ] noGuard (bodyForms t), fClause [ fAtom "false" ] noGuard (bodyForms e) ]
     ]
+-- `case scrut do pat [when g] -> body … end` → an Erlang `{case, 1, Scrut, [Clause]}`.
+exprForm (ECase scrut arms) =
+  mkTuple [ mkAtomTerm "case", ln, exprForm scrut, mkList (map caseArmForm arms) ]
 exprForm _ = unsafeCrashWith "abstract-forms: unported expression (Phase 8 inc 1)"
+
+caseArmForm :: CArm -> ETerm
+caseArmForm arm = fClause [ patForm arm.pat ] (armGuardForm arm.guard) (bodyForms arm.body)
 
 -- ── patterns → abstract forms (inc 1: wildcards / vars / literals / atoms) ──
 patForm :: CPat -> ETerm
@@ -159,8 +181,12 @@ fFunction :: String -> Int -> Array ETerm -> ETerm
 fFunction name arity clauses =
   mkTuple [ mkAtomTerm "function", ln, mkAtomTerm name, mkIntI arity, mkList clauses ]
 
-fClause :: Array ETerm -> Array ETerm -> ETerm
-fClause pats body = mkTuple [ mkAtomTerm "clause", ln, mkList pats, mkList [], mkList body ]
+fClause :: Array ETerm -> ETerm -> Array ETerm -> ETerm
+fClause pats guard body = mkTuple [ mkAtomTerm "clause", ln, mkList pats, guard, mkList body ]
+
+-- the empty Erlang guard sequence (`[]` — an unguarded clause).
+noGuard :: ETerm
+noGuard = mkList []
 
 attrModule :: String -> ETerm
 attrModule m = mkTuple [ mkAtomTerm "attribute", ln, mkAtomTerm "module", mkAtomTerm m ]

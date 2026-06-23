@@ -2116,7 +2116,16 @@ beam_corpus = [
   # a boolean (comparison + `and`)
   "pub def main() Bool := (1 < 2) and (3 >= 3)",
   # recursion (a self local call) + `if … do … else … end`
-  "pub def fact(n Int53) Int53 := if n <= 1 do 1 else n * fact(n - 1) end\npub def main() Int53 := fact(5)"
+  "pub def fact(n Int53) Int53 := if n <= 1 do 1 else n * fact(n - 1) end\npub def main() Int53 := fact(5)",
+  # ── inc 2: multi-clause dispatch, function-clause guards, `case` ──
+  # a multi-clause function (Erlang dispatches natively over the clause heads)
+  "pub def f(x Int53) Int53\npub def f(0) := 10\npub def f(n) := n * 2\npub def main() Int53 := f(0) + f(5)",
+  # a function-clause `when` guard
+  "pub def sign(n Int53) Int53\npub def sign(n) when n > 0 := 1\npub def sign(n) := 0\npub def main() Int53 := sign(5) * 10 + sign(-3)",
+  # a `case` with a literal arm + a wildcard
+  "pub def classify(n Int53) Int53 := case n do\n  0 -> 100\n  _ -> 200\nend\npub def main() Int53 := classify(0) + classify(7)",
+  # a `case` arm with a `when` guard
+  "pub def g(n Int53) Int53 := case n do\n  x when x > 5 -> 1\n  _ -> 0\nend\npub def main() Int53 := g(9) * 10 + g(2)"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses
