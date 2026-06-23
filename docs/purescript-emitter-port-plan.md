@@ -19,8 +19,9 @@ Targets, by difficulty:
   JS (§C).
 - **Part D — `Rian.Rust`.** The deep one — ownership lowering, the bulk of `Rian.Lower`, gated on
   `Rian.Capability` (§D).
-- **Part E — `Rian.Elixir` (text).** The reference's own admitted DEBUG/inspection view, not a
-  run path — last / optional (§E).
+- **Part E — `Rian.Elixir` (text).** A *secondary*, non-run-path target (live consumers:
+  `Rian.Roundtrip`'s cross-check + the protocol-dispatcher display) whose roundtrip role is
+  `Rian.Beam`-subsumed — last / optional (§E).
 
 > ## The prerequisite that gates ALL of these: `Check.annotate`
 >
@@ -274,9 +275,11 @@ compiler — **a project, not "an emitter."**
 ### E.0 What it is
 
 The Elixir-text half of `Rian.Lower` (`to_elixir/5`, `lower.ex:346`). The reference's **own
-moduledoc** labels it a callout: *"the Elixir-text path is a DEBUG/inspection view, not the BEAM
-execution path… surfaced only behind `mix rian.compile --show-elixir`… never the run path"* —
-`Rian.Beam` (Part B) is the real BEAM backend.
+moduledoc** frames it as a *secondary* target: **never the run path** — `Rian.Beam` (Part B) is the
+real BEAM backend — but **not "debug only."** It has live consumers: `Rian.Roundtrip`'s path-3
+differential cross-check, the protocol-dispatcher display (`mix examples`), and
+`mix rian.compile --show-elixir`. Its roundtrip role is `Rian.Beam`-subsumed (so it is not
+load-bearing for the port).
 
 ### E.1 Plan
 
@@ -284,8 +287,8 @@ execution path… surfaced only behind `mix rian.compile --show-elixir`… never
   **run-path** targets (Beam, Rust, JS, JVM); the Elixir *text* is an inspection artifact whose
   parity is a nice-to-have, not a gate.
 - If ported: extract `to_elixir` into **`Rian.Elixir`** (reusing `Rian.Emit.Common`), parity via
-  an `elx` stream vs `Lower.to_elixir`, and **mirror the reference's debug-only callout** in the
-  PS moduledoc so the artifact's status is never mistaken for a run path.
+  an `elx` stream vs `Lower.to_elixir`, and **mirror the reference's secondary-target callout** (not
+  the run path, but with live consumers) in the PS moduledoc so the artifact's status is clear.
 
 ---
 
@@ -317,7 +320,7 @@ stream exists from concurrent work) — sequence for that synergy.
 **Concrete suggestions (rated).** Open the emitter phase with `Check.annotate`/`ic` (10/10);
 JS + JVM paired, sharing the dispatcher (9/10); Rust gated on `Capability`, honesty via
 `rustc --test` (9/10); split `Lower` → `Rust`/`Elixir`/`Emit.Common` (8/10); Elixir-text
-last/optional, labelled debug-only (7/10); one parameterized toolchain-run harness (7/10).
+last/optional, labelled a secondary non-run-path target (7/10); one parameterized toolchain-run harness (7/10).
 
 ---
 
