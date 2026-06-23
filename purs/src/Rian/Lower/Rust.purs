@@ -43,7 +43,7 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, any, concat, concatMap, drop, elem, filter, find, foldl, head, index, last, length, mapWithIndex, nub, null, range, reverse, snoc, uncons, zipWith)
+import Data.Array (all, any, concat, concatMap, drop, elem, filter, find, foldl, head, index, last, length, mapMaybe, mapWithIndex, nub, null, range, reverse, snoc, sort, uncons, zipWith)
 import Data.Array (groupBy) as Array
 import Data.Array.NonEmpty (toArray) as NEA
 import Data.Enum (fromEnum, toEnum)
@@ -62,7 +62,8 @@ import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), capArity, fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.Exhaustiveness (analyze, programEnv)
-import Rian.IR (Cap(..), Clause, Func, ImplDecl, ImplMethod, Method, Param, Prog, Protocol, Range, Struct, Type, Variant, bodySurface)
+import Rian.External (render) as Ext
+import Rian.IR (Cap(..), Clause, ExtSpec(..), Func, ImplDecl, ImplMethod, Method, Param, Prog, Protocol, Range, Struct, Type, Variant, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
 import Rian.PatternLower (Env, lowerMany)
@@ -87,6 +88,13 @@ type Ec =
   , slices :: Array String
   , fnParams :: Array String
   , fnBox :: Maybe { clone :: Boolean, rc :: Boolean }
+  -- value unions (ADR-0083): the program's function signatures (name → params), so a call
+  -- passing a member to a union param wraps it `RUnion_…::from(x)`; the union-typed locals in
+  -- scope (var → `Union(…)` type), so a `case` over one lowers to a `match` on the synth enum;
+  -- and the union case-arm binders, each holding an OWNED member (so a `&str` host arg borrows).
+  , sigs :: Array (Tuple String (Array Param))
+  , unions :: Array (Tuple String String)
+  , ownedBinders :: Array String
   }
 
 -- | Compile `src`'s functions to a single Rust module (a string). Mirrors the `:rust`
@@ -129,7 +137,7 @@ allTypes prog = prog.types <> foldl (\acc m -> acc <> m.types) [] prog.mods
 -- then this function. Empty parts (no types) drop out.
 rustUnit :: String -> String -> Meta -> Env -> Array String -> Func -> String
 rustUnit structDefs enums meta env methods f =
-  joinWith "\n\n" (filter (_ /= "") [ structDefs, enums, rustFn [] meta env methods f ])
+  joinWith "\n\n" (filter (_ /= "") [ structDefs, enums, rustFn [] meta env methods [] f ])
 
 -- a `struct Name(f T, …)` → a `#[derive(Clone, Debug, PartialEq)] struct Name { f: T, … }`.
 rustStruct :: Struct -> String
@@ -216,9 +224,13 @@ lowerRustProg prog0 =
           impls = joinWith "\n\n" (map (rustImpl meta methods prog.protocols) prog.implDecls)
           traitImpl = joinWith "\n\n" (filter (_ /= "") [ traits, impls ])
           funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
-          fns = joinWith "\n\n" (map (rustFn pm meta env methods) funcs)
+          -- synthesized value-union enums (ADR-0083) + the program signatures threaded for the
+          -- call-site union `From`-wrap / borrow.
+          unionEnums = synthUnionEnums prog
+          sigs = funcSigs prog
+          fns = joinWith "\n\n" (map (rustFn pm meta env methods sigs) funcs)
         in
-          joinWith "\n\n" (filter (_ /= "") [ structs, enums, traitImpl, fns ])
+          joinWith "\n\n" (filter (_ /= "") [ structs, enums, unionEnums, traitImpl, fns ])
 
 -- an `impl P for T` → `impl RianP for <rust T> { fn m(&self, …) -> ret { let recv = self; body } }`
 -- (ADR-0061 §2). The method's param/return types come from the protocol's declared signature.
@@ -250,7 +262,7 @@ rustImplMethod meta methods rustType copyRecv sigFor m =
     bodySurf = P.parseBody (fromMaybe "" m.body)
     -- impl-method bodies don't yet need the borrowed-clone / closure context (corpus methods
     -- construct nothing and take no `Fn` params).
-    body = coerceRet retTy (fst (emit { vi: meta, bor: [], slices: [], fnParams: [], fnBox: Nothing } (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
+    body = coerceRet retTy (fst (emit { vi: meta, bor: [], slices: [], fnParams: [], fnBox: Nothing, sigs: [], unions: [], ownedBinders: [] } (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
   in
     "    fn " <> m.name <> "(" <> params <> ") -> " <> rustRet retTy
       <> " { let " <> recv <> " = " <> recvRhs <> "; " <> body <> " }"
@@ -310,19 +322,22 @@ rustFieldType pm ft = case find (\(Tuple n _) -> n == ft) pm of
 
 -- ── function / clause dispatch ────────────────────────────────────────────────
 
-rustFn :: ParaMap -> Meta -> Env -> Array String -> Func -> String
-rustFn pm meta env methods f =
+rustFn :: ParaMap -> Meta -> Env -> Array String -> Array (Tuple String (Array Param)) -> Func -> String
+rustFn _ _ _ _ _ f | not (null f.externals) = externalRustFn f
+rustFn pm meta env methods sigs f =
   let
     -- parametric instantiation for this function (`Box` → `Box<T>` in its sig); empty in the
     -- per-unit `rust` stream (no `pm`), filled in the whole-program `rustprog` stream.
     pinst = pairInst pm f
-    paramDecls = joinWith ", " (map (\p -> p.name <> ": " <> rustifyParametric pinst (Cap.rustParam p.cap (fromMaybe "" p.ty))) f.params)
-    ret = rustifyParametric pinst (rustRet (fromMaybe "" f.ret))
+    -- a value-union param/return is the synth enum (owned), not the capability lowering (ADR-0083).
+    paramTy p = let t = fromMaybe "" p.ty in if isUnionType t then unionEnumName t else rustifyParametric pinst (Cap.rustParam p.cap t)
+    paramDecls = joinWith ", " (map (\p -> p.name <> ": " <> paramTy p) f.params)
+    ret = let r = fromMaybe "" f.ret in if isUnionType r then unionEnumName r else rustifyParametric pinst (rustRet r)
     -- param positions that are an owned `iso Vec` destructured by a cons/list pattern: they
     -- match via `.as_slice()` and their binders are rebound owned in each arm (ADR-0047).
     iso = isoConsPositions f
     scrut = rustScrut iso f.params
-    arms = joinWith "\n" (map (clauseArm meta methods f iso) f.clauses)
+    arms = joinWith "\n" (map (clauseArm meta methods sigs f iso) f.clauses)
   in
     "fn " <> f.name <> rustGenerics f <> "(" <> paramDecls <> ") -> " <> ret <> " {\n"
       <> "    match "
@@ -399,18 +414,22 @@ rustScrut iso params = case mapWithIndex part params of
 -- one `pat => body,` arm. The clause-head patterns form the match pattern (one, or a tuple
 -- of N); the body lowers through the precedence-aware emitter, then is return-coerced. `iso` is
 -- the function's `iso Vec` cons positions, driving the owned arm rebinds.
-clauseArm :: Meta -> Array String -> Func -> Array Int -> Clause -> String
-clauseArm meta methods f iso c =
+clauseArm :: Meta -> Array String -> Array (Tuple String (Array Param)) -> Func -> Array Int -> Clause -> String
+clauseArm meta methods sigs f iso c =
   let
     pat = tupleOrOne (map (corePatRs meta) c.pats)
     -- the per-clause emit context: variant registry, borrowed (`&`-bound) vars, the `&[T]`
-    -- slice binders, `Fn`-typed params (closure calls), and the closure-return box flag.
+    -- slice binders, `Fn`-typed params (closure calls), the closure-return box flag, the program
+    -- signatures (for the call-site union `From`-wrap / borrow), and the union-typed locals.
     ec =
       { vi: meta
       , bor: borrowedVars f.params c.pats
       , slices: sliceBinders f.params c.pats
       , fnParams: map _.name (filter (\p -> isFnType (fromMaybe "" p.ty)) f.params)
       , fnBox: if isFnType (fromMaybe "" f.ret) then Just { clone: fnReturnsTvar (fromMaybe "" f.ret) f.tvars, rc: false } else Nothing
+      , sigs: sigs
+      , unions: unionLocals f
+      , ownedBinders: []
       }
     -- rewrite protocol-method calls to receiver methods (`eq(a, b)` → `a.eq(b)`, ADR-0061 §2)
     -- on the surface, before lowering to Core.
@@ -687,6 +706,139 @@ stringRepr "String" = true
 stringRepr "Symbol" = true
 stringRepr _ = false
 
+-- ── value unions (ADR-0083) → synthesized Rust enums + From impls + dispatch ────
+-- A `String | Int53` param/return → a generated `enum RUnion_Int53_String { … }`. The whole-
+-- program assembly emits one enum (+ `From` impls) per distinct union type; a `case` over a union
+-- local lowers to a `match` on the enum, and a call passing a member wraps it `RUnion_…::from(x)`.
+-- Mirrors `Rian.Lower`'s `synth_union_enums` / `union_enum_decl` / `union_from_arg`.
+
+isUnionType :: String -> Boolean
+isUnionType t = isJust (stripPrefix (Pattern "Union(") t)
+
+unionMembersOf :: String -> Array String
+unionMembersOf t = case stripPrefix (Pattern "Union(") t >>= stripSuffix (Pattern ")") of
+  Just inner -> TS.splitTopCommas inner
+  Nothing -> []
+
+-- a member's variant name: non-alphanumerics → `_` (so `Vec(Int8)` → `Vec_Int8_`), matching
+-- the reference's `variant_name`.
+variantName :: String -> String
+variantName = CU.fromCharArray <<< map (\c -> if isAlnum c then c else '_') <<< CU.toCharArray
+
+isAlnum :: Char -> Boolean
+isAlnum c = (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')
+
+unionEnumName :: String -> String
+unionEnumName t = "RUnion_" <> joinWith "_" (map variantName (unionMembersOf t))
+
+-- the Rust spelling of a union member's payload (`Int53` → `i64`, `String` → `String`).
+memberRust :: String -> String
+memberRust = Cap.owned
+
+-- every distinct value-union type referenced by a param/return across the program, sorted (the
+-- reference's `collect_union_types`).
+collectUnionTypes :: Prog -> Array String
+collectUnionTypes prog = nub (sort (filter isUnionType (concatMap fnTypes (allFuncs prog))))
+  where
+  fnTypes f = [ fromMaybe "" f.ret ] <> map (\p -> fromMaybe "" p.ty) f.params
+
+synthUnionEnums :: Prog -> String
+synthUnionEnums prog = joinWith "\n\n" (map unionEnumDecl (collectUnionTypes prog))
+
+unionEnumDecl :: String -> String
+unionEnumDecl t =
+  let
+    members = unionMembersOf t
+    name = unionEnumName t
+    variants = joinWith " " (map (\m -> variantName m <> "(" <> memberRust m <> "),") members)
+    froms = joinWith "\n" (concatMap (memberFroms name) members)
+  in
+    "#[derive(Clone, Debug, PartialEq)]\nenum " <> name <> " { " <> variants <> " }\n" <> froms
+
+memberFroms :: String -> String -> Array String
+memberFroms name m =
+  let
+    v = variantName m
+    rt = memberRust m
+    base = "impl From<" <> rt <> "> for " <> name <> " { fn from(x: " <> rt <> ") -> Self { Self::" <> v <> "(x) } }"
+  in
+    if rt == "String" then [ base, "impl From<&str> for " <> name <> " { fn from(x: &str) -> Self { Self::" <> v <> "(x.to_string()) } }" ]
+    else [ base ]
+
+-- the program's function signatures (name → params) for the call-site `From`-wrap / borrow.
+funcSigs :: Prog -> Array (Tuple String (Array Param))
+funcSigs prog = map (\f -> Tuple f.name f.params) (allFuncs prog)
+
+lookupSig :: String -> Array (Tuple String (Array Param)) -> Maybe (Array Param)
+lookupSig name = map snd <<< find (\(Tuple k _) -> k == name)
+
+-- the union-typed locals of a clause: params whose declared type is a `Union(…)` (var → that type).
+unionLocals :: Func -> Array (Tuple String String)
+unionLocals f = mapMaybe pick f.params
+  where
+  pick p = case p.ty of
+    Just t | isUnionType t -> Just (Tuple p.name t)
+    _ -> Nothing
+
+-- does this argument PRODUCE an owned value that a `&`-param must borrow? — a union case-arm binder
+-- (the synth enum owns its payload) or a stringify prim (`n.to_string()` / `format!(…)`). Gated to
+-- the union-arm context (non-empty `ownedBinders`) so non-union code is byte-for-byte unchanged.
+ownedArgRs :: Ec -> CExpr -> Boolean
+ownedArgRs ec (EId v) = elem v ec.ownedBinders
+ownedArgRs _ (ECall (EId "__prim_int_to_string") _) = true
+ownedArgRs _ (ECall (EId "__prim_float_repr") _) = true
+ownedArgRs _ (ECall (EId "__prim_char_to_string") _) = true
+ownedArgRs _ (ECall (EId "__prim_to_string") _) = true
+ownedArgRs _ (ECall (EId "__prim_str_concat") _) = true
+ownedArgRs _ (ECall (EId "__prim_str_concat_all") _) = true
+ownedArgRs _ _ = false
+
+-- a call to a known program function: coerce each argument against the callee's params — a union
+-- param gets `RUnion_…::from(arg)` (unless the arg is already that union local); a borrow (`&str`/
+-- `&T`) param fed an owned arg (case-arm binder / stringify prim, inside a union arm) gets `&arg`.
+coercedCall :: Ec -> String -> Array Param -> Array CExpr -> String
+coercedCall ec name params args =
+  name <> "(" <> joinWith ", " (mapWithIndex coerce args) <> ")"
+  where
+  coerce i a = case index params i of
+    Just pm -> coerceArg ec pm a
+    Nothing -> p ec 0 a
+
+coerceArg :: Ec -> Param -> CExpr -> String
+coerceArg ec pm a =
+  let ty = fromMaybe "" pm.ty
+  in
+    if isUnionType ty then case a of
+      EId v | elem (Tuple v ty) ec.unions -> p ec 0 a
+      _ -> unionEnumName ty <> "::from(" <> p ec 0 a <> ")"
+    else if isBorrowParam pm && not (null ec.ownedBinders) && ownedArgRs ec a then "&" <> p ec 12 a
+    else p ec 0 a
+
+isBorrowParam :: Param -> Boolean
+isBorrowParam pm = isJust (stripPrefix (Pattern "&") (Cap.rustParam pm.cap (fromMaybe "" pm.ty)))
+
+-- the `:rs` external spec, if any (the target key is the bare `"rs"`, as `Decl` stores it).
+rustExternal :: Func -> Maybe ExtSpec
+rustExternal f = map snd (find (\(Tuple t _) -> t == "rs") f.externals)
+
+-- an `@external` function (ADR-0068): emit the `:rs` host body verbatim — Rust uses named params, so
+-- the spec references them directly (no positional binding). No `:rs` body → off `:rs` (Reach pins
+-- it); reaching here is an off-target compile error. Mirrors `Rian.Lower.rust_fn`'s external clause.
+externalRustFn :: Func -> String
+externalRustFn f = case rustExternal f of
+  Nothing -> unsafeCrashWith ("`" <> f.name <> "`: no `@external(:rs, …)` body — not reachable on :rs")
+  Just (ExtFile _ _) -> unsafeCrashWith ("`" <> f.name <> "`: :rs file-reference externals not yet ported")
+  Just spec -> externalRustBody f (Ext.render spec f.params)
+
+externalRustBody :: Func -> String -> String
+externalRustBody f host =
+  let
+    paramDecl p = let t = fromMaybe "" p.ty in p.name <> ": " <> (if isUnionType t then unionEnumName t else Cap.rustParam p.cap t)
+    paramDecls = joinWith ", " (map paramDecl f.params)
+    ret = let r = fromMaybe "" f.ret in if isUnionType r then unionEnumName r else rustRet r
+  in
+    "fn " <> f.name <> "(" <> paramDecls <> ") -> " <> ret <> " { " <> host <> " }"
+
 -- ── expression emission (precedence-aware `{string, prec}`) ────────────────────
 
 p :: Ec -> Int -> CExpr -> String
@@ -790,6 +942,11 @@ emit ec (ECall (EId name) args)
   | isJust (find (\(Tuple c _) -> c == name) ec.vi) = Tuple (ctorConstruct ec name args) 12
   | elem name ec.fnParams = Tuple (name <> "(" <> joinWith ", " (map (closureArg ec) args) <> ")") 12
   | pascal name && not (null args) && all isELabel args = Tuple (structConstruct ec name args) 12
+  -- a call to a known program function: coerce args against its params (value-union `From`-wrap /
+  -- owned→borrow); with no union/borrow coercion this is byte-for-byte the plain call below.
+  | otherwise = case lookupSig name ec.sigs of
+      Just params -> Tuple (coercedCall ec name params args) 12
+      Nothing -> Tuple (name <> "(" <> joinWith ", " (map (p ec 0) args) <> ")") 12
 emit ec (ECall f args) =
   Tuple (p ec 12 f <> "(" <> joinWith ", " (map (p ec 0) args) <> ")") 12
 -- ── captures (ADR-0061) → explicit Rust closures ──
@@ -905,12 +1062,34 @@ rustCase ec scrut arms = rustCaseWith ec scrut arms (p ec 0)
 -- arm bodies; the default emits them plainly).
 rustCaseWith :: Ec -> CExpr -> Array CArm -> (CExpr -> String) -> String
 rustCaseWith ec scrut arms bodyFn =
-  let
-    sliced = any (\a -> isListPat a.pat) arms
-    scrutRs = if sliced then "&(" <> p ec 0 scrut <> ")[..]" else p ec 0 scrut
-    arm a = patRs ec.vi a.pat <> caseGuard ec a.guard <> " => " <> bodyFn a.body <> ","
-  in
-    "match " <> scrutRs <> " { " <> joinWith " " (map arm arms) <> " }"
+  case unionScrut ec scrut of
+    -- a `case` over a value-union local (ADR-0083) → a `match` on the synth enum; each type-pattern
+    -- arm binds the OWNED member (added to `ownedBinders` so a `&str` host arg in the body borrows).
+    Just enum -> "match " <> p ec 0 scrut <> " { " <> joinWith " " (map (unionArm ec enum) arms) <> " }"
+    Nothing ->
+      let
+        sliced = any (\a -> isListPat a.pat) arms
+        scrutRs = if sliced then "&(" <> p ec 0 scrut <> ")[..]" else p ec 0 scrut
+        arm a = patRs ec.vi a.pat <> caseGuard ec a.guard <> " => " <> bodyFn a.body <> ","
+      in
+        "match " <> scrutRs <> " { " <> joinWith " " (map arm arms) <> " }"
+
+-- the synth enum name if the scrutinee is a value-union local (`case x` over a `String | Int53`
+-- param), else `Nothing` — the ordinary `match`. (A union-returning-call scrutinee is deferred.)
+unionScrut :: Ec -> CExpr -> Maybe String
+unionScrut ec (EId v) = case find (\(Tuple k _) -> k == v) ec.unions of
+  Just (Tuple _ ty) -> Just (unionEnumName ty)
+  Nothing -> Nothing
+unionScrut _ _ = Nothing
+
+-- one arm of a value-union `match`: a type-pattern `s String ->` → `RUnion_…::String(s)` with `s`
+-- bound owned (so the body borrows it for a `&` host param); any other pattern emits normally.
+unionArm :: Ec -> String -> CArm -> String
+unionArm ec enum a = case a.pat of
+  PTyped binder tname _ ->
+    let ec' = ec { ownedBinders = snoc ec.ownedBinders binder }
+    in enum <> "::" <> variantName tname <> "(" <> binder <> ")" <> caseGuard ec' a.guard <> " => " <> p ec' 0 a.body <> ","
+  _ -> patRs ec.vi a.pat <> caseGuard ec a.guard <> " => " <> p ec 0 a.body <> ","
 
 isListPat :: CPat -> Boolean
 isListPat (PList _ _) = true
@@ -923,15 +1102,20 @@ caseGuard ec (Just g) = " if " <> p ec 0 g
 -- a block in tail position (an `if` branch / arm): statements joined, the final an expression.
 emitBlock :: Ec -> CExpr -> String
 emitBlock _ (EBlock []) = "()"
-emitBlock ec (EBlock stmts) = joinWith " " (map (stmtRs ec) stmts)
+emitBlock ec (EBlock stmts) =
+  let n = length stmts
+  in joinWith " " (mapWithIndex (\i s -> stmtRs ec (i < n - 1) s) stmts)
 emitBlock ec e = p ec 0 e
 
-stmtRs :: Ec -> CStmt -> String
-stmtRs ec (CExprStmt e) = p ec 0 e
+-- one block statement; `nonfinal` marks a non-last expression — a side effect before the next, so
+-- it ends in `;` (`{ puts(…); puts(…) }`). The final expression is the block's value (no `;`).
+stmtRs :: Ec -> Boolean -> CStmt -> String
+stmtRs ec true (CExprStmt e) = p ec 0 e <> ";"
+stmtRs ec false (CExprStmt e) = p ec 0 e
 -- a `:=` bind owns its RHS (`rust_owned_elem`): a `&T`/`&str`/`&[T]` rebind is cloned/`to_string`/
 -- `to_vec`'d so the binder is owned and downstream construction needs no further coercion.
-stmtRs ec (CBind n e) = "let " <> n <> " = " <> rustOwnedElem ec e <> ";"
-stmtRs ec (CTypedBind n _ e) = "let " <> n <> " = " <> rustOwnedElem ec e <> ";"
+stmtRs ec _ (CBind n e) = "let " <> n <> " = " <> rustOwnedElem ec e <> ";"
+stmtRs ec _ (CTypedBind n _ e) = "let " <> n <> " = " <> rustOwnedElem ec e <> ";"
 
 -- ── operator precedence (mirrors `Rian.Lower` prec/assoc/disp) ─────────────────
 

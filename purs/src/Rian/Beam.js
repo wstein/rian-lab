@@ -16,4 +16,4 @@ export const mkBinary = unavailable("mkBinary");
 export const strBytes = unavailable("strBytes");
 export const mkTuple = unavailable("mkTuple");
 export const mkList = unavailable("mkList");
-export const runMainImpl = unavailable("runMainImpl");
+export const runModulesImpl = unavailable("runModulesImpl");

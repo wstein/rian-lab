@@ -22,11 +22,13 @@ source =
   """
 @external(:ex, "IO.puts(s)")
 @external(:js, "console.log(s)")
+@external(:rs, "println!(\"{}\", s)")
 @external(:jvm, "println(s)")
 pub def line(s val String) Unit
 
 @external(:ex, "IO.write(s)")
 @external(:js, "process.stdout.write(s)")
+@external(:rs, "print!(\"{}\", s)")
 @external(:jvm, "print(s)")
 pub def write(s val String) Unit
 
