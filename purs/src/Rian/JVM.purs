@@ -24,8 +24,10 @@
 -- | `Core.capArity`/`Core.desugarWith`. (c) **associated types** (ADR-0074): an assoc `Elem` in a
 -- | covariant `Vec(...)` return erases to `List<Any>` (`substAssocAny`); a dispatcher with an assoc
 -- | in a non-erasable position (param / bare return) is dropped (`assocBlocksJvm`, Reach keeps it
--- | off `:jvm`). **Deferred:** the `coerce_casts` use-site cast (an erased `List<Any>` flowing into
--- | a *concrete* `Vec(T)` param needs `as List<T>`; the element-agnostic common case needs none).
+-- | off `:jvm`). The `coerce_casts` use-site cast: a DIRECT erased call flowing into a concrete
+-- | `Vec(T)` param gets `as List<T>` (`castedArgs`/`castArg` over the threaded `meta.sigs`/`erased`),
+-- | so `sum_l(to_list(c))` → `sum_l((to_list(c) as List<Long>))`. **Deferred:** the env-bound variant
+-- | (`xs := to_list(b); sum_l(xs)` — needs block-level tracking of locals bound to an erased result).
 -- | An unported node raises a clear "stage" crash, kept out of the `jvm` parity corpus (oracle =
 -- | `Rian.JVM.compile`).
 module Rian.JVM
@@ -35,7 +37,7 @@ module Rian.JVM
 
 import Prelude
 
-import Data.Array (all, any, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, null, range, uncons, unsnoc)
+import Data.Array (all, any, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, null, range, uncons, unsnoc, zipWith)
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
@@ -77,7 +79,6 @@ lowerJvmProg prog0 =
         let
           prog = erase prog0
           types = allTypes prog
-          meta = buildMeta types
           typeDecls = joinWith "\n\n" (map sumDecl types)
           structDecls = joinWith "\n\n" (map structDecl (allStructs prog))
           allf = allFuncs prog
@@ -91,6 +92,11 @@ lowerJvmProg prog0 =
           dispatchers = filter (\f -> f.dispatch == Just "dispatcher" && not (assocBlocksJvm assoc f)) allf
           funcs = filter (\f -> f.dispatch /= Just "dispatcher") allf
           ift = implFirstType allf
+          -- ADR-0074 coercion inputs: each callee's param types, and the dispatchers whose
+          -- `Vec(...)` return erased to `List<Any>` (an assoc in the return).
+          sigs = map (\f -> Tuple (f.name <> "/" <> show (length f.params)) (map (fromMaybe "" <<< _.ty) f.params)) allf
+          erased = map _.name (filter (\d -> typeMentionsAssoc assoc (fromMaybe "" d.ret)) dispatchers)
+          meta = { labels: buildLabels types, sigs, erased }
           fnDecls = joinWith "\n\n" (map (functionKt meta) funcs)
           dispDecls = joinWith "\n\n" (map (dispatcherKt assoc ift) dispatchers)
         in
@@ -115,10 +121,18 @@ structDecl s =
 -- ── sum types → sealed interface + data class / object (inc 3) ──────────────────
 -- a ctor → its field labels (`Nothing` = anonymous), so a pattern/declaration picks the
 -- declared field name (`radius`) or the positional `f<i>` fallback (ADR-0049 §3b).
-type Meta = Array (Tuple String (Array (Maybe String)))
+-- threaded through the emitter: `labels` (ctor → field labels, ADR-0049 §3b) plus the ADR-0074
+-- coercion inputs — `sigs` (`"name/arity"` → each callee's param types) and `erased` (the names of
+-- dispatchers whose `Vec(...)` return erased to `List<Any>`), so a direct erased call flowing into a
+-- concrete `Vec(T)` param gets an `as List<T>` cast.
+type Meta =
+  { labels :: Array (Tuple String (Array (Maybe String)))
+  , sigs :: Array (Tuple String (Array String))
+  , erased :: Array String
+  }
 
-buildMeta :: Array IR.Type -> Meta
-buildMeta types = types >>= \t -> map (\v -> Tuple v.ctor (map _.label v.fields)) t.variants
+buildLabels :: Array IR.Type -> Array (Tuple String (Array (Maybe String)))
+buildLabels types = types >>= \t -> map (\v -> Tuple v.ctor (map _.label v.fields)) t.variants
 
 -- a sum `type` → `sealed interface Name` + a `data class`/`object` per variant. A single
 -- variant whose ctor IS the type name is a newtype-style wrapper — just the variant body.
@@ -151,7 +165,7 @@ fieldName Nothing i = "f" <> show i
 
 -- the i-th field name of a ctor, resolved through the meta (a labelled field keeps its name).
 fieldKey :: Meta -> String -> Int -> String
-fieldKey meta ctor i = case find (\(Tuple c _) -> c == ctor) meta of
+fieldKey meta ctor i = case find (\(Tuple c _) -> c == ctor) meta.labels of
   Just (Tuple _ labels) -> fieldName (join (index labels i)) i
   Nothing -> "f" <> show i
 
@@ -204,6 +218,39 @@ dispatcherKt assoc ift disp =
     vis <> "fun " <> disp.name <> "(" <> params <> "): " <> ret <> " = when (a0) {\n"
       <> arms
       <> "\n    else -> throw RuntimeException(" <> ktStr (disp.name <> ": no matching impl") <> ")\n}"
+
+-- ── ADR-0074 coercion: cast an erased `List<Any>` flowing into a concrete `List<T>` param ──
+-- emit a call's arguments, inserting an `as List<T>` cast where a DIRECT erased-dispatcher call
+-- (a `Vec(Elem)`-returning dispatcher, erased to `List<Any>`) flows into a concrete `Vec(T)` param
+-- of the callee `f`. (A `Vec(T)` param with a tvar element accepts `List<Any>` uncast; an erased
+-- value bound to a local — `xs := to_list(b)` — is the deferred env-tracked case.)
+castedArgs :: Meta -> String -> Array CExpr -> Array String
+castedArgs meta f args = case lookupSig (f <> "/" <> show (length args)) meta.sigs of
+  Just ptypes | length ptypes == length args -> zipWith (castArg meta) args ptypes
+  _ -> map (exprKt meta) args
+
+castArg :: Meta -> CExpr -> String -> String
+castArg meta arg ptype = case arg of
+  ECall (EId g) _ -> case vecInnerConcrete ptype of
+    Just inner | elem g meta.erased -> "(" <> exprKt meta arg <> " as List<" <> ktType inner <> ">)"
+    _ -> exprKt meta arg
+  _ -> exprKt meta arg
+
+lookupSig :: String -> Array (Tuple String (Array String)) -> Maybe (Array String)
+lookupSig key sigs = map snd (find (\(Tuple k _) -> k == key) sigs)
+
+-- the element type of a `Vec(T)` param IFF it is concrete (a tvar element accepts `List<Any>` and
+-- `as List<T>` would name an undeclared `T` at the call site).
+vecInnerConcrete :: String -> Maybe String
+vecInnerConcrete pt = case Str.stripPrefix (Str.Pattern "Vec(") pt >>= Str.stripSuffix (Str.Pattern ")") of
+  Just inner | not (isTvarKt inner) -> Just inner
+  _ -> Nothing
+
+-- a bare type variable (`T`, `C`, `U2`) — a single uppercase letter then optional digits.
+isTvarKt :: String -> Boolean
+isTvarKt t = case uncons (CU.toCharArray t) of
+  Just { head: c, tail } -> c >= 'A' && c <= 'Z' && all (\d -> d >= '0' && d <= '9') tail
+  Nothing -> false
 
 -- ── associated types (ADR-0074) ──────────────────────────────────────────────
 -- the associated-type names declared across the program's protocols.
@@ -511,7 +558,7 @@ exprKt meta (ECaptureNamed path a) =
 -- A *labeled* call `Name(f: v, …)` is struct/labeled-variant construction → `Name(f = v, …)`.
 exprKt meta (ECall (EId f) args) = case head args of
   Just (ELabel _ _) -> f <> "(" <> joinWith ", " (map (labelKt meta) args) <> ")"
-  _ -> f <> "(" <> joinWith ", " (map (exprKt meta) args) <> ")"
+  _ -> f <> "(" <> joinWith ", " (castedArgs meta f args) <> ")"
 -- a resolved struct literal (`EStruct`) → `Name(f = v, …)`.
 exprKt meta (EStruct name pairs) =
   name <> "(" <> joinWith ", " (map (\(Tuple l v) -> l <> " = " <> exprKt meta v) pairs) <> ")"

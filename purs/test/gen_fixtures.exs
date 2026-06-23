@@ -1176,7 +1176,10 @@ def f(c) := 0|,
   # ── associated types (ADR-0074): an assoc `Elem` in a covariant `Vec(...)` return erases to
   # `List<Any>` (the `to_list` dispatcher); an element-AGNOSTIC consumer (generic `len`) needs no
   # use-site cast, so this lowers + kotlinc-compiles with the assoc-erasure pass alone.
-  "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Elem)\nend\ntype Bag := Bag(items Vec(Int53))\nimpl Foldable for Bag do\n  type Elem := Int53\n  def to_list(b) := case b do Bag(xs) -> xs end\nend\npub def len(xs Vec(T)) Int53 forall T := case xs do\n  [] -> 0\n  [_ | t] -> 1 + len(t)\nend\npub def fcount(c C) Int53 forall C := len(to_list(c))"
+  "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Elem)\nend\ntype Bag := Bag(items Vec(Int53))\nimpl Foldable for Bag do\n  type Elem := Int53\n  def to_list(b) := case b do Bag(xs) -> xs end\nend\npub def len(xs Vec(T)) Int53 forall T := case xs do\n  [] -> 0\n  [_ | t] -> 1 + len(t)\nend\npub def fcount(c C) Int53 forall C := len(to_list(c))",
+  # the `coerce_casts` use-site cast (ADR-0074): an erased `to_list(c)` (`List<Any>`) flowing into a
+  # CONCRETE `Vec(Int53)` param (`sum_l`) gets an `as List<Long>` cast (`sum_l((to_list(c) as List<Long>))`)
+  "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Elem)\nend\ntype Bag := Bag(items Vec(Int53))\nimpl Foldable for Bag do\n  type Elem := Int53\n  def to_list(b) := case b do Bag(xs) -> xs end\nend\npub def sum_l(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [h | t] -> h + sum_l(t)\nend\npub def fsum(c C) Int53 forall C := sum_l(to_list(c))"
 ]
 
 # Rian.Lower.rust_program — the `rustprog` stream: the WHOLE-PROGRAM Rust assembly (ADR-0061)
