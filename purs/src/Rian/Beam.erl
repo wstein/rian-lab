@@ -9,7 +9,7 @@
 %% purerl represents a PureScript `Array a` as an Erlang `array` (see Rian.HostRef), so the
 %% Array-taking builders convert with `array:to_list/1`.
 -export([mkAtomTerm/1, mkIntStr/1, mkIntI/1, mkFloatStr/1, mkBinary/1, strBytes/1, mkTuple/1,
-         mkList/1, runModulesImpl/2]).
+         mkList/1, runModulesImpl/3]).
 
 %% ── ETerm constructors (raw Erlang terms; the abstract-format nodes are tuples of these) ──
 mkAtomTerm(B) -> binary_to_atom(B, utf8).      %% a raw atom (module / op / function name)
@@ -27,15 +27,24 @@ mkList(Arr) -> array:to_list(Arr).
 %% for `${float}`, or sibling `mod`s) are compiled + loaded first, so a cross-module call from the
 %% main module resolves. Returns a binary: the `~p`-rendered result of `Main:main()`, or a
 %% `compile_error:`/`crash:` diagnostic (a comparable string under parity, never an exception).
-runModulesImpl(ModsArr, MainB) ->
+runModulesImpl(PreludeArr, ModsArr, MainB) ->
   Main = binary_to_atom(MainB, utf8),
-  Mods = array:to_list(ModsArr),
   try
-    lists:foreach(fun load_forms/1, Mods),
+    ensure_prelude(array:to_list(PreludeArr)),
+    lists:foreach(fun load_forms/1, array:to_list(ModsArr)),
     fmt("~p", [Main:main()])
   catch
     throw:{compile_error, Err} -> fmt("compile_error: ~p", [Err]);
     Class:Reason -> fmt("crash: ~p:~p", [Class, Reason])
+  end.
+
+%% Compile + load the portable-prelude modules ONCE per VM (idempotent): if the sentinel
+%% `Elixir.Rian.Prelude.List` is already loaded, every prelude module is, so skip the (Erlang-)
+%% compiler work on every subsequent program. Mirrors `Rian.Prelude.load/0`.
+ensure_prelude(Forms) ->
+  case code:is_loaded('Elixir.Rian.Prelude.List') of
+    false -> lists:foreach(fun load_forms/1, Forms);
+    _ -> ok
   end.
 
 load_forms(Forms) ->

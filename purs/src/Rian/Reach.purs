@@ -24,6 +24,7 @@ module Rian.Reach
   , analyzeSexpr
   , effectSets
   , effectSetsSexpr
+  , preludeDefines
   ) where
 
 import Prelude

@@ -2192,7 +2192,27 @@ beam_corpus = [
   # a negative float through `Show` (exercises the recursive `Show.signed`/`neg`/`magnitude` path)
   "pub def main() String := \"${-2.25}\"",
   # a user multi-`mod` program — top-level `main` calls a sibling `mod`'s function (`Elixir.Math`)
-  "mod Math do\n  pub def sq(n Int53) Int53 := n * n\nend\npub def main() Int53 := Math.sq(7) + 1"
+  "mod Math do\n  pub def sq(n Int53) Int53 := n * n\nend\npub def main() Int53 := Math.sq(7) + 1",
+  # ── inc 11: lambdas / captures / variable application (the HOF foundation) ──
+  # a user-defined HOF applies a passed fun (`f(x)` is a variable application, not a local call)
+  "pub def apply2(f Fn(Int53, Int53), x Int53) Int53 := f(f(x))\npub def main() Int53 := apply2((n) -> n + 3, 10)",
+  # map over a list with a lambda → an Erlang `fun` (recursion + var-application + `ELambda`)
+  "pub def my_map(xs Vec(Int53), f Fn(Int53, Int53)) Vec(Int53) := case xs do\n  [] -> []\n  [h | t] -> [f(h) | my_map(t, f)]\nend\npub def main() Vec(Int53) := my_map([1, 2, 3], (n) -> n * n)",
+  # an anonymous capture `&(&1 * 2)` → a `fun` over `caparg_1`
+  "pub def app(f Fn(Int53, Int53), x Int53) Int53 := f(x)\npub def main() Int53 := app(&(&1 * 2), 21)",
+  # a named capture `&fn/1` → a `fun fn/1` reference passed as a value
+  "pub def dbl(n Int53) Int53 := n * 2\npub def app(f Fn(Int53, Int53), x Int53) Int53 := f(x)\npub def main() Int53 := app(&dbl/1, 21)",
+  # ── inc 12: portable-prelude linkage (List/Dict/Str/Int → linked Rian.Prelude.* modules) ──
+  # `Int.wrapping_add` → the linked `Elixir.Rian.Prelude.Int` (over the `__prim_wrapping_add` op)
+  "pub def main() Int64 := Int.wrapping_add(9223372036854775807, 1)",
+  # `List.map` with a lambda → the linked `Rian.Prelude.List` (recursion + var-application HOF)
+  "pub def main() Vec(Int53) := List.map([1, 2, 3], (n) -> n * n)",
+  # `List.sum` / `List.length` — reducer-style prelude functions
+  "pub def main() Int53 := List.sum([10, 20, 30]) + List.length([1, 2, 3, 4])",
+  # `List.all` over a bool list → the prelude's short-circuit fold
+  "pub def main() Bool := List.all([true, true, false])",
+  # `Str.length` → the linked `Rian.Prelude.Str` (over `Prim.str_chars` + a recursive count)
+  "pub def main() Int53 := Str.length(\"hello\")"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses

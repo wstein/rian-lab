@@ -52,27 +52,37 @@
 -- | hole, which now compiles + loads as an aux mod and runs end-to-end (the String⇄charlist prims
 -- | `__prim_str_chars`/`_from_chars`/`_to_atom` lower to the pure-Erlang `unicode:*`/`erlang:*` BIFs
 -- | rather than the reference's `Elixir.String.*` — an equivalent result with no Elixir runtime
--- | needed, the one deliberate emit divergence). **Deferred (later increments):** specs/`type` attrs,
--- | and the **`List`/`Dict`/`Str`/`Int` prelude linkage** (the `Rian.Prelude.<Name>` redirect in
--- | `moduleAtom` + bundling/compiling the prelude `.rian` sources). An unported node raises a clear
--- | crash.
+-- | needed, the one deliberate emit divergence). Inc 11: **lambdas / captures / variable application**
+-- | (the higher-order foundation) — `expr_form` now threads a `scope` (the bound-name set: clause-head
+-- | pattern vars + `:=` binds + lambda/capture params, via `patVars`/`blockForms`), so a call `f(args)`
+-- | over a bound (fun-valued) name lowers to a **variable application** (`{call, {var,F}, args}`)
+-- | rather than a local call; an `ELambda`/`ECapture` lowers to an Erlang `fun` (its params extend the
+-- | scope), `&name/arity` / `&Mod.fun/arity` to a `fun …/arity` reference, and a generic-callee
+-- | `ECall` (an immediately-applied lambda) applies the callee form. Inc 12: the **portable-prelude
+-- | linkage** (ADR-0047 §2) — the bundled `List`/`Dict`/`Str`/`Int` `.rian` sources (`Rian.PreludeSrc`,
+-- | generated from `examples/rian/prelude_*.rian`) each compile to a private `Elixir.Rian.Prelude.<Name>`
+-- | module (`preludeForms`), loaded once per VM by `runModulesImpl` (idempotent via the
+-- | `Elixir.Rian.Prelude.List` sentinel); `moduleAtom` redirects a `List.fun(…)` call (per
+-- | `Rian.Reach.preludeDefines`) to its linked module rather than an Elixir/Erlang same-named stdlib —
+-- | so `List.map`/`List.sum`/`Str.length`/`Int.wrapping_add`/… run. **Deferred (later increments):**
+-- | `-spec`/`type` attrs. An unported node raises a clear crash.
 module Rian.Beam
   ( runMain
   ) where
 
 import Prelude
 
-import Data.Array (all, elem, filter, find, head, length, null, uncons)
+import Data.Array (all, concatMap, elem, filter, find, head, length, null, range, snoc, uncons)
 import Data.Foldable (foldl, foldr)
-import Data.Maybe (Maybe(..), fromMaybe)
+import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String (Pattern(..), Replacement(..), contains, drop, replaceAll, stripPrefix, take) as Str
 import Data.String.CodeUnits (charAt, toCharArray) as CU
 import Data.String.Common (toUpper)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), snd)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
-import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), capArity, fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.External (render) as External
 import Rian.IR (Body, Clause, Const, Func, Prog, bodySurface)
@@ -80,7 +90,9 @@ import Rian.IR as IR
 import Rian.Macro (mapNode)
 import Rian.PatternLower (toSnake)
 import Rian.Pratt (Pat(..), Surface(..), parse) as P
+import Rian.PreludeSrc (sources) as PreludeSrc
 import Rian.Prim (normalize)
+import Rian.Reach (preludeDefines)
 
 -- ── the Erlang-FFI boundary (Beam.erl) ───────────────────────────────────────
 foreign import data ETerm :: Type
@@ -92,9 +104,10 @@ foreign import mkBinary :: String -> ETerm -- a raw binary (a Rian String litera
 foreign import strBytes :: String -> ETerm -- a String's UTF-8 byte charlist (a `{string,…}` node)
 foreign import mkTuple :: Array ETerm -> ETerm
 foreign import mkList :: Array ETerm -> ETerm
--- compile each module's forms → load all → run `Main:main()` → the `~p`-rendered result (or a
--- diagnostic). The first arg is the array of module-forms (aux mods + the main module).
-foreign import runModulesImpl :: Array ETerm -> String -> String
+-- compile + load the prelude modules (arg 1, ONCE per VM — idempotent), then the program's own
+-- modules (arg 2, every call), run `Main:main()` (arg 3), and return the `~p`-rendered result (or a
+-- diagnostic).
+foreign import runModulesImpl :: Array ETerm -> Array ETerm -> String -> String
 
 -- | Compile `src` to BEAM abstract forms, load the module, run its `main/0`, and return the
 -- | stringified result (or a `Rian.Check:`/`compile_error:` diagnostic). The execution-parity entry.
@@ -103,7 +116,7 @@ runMain :: String -> String
 runMain src =
   case checkProgram prog of
     Just msg -> "Rian.Check: " <> msg
-    Nothing -> runModulesImpl (auxForms <> [ mainForms ]) "rian_main"
+    Nothing -> runModulesImpl preludeForms (auxForms <> [ mainForms ]) "rian_main"
   where
   prog = runProgramTail (assemble (parseToProg src))
   -- the main module = the top-level funcs (or the single pulled-up `mod`), named `rian_main`.
@@ -116,6 +129,16 @@ runMain src =
     [] -> []
     _ -> map auxModuleForms prog.mods
   auxModuleForms m = moduleForms ("Elixir." <> m.name) m.funcs m.consts (registryFrom m.types m.structs)
+
+-- the portable-prelude (`List`/`Dict`/`Str`/`Int`) module forms, compiled from the bundled `.rian`
+-- sources (`Rian.PreludeSrc`) — each `mod M` → a private `Elixir.Rian.Prelude.M` module, so a
+-- `List.fun(…)` call (redirected by `moduleAtom`) resolves to its linked implementation rather than
+-- clobbering an Elixir/Erlang same-named stdlib. Loaded once per VM by `runModulesImpl`. Mirrors
+-- `Rian.Prelude.beams`/`load`.
+preludeForms :: Array ETerm
+preludeForms = concatMap (\src -> map preludeMod (assemble (parseToProg src)).mods) PreludeSrc.sources
+  where
+  preludeMod m = moduleForms ("Elixir.Rian.Prelude." <> m.name) m.funcs m.consts (registryFrom m.types m.structs)
 
 -- the functions to compile: a single `mod`'s, else the top-level ones (mirrors `funcs_of`).
 funcsOf :: Prog -> Array Func
@@ -160,7 +183,7 @@ moduleForms modName funcs0 consts reg =
 -- a `const NAME := value` (ADR-0033) → its 0-arity accessor `name() -> value` (snake-cased name,
 -- so `EConstRef` resolves to the same target). The value is a source expression string.
 constForm :: Array String -> Registry -> Const -> ETerm
-constForm cnames reg c = fFunction (toSnake c.name) 0 [ fClause [] noGuard (bodyForms (desugarTyped reg (parseResolved cnames (P.parse c.value)))) ]
+constForm cnames reg c = fFunction (toSnake c.name) 0 [ fClause [] noGuard (bodyForms [] (desugarTyped reg (parseResolved cnames (P.parse c.value)))) ]
 
 -- parse a body/value/guard surface, rewriting a reference to a declared `const` (`SId NAME` with
 -- NAME in the set) into a `SConstRef` so it lowers to the accessor call (mirrors `resolve_consts`),
@@ -197,124 +220,192 @@ functionForm cnames reg f =
 -- a function clause → `{clause, 1, [PatForm], Guard, [BodyForm]}`. A multi-clause `def` is one
 -- Erlang function with one clause per group member (Erlang dispatches natively); a `when` guard
 -- lowers to the Erlang guard sequence `[[GuardExpr]]`. `cnames` resolves const references in the body.
+-- `sc` is the set of names bound in scope (clause-head pattern vars + `:=` binds + lambda/capture
+-- params), so a call `f(args)` whose `f` is a bound (fun-valued) name lowers to a **variable
+-- application** rather than a local call (mirrors the reference's `scope` map). It is consulted at
+-- exactly one place — the `ECall (EId f)` clause — but threaded everywhere a nested call can occur.
 clauseForm :: Array String -> Registry -> Clause -> ETerm
 clauseForm cnames reg c =
-  fClause (map (patForm <<< fromPat) c.pats) (clauseGuardForm cnames c.guard) (bodyForms (desugarTyped reg (bodyExprOf cnames c.body)))
+  let
+    corePats = map fromPat c.pats
+    sc = concatMap patVars corePats
+  in
+    fClause (map patForm corePats) (clauseGuardForm cnames sc c.guard)
+      (bodyForms sc (desugarTyped reg (bodyExprOf cnames c.body)))
 
 -- a function clause's `when` guard (a source string) → the Erlang guard sequence; `Nothing` → `[]`.
-clauseGuardForm :: Array String -> Maybe String -> ETerm
-clauseGuardForm _ Nothing = noGuard
-clauseGuardForm cnames (Just g) = mkList [ mkList [ exprForm (parseResolved cnames (P.parse g)) ] ]
+clauseGuardForm :: Array String -> Array String -> Maybe String -> ETerm
+clauseGuardForm _ _ Nothing = noGuard
+clauseGuardForm cnames sc (Just g) = mkList [ mkList [ exprForm sc (parseResolved cnames (P.parse g)) ] ]
 
 -- a `case`-arm guard (already core) → the Erlang guard sequence `[[GuardExpr]]`; `Nothing` → `[]`.
-armGuardForm :: Maybe CExpr -> ETerm
-armGuardForm Nothing = noGuard
-armGuardForm (Just g) = mkList [ mkList [ exprForm g ] ]
+armGuardForm :: Array String -> Maybe CExpr -> ETerm
+armGuardForm _ Nothing = noGuard
+armGuardForm sc (Just g) = mkList [ mkList [ exprForm sc g ] ]
 
--- a `:=` body parses to an `EBlock`; lower each statement to a body form (a bare expression is a
--- one-statement body).
-bodyForms :: CExpr -> Array ETerm
-bodyForms (EBlock stmts) = map stmtForm stmts
-bodyForms e = [ exprForm e ]
+-- a `:=` body parses to an `EBlock`; lower each statement, threading the scope (a bind extends it).
+bodyForms :: Array String -> CExpr -> Array ETerm
+bodyForms sc (EBlock stmts) = blockForms sc stmts
+bodyForms sc e = [ exprForm sc e ]
 
-stmtForm :: CStmt -> ETerm
-stmtForm (CExprStmt e) = exprForm e
+-- lower a statement block: a `:=` bind's RHS is lowered in the scope BEFORE the bind, then the bound
+-- name extends the scope for the following statements (so a later `f(x)` over a bound fun is a var app).
+blockForms :: Array String -> Array CStmt -> Array ETerm
+blockForms sc stmts = case uncons stmts of
+  Nothing -> []
+  Just { head: CExprStmt e, tail: rest } -> [ exprForm sc e ] <> blockForms sc rest
+  Just { head: CBind n e, tail: rest } -> [ bindForm sc n e ] <> blockForms (snoc sc n) rest
+  Just { head: CTypedBind n _ e, tail: rest } -> [ bindForm sc n e ] <> blockForms (snoc sc n) rest
+
 -- a `:=` bind → an Erlang `{match, 1, {var,…}, Rhs}` (the declared type is erased, ADR-0034 §1).
-stmtForm (CBind n e) = mkTuple [ mkAtomTerm "match", ln, fVar (varAtom n), exprForm e ]
-stmtForm (CTypedBind n _ e) = mkTuple [ mkAtomTerm "match", ln, fVar (varAtom n), exprForm e ]
+bindForm :: Array String -> String -> CExpr -> ETerm
+bindForm sc n e = mkTuple [ mkAtomTerm "match", ln, fVar (varAtom n), exprForm sc e ]
+
+-- the names a pattern binds (so they extend the scope for the clause/arm body). Mirrors `pat_vars`.
+patVars :: CPat -> Array String
+patVars (PVar x) = [ x ]
+patVars (PAs x p) = [ x ] <> patVars p
+patVars (PTuple ps) = concatMap patVars ps
+patVars (PList ps tail) = concatMap patVars ps <> maybe [] patVars tail
+patVars (PCtor _ ps) = concatMap patVars ps
+patVars (PStruct _ fs) = concatMap (patVars <<< snd) fs
+patVars (PMap pairs) = concatMap mapPatVars pairs
+patVars (PTyped name _ _) = [ name ]
+patVars _ = []
+
+mapPatVars :: CMapPatPair -> Array String
+mapPatVars (CMPAtom _ p) = patVars p
+mapPatVars (CMPKey _ p) = patVars p
 
 -- ── expressions → abstract forms ─────────────────────────────────────────────
-exprForm :: CExpr -> ETerm
-exprForm (ENum n) = numForm n
-exprForm (EChar cp) = fIntegerI cp
-exprForm (EStr s) = fStr s
-exprForm (EId "true") = fAtom "true"
-exprForm (EId "false") = fAtom "false"
+exprForm :: Array String -> CExpr -> ETerm
+exprForm _ (ENum n) = numForm n
+exprForm _ (EChar cp) = fIntegerI cp
+exprForm _ (EStr s) = fStr s
+exprForm _ (EId "true") = fAtom "true"
+exprForm _ (EId "false") = fAtom "false"
 -- a lowercase identifier is a variable; a PascalCase one is a nullary constructor (its atom tag).
-exprForm (EId x) = if startsUpper x then fAtom (toSnake x) else fVar (varAtom x)
-exprForm (EAtom a) = fAtom a
+exprForm _ (EId x) = if startsUpper x then fAtom (toSnake x) else fVar (varAtom x)
+exprForm _ (EAtom a) = fAtom a
 -- a `const NAME` reference → a call to its 0-arity accessor `name()` (ADR-0033).
-exprForm (EConstRef name) = fCall (fAtom (toSnake name)) []
+exprForm _ (EConstRef name) = fCall (fAtom (toSnake name)) []
 -- a list literal `[a, b]` / cons `[h | t]` → an Erlang `{cons, …}` chain (`{nil,…}`-terminated).
-exprForm (EList elems tail) = consForm exprForm elems tail
+exprForm sc (EList elems tail) = consForm (exprForm sc) elems tail
 -- a tuple `{a, b}` → an Erlang `{tuple, 1, […]}`.
-exprForm (ETuple es) = tupleForm exprForm es
+exprForm sc (ETuple es) = tupleForm (exprForm sc) es
 -- a struct construction `Name(f: v, …)` → a `__struct__`-tagged Erlang map.
-exprForm (EStruct name fields) =
-  mapForm ([ mapFieldAssoc (fAtom "__struct__") (fAtom (toSnake name)) ] <> map structFieldAssoc fields)
+exprForm sc (EStruct name fields) =
+  mapForm ([ mapFieldAssoc (fAtom "__struct__") (fAtom (toSnake name)) ] <> map (structFieldAssoc sc) fields)
 -- a map literal `%{k: v, …}` → an Erlang `#{k => v, …}`.
-exprForm (EMap pairs) = mapForm (map mapPairAssoc pairs)
+exprForm sc (EMap pairs) = mapForm (map (mapPairAssoc sc) pairs)
 -- field access `value.field` → `maps:get(:field, Value)`.
-exprForm (EDot head_ field) = remoteCall "maps" "get" [ fAtom field, exprForm head_ ]
-exprForm (EUnary "-" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "-", exprForm x ]
-exprForm (EUnary "not" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "not", exprForm x ]
+exprForm sc (EDot head_ field) = remoteCall "maps" "get" [ fAtom field, exprForm sc head_ ]
+exprForm sc (EUnary "-" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "-", exprForm sc x ]
+exprForm sc (EUnary "not" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "not", exprForm sc x ]
 -- string concat `<>` → a `<<L/binary, R/binary>>` binary (Erlang has no `<>` op).
-exprForm (EBin "<>" l r) = fBin [ binSeg (exprForm l), binSeg (exprForm r) ]
+exprForm sc (EBin "<>" l r) = fBin [ binSeg (exprForm sc l), binSeg (exprForm sc r) ]
 -- list membership `x in xs` → `lists:member(x, xs)` (the portable surface op, ADR-0047).
-exprForm (EBin "in" l r) = remoteCall "lists" "member" [ exprForm l, exprForm r ]
-exprForm (EBin op l r) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm (erlOp op), exprForm l, exprForm r ]
+exprForm sc (EBin "in" l r) = remoteCall "lists" "member" [ exprForm sc l, exprForm sc r ]
+exprForm sc (EBin op l r) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm (erlOp op), exprForm sc l, exprForm sc r ]
 -- ── the portable `Prim.*` intrinsics (inc 5) → native Erlang/Elixir-runtime forms ──
-exprForm (ECall (EId "__prim_map_new") []) = mapForm []
-exprForm (ECall (EId "__prim_map_get") [ m, k ]) = remoteCall "maps" "get" [ exprForm k, exprForm m ]
-exprForm (ECall (EId "__prim_map_put") [ m, k, v ]) = remoteCall "maps" "put" [ exprForm k, exprForm v, exprForm m ]
-exprForm (ECall (EId "__prim_map_has") [ m, k ]) = remoteCall "maps" "is_key" [ exprForm k, exprForm m ]
+exprForm _ (ECall (EId "__prim_map_new") []) = mapForm []
+exprForm sc (ECall (EId "__prim_map_get") [ m, k ]) = remoteCall "maps" "get" [ exprForm sc k, exprForm sc m ]
+exprForm sc (ECall (EId "__prim_map_put") [ m, k, v ]) = remoteCall "maps" "put" [ exprForm sc k, exprForm sc v, exprForm sc m ]
+exprForm sc (ECall (EId "__prim_map_has") [ m, k ]) = remoteCall "maps" "is_key" [ exprForm sc k, exprForm sc m ]
 -- a value-union struct discriminator's map-value read (inc 8) → the guard-safe BIF `erlang:map_get/2`.
-exprForm (ECall (EId "__beam_map_get") [ k, m ]) = remoteCall "erlang" "map_get" [ exprForm k, exprForm m ]
-exprForm (ECall (EId "__prim_str_concat") [ a, b ]) = fBin [ binSeg (exprForm a), binSeg (exprForm b) ]
-exprForm (ECall (EId "__prim_str_concat_all") args) = fBin (map (binSeg <<< exprForm) args)
-exprForm (ECall (EId "__prim_char_to_string") [ c ]) =
-  fBin [ mkTuple [ mkAtomTerm "bin_element", ln, exprForm c, mkAtomTerm "default", mkList [ mkAtomTerm "utf8" ] ] ]
-exprForm (ECall (EId "__prim_char_code") [ c ]) = exprForm c
-exprForm (ECall (EId "__prim_int_to_string") [ n ]) = remoteCall "erlang" "integer_to_binary" [ exprForm n ]
-exprForm (ECall (EId "__prim_int_to_float") [ n ]) = remoteCall "erlang" "float" [ exprForm n ]
-exprForm (ECall (EId "__prim_float_repr") [ n ]) =
-  remoteCall "erlang" "float_to_binary" [ exprForm n, mkTuple [ mkAtomTerm "cons", ln, fAtom "short", mkTuple [ mkAtomTerm "nil", ln ] ] ]
-exprForm (ECall (EId "__prim_str_to_float") [ s ]) = remoteCall "erlang" "binary_to_float" [ exprForm s ]
-exprForm (ECall (EId "__prim_to_string") [ x ]) = remoteCall "Elixir.String.Chars" "to_string" [ exprForm x ]
-exprForm (ECall (EId "__prim_panic") [ m ]) = remoteCall "erlang" "error" [ exprForm m ]
+exprForm sc (ECall (EId "__beam_map_get") [ k, m ]) = remoteCall "erlang" "map_get" [ exprForm sc k, exprForm sc m ]
+exprForm sc (ECall (EId "__prim_str_concat") [ a, b ]) = fBin [ binSeg (exprForm sc a), binSeg (exprForm sc b) ]
+exprForm sc (ECall (EId "__prim_str_concat_all") args) = fBin (map (binSeg <<< exprForm sc) args)
+exprForm sc (ECall (EId "__prim_char_to_string") [ c ]) =
+  fBin [ mkTuple [ mkAtomTerm "bin_element", ln, exprForm sc c, mkAtomTerm "default", mkList [ mkAtomTerm "utf8" ] ] ]
+exprForm sc (ECall (EId "__prim_char_code") [ c ]) = exprForm sc c
+exprForm sc (ECall (EId "__prim_int_to_string") [ n ]) = remoteCall "erlang" "integer_to_binary" [ exprForm sc n ]
+exprForm sc (ECall (EId "__prim_int_to_float") [ n ]) = remoteCall "erlang" "float" [ exprForm sc n ]
+exprForm sc (ECall (EId "__prim_float_repr") [ n ]) =
+  remoteCall "erlang" "float_to_binary" [ exprForm sc n, mkTuple [ mkAtomTerm "cons", ln, fAtom "short", mkTuple [ mkAtomTerm "nil", ln ] ] ]
+exprForm sc (ECall (EId "__prim_str_to_float") [ s ]) = remoteCall "erlang" "binary_to_float" [ exprForm sc s ]
+exprForm sc (ECall (EId "__prim_to_string") [ x ]) = remoteCall "Elixir.String.Chars" "to_string" [ exprForm sc x ]
+exprForm sc (ECall (EId "__prim_panic") [ m ]) = remoteCall "erlang" "error" [ exprForm sc m ]
 -- the String ⇄ charlist/atom conversions: the purerl backend lowers these to the **pure-Erlang**
 -- BIFs (not the Elixir-stdlib calls the Elixir reference emits — `Elixir.String.to_charlist` etc.,
 -- which themselves delegate to exactly these), so the emitted `.beam` runs with no Elixir runtime
 -- loaded. The result is identical, so execution parity against the reference holds; this is the one
 -- deliberate emit divergence, and it is what makes the injected `Show` module (and thus `${float}`)
 -- run in the plain-Erlang harness.
-exprForm (ECall (EId "__prim_str_chars") [ s ]) = remoteCall "unicode" "characters_to_list" [ exprForm s, fAtom "utf8" ]
-exprForm (ECall (EId "__prim_str_from_chars") [ cs ]) = remoteCall "unicode" "characters_to_binary" [ exprForm cs, fAtom "utf8" ]
-exprForm (ECall (EId "__prim_str_to_atom") [ s ]) = remoteCall "erlang" "binary_to_atom" [ exprForm s, fAtom "utf8" ]
+exprForm sc (ECall (EId "__prim_str_chars") [ s ]) = remoteCall "unicode" "characters_to_list" [ exprForm sc s, fAtom "utf8" ]
+exprForm sc (ECall (EId "__prim_str_from_chars") [ cs ]) = remoteCall "unicode" "characters_to_binary" [ exprForm sc cs, fAtom "utf8" ]
+exprForm sc (ECall (EId "__prim_str_to_atom") [ s ]) = remoteCall "erlang" "binary_to_atom" [ exprForm sc s, fAtom "utf8" ]
 -- explicit 64-bit overflow ops (ADR-0035 §3): BEAM ints are bignums, so compute the true sum once
 -- (an immediately-applied `fun`) then project onto signed-64: wrap / saturate / check.
-exprForm (ECall (EId "__prim_wrapping_add") [ a, b ]) = i64Overflow Wrapping a b
-exprForm (ECall (EId "__prim_saturating_add") [ a, b ]) = i64Overflow Saturating a b
-exprForm (ECall (EId "__prim_checked_add") [ a, b ]) = i64Overflow Checked a b
+exprForm sc (ECall (EId "__prim_wrapping_add") [ a, b ]) = i64Overflow sc Wrapping a b
+exprForm sc (ECall (EId "__prim_saturating_add") [ a, b ]) = i64Overflow sc Saturating a b
+exprForm sc (ECall (EId "__prim_checked_add") [ a, b ]) = i64Overflow sc Checked a b
 -- a module-qualified call `Mod.fun(args)` / `:erlang.fun(args)` (inc 9, `@external` host bodies) →
 -- an Erlang remote call. A PascalCase head is an Elixir module (`String` → `'Elixir.String'`); a
 -- lowercase/atom head is an Erlang module verbatim (`:erlang` → `erlang`).
-exprForm (ECall (EDot (EId m) fun) args) = remoteCall (moduleAtom m fun) fun (map exprForm args)
-exprForm (ECall (EDot (EAtom m) fun) args) = remoteCall m fun (map exprForm args)
--- an all-labeled call `Name(f: v, …)` is struct construction → a `__struct__`-tagged map; a
--- PascalCase positional call `Circle(r)` is sum construction → a tagged tuple `{circle, R}`; a
--- lowercase `f(args)` is a local call (inc 3/4: no var application / imports / cross-module yet).
-exprForm (ECall (EId f) args) = case head args of
-  Just (ELabel _ _) ->
-    mapForm ([ mapFieldAssoc (fAtom "__struct__") (fAtom (toSnake f)) ] <> map labelAssoc args)
-  _ ->
-    if startsUpper f then ctorForm (toSnake f) (map exprForm args)
-    else fCall (fAtom f) (map exprForm args)
+exprForm sc (ECall (EDot (EId m) fun) args) = remoteCall (moduleAtom m fun) fun (map (exprForm sc) args)
+exprForm sc (ECall (EDot (EAtom m) fun) args) = remoteCall m fun (map (exprForm sc) args)
+-- a positional call `f(args)`: a name bound in scope is a **variable application** (`f` is a
+-- fun-valued binding → `{call, {var,F}, args}`); a PascalCase name is sum construction → a tagged
+-- tuple `{circle, R}`; an all-labeled `Name(f: v, …)` is struct construction → a `__struct__` map;
+-- otherwise a local function call.
+exprForm sc (ECall (EId f) args)
+  | elem f sc = fCall (fVar (varAtom f)) (map (exprForm sc) args)
+  | otherwise = case head args of
+      Just (ELabel _ _) ->
+        mapForm ([ mapFieldAssoc (fAtom "__struct__") (fAtom (toSnake f)) ] <> map (labelAssoc sc) args)
+      _ ->
+        if startsUpper f then ctorForm (toSnake f) (map (exprForm sc) args)
+        else fCall (fAtom f) (map (exprForm sc) args)
+-- a call to any other callee expression (e.g. an immediately-applied lambda) → apply the callee form.
+exprForm sc (ECall callee args) = fCall (exprForm sc callee) (map (exprForm sc) args)
+-- a lambda `(a, b) -> body` → an Erlang `fun`; its params extend the scope for the body.
+exprForm sc (ELambda params body) =
+  let names = map _.name params
+  in funForm [ fClause (map (fVar <<< varAtom) names) noGuard (bodyForms (sc <> names) body) ]
+-- an anonymous capture `&(&1 + &2)` → a `fun` over the generated args `caparg_1..N`.
+exprForm sc (ECapture body) =
+  let names = capNames (capArity body)
+  in funForm [ fClause (map (fVar <<< varAtom) names) noGuard (bodyForms (sc <> names) body) ]
+-- `&name/arity` → a local fun reference `fun name/arity`; `&Mod.fun/arity` → a remote one.
+exprForm _ (ECaptureNamed (EId nm) a) = mkTuple [ mkAtomTerm "fun", ln, mkTuple [ mkAtomTerm "function", mkAtomTerm nm, mkIntI a ] ]
+exprForm _ (ECaptureNamed (EDot (EId m) fun) a) = funRef (moduleAtom m fun) fun a
+exprForm _ (ECaptureNamed (EDot (EAtom m) fun) a) = funRef m fun a
+exprForm _ (ECapArg n) = fVar (varAtom (capName n))
 -- `if c do t else e end` → an Erlang `case c of true -> t; false -> e end`.
-exprForm (EIf c t e) =
+exprForm sc (EIf c t e) =
   mkTuple
     [ mkAtomTerm "case"
     , ln
-    , exprForm c
-    , mkList [ fClause [ fAtom "true" ] noGuard (bodyForms t), fClause [ fAtom "false" ] noGuard (bodyForms e) ]
+    , exprForm sc c
+    , mkList [ fClause [ fAtom "true" ] noGuard (bodyForms sc t), fClause [ fAtom "false" ] noGuard (bodyForms sc e) ]
     ]
 -- `case scrut do pat [when g] -> body … end` → an Erlang `{case, 1, Scrut, [Clause]}`.
-exprForm (ECase scrut arms) =
-  mkTuple [ mkAtomTerm "case", ln, exprForm scrut, mkList (map caseArmForm arms) ]
-exprForm _ = unsafeCrashWith "abstract-forms: unported expression (Phase 8 inc 1)"
+exprForm sc (ECase scrut arms) =
+  mkTuple [ mkAtomTerm "case", ln, exprForm sc scrut, mkList (map (caseArmForm sc) arms) ]
+exprForm _ _ = unsafeCrashWith "abstract-forms: unported expression (Phase 8)"
 
-caseArmForm :: CArm -> ETerm
-caseArmForm arm = fClause [ patForm arm.pat ] (armGuardForm arm.guard) (bodyForms arm.body)
+-- a `case` arm → an Erlang clause; the arm pattern's bindings extend the scope for its guard + body.
+caseArmForm :: Array String -> CArm -> ETerm
+caseArmForm sc arm =
+  let inner = sc <> patVars arm.pat
+  in fClause [ patForm arm.pat ] (armGuardForm inner arm.guard) (bodyForms inner arm.body)
+
+-- the generated capture-argument names `caparg_1..n` (the reference's `caparg_#{i}`).
+capNames :: Int -> Array String
+capNames n = if n < 1 then [] else map capName (range 1 n)
+
+capName :: Int -> String
+capName n = "caparg_" <> show n
+
+-- an `{fun, 1, {clauses, […]}}` over already-built fun clauses.
+funForm :: Array ETerm -> ETerm
+funForm clauses = mkTuple [ mkAtomTerm "fun", ln, mkTuple [ mkAtomTerm "clauses", mkList clauses ] ]
+
+-- a remote fun reference `fun mod:fun/arity` → `{fun, 1, {function, {atom,mod}, {atom,fun}, {integer,a}}}`.
+funRef :: String -> String -> Int -> ETerm
+funRef mod fun a =
+  mkTuple [ mkAtomTerm "fun", ln, mkTuple [ mkAtomTerm "function", fAtom mod, fAtom fun, fIntegerI a ] ]
 
 -- ── value-union type-pattern discrimination (inc 8, ADR-0083) ─────────────────
 -- The sum/struct registry threaded (like `cnames`) so a case-arm type-pattern `n Type` can build
@@ -472,6 +563,8 @@ patForm (PLit (LInt n)) = fIntegerI n
 patForm (PLit (LStr s)) = fStr s
 -- a char-literal pattern `'-'` → its integer codepoint (a `Char` is an integer, as `EChar`).
 patForm (PChar cp) = fIntegerI cp
+-- an as-pattern `name @ pat` → the Erlang match pattern `Name = Pat`.
+patForm (PAs name p) = mkTuple [ mkAtomTerm "match", ln, fVar (varAtom name), patForm p ]
 patForm (PAtom a) = fAtom a
 -- a sum pattern `Circle(r)` → the tagged-tuple pattern `{circle, R}` (a nullary ctor → its atom).
 patForm (PCtor name args) = ctorForm (toSnake name) (map patForm args)
@@ -557,39 +650,44 @@ mapFieldExact k v = mkTuple [ mkAtomTerm "map_field_exact", ln, k, v ]
 
 -- a struct field `f: v` (construction) → `f => v`; `f: p` (pattern) → `f := p`. The key is the
 -- field-name atom.
-structFieldAssoc :: Tuple String CExpr -> ETerm
-structFieldAssoc (Tuple f v) = mapFieldAssoc (fAtom f) (exprForm v)
+structFieldAssoc :: Array String -> Tuple String CExpr -> ETerm
+structFieldAssoc sc (Tuple f v) = mapFieldAssoc (fAtom f) (exprForm sc v)
 
 -- a labeled call argument `f: v` → the struct map field `f => v` (a labeled `Name(f: v, …)` call
 -- is struct construction, mirroring the reference's `ECall{args: [ELabel | _]}`).
-labelAssoc :: CExpr -> ETerm
-labelAssoc (ELabel f v) = mapFieldAssoc (fAtom f) (exprForm v)
-labelAssoc _ = unsafeCrashWith "abstract-forms: a non-label in a labeled call"
+labelAssoc :: Array String -> CExpr -> ETerm
+labelAssoc sc (ELabel f v) = mapFieldAssoc (fAtom f) (exprForm sc v)
+labelAssoc _ _ = unsafeCrashWith "abstract-forms: a non-label in a labeled call"
 
 structFieldPat :: Tuple String CPat -> ETerm
 structFieldPat (Tuple f p) = mapFieldExact (fAtom f) (patForm p)
 
 -- a map-literal pair → `k => v` (an atom key, or a computed `{:key, e}` key).
-mapPairAssoc :: CMapPair -> ETerm
-mapPairAssoc (CMAtom k v) = mapFieldAssoc (fAtom k) (exprForm v)
-mapPairAssoc (CMKey k v) = mapFieldAssoc (exprForm k) (exprForm v)
+mapPairAssoc :: Array String -> CMapPair -> ETerm
+mapPairAssoc sc (CMAtom k v) = mapFieldAssoc (fAtom k) (exprForm sc v)
+mapPairAssoc sc (CMKey k v) = mapFieldAssoc (exprForm sc k) (exprForm sc v)
 
 -- a map-pattern pair → `k := p` (a map pattern always matches exactly on the listed keys).
+-- a map-pattern pair → `k := p`; a computed key is lowered scope-free (`[]`) — it never names a
+-- clause-local fun in practice, and the scope only affects a call-position name.
 mapPatPairExact :: CMapPatPair -> ETerm
 mapPatPairExact (CMPAtom k p) = mapFieldExact (fAtom k) (patForm p)
-mapPatPairExact (CMPKey k p) = mapFieldExact (exprForm k) (patForm p)
+mapPatPairExact (CMPKey k p) = mapFieldExact (exprForm [] k) (patForm p)
 
 -- a remote call `mod:fun(args)` → `{call, 1, {remote, 1, {atom,1,mod}, {atom,1,fun}}, [args]}`.
 remoteCall :: String -> String -> Array ETerm -> ETerm
 remoteCall mod fun args =
   mkTuple [ mkAtomTerm "call", ln, mkTuple [ mkAtomTerm "remote", ln, fAtom mod, fAtom fun ], mkList args ]
 
--- the Erlang module atom for an `EId`-headed `Mod.fun` call: a PascalCase head is an Elixir module
--- (`String` → `Elixir.String`), a lowercase one is an Erlang module verbatim. Mirrors `module_atom`
--- (the portable-prelude redirect — `List`/`Dict`/`Str`/`Int` → the linked `Rian.Prelude.<Name>` — is
--- the cross-module/prelude increment; until then a prelude call lowers to its bare module name).
+-- the Erlang module atom for an `EId`-headed `Mod.fun` call (mirrors `module_atom`): a
+-- portable-prelude call (`List`/`Dict`/`Str`/`Int`, per `preludeDefines`) redirects to its linked
+-- `Elixir.Rian.Prelude.<Name>` module; otherwise a PascalCase head is an Elixir module
+-- (`String` → `Elixir.String`) and a lowercase one is an Erlang module verbatim.
 moduleAtom :: String -> String -> String
-moduleAtom m _fun = if startsUpper m then "Elixir." <> m else m
+moduleAtom m fun
+  | preludeDefines m fun = "Elixir.Rian.Prelude." <> m
+  | startsUpper m = "Elixir." <> m
+  | otherwise = m
 
 -- a binary `<<…>>` over already-formed segments, and a whole-binary segment `X/binary` (for `<>`).
 fBin :: Array ETerm -> ETerm
@@ -602,10 +700,10 @@ binSeg form = mkTuple [ mkAtomTerm "bin_element", ln, form, mkAtomTerm "default"
 data OvfKind = Wrapping | Saturating | Checked
 
 -- the true `a + b` (bignum) computed once via `(fun(OvfSum) -> project(OvfSum) end)(a + b)`.
-i64Overflow :: OvfKind -> CExpr -> CExpr -> ETerm
-i64Overflow kind a b =
+i64Overflow :: Array String -> OvfKind -> CExpr -> CExpr -> ETerm
+i64Overflow sc kind a b =
   let
-    sum = binOp "+" (exprForm a) (exprForm b)
+    sum = binOp "+" (exprForm sc a) (exprForm sc b)
     sv = fVar "OvfSum"
     clause = mkTuple [ mkAtomTerm "clause", ln, mkList [ sv ], noGuard, mkList [ i64Project kind sv ] ]
     funE = mkTuple [ mkAtomTerm "fun", ln, mkTuple [ mkAtomTerm "clauses", mkList [ clause ] ] ]
