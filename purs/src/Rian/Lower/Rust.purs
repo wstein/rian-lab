@@ -28,7 +28,7 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, any, concatMap, filter, find, foldl, head, index, length, mapWithIndex, null, reverse)
+import Data.Array (all, any, concatMap, elem, filter, find, foldl, head, index, length, mapWithIndex, null, reverse)
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
@@ -145,7 +145,7 @@ rustFn meta env f =
     scrut = rustScrut f.params
     arms = joinWith "\n" (map (clauseArm meta f) f.clauses)
   in
-    "fn " <> f.name <> "(" <> paramDecls <> ") -> " <> ret <> " {\n"
+    "fn " <> f.name <> rustGenerics f <> "(" <> paramDecls <> ") -> " <> ret <> " {\n"
       <> "    match "
       <> scrut
       <> " {\n"
@@ -227,9 +227,37 @@ clauseArm meta f c =
     cbody = case c.body of
       Just b -> fromExpr (normalize (bodySurface b))
       Nothing -> unsafeCrashWith ("rust: clause of " <> f.name <> " has no body")
-    arm = coerceRet (fromMaybe "" f.ret) (rustArmBody cbody (fst (emit meta cbody)))
+    ret = fromMaybe "" f.ret
+    -- a generic function returning a bare tvar `T` clones the borrowed `&T` leaves to the
+    -- owned `T` the signature promises (`T: Clone`); else the plain string/owned-Vec return
+    -- coercion. (Rebinds + the owned-Vec/String leaf coercions are the deeper-borrow increment.)
+    arm =
+      if not (null f.tvars) && elem ret f.tvars then coerceOwnedTvar meta cbody
+      else coerceRet ret (rustArmBody cbody (fst (emit meta cbody)))
   in
     "        " <> pat <> " => " <> arm <> ","
+
+-- the Rust generic list `<T: Clone, …>`: each tvar's declared bounds (`forall T: Eq` →
+-- `RianEq`) plus `Clone` (a generic body clones borrowed leaves to the owned return). The
+-- closure-`'static` / `Map`-key `Eq + Hash` bounds are the later generics increment.
+rustGenerics :: Func -> String
+rustGenerics f = case f.tvars of
+  [] -> ""
+  tvs -> "<" <> joinWith ", " (map gbound tvs) <> ">"
+  where
+  gbound tv = tv <> ": " <> joinWith " + " (map (\b -> "Rian" <> b) (boundsOf tv) <> [ "Clone" ])
+  boundsOf tv = case find (\(Tuple k _) -> k == tv) f.bounds of
+    Just (Tuple _ bs) -> bs
+    Nothing -> []
+
+-- clone a bare-tvar return's borrowed leaves to the owned `T` (pushed into `if`/block tails);
+-- mirrors `coerce_owned_tvar_ast` for the leaf/`if`/block cases.
+coerceOwnedTvar :: Meta -> CExpr -> String
+coerceOwnedTvar meta (EBlock [ CExprStmt e ]) = coerceOwnedTvar meta e
+coerceOwnedTvar meta (EBlock stmts) = "({ " <> emitBlock meta (EBlock stmts) <> " }).clone()"
+coerceOwnedTvar meta (EIf c t e) =
+  "if " <> p meta 0 c <> " { " <> coerceOwnedTvar meta t <> " } else { " <> coerceOwnedTvar meta e <> " }"
+coerceOwnedTvar meta ast = "(" <> p meta 0 ast <> ").clone()"
 
 -- a multi-statement block body is braced as a match-arm value (`{ … }`); a single
 -- expression (or single-stmt block) is the value directly. Mirrors `rust_arm_body`.

@@ -1001,7 +1001,11 @@ rust_corpus = [
   "pub def lit() Vec(Int53) := [1, 2, 3]",
   "pub def pre(x Int53, xs Vec(Int53)) Vec(Int53) := [x | xs]",
   "pub def len(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [_ | t] -> 1 + len(t)\nend",
-  "pub def hd(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [h | _] -> h\nend"
+  "pub def hd(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [h | _] -> h\nend",
+  # generics (ADR-0061) — a bare-tvar pass-through: `forall T` → `fn id<T: Clone>(x: &T) -> T`,
+  # the borrowed `&T` cloned to the owned return (`(x).clone()`)
+  "pub def id(x T) T forall T := x",
+  "pub def fst(x T, y U) T forall T, U := x"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
