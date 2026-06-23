@@ -3,11 +3,22 @@
 // tutorial (`pages/by-example.astro`). The compiler is the real Rian → JS
 // compiler, compiled to JS by stock purs and served from `public/`.
 
+// An opaque, parsed + type-checked program (`Rian.Lower.All.Prepared`) — produced once by
+// `prepare`, then lowered to each target. Callers only thread it through.
+export type Prepared = unknown;
+
 export type Compiler = {
-  compile: (src: string) => string; // the runtime ECMAScript module (.mjs)
-  compileTs: (src: string) => string; // a native, typed TypeScript module (.ts)
-  compileRust: (src: string) => string; // whole-program Rust (== the `rs` tour pane)
-  compileJvm: (src: string) => string; // Kotlin/JVM source (== the `jvm` tour pane)
+  // parse-once front door (ADR-0090): run the shared front-end (lex → parse → Core → type-gate)
+  // a single time; throws on a parse / shared type-gate error (the buffer is invalid everywhere).
+  prepare: (src: string) => Prepared;
+  // per-target lowerings of a prepared program; each may throw its own target-specific rejection.
+  lowerJs: (p: Prepared) => string; // the runtime ECMAScript module (.mjs)
+  lowerTs: (p: Prepared) => string; // a native, typed TypeScript module (.ts)
+  lowerRust: (p: Prepared) => string; // whole-program Rust (== the `rs` tour pane)
+  lowerJvm: (p: Prepared) => string; // Kotlin/JVM source (== the `jvm` tour pane)
+  // one-shot String->String emitters (back-compat; e.g. the build smoke checks).
+  compile: (src: string) => string;
+  compileTs: (src: string) => string;
 };
 
 // The deploy base, slash-safe: `/rian-lab` on GitHub Pages (configure-pages emits

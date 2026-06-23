@@ -270,29 +270,32 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
       return;
     }
     let js: string;
+    let prep: import("../lib/rian-live").Prepared;
     let compiler: Compiler;
     try {
       compiler = await loadCompiler();
       if (gen !== evalGen) return; // a newer keystroke superseded this run
-      js = compiler.compile(source);
-      liveTs = compiler.compileTs(source); // the native typed `.ts` view, same gate
+      // parse + type-check ONCE (ADR-0090), then lower per target off the shared result.
+      prep = compiler.prepare(source);
+      js = compiler.lowerJs(prep); // the JS gate (wide-int rejection lives here)
+      liveTs = compiler.lowerTs(prep); // the native typed `.ts` view, same gate
     } catch (e: any) {
       if (gen !== evalGen) return;
-      // forgiving: a gate/parse error keeps the last good panes; report it softly.
+      // forgiving: a parse/gate error keeps the last good panes; report it softly.
       setOut("soft", "… " + cleanError(e));
       return;
     }
     liveJs = js;
-    // JS is the gate: once it lowers, the buffer parses + type-checks, so a Rust/JVM failure is an
-    // honest "this target's emitter doesn't cover this construct yet" — record it as `null` (the
-    // pane shows that) rather than aborting, and keep the targets independent of each other.
+    // JS gated it (the buffer parses + type-checks), so a Rust/JVM failure is an honest "this
+    // target's emitter doesn't cover this construct yet" — record `null` (the pane shows that)
+    // rather than aborting, keeping the targets independent of each other.
     try {
-      liveRs = compiler.compileRust(source);
+      liveRs = compiler.lowerRust(prep);
     } catch {
       liveRs = null;
     }
     try {
-      liveJvm = compiler.compileJvm(source);
+      liveJvm = compiler.lowerJvm(prep);
     } catch {
       liveJvm = null;
     }

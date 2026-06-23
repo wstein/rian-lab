@@ -1148,7 +1148,9 @@ def f(c) := 0|,
   # a ctor-pattern impl head: the reference synthesizes a corrupted param type `Bag(n)Bag`
   # (a pre-existing Elixir JVM bug) and renders it verbatim via the `^[A-Z]` nominal fallback;
   # the PS port now mirrors that byte-for-byte (NOT kotlinc-valid — excluded from the kotlinc gate)
-  "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(Bag(n)) := n\nend\npub def go(b Bag) Int64 := sz(b)"
+  "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(Bag(n)) := n\nend\npub def go(b Bag) Int64 := sz(b)",
+  # a multi-statement body (`:=` bind then value) → a scoped `run { val …; … }` (+ a `${…}` hole)
+  "pub def hi(who String) String := name := who ; \"Hello, ${name}!\""
 ]
 
 # Rian.Lower.rust_program — the `rustprog` stream: the WHOLE-PROGRAM Rust assembly (ADR-0061)
@@ -1176,7 +1178,11 @@ rustprog_corpus = [
   # cloned and the tail `&[i64]` rebound `to_vec()` so the recursive call takes an owned `Vec`
   "pub def sum(xs iso Vec(Int53)) Int53\npub def sum([]) := 0\npub def sum([h | t]) := h + sum(t)",
   # iso `Vec` rebuilt + returned owned: the rebinds plus the cons-rebuild owned-`Vec` return
-  "pub def dup(xs iso Vec(Int53)) Vec(Int53)\npub def dup([]) := []\npub def dup([h | t]) := [h, h | dup(t)]"
+  "pub def dup(xs iso Vec(Int53)) Vec(Int53)\npub def dup([]) := []\npub def dup([h | t]) := [h, h | dup(t)]",
+  # string interpolation (ADR-0069) → one `format!` (`__prim_str_concat_all`), with `${int}`
+  # going through `__prim_int_to_string` → `.to_string()`; a `:=` bind of a string literal owns it
+  # (`let name = "Rian".to_string()`, `rust_owned_elem`)
+  "pub def greet(age Int53) String := name := \"Rian\" ; \"hi ${name}, you are ${age}!\""
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

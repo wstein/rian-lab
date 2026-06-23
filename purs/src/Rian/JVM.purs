@@ -21,6 +21,7 @@
 -- | kept out of the `jvm` parity corpus (oracle = `Rian.JVM.compile`).
 module Rian.JVM
   ( compile
+  , lowerJvmProg
   ) where
 
 import Prelude
@@ -54,12 +55,16 @@ import Rian.TypeStr (splitTopCommas) as TS
 -- @rian_sig pub def compile(src val String) String
 compile :: String -> String
 compile src =
-  let
-    prog0 = runProgramTail (assemble (parseToProg src))
-  in
-    case checkProgram prog0 of
-      Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
-      Nothing ->
+  case checkProgram prog0 of
+    Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
+    Nothing -> lowerJvmProg prog0
+  where
+  prog0 = runProgramTail (assemble (parseToProg src))
+
+-- | The post-gate half of `compile` (parse + check done) — lower an already-checked program to a
+-- | Kotlin module. Exposed so `Rian.Lower.All` parses + type-checks ONCE across all targets.
+lowerJvmProg :: Prog -> String
+lowerJvmProg prog0 =
         let
           prog = erase prog0
           types = allTypes prog
@@ -335,12 +340,27 @@ bodyExprOf :: Maybe Body -> CExpr
 bodyExprOf (Just b) = fromExpr (normalize (bodySurface b))
 bodyExprOf Nothing = unsafeCrashWith "jvm: clause has no body"
 
--- a `:=` body is parsed to an `EBlock`; we handle the single-expression block (a multi-
--- statement block — `:=` binds before the value — is a later increment).
+-- a `:=` body is parsed to an `EBlock`: a single-expression block is the value directly; a
+-- multi-statement block (`:=` binds before the value) becomes a scoped `run { val …; … value }`
+-- (mirrors `block_value`). (Shadow-rename + the associated-type cast pass are later increments;
+-- a shadow-free, cast-free body — the portable common case — matches the reference here.)
 clauseValue :: Meta -> CExpr -> String
 clauseValue meta (EBlock [ CExprStmt e ]) = exprKt meta e
-clauseValue _ (EBlock _) = unsafeCrashWith "jvm: stage — multi-statement body block (inc 3)"
+clauseValue meta (EBlock stmts) = case unsnoc stmts of
+  Just { init, last } -> "run { " <> joinWith " " (map (stmtKt meta) init) <> " " <> stmtValue meta last <> " }"
+  Nothing -> unsafeCrashWith "jvm: empty block body"
 clauseValue meta e = exprKt meta e
+
+-- a non-final block statement → its Kotlin line (`val n = e;` / `e;`); the final statement is the
+-- block's value (always an expression — a trailing bind is rejected at `Rian.Core`).
+stmtKt :: Meta -> CStmt -> String
+stmtKt meta (CBind n e) = "val " <> n <> " = " <> exprKt meta e <> ";"
+stmtKt meta (CTypedBind n _ e) = "val " <> n <> " = " <> exprKt meta e <> ";"
+stmtKt meta (CExprStmt e) = exprKt meta e <> ";"
+
+stmtValue :: Meta -> CStmt -> String
+stmtValue meta (CExprStmt e) = exprKt meta e
+stmtValue meta s = stmtKt meta s
 
 -- ── expressions ────────────────────────────────────────────────────────────────
 exprKt :: Meta -> CExpr -> String

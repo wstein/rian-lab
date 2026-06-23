@@ -26,6 +26,8 @@ module Rian.JS
   , compileTypesSexpr
   , compileTs
   , compileTsSexpr
+  , lowerJsProg
+  , lowerTsProg
   ) where
 
 import Prelude
@@ -58,14 +60,19 @@ import Rian.TypeStr (normalize, splitTopCommas) as TS
 -- @rian_sig pub def compile(src val String) String
 compile :: String -> String
 compile src =
-  let
-    -- the program tail (interpolation resolution + `Show` injection) runs before the gate, matching
-    -- the reference's `Decl.parse` → `Check.gate!` order (ADR-0069).
-    prog0 = runProgramTail (assemble (parseToProg src))
-  in
-    case checkProgram prog0 of
-      Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
-      Nothing ->
+  -- the program tail (interpolation resolution + `Show` injection) runs before the gate, matching
+  -- the reference's `Decl.parse` → `Check.gate!` order (ADR-0069).
+  case checkProgram prog0 of
+    Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
+    Nothing -> lowerJsProg prog0
+  where
+  prog0 = runProgramTail (assemble (parseToProg src))
+
+-- | Lower an already-checked, tail-resolved program to a JS module — the post-gate half of
+-- | `compile`. Exposed so `Rian.Lower.All` can parse + type-check ONCE and lower to every target
+-- | without redoing the shared front-end per target.
+lowerJsProg :: Prog -> String
+lowerJsProg prog0 =
         let
           prog = erase prog0
           _ = rejectMixedIntMode prog
@@ -868,10 +875,15 @@ compileTypes src =
 -- @rian_sig pub def compile_ts(src val String) String
 compileTs :: String -> String
 compileTs src =
-  let prog0 = runProgramTail (assemble (parseToProg src))
-  in case checkProgram prog0 of
+  case checkProgram prog0 of
     Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
-    Nothing ->
+    Nothing -> lowerTsProg prog0
+  where
+  prog0 = runProgramTail (assemble (parseToProg src))
+
+-- | The post-gate half of `compileTs` (parse + check done), exposed for `Rian.Lower.All`.
+lowerTsProg :: Prog -> String
+lowerTsProg prog0 =
       let
         prog = erase prog0
         _ = rejectMixedIntMode prog

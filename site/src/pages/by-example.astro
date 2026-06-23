@@ -209,29 +209,32 @@ const onThis = [
         return;
       }
       let js: string;
+      let prep: import("../lib/rian-live").Prepared;
       let compiler: Compiler;
       try {
         compiler = await loadCompiler();
         if (g !== gen) return; // a newer keystroke superseded this run
-        js = compiler.compile(source);
+        prep = compiler.prepare(source); // parse + type-check ONCE (ADR-0090)
+        js = compiler.lowerJs(prep);
       } catch (e) {
         if (g !== gen) return;
         setOut("soft", "… " + cleanError(e)); // keep the last good JS pane
         return;
       }
       jsPane!.innerHTML = highlight(js);
-      // JS gated it (the buffer parses + checks), so re-lower the other source targets live; a
-      // Rust/JVM failure is an honest "this construct isn't covered yet". BEAM can't lower here.
+      // JS gated it (the buffer parses + checks), so re-lower the other source targets off the
+      // shared result; a Rust/JVM failure is an honest "this construct isn't covered yet". BEAM
+      // can't lower here.
       if (rsPane) {
         try {
-          rsPane.innerHTML = highlight(compiler.compileRust(source));
+          rsPane.innerHTML = highlight(compiler.lowerRust(prep));
         } catch {
           rsPane.innerHTML = highlight(noteUnsupported("Rust"));
         }
       }
       if (jvmPane) {
         try {
-          jvmPane.innerHTML = highlight(compiler.compileJvm(source));
+          jvmPane.innerHTML = highlight(compiler.lowerJvm(prep));
         } catch {
           jvmPane.innerHTML = highlight(noteUnsupported("JVM · Kotlin"));
         }

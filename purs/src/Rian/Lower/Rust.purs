@@ -32,6 +32,7 @@
 module Rian.Lower.Rust
   ( compile
   , rustProgram
+  , lowerRustProg
   ) where
 
 import Prelude
@@ -185,12 +186,16 @@ rewriteProtoCalls methods = walk
 -- @rian_sig pub def rustProgram(src val String) String
 rustProgram :: String -> String
 rustProgram src =
-  let
-    prog0 = runProgramTail (assemble (parseToProg src))
-  in
-    case checkProgram prog0 of
-      Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
-      Nothing ->
+  case checkProgram prog0 of
+    Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
+    Nothing -> lowerRustProg prog0
+  where
+  prog0 = runProgramTail (assemble (parseToProg src))
+
+-- | The post-gate half of `rustProgram` (parse + check done) — lower an already-checked program
+-- | to one Rust module. Exposed so `Rian.Lower.All` parses + checks ONCE across all targets.
+lowerRustProg :: Prog -> String
+lowerRustProg prog0 =
         let
           prog = erase prog0
           types = allTypes prog
@@ -749,6 +754,19 @@ emit ec (ELambda params body) =
           ctor = if fb.rc then "std::rc::Rc::new" else "Box::new"
         in
           Tuple (ctor <> "(move |" <> ps <> "| " <> inner <> ")") 12
+-- the stringify / interpolation prims (ADR-0069): each lowers to its native Rust form, mirroring
+-- the reference's `__prim_*` emit. `<>` (EBin above) and `Prim.str_concat` (here) both → `format!`.
+emit ec (ECall (EId "__prim_int_to_string") [ n ]) = Tuple (p ec 12 n <> ".to_string()") 12
+emit ec (ECall (EId "__prim_char_to_string") [ c ]) = Tuple (p ec 12 c <> ".to_string()") 12
+emit ec (ECall (EId "__prim_to_string") [ x ]) = Tuple ("format!(\"{}\", " <> p ec 0 x <> ")") 12
+emit ec (ECall (EId "__prim_float_repr") [ n ]) = Tuple ("format!(\"{:e}\", " <> p ec 0 n <> ")") 12
+emit ec (ECall (EId "__prim_int_to_float") [ n ]) = Tuple ("(" <> p ec 12 n <> " as f64)") 12
+emit ec (ECall (EId "__prim_panic") [ msg ]) = Tuple ("panic!(\"{}\", " <> p ec 0 msg <> ")") 12
+emit ec (ECall (EId "__prim_str_concat") [ a, b ]) =
+  Tuple ("format!(\"{}{}\", " <> p ec 0 a <> ", " <> p ec 0 b <> ")") 12
+-- variadic single-shot join (ADR-0069 §6): one `format!`, one allocation; every part is a `String`.
+emit ec (ECall (EId "__prim_str_concat_all") args) =
+  Tuple ("format!(\"" <> foldMap (const "{}") args <> "\", " <> joinWith ", " (map (p ec 0) args) <> ")") 12
 -- a call to a known sum ctor is construction (`Enum::Variant(…)`); a call to a `Fn`-typed param is
 -- a closure call (args clone); a PascalCase all-labeled call is struct construction; else a call.
 emit ec (ECall (EId name) args)
@@ -813,9 +831,18 @@ ctorConstruct ec name args =
 -- a value stored into an owned position (a variant/struct field, a `Vec` element). A borrowed
 -- binding (`&T`/`&[T]` — in `ec.bor`) is cloned to the owned `T`; a literal/owned value is itself.
 -- (The slice→`.to_vec()` and `&str`→`.to_string()` owned coercions are a later borrow increment.)
+-- coerce a value to its OWNED Rust form for a construction / element / `:=`-bind position
+-- (mirrors `rust_owned_elem`): a string/`Symbol` *literal* is a `&str` → `.to_string()`; a `&[T]`
+-- slice binder → `.to_vec()`; a `&`-borrowed param binder → `.clone()`; an owned value is itself.
+-- (The reference also `.to_string()`s a `String`-*typed* `EId` rebind; that needs the node type,
+-- which the untyped Core `EId` here doesn't carry — a literal/borrow rebind is the common case.)
 rustOwnedElem :: Ec -> CExpr -> String
 rustOwnedElem ec e = case e of
-  EId n | elem n ec.bor -> p ec 0 e <> ".clone()"
+  EStr _ -> p ec 0 e <> ".to_string()"
+  EAtom _ -> p ec 0 e <> ".to_string()"
+  EId n
+    | elem n ec.slices -> p ec 0 e <> ".to_vec()"
+    | elem n ec.bor -> p ec 0 e <> ".clone()"
   _ -> p ec 0 e
 
 -- a `case` → a Rust `match`; each arm `pat <guard> => body,`, joined by spaces. A `case` whose
@@ -850,8 +877,10 @@ emitBlock ec e = p ec 0 e
 
 stmtRs :: Ec -> CStmt -> String
 stmtRs ec (CExprStmt e) = p ec 0 e
-stmtRs ec (CBind n e) = "let " <> n <> " = " <> p ec 0 e <> ";"
-stmtRs ec (CTypedBind n _ e) = "let " <> n <> " = " <> p ec 0 e <> ";"
+-- a `:=` bind owns its RHS (`rust_owned_elem`): a `&T`/`&str`/`&[T]` rebind is cloned/`to_string`/
+-- `to_vec`'d so the binder is owned and downstream construction needs no further coercion.
+stmtRs ec (CBind n e) = "let " <> n <> " = " <> rustOwnedElem ec e <> ";"
+stmtRs ec (CTypedBind n _ e) = "let " <> n <> " = " <> rustOwnedElem ec e <> ";"
 
 -- ── operator precedence (mirrors `Rian.Lower` prec/assoc/disp) ─────────────────
 
