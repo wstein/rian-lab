@@ -1064,7 +1064,20 @@ jvm_corpus = [
 def label("yes") := 1
 def label(_) := 0|,
   # multiple positional literal tests joined by `&&`
-  "def both0(a Int64, b Int64) Bool\ndef both0(0, 0) := true\ndef both0(a, b) := false"
+  "def both0(a Int64, b Int64) Bool\ndef both0(0, 0) := true\ndef both0(a, b) := false",
+  # ── inc 3: sum variants (sealed interface + data class, smart-cast `is`, `case`) ──
+  # a recursive sum + ctor clause patterns (smart-cast `is Ctor`, positional `.f0`/`.f1` binds)
+  "type Expr := Num(Int64) | Add(Expr, Expr)\ndef ev(e Expr) Int64\ndef ev(Num(n)) := n\ndef ev(Add(a, b)) := ev(a) + ev(b)",
+  # labeled (`data class Circle(val radius: Long)`) + positional fields side by side
+  "type Shape := Circle(radius Int64) | Sq(Int64)\ndef area(s Shape) Int64\ndef area(Circle(radius)) := radius * radius\ndef area(Sq(n)) := n * n",
+  # a nullary variant → a singleton `object`; the construction `Num(5)` lowers to `Num(5L)`
+  "type Expr := Lit(Int64) | Neg(Expr)\npub def build() Expr := Neg(Lit(5))\ndef ev(e Expr) Int64\ndef ev(Lit(n)) := n\ndef ev(Neg(x)) := 0 - ev(x)",
+  # a `case` over a sum (nullary arms → `is A`/`is B`, → a labelled `run rcase@{ … }`)
+  "type T := A | B\ndef f(t T) Int64 := case t do\n  A -> 1\n  B -> 2\nend",
+  # a `case` with a ctor arm that binds a field
+  "type Opt := Som(Int64) | Non\ndef get(o Opt) Int64 := case o do\n  Som(x) -> x\n  Non -> 0\nend",
+  # a `case` arm carrying a `when` guard (tests + guard → a conditional `if`)
+  "type Box := B(Int64)\ndef f(b Box) Int64 := case b do\n  B(n) when n > 0 -> n\n  B(n) -> 0 - n\nend"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
