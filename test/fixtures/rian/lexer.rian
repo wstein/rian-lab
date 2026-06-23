@@ -3,7 +3,7 @@
 # ===========================================================================
 # Goal (ADR-0027/0031): tokenize a small arithmetic grammar entirely in Rian,
 # typing its OWN data (the `Token` sum), recursing over a list with `[h | t]`
-# patterns, and running on the BEAM. Evidence for SELFHOST.md, not a demo.
+# patterns, and running on the BEAM. Evidence (self-host retired, ADR-0063), not a demo.
 #
 # Char literals (ADR-0036): clauses match `'+'`/`'('`/`'0'` directly — `Char` is
 # a distinct type, lowered native per target (codepoint integer on BEAM, BigInt

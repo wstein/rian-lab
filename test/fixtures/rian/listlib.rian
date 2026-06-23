@@ -12,7 +12,7 @@
 #
 # `Map`/`String` genuinely bottom out in per-target *primitives* (a hashed map, a
 # UTF-8 buffer) and need the primitive-layer design; `List` does not — it is just
-# cons + recursion, portable as-is. Evidence for SELFHOST.md.
+# cons + recursion, portable as-is. Evidence (self-host retired, ADR-0063).
 # ---------------------------------------------------------------------------
 
 mod ListLib do

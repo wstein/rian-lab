@@ -6,7 +6,7 @@
 # (`x + 0` -> `x`, `x * 1` -> `x`, `x * 0` -> `0`). This is where a compiler
 # pattern-matches IR nodes *by shape* — the test of whether sum-based matching
 # (variant + nested-literal patterns) is enough, or a struct/map pattern is
-# wanted. Evidence for SELFHOST.md.
+# wanted. Evidence (self-host retired, ADR-0063).
 # ---------------------------------------------------------------------------
 
 mod Opt do

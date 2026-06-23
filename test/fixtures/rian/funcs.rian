@@ -10,7 +10,7 @@
 #   fact(n) = if n < 1 then 1 else n * fact(n - 1)
 #   evalx(App("fact", [Num(5)]))  =  120
 #
-# Evidence for SELFHOST.md. (A *compiled* CALL/RET stack VM is a further step;
+# Evidence (self-host retired, ADR-0063). (A *compiled* CALL/RET stack VM is a further step;
 # this proves first-class user functions over the existing IR machinery.)
 # ---------------------------------------------------------------------------
 

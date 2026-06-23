@@ -15,7 +15,7 @@ type Node := BlockE(Vec(Stmt)) | Expr(Surface)   # a name invented just to union
 def lower_body(body Node) Block := …
 ```
 
-That is the **nominal-sums-canonical** decision of ADR-0034 (a value's type is a *named* `type`, never an anonymous shape), and it is load-bearing for portability: a named sum maps 1:1 to a Rust `enum` and a JVM `sealed interface`. But it is verbose at the use site, and the self-host corpus shows the pain directly — `compose_real_sum.rian`'s `def lower_body(body)` legitimately matches **one untyped param at several shapes** (`{:block_e, stmts}` and a fallthrough `e`), and ADR-0034 had to *revert* an attempt to constrain such a param because there was no way to spell "this is a union" (so the param stays untyped, `:unknown`, BEAM-only).
+That is the **nominal-sums-canonical** decision of ADR-0034 (a value's type is a *named* `type`, never an anonymous shape), and it is load-bearing for portability: a named sum maps 1:1 to a Rust `enum` and a JVM `sealed interface`. But it is verbose at the use site, and the (now-retired, ADR-0063) self-host corpus showed the pain directly — a `lower_body(body)` that legitimately matched **one untyped param at several shapes** (`{:block_e, stmts}` and a fallthrough `e`), and ADR-0034 had to *revert* an attempt to constrain such a param because there was no way to spell "this is a union" (so the param stays untyped, `:unknown`, BEAM-only).
 
 ADR-0034 named the fix and **deferred it**: *"introduce union types — … a larger design step, deferred."* This ADR is that step. The ask (verbatim user request): a Crystal-style union usable directly in a signature, so `def f(x Int32 | String)` needs no throwaway `type`.
 

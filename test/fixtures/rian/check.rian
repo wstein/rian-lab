@@ -5,7 +5,7 @@
 # infer a type (`Ty`) under a typing environment, reporting a **structured type
 # error** when the program is ill-typed. The diagnostic is the first place a
 # real checker reaches for a `struct` (a record of named fields) rather than a
-# sum — cf. `Rian.Check.Error`. Evidence for SELFHOST.md.
+# sum — cf. `Rian.Check.Error`. Evidence (self-host retired, ADR-0063).
 #
 # Language checked:  integers, booleans, variables, `+` (Int×Int→Int),
 # `<` (Int×Int→Bool), `if` (Bool cond, branches of one type), and `let`.

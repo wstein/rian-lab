@@ -5,7 +5,7 @@
 # `+ - * /` with parentheses — into Rian itself. It consumes the `Vec(Token)`
 # the companion lexer (`lexer.rian`) produces, builds its OWN typed
 # `Expr` sum, and threads `(Expr, Vec(Token))` through each step as a `Parse`
-# pair. Evidence for SELFHOST.md — the first `Rian.Beam.Unsupported` it raises
+# pair. Evidence (self-host retired, ADR-0063) — the first `Rian.Beam.Unsupported` it raises
 # is the next real self-hosting increment.
 #
 # Grammar (precedence: `* /` tighter than `+ -`, left-associative):

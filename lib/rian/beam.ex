@@ -260,10 +260,11 @@ defmodule Rian.Beam do
   Compile a **pre-built program IR** (the `Rian.Decl.parse/1` shape —
   `%{funcs, types, structs, ranges, mods}`) directly, skipping the Elixir parser.
 
-  This is the **Stage-2 self-hosting seam** (ADR-0063): a Rian-written front-end
-  produces this IR and the real backend compiles it, with no Elixir parse in the
-  loop. Clause bodies may be source strings *or* already-parsed `{:block,…}` ASTs
-  — `Pratt.parse_body/1` accepts either (the macro-pipeline passthrough).
+  This is the **IR-input seam**: a front-end produces this program IR and the real
+  backend compiles it, with no Elixir parse in the loop (historically the Stage-2
+  self-host seam, ADR-0063, now retired; the PureScript port, ADR-0084, is its
+  successor producer). Clause bodies may be source strings *or* already-parsed
+  `{:block,…}` ASTs — `Pratt.parse_body/1` accepts either (the macro-pipeline passthrough).
   """
   @rian_sig "pub def compile_ir(prog Prog, module Symbol) _Unk"
   @spec compile_ir(map(), module()) :: {:ok, module(), binary()}
@@ -816,15 +817,14 @@ defmodule Rian.Beam do
   defp expr_form(%ECall{fun: %EId{name: "__prim_panic"}, args: [msg]}, s),
     do: remote_call(:erlang, "error", [msg], s)
 
-  # string → atom (the BEAM-native interning the self-host backend needs to build
-  # Erlang variable/operator atoms; atoms are BEAM-only, so `Rian.Reach` pins a
-  # caller off `:rs`/`:js`/`:jvm`).
+  # string → atom (BEAM-native interning to build Erlang variable/operator atoms;
+  # atoms are BEAM-only, so `Rian.Reach` pins a caller off `:rs`/`:js`/`:jvm`).
   defp expr_form(%ECall{fun: %EId{name: "__prim_str_to_atom"}, args: [s_]}, s),
     do: remote_call(:"Elixir.String", "to_atom", [s_], s)
 
-  # string → float — correctly-rounded native parse (the self-host backend needs it
-  # to turn a `Float64` literal lexeme into a `float()` form; pure-Rian decimal
-  # arithmetic could not guarantee the same last-ULP rounding as the literal).
+  # string → float — correctly-rounded native parse (turns a `Float64` literal lexeme
+  # into a `float()` form; pure-Rian decimal arithmetic could not guarantee the same
+  # last-ULP rounding as the literal).
   defp expr_form(%ECall{fun: %EId{name: "__prim_str_to_float"}, args: [s_]}, s),
     do: remote_call(:erlang, "binary_to_float", [s_], s)
 

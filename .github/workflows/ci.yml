@@ -1,8 +1,8 @@
 name: CI
 
-# Locks the component suite — including the self-hosting fixpoint diff
-# (test/rian/fixpoint_test.exs), which fails the build if the Rian-written lexer
-# and the reference `Rian.Lexer` ever disagree over the shared corpus (ADR-0027/0031).
+# Locks the component suite + the external-toolchain lanes (rustc/node/kotlinc) via
+# `mix test.all` (ADR-0049), plus formatting, the shared-core portability gate, and the
+# errors-as-values transpile ratchet.
 on:
   push:
     branches: ["**"]
@@ -81,7 +81,7 @@ jobs:
       # the `:jvm` runs self-skip to their shape assertions here — JVM execution
       # is verified separately, non-blocking, in the Tier-2 lane below. This
       # blocking gate is therefore Tier 1 only (ADR-0049). See test/test_helper.exs.
-      - name: Run the full suite (incl. toolchain tests + the self-hosting fixpoint diff)
+      - name: Run the full suite (incl. external-toolchain tests)
         run: mix test.all
 
       # ── Tier-2 JVM execution lane (ADR-0049: non-blocking until promoted) ──

@@ -5,7 +5,7 @@
 # parser builds and fold it to an `Int53`, threading an **environment** (a
 # symbol table mapping variable names to values) — the first place a real
 # compiler-in-Rian reaches for a `Map`. `let x = e in body` binds; `Var(name)`
-# looks up. Evidence for SELFHOST.md.
+# looks up. Evidence (self-host retired, ADR-0063).
 #
 # The environment is a `Map(String, Int53)`: lookups/inserts go through the
 # `Map` FFI (free BEAM remote calls), and the empty starting environment is the

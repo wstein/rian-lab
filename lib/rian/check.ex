@@ -2284,10 +2284,10 @@ defmodule Rian.Check do
 
   # the type a clause-head pattern requires of its scrutinee (the parameter).
   # `PList`/`PTuple`/`PMap`/`PStruct`/`PAs` deliberately stay `:unknown`: a structural
-  # constraint can't be turned into a *conflict* without breaking the dynamically-typed
-  # (BEAM-only) self-host corpus, which legitimately matches one untyped param at
-  # several shapes (e.g. `compose_real_sum.rian`'s `lower_body`). Sound conflict
-  # detection there needs target-aware inference or union types — out of scope here.
+  # constraint can't be turned into a *conflict* without breaking dynamically-typed
+  # (BEAM-only) code that legitimately matches one untyped param at several shapes
+  # (a `{:block, …}`-vs-fallthrough body, say). Sound conflict detection there needs
+  # target-aware inference or union types — out of scope here.
   defp pattern_type(%PLit{value: v}, _ic) when is_integer(v), do: "Int53"
   defp pattern_type(%PLit{value: v}, _ic) when is_binary(v), do: "String"
   defp pattern_type(%PChar{}, _ic), do: "Char"

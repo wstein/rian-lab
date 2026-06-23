@@ -48,8 +48,8 @@ defmodule Rian.JS do
   **lists** (→ JS arrays, cons `[h | t]` → `[h, ...t]`, with closed/cons clause
   patterns via `length`/`slice`); **`case`** (→ an IIFE if-chain over the arm
   patterns); **strings** (`<>` → `+`); **maps** (`%{k: v}` → a JS object); and a
-  small set of **stdlib calls** the self-hosting spikes lean on, mapped to
-  portable JS (`Map.get`/`Map.put` immutable, `String.to_charlist`,
+  small set of **stdlib calls** — a stopgap until the portable prelude (ADR-0047) —
+  mapped to portable JS (`Map.get`/`Map.put` immutable, `String.to_charlist`,
   `List.to_string`, `:lists.reverse`) — a stopgap until the portable prelude
   (ADR-0047) owns them. **Protocol dispatch** (ADR-0061 §3): a `protocol` lowers
   to a JS dispatcher generated from the protocol IR — it selects the impl by the
@@ -1518,8 +1518,8 @@ defmodule Rian.JS do
              "64-bit two's-complement wrap has no JS representation; use `Int` or `Int53`."
          )
 
-  # the handful of stdlib calls the self-hosting spikes use, mapped to portable
-  # JS (a stopgap until the portable prelude, ADR-0047, owns these):
+  # the handful of stdlib calls mapped to portable JS (a stopgap until the
+  # portable prelude, ADR-0047, owns these):
   #   Map.get/put (immutable), String.to_charlist, List.to_string, :lists.reverse
   defp expr_js(%ECall{fun: %EDot{head: %EId{name: "Map"}, name: "get"}, args: [m, k]}, i53),
     do: "#{paren(m, i53)}[#{expr_js(k, i53)}]"
