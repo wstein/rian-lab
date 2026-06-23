@@ -68,6 +68,7 @@
 -- | `-spec`/`type` attrs. An unported node raises a clear crash.
 module Rian.Beam
   ( runMain
+  , runEntry
   ) where
 
 import Prelude
@@ -108,6 +109,10 @@ foreign import mkList :: Array ETerm -> ETerm
 -- modules (arg 2, every call), run `Main:main()` (arg 3), and return the `~p`-rendered result (or a
 -- diagnostic).
 foreign import runModulesImpl :: Array ETerm -> Array ETerm -> String -> String
+-- like `runModulesImpl`, but instead of a fixed main module it finds the loaded module exporting
+-- `Entry/0` and applies it, returning a tagged result: `"ok\t<~p value>"`, `"error\tno entry …"`
+-- (zero or many modules export it), or `"error\t<crash/compile diagnostic>"`. Backs `Rian.Run.eval`.
+foreign import runEntryImpl :: Array ETerm -> Array ETerm -> String -> String
 
 -- | Compile `src` to BEAM abstract forms, load the module, run its `main/0`, and return the
 -- | stringified result (or a `Rian.Check:`/`compile_error:` diagnostic). The execution-parity entry.
@@ -116,15 +121,30 @@ runMain :: String -> String
 runMain src =
   case checkProgram prog of
     Just msg -> "Rian.Check: " <> msg
-    Nothing -> runModulesImpl preludeForms (auxForms <> [ mainForms ]) "rian_main"
+    Nothing -> runModulesImpl preludeForms (progModuleForms prog) "rian_main"
   where
   prog = runProgramTail (assemble (parseToProg src))
-  -- the main module = the top-level funcs (or the single pulled-up `mod`), named `rian_main`.
+
+-- | Gate `src`, load every module (+ the prelude), find the module exporting the zero-arg `entry`,
+-- | and apply it — returning a tagged string the `Rian.Run` port unwraps to `{ok value}`/`{error
+-- | msg}`: a `Rian.Check` failure is `"error\t<msg>"`, a successful run `"ok\t<~p value>"`. The
+-- | parameterized, errors-as-valued sibling of `runMain` (backs `Rian.Run.eval`).
+-- @rian_sig pub def runEntry(src val String, entry val String) String
+runEntry :: String -> String -> String
+runEntry src entry =
+  case checkProgram prog of
+    Just msg -> "error\t" <> msg
+    Nothing -> runEntryImpl preludeForms (progModuleForms prog) entry
+  where
+  prog = runProgramTail (assemble (parseToProg src))
+
+-- the program's own module forms (no prelude): the top-level funcs as `rian_main`, plus each sibling
+-- `mod` as its own `Elixir.<Name>` (loaded so a cross-module call resolves — skipped when there are
+-- no top-level funcs, since `funcsOf` then pulls the single `mod` up as main). Mirrors `load_aux_mods`.
+progModuleForms :: Prog -> Array ETerm
+progModuleForms prog = auxForms <> [ mainForms ]
+  where
   mainForms = moduleForms "rian_main" (funcsOf prog) (constsOf prog) (registryFrom (typesOf prog) (structsOf prog))
-  -- each sibling `mod` (e.g. the injected `Show` for `${float}`, or a user multi-`mod` program) →
-  -- its own `Elixir.<Name>` module, loaded first so a cross-module call resolves. Skipped when there
-  -- are no top-level funcs (then `funcsOf` already pulled the single `mod` up as main). Mirrors
-  -- `load_aux_mods`.
   auxForms = case prog.funcs of
     [] -> []
     _ -> map auxModuleForms prog.mods

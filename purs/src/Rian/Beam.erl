@@ -9,7 +9,7 @@
 %% purerl represents a PureScript `Array a` as an Erlang `array` (see Rian.HostRef), so the
 %% Array-taking builders convert with `array:to_list/1`.
 -export([mkAtomTerm/1, mkIntStr/1, mkIntI/1, mkFloatStr/1, mkBinary/1, strBytes/1, mkTuple/1,
-         mkList/1, runModulesImpl/3]).
+         mkList/1, runModulesImpl/3, runEntryImpl/3]).
 
 %% ── ETerm constructors (raw Erlang terms; the abstract-format nodes are tuples of these) ──
 mkAtomTerm(B) -> binary_to_atom(B, utf8).      %% a raw atom (module / op / function name)
@@ -47,6 +47,26 @@ ensure_prelude(Forms) ->
     _ -> ok
   end.
 
+%% like `runModulesImpl`, but instead of a fixed main module it resolves the zero-arg `Entry`
+%% across the loaded program modules (mirrors `Rian.Run.resolve`/`function_exported?`) and applies
+%% the single one that exports it. Returns a tab-tagged string the `Rian.Run` port unwraps.
+runEntryImpl(PreludeArr, ModsArr, EntryB) ->
+  Entry = binary_to_atom(EntryB, utf8),
+  try
+    ensure_prelude(array:to_list(PreludeArr)),
+    Mods = lists:map(fun load_forms/1, array:to_list(ModsArr)),
+    case [M || M <- Mods, erlang:function_exported(M, Entry, 0)] of
+      [Mod] -> fmt("ok\t~p", [Mod:Entry()]);
+      [] -> fmt("error\tno zero-arg entry `~s`", [EntryB]);
+      _Many -> fmt("error\tentry `~s` is defined in more than one module", [EntryB])
+    end
+  catch
+    throw:{compile_error, Err} -> fmt("error\tcompile_error: ~p", [Err]);
+    Class:Reason -> fmt("error\tcrash: ~p:~p", [Class, Reason])
+  end.
+
+%% compile + load one module's forms; returns the module's name (read from its `-module` attr via
+%% `compile:forms`). `runModulesImpl` ignores the name; `runEntryImpl` collects them for resolution.
 load_forms(Forms) ->
   case compile:forms(Forms, [return_errors]) of
     {ok, Mod, Bin} -> do_load(Mod, Bin);
@@ -57,6 +77,6 @@ load_forms(Forms) ->
 do_load(Mod, Bin) ->
   code:purge(Mod),
   {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
-  ok.
+  Mod.
 
 fmt(Format, Args) -> list_to_binary(lists:flatten(io_lib:format(Format, Args))).

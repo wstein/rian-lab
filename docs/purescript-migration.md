@@ -213,7 +213,7 @@ parity-gated). What's left, by category — `lib/rian/*.ex` with **no** `purs/sr
 | --- | --- | --- |
 | **⛔ Emitters — the compile-spine gap** | `jvm`, `lower`, `beam` | The value backend. **`Rian.JS` is complete for its Tier-1 subset** (all three print modes + const refs, `@external`, value-union discrimination, protocol dispatch, struct construction, string interpolation — `js`/`jsdts`/`jsts` streams). **`Rian.Lower`'s Rust half is in progress** (`Rian.Lower.Rust`, the `rust` stream — increment 1: single-clause portable core); its Elixir-text half is not ported (not load-bearing, see `Rian.Roundtrip`). **`Rian.JVM`'s port is in progress too** (the `jvm` stream — inc 1: single-clause portable core, dual-gated on byte-parity + `kotlinc`); `Beam` is FFI-heavy → Phase 8. |
 | **✅ Pipeline desugars — ported** | ~~`interp`~~, ~~`show_stdlib`~~ | `Interp` (`${}` resolution, ADR-0069) and `ShowStdlib` (the portable `Show.float`) are ported and wired into `Rian.Assemble.runProgramTail` (composed by `Rian.JS.compile` before the gate); `itp`/`shs` parity streams. |
-| **⚙️ Execution & self-host (FFI-heavy, Phase 8)** | `run`, `repl`, `fixpoint`, `self_host`, `roundtrip`, `forms_equiv`, `doctest`, `test` | Wrap `:compile.forms` / code-loading / `GenServer`. Expected-late: they need the BEAM emitter + Erlang FFI. For the **JS** build these are skipped in-browser. |
+| **⚙️ Execution & self-host (FFI-heavy, Phase 8)** | ~~`run`~~ (eval), `repl`, `fixpoint`, `self_host`, `roundtrip`, `forms_equiv`, `doctest`, `test` | Wrap `:compile.forms` / code-loading / `GenServer`. **`Rian.Run.eval` is ported** (the `run` stream): gate → load every module (+ prelude) → resolve the zero-arg entry across modules → apply, errors-as-values — over `Rian.Beam.runEntry`'s `runEntryImpl` FFI. The **file/Manifest half** (`run_file`/`bundle_and_load`/`cli`) stays at the filesystem boundary; **`repl`** is interactive/stateful; **`roundtrip`** needs the Elixir→Rian transpiler (unported); **`forms_equiv`** deconstructs Erlang forms as *data* (the port builds them as opaque `ETerm`, so it would need a forms-as-ADT redesign). For the **JS** build these are skipped in-browser. |
 | **📐 Formatter (Phase 9)** | `format` (+ `format/{Doc,CST,CLI}`), `lsp/*` | Zero-config formatter (ADR-0045). A real feature, off the compile spine; ports after the emitters. |
 | **📦 CLI / packaging / integrations (Phase 10)** | `cli`, `build`, `manifest`, `pkg/*`, `tour`, `livebook/*`, `application` | Host shims + build toolchain. `Manifest` (`rian.toml` reader) gates the Phase 7–10 build. Becomes a thin Elixir/escript or node-CLI shell over the ported core. |
 | **🚫 Superseded / out of scope** | `transpile` (+ `transpile/*`), `ann` (reader) | **Not ported by design.** Elixir→Rian `Transpile` is *re-aimed* to **PureScript → Rian** (Phase 7), not lifted. `Ann`'s reader is dropped; the `@rian_sig` *comment convention* is retained. |
@@ -264,9 +264,9 @@ runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tie
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **1137/1137** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **1142/1142** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
-InferLocal/Assemble/Comptime/Opaque/**JS**/**Lower.Rust**/**JVM** (the count is the harness's own `N/N` total — `parity.erl`
+InferLocal/Assemble/Comptime/Opaque/**JS**/**Lower.Rust**/**JVM**/**Beam**/**Run** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it). This prose figure,
 and the "all 12 `check_func` checks" / "deferred" notes below, are pinned to the code by
 `Rian.PursMigrationDocTest` — a stale count or a deferral note that outlived its port fails `mix test`.

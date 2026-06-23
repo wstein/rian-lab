@@ -2215,6 +2215,17 @@ beam_corpus = [
   "pub def main() Int53 := Str.length(\"hello\")"
 ]
 
+# Rian.Run.eval — the `run` stream: {src, entry} → `{:ok, value} | {:error, msg}`, rendered
+# canonically. Happy paths (default/custom entry, multi-mod, prelude) + a check error.
+run_corpus = [
+  {"pub def main() Int53 := 6 * 7", "main"},
+  {"pub def go() Int53 := 7\npub def main() Int53 := 1", "go"},
+  {"pub def main() Vec(Int53) := List.map([1, 2, 3], (n) -> n + 1)", "main"},
+  {"mod Math do\n  pub def sq(n Int53) Int53 := n * n\nend\npub def main() Int53 := Math.sq(5)",
+   "main"},
+  {"pub def main() Int53 := \"hello\"", "main"}
+]
+
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses
 # the `js` runtime corpus (every runtime program, emitted as TypeScript). Oracle = `compile_ts`.
 lines =
@@ -2388,6 +2399,21 @@ lines =
       {:ok, mod} = Rian.Beam.load(s, :rian_main)
       out = :erlang.iolist_to_binary(:io_lib.format(~c"~p", [apply(mod, :main, [])]))
       "beam\t#{Canon.hex(s)}\t#{Canon.hex(out)}"
+    end) ++
+    Enum.map(run_corpus, fn {src, entry} ->
+      # Rian.Run.eval — the `run` stream: gate + load + apply a zero-arg entry, errors-as-values.
+      # Canonical render: `ok:<~p value>` / `error:<msg>`. The input packs `entry\tsrc` (split in
+      # parity.erl). Corpus = happy paths (default + custom entry, multi-mod, prelude) + a check
+      # error (gate-parity-matched message). The `no entry`/ambiguous-entry + compile-error messages
+      # carry divergent module names (`rian_main` vs the reference's `RianCompiled`), so they are
+      # exercised by the eval logic but kept out of this byte-parity corpus.
+      canon =
+        case Rian.Run.eval(src, entry) do
+          {:ok, v} -> "ok:" <> :erlang.iolist_to_binary(:io_lib.format(~c"~p", [v]))
+          {:error, m} -> "error:" <> m
+        end
+
+      "run\t#{Canon.hex(entry <> "\t" <> src)}\t#{Canon.hex(canon)}"
     end) ++
     Enum.map(rustprog_corpus, fn s ->
       "rustprog\t#{Canon.hex(s)}\t#{Canon.hex(Rian.Lower.rust_program(Rian.Decl.parse(s)))}"
