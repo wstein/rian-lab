@@ -199,6 +199,14 @@ const stats = [
   })();
 </script>
 
+<!-- The hero is a LIVE demo, not a screenshot: editing the source re-compiles + runs in the
+     browser and re-lowers every target pane (the same driver the by-example tour uses). The
+     ~380KB compiler loads lazily on the first keystroke, so the landing paint stays light. -->
+<script>
+  import { wireLiveCells } from "../lib/live-cells";
+  wireLiveCells();
+</script>
+
 <style>
   .hp-hero {
     padding: clamp(40px, 7vw, 84px) clamp(18px, 4vw, 36px) clamp(30px, 5vw, 60px);
