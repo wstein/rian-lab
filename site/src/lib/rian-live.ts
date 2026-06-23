@@ -102,3 +102,36 @@ export function runInSandbox(jsModule: string, timeoutMs = 4000): Promise<RunRes
 // strip the leading `Kind: ` an exception message often carries, for terser output.
 export const cleanError = (e: unknown): string =>
   String((e && (e as any).message) || e).replace(/^\w+: /, "");
+
+// ── shareable source state (the `#code=` permalink, ADR-0090) ────────────────
+// A lab buffer round-trips through the URL *hash* (never the query — the source
+// stays client-only, off the server/Pages logs). Encoding is synchronous
+// base64url(utf8): no async on the load path, no dependency, and the tour cells
+// are well under any URL limit. The build-time half (the by-example "Open in
+// Lab" hrefs) computes the same string in Astro via `Buffer.toString("base64url")`,
+// so the two sides agree byte-for-byte. (Deflate would shorten big pastes but is
+// async + Safari-gated — deferred until sharing large buffers is a real need.)
+export function encodeSource(src: string): string {
+  const bytes = new TextEncoder().encode(src);
+  let bin = "";
+  for (const b of bytes) bin += String.fromCharCode(b);
+  return btoa(bin).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+
+export function decodeSource(frag: string): string | null {
+  try {
+    const b64 = frag.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = b64 + "===".slice((b64.length + 3) % 4);
+    const bin = atob(padded);
+    const bytes = Uint8Array.from(bin, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+// Read a shared buffer out of `location.hash` (`#code=<base64url>`), or null.
+export function sharedFromHash(hash: string): string | null {
+  const m = /^#code=(.+)$/.exec(hash);
+  return m ? decodeSource(m[1]) : null;
+}

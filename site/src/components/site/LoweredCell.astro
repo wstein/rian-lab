@@ -20,6 +20,12 @@ interface Props {
 
 const { cell, heading = true } = Astro.props as Props;
 const order = ["ex", "rs", "js", "jvm"];
+
+// "Open in Lab" deep-link — the cell source, base64url'd into the playground's `#code=`
+// permalink. Built here at build time with Node's `Buffer` so it needs no client JS; the
+// browser side (`rian-live.ts` decodeSource) reads the identical encoding (ADR-0090).
+const base = import.meta.env.BASE_URL.replace(/\/$/, "");
+const labHref = `${base}/playground#code=${Buffer.from(cell.source, "utf8").toString("base64url")}`;
 ---
 
 <section id={cell.id} class="rl-cell" data-cell-id={cell.id}>
@@ -44,6 +50,9 @@ const order = ["ex", "rs", "js", "jvm"];
         <span class="rl-mono rl-edithint" title="Edit the source — it compiles and runs live in your browser">
           ✎ EDIT · LIVE
         </span>
+        <a class="rl-mono rl-lablink" href={labHref} title="Open this source in the Playground (the Lab)">
+          Open in Lab ↗
+        </a>
       </div>
       <div class="rl-codearea">
         <pre class="rl-code rl-hl" data-cell-hl set:html={highlight(cell.source)}></pre>
@@ -140,6 +149,17 @@ const order = ["ex", "rs", "js", "jvm"];
     font-size: 10.5px;
     letter-spacing: 0.06em;
     color: var(--accent);
+  }
+  .rl-lablink {
+    margin-left: 12px;
+    font-size: 10.5px;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    text-decoration: none;
+    white-space: nowrap;
+  }
+  .rl-lablink:hover {
+    text-decoration: underline;
   }
   .rl-codearea {
     position: relative;

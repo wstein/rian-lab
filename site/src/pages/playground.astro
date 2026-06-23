@@ -47,8 +47,10 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
             <div class="pg-console-bar">
               <span class="rl-mono pg-console-title">OUTPUT</span>
               <span class="pg-edited" id="pg-edited" hidden>● edited · live</span>
+              <span class="pg-shared" id="pg-shared" hidden title="This buffer came from a shared link; it compiles + runs in a sandbox.">↗ shared · sandboxed</span>
               <div class="pg-console-btns">
                 <button class="pg-btn pg-run" id="pg-run">▷ Run</button>
+                <button class="pg-btn" id="pg-link" title="Copy a permalink to this buffer">⎘ Copy link</button>
                 <button class="pg-btn" id="pg-reset">↺ Reset</button>
               </div>
             </div>
@@ -100,7 +102,15 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
 
 <script>
   import { highlight } from "../lib/highlight";
-  import { loadCompiler, compilerLoaded, looksIncomplete, runInSandbox, cleanError } from "../lib/rian-live";
+  import {
+    loadCompiler,
+    compilerLoaded,
+    looksIncomplete,
+    runInSandbox,
+    cleanError,
+    encodeSource,
+    sharedFromHash,
+  } from "../lib/rian-live";
   import tour from "../data/tour.json";
 
   type Cell = (typeof tour.cells)[number];
@@ -114,10 +124,15 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   const gutter = $("#pg-gutter");
   const out = $("#pg-out");
   const edited = $("#pg-edited");
+  const sharedBadge = $("#pg-shared");
   const statusReach = $("#pg-status-reach");
   const statusLn = $("#pg-status-ln");
 
-  let current: Cell = cells[0];
+  // a synthetic "file" for a buffer that arrived via a `#code=` share link — it has
+  // no pre-generated reference panes, so the non-JS targets show an honest placeholder.
+  type AnyCell = Cell | { id: "shared"; file: string; source: string; panes: {}; reach: {} };
+  let current: AnyCell = cells[0];
+  let isShared = false;
   // the live JS/TS the in-browser compiler emits for the current buffer (null = reference / awaiting Run)
   let liveJs: string | null = null;
   let liveTs: string | null = null;
@@ -133,20 +148,40 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     edited.hidden = code === current.source;
   }
 
+  const PANE_LABEL: Record<string, string> = { ex: "BEAM · Elixir", rs: "Rust", jvm: "JVM · Kotlin" };
+
   function renderPanes() {
+    const panes = (current as any).panes as Record<string, string>;
+    // Only JS/TS lower in-browser; BEAM/Rust/JVM ship as pre-generated reference for the
+    // *original* cell source. So once the buffer diverges from that source (an edit) or is a
+    // shared buffer with no reference at all, those panes would be SHOWING A STALE LIE — the
+    // original cell's output mislabeled as this buffer's. Mark them explicitly instead.
+    const stale = isShared || src.value !== current.source;
     for (const t of ["ex", "rs", "js", "ts", "jvm"]) {
       const el = document.querySelector(`.pg-pane-code[data-pane="${t}"]`);
       if (!el) continue;
-      // the JS + TS panes are LIVE — the in-browser compiler's real `.mjs`/`.ts` emission for the
-      // current buffer once Run has compiled it; the other targets show the pre-generated reference
-      // (their emitters aren't in-browser). The `.ts` pane has no reference, so it waits for Run.
       let code: string;
-      if (t === "js") code = liveJs != null ? liveJs : (current.panes as Record<string, string>).js;
-      else if (t === "ts") code = liveTs != null ? liveTs : "// Run to compile this buffer to native TypeScript.";
-      else code = (current.panes as Record<string, string>)[t];
+      let isStale = false;
+      if (t === "js") {
+        code = liveJs != null ? liveJs : (panes.js ?? "// editing — compiles live as you type.");
+      } else if (t === "ts") {
+        code = liveTs != null ? liveTs : "// Run to compile this buffer to native TypeScript.";
+      } else if (stale) {
+        isStale = true;
+        code = isShared
+          ? `// ⓘ ${PANE_LABEL[t]} is not lowered in-browser.\n// A shared/edited buffer compiles live to JS/TS only; BEAM/Rust/JVM\n// need the toolchain — they ship here as pre-generated reference (ADR-0090).`
+          : `// ⓘ ${PANE_LABEL[t]}: reference for the ORIGINAL ${current.file}.\n// In-browser lowering covers JS/TS only — your edits update those panes;\n// the BEAM/Rust/JVM emitters aren't in the browser yet (ADR-0090).`;
+      } else {
+        code = panes[t];
+      }
       el.innerHTML = highlight(code);
+      (el as HTMLElement).classList.toggle("pg-pane-stale", isStale);
     }
-    const reach = Object.values(current.reach)[0] as string[];
+    if (isShared) {
+      statusReach.innerHTML = `<span style="opacity:1">:js</span> · <span style="opacity:1">:ts</span> live · <span style="opacity:0.45">other targets need the toolchain</span>`;
+      return;
+    }
+    const reach = (Object.values((current as any).reach)[0] as string[]) ?? [];
     const order = ["ex", "rs", "js", "jvm"];
     statusReach.innerHTML =
       "reaches " +
@@ -160,6 +195,10 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
 
   function loadFile(id: string) {
     current = byId.get(id)!;
+    isShared = false;
+    sharedBadge.hidden = true;
+    // a tab is an explicit choice — drop any `#code=` so a reload doesn't snap back to the share.
+    if (location.hash.startsWith("#code=")) history.replaceState(null, "", location.pathname + location.search);
     src.value = current.source;
     liveJs = null;
     liveTs = null;
@@ -168,6 +207,22 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     renderPanes();
     out.dataset.kind = "hint";
     out.textContent = "Start typing — it compiles + runs live in your browser. Or press ▷ Run.";
+  }
+
+  // a buffer that arrived via a `#code=` permalink (or "Open in Lab"): no tab, no
+  // pre-generated reference panes, a "shared · sandboxed" badge, and immediate eval.
+  function loadShared(source: string) {
+    current = { id: "shared", file: "shared.rian", source, panes: {}, reach: {} };
+    isShared = true;
+    src.value = source;
+    liveJs = null;
+    liveTs = null;
+    document.querySelectorAll(".pg-tab").forEach((b) => b.classList.remove("on"));
+    sharedBadge.hidden = false;
+    renderEditor();
+    renderPanes();
+    out.dataset.kind = "hint";
+    out.textContent = "Loaded a shared buffer — compiling + running in a sandbox…";
   }
 
   // ── live, forgiving evaluation ──────────────────────────────────────────────
@@ -237,6 +292,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   );
   src.addEventListener("input", () => {
     renderEditor();
+    renderPanes(); // flip BEAM/Rust/JVM to the honest placeholder the moment the buffer diverges
     clearTimeout(liveTimer);
     liveTimer = window.setTimeout(() => liveEval(false), 280);
   });
@@ -250,11 +306,32 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   $("#pg-reset").addEventListener("click", () => {
     src.value = current.source;
     renderEditor();
+    renderPanes();
     if (compilerLoaded()) liveEval(false);
     else setOut("hint", "Reset to " + current.file + ".");
   });
+  // Copy link — encode the buffer into the URL hash (client-only, never the query) and
+  // put the permalink on the clipboard. Anyone who opens it lands on this exact buffer.
+  $("#pg-link").addEventListener("click", async () => {
+    const enc = encodeSource(src.value);
+    history.replaceState(null, "", "#code=" + enc);
+    const url = location.href;
+    try {
+      await navigator.clipboard.writeText(url);
+      setOut("ok", "⎘ link copied — it carries this exact buffer (which runs in a sandbox on open).");
+    } catch {
+      setOut("hint", "The permalink is now in your address bar — copy it from there.");
+    }
+  });
 
-  loadFile(cells[0].id);
+  // Boot: a `#code=` permalink wins over the default first cell.
+  const shared = sharedFromHash(location.hash);
+  if (shared != null && shared.trim() !== "") {
+    loadShared(shared);
+    liveEval(true); // compile + run the shared buffer right away, and focus the JS pane
+  } else {
+    loadFile(cells[0].id);
+  }
 </script>
 
 <style>
@@ -413,6 +490,16 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     font-family: "JetBrains Mono", monospace;
     font-size: 11px;
     color: #f59e0b;
+  }
+  .pg-shared {
+    font-family: "JetBrains Mono", monospace;
+    font-size: 11px;
+    color: #7dd3fc;
+  }
+  /* a non-JS pane showing the honest "reference / not this buffer" placeholder */
+  .pg-pane-stale {
+    opacity: 0.66;
+    font-style: italic;
   }
   .pg-console-btns {
     margin-left: auto;
