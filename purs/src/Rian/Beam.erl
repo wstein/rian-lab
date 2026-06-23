@@ -9,7 +9,7 @@
 %% purerl represents a PureScript `Array a` as an Erlang `array` (see Rian.HostRef), so the
 %% Array-taking builders convert with `array:to_list/1`.
 -export([mkAtomTerm/1, mkIntStr/1, mkIntI/1, mkFloatStr/1, mkBinary/1, strBytes/1, mkTuple/1,
-         mkList/1, runMainImpl/2]).
+         mkList/1, runModulesImpl/2]).
 
 %% ── ETerm constructors (raw Erlang terms; the abstract-format nodes are tuples of these) ──
 mkAtomTerm(B) -> binary_to_atom(B, utf8).      %% a raw atom (module / op / function name)
@@ -21,26 +21,33 @@ strBytes(B) -> binary_to_list(B).              %% the UTF-8 byte charlist of a S
 mkTuple(Arr) -> list_to_tuple(array:to_list(Arr)).
 mkList(Arr) -> array:to_list(Arr).
 
-%% ── compile the forms → load → run `main/0` → stringify the result ──
-%% `Forms` arrives already as an Erlang list (built via `mkList`). Returns a binary: either the
-%% `~p`-rendered result of `Mod:main()`, or a `compile_error:`/`crash:` diagnostic (so a failure is
-%% a comparable string under the parity harness, never an exception).
-runMainImpl(Forms, ModB) ->
-  Mod = binary_to_atom(ModB, utf8),
+%% ── compile each module's forms → load all → run the main module's `main/0` → stringify ──
+%% `ModsArr` is a PureScript `Array` (an Erlang `array`) of module-forms, each already an Erlang
+%% list (built via `mkList`); `MainB` names the module to run. Aux modules (e.g. the injected `Show`
+%% for `${float}`, or sibling `mod`s) are compiled + loaded first, so a cross-module call from the
+%% main module resolves. Returns a binary: the `~p`-rendered result of `Main:main()`, or a
+%% `compile_error:`/`crash:` diagnostic (a comparable string under parity, never an exception).
+runModulesImpl(ModsArr, MainB) ->
+  Main = binary_to_atom(MainB, utf8),
+  Mods = array:to_list(ModsArr),
   try
-    case compile:forms(Forms, [return_errors]) of
-      {ok, Mod, Bin} -> run(Mod, Bin);
-      {ok, Mod, Bin, _Warnings} -> run(Mod, Bin);
-      Other -> fmt("compile_error: ~p", [Other])
-    end
+    lists:foreach(fun load_forms/1, Mods),
+    fmt("~p", [Main:main()])
   catch
+    throw:{compile_error, Err} -> fmt("compile_error: ~p", [Err]);
     Class:Reason -> fmt("crash: ~p:~p", [Class, Reason])
   end.
 
-run(Mod, Bin) ->
+load_forms(Forms) ->
+  case compile:forms(Forms, [return_errors]) of
+    {ok, Mod, Bin} -> do_load(Mod, Bin);
+    {ok, Mod, Bin, _Warnings} -> do_load(Mod, Bin);
+    Other -> throw({compile_error, Other})
+  end.
+
+do_load(Mod, Bin) ->
   code:purge(Mod),
   {module, Mod} = code:load_binary(Mod, atom_to_list(Mod) ++ ".beam", Bin),
-  Result = Mod:main(),
-  fmt("~p", [Result]).
+  ok.
 
 fmt(Format, Args) -> list_to_binary(lists:flatten(io_lib:format(Format, Args))).

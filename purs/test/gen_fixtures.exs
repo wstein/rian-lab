@@ -2185,7 +2185,14 @@ beam_corpus = [
   # here (the same reason the Elixir-runtime `__prim_*` stringify prims are not in the beam stream).
   "@external(:ex, \"erlang.integer_to_binary(n)\")\npub def show(n Int53) String\npub def main() String := show(255)",
   # a non-`:ex` external → honestly dropped on BEAM (emits nothing); `main` stands alone
-  "@external(:js, \"x + 1\")\npub def jsonly(x Int53) Int53\npub def main() Int53 := 99"
+  "@external(:js, \"x + 1\")\npub def jsonly(x Int53) Int53\npub def main() Int53 := 99",
+  # ── inc 10: cross-module / aux-mod loading (multi-module compile + load all) ──
+  # `${float}` interpolation → the injected `Show` module, compiled + loaded as an aux mod (ADR-0069)
+  "pub def main() String := x := 1.5 ; \"v = ${x}\"",
+  # a negative float through `Show` (exercises the recursive `Show.signed`/`neg`/`magnitude` path)
+  "pub def main() String := \"${-2.25}\"",
+  # a user multi-`mod` program — top-level `main` calls a sibling `mod`'s function (`Elixir.Math`)
+  "mod Math do\n  pub def sq(n Int53) Int53 := n * n\nend\npub def main() Int53 := Math.sq(7) + 1"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses

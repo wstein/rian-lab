@@ -44,11 +44,18 @@
 -- | positional call), reusing the normal Core → forms FFI lowering (`beamFunc`); an `@external` with
 -- | no `:ex` body is honestly off `:ex` and emits nothing. The new remote-call clauses lower a
 -- | `Mod.fun(args)` / `:erlang.fun(args)` to an Erlang remote call (`moduleAtom`: a PascalCase head →
--- | the Elixir module `Elixir.Mod`, a lowercase/atom head → an Erlang module verbatim).
--- | **Deferred (later increments):** specs/`type` attrs, and the cross-module + prelude machinery
--- | (the `Rian.Prelude.<Name>` redirect in `moduleAtom`, multi-module compile/load — so `${float}`
--- | via `Show.float` and `List`/`Str`/`Dict` prelude calls land there). An unported node raises a
--- | clear crash.
+-- | the Elixir module `Elixir.Mod`, a lowercase/atom head → an Erlang module verbatim). Inc 10:
+-- | **cross-module / aux-mod loading** — `runMain` now compiles the top-level functions into the main
+-- | `rian_main` module *and* each sibling `mod` into its own `Elixir.<Name>` module, loading all
+-- | before running `rian_main:main()` (`runModulesImpl`), so a cross-module call resolves. This
+-- | lands **`${float}`**: `Rian.Assemble.runProgramTail` injects a `Show` module for a `Float64`
+-- | hole, which now compiles + loads as an aux mod and runs end-to-end (the String⇄charlist prims
+-- | `__prim_str_chars`/`_from_chars`/`_to_atom` lower to the pure-Erlang `unicode:*`/`erlang:*` BIFs
+-- | rather than the reference's `Elixir.String.*` — an equivalent result with no Elixir runtime
+-- | needed, the one deliberate emit divergence). **Deferred (later increments):** specs/`type` attrs,
+-- | and the **`List`/`Dict`/`Str`/`Int` prelude linkage** (the `Rian.Prelude.<Name>` redirect in
+-- | `moduleAtom` + bundling/compiling the prelude `.rian` sources). An unported node raises a clear
+-- | crash.
 module Rian.Beam
   ( runMain
   ) where
@@ -85,8 +92,9 @@ foreign import mkBinary :: String -> ETerm -- a raw binary (a Rian String litera
 foreign import strBytes :: String -> ETerm -- a String's UTF-8 byte charlist (a `{string,…}` node)
 foreign import mkTuple :: Array ETerm -> ETerm
 foreign import mkList :: Array ETerm -> ETerm
--- compile the forms list → load → run `Mod:main()` → the `~p`-rendered result (or a diagnostic).
-foreign import runMainImpl :: ETerm -> String -> String
+-- compile each module's forms → load all → run `Main:main()` → the `~p`-rendered result (or a
+-- diagnostic). The first arg is the array of module-forms (aux mods + the main module).
+foreign import runModulesImpl :: Array ETerm -> String -> String
 
 -- | Compile `src` to BEAM abstract forms, load the module, run its `main/0`, and return the
 -- | stringified result (or a `Rian.Check:`/`compile_error:` diagnostic). The execution-parity entry.
@@ -95,9 +103,19 @@ runMain :: String -> String
 runMain src =
   case checkProgram prog of
     Just msg -> "Rian.Check: " <> msg
-    Nothing -> runMainImpl (moduleForms "rian_main" prog) "rian_main"
+    Nothing -> runModulesImpl (auxForms <> [ mainForms ]) "rian_main"
   where
   prog = runProgramTail (assemble (parseToProg src))
+  -- the main module = the top-level funcs (or the single pulled-up `mod`), named `rian_main`.
+  mainForms = moduleForms "rian_main" (funcsOf prog) (constsOf prog) (registryFrom (typesOf prog) (structsOf prog))
+  -- each sibling `mod` (e.g. the injected `Show` for `${float}`, or a user multi-`mod` program) →
+  -- its own `Elixir.<Name>` module, loaded first so a cross-module call resolves. Skipped when there
+  -- are no top-level funcs (then `funcsOf` already pulled the single `mod` up as main). Mirrors
+  -- `load_aux_mods`.
+  auxForms = case prog.funcs of
+    [] -> []
+    _ -> map auxModuleForms prog.mods
+  auxModuleForms m = moduleForms ("Elixir." <> m.name) m.funcs m.consts (registryFrom m.types m.structs)
 
 -- the functions to compile: a single `mod`'s, else the top-level ones (mirrors `funcs_of`).
 funcsOf :: Prog -> Array Func
@@ -123,13 +141,13 @@ beamFunc f
   | otherwise = [ f ]
 
 -- ── module assembly ──────────────────────────────────────────────────────────
-moduleForms :: String -> Prog -> ETerm
-moduleForms modName prog =
+-- build one module's forms from its own functions / consts / type-registry (so the main module and
+-- each aux `mod` share one builder, mirroring the reference `beam_for`'s per-scope arguments).
+moduleForms :: String -> Array Func -> Array Const -> Registry -> ETerm
+moduleForms modName funcs0 consts reg =
   let
-    funcs = funcsOf prog >>= beamFunc
-    consts = constsOf prog
+    funcs = funcs0 >>= beamFunc
     cnames = map _.name consts
-    reg = registryOf prog
     exports =
       map (\f -> nameArity f.name (funcArity f)) funcs
         <> map (\c -> nameArity (toSnake c.name) 0) consts
@@ -254,9 +272,15 @@ exprForm (ECall (EId "__prim_float_repr") [ n ]) =
 exprForm (ECall (EId "__prim_str_to_float") [ s ]) = remoteCall "erlang" "binary_to_float" [ exprForm s ]
 exprForm (ECall (EId "__prim_to_string") [ x ]) = remoteCall "Elixir.String.Chars" "to_string" [ exprForm x ]
 exprForm (ECall (EId "__prim_panic") [ m ]) = remoteCall "erlang" "error" [ exprForm m ]
-exprForm (ECall (EId "__prim_str_chars") [ s ]) = remoteCall "Elixir.String" "to_charlist" [ exprForm s ]
-exprForm (ECall (EId "__prim_str_from_chars") [ cs ]) = remoteCall "Elixir.List" "to_string" [ exprForm cs ]
-exprForm (ECall (EId "__prim_str_to_atom") [ s ]) = remoteCall "Elixir.String" "to_atom" [ exprForm s ]
+-- the String ⇄ charlist/atom conversions: the purerl backend lowers these to the **pure-Erlang**
+-- BIFs (not the Elixir-stdlib calls the Elixir reference emits — `Elixir.String.to_charlist` etc.,
+-- which themselves delegate to exactly these), so the emitted `.beam` runs with no Elixir runtime
+-- loaded. The result is identical, so execution parity against the reference holds; this is the one
+-- deliberate emit divergence, and it is what makes the injected `Show` module (and thus `${float}`)
+-- run in the plain-Erlang harness.
+exprForm (ECall (EId "__prim_str_chars") [ s ]) = remoteCall "unicode" "characters_to_list" [ exprForm s, fAtom "utf8" ]
+exprForm (ECall (EId "__prim_str_from_chars") [ cs ]) = remoteCall "unicode" "characters_to_binary" [ exprForm cs, fAtom "utf8" ]
+exprForm (ECall (EId "__prim_str_to_atom") [ s ]) = remoteCall "erlang" "binary_to_atom" [ exprForm s, fAtom "utf8" ]
 -- explicit 64-bit overflow ops (ADR-0035 §3): BEAM ints are bignums, so compute the true sum once
 -- (an immediately-applied `fun`) then project onto signed-64: wrap / saturate / check.
 exprForm (ECall (EId "__prim_wrapping_add") [ a, b ]) = i64Overflow Wrapping a b
@@ -297,10 +321,10 @@ caseArmForm arm = fClause [ patForm arm.pat ] (armGuardForm arm.guard) (bodyForm
 -- its runtime discriminator: `sums` = each value-`type` name → its variants; `structs` = the names.
 type Registry = { sums :: Array (Tuple String (Array IR.Variant)), structs :: Array String }
 
--- the registry in the same scope as `funcsOf` (a single `mod`'s decls, else the top-level ones).
-registryOf :: Prog -> Registry
-registryOf prog =
-  { sums: map (\t -> Tuple t.name t.variants) (typesOf prog), structs: map _.name (structsOf prog) }
+-- the registry for a scope's own type/struct declarations.
+registryFrom :: Array IR.Type -> Array IR.Struct -> Registry
+registryFrom types structs =
+  { sums: map (\t -> Tuple t.name t.variants) types, structs: map _.name structs }
 
 typesOf :: Prog -> Array IR.Type
 typesOf prog = case prog.funcs of
@@ -446,6 +470,8 @@ patForm PWild = fVar "_"
 patForm (PVar x) = fVar (varAtom x)
 patForm (PLit (LInt n)) = fIntegerI n
 patForm (PLit (LStr s)) = fStr s
+-- a char-literal pattern `'-'` → its integer codepoint (a `Char` is an integer, as `EChar`).
+patForm (PChar cp) = fIntegerI cp
 patForm (PAtom a) = fAtom a
 -- a sum pattern `Circle(r)` → the tagged-tuple pattern `{circle, R}` (a nullary ctor → its atom).
 patForm (PCtor name args) = ctorForm (toSnake name) (map patForm args)
