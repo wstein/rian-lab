@@ -409,6 +409,21 @@ defmodule Rian.Lower do
   # The `def`/`defp` clauses of one function (no type/struct preamble). `def_kw`
   # selects the visibility keyword (top-level is always `def`; inside a `mod` a
   # private function is `defp`).
+  # an `@external` function (ADR-0068): no clauses — render its `:ex` host body as a
+  # one-line `def name(params), do: <host>` (mirrors `rust_fn` for `:rs`). The `:ex`
+  # spec is rendered by `Rian.External.render` (raw string / `Mod.fun` ref / file ref).
+  defp elixir_clauses(%{externals: ext} = func, _ctx, def_kw) when map_size(ext) > 0 do
+    Enum.each(func.params, &Rian.Capability.beam_legal!(&1.cap))
+
+    host =
+      case Map.get(ext, :ex) do
+        nil -> raise "`#{func.name}`: no `@external(:ex, …)` body — not reachable on :ex"
+        spec -> Rian.External.render(spec, func.params)
+      end
+
+    "#{def_kw} #{func.name}(#{Enum.map_join(func.params, ", ", & &1.name)}), do: #{host}"
+  end
+
   defp elixir_clauses(func, ctx, def_kw) do
     Enum.each(func.params, &Rian.Capability.beam_legal!(&1.cap))
 

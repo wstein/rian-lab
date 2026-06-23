@@ -43,12 +43,12 @@ defmodule Rian.LowerTest do
     # emitting the per-target host body verbatim for both Elixir and Rust.
     test "a clause-less @external func lowers to its host body, not a crash" do
       # the compile returning at all is the regression proof (check! no longer
-      # crashes); the Rust backend renders the `:rs` host body verbatim. (The
-      # Elixir-text view is the debug/inspection backend and does not render
-      # `@external` — the real `:ex` path is `Rian.Beam`.)
+      # crashes); both backends render the per-target host body — Rust the `:rs`
+      # spec, the Elixir-text view a one-line `def …, do: <:ex spec>`.
       out = Lower.compile([], ext_puts())
       assert out.rust =~ "fn puts(s: &str) -> String"
       assert out.rust =~ ~S|println!("{}", s)|
+      assert out.elixir =~ "def puts(s), do: IO.puts(s)"
     end
 
     @tag :rust
