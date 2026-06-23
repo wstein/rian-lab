@@ -24,7 +24,7 @@
           "rs"
         ]
       },
-      "source": "# a module, an entry `main`, a single-assignment bind, and a `${…}` hole\nmod Hello do\n  pub def main() String := name := \"Rian\" ; \"Hello, ${name}!\"\nend",
+      "source": "# a module, an entry `main`, a single-assignment bind, and a `${…}` hole\nmod Hello do\n  pub def main() String\n    name := \"Rian\"\n    \"Hello, ${name}!\"\n  end\nend",
       "title": "Hello, Rian!"
     },
     {

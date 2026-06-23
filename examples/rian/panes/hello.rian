@@ -1,5 +1,8 @@
 #@pane
 # a module, an entry `main`, a single-assignment bind, and a `${…}` hole
 mod Hello do
-  pub def main() String := name := "Rian" ; "Hello, ${name}!"
+  pub def main() String
+    name := "Rian"
+    "Hello, ${name}!"
+  end
 end
