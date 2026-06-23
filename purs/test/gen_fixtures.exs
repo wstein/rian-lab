@@ -1077,7 +1077,22 @@ def label(_) := 0|,
   # a `case` with a ctor arm that binds a field
   "type Opt := Som(Int64) | Non\ndef get(o Opt) Int64 := case o do\n  Som(x) -> x\n  Non -> 0\nend",
   # a `case` arm carrying a `when` guard (tests + guard → a conditional `if`)
-  "type Box := B(Int64)\ndef f(b Box) Int64 := case b do\n  B(n) when n > 0 -> n\n  B(n) -> 0 - n\nend"
+  "type Box := B(Int64)\ndef f(b Box) Int64 := case b do\n  B(n) when n > 0 -> n\n  B(n) -> 0 - n\nend",
+  # ── inc 4: strings / chars / symbols (the `Prim.*` intrinsics + atom/char patterns) ──
+  # a `Char` literal value + pattern → its codepoint `Long` (`'a'` → `97L`)
+  ~S|def f(c Char) Int64
+def f('a') := 1
+def f(c) := 0|,
+  "pub def ay() Char := 'a'",
+  # a `Symbol`/atom pattern tests the interned name as a Kotlin String
+  "def g(s Symbol) Int64\ndef g(:ok) := 1\ndef g(s) := 0",
+  # the string prims: `<>`-concat via `Prim.str_concat`, codepoint `Prim.char_code`/`char_to_string`
+  "pub def cat(a String, b String) String := Prim.str_concat(a, b)",
+  "pub def cc(c Char) Int64 := Prim.char_code(c)",
+  "pub def cstr(c Char) String := Prim.char_to_string(c)",
+  # string interpolation (ADR-0069) → `__prim_str_concat_all` (+ `__prim_int_to_string` for `${int}`)
+  ~S|pub def greet(s String) String := "hi ${s}"|,
+  ~S|pub def show(n Int64) String := "n=${n}"|
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

@@ -180,6 +180,10 @@ patMatch :: Meta -> CPat -> String -> Tuple (Array String) (Array (Tuple String 
 patMatch _ PWild _ = Tuple [] []
 patMatch _ (PVar n) acc = Tuple [] [ Tuple n acc ]
 patMatch _ (PLit v) acc = Tuple [ acc <> " == " <> litKt v ] []
+-- a `Symbol`/atom pattern (`:ok`) tests the interned name as a Kotlin `String` (ADR-0041);
+-- a `Char` pattern tests the codepoint `Long`.
+patMatch _ (PAtom a) acc = Tuple [ acc <> " == " <> ktStr a ] []
+patMatch _ (PChar cp) acc = Tuple [ acc <> " == " <> show cp <> "L" ] []
 patMatch meta (PCtor ctor args) acc =
   let
     parts = mapWithIndex (\i p -> patMatch meta p (acc <> "." <> fieldKey meta ctor i)) args
@@ -219,6 +223,8 @@ exprKt _ (EChar cp) = show cp <> "L"
 exprKt _ (EStr s) = ktStr s
 -- a `Symbol` (`:foo`) lowers to its interned name as a Kotlin `String` (ADR-0041).
 exprKt _ (EAtom a) = ktStr a
+-- a reference to a declared `const` → the top-level `val`'s name.
+exprKt _ (EConstRef name) = name
 exprKt _ (EId "true") = "true"
 exprKt _ (EId "false") = "false"
 -- a bare PascalCase id is a nullary sum variant — its singleton `object` of the same name.
@@ -227,6 +233,19 @@ exprKt meta (EUnary "-" x) = "-" <> exprKt meta x
 exprKt meta (EUnary "not" x) = "!" <> exprKt meta x
 exprKt _ (EUnary op _) = unsafeCrashWith ("jvm: unary operator `" <> op <> "`")
 exprKt meta (EBin op l r) = "(" <> exprKt meta l <> " " <> ktOp op <> " " <> exprKt meta r <> ")"
+-- a PascalCase call is sum construction `Ctor(args)`; a lowercase one a local call — same shape.
+-- ── the `__prim_*` intrinsics (ADR-0047): string / char / int ops over Kotlin (inc 4) ──
+exprKt meta (ECall (EId "__prim_panic") [ msg ]) = "throw RuntimeException(" <> exprKt meta msg <> ")"
+exprKt meta (ECall (EId "__prim_int_to_string") [ n ]) = "(" <> exprKt meta n <> ").toString()"
+exprKt meta (ECall (EId "__prim_to_string") [ x ]) = "(" <> exprKt meta x <> ").toString()"
+exprKt meta (ECall (EId "__prim_str_concat_all") args) = "(" <> joinWith " + " (map (exprKt meta) args) <> ")"
+exprKt meta (ECall (EId "__prim_str_concat") [ a, b ]) = "(" <> exprKt meta a <> " + " <> exprKt meta b <> ")"
+exprKt meta (ECall (EId "__prim_char_to_string") [ c ]) = "String(Character.toChars((" <> exprKt meta c <> ").toInt()))"
+exprKt meta (ECall (EId "__prim_str_chars") [ s ]) = "(" <> exprKt meta s <> ").codePoints().toArray().map { it.toLong() }"
+exprKt meta (ECall (EId "__prim_str_from_chars") [ cs ]) = "(" <> exprKt meta cs <> ").joinToString(\"\") { String(Character.toChars(it.toInt())) }"
+-- a `Char`'s codepoint is already its `Long` value — identity.
+exprKt meta (ECall (EId "__prim_char_code") [ c ]) = exprKt meta c
+exprKt meta (ECall (EId "__prim_int_to_float") [ n ]) = "(" <> exprKt meta n <> ").toDouble()"
 -- a PascalCase call is sum construction `Ctor(args)`; a lowercase one a local call — same shape.
 exprKt meta (ECall (EId f) args) = f <> "(" <> joinWith ", " (map (exprKt meta) args) <> ")"
 -- Kotlin `if` is an expression.
