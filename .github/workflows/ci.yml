@@ -152,3 +152,43 @@ jobs:
 
       - name: Dialyzer (builds the PLT on first run, then analyzes)
         run: mix dialyzer
+
+  # ── JS playground-bundle freshness gate (ADR-0090) ─────────────────────────
+  # `purs/scripts/js-bundle.sh --check` rebuilds the committed browser bundle
+  # (`site/public/rian-compiler.mjs`) from source — the stock-`purs` JS backend
+  # (`js-build.sh`) + esbuild — and asserts byte-identity with the committed artifact,
+  # so the playground can never serve a compiler that disagrees with the source (it has
+  # already caught a real stale bundle). Reproducible inputs make the byte check sound:
+  # purs 0.15.16 + spago (`purs/package-lock.json`), the dhall JS package set (hash-pinned
+  # in `packages-js.dhall`), and esbuild (`site/package-lock.json`) all via `npm ci`, and
+  # esbuild `--minify` is deterministic. NON-BLOCKING until a few green runs confirm
+  # cross-environment byte-reproducibility, then promote (drop `continue-on-error`) — the
+  # same "non-blocking until promoted" contract as the Tier-2 JVM lane above.
+  js-bundle:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache the purs toolchain, JS package set, and esbuild
+        uses: actions/cache@v5
+        with:
+          path: |
+            purs/node_modules
+            purs/.spago
+            site/node_modules
+          key: ${{ runner.os }}-jsbundle-${{ hashFiles('purs/package-lock.json', 'purs/spago-js.dhall', 'purs/packages-js.dhall', 'site/package-lock.json') }}
+
+      # `npm ci` (not `install`) for byte-reproducible toolchains from the lock files.
+      - name: Install purs + spago (purs/) and esbuild (site/)
+        run: |
+          (cd purs && npm ci)
+          (cd site && npm ci)
+
+      - name: Bundle freshness gate (committed rian-compiler.mjs == clean rebuild)
+        run: purs/scripts/js-bundle.sh --check
