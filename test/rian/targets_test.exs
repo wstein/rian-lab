@@ -104,4 +104,45 @@ defmodule Rian.TargetsTest do
       assert Reach.check_contracts(Decl.parse(src)) == :ok
     end
   end
+
+  describe "mix rian.targets --explain (ADR-0086 §6 diagnostics)" do
+    import ExUnit.CaptureIO
+
+    test "prints the construct + plain-English cause + governing ADR per pinned function" do
+      src = "pub def wide(a Int64, b Int64) Int64 := Int.wrapping_add(a, b)\n"
+
+      file =
+        Path.join(System.tmp_dir!(), "rian_explain_#{System.unique_integer([:positive])}.rian")
+
+      File.write!(file, src)
+
+      out =
+        capture_io(fn ->
+          Mix.Tasks.Rian.Targets.run([file, "--explain"])
+        end)
+
+      # the table still prints, plus the new "why" section with the cause + ADR
+      assert out =~ "why (ADR-0086 §6)"
+      assert out =~ "wide/2 — off [:js]"
+      assert out =~ "fixed-width integer >2^53"
+      assert out =~ "no portable representation"
+      assert out =~ "ADR-0064"
+      # the misleading blanket "host FFI" tag is gone for a numeric pin
+      refute out =~ "host FFI"
+    after
+      :ok
+    end
+
+    test "a fully-portable file prints no `why` section" do
+      src = "pub def add(a Int53, b Int53) Int53 := a + b\n"
+
+      file =
+        Path.join(System.tmp_dir!(), "rian_explain_ok_#{System.unique_integer([:positive])}.rian")
+
+      File.write!(file, src)
+
+      out = capture_io(fn -> Mix.Tasks.Rian.Targets.run([file, "--explain"]) end)
+      refute out =~ "why (ADR-0086 §6)"
+    end
+  end
 end

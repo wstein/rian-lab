@@ -160,6 +160,16 @@ pin must print like a friendly error: `file:line` + the *specific* cause — e.g
 `FunctionClauseError`/`Unsupported` raise. This unifies the DX agenda (Gleam/Elm-grade messages) with
 the inference agenda: the same work that makes reach trustworthy makes it teachable.
 
+> **Status — partially shipped (`mix rian.targets --explain`).** The *cause* half is in: `--explain`
+> prints, per pinned function, each blocking **construct**, *why* it kills the target(s) it does
+> (a `kind → plain-English reason` map over every `Rian.Reach` blocker kind), and the **governing
+> ADR** — and the table note no longer mislabels every pin as "host FFI" (a numeric/typed pin now
+> reads accurately). The **`file:line`** half is *not* yet possible: the IR (`Lexer`/`Pratt`/`Core`)
+> carries no source positions, so line numbers await a position-threading pass through the front-end.
+> Until then the construct + cause are exact; the location is the *function*, not the line. (This is a
+> DX/presentation change only — it reads `Reach.analyze`'s existing blocker set, lands no
+> reach-affecting code, and so is independent of the §2 gate.)
+
 ### 7. Competitive positioning — the one-sentence deltas (write them down, then live by them)
 
 The positioning surface (README / docs) states the differentiator against each live competitor, and
