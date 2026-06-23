@@ -1012,6 +1012,42 @@ rust_corpus = [
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\npub def same(a T, b T) Bool forall T: Eq := eq(a, b)"
 ]
 
+# Rian.JVM — the `jvm` stream (ADR-0049 Tier 2): the compiled Kotlin module. Oracle =
+# `Rian.JVM.compile`. Increment 1: single-clause portable core only — primitive params, the
+# operator algebra (`L`-suffixed int literals, float-`/`, comparisons, `and`/`or`, `<>`→`+`,
+# unary `-`/`not`), `if`-expressions, local calls/recursion. Multi-clause, sums, lists, and
+# guards arrive with later increments and stay out of this corpus until then.
+jvm_corpus = [
+  "pub def add(x Int64, y Int64) Int64 := x + y",
+  "def half(n Int64) Int64 := n div 2",
+  "pub def rem3(n Int64) Int64 := n rem 3",
+  "pub def neg(b Bool) Bool := not b",
+  "pub def negate(x Int64) Int64 := -x",
+  "pub def between(x Int64) Bool := x >= 0 and x <= 9",
+  "pub def either(a Bool, b Bool) Bool := a or b",
+  # precedence: `*` binds tighter than `+`, so the `+` operands parenthesize
+  "pub def poly(x Int64) Int64 := x * x + 2 * x",
+  "pub def grouped(x Int64) Int64 := (x + 1) * (x - 1)",
+  "pub def fst(x Int64, y Int64) Int64 := x",
+  "pub def eq(a Int64, b Int64) Bool := a == b",
+  "pub def neq(a Int64, b Int64) Bool := a != b",
+  # `if` is a Kotlin expression; the `do … end` branches unwrap to expressions
+  "pub def abs(n Int64) Int64 := if n < 0 do 0 - n else n end",
+  # a private callee + a public caller (local calls / recursion-shaped)
+  "def dbl(n Int64) Int64 := n * 2\npub def quad(x Int64) Int64 := dbl(dbl(x))",
+  # the portable number/bool/string/symbol/char primitives
+  "pub def halve(x Float64) Float64 := x / 2.0",
+  ~S|pub def greet(s String) String := "hi " <> s|,
+  "pub def same(c Char) Char := c",
+  "pub def passthru(s Symbol) Symbol := s",
+  "pub def ok() Symbol := :ok",
+  # the fixed-width integers all map to `Long`
+  "pub def w8(n Int8) Int8 := n",
+  "pub def w32(n UInt32) UInt32 := n",
+  # Int53 is the portable default → `Long`
+  "pub def i53(n Int53) Int53 := n + 1"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -2035,6 +2071,9 @@ lines =
         |> Enum.map_join("\n\n", fn {_n, o} -> o.rust end)
 
       "rust\t#{Canon.hex(s)}\t#{Canon.hex(rust)}"
+    end) ++
+    Enum.map(jvm_corpus, fn s ->
+      "jvm\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JVM.compile(s))}"
     end) ++
     [
       # Rian.ShowStdlib — the `shs` stream: the parsed `Show` stdlib module (ADR-0069 §6). Input
