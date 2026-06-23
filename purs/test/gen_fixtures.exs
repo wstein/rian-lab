@@ -985,7 +985,11 @@ rust_corpus = [
   "pub def tag() Symbol := :ok",
   "pub def first(c Char) Char := c",
   # a `\\n` escape in a string literal exercises the shared escape table
-  "pub def nl() String := \"a\\nb\""
+  "pub def nl() String := \"a\\nb\"",
+  # the match shim (ADR-0036): a PARTIAL function (literal heads, no catch-all) → `_ => panic!(…)`
+  "pub def lat(Int53) Int53\npub def lat(0) := 10\npub def lat(1) := 20",
+  # a range-TOTAL literal match (`Bit := 0..1`, both covered) → `_ => unreachable!()` (rustc shim)
+  "range Bit := 0..1\npub def flip(Bit) Bit\npub def flip(0) := 1\npub def flip(1) := 0"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

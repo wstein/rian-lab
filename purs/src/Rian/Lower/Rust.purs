@@ -28,7 +28,7 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, filter, find, foldl, index, length, mapWithIndex, null)
+import Data.Array (all, any, concatMap, filter, find, foldl, head, index, length, mapWithIndex, null)
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
@@ -43,8 +43,10 @@ import Rian.Capability (owned, rustParam) as Cap
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Clause, Func, Param, Prog, Type, Variant, bodySurface)
+import Rian.Exhaustiveness (analyze, programEnv)
+import Rian.IR (Clause, Func, Param, Prog, Range, Type, Variant, bodySurface)
 import Rian.Opaque (erase)
+import Rian.PatternLower (Env, lowerMany)
 import Rian.Pratt (Pat) as P
 import Rian.Prelude (withPrelude)
 import Rian.Prim (normalize)
@@ -71,10 +73,11 @@ compile src =
           prog = erase prog0
           types = allTypes prog
           meta = buildMeta types
+          env = programEnv types prog.structs prog.ranges
           enums = joinWith "\n\n" (map rustEnum types)
           funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
         in
-          joinWith "\n\n" (map (\f -> rustUnit enums meta f) funcs)
+          joinWith "\n\n" (map (\f -> rustUnit enums meta env f) funcs)
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> foldl (\acc m -> acc <> m.funcs) [] prog.mods
@@ -84,8 +87,8 @@ allTypes prog = prog.types <> foldl (\acc m -> acc <> m.types) [] prog.mods
 
 -- the per-function unit: the program's `enum` defs (repeated per unit, as the reference does),
 -- then this function. Empty parts (no types) drop out.
-rustUnit :: String -> Meta -> Func -> String
-rustUnit enums meta f = joinWith "\n\n" (filter (_ /= "") [ enums, rustFn meta f ])
+rustUnit :: String -> Meta -> Env -> Func -> String
+rustUnit enums meta env f = joinWith "\n\n" (filter (_ /= "") [ enums, rustFn meta env f ])
 
 -- ── sum types → enums ──────────────────────────────────────────────────────────
 
@@ -124,8 +127,8 @@ variantDecl v
 
 -- ── function / clause dispatch ────────────────────────────────────────────────
 
-rustFn :: Meta -> Func -> String
-rustFn meta f =
+rustFn :: Meta -> Env -> Func -> String
+rustFn meta env f =
   let
     paramDecls = joinWith ", " (map paramDecl f.params)
     ret = rustRet (fromMaybe "" f.ret)
@@ -137,7 +140,63 @@ rustFn meta f =
       <> scrut
       <> " {\n"
       <> arms
+      <> shim env f
       <> "\n    }\n}"
+
+-- the per-target exhaustiveness shim (ADR-0036). A **partial** function (clause heads not
+-- total, by `Rian.Exhaustiveness`) gets `_ => panic!(…)` — the runtime no-match the BEAM's
+-- `FunctionClauseError` / JS-JVM `throw` give; a non-partial **range-total** literal match
+-- gets `_ => unreachable!()` (the Rian gate proved totality, but `rustc` sees the open base
+-- primitive as non-exhaustive). A closed sum / var-headed match needs neither.
+shim :: Env -> Func -> String
+shim env f
+  | isPartial env f = "\n        _ => panic!(" <> strLit (f.name <> ": no clause matched") <> "),"
+  | rustTotalShim f = "\n        _ => unreachable!(),"
+  | otherwise = ""
+
+-- partial = the clause heads are not exhaustive (the same analysis `Rian.Lower.check!` stamps).
+isPartial :: Env -> Func -> Boolean
+isPartial env f = case head f.clauses of
+  Nothing -> false
+  Just c0 ->
+    let
+      arity = length c0.pats
+      arms = map clauseArm_ f.clauses
+      clauseArm_ c =
+        let Tuple pats intro = lowerMany (map fromPat c.pats) env
+        in { pat: pats, guard: isJust c.guard || intro }
+    in
+      not (analyze arms arity env).exhaustive
+
+-- a literal-headed match over an OPEN base primitive (no catch-all, no variant) that the
+-- gate proved total — `rustc` still needs an `unreachable!()` arm. Pattern-only (mirrors
+-- `rust_total_shim?`); only consulted when not partial.
+rustTotalShim :: Func -> Boolean
+rustTotalShim f =
+  let
+    flat = concatMap (\c -> map fromPat c.pats) f.clauses
+    hasCatchall = any (\c -> all catchallPat (map fromPat c.pats)) f.clauses
+    literalHeaded = any isLitPat flat || any isCharPat flat
+    hasVariant = any isCtorPat flat
+  in
+    not hasCatchall && literalHeaded && not hasVariant
+
+catchallPat :: CPat -> Boolean
+catchallPat PWild = true
+catchallPat (PVar _) = true
+catchallPat _ = false
+
+isLitPat :: CPat -> Boolean
+isLitPat (PLit _) = true
+isLitPat _ = false
+
+isCharPat :: CPat -> Boolean
+isCharPat (PChar _) = true
+isCharPat _ = false
+
+isCtorPat :: CPat -> Boolean
+isCtorPat (PCtor _ _) = true
+isCtorPat _ = false
 
 -- a parameter's Rust declaration: `name: <capability-lowered type>` (ADR-0055).
 paramDecl :: Param -> String
