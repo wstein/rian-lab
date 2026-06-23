@@ -406,6 +406,11 @@ defmodule Rian.JVM do
   defp field_key(nil, i), do: "f#{i}"
   defp field_key(label, _i), do: label
 
+  # the i-th declared label, or `nil` when the variant has no labels (anonymous
+  # fields) — pattern-matched off the nilable list rather than a truthy `&&`.
+  defp label_at(nil, _i), do: nil
+  defp label_at(labels, i), do: Enum.at(labels, i)
+
   # ── function / clause dispatch ──────────────────────────────────────────
   # an `@external` function (ADR-0068): emit the `:jvm` host body verbatim, binding
   # each param to its positional argument by name. No `:jvm` body -> off `:jvm`.
@@ -632,7 +637,7 @@ defmodule Rian.JVM do
       args
       |> Enum.with_index()
       |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
-        {t, b} = pat_match(p, "#{acc}.#{field_key(labels && Enum.at(labels, i), i)}")
+        {t, b} = pat_match(p, "#{acc}.#{field_key(label_at(labels, i), i)}")
         {ts ++ t, bs ++ b}
       end)
 
