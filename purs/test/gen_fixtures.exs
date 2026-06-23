@@ -1045,7 +1045,26 @@ jvm_corpus = [
   "pub def w8(n Int8) Int8 := n",
   "pub def w32(n UInt32) UInt32 := n",
   # Int53 is the portable default → `Long`
-  "pub def i53(n Int53) Int53 := n + 1"
+  "pub def i53(n Int53) Int53 := n + 1",
+  # ── inc 2: the multi-clause dispatcher (if-chain, literal tests, when guards, throw tail) ──
+  # a literal clause then a var fallthrough (the var clause closes — no throw)
+  "def f(n Int64) Int64\ndef f(0) := 1\ndef f(n) := n * 2",
+  # recursion through the dispatcher (factorial)
+  "pub def fac(n Int64) Int64\ndef fac(0) := 1\ndef fac(n) := n * fac(n - 1)",
+  # a wildcard pattern (no test, no bind) beside a literal
+  "def mul(a Int64, b Int64) Int64\ndef mul(0, _) := 0\ndef mul(a, b) := a * b",
+  # a `when` guard with no structural test → a scoped `run { … }`, then a fallthrough
+  "def max2(a Int64, b Int64) Int64\ndef max2(a, b) when a >= b := a\ndef max2(a, b) := b",
+  # a guard riding a clause with a structural test absent (var head + guard → `run`), fallthrough
+  "def g(n Int64) Int64\ndef g(n) when n > 10 := 100\ndef g(n) := n",
+  # a non-total clause set → the trailing `throw RuntimeException(\"…: no clause matched\")`
+  "def only0(n Int64) Int64\ndef only0(0) := 1",
+  # a String literal pattern (`==` against the Kotlin string)
+  ~S|def label(s String) Int64
+def label("yes") := 1
+def label(_) := 0|,
+  # multiple positional literal tests joined by `&&`
+  "def both0(a Int64, b Int64) Bool\ndef both0(0, 0) := true\ndef both0(a, b) := false"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

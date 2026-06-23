@@ -21,7 +21,7 @@ module Rian.JVM
 
 import Prelude
 
-import Data.Array (all, elem, filter, foldl, mapWithIndex)
+import Data.Array (all, elem, filter, foldl, mapWithIndex, uncons)
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
@@ -31,14 +31,15 @@ import Data.String (Pattern(..), contains, length, stripPrefix) as Str
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (toCharArray) as CU
 import Data.String.Common (joinWith)
-import Data.Tuple (Tuple(..))
+import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
-import Rian.Core (CExpr(..), CPat(..), CStmt(..), fromExpr, fromPat)
+import Rian.Core (CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Clause, Func, Prog, bodySurface)
+import Rian.IR (Body, Clause, Func, Prog, bodySurface)
 import Rian.Opaque (erase)
+import Rian.Pratt (Pat, parse) as P
 import Rian.Prim (normalize)
 
 -- | Compile `src`'s functions to a single Kotlin module (a string). Mirrors `Rian.JVM.compile`:
@@ -76,40 +77,83 @@ functionKt f =
   in
     vis <> "fun " <> f.name <> "(" <> sigParams <> "): " <> ktTypeM f.ret <> " {\n" <> lines <> tail <> "}"
 
--- ── clause dispatch (inc 1: the single total var-clause) ───────────────────────
--- A single clause whose parameters are all plain variables and has no guard is total:
--- bind each var to its positional `a<i>` and `return` the body. (The multi-clause `if`-chain
--- dispatcher with structural tests is increment 2.)
+-- ── clause dispatch (inc 2: the multi-clause `if`-chain) ───────────────────────
+-- The clause lines of a function, top-to-bottom, plus whether the set is **closed** (a clause
+-- matched unconditionally, so the trailing `throw` is dropped). Each clause becomes an `if
+-- (<structural tests>) { <binds> <return> }`; an unconditional clause (no tests, no guard)
+-- closes the function; a guard-only clause rides a scoped `run { … }`. Mirrors `clause_lines`.
 clauseLines :: Array Clause -> Tuple String Boolean
-clauseLines clauses = case clauses of
-  [ c ]
-    | isNothing c.guard && all (isPVar <<< fromPat) c.pats ->
-        let
-          names = map (pvarName <<< fromPat) c.pats
-          binds = joinWith "" (mapWithIndex (\i n -> "val " <> n <> " = a" <> show i <> "; ") names)
-        in
-          Tuple ("  " <> binds <> "return " <> clauseValue (bodyExpr c) <> "\n") true
-  _ -> unsafeCrashWith "jvm: stage — multi-clause / non-var clause patterns (inc 2)"
+clauseLines clauses = case uncons clauses of
+  Nothing -> Tuple "" false
+  Just { head: c, tail: rest } ->
+    let
+      Tuple tests binds = clauseMatch c.pats
+      line = bindStr binds <> guardedReturn c.body c.guard
+    in
+      case c.guard of
+        Nothing -> closedOrCond tests line rest
+        Just _ -> runOrCond tests line rest
 
--- a `:=` body is parsed to an `EBlock`; inc 1 handles the single-expression block (a multi-
--- statement block — `:=` binds before the value — is a later increment).
+-- no guard: empty tests → unconditional (closes the function); else a conditional `if`.
+closedOrCond :: Array String -> String -> Array Clause -> Tuple String Boolean
+closedOrCond [] line _ = Tuple ("  " <> line <> "\n") true
+closedOrCond tests line rest = prependIf tests line rest
+
+-- a guard with no structural tests carries its condition in the `if` `guardedReturn` emits;
+-- wrap it in a scoped `run { … }` (an empty `if () { … }` is not valid Kotlin) so a matched
+-- guard returns non-locally from the function. With tests, it is a plain conditional `if`.
+runOrCond :: Array String -> String -> Array Clause -> Tuple String Boolean
+runOrCond [] line rest = prepend ("  run { " <> line <> " }\n") (clauseLines rest)
+runOrCond tests line rest = prependIf tests line rest
+
+prependIf :: Array String -> String -> Array Clause -> Tuple String Boolean
+prependIf tests line rest =
+  prepend ("  if (" <> joinWith " && " tests <> ") { " <> line <> " }\n") (clauseLines rest)
+
+prepend :: String -> Tuple String Boolean -> Tuple String Boolean
+prepend s (Tuple lines closed) = Tuple (s <> lines) closed
+
+-- match each clause-head pattern against its positional `a<i>` → (tests, binds), concatenated.
+clauseMatch :: Array P.Pat -> Tuple (Array String) (Array (Tuple String String))
+clauseMatch pats =
+  let
+    parts = mapWithIndex (\i p -> patMatch (fromPat p) ("a" <> show i)) pats
+  in
+    Tuple (parts >>= fst) (parts >>= snd)
+
+-- a single pattern against the Kotlin access path `acc` → (tests, binds). Inc 2: a literal
+-- tests (`acc == lit`), a variable binds it, a wildcard does nothing. (Sum / list / char /
+-- symbol / type / as / pin patterns are later increments — they raise a stage crash.)
+patMatch :: CPat -> String -> Tuple (Array String) (Array (Tuple String String))
+patMatch PWild _ = Tuple [] []
+patMatch (PVar n) acc = Tuple [] [ Tuple n acc ]
+patMatch (PLit v) acc = Tuple [ acc <> " == " <> litKt v ] []
+patMatch _ _ = unsafeCrashWith "jvm: stage — unported clause pattern (inc 2: literals / vars / wildcards)"
+
+litKt :: LitVal -> String
+litKt (LInt n) = show n <> "L"
+litKt (LStr s) = ktStr s
+
+bindStr :: Array (Tuple String String) -> String
+bindStr binds = joinWith "" (map (\(Tuple n a) -> "val " <> n <> " = " <> a <> "; ") binds)
+
+-- a clause's value: `return <body>` (no guard) or `if (<guard>) { return <body> }`. The guard
+-- string is parsed + normalized then lowered like any expression.
+guardedReturn :: Maybe Body -> Maybe String -> String
+guardedReturn body Nothing = "return " <> clauseValue (bodyExprOf body)
+guardedReturn body (Just g) =
+  "if (" <> exprKt (fromExpr (normalize (P.parse g))) <> ") { return " <> clauseValue (bodyExprOf body) <> " }"
+
+bodyExprOf :: Maybe Body -> CExpr
+bodyExprOf (Just b) = fromExpr (normalize (bodySurface b))
+bodyExprOf Nothing = unsafeCrashWith "jvm: clause has no body"
+
+-- a `:=` body is parsed to an `EBlock`; inc 1/2 handle the single-expression block (a
+-- multi-statement block — `:=` binds before the value — is a later increment).
 clauseValue :: CExpr -> String
 clauseValue (EBlock [ CExprStmt e ]) = exprKt e
 clauseValue (EBlock _) = unsafeCrashWith "jvm: stage — multi-statement body block (inc 2)"
 clauseValue e = exprKt e
-
-bodyExpr :: Clause -> CExpr
-bodyExpr c = case c.body of
-  Just b -> fromExpr (normalize (bodySurface b))
-  Nothing -> unsafeCrashWith "jvm: clause has no body"
-
-isPVar :: CPat -> Boolean
-isPVar (PVar _) = true
-isPVar _ = false
-
-pvarName :: CPat -> String
-pvarName (PVar n) = n
-pvarName _ = unsafeCrashWith "jvm: expected a variable pattern"
 
 -- ── expressions ────────────────────────────────────────────────────────────────
 exprKt :: CExpr -> String
