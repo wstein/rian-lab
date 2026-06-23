@@ -1,0 +1,45 @@
+# ===========================================================================
+# CONSOLE I/O PRELUDE (ADR-0068) — `Console`, per-target host output
+# ===========================================================================
+# Console output is a side effect with no *portable* contract — every target
+# reaches it through its own host call — so unlike `Str`/`List`/`Dict` (pure
+# logic over `Prim.*`) this prelude is a thin set of `@external` wrappers, one
+# host body per target (ADR-0068). A function with a body for a target reaches
+# that target (`Rian.Reach` turns "FFI pins to `:ex`" into an honest multi-target
+# set); a target with no body is honestly *off* it, never a silent stub.
+#
+#   Console.puts("hi")    a line to stdout (trailing newline)
+#   Console.print("x")    raw text to stdout (no newline)
+#
+# NB — the module is **`Console`, not `IO`**: a Rian `mod IO` emits an Elixir
+# module literally named `IO`, shadowing the host `IO` and breaking the BEAM's
+# own output (verified — it crashes the runtime). `Console` collides with no host
+# module, so each `@external(:ex, "IO.…")` body resolves to the *host* `IO`.
+#
+# Effects (ADR-0048): each performs `host` (non-portable FFI) + `io`. The return
+# is `Symbol` — the BEAM `IO.puts` result is `:ok`, and `:js` is dynamic, so a
+# console call's `undefined` is unchecked.
+#
+# TARGETS — `:ex` and `:js` only, on purpose. `:rs`/`:jvm` are statically typed,
+# and their console calls return *unit* (`()` / `Unit`), which will not type-check
+# against a `Symbol` return: `fn puts(s) -> Symbol { println!("{}", s) }` is a
+# rustc/kotlinc error. A correct `:rs`/`:jvm` body must run the call *and* yield a
+# `Symbol` (e.g. Kotlin `println(s).let { :ok }`), so those bodies are left out
+# until the wrapper shape is settled — `Rian.Reach` then honestly reports `puts`
+# off `:rs`/`:jvm`, rather than emitting code the backend toolchain rejects.
+# ---------------------------------------------------------------------------
+
+mod Console do
+  # a line to stdout, with a trailing newline.
+  @effects(host, io)
+  @external(:ex, "IO.puts(s)")
+  @external(:js, "console.log(s)")
+  pub def puts(s String) Symbol
+
+  # raw text to stdout, no trailing newline. (`:js` targets node — a browser host
+  # has no unbuffered stdout; use `puts`/`console.log` there.)
+  @effects(host, io)
+  @external(:ex, "IO.write(s)")
+  @external(:js, "process.stdout.write(s)")
+  pub def print(s String) Symbol
+end
