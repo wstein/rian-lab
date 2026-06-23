@@ -10,12 +10,16 @@
 -- | char/atom/bool literals, the operator algebra, variables, `:=` binds, local calls, `if`). Inc 2:
 -- | **multi-clause dispatch** (a multi-clause `def` → one Erlang function, one clause per group
 -- | member — Erlang dispatches natively), **`when` guards** (function-clause + `case`-arm → the
--- | Erlang guard sequence `[[G]]`), and **`case`** expressions. Verified by EXECUTION: `runMain`
--- | compiles + loads + runs `main/0` and stringifies the result, parity-gated (the `beam` stream)
--- | against the Elixir reference running the same program. **Deferred (later increments):** the
--- | type-directed lowering (the annotated/range-expanded core — `Show`/overflow/value-union
--- | discrimination), sum/struct/list/map/string lowering + their patterns, `@external`, specs/`type`
--- | attrs, and the whole-program / cross-module + const machinery. An unported node raises a clear crash.
+-- | Erlang guard sequence `[[G]]`), and **`case`** expressions. Inc 3: the **structural data layer**
+-- | — **sum constructors/patterns** (`Circle(r)` ⇄ the tagged tuple `{circle, R}`, a nullary ctor →
+-- | its atom; `ctorForm`), **lists** (`[a,b]`/`[h|t]` → a `{cons,…}`/`{nil,…}` chain; `consForm`),
+-- | **tuples** (`{a,b}` → `{tuple,…}`; `tupleForm`), and **String** literals (→ a `<<"…">>` BEAM
+-- | binary; `fStr`/`strBytes`). Verified by EXECUTION: `runMain` compiles + loads + runs `main/0` and
+-- | stringifies the result, parity-gated (the `beam` stream) against the Elixir reference running the
+-- | same program. **Deferred (later increments):** the type-directed lowering (the annotated/
+-- | range-expanded core — `Show`/overflow/value-union discrimination), structs + maps + their
+-- | patterns, `@external`, specs/`type` attrs, and the whole-program / cross-module + const
+-- | machinery. An unported node raises a clear crash.
 module Rian.Beam
   ( runMain
   ) where
@@ -23,6 +27,7 @@ module Rian.Beam
 import Prelude
 
 import Data.Array (head, length)
+import Data.Foldable (foldr)
 import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), Replacement(..), contains, drop, replaceAll, stripPrefix, take) as Str
 import Data.String.CodeUnits (charAt) as CU
@@ -33,6 +38,7 @@ import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Body, Clause, Func, Prog, bodySurface)
+import Rian.PatternLower (toSnake)
 import Rian.Pratt (parse) as P
 import Rian.Prim (normalize)
 
@@ -43,6 +49,7 @@ foreign import mkIntStr :: String -> ETerm -- a raw integer, from a Rian numeric
 foreign import mkIntI :: Int -> ETerm -- a raw integer, from a PureScript Int
 foreign import mkFloatStr :: String -> ETerm -- a raw float
 foreign import mkBinary :: String -> ETerm -- a raw binary (a Rian String literal)
+foreign import strBytes :: String -> ETerm -- a String's UTF-8 byte charlist (a `{string,…}` node)
 foreign import mkTuple :: Array ETerm -> ETerm
 foreign import mkList :: Array ETerm -> ETerm
 -- compile the forms list → load → run `Mod:main()` → the `~p`-rendered result (or a diagnostic).
@@ -119,17 +126,25 @@ stmtForm (CTypedBind n _ e) = mkTuple [ mkAtomTerm "match", ln, fVar (varAtom n)
 exprForm :: CExpr -> ETerm
 exprForm (ENum n) = numForm n
 exprForm (EChar cp) = fIntegerI cp
+exprForm (EStr s) = fStr s
 exprForm (EId "true") = fAtom "true"
 exprForm (EId "false") = fAtom "false"
--- a lowercase identifier is a variable; a PascalCase one is a nullary constructor (deferred).
-exprForm (EId x) = if startsUpper x then unsafeCrashWith "abstract-forms: a constructor reference (Phase 8 inc 1)" else fVar (varAtom x)
+-- a lowercase identifier is a variable; a PascalCase one is a nullary constructor (its atom tag).
+exprForm (EId x) = if startsUpper x then fAtom (toSnake x) else fVar (varAtom x)
 exprForm (EAtom a) = fAtom a
+-- a list literal `[a, b]` / cons `[h | t]` → an Erlang `{cons, …}` chain (`{nil,…}`-terminated).
+exprForm (EList elems tail) = consForm exprForm elems tail
+-- a tuple `{a, b}` → an Erlang `{tuple, 1, […]}`.
+exprForm (ETuple es) = tupleForm exprForm es
 exprForm (EUnary "-" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "-", exprForm x ]
 exprForm (EUnary "not" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "not", exprForm x ]
 exprForm (EBin op l r) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm (erlOp op), exprForm l, exprForm r ]
--- a local call `f(args)` → `{call, 1, {atom,1,f}, [args]}` (inc 1: a bare local call — no var
--- application, imports, or cross-module resolution yet).
-exprForm (ECall (EId f) args) = fCall (fAtom f) (map exprForm args)
+-- a PascalCase call `Circle(r)` is sum construction → a tagged tuple `{circle, R}`; a lowercase
+-- call `f(args)` is a local call `{call, 1, {atom,1,f}, [args]}` (inc 3: no var application /
+-- imports / cross-module resolution yet).
+exprForm (ECall (EId f) args) =
+  if startsUpper f then ctorForm (toSnake f) (map exprForm args)
+  else fCall (fAtom f) (map exprForm args)
 -- `if c do t else e end` → an Erlang `case c of true -> t; false -> e end`.
 exprForm (EIf c t e) =
   mkTuple
@@ -151,9 +166,15 @@ patForm :: CPat -> ETerm
 patForm PWild = fVar "_"
 patForm (PVar x) = fVar (varAtom x)
 patForm (PLit (LInt n)) = fIntegerI n
-patForm (PLit (LStr _)) = unsafeCrashWith "abstract-forms: a string pattern (Phase 8 inc 1)"
+patForm (PLit (LStr s)) = fStr s
 patForm (PAtom a) = fAtom a
-patForm _ = unsafeCrashWith "abstract-forms: unported clause pattern (Phase 8 inc 1)"
+-- a sum pattern `Circle(r)` → the tagged-tuple pattern `{circle, R}` (a nullary ctor → its atom).
+patForm (PCtor name args) = ctorForm (toSnake name) (map patForm args)
+-- a list pattern `[a, b]` / `[h | t]` → an Erlang `{cons, …}` pattern chain.
+patForm (PList elems tail) = consForm patForm elems tail
+-- a tuple pattern `{a, b}` → an Erlang `{tuple, 1, […]}` pattern.
+patForm (PTuple ps) = tupleForm patForm ps
+patForm _ = unsafeCrashWith "abstract-forms: unported clause pattern (Phase 8)"
 
 -- ── abstract-format node builders ────────────────────────────────────────────
 ln :: ETerm
@@ -173,6 +194,45 @@ fAtom a = mkTuple [ mkAtomTerm "atom", ln, mkAtomTerm a ]
 
 fVar :: String -> ETerm
 fVar v = mkTuple [ mkAtomTerm "var", ln, mkAtomTerm v ]
+
+-- a Rian `String` literal → the BEAM binary of its UTF-8 bytes: `{bin, 1, [{bin_element, 1,
+-- {string, 1, Bytes}, default, default}]}` (a `<<"…">>` literal). Mirrors `str_form`.
+fStr :: String -> ETerm
+fStr s =
+  mkTuple
+    [ mkAtomTerm "bin"
+    , ln
+    , mkList
+        [ mkTuple
+            [ mkAtomTerm "bin_element"
+            , ln
+            , mkTuple [ mkAtomTerm "string", ln, strBytes s ]
+            , mkAtomTerm "default"
+            , mkAtomTerm "default"
+            ]
+        ]
+    ]
+
+-- a `{cons, 1, H, T}` chain over `elems`, ending in `T` (a cons tail) or `{nil, 1}` (a closed list).
+-- Shared by list expressions (`f = exprForm`) and patterns (`f = patForm`).
+consForm :: forall a. (a -> ETerm) -> Array a -> Maybe a -> ETerm
+consForm f elems tail = foldr (\e acc -> mkTuple [ mkAtomTerm "cons", ln, f e, acc ]) base elems
+  where
+  base = case tail of
+    Nothing -> mkTuple [ mkAtomTerm "nil", ln ]
+    Just t -> f t
+
+-- a `{tuple, 1, […]}` over the elements (`f` = exprForm / patForm).
+tupleForm :: forall a. (a -> ETerm) -> Array a -> ETerm
+tupleForm f xs = mkTuple [ mkAtomTerm "tuple", ln, mkList (map f xs) ]
+
+-- a sum constructor with `tag` (already snake-cased) over already-formed args: a nullary ctor is
+-- its bare atom `{atom, 1, tag}`; an arg-carrying one is a tagged tuple `{tag, A, …}`. Mirrors the
+-- reference's symmetric ctor construction / `PCtor` pattern.
+ctorForm :: String -> Array ETerm -> ETerm
+ctorForm tag args = case args of
+  [] -> fAtom tag
+  _ -> mkTuple [ mkAtomTerm "tuple", ln, mkList ([ fAtom tag ] <> args) ]
 
 fCall :: ETerm -> Array ETerm -> ETerm
 fCall target args = mkTuple [ mkAtomTerm "call", ln, target, mkList args ]

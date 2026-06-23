@@ -2125,7 +2125,18 @@ beam_corpus = [
   # a `case` with a literal arm + a wildcard
   "pub def classify(n Int53) Int53 := case n do\n  0 -> 100\n  _ -> 200\nend\npub def main() Int53 := classify(0) + classify(7)",
   # a `case` arm with a `when` guard
-  "pub def g(n Int53) Int53 := case n do\n  x when x > 5 -> 1\n  _ -> 0\nend\npub def main() Int53 := g(9) * 10 + g(2)"
+  "pub def g(n Int53) Int53 := case n do\n  x when x > 5 -> 1\n  _ -> 0\nend\npub def main() Int53 := g(9) * 10 + g(2)",
+  # ── inc 3: sums (tagged tuples), lists, strings, tuples + their patterns ──
+  # a sum type → construction `Circle(r)` = `{circle, R}` + `case` ctor patterns
+  "type Shape := Circle(Int53) | Square(Int53)\npub def area(s Shape) Int53 := case s do\n  Circle(r) -> r * r\n  Square(x) -> x * x\nend\npub def main() Int53 := area(Circle(3)) + area(Square(4))",
+  # a list literal (the `main/0` result is a list)
+  "pub def main() Vec(Int53) := [1, 2, 3]",
+  # list cons + `[]`/`[h | t]` patterns (recursive sum over a list)
+  "pub def sum_l(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [h | t] -> h + sum_l(t)\nend\npub def main() Int53 := sum_l([10, 20, 30])",
+  # a String literal → a BEAM binary
+  "pub def main() String := \"hello\"",
+  # a tuple value + tuple pattern
+  "pub def main() Int53 := case {1, 2} do\n  {a, b} -> a + b\nend"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses

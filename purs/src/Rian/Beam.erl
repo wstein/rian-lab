@@ -8,8 +8,8 @@
 %%
 %% purerl represents a PureScript `Array a` as an Erlang `array` (see Rian.HostRef), so the
 %% Array-taking builders convert with `array:to_list/1`.
--export([mkAtomTerm/1, mkIntStr/1, mkIntI/1, mkFloatStr/1, mkBinary/1, mkTuple/1, mkList/1,
-         runMainImpl/2]).
+-export([mkAtomTerm/1, mkIntStr/1, mkIntI/1, mkFloatStr/1, mkBinary/1, strBytes/1, mkTuple/1,
+         mkList/1, runMainImpl/2]).
 
 %% ── ETerm constructors (raw Erlang terms; the abstract-format nodes are tuples of these) ──
 mkAtomTerm(B) -> binary_to_atom(B, utf8).      %% a raw atom (module / op / function name)
@@ -17,6 +17,7 @@ mkIntStr(B) -> binary_to_integer(B).           %% a raw integer from a Rian nume
 mkIntI(N) -> N.                                %% a raw integer from a PureScript Int (arity / line)
 mkFloatStr(B) -> binary_to_float(B).           %% a raw float
 mkBinary(B) -> B.                              %% a raw binary (a Rian String literal)
+strBytes(B) -> binary_to_list(B).              %% the UTF-8 byte charlist of a String (a `{string,…}` node)
 mkTuple(Arr) -> list_to_tuple(array:to_list(Arr)).
 mkList(Arr) -> array:to_list(Arr).
 
