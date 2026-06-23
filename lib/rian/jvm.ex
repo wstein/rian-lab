@@ -197,6 +197,9 @@ defmodule Rian.JVM do
       |> Map.put(:consts, MapSet.new(consts, & &1.name))
       |> Map.put(:jvm_sigs, sigs)
       |> Map.put(:jvm_erased, erased)
+      # ctor → field-label info (ADR-0049 §3b): a labeled variant lowers to a `data class`
+      # with named fields, and its patterns bind `acc.radius` not `acc.f0`.
+      |> Map.put(:vmeta, Rian.VariantLabels.meta(prog))
 
     const_decls = Enum.map_join(consts, "\n", &const_kt(&1, ic))
     fn_decls = Enum.map_join(funcs, "\n\n", &function_kt(&1, ic))
@@ -381,7 +384,8 @@ defmodule Rian.JVM do
   end
 
   # a nullary variant is a singleton `object`; an arg-carrying one a `data class`
-  # with positional fields `f0, f1, …` (Rian variants are positional).
+  # with its declared field names (`radius`), falling back to positional `f0, f1, …`
+  # for an anonymous field (ADR-0049 §3b).
   defp variant_decl(v, tname), do: "#{variant_body(v)} : #{tname}"
 
   # the data class / object for a variant, without the `: SealedInterface` supertype.
@@ -391,10 +395,16 @@ defmodule Rian.JVM do
     params =
       fields
       |> Enum.with_index()
-      |> Enum.map_join(", ", fn {f, i} -> "val f#{i}: #{kt_type(f.type)}" end)
+      |> Enum.map_join(", ", fn {f, i} ->
+        "val #{field_key(Map.get(f, :label), i)}: #{kt_type(f.type)}"
+      end)
 
     "data class #{ctor}(#{params})"
   end
+
+  # the Kotlin field name for a variant's i-th field: its declared label, else `f<i>`.
+  defp field_key(nil, i), do: "f#{i}"
+  defp field_key(label, _i), do: label
 
   # ── function / clause dispatch ──────────────────────────────────────────
   # an `@external` function (ADR-0068): emit the `:jvm` host body verbatim, binding
@@ -527,7 +537,7 @@ defmodule Rian.JVM do
   defp clause_lines([], _params, _ic), do: {"", false}
 
   defp clause_lines([c | rest], params, ic) do
-    {tests, binds} = clause_match(c.pats)
+    {tests, binds} = clause_match(c.pats, ic)
     param_names = Enum.map(binds, fn {n, _} -> n end)
     # the per-clause typing env types the body's core IR (ADR-0050 §3).
     tenv = Rian.Check.clause_env(c.pats, params, ic)
@@ -560,9 +570,11 @@ defmodule Rian.JVM do
 
   defp prepend(s, {lines, closed?}), do: {s <> lines, closed?}
 
-  defp clause_match(pats) do
+  defp clause_match(pats, ic) do
+    vmeta = Map.get(ic, :vmeta, %{})
+
     pats
-    |> Enum.map(&Core.from_pat/1)
+    |> Enum.map(&(&1 |> Core.from_pat() |> Rian.VariantLabels.bake_pats(vmeta)))
     |> Enum.with_index()
     |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
       {t, b} = pat_match(p, "a#{i}")
@@ -615,12 +627,12 @@ defmodule Rian.JVM do
   defp pat_match(%PAtom{name: a}, acc), do: {["#{acc} == #{kt_str(a)}"], []}
   defp pat_match(%PChar{value: cp}, acc), do: {["#{acc} == #{cp}L"], []}
 
-  defp pat_match(%PCtor{ctor: ctor, args: args}, acc) do
+  defp pat_match(%PCtor{ctor: ctor, args: args, labels: labels}, acc) do
     {ts, bs} =
       args
       |> Enum.with_index()
       |> Enum.reduce({[], []}, fn {p, i}, {ts, bs} ->
-        {t, b} = pat_match(p, "#{acc}.f#{i}")
+        {t, b} = pat_match(p, "#{acc}.#{field_key(labels && Enum.at(labels, i), i)}")
         {ts ++ t, bs ++ b}
       end)
 
@@ -721,6 +733,8 @@ defmodule Rian.JVM do
       |> Pratt.parse_body()
       |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
       |> Rian.Check.annotate(tenv, ic)
+      # fill `case`-arm ctor patterns' field labels (ADR-0049 §3b) so they bind `.radius`.
+      |> Rian.VariantLabels.bake_pats(Map.get(ic, :vmeta, %{}))
 
     stmts
     |> Rian.Shadow.dedup(params, &kt_fresh/2)

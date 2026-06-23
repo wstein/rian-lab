@@ -51,6 +51,17 @@ defmodule Rian.TourTest do
       refute js =~ "a0._0"
     end
 
+    test "the same labeled variant lowers to a Kotlin `data class` with named fields", %{
+      data: data
+    } do
+      jvm = Enum.find(data["cells"], &(&1["id"] == "types"))["panes"]["jvm"]
+      # the declared field name is the `data class` param and the smart-cast accessor — not `f0`
+      assert jvm =~ "data class Circle(val radius: Double)"
+      assert jvm =~ "data class Square(val side: Double)"
+      assert jvm =~ "a0.radius"
+      refute jvm =~ ".f0"
+    end
+
     test "the reachability strip is the honest, inferred matrix (ADR-0057)", %{data: data} do
       by_name = Map.new(data["reachExamples"], &{&1["name"], &1["reach"]})
 

@@ -91,11 +91,14 @@ sealed sums / typed structs, **not loose tuples**. Two payoffs the old pragma co
   totality gate that is Rian's pitch then applies to the compiler's *own* passes — a missed IR case is
   a compile error in the self-hosted compiler.
 
-A node may carry an **optional emitter-specific annotation** — a field with a `nil` default that one
-backend's pre-emit pass fills and other consumers ignore. Example: `PCtor.labels` (the per-field name
-list) is populated by `Rian.JS`'s `bake_variants` so the JS emitter binds `v.radius` rather than
-`v._0` (ADR-0049 §3b); the BEAM/Rust/JVM emitters never read it. The annotation does not break the
-"one node shape" rule — it is a default-`nil` field on the canonical struct, not a parallel node.
+A node may carry an **optional emitter-specific annotation** — a field with a `nil` default that a
+pre-emit pass fills and a consumer that has no use for it ignores. Example: `PCtor.labels` (the
+per-field name list) is populated by `Rian.VariantLabels.bake_pats` (shared) so a *named-slot* backend
+binds by the field name — `Rian.JS` spells `v.radius` not `v._0`, and `Rian.JVM` lowers a variant to a
+Kotlin `data class` with named fields and matches `acc.radius` not `acc.f0` (ADR-0049 §3b). The BEAM
+emitter keeps positional tagged tuples (no named slot) and the Rust emitter its positional enum, so
+both ignore it. The annotation does not break the "one node shape" rule — it is a default-`nil` field
+on the canonical struct, not a parallel node.
 
 ### 5. Migration is incremental, behind tests, and sequenced first
 

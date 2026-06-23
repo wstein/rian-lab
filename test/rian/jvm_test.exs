@@ -279,6 +279,19 @@ defmodule Rian.JVMTest do
       probe: ~s|println(area(Circle(2.0))); println(area(Square(3.0)))|
     },
     %{
+      # a labeled sum variant → a `data class` with named fields; construction (named +
+      # positional) and patterns bind by the field name `.radius`/`.side` (ADR-0049 §3b).
+      id: :labeled_sum,
+      src: """
+      type Shape := Circle(radius Float64) | Square(side Float64)
+      def area(Shape) Float64
+      def area(Circle(r)) := 3.14159 * r * r
+      def area(Square(s)) := s * s
+      def mk(r Float64) Shape := Circle(radius: r)
+      """,
+      probe: ~s|println(area(mk(2.0))); println(area(Square(3.0)))|
+    },
+    %{
       id: :case_lit_guard,
       src: """
       def sign(n Int64) String := case n do
@@ -1135,6 +1148,21 @@ defmodule Rian.JVMTest do
       assert kt =~ "run rcase@{"
       assert kt =~ "if (s is Circle) { val r = s.f0; return@rcase ((3.14159 * r) * r) }"
       expect_jvm(jvm, :case_sum, "12.56636\n9.0")
+    end
+
+    @tag :jvm
+    test "a labeled sum variant lowers to named `data class` fields (`.radius`), ADR-0049 §3b", %{
+      jvm_batch: jvm
+    } do
+      kt = jvm_kt(jvm, :labeled_sum)
+      # the declared field name is the data class param and the smart-cast accessor
+      assert kt =~ "data class Circle(val radius: Double) : Shape"
+      assert kt =~ "data class Square(val side: Double) : Shape"
+      assert kt =~ "if (a0 is Circle) { val r = a0.radius; return ((3.14159 * r) * r) }"
+      # named construction lowers to a named-arg call
+      assert kt =~ "Circle(radius = r)"
+      refute kt =~ ".f0"
+      expect_jvm(jvm, :labeled_sum, "12.56636\n9.0")
     end
 
     @tag :jvm

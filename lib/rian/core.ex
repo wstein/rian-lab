@@ -128,9 +128,10 @@ defmodule Rian.Core do
   defmodule PCtor do
     @moduledoc """
     A sum-variant pattern `Ctor(args…)` (nullary when `args == []`). `labels` is an
-    optional per-field name list (`["radius"]`, `nil` for anonymous), populated by the
-    JS emitter's `bake_variants` so it can bind `v.radius` instead of `v._0`; other
-    backends ignore it.
+    optional per-field name list (`["radius"]`, `nil` for anonymous / unresolved),
+    populated by `Rian.VariantLabels.bake_pats` (shared) so a named-slot backend binds by
+    field name — the JS emitter `v.radius` instead of `v._0`, the JVM emitter `acc.radius`
+    instead of `acc.f0`. The positional backends (BEAM tagged tuples, Rust enums) ignore it.
     """
     @enforce_keys [:ctor]
     defstruct ctor: nil, args: [], type: nil, labels: nil

@@ -206,7 +206,7 @@ defmodule Rian.JS do
       # ctor → {enum, named, labels} for `bake_variants`: a sum construction becomes
       # an `EVariant` (named fields where the variant has labels, `_n` otherwise) and
       # a ctor pattern gains its `labels`, so emit can spell `v.radius` not `v._0`.
-      |> Map.put(:js_vmeta, variant_meta(prog))
+      |> Map.put(:js_vmeta, Rian.VariantLabels.meta(prog))
 
     const_js = Enum.map_join(consts, "\n", &const_js(&1, i53, ic))
     fn_js = Enum.map_join(funcs, "\n\n", &function_js(&1, i53, ic))
@@ -245,7 +245,7 @@ defmodule Rian.JS do
       Check.program_ic(prog)
       |> Map.put(:consts, MapSet.new(consts, & &1.name))
       |> Map.put(:js_reg, reg)
-      |> Map.put(:js_vmeta, variant_meta(prog))
+      |> Map.put(:js_vmeta, Rian.VariantLabels.meta(prog))
 
     range_ts = Enum.map_join(all_ranges(prog), "\n", &dts_range/1)
     type_ts = Enum.map_join(all_types(prog), "\n", &dts_sum(&1, known))
@@ -1235,18 +1235,6 @@ defmodule Rian.JS do
       |> bake_variants(Map.get(ic, :js_vmeta, %{}))
 
     block_return(Rian.Shadow.dedup(stmts, params, &js_fresh/2), i53)
-  end
-
-  # ctor name → `%{enum, ctor, named, labels}` for every sum variant (top level +
-  # every `mod`); `labels` is the per-field `label | nil` list.
-  defp variant_meta(prog) do
-    types = Map.get(prog, :types, []) ++ for(m <- Map.get(prog, :mods, []), t <- m.types, do: t)
-
-    for t <- types, v <- t.variants, into: %{} do
-      labels = Enum.map(v.fields, &Map.get(&1, :label))
-      named = v.fields != [] and Enum.all?(labels, & &1)
-      {v.ctor, %{enum: t.name, ctor: v.ctor, named: named, labels: labels}}
-    end
   end
 
   # Reflective Core walk: a sum construction (`Ctor(args)` / nullary `Ctor`) becomes

@@ -173,7 +173,12 @@ pass (`Rian.JS.bake_variants`) resolves a construction to an `EVariant` carrying
 `{label｜nil, value}` pairs (handling positional **and** named `Circle(radius: …)`
 construction) and tags a `PCtor` with its `labels`, so `expr_js`/`pat_match` read the
 names off the node — no type registry threaded into the deep emit. `compile_types`
-emits the matching named union (`{ $: "Circle", radius: number } | …`). The prototype
+emits the matching named union (`{ $: "Circle", radius: number } | …`). **JVM** takes the
+same labels (via the shared `Rian.VariantLabels`): a labeled variant lowers to a Kotlin
+`data class Circle(val radius: Double)` and its patterns smart-cast to `acc.radius`, not
+`acc.f0`. The two *positional-by-nature* backends keep their native shape and ignore the
+labels — **BEAM** a tagged tuple `{:circle, R}` (element order, no field-name slot), **Rust**
+a positional `enum` variant `Circle(f64)`. The prototype
 that drove the design: IR is ~90% anonymous variants, so the named-field win is
 concentrated in user-facing types (and structs already cover named fields) — but the
 one-model object form carries it cleanly. A **hybrid** (labeled→object,
