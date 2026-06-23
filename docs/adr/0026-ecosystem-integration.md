@@ -24,6 +24,16 @@ Three concerns were conflated and must be separated:
 > [ADR-0049](0049-backend-target-roadmap.md): **Tier 1** = BEAM, Rust, ECMAScript (JS, emitted
 > directly; PureScript is a reference, not a dependency); **Tier 2** = JVM, WASM (via the Rust→`wasm32`
 > pipeline); **Tier 3** = Go.
+>
+> **WASM is not a free fifth target — it *is* Rust.** Because the WASM pipeline is Rust→`wasm32`,
+> a function reaches WASM **iff it reaches `:rs`**: WASM inherits Rust's reach verbatim, including its
+> gaps. Concretely, arbitrary-precision **`Int` is off `:rs`** (no bignum is built, ADR-0064), so it is
+> **off WASM too** — `wasm32` does not rescue it despite WASM's native `i64`. The same holds for every
+> other Rust reach-pin (`ref`/`&mut`, the parametric-`:rs` builder-shape limits, …). "WASM = free via
+> Rust" is folklore: you ship *Rian-that-already-compiles-to-Rust, on `wasm32`*, with Rust's exact
+> reach matrix — not a backend with WASM-native numeric capabilities. A *direct* WASM backend (which
+> could expose honest native `i64`) would be a **separate target entering through the ADR-0049 §5a
+> admission gate**, justified only by a kernel-performance story that Rust→`wasm32` cannot serve.
 
 1. **BEAM target = Erlang-native, not Elixir source.** The production backend emits **Core
    Erlang / abstract forms** and compiles them in-process via `:compile.forms/2`, loading with

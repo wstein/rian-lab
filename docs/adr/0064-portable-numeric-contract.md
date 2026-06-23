@@ -87,7 +87,13 @@ wrap prelude (`Int.wrapping_add` etc.) is therefore portable across BEAM/Rust/JV
 
 **Portable all-target integer code uses `Int53`** (or `Int32`): a native `number` on JS, an `i64`/`Long`
 elsewhere — the integer that reaches every target. `Int` reaches `[:ex, :js]` only (the bignum gap on
-Rust/JVM); wide fixed-width reaches `[:ex, :rs, :jvm]` only (no JS). Integer mode on JS is whole-program:
+Rust/JVM); wide fixed-width reaches `[:ex, :rs, :jvm]` only (no JS). **WASM inherits this from Rust:**
+the WASM target is the Rust→`wasm32` pipeline (ADR-0026), so a function reaches WASM iff it reaches
+`:rs` — and therefore **`Int` (arbitrary precision) is off WASM too**, despite WASM's native `i64`.
+"WASM = free via Rust" must not become folklore: `wasm32` gives Rust's reach matrix verbatim, including
+its `Int` bignum gap, not WASM-native numeric capabilities. (Honest native-`i64` `Int` on WASM would
+require a *direct* WASM backend — a separate target under the ADR-0049 §5a admission gate, not this
+pipeline.) Integer mode on JS is whole-program:
 a module that mentions any `number`-width type emits all integers as `number`, never mixing with `BigInt`.
 Because the two carriers cannot coexist, a module that mixes `Int` (BigInt) with a `number`-width type
 (`Int53`/`Int32`) is **refused by the JS emitter** (`Rian.JS.reject_mixed_int_mode!`) rather than silently
