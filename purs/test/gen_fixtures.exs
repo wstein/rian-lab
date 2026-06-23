@@ -1005,7 +1005,11 @@ rust_corpus = [
   # generics (ADR-0061) — a bare-tvar pass-through: `forall T` → `fn id<T: Clone>(x: &T) -> T`,
   # the borrowed `&T` cloned to the owned return (`(x).clone()`)
   "pub def id(x T) T forall T := x",
-  "pub def fst(x T, y U) T forall T, U := x"
+  "pub def fst(x T, y U) T forall T, U := x",
+  # bounded generics + protocol traits (ADR-0061 §2): `protocol P` → `trait RianP`; a
+  # `forall T: Eq` bound → `<T: RianEq + Clone>`; a protocol-method call `eq(a, b)` → `a.eq(b)`
+  # (receiver method). Impls (`impl P for T`) are the next increment — none here.
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\npub def same(a T, b T) Bool forall T: Eq := eq(a, b)"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

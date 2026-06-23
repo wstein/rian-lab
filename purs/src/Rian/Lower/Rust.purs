@@ -28,12 +28,12 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, any, concatMap, elem, filter, find, foldl, head, index, length, mapWithIndex, null, reverse)
+import Data.Array (all, any, concatMap, drop, elem, filter, find, foldl, head, index, length, mapWithIndex, null, reverse, uncons)
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing)
-import Data.String (Pattern(..), stripPrefix, stripSuffix)
+import Data.String (Pattern(..), split, stripPrefix, stripSuffix)
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (charAt) as CU
 import Data.String.Common (joinWith, toLower, toUpper)
@@ -45,10 +45,11 @@ import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.Exhaustiveness (analyze, programEnv)
-import Rian.IR (Clause, Func, Param, Prog, Range, Struct, Type, Variant, bodySurface)
+import Rian.IR (Clause, Func, Param, Prog, Protocol, Range, Struct, Type, Variant, bodySurface)
+import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
 import Rian.PatternLower (Env, lowerMany)
-import Rian.Pratt (Pat) as P
+import Rian.Pratt (Pat, Surface(..)) as P
 import Rian.Prelude (withPrelude)
 import Rian.Prim (normalize)
 import Rian.TypeStr (splitTopCommas) as TS
@@ -77,9 +78,13 @@ compile src =
           env = programEnv types prog.structs prog.ranges
           enums = joinWith "\n\n" (map rustEnum types)
           structDefs = joinWith "\n\n" (map rustStruct prog.structs)
+          methods = prog.protocols >>= \pr -> map _.name pr.methods
           funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
+          funcUnits = map (\f -> rustUnit structDefs enums meta env methods f) funcs
+          -- protocols → a `trait Rian<Name> { … }` unit, emitted last (as `Rian.Decl.compile` does).
+          protoUnit = if null prog.protocols then "" else joinWith "\n\n" (map rustTrait prog.protocols)
         in
-          joinWith "\n\n" (map (\f -> rustUnit structDefs enums meta env f) funcs)
+          joinWith "\n\n" (filter (_ /= "") (funcUnits <> [ protoUnit ]))
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> foldl (\acc m -> acc <> m.funcs) [] prog.mods
@@ -89,9 +94,9 @@ allTypes prog = prog.types <> foldl (\acc m -> acc <> m.types) [] prog.mods
 
 -- the per-function unit: the program's `enum` defs (repeated per unit, as the reference does),
 -- then this function. Empty parts (no types) drop out.
-rustUnit :: String -> String -> Meta -> Env -> Func -> String
-rustUnit structDefs enums meta env f =
-  joinWith "\n\n" (filter (_ /= "") [ structDefs, enums, rustFn meta env f ])
+rustUnit :: String -> String -> Meta -> Env -> Array String -> Func -> String
+rustUnit structDefs enums meta env methods f =
+  joinWith "\n\n" (filter (_ /= "") [ structDefs, enums, rustFn meta env methods f ])
 
 -- a `struct Name(f T, …)` → a `#[derive(Clone, Debug, PartialEq)] struct Name { f: T, … }`.
 rustStruct :: Struct -> String
@@ -99,6 +104,52 @@ rustStruct s =
   "#[derive(Clone, Debug, PartialEq)]\nstruct " <> s.name <> " { "
     <> joinWith ", " (map (\f -> fromMaybe "" f.label <> ": " <> Cap.owned f.ty) s.fields)
     <> " }"
+
+-- ── protocols → traits (ADR-0061 §2) ────────────────────────────────────────────
+
+-- a `protocol P` → `trait RianP { fn m(&self, …) -> ret; }`. The first method param is the
+-- receiver (`&self`); the rest keep their (Self-borrowed) signature. (Impls + associated types
+-- are the later increment.)
+rustTrait :: Protocol -> String
+rustTrait pr =
+  "trait Rian" <> pr.name <> " {\n" <> joinWith "\n" (map methodSig pr.methods) <> "\n}"
+  where
+  methodSig m =
+    "    fn " <> m.name <> "(" <> traitParams m.params <> ") -> " <> rustRet (fromMaybe "" m.ret) <> ";"
+
+traitParams :: String -> String
+traitParams paramStr = case filter (_ /= "") (TS.splitTopCommas paramStr) of
+  [] -> "&self"
+  ps -> joinWith ", " ([ "&self" ] <> map sigParam (drop 1 ps))
+
+sigParam :: String -> String
+sigParam pstr = let Tuple nm ty = nameType pstr in nm <> ": " <> refType ty
+
+-- a trait-method param type → its borrowed Rust form. `Self` → `&Self`; a non-`Self` trait param
+-- is the later increment (needs the `val` capability lowering, whose `Cap` ctor isn't exported).
+refType :: String -> String
+refType "Self" = "&Self"
+refType _ = unsafeCrashWith "rust: non-Self trait param (stage)"
+
+-- split a `name Type` param into its name (or `_`) and type.
+nameType :: String -> Tuple String String
+nameType pstr = case filter (_ /= "") (split (Pattern " ") pstr) of
+  [ ty ] -> Tuple "_" ty
+  arr -> case uncons arr of
+    Just { head: nm, tail: rest } -> Tuple nm (joinWith " " rest)
+    Nothing -> Tuple "_" ""
+
+-- rewrite a protocol-method call `m(recv, rest…)` to a receiver method `recv.m(rest…)` on the
+-- surface (ADR-0061 §2), recursing; a non-method call passes through. Mirrors `rewrite_proto_calls`.
+rewriteProtoCalls :: Array String -> P.Surface -> P.Surface
+rewriteProtoCalls methods = walk
+  where
+  walk node = case node of
+    P.SCall (P.SId m) args
+      | elem m methods -> case uncons args of
+          Just { head: recv, tail: rest } -> P.SCall (P.SDot (walk recv) m) (map walk rest)
+          Nothing -> mapNode walk node
+    _ -> mapNode walk node
 
 -- ── sum types → enums ──────────────────────────────────────────────────────────
 
@@ -137,13 +188,13 @@ variantDecl v
 
 -- ── function / clause dispatch ────────────────────────────────────────────────
 
-rustFn :: Meta -> Env -> Func -> String
-rustFn meta env f =
+rustFn :: Meta -> Env -> Array String -> Func -> String
+rustFn meta env methods f =
   let
     paramDecls = joinWith ", " (map paramDecl f.params)
     ret = rustRet (fromMaybe "" f.ret)
     scrut = rustScrut f.params
-    arms = joinWith "\n" (map (clauseArm meta f) f.clauses)
+    arms = joinWith "\n" (map (clauseArm meta methods f) f.clauses)
   in
     "fn " <> f.name <> rustGenerics f <> "(" <> paramDecls <> ") -> " <> ret <> " {\n"
       <> "    match "
@@ -220,12 +271,14 @@ rustScrut params = case map _.name params of
 
 -- one `pat => body,` arm. The clause-head patterns form the match pattern (one, or a tuple
 -- of N); the body lowers through the precedence-aware emitter, then is return-coerced.
-clauseArm :: Meta -> Func -> Clause -> String
-clauseArm meta f c =
+clauseArm :: Meta -> Array String -> Func -> Clause -> String
+clauseArm meta methods f c =
   let
     pat = tupleOrOne (map (corePatRs meta) c.pats)
+    -- rewrite protocol-method calls to receiver methods (`eq(a, b)` → `a.eq(b)`, ADR-0061 §2)
+    -- on the surface, before lowering to Core.
     cbody = case c.body of
-      Just b -> fromExpr (normalize (bodySurface b))
+      Just b -> fromExpr (rewriteProtoCalls methods (normalize (bodySurface b)))
       Nothing -> unsafeCrashWith ("rust: clause of " <> f.name <> " has no body")
     ret = fromMaybe "" f.ret
     -- a generic function returning a bare tvar `T` clones the borrowed `&T` leaves to the
