@@ -38,6 +38,7 @@ that is the point (see [15_targets.rian](15_targets.rian)).
 
 | File | Shows |
 | --- | --- |
+| [hello.rian](hello.rian) | The classic first program — `main/0` as the entry point, `IO.puts` host FFI (BEAM-only `:ex`) |
 | [01_basics.rian](01_basics.rian) | Expression-orientation, `:=` single-assignment, `if`/blocks, the operator table (`/` vs `div`, `<>`, `\|>`, non-associative comparisons) |
 | [02_types_match.rian](02_types_match.rian) | `type` / `struct` / `alias`, the `case` expression, recursive sums, guarded arms |
 | [03_clauses_guards.rian](03_clauses_guards.rian) | Multi-clause functions, the restricted guard sublanguage, static exhaustiveness, union narrowing, `@partial` |
@@ -187,6 +188,10 @@ Rian and compile + run on real BEAM bytecode:
   `Fail("expected 42, got 41")`, formatted via interpolation, ADR-0069); `Rian.Test`
   surfaces that message on every target. `contain` (membership) stays deferred — it needs
   the `List` prelude linked, like `assert_in`.
+
+- [prelude_io.rian](prelude_io.rian) — **a `Console` host-FFI wrapper for console
+  output (ADR-0068).** Console writes are a side effect with no portable contract, so the
+  module is BEAM-only (`:ex`) — the host-FFI boundary that `hello.rian` uses for `IO.puts`.
 
 ### Function body forms
 
