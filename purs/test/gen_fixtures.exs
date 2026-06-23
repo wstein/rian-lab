@@ -1128,7 +1128,17 @@ def f(c) := 0|,
   "pub def mk2(a Int64, b Int64) (Int64, Int64) := {a, b}",
   "def fst(p (Int64, Int64)) Int64\ndef fst({a, b}) := a",
   # a 3-tuple → `Triple`
-  "pub def tri(a Int64, b Int64, c Int64) (Int64, Int64, Int64) := {a, b, c}"
+  "pub def tri(a Int64, b Int64, c Int64) (Int64, Int64, Int64) := {a, b, c}",
+  # ── inc 8: protocols → a `when (a0)` runtime dispatcher over the receiver type (ADR-0042) ──
+  # a protocol + two impls (`impl_eq_int64_eq`/`impl_eq_string_eq` stay regular funs) + a
+  # dispatcher `eq(a0: Any, a1: Any) = when (a0) { is Long -> …; is String -> … }`
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Int64 do\n  def eq(a, b) := a == b\nend\nimpl Eq for String do\n  def eq(a, b) := a == b\nend\npub def same(a Int64, b Int64) Bool := eq(a, b)",
+  # a bounded-generic consumer (`forall T: Eq`) — the bound erases to `<T : Any>`, the call
+  # goes through the dynamic dispatcher
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Int64 do\n  def eq(a, b) := a == b\nend\npub def member(x T, y T) Bool forall T: Eq := eq(x, y)",
+  # a protocol impl over a user sum type → an `is <Sum>` dispatcher arm (a var-head impl;
+  # a ctor-pattern impl head hits an unrelated PS `Protocol` param-type gap, not a JVM one)
+  "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(b) := 42\nend\npub def go(b Bag) Int64 := sz(b)"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

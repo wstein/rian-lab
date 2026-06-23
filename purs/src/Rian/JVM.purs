@@ -9,19 +9,23 @@
 -- | codepoint, `Symbol` → `String`, `Vec(T)` → `List<T>`); an integer literal carries the
 -- | `L` suffix, and `Int` (arbitrary precision, ADR-0064) is rejected — a `Long` would wrap.
 -- |
--- | **Staged port.** Increment 1: single-clause portable core — primitive `val` params, the
--- | precedence-aware operator algebra (`+`/`-`/`*`/`div`/`rem`/float-`/`, comparisons,
--- | `and`/`or`, `in`, unary `-`/`not`), `if`-expressions, and local calls (recursion). Still
--- | later: the multi-clause dispatcher (`if`-chain + smart-casts), sums + `case`, strings,
--- | lists, structs, generics, lambdas, and protocols. An unported node raises a clear "stage"
--- | crash, kept out of the `jvm` parity corpus (oracle = `Rian.JVM.compile`).
+-- | **Staged port (increments 1–8).** 1: single-clause portable core (operator algebra, `if`,
+-- | local calls). 2: the multi-clause `if`-chain dispatcher (literal tests, `when` guards →
+-- | `run { … }`, throw tail). 3: sum variants — `sealed interface` + `data class`/`object`,
+-- | smart-cast `is` patterns, `case` → `run rcase@{ … }`. 4: strings/chars/symbols (the
+-- | `__prim_*` intrinsics, atom/char patterns). 5: lists/`Vec(T)` → `List<T>`. 6: structs →
+-- | `data class`. 7: generics (`<T : Any>`), `Fn` types, lambdas, tuples (`Pair`/`Triple`).
+-- | 8: protocols — the `when (a0)` runtime dispatcher over the receiver type. **Deferred:**
+-- | captures (`&/1`) + `with` (need `Core.capArity`/`desugarWith` exports), and associated
+-- | types + the `coerce_casts` pass (ADR-0074). An unported node raises a clear "stage" crash,
+-- | kept out of the `jvm` parity corpus (oracle = `Rian.JVM.compile`).
 module Rian.JVM
   ( compile
   ) where
 
 import Prelude
 
-import Data.Array (all, elem, filter, find, foldl, head, index, length, mapWithIndex, null, uncons, unsnoc)
+import Data.Array (all, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, null, uncons, unsnoc)
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
@@ -37,7 +41,7 @@ import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Body, Clause, Func, Prog, Struct, Variant, bodySurface)
+import Rian.IR (Body, Clause, Func, Param, Prog, Struct, Variant, bodySurface)
 import Rian.IR (Type) as IR
 import Rian.Opaque (erase)
 import Rian.Pratt (Pat, parse) as P
@@ -62,10 +66,17 @@ compile src =
           meta = buildMeta types
           typeDecls = joinWith "\n\n" (map sumDecl types)
           structDecls = joinWith "\n\n" (map structDecl (allStructs prog))
-          funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
+          allf = allFuncs prog
+          -- a protocol **dispatcher** (`dispatch == "dispatcher"`, ADR-0042) lowers to a
+          -- `when (a0)` over the receiver's runtime type; the `impl` methods stay regular
+          -- functions, so only the dispatcher is split out.
+          dispatchers = filter (\f -> f.dispatch == Just "dispatcher") allf
+          funcs = filter (\f -> f.dispatch /= Just "dispatcher") allf
+          ift = implFirstType allf
           fnDecls = joinWith "\n\n" (map (functionKt meta) funcs)
+          dispDecls = joinWith "\n\n" (map (dispatcherKt ift) dispatchers)
         in
-          joinWith "\n\n" (filter (_ /= "") [ typeDecls, structDecls, fnDecls ])
+          joinWith "\n\n" (filter (_ /= "") [ typeDecls, structDecls, fnDecls, dispDecls ])
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> foldl (\acc m -> acc <> m.funcs) [] prog.mods
@@ -146,6 +157,69 @@ functionKt meta f =
 genericsKt :: Array String -> String
 genericsKt [] = ""
 genericsKt tvars = "<" <> joinWith ", " (map (\t -> t <> " : Any") tvars) <> "> "
+
+-- ── protocol dispatcher (inc 8): `when (a0)` over the receiver's runtime type ───
+-- each `impl`-function's first parameter Rian type, keyed by its mangled name — the `is`-test
+-- type each dispatcher arm checks (`impl_eq_int64_eq` → `Int64`).
+implFirstType :: Array Func -> Array (Tuple String String)
+implFirstType allf = mapMaybe entry allf
+  where
+  entry f =
+    if f.dispatch == Just "impl" then case head f.params of
+      Just p -> Just (Tuple f.name (fromMaybe "" p.ty))
+      Nothing -> Nothing
+    else Nothing
+
+-- a synthesized protocol dispatcher (ADR-0042) → `fun name(a0: Any, …): Ret = when (a0) { is
+-- <Type> -> impl_…(…); … else -> throw }`. A `Self` parameter is typed `Any` (dynamic dispatch);
+-- the `is` test smart-casts `a0`, and a further `Self` argument is `as`-cast to the matched type.
+dispatcherKt :: Array (Tuple String String) -> Func -> String
+dispatcherKt ift disp =
+  let
+    params = joinWith ", " (mapWithIndex (\i p -> "a" <> show i <> ": " <> selfOrType p.ty) disp.params)
+    arms = joinWith "\n" (map (dispArm ift disp.params) disp.clauses)
+    vis = if disp.pub then "" else "private "
+  in
+    vis <> "fun " <> disp.name <> "(" <> params <> "): " <> ktTypeM disp.ret <> " = when (a0) {\n"
+      <> arms
+      <> "\n    else -> throw RuntimeException(" <> ktStr (disp.name <> ": no matching impl") <> ")\n}"
+
+selfOrType :: Maybe String -> String
+selfOrType (Just "Self") = "Any"
+selfOrType t = ktTypeM t
+
+dispArm :: Array (Tuple String String) -> Array Param -> Clause -> String
+dispArm ift params c =
+  let
+    impl = dispatchImplName c.body
+    dtype = ktType (lookupImpl ift impl)
+  in
+    "    is " <> dtype <> " -> " <> impl <> "(" <> dispatchArgs params dtype <> ")"
+
+-- the impl-call args: the receiver `a0` (smart-cast by the `is` test), any other `Self`
+-- argument `as`-cast to the matched type, the rest passed through (dispatch on arg 0, ADR-0042).
+dispatchArgs :: Array Param -> String -> String
+dispatchArgs params dtype = joinWith ", "
+  ( mapWithIndex
+      ( \i p ->
+          if i == 0 then "a0"
+          else if p.ty == Just "Self" then "a" <> show i <> " as " <> dtype
+          else "a" <> show i
+      )
+      params
+  )
+
+lookupImpl :: Array (Tuple String String) -> String -> String
+lookupImpl ift name = case find (\(Tuple n _) -> n == name) ift of
+  Just (Tuple _ ty) -> ty
+  Nothing -> unsafeCrashWith ("jvm: dispatcher references unknown impl `" <> name <> "`")
+
+-- the impl name a dispatcher clause forwards to (`impl_eq_int64_eq(a, b)` → `impl_eq_int64_eq`).
+dispatchImplName :: Maybe Body -> String
+dispatchImplName body = case bodyExprOf body of
+  EBlock [ CExprStmt (ECall (EId n) _) ] -> n
+  ECall (EId n) _ -> n
+  _ -> unsafeCrashWith "jvm: a dispatcher clause body is not an impl call"
 
 -- ── clause dispatch (inc 2 if-chain + inc 3 sum patterns) ──────────────────────
 -- The clause lines of a function, top-to-bottom, plus whether the set is **closed** (a clause
