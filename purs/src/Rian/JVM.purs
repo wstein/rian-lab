@@ -21,13 +21,13 @@ module Rian.JVM
 
 import Prelude
 
-import Data.Array (all, elem, filter, find, foldl, index, mapWithIndex, null, uncons)
+import Data.Array (all, elem, filter, find, foldl, index, length, mapWithIndex, null, uncons)
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
 import Data.Maybe (Maybe(..), isNothing)
 import Data.Monoid (power)
-import Data.String (Pattern(..), contains, length, stripPrefix) as Str
+import Data.String (Pattern(..), contains, length, stripPrefix, stripSuffix) as Str
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (charAt, toCharArray) as CU
 import Data.String.Common (joinWith)
@@ -184,6 +184,22 @@ patMatch _ (PLit v) acc = Tuple [ acc <> " == " <> litKt v ] []
 -- a `Char` pattern tests the codepoint `Long`.
 patMatch _ (PAtom a) acc = Tuple [ acc <> " == " <> ktStr a ] []
 patMatch _ (PChar cp) acc = Tuple [ acc <> " == " <> show cp <> "L" ] []
+-- a list pattern over a `List<_>`: a closed `[a, b]` tests the exact `size`, a cons `[a, … | t]`
+-- tests `size >=` the fixed count and binds the rest to `acc.drop(n)`; each fixed element is
+-- matched at `acc[i]`. The `&&` chain is short-circuit, so an element never indexes past a
+-- failed size guard.
+patMatch meta (PList elems tl) acc =
+  let
+    n = length elems
+    sizeTest = case tl of
+      Nothing -> if n == 0 then [ "(" <> acc <> ").isEmpty()" ] else [ "(" <> acc <> ").size == " <> show n ]
+      Just _ -> [ "(" <> acc <> ").size >= " <> show n ]
+    elemParts = mapWithIndex (\i p -> patMatch meta p ("(" <> acc <> ")[" <> show i <> "]")) elems
+    Tuple tailTests tailBinds = case tl of
+      Nothing -> Tuple [] []
+      Just t -> patMatch meta t ("(" <> acc <> ").drop(" <> show n <> ")")
+  in
+    Tuple (sizeTest <> (elemParts >>= fst) <> tailTests) ((elemParts >>= snd) <> tailBinds)
 patMatch meta (PCtor ctor args) acc =
   let
     parts = mapWithIndex (\i p -> patMatch meta p (acc <> "." <> fieldKey meta ctor i)) args
@@ -248,6 +264,10 @@ exprKt meta (ECall (EId "__prim_char_code") [ c ]) = exprKt meta c
 exprKt meta (ECall (EId "__prim_int_to_float") [ n ]) = "(" <> exprKt meta n <> ").toDouble()"
 -- a PascalCase call is sum construction `Ctor(args)`; a lowercase one a local call — same shape.
 exprKt meta (ECall (EId f) args) = f <> "(" <> joinWith ", " (map (exprKt meta) args) <> ")"
+-- a list literal `[a, b]` → `listOf(a, b)`; a cons `[h, … | t]` → `(listOf(h, …) + t)`.
+exprKt meta (EList elems Nothing) = "listOf(" <> joinWith ", " (map (exprKt meta) elems) <> ")"
+exprKt meta (EList elems (Just tl)) =
+  "(listOf(" <> joinWith ", " (map (exprKt meta) elems) <> ") + " <> exprKt meta tl <> ")"
 -- Kotlin `if` is an expression.
 exprKt meta (EIf c t e) = "if (" <> exprKt meta c <> ") " <> branchKt meta t <> " else " <> branchKt meta e
 exprKt meta (ECase scrut arms) = caseKt meta scrut arms
@@ -326,9 +346,16 @@ ktType t
   | widthInt t = "Long"
   | widthFloat t = "Double"
   -- a bare nominal type (a sum / struct name) → its Kotlin name verbatim. Guarded to
-  -- paren-free names so a not-yet-ported `Vec(…)`/`Fn(…)`/tuple still stage-crashes.
+  -- paren-free names so a not-yet-ported `Fn(…)`/tuple still stage-crashes.
   | nominal t = t
-  | otherwise = unsafeCrashWith ("jvm: stage — type `" <> t <> "` (inc 3)")
+  | otherwise = case vecInner t of
+      Just inner -> "List<" <> ktType inner <> ">"
+      Nothing -> unsafeCrashWith ("jvm: stage — type `" <> t <> "` (inc 5)")
+
+-- `Vec(T)` → its element type `T` (a Kotlin `List<T>`). Other parametric/tuple/`Fn` types
+-- are later increments.
+vecInner :: String -> Maybe String
+vecInner t = Str.stripPrefix (Str.Pattern "Vec(") t >>= Str.stripSuffix (Str.Pattern ")")
 
 nominal :: String -> Boolean
 nominal t = not (Str.contains (Str.Pattern "(") t) && case CU.charAt 0 t of

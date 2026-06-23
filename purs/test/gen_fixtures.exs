@@ -1092,7 +1092,22 @@ def f(c) := 0|,
   "pub def cstr(c Char) String := Prim.char_to_string(c)",
   # string interpolation (ADR-0069) → `__prim_str_concat_all` (+ `__prim_int_to_string` for `${int}`)
   ~S|pub def greet(s String) String := "hi ${s}"|,
-  ~S|pub def show(n Int64) String := "n=${n}"|
+  ~S|pub def show(n Int64) String := "n=${n}"|,
+  # ── inc 5: lists / `Vec(T)` → Kotlin `List<T>` (`listOf`, cons `+`, size/index/drop) ──
+  # (`Int53` — the portable default — so the literals need no width adoption; both → `Long`.
+  # A `Vec(Int64)` literal return is held back: PS `Check` doesn't yet adopt the declared list
+  # width, an unrelated `gate`-stream gap, not a JVM one.)
+  "pub def three() Vec(Int53) := [1, 2, 3]",
+  # a cons literal → `(listOf(x) + xs)`; `Vec(Int64)` param → `List<Long>`
+  "pub def pre(x Int64, xs Vec(Int64)) Vec(Int64) := [x | xs]",
+  # list clause patterns: a closed `[a, b]` tests `size ==`, a cons `[_ | t]` tests `size >=`
+  "def pair(xs Vec(Int64)) Int64\ndef pair([a, b]) := a + b\ndef pair(xs) := 0",
+  # recursion over a list (length) through the dispatcher
+  "def len(xs Vec(Int64)) Int64\ndef len([]) := 0\ndef len([_ | t]) := 1 + len(t)",
+  # a `case` over a list
+  "def first(xs Vec(Int64)) Int64 := case xs do\n  [] -> 0\n  [h | _] -> h\nend",
+  # nested `Vec(Vec(Int64))` → `List<List<Long>>`
+  "pub def empty() Vec(Vec(Int64)) := []"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
