@@ -31,22 +31,27 @@
 -- | `none`); `i64Overflow`/`i64Project`. Inc 7: **`const` declarations + references** — a
 -- | `const NAME := value` → a 0-arity accessor `name() -> value`, and a reference resolves at the
 -- | surface level (`SId NAME` → `SConstRef`, `resolveConstsS` over `Rian.Macro.mapNode`, threaded as
--- | `cnames`) so it lowers to a call to the accessor. **Deferred (later increments):** value-union
--- | type-pattern discrimination (ADR-0083 `PTyped` + the sum/struct registry), `@external`,
--- | specs/`type` attrs, remote `Mod.fun` user calls, and the cross-module + prelude machinery (so
--- | `${float}` via `Show.float` and `List`/`Str`/`Dict` prelude calls land there). An unported node
--- | raises a clear crash.
+-- | `cnames`) so it lowers to a call to the accessor. Inc 8: **value-union type-pattern
+-- | discrimination** (ADR-0083) — a `case`-arm `name Type` (`PTyped`) is desugared to a `PVar name`
+-- | bound under a runtime type-test guard, reusing the protocol-dispatch discriminator: a primitive
+-- | BIF (`is_boolean`/`is_binary`/`is_integer`/`is_float`), a sum's tag-membership
+-- | (`is_tuple(v) and element(1, v) == :tag` / `v == :tag`), or a struct's `__struct__` test. A
+-- | `desugarTyped` pre-pass over the body Core (threaded the sum/struct registry like `cnames`)
+-- | rewrites the arms, so `expr_form` stays registry-free. **Deferred (later increments):**
+-- | `@external` host-body splice, specs/`type` attrs, remote `Mod.fun` user calls, and the
+-- | cross-module + prelude machinery (so `${float}` via `Show.float` and `List`/`Str`/`Dict` prelude
+-- | calls land there). An unported node raises a clear crash.
 module Rian.Beam
   ( runMain
   ) where
 
 import Prelude
 
-import Data.Array (elem, head, length)
-import Data.Foldable (foldr)
-import Data.Maybe (Maybe(..))
+import Data.Array (all, elem, filter, find, head, length, null, uncons)
+import Data.Foldable (foldl, foldr)
+import Data.Maybe (Maybe(..), fromMaybe)
 import Data.String (Pattern(..), Replacement(..), contains, drop, replaceAll, stripPrefix, take) as Str
-import Data.String.CodeUnits (charAt) as CU
+import Data.String.CodeUnits (charAt, toCharArray) as CU
 import Data.String.Common (toUpper)
 import Data.Tuple (Tuple(..))
 import Partial.Unsafe (unsafeCrashWith)
@@ -55,6 +60,7 @@ import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Body, Clause, Const, Func, Prog, bodySurface)
+import Rian.IR as IR
 import Rian.Macro (mapNode)
 import Rian.PatternLower (toSnake)
 import Rian.Pratt (Surface(..), parse) as P
@@ -99,19 +105,20 @@ moduleForms modName prog =
     funcs = funcsOf prog
     consts = constsOf prog
     cnames = map _.name consts
+    reg = registryOf prog
     exports =
       map (\f -> nameArity f.name (funcArity f)) funcs
         <> map (\c -> nameArity (toSnake c.name) 0) consts
   in
     mkList
       ([ attrModule modName, attrExport exports ]
-        <> map (functionForm cnames) funcs
-        <> map (constForm cnames) consts)
+        <> map (functionForm cnames reg) funcs
+        <> map (constForm cnames reg) consts)
 
 -- a `const NAME := value` (ADR-0033) → its 0-arity accessor `name() -> value` (snake-cased name,
 -- so `EConstRef` resolves to the same target). The value is a source expression string.
-constForm :: Array String -> Const -> ETerm
-constForm cnames c = fFunction (toSnake c.name) 0 [ fClause [] noGuard (bodyForms (parseResolved cnames (P.parse c.value))) ]
+constForm :: Array String -> Registry -> Const -> ETerm
+constForm cnames reg c = fFunction (toSnake c.name) 0 [ fClause [] noGuard (bodyForms (desugarTyped reg (parseResolved cnames (P.parse c.value)))) ]
 
 -- parse a body/value/guard surface, rewriting a reference to a declared `const` (`SId NAME` with
 -- NAME in the set) into a `SConstRef` so it lowers to the accessor call (mirrors `resolve_consts`),
@@ -141,16 +148,16 @@ funcArity f = case head f.clauses of
   Nothing -> length f.params
 
 -- a function → `{function, 1, Name, Arity, [Clause]}`.
-functionForm :: Array String -> Func -> ETerm
-functionForm cnames f =
-  fFunction f.name (funcArity f) (map (clauseForm cnames) f.clauses)
+functionForm :: Array String -> Registry -> Func -> ETerm
+functionForm cnames reg f =
+  fFunction f.name (funcArity f) (map (clauseForm cnames reg) f.clauses)
 
 -- a function clause → `{clause, 1, [PatForm], Guard, [BodyForm]}`. A multi-clause `def` is one
 -- Erlang function with one clause per group member (Erlang dispatches natively); a `when` guard
 -- lowers to the Erlang guard sequence `[[GuardExpr]]`. `cnames` resolves const references in the body.
-clauseForm :: Array String -> Clause -> ETerm
-clauseForm cnames c =
-  fClause (map (patForm <<< fromPat) c.pats) (clauseGuardForm cnames c.guard) (bodyForms (bodyExprOf cnames c.body))
+clauseForm :: Array String -> Registry -> Clause -> ETerm
+clauseForm cnames reg c =
+  fClause (map (patForm <<< fromPat) c.pats) (clauseGuardForm cnames c.guard) (bodyForms (desugarTyped reg (bodyExprOf cnames c.body)))
 
 -- a function clause's `when` guard (a source string) → the Erlang guard sequence; `Nothing` → `[]`.
 clauseGuardForm :: Array String -> Maybe String -> ETerm
@@ -209,6 +216,8 @@ exprForm (ECall (EId "__prim_map_new") []) = mapForm []
 exprForm (ECall (EId "__prim_map_get") [ m, k ]) = remoteCall "maps" "get" [ exprForm k, exprForm m ]
 exprForm (ECall (EId "__prim_map_put") [ m, k, v ]) = remoteCall "maps" "put" [ exprForm k, exprForm v, exprForm m ]
 exprForm (ECall (EId "__prim_map_has") [ m, k ]) = remoteCall "maps" "is_key" [ exprForm k, exprForm m ]
+-- a value-union struct discriminator's map-value read (inc 8) → the guard-safe BIF `erlang:map_get/2`.
+exprForm (ECall (EId "__beam_map_get") [ k, m ]) = remoteCall "erlang" "map_get" [ exprForm k, exprForm m ]
 exprForm (ECall (EId "__prim_str_concat") [ a, b ]) = fBin [ binSeg (exprForm a), binSeg (exprForm b) ]
 exprForm (ECall (EId "__prim_str_concat_all") args) = fBin (map (binSeg <<< exprForm) args)
 exprForm (ECall (EId "__prim_char_to_string") [ c ]) =
@@ -253,6 +262,154 @@ exprForm _ = unsafeCrashWith "abstract-forms: unported expression (Phase 8 inc 1
 
 caseArmForm :: CArm -> ETerm
 caseArmForm arm = fClause [ patForm arm.pat ] (armGuardForm arm.guard) (bodyForms arm.body)
+
+-- ── value-union type-pattern discrimination (inc 8, ADR-0083) ─────────────────
+-- The sum/struct registry threaded (like `cnames`) so a case-arm type-pattern `n Type` can build
+-- its runtime discriminator: `sums` = each value-`type` name → its variants; `structs` = the names.
+type Registry = { sums :: Array (Tuple String (Array IR.Variant)), structs :: Array String }
+
+-- the registry in the same scope as `funcsOf` (a single `mod`'s decls, else the top-level ones).
+registryOf :: Prog -> Registry
+registryOf prog =
+  { sums: map (\t -> Tuple t.name t.variants) (typesOf prog), structs: map _.name (structsOf prog) }
+
+typesOf :: Prog -> Array IR.Type
+typesOf prog = case prog.funcs of
+  [] -> case prog.mods of
+    [ m ] -> m.types
+    _ -> prog.types
+  _ -> prog.types
+
+structsOf :: Prog -> Array IR.Struct
+structsOf prog = case prog.funcs of
+  [] -> case prog.mods of
+    [ m ] -> m.structs
+    _ -> prog.structs
+  _ -> prog.structs
+
+-- Rewrite every case-arm (and `with`-else-arm) type-pattern `n Type` to a plain `PVar n` bound under
+-- a runtime type-test guard, reusing the protocol-dispatch discriminator. Mirrors the reference
+-- `Rian.Beam.desugar_typed`. The walk recurses through every sub-expression so a NESTED `case`'s
+-- arms are desugared too; `expr_form` itself stays registry-free (it only ever sees `PVar` + a guard).
+desugarTyped :: Registry -> CExpr -> CExpr
+desugarTyped reg = go
+  where
+  go (ECase scrut arms) = ECase (go scrut) (map goArm arms)
+  go (EWith clauses body els) =
+    EWith (map (\c -> c { expr = go c.expr }) clauses) (go body) (map goArm els)
+  go (EUnary op x) = EUnary op (go x)
+  go (EBin op l r) = EBin op (go l) (go r)
+  go (ECall f args) = ECall (go f) (map go args)
+  go (EDot h n) = EDot (go h) n
+  go (EIf c t e) = EIf (go c) (go t) (go e)
+  go (EBlock stmts) = EBlock (map goStmt stmts)
+  go (EList es tail) = EList (map go es) (map go tail)
+  go (EMap ps) = EMap (map goPair ps)
+  go (EMapUpdate b ps) = EMapUpdate (go b) (map goPair ps)
+  go (ETuple es) = ETuple (map go es)
+  go (ELambda ps b) = ELambda ps (go b)
+  go (ECapture b) = ECapture (go b)
+  go (ECaptureNamed p a) = ECaptureNamed (go p) a
+  go (ELabel n e) = ELabel n (go e)
+  go (EStruct n fs) = EStruct n (map (\(Tuple k v) -> Tuple k (go v)) fs)
+  go (EVariant n fs) = EVariant n (map (\(Tuple k v) -> Tuple k (go v)) fs)
+  go e = e
+
+  goStmt (CBind n e) = CBind n (go e)
+  goStmt (CTypedBind n t e) = CTypedBind n t (go e)
+  goStmt (CExprStmt e) = CExprStmt (go e)
+
+  goPair (CMAtom k v) = CMAtom k (go v)
+  goPair (CMKey k v) = CMKey (go k) (go v)
+
+  -- a type-pattern arm `n Type [when g]` → `PVar n` guarded by `is_<Type>(n) [and g]`.
+  goArm arm =
+    let
+      arm2 = arm { body = go arm.body, guard = map go arm.guard }
+    in
+      case arm2.pat of
+        PTyped name tname _ ->
+          let
+            test = typeTest reg tname name
+            g = case arm2.guard of
+              Nothing -> test
+              Just existing -> EBin "and" test existing
+          in
+            arm2 { pat = PVar name, guard = Just g }
+        _ -> arm2
+
+-- the runtime type-test (a Core guard over `var`) for a value-union member `tname`: a primitive BIF
+-- (`is_boolean`/`is_binary`/`is_integer`/`is_float`), or — reusing the dispatcher discriminator — a
+-- sum's tag-membership / a struct's `__struct__` test. Mirrors `Rian.Beam.type_test`.
+typeTest :: Registry -> String -> String -> CExpr
+typeTest reg tname var
+  | tname == "Bool" = call1 "is_boolean" (EId var)
+  | tname == "String" = call1 "is_binary" (EId var)
+  | tname == "Char" = call1 "is_integer" (EId var)
+  | isIntType tname = call1 "is_integer" (EId var)
+  | isFloatType tname = call1 "is_float" (EId var)
+  | otherwise = case lookupAssoc tname reg.sums of
+      Just variants -> sumGuard variants var
+      Nothing ->
+        if elem tname reg.structs then structGuard tname var
+        else unsafeCrashWith ("abstract-forms: type-pattern over `" <> tname <> "` (no discriminator)")
+
+-- a sum value's discriminator (mirrors `sum_guard_str`): a tagged-tuple variant tests
+-- `is_tuple(var) and element(1, var) == :tag`; a nullary variant tests `var == :tag`.
+sumGuard :: Array IR.Variant -> String -> CExpr
+sumGuard variants var =
+  orParts (tupledPart <> nullaryPart)
+  where
+  tupled = filter (\v -> not (null v.fields)) variants
+  nullary = filter (\v -> null v.fields) variants
+  tupledPart =
+    if null tupled then []
+    else
+      [ EBin "and" (call1 "is_tuple" (EId var))
+          (orParts (map (\v -> EBin "==" (elem1 var) (EAtom (toSnake v.ctor))) tupled))
+      ]
+  nullaryPart =
+    if null nullary then []
+    else [ orParts (map (\v -> EBin "==" (EId var) (EAtom (toSnake v.ctor))) nullary) ]
+  elem1 w = ECall (EId "element") [ ENum "1", EId w ]
+
+-- a struct value's discriminator (mirrors `struct_guard_str`), guard-safe: `is_map` + the
+-- `__struct__` key + `erlang:map_get(:__struct__, var) == :tag` (`__beam_map_get` → the guard BIF).
+structGuard :: String -> String -> CExpr
+structGuard tname var =
+  EBin "and" (call1 "is_map" (EId var))
+    ( EBin "and" (ECall (EId "is_map_key") [ EAtom "__struct__", EId var ])
+        (EBin "==" (ECall (EId "__beam_map_get") [ EAtom "__struct__", EId var ]) (EAtom (toSnake tname)))
+    )
+
+call1 :: String -> CExpr -> CExpr
+call1 f x = ECall (EId f) [ x ]
+
+-- `or` over a non-empty list of guard expressions (left-associated, as the reference's join).
+orParts :: Array CExpr -> CExpr
+orParts xs = case uncons xs of
+  Just { head: h, tail: t } -> foldl (\acc e -> EBin "or" acc e) h t
+  Nothing -> EId "false"
+
+lookupAssoc :: forall a. String -> Array (Tuple String a) -> Maybe a
+lookupAssoc k xs = case find (\(Tuple n _) -> n == k) xs of
+  Just (Tuple _ v) -> Just v
+  Nothing -> Nothing
+
+-- `^U?Int\d*$` / `^Float\d*$` — the integer / float width families (each tests `is_integer`/`is_float`).
+isIntType :: String -> Boolean
+isIntType s =
+  case Str.stripPrefix (Str.Pattern "Int") (fromMaybe s (Str.stripPrefix (Str.Pattern "U") s)) of
+    Just rest -> allDigits rest
+    Nothing -> false
+
+isFloatType :: String -> Boolean
+isFloatType s = case Str.stripPrefix (Str.Pattern "Float") s of
+  Just rest -> allDigits rest
+  Nothing -> false
+
+allDigits :: String -> Boolean
+allDigits s = all (\c -> c >= '0' && c <= '9') (CU.toCharArray s)
 
 -- ── patterns → abstract forms (inc 1: wildcards / vars / literals / atoms) ──
 patForm :: CPat -> ETerm

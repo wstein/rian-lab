@@ -2164,7 +2164,16 @@ beam_corpus = [
   # a `const` → a 0-arity accessor; a reference resolves to a call to it (`Limit` → `limit()`)
   "mod M do\n  const Limit Int53 := 100\n  pub def main() Int53 := Limit + 1\nend",
   # a const whose value is an expression, referenced twice
-  "mod M do\n  const Base Int53 := (2 + 3) * 4\n  pub def main() Int53 := Base + Base\nend"
+  "mod M do\n  const Base Int53 := (2 + 3) * 4\n  pub def main() Int53 := Base + Base\nend",
+  # ── inc 8: value-union type-pattern discrimination (ADR-0083) ──
+  # a primitive union `Int53 | String` narrowed in a `case` (is_integer / is_binary guards)
+  "pub def describe(x Int53 | String) Int53 := case x do\n  n Int53 -> n + 1\n  s String -> 0\nend\npub def main() Int53 := describe(41) + describe(\"hi\")",
+  # a primitive union narrowed in a clause head via a `case` over the param (Bool member)
+  "pub def kind(x Bool | Int53) Int53 := case x do\n  b Bool -> 1\n  n Int53 -> 2\nend\npub def main() Int53 := kind(true) * 10 + kind(7)",
+  # a SUM-member union — the tag-membership discriminator (`is_tuple` + `element(1,…)`)
+  "type A := Mk(Int53)\ntype B := Nul\npub def pick(x A | B) Int53 := case x do\n  a A -> 1\n  b B -> 2\nend\npub def main() Int53 := pick(Mk(9)) * 10 + pick(Nul)",
+  # a STRUCT-member union — the `__struct__` map-value discriminator (guard-safe `erlang:map_get`)
+  "struct P(x Int53)\nstruct Q(y Int53)\npub def tag(v P | Q) Int53 := case v do\n  p P -> p.x\n  q Q -> q.y\nend\npub def main() Int53 := tag(P(x: 5)) * 10 + tag(Q(y: 3))"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses
