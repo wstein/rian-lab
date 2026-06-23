@@ -2097,6 +2097,28 @@ itp_corpus = [
   ~S|m := n; "v=${m}"|
 ]
 
+# Rian.Beam — the `beam` stream (ADR-0084 Phase 8): EXECUTION parity. Each program is compiled to
+# Erlang abstract forms, loaded, and its `main/0` run; the `~p`-rendered result is the fixture. The
+# PS side (`rian_beam@ps:runMain`) does the same on purerl, so a match proves the forms are not just
+# structurally similar but actually *run the same*. Inc 1: literals, the operator algebra, vars,
+# `:=` binds, and local calls over single-clause var-headed functions.
+beam_corpus = [
+  # an integer literal
+  "pub def main() Int53 := 42",
+  # the operator algebra + a local call (recursion-free)
+  "pub def add(x Int53, y Int53) Int53 := x + y\npub def main() Int53 := add(40, 2)",
+  # mixed arithmetic with precedence + `div`/`rem`
+  "pub def main() Int53 := (1 + 2) * 3 - 10 div 3 + 7 rem 4",
+  # a `:=` bind then use, and unary minus
+  "pub def main() Int53 := x := 10 ; y := -(x * 2) ; x - y",
+  # a float result
+  "pub def main() Float64 := 3.0 * 2.5",
+  # a boolean (comparison + `and`)
+  "pub def main() Bool := (1 < 2) and (3 >= 3)",
+  # recursion (a self local call) + `if … do … else … end`
+  "pub def fact(n Int53) Int53 := if n <= 1 do 1 else n * fact(n - 1) end\npub def main() Int53 := fact(5)"
+]
+
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses
 # the `js` runtime corpus (every runtime program, emitted as TypeScript). Oracle = `compile_ts`.
 lines =
@@ -2265,6 +2287,11 @@ lines =
     end) ++
     Enum.map(jvm_corpus, fn s ->
       "jvm\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JVM.compile(s))}"
+    end) ++
+    Enum.map(beam_corpus, fn s ->
+      {:ok, mod} = Rian.Beam.load(s, :rian_main)
+      out = :erlang.iolist_to_binary(:io_lib.format(~c"~p", [apply(mod, :main, [])]))
+      "beam\t#{Canon.hex(s)}\t#{Canon.hex(out)}"
     end) ++
     Enum.map(rustprog_corpus, fn s ->
       "rustprog\t#{Canon.hex(s)}\t#{Canon.hex(Rian.Lower.rust_program(Rian.Decl.parse(s)))}"

@@ -173,11 +173,24 @@ they are the transpiler's input, and they let the **Rust backend work from day o
 transpiled output (correct ownership/borrowing instead of a guessed default). Likely reads
 PureScript's `corefn` JSON (already emitted by `purs`) rather than re-parsing source.
 
-### Phase 8 — Execution & self-host (FFI-heavy)
+### Phase 8 — Execution & self-host (FFI-heavy) — **started**
 
-`Interp` (252), `FormsEquiv` (245), `Roundtrip` (293), `Fixpoint` (64), `Run` (161),
+`Interp` (252, done — Phase 5), `FormsEquiv` (245), `Roundtrip` (293), `Fixpoint` (64), `Run` (161),
 `Repl`+`Repl.History` (538+89), `SelfHost` (502), `Doctest` (190), `Test` (232). These
 wrap `:compile.forms`/code-loading/`GenServer` — the bulk of the Erlang FFI.
+
+**`Rian.Beam` (1519) — the keystone — is in progress** (`purs/src/Rian/Beam.purs` + `Beam.erl`).
+The abstract-forms construction is **pure PureScript over an opaque `ETerm`**; the Erlang-FFI tail
+(`Beam.erl` = `rian_beam@foreign`) is just the term constructors (`mkAtomTerm`/`mkIntStr`/`mkTuple`/
+`mkList`/…) plus `compile:forms` → `code:load_binary` → run. Parity is **by EXECUTION** — the new
+`beam` stream compiles + loads + runs each program's `main/0` on purerl and compares the
+`~p`-rendered result against the Elixir reference running the same program (so a match proves the
+forms actually *run the same*, not merely look alike). **Inc 1 (landed):** literals (int/float/char/
+atom/bool), the operator algebra, variables, `:=` binds, local calls, `if`, single-clause var-headed
+functions — verified on `42`/`add`/precedence/`:=`/float/`bool`/`fact(5)=120`. Deferred to later
+increments: the type-directed lowering (annotated/range-expanded core — `Show`/overflow/value-union),
+multi-clause dispatch + guards, sums/structs/`case`/lists/maps/strings, `@external`, `-spec`/`type`
+attrs, and the whole-program / cross-module + const machinery.
 
 ### Phase 9 — Formatter
 
@@ -251,7 +264,7 @@ runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tie
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **1089/1089** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **1096/1096** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
 InferLocal/Assemble/Comptime/Opaque/**JS**/**Lower.Rust**/**JVM** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it). This prose figure,
