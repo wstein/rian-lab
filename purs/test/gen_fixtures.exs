@@ -1114,7 +1114,21 @@ def f(c) := 0|,
   # a struct clause pattern smart-casts (`a0 is Point`) and reads `(a0 as Point).x`
   "struct Point(x Int64, y Int64)\ndef getx(p Point) Int64\ndef getx(Point(x: a, y: b)) := a",
   # a struct carrying a `Vec` field (`val items: List<Long>`)
-  "struct Bag(items Vec(Int64))\npub def mk(xs Vec(Int64)) Bag := Bag(items: xs)"
+  "struct Bag(items Vec(Int64))\npub def mk(xs Vec(Int64)) Bag := Bag(items: xs)",
+  # ── inc 7: generics + `Fn` types + lambdas + tuples (the HOF core, ADR-0061) ──
+  # a generic function → `fun <T : Any> id(a0: T): T`
+  "pub def id(x T) T forall T := x",
+  # an `Fn(a, r)` parameter → `(Long) -> Long`; calling it is a plain call
+  "pub def apply(f Fn(Int64, Int64), n Int64) Int64 := f(n)",
+  # a lambda value → `{ n -> (n + 1L) }`, returned as an `Fn`
+  "pub def inc() Fn(Int64, Int64) := (n) -> n + 1",
+  # passing a lambda as a call argument
+  "pub def apply2(f Fn(Int64, Int64), n Int64) Int64 := f(n)\npub def use2() Int64 := apply2((x) -> x * 2, 5)",
+  # a 2-tuple value/type → `Pair`; the pattern destructures via `componentN()`
+  "pub def mk2(a Int64, b Int64) (Int64, Int64) := {a, b}",
+  "def fst(p (Int64, Int64)) Int64\ndef fst({a, b}) := a",
+  # a 3-tuple → `Triple`
+  "pub def tri(a Int64, b Int64, c Int64) (Int64, Int64, Int64) := {a, b, c}"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

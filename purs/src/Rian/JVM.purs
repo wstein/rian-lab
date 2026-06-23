@@ -21,7 +21,7 @@ module Rian.JVM
 
 import Prelude
 
-import Data.Array (all, elem, filter, find, foldl, head, index, length, mapWithIndex, null, uncons)
+import Data.Array (all, elem, filter, find, foldl, head, index, length, mapWithIndex, null, uncons, unsnoc)
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
@@ -42,6 +42,7 @@ import Rian.IR (Type) as IR
 import Rian.Opaque (erase)
 import Rian.Pratt (Pat, parse) as P
 import Rian.Prim (normalize)
+import Rian.TypeStr (splitTopCommas) as TS
 
 -- | Compile `src`'s functions to a single Kotlin module (a string). Mirrors `Rian.JVM.compile`:
 -- | run the type gate, erase opaque types, drop protocol dispatchers (no Kotlin shape yet),
@@ -137,7 +138,14 @@ functionKt meta f =
       else "  throw RuntimeException(" <> ktStr (f.name <> ": no clause matched") <> ")\n"
     vis = if f.pub then "" else "private "
   in
-    vis <> "fun " <> f.name <> "(" <> sigParams <> "): " <> ktTypeM f.ret <> " {\n" <> lines <> tail <> "}"
+    vis <> "fun " <> genericsKt f.tvars <> f.name <> "(" <> sigParams <> "): " <> ktTypeM f.ret <> " {\n" <> lines <> tail <> "}"
+
+-- a generic function's `<T : Any, …> ` prefix (ADR-0061). Each tvar is bound `: Any` (non-null:
+-- Rian values are never null, and a bare `<T>` is `T : Any?`, which would not fit a non-null
+-- `Any` dispatcher parameter). Empty when the function has no `forall` variables.
+genericsKt :: Array String -> String
+genericsKt [] = ""
+genericsKt tvars = "<" <> joinWith ", " (map (\t -> t <> " : Any") tvars) <> "> "
 
 -- ── clause dispatch (inc 2 if-chain + inc 3 sum patterns) ──────────────────────
 -- The clause lines of a function, top-to-bottom, plus whether the set is **closed** (a clause
@@ -216,6 +224,17 @@ patMatch meta (PCtor ctor args) acc =
     parts = mapWithIndex (\i p -> patMatch meta p (acc <> "." <> fieldKey meta ctor i)) args
   in
     Tuple ([ acc <> " is " <> ctor ] <> (parts >>= fst)) (parts >>= snd)
+-- a 2-/3-tuple pattern destructures a `Pair`/`Triple` via `componentN()` — no shape test
+-- (the static type guarantees the arity). A tagged / ≥4-tuple has no Kotlin form.
+patMatch meta (PTuple ps) acc = case head ps of
+  Just (PAtom _) -> unsafeCrashWith "jvm: a tagged-tuple pattern (`{:tag, …}`) is BEAM-only"
+  _ ->
+    if length ps == 2 || length ps == 3 then
+      let
+        parts = mapWithIndex (\i p -> patMatch meta p ("(" <> acc <> ").component" <> show (i + 1) <> "()")) ps
+      in
+        Tuple (parts >>= fst) (parts >>= snd)
+    else unsafeCrashWith "jvm: a ≥4-tuple pattern (Pair/Triple cover 2/3)"
 -- a struct pattern smart-casts and reads named fields off the `as`-cast value.
 patMatch meta (PStruct name fields) acc =
   let
@@ -289,6 +308,16 @@ exprKt meta (EStruct name pairs) =
   name <> "(" <> joinWith ", " (map (\(Tuple l v) -> l <> " = " <> exprKt meta v) pairs) <> ")"
 -- field access `p.x` → `p.x`.
 exprKt meta (EDot head_ field) = exprKt meta head_ <> "." <> field
+-- a lambda `(a) -> body` → `{ a -> body }` (a nullary lambda → `{ body }`), ADR-0061.
+exprKt meta (ELambda [] body) = "{ " <> branchKt meta body <> " }"
+exprKt meta (ELambda params body) = "{ " <> joinWith ", " (map _.name params) <> " -> " <> branchKt meta body <> " }"
+-- a 2-/3-tuple → a Kotlin `Pair`/`Triple`; a tagged tuple `{:tag, …}` (Result/AST) is BEAM-only.
+exprKt meta (ETuple elems) = case head elems of
+  Just (EAtom _) -> unsafeCrashWith "jvm: a tagged tuple (`{:tag, …}` — a Result/AST node) is BEAM-only"
+  _ -> case elems of
+    [ a, b ] -> "Pair(" <> exprKt meta a <> ", " <> exprKt meta b <> ")"
+    [ a, b, c ] -> "Triple(" <> exprKt meta a <> ", " <> exprKt meta b <> ", " <> exprKt meta c <> ")"
+    _ -> unsafeCrashWith "jvm: a ≥4-tuple (Pair/Triple cover 2/3)"
 -- a list literal `[a, b]` → `listOf(a, b)`; a cons `[h, … | t]` → `(listOf(h, …) + t)`.
 exprKt meta (EList elems Nothing) = "listOf(" <> joinWith ", " (map (exprKt meta) elems) <> ")"
 exprKt meta (EList elems (Just tl)) =
@@ -376,16 +405,41 @@ ktType t
   | widthInt t = "Long"
   | widthFloat t = "Double"
   -- a bare nominal type (a sum / struct name) → its Kotlin name verbatim. Guarded to
-  -- paren-free names so a not-yet-ported `Fn(…)`/tuple still stage-crashes.
+  -- paren-free names so a parametric/`Fn`/tuple type routes to `ktParametric`.
   | nominal t = t
-  | otherwise = case vecInner t of
-      Just inner -> "List<" <> ktType inner <> ">"
-      Nothing -> unsafeCrashWith ("jvm: stage — type `" <> t <> "` (inc 5)")
+  | otherwise = ktParametric t
 
--- `Vec(T)` → its element type `T` (a Kotlin `List<T>`). Other parametric/tuple/`Fn` types
--- are later increments.
+-- the parametric / `Fn` / tuple types (all paren-bearing). `Vec(T)` → `List<T>`,
+-- `Fn(a…, r)` → `(a…) -> r` (last component is the return), `(A, B)`/`(A, B, C)` →
+-- `Pair`/`Triple`. A ≥4-tuple / other unported head stage-crashes.
+ktParametric :: String -> String
+ktParametric t = case vecInner t of
+  Just inner -> "List<" <> ktType inner <> ">"
+  Nothing -> case fnInner t of
+    Just inner -> ktFn inner
+    Nothing -> case tupleInner t of
+      Just inner -> ktTuple inner
+      Nothing -> unsafeCrashWith ("jvm: stage — type `" <> t <> "` (inc 7)")
+
 vecInner :: String -> Maybe String
 vecInner t = Str.stripPrefix (Str.Pattern "Vec(") t >>= Str.stripSuffix (Str.Pattern ")")
+
+fnInner :: String -> Maybe String
+fnInner t = Str.stripPrefix (Str.Pattern "Fn(") t >>= Str.stripSuffix (Str.Pattern ")")
+
+ktFn :: String -> String
+ktFn inner = case unsnoc (TS.splitTopCommas inner) of
+  Just { init: params, last: ret } -> "(" <> joinWith ", " (map ktType params) <> ") -> " <> ktType ret
+  Nothing -> unsafeCrashWith "jvm: empty `Fn()` type"
+
+tupleInner :: String -> Maybe String
+tupleInner t = Str.stripPrefix (Str.Pattern "(") t >>= Str.stripSuffix (Str.Pattern ")")
+
+ktTuple :: String -> String
+ktTuple inner = case TS.splitTopCommas inner of
+  [ a, b ] -> "Pair<" <> ktType a <> ", " <> ktType b <> ">"
+  [ a, b, c ] -> "Triple<" <> ktType a <> ", " <> ktType b <> ", " <> ktType c <> ">"
+  _ -> unsafeCrashWith ("jvm: a tuple type `(" <> inner <> ")` (Pair/Triple cover 2/3)")
 
 nominal :: String -> Boolean
 nominal t = not (Str.contains (Str.Pattern "(") t) && case CU.charAt 0 t of
