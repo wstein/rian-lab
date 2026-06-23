@@ -1179,7 +1179,11 @@ def f(c) := 0|,
   "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Elem)\nend\ntype Bag := Bag(items Vec(Int53))\nimpl Foldable for Bag do\n  type Elem := Int53\n  def to_list(b) := case b do Bag(xs) -> xs end\nend\npub def len(xs Vec(T)) Int53 forall T := case xs do\n  [] -> 0\n  [_ | t] -> 1 + len(t)\nend\npub def fcount(c C) Int53 forall C := len(to_list(c))",
   # the `coerce_casts` use-site cast (ADR-0074): an erased `to_list(c)` (`List<Any>`) flowing into a
   # CONCRETE `Vec(Int53)` param (`sum_l`) gets an `as List<Long>` cast (`sum_l((to_list(c) as List<Long>))`)
-  "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Elem)\nend\ntype Bag := Bag(items Vec(Int53))\nimpl Foldable for Bag do\n  type Elem := Int53\n  def to_list(b) := case b do Bag(xs) -> xs end\nend\npub def sum_l(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [h | t] -> h + sum_l(t)\nend\npub def fsum(c C) Int53 forall C := sum_l(to_list(c))"
+  "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Elem)\nend\ntype Bag := Bag(items Vec(Int53))\nimpl Foldable for Bag do\n  type Elem := Int53\n  def to_list(b) := case b do Bag(xs) -> xs end\nend\npub def sum_l(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [h | t] -> h + sum_l(t)\nend\npub def fsum(c C) Int53 forall C := sum_l(to_list(c))",
+  # the env-bound variant: the erased result is BOUND to a local first (`xs := to_list(c)`), then
+  # flows into the concrete param — the `env` of erased-bound locals threads through the block so
+  # `xs` casts too (`run { val xs = to_list(c); sum_l((xs as List<Long>)) }`)
+  "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Elem)\nend\ntype Bag := Bag(items Vec(Int53))\nimpl Foldable for Bag do\n  type Elem := Int53\n  def to_list(b) := case b do Bag(xs) -> xs end\nend\npub def sum_l(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [h | t] -> h + sum_l(t)\nend\npub def fsum2(c C) Int53 forall C := xs := to_list(c) ; sum_l(xs)"
 ]
 
 # Rian.Lower.rust_program — the `rustprog` stream: the WHOLE-PROGRAM Rust assembly (ADR-0061)

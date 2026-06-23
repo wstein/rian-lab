@@ -24,12 +24,13 @@
 -- | `Core.capArity`/`Core.desugarWith`. (c) **associated types** (ADR-0074): an assoc `Elem` in a
 -- | covariant `Vec(...)` return erases to `List<Any>` (`substAssocAny`); a dispatcher with an assoc
 -- | in a non-erasable position (param / bare return) is dropped (`assocBlocksJvm`, Reach keeps it
--- | off `:jvm`). The `coerce_casts` use-site cast: a DIRECT erased call flowing into a concrete
--- | `Vec(T)` param gets `as List<T>` (`castedArgs`/`castArg` over the threaded `meta.sigs`/`erased`),
--- | so `sum_l(to_list(c))` → `sum_l((to_list(c) as List<Long>))`. **Deferred:** the env-bound variant
--- | (`xs := to_list(b); sum_l(xs)` — needs block-level tracking of locals bound to an erased result).
--- | An unported node raises a clear "stage" crash, kept out of the `jvm` parity corpus (oracle =
--- | `Rian.JVM.compile`).
+-- | off `:jvm`). The `coerce_casts` use-site cast inserts `as List<T>` where an erased `List<Any>`
+-- | flows into a concrete `Vec(T)` param — both a DIRECT call (`sum_l(to_list(c))` →
+-- | `sum_l((to_list(c) as List<Long>))`, `castedArgs`/`castArg` over `meta.sigs`/`erased`) and a local
+-- | BOUND to an erased result (`xs := to_list(b); sum_l(xs)` → `sum_l((xs as List<Long>))`, via the
+-- | `meta.env` of erased-bound locals threaded across block statements, `envStep`). ADR-0074 fully
+-- | covered. An unported node raises a clear "stage" crash, kept out of the `jvm` parity corpus
+-- | (oracle = `Rian.JVM.compile`).
 module Rian.JVM
   ( compile
   , lowerJvmProg
@@ -96,7 +97,7 @@ lowerJvmProg prog0 =
           -- `Vec(...)` return erased to `List<Any>` (an assoc in the return).
           sigs = map (\f -> Tuple (f.name <> "/" <> show (length f.params)) (map (fromMaybe "" <<< _.ty) f.params)) allf
           erased = map _.name (filter (\d -> typeMentionsAssoc assoc (fromMaybe "" d.ret)) dispatchers)
-          meta = { labels: buildLabels types, sigs, erased }
+          meta = { labels: buildLabels types, sigs, erased, env: [] }
           fnDecls = joinWith "\n\n" (map (functionKt meta) funcs)
           dispDecls = joinWith "\n\n" (map (dispatcherKt assoc ift) dispatchers)
         in
@@ -129,6 +130,10 @@ type Meta =
   { labels :: Array (Tuple String (Array (Maybe String)))
   , sigs :: Array (Tuple String (Array String))
   , erased :: Array String
+  -- locals bound to an (uncast) erased dispatcher result (`List<Any>`) in the current block —
+  -- threaded through the statements so a later concrete-typed consumer of one (`xs := to_list(b);
+  -- sum_l(xs)`) gets the same `as List<T>` cast a direct call would (ADR-0074).
+  , env :: Array String
   }
 
 buildLabels :: Array IR.Type -> Array (Tuple String (Array (Maybe String)))
@@ -231,8 +236,13 @@ castedArgs meta f args = case lookupSig (f <> "/" <> show (length args)) meta.si
 
 castArg :: Meta -> CExpr -> String -> String
 castArg meta arg ptype = case arg of
+  -- a DIRECT erased-dispatcher call flowing into a concrete `Vec(...)` param.
   ECall (EId g) _ -> case vecInnerConcrete ptype of
     Just inner | elem g meta.erased -> "(" <> exprKt meta arg <> " as List<" <> ktType inner <> ">)"
+    _ -> exprKt meta arg
+  -- a local bound to an erased dispatcher result (`xs := to_list(b)`) used the same way.
+  EId v -> case vecInnerConcrete ptype of
+    Just inner | elem v meta.env -> "(" <> exprKt meta arg <> " as List<" <> ktType inner <> ">)"
     _ -> exprKt meta arg
   _ -> exprKt meta arg
 
@@ -485,9 +495,32 @@ bodyExprOf Nothing = unsafeCrashWith "jvm: clause has no body"
 clauseValue :: Meta -> CExpr -> String
 clauseValue meta (EBlock [ CExprStmt e ]) = exprKt meta e
 clauseValue meta (EBlock stmts) = case unsnoc stmts of
-  Just { init, last } -> "run { " <> joinWith " " (map (stmtKt meta) init) <> " " <> stmtValue meta last <> " }"
+  -- thread the erased-bound-locals `env` across the statements (ADR-0074): each `init` statement
+  -- emits with the env BEFORE it, then a `:=` of an erased dispatcher call extends it, so the final
+  -- value statement (and any later consumer) casts a local bound to a `List<Any>` result.
+  Just { init, last } ->
+    let
+      Tuple initStrs metaN = foldl (\(Tuple acc m) s -> Tuple (acc <> [ stmtKt m s ]) (envStep m s)) (Tuple [] meta) init
+    in
+      "run { " <> joinWith " " initStrs <> " " <> stmtValue metaN last <> " }"
   Nothing -> unsafeCrashWith "jvm: empty block body"
 clauseValue meta e = exprKt meta e
+
+-- update the erased-bound-locals `env` after a statement: a `:=` of a bare erased dispatcher call
+-- binds a `List<Any>` (track it); any other bind of the same name clears a prior tracking.
+envStep :: Meta -> CStmt -> Meta
+envStep meta (CBind n e) = meta { env = envUpdate meta n e }
+envStep meta (CTypedBind n _ e) = meta { env = envUpdate meta n e }
+envStep meta _ = meta
+
+envUpdate :: Meta -> String -> CExpr -> Array String
+envUpdate meta n e =
+  if erasedCall meta e then (if elem n meta.env then meta.env else [ n ] <> meta.env)
+  else filter (_ /= n) meta.env
+
+erasedCall :: Meta -> CExpr -> Boolean
+erasedCall meta (ECall (EId g) _) = elem g meta.erased
+erasedCall _ _ = false
 
 -- a non-final block statement → its Kotlin line (`val n = e;` / `e;`); the final statement is the
 -- block's value (always an expression — a trailing bind is rejected at `Rian.Core`).
