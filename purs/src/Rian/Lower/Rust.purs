@@ -17,11 +17,18 @@
 -- |      algebra, `div`/`rem`/float-`/`, unary `-`/`not`, `if`, local calls (recursion);
 -- |   2a. **total** multi-clause functions (a var/catch-all clause or full variant coverage →
 -- |      Rust-exhaustive, no shim), sum `enum` decls + construction + `Enum::Variant` patterns,
--- |      and `case` (→ a nested `match`).
--- | Still later: the partial/total `match` shim (`_ => panic!`/`unreachable!()` — needs the
--- | exhaustiveness/`partial` flag), structs, lists, strings/chars, capability borrows,
--- | generics/monomorphization, and protocol traits. An unported node raises a clear "stage"
--- | crash, kept out of the `rust` parity corpus (oracle = `Rian.Decl.compile`'s `:rust`).
+-- |      and `case` (→ a nested `match`);
+-- |   3–6. strings/chars/symbols, the partial/total `match` shim (`_ => panic!`/`unreachable!()`),
+-- |      structs, and lists (`vec![…]` / `&[T]` slices / cons rebuild);
+-- |   7a–b. generics — bare-tvar pass-through + bounded `forall T: Eq` and protocol traits/UFCS;
+-- |   7c. the whole-program `rustProgram` assembly + protocol `impl` blocks;
+-- |   7d. parametric-type monomorphization (`enum Pair<K, V>` + `pinst`) + owned-element clone;
+-- |   7e. closures (`Fn` → `&impl Fn` / `Box<dyn Fn>`);
+-- |   7f. deeper capability borrows — a cons-head `&T` rebound `clone()`, an `iso Vec` matched
+-- |      via `.as_slice()` with its tail rebound `to_vec()`, and a `Vec` return coercing a
+-- |      borrowed `&[T]` slice leaf to owned (`coerceOwnedVecAst`).
+-- | An unported node raises a clear "stage" crash, kept out of the `rust`/`rustprog` parity
+-- | corpus (oracle = `Rian.Decl.compile`'s `:rust` / `Rian.Lower.rust_program`).
 module Rian.Lower.Rust
   ( compile
   , rustProgram
@@ -29,13 +36,13 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, any, concatMap, drop, elem, filter, find, foldl, head, index, last, length, mapWithIndex, nub, null, reverse, snoc, uncons, zipWith)
+import Data.Array (all, any, concat, concatMap, drop, elem, filter, find, foldl, head, index, last, length, mapWithIndex, nub, null, reverse, snoc, uncons, zipWith)
 import Data.Array (groupBy) as Array
 import Data.Array.NonEmpty (toArray) as NEA
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
-import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing)
+import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing, maybe)
 import Data.String (Pattern(..), Replacement(..), replaceAll, split, stripPrefix, stripSuffix)
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (charAt, fromCharArray, toCharArray) as CU
@@ -45,10 +52,10 @@ import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Capability (copy, owned, rustParam) as Cap
 import Rian.Check (checkProgram)
-import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.Exhaustiveness (analyze, programEnv)
-import Rian.IR (Clause, Func, ImplDecl, ImplMethod, Method, Param, Prog, Protocol, Range, Struct, Type, Variant, bodySurface)
+import Rian.IR (Cap(..), Clause, Func, ImplDecl, ImplMethod, Method, Param, Prog, Protocol, Range, Struct, Type, Variant, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Opaque (erase)
 import Rian.PatternLower (Env, lowerMany)
@@ -62,12 +69,15 @@ type VInfo = { enum :: String, named :: Boolean, labels :: Array (Maybe String) 
 type Meta = Array (Tuple String VInfo)
 
 -- the per-clause emit context: the variant registry `vi`, the clause's `borrowed` vars (a
--- `&T`/`&[T]` binding, cloned to owned in a construction position — ADR-0055/0061), the
--- `Fn`-typed param names (a call to one is a closure call: args clone), and `fnBox` — set when
--- the function returns a closure, so a value-position lambda is `Box::new(move …)` (ADR-0061).
+-- `&T`/`&[T]` binding, cloned to owned in a construction position — ADR-0055/0061), `slices`
+-- (the `&[T]` slice binders — a `val Vec` param or a cons-tail `@..` binder — that a `Vec`
+-- return must `.to_vec()` to owned, ADR-0047 Gap E), the `Fn`-typed param names (a call to
+-- one is a closure call: args clone), and `fnBox` — set when the function returns a closure, so
+-- a value-position lambda is `Box::new(move …)` (ADR-0061).
 type Ec =
   { vi :: Meta
   , bor :: Array String
+  , slices :: Array String
   , fnParams :: Array String
   , fnBox :: Maybe { clone :: Boolean, rc :: Boolean }
   }
@@ -229,7 +239,7 @@ rustImplMethod meta methods rustType copyRecv sigFor m =
     bodySurf = P.parseBody (fromMaybe "" m.body)
     -- impl-method bodies don't yet need the borrowed-clone / closure context (corpus methods
     -- construct nothing and take no `Fn` params).
-    body = coerceRet retTy (fst (emit { vi: meta, bor: [], fnParams: [], fnBox: Nothing } (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
+    body = coerceRet retTy (fst (emit { vi: meta, bor: [], slices: [], fnParams: [], fnBox: Nothing } (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
   in
     "    fn " <> m.name <> "(" <> params <> ") -> " <> rustRet retTy
       <> " { let " <> recv <> " = " <> recvRhs <> "; " <> body <> " }"
@@ -297,8 +307,11 @@ rustFn pm meta env methods f =
     pinst = pairInst pm f
     paramDecls = joinWith ", " (map (\p -> p.name <> ": " <> rustifyParametric pinst (Cap.rustParam p.cap (fromMaybe "" p.ty))) f.params)
     ret = rustifyParametric pinst (rustRet (fromMaybe "" f.ret))
-    scrut = rustScrut f.params
-    arms = joinWith "\n" (map (clauseArm meta methods f) f.clauses)
+    -- param positions that are an owned `iso Vec` destructured by a cons/list pattern: they
+    -- match via `.as_slice()` and their binders are rebound owned in each arm (ADR-0047).
+    iso = isoConsPositions f
+    scrut = rustScrut iso f.params
+    arms = joinWith "\n" (map (clauseArm meta methods f iso) f.clauses)
   in
     "fn " <> f.name <> rustGenerics f <> "(" <> paramDecls <> ") -> " <> ret <> " {\n"
       <> "    match "
@@ -363,23 +376,28 @@ isCtorPat :: CPat -> Boolean
 isCtorPat (PCtor _ _) = true
 isCtorPat _ = false
 
--- the match scrutinee: one param matches directly, N>1 match the argument tuple.
-rustScrut :: Array Param -> String
-rustScrut params = case map _.name params of
+-- the match scrutinee: one param matches directly, N>1 match the argument tuple. An `iso Vec`
+-- position (in `iso`) is an owned `Vec<T>` matched via `.as_slice()` so cons patterns apply.
+rustScrut :: Array Int -> Array Param -> String
+rustScrut iso params = case mapWithIndex part params of
   [ one ] -> one
   many -> "(" <> joinWith ", " many <> ")"
+  where
+  part i p = if elem i iso then p.name <> ".as_slice()" else p.name
 
 -- one `pat => body,` arm. The clause-head patterns form the match pattern (one, or a tuple
--- of N); the body lowers through the precedence-aware emitter, then is return-coerced.
-clauseArm :: Meta -> Array String -> Func -> Clause -> String
-clauseArm meta methods f c =
+-- of N); the body lowers through the precedence-aware emitter, then is return-coerced. `iso` is
+-- the function's `iso Vec` cons positions, driving the owned arm rebinds.
+clauseArm :: Meta -> Array String -> Func -> Array Int -> Clause -> String
+clauseArm meta methods f iso c =
   let
     pat = tupleOrOne (map (corePatRs meta) c.pats)
-    -- the per-clause emit context: variant registry, borrowed (`&`-bound) vars, `Fn`-typed
-    -- params (closure calls), and the closure-return box flag.
+    -- the per-clause emit context: variant registry, borrowed (`&`-bound) vars, the `&[T]`
+    -- slice binders, `Fn`-typed params (closure calls), and the closure-return box flag.
     ec =
       { vi: meta
       , bor: borrowedVars f.params c.pats
+      , slices: sliceBinders f.params c.pats
       , fnParams: map _.name (filter (\p -> isFnType (fromMaybe "" p.ty)) f.params)
       , fnBox: if isFnType (fromMaybe "" f.ret) then Just { clone: fnReturnsTvar (fromMaybe "" f.ret) f.tvars, rc: false } else Nothing
       }
@@ -389,14 +407,155 @@ clauseArm meta methods f c =
       Just b -> fromExpr (rewriteProtoCalls methods (normalize (bodySurface b)))
       Nothing -> unsafeCrashWith ("rust: clause of " <> f.name <> " has no body")
     ret = fromMaybe "" f.ret
-    -- a generic function returning a bare tvar `T` clones the borrowed `&T` leaves to the
-    -- owned `T` the signature promises (`T: Clone`); else the plain string/owned-Vec return
-    -- coercion. (The owned-Vec/String leaf coercions are a later deeper-borrow increment.)
-    arm =
-      if not (null f.tvars) && elem ret f.tvars then coerceOwnedTvar ec cbody
-      else coerceRet ret (rustArmBody cbody (fst (emit ec cbody)))
+    -- make a cons clause's borrowed binders owned at arm entry: a slice-element HEAD bound under
+    -- the `.as_slice()` match is a `&T` borrow → `clone()` (only if the body uses it, else `rustc`
+    -- flags an unused `let`); a cons TAIL is a `&[T]` slice, rebound `to_vec()` only for an `iso`
+    -- (owned-`Vec`) position (a `val` slice keeps zero-copy recursion). Mirrors `arm_rebinds`.
+    rebinds = armRebinds iso (usedIds cbody) c.pats
+    -- the arm body: with rebinds it is a `{ let …; … }` block (the rebinds can't push into
+    -- branches); otherwise the plain (return-coerced below) body.
+    body = fst (emit ec cbody)
+    armBody = if null rebinds then rustArmBody cbody body else "{ " <> joinWith " " rebinds <> " " <> body <> " }"
+    -- the return coercion (mirrors the reference's clause-arm `cond`): a `Vec` return coerces a
+    -- borrowed-collection leaf to owned (`.to_vec()`, pushed into if/case tails for a no-rebind
+    -- body; wrapping a rebind body whose value is a slice id); a bare-tvar return clones the
+    -- borrowed `T` leaves; else the plain string/owned coercion.
+    arm
+      | isVecType ret && null rebinds = coerceOwnedVecAst ec cbody
+      | isVecType ret && tailSliceId ec cbody = "(" <> armBody <> ").to_vec()"
+      | not (null f.tvars) && elem ret f.tvars && null rebinds = coerceOwnedTvar ec cbody
+      | not (null f.tvars) && elem ret f.tvars = "(" <> armBody <> ").clone()"
+      | otherwise = coerceRet ret armBody
   in
     "        " <> pat <> " => " <> arm <> ","
+
+-- ── deeper capability borrows (ADR-0047/0055/0061) ──────────────────────────────
+
+-- the clause vars that are a `&[T]` SLICE at runtime: a `Vec`-typed `val` param (lowers to
+-- `&[T]`) or a cons-tail `@..` binder. A slice stored into an owned `Vec<T>` (a `Vec` return)
+-- needs `.to_vec()`, not `.clone()` (which would clone the reference, staying `&[T]`). Mirrors
+-- `slice_binders`.
+sliceBinders :: Array Param -> Array P.Pat -> Array String
+sliceBinders params pats =
+  let
+    paramSlices = map _.name (filter (\p -> isJust (stripPrefix (Pattern "&[") (Cap.rustParam p.cap (fromMaybe "" p.ty)))) params)
+    tails = concatMap (consTailNames <<< fromPat) pats
+  in
+    paramSlices <> tails
+
+consTailNames :: CPat -> Array String
+consTailNames (PList _ (Just (PVar n))) = [ n ]
+consTailNames _ = []
+
+-- param positions that are an owned `iso Vec` destructured by a cons/list pattern in some
+-- clause — those match `param.as_slice()` and rebind owned in each arm. Mirrors `iso_cons_positions`.
+isoConsPositions :: Func -> Array Int
+isoConsPositions f =
+  map fst (filter keep (mapWithIndex Tuple f.params))
+  where
+  keep (Tuple i p) =
+    p.cap == Iso && isVecType (fromMaybe "" p.ty)
+      && any (\c -> isPListPat (index c.pats i)) f.clauses
+  isPListPat (Just pat) = case fromPat pat of
+    PList _ _ -> true
+    _ -> false
+  isPListPat Nothing = false
+
+-- the owned rebinds for one clause's cons binders: each USED slice-element HEAD → `let h =
+-- h.clone();`, and (for an `iso` position) the cons TAIL → `let t = t.to_vec();`. Mirrors
+-- `arm_rebinds`.
+armRebinds :: Array Int -> Array String -> Array P.Pat -> Array String
+armRebinds iso used pats =
+  concat (mapWithIndex perPat pats)
+  where
+  perPat i pat =
+    let
+      core = fromPat pat
+      heads = map (\n -> "let " <> n <> " = " <> n <> ".clone();") (filter (\n -> elem n used) (sliceElemVars core))
+      tails = if elem i iso then consTailRebinds core else []
+    in
+      heads <> tails
+
+consTailRebinds :: CPat -> Array String
+consTailRebinds (PList _ (Just (PVar n))) = [ "let " <> n <> " = " <> n <> ".to_vec();" ]
+consTailRebinds _ = []
+
+-- variables bound inside the *element* positions of a list pattern — under a slice match they
+-- are `&T` borrows. Mirrors `slice_elem_vars`.
+sliceElemVars :: CPat -> Array String
+sliceElemVars (PList elems _) = concatMap allPatVars elems
+sliceElemVars _ = []
+
+allPatVars :: CPat -> Array String
+allPatVars (PVar n) = [ n ]
+allPatVars (PCtor _ args) = concatMap allPatVars args
+allPatVars (PTuple es) = concatMap allPatVars es
+allPatVars (PList elems tail) = concatMap allPatVars elems <> maybe [] allPatVars tail
+allPatVars _ = []
+
+-- a `Vec`-returning body whose value is a `&[T]` slice id (`def drop(cs, 0) := cs`) — the arm
+-- needs `(…).to_vec()` to materialise the owned `Vec`. Mirrors `tail_slice_id?`.
+tailSliceId :: Ec -> CExpr -> Boolean
+tailSliceId ec (EBlock [ CExprStmt e ]) = sliceVar ec e
+tailSliceId ec e = sliceVar ec e
+
+sliceVar :: Ec -> CExpr -> Boolean
+sliceVar ec (EId n) = elem n ec.slices
+sliceVar _ _ = false
+
+-- Gap E (ADR-0061): a `Vec`-returning body that tail-returns a BORROWED collection (a `&[T]`
+-- slice binder) needs `.to_vec()`. Like the `String` Gap, push the coercion into if/case TAIL
+-- leaves rather than wrapping the whole expression; only a borrowed-collection leaf is cloned,
+-- an owned leaf (`vec![…]`, a cons rebuild, an owned call) is emitted untouched. Mirrors
+-- `coerce_owned_vec_ast`.
+coerceOwnedVecAst :: Ec -> CExpr -> String
+coerceOwnedVecAst ec (EIf c t e) =
+  "if " <> p ec 0 c <> " { " <> coerceOwnedVecAst ec t <> " } else { " <> coerceOwnedVecAst ec e <> " }"
+coerceOwnedVecAst ec (ECase scrut arms) = rustCaseWith ec scrut arms (coerceOwnedVecAst ec)
+coerceOwnedVecAst ec (EBlock [ CExprStmt e ]) = coerceOwnedVecAst ec e
+coerceOwnedVecAst ec e@(EId n) =
+  let s = p ec 0 e
+  in if elem n ec.slices then s <> ".to_vec()" else s
+coerceOwnedVecAst ec ast = p ec 0 ast
+
+isVecType :: String -> Boolean
+isVecType t = isJust (stripPrefix (Pattern "Vec(") t)
+
+-- identifier names referenced anywhere in a Core body expression (for the arm-rebind
+-- used-binder filter). Mirrors `used_ids`/`collect_ids`.
+usedIds :: CExpr -> Array String
+usedIds (EId n) = [ n ]
+usedIds (EUnary _ e) = usedIds e
+usedIds (EBin _ a b) = usedIds a <> usedIds b
+usedIds (ECall f as) = usedIds f <> concatMap usedIds as
+usedIds (EDot e _) = usedIds e
+usedIds (EIf c t e) = usedIds c <> usedIds t <> usedIds e
+usedIds (ECase s arms) = usedIds s <> concatMap armIds arms
+usedIds (EWith cls e arms) = concatMap (\w -> usedIds w.expr) cls <> usedIds e <> concatMap armIds arms
+usedIds (EBlock stmts) = concatMap stmtIds stmts
+usedIds (EList es tl) = concatMap usedIds es <> maybe [] usedIds tl
+usedIds (EMap pairs) = concatMap mapPairIds pairs
+usedIds (EMapUpdate b pairs) = usedIds b <> concatMap mapPairIds pairs
+usedIds (ETuple es) = concatMap usedIds es
+usedIds (ELambda _ e) = usedIds e
+usedIds (ECapture e) = usedIds e
+usedIds (ECaptureNamed e _) = usedIds e
+usedIds (ELabel _ e) = usedIds e
+usedIds (EStruct _ fs) = concatMap (\(Tuple _ e) -> usedIds e) fs
+usedIds (EVariant _ fs) = concatMap (\(Tuple _ e) -> usedIds e) fs
+usedIds _ = []
+
+armIds :: CArm -> Array String
+armIds a = maybe [] usedIds a.guard <> usedIds a.body
+
+stmtIds :: CStmt -> Array String
+stmtIds (CBind _ e) = usedIds e
+stmtIds (CTypedBind _ _ e) = usedIds e
+stmtIds (CExprStmt e) = usedIds e
+
+mapPairIds :: CMapPair -> Array String
+mapPairIds (CMAtom _ v) = usedIds v
+mapPairIds (CMKey k v) = usedIds k <> usedIds v
 
 -- the clause vars that are a `&`-reference at runtime: a pattern var binding a `&`-typed
 -- (capability-borrowed) param. Such a var is cloned to owned in a construction position

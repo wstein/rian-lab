@@ -1162,7 +1162,15 @@ rustprog_corpus = [
   # the signature `Box` → `Box<T>`; construction clones the borrowed payload (`B { v: x.clone() }`)
   "type Box := B(v T)\npub def wrap(x T) Box forall T := B(x)\npub def unwrap(b Box) T forall T := case b do\n  B(v) -> v\nend",
   # two type params: `enum Pair<K: Clone, V: Clone>`, `-> Pair<K, V>`, both payloads cloned
-  "type Pair := P(k K, v V)\npub def mk(a K, b V) Pair forall K, V := P(a, b)"
+  "type Pair := P(k K, v V)\npub def mk(a K, b V) Pair forall K, V := P(a, b)",
+  # deeper borrows (ADR-0047 Gap D/E). slice-leaf `.to_vec()`: a `val Vec` param (`&[i64]`)
+  # returned where the signature promises an owned `Vec<i64>` → `cs.to_vec()`
+  "pub def keep(cs val Vec(Int53)) Vec(Int53) := cs",
+  # iso owned-`Vec` + cons-head rebind: an `iso Vec` matched via `.as_slice()`, the head `&i64`
+  # cloned and the tail `&[i64]` rebound `to_vec()` so the recursive call takes an owned `Vec`
+  "pub def sum(xs iso Vec(Int53)) Int53\npub def sum([]) := 0\npub def sum([h | t]) := h + sum(t)",
+  # iso `Vec` rebuilt + returned owned: the rebinds plus the cons-rebuild owned-`Vec` return
+  "pub def dup(xs iso Vec(Int53)) Vec(Int53)\npub def dup([]) := []\npub def dup([h | t]) := [h, h | dup(t)]"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
