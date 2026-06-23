@@ -404,6 +404,9 @@ defmodule Rian.Lower do
         slices: MapSet.new(),
         owned_fields: MapSet.new(),
         borrowed_vec_fields: MapSet.new(),
+        # value-union case-arm binders (ADR-0083) — each holds an OWNED member (the synth enum
+        # owns its payload), so passing one to a `&str`/`&T` host param needs `&` (`borrow_arg`).
+        owned_binders: MapSet.new(),
         ok_string: false,
         err_string: false,
         # set inside a function whose return type contains a `Fn(...)` (top-level or
@@ -961,6 +964,11 @@ defmodule Rian.Lower do
       owned_field_var?(a, ec) ->
         {:unary, "&", a}
 
+      # a value-union case-arm binder (ADR-0083) holds an OWNED member (the synth enum owns its
+      # payload), so passing it to a `&str`/`&T` param needs `&` (`String(s) -> line(s)` → `&s`).
+      owned_binder_var?(a, ec) ->
+        {:unary, "&", a}
+
       borrowed != nil ->
         borrow_value(a, borrowed)
 
@@ -1135,6 +1143,26 @@ defmodule Rian.Lower do
 
   defp owned_field_var?(_, _ec), do: false
 
+  defp owned_binder_var?({:id, v}, ec),
+    do: MapSet.member?(Map.get(ec, :owned_binders, MapSet.new()), v)
+
+  defp owned_binder_var?(_, _ec), do: false
+
+  # the value-union case-arm binders in a surface body (`s String ->` → `s`); each holds an OWNED
+  # union member (the synth enum owns its payload), collected so `borrow_arg` `&`s one fed to a
+  # `&`-param. A `{:typed, name, …}` is the type-pattern; a generic tuple/list recurses.
+  defp union_arm_binders(ast), do: union_arm_binders(ast, MapSet.new())
+  defp union_arm_binders({:typed, name, _tname}, acc), do: MapSet.put(acc, name)
+  defp union_arm_binders({:typed, name, _tname, _disc}, acc), do: MapSet.put(acc, name)
+
+  defp union_arm_binders(t, acc) when is_tuple(t),
+    do: Enum.reduce(Tuple.to_list(t), acc, &union_arm_binders/2)
+
+  defp union_arm_binders(l, acc) when is_list(l),
+    do: Enum.reduce(l, acc, &union_arm_binders/2)
+
+  defp union_arm_binders(_, acc), do: acc
+
   # the clause vars that are a runtime `&`-reference (see `rust_fn`): a pattern var
   # binding a `&`-typed param, plus any cons-tail (`@..`) binder. Cloned element/field
   # binders and literals are owned and excluded.
@@ -1212,6 +1240,14 @@ defmodule Rian.Lower do
   defp owned_arg?({:call, {:id, "__prim_str_chars"}, _}, _funs), do: true
   defp owned_arg?({:call, {:id, "__prim_str_from_chars"}, _}, _funs), do: true
   defp owned_arg?({:call, {:id, "__prim_str_concat"}, _}, _funs), do: true
+  # the stringify prims each build an owned `String` (`n.to_string()`, `format!(…)`, ADR-0069),
+  # so feeding one to a `&str`/`&String` param needs `&` (a value-union `puts` arm:
+  # `line(Prim.int_to_string(n))` → `line(&n.to_string())`).
+  defp owned_arg?({:call, {:id, "__prim_str_concat_all"}, _}, _funs), do: true
+  defp owned_arg?({:call, {:id, "__prim_int_to_string"}, _}, _funs), do: true
+  defp owned_arg?({:call, {:id, "__prim_float_repr"}, _}, _funs), do: true
+  defp owned_arg?({:call, {:id, "__prim_char_to_string"}, _}, _funs), do: true
+  defp owned_arg?({:call, {:id, "__prim_to_string"}, _}, _funs), do: true
   # a resolved construction (`Bag(xs)` -> `{:variant_lit, …}`, `Point(1, 2)` ->
   # `{:struct_lit, …}`) builds a fresh OWNED value, so feeding it to a `&T`/`&C` param
   # needs `&` — e.g. a non-generic caller of a generic function, `fcount(Bag([1,2,3]))`.
@@ -1952,6 +1988,7 @@ defmodule Rian.Lower do
             slices: slice_binders(func.params, c.pats),
             owned_fields: owned_field_binders(pre, ctx),
             borrowed_vec_fields: borrowed_vec_field_binders(pre, ctx),
+            owned_binders: union_arm_binders(pre),
             tenv: tenv,
             ic: ctx.ic
         }
@@ -3239,12 +3276,23 @@ defmodule Rian.Lower do
     # rebind to an owned `T` here — `rust_owned_elem` clones a borrowed-var RHS and
     # passes everything else through — so the binder is owned and downstream
     # construction needs no further coercion (mirrors destructured-binder cloning).
-    Enum.map_join(stmts, " ", fn
-      {:bind, n, e} -> "let #{n} = #{rust_owned_elem(e, ec)};"
-      {:typed_bind, n, _t, e} -> "let #{n} = #{rust_owned_elem(e, ec)};"
-      {:expr, e} -> p(e, 0, :rust, ec)
-    end)
+    n = length(stmts)
+
+    stmts
+    |> Enum.with_index(1)
+    |> Enum.map_join(" ", fn {stmt, i} -> rust_stmt(stmt, ec, i < n) end)
   end
+
+  # one Rust block statement. A `:=` bind is always `let …;`. A NON-final expression is a
+  # statement (`expr;` — a side effect before the next); the FINAL expression is the block's
+  # value (no `;`). (A trailing bind is rejected at `Rian.Core`, so the last is an expr.)
+  defp rust_stmt({:bind, n, e}, ec, _nonfinal), do: "let #{n} = #{rust_owned_elem(e, ec)};"
+
+  defp rust_stmt({:typed_bind, n, _t, e}, ec, _nonfinal),
+    do: "let #{n} = #{rust_owned_elem(e, ec)};"
+
+  defp rust_stmt({:expr, e}, ec, true), do: "#{p(e, 0, :rust, ec)};"
+  defp rust_stmt({:expr, e}, ec, false), do: p(e, 0, :rust, ec)
 
   defp pipe_to_call(l, %ECall{fun: f, args: args}), do: %ECall{fun: f, args: [l | args]}
   defp pipe_to_call(l, f), do: %ECall{fun: f, args: [l]}

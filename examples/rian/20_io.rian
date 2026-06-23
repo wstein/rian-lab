@@ -1,20 +1,20 @@
-#@reach ex, js, jvm
+#@reach ex, rs, js, jvm
 # ===========================================================================
 # 20 — Console I/O: portable `puts` / `print`
 # ===========================================================================
 # Character: a side effect with no portable VALUE — but a portable SHAPE. `puts`/`print`
 # are auto-injected front doors (ADR-0068/0069/0083, `Rian.IOStdlib`) over the per-target
-# host output — `IO.puts` (BEAM) · `console.log` (JS) · `println` (Kotlin). No import, no
-# boilerplate: a program that calls them gets their bodies emitted into it.
+# host output — `IO.puts` (BEAM) · `console.log` (JS) · `println!` (Rust) · `println`
+# (Kotlin). No import, no boilerplate: a program that calls them gets their bodies emitted
+# into it.
 #
 # They take a `String | Int53` value union (ADR-0083), so a number prints with no explicit
 # conversion — the `Int53` arm stringifies via `Prim.int_to_string` (portable). `print` is
 # the same without the trailing newline.
 #
-# REACH `[:ex, :js, :jvm]`, NOT `:rs` (the `#@reach` header above is the honest matrix): the
-# value-union arm hands the host's `&str` parameter an owned `String`, and the Rust
-# owned→borrow coercion across a value-union arm is a tracked follow-up — so `:rs` is
-# honestly OFF rather than a false claim.
+# Reaches **all four targets**. The value-union arm hands the host's `&str` parameter an
+# owned `String` member; the Rust emitter borrows it across the arm (`&s` / `&n.to_string()`,
+# the `owned_binders`/`owned_arg?` borrow), so the `println!`/`print!` bodies type-check.
 # ---------------------------------------------------------------------------
 
 pub def main() Unit

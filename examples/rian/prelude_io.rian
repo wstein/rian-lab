@@ -18,26 +18,27 @@
 # that would shadow the host `IO` on the BEAM (ADR-0068).
 #
 # RETURN TYPE `Unit` (ADR-0068): a console call has no meaningful value, and its
-# natural per-target result differs (`:ok` / `undefined` / `Unit`). `Unit` erases on
-# BEAM/JS and lowers to Kotlin `Unit`.
+# natural per-target result differs (`:ok` / `undefined` / `()` / `Unit`). `Unit` erases on
+# BEAM/JS and lowers to Rust `()` / Kotlin `Unit`.
 #
-# REACH `[:ex, :js, :jvm]` (NOT `:rs`): the polymorphic `puts` is a value-union
-# (ADR-0083) that hands `line` an owned `String` member, and Rust's `&str` host param
-# needs an owned→borrow coercion across the value-union arm the emitter does not yet do
-# (a borrow-staging change, tracked). So `:rs` is honestly OFF — never a false claim —
-# and `line`/`write` carry no `:rs` host body.
+# Reaches **all four targets**. The polymorphic `puts` is a value-union (ADR-0083) that hands
+# `line` an owned `String` member; the Rust emitter borrows it across the value-union arm
+# (`&s` / `&n.to_string()` — the `owned_binders`/`owned_arg?` coercion), so the `println!`/
+# `print!` host bodies type-check.
 # ---------------------------------------------------------------------------
 
 # a line to stdout, with a trailing newline (the raw per-target host call). Named `line`,
 # not `puts`, so it does not clash with the bare polymorphic `puts` front door.
 @external(:ex, "IO.puts(s)")
 @external(:js, "console.log(s)")
+@external(:rs, "println!(\"{}\", s)")
 @external(:jvm, "println(s)")
 pub def line(s val String) Unit
 
 # raw text to stdout, no trailing newline. (`:js` targets node.)
 @external(:ex, "IO.write(s)")
 @external(:js, "process.stdout.write(s)")
+@external(:rs, "print!(\"{}\", s)")
 @external(:jvm, "print(s)")
 pub def write(s val String) Unit
 

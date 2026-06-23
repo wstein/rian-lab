@@ -1209,33 +1209,39 @@
       "reach": [
         "ex",
         "js",
-        "jvm"
+        "jvm",
+        "rs"
       ],
       "reachByFn": {
         "line": [
           "ex",
           "js",
-          "jvm"
+          "jvm",
+          "rs"
         ],
         "main": [
           "ex",
           "js",
-          "jvm"
+          "jvm",
+          "rs"
         ],
         "print": [
           "ex",
           "js",
-          "jvm"
+          "jvm",
+          "rs"
         ],
         "puts": [
           "ex",
           "js",
-          "jvm"
+          "jvm",
+          "rs"
         ],
         "write": [
           "ex",
           "js",
-          "jvm"
+          "jvm",
+          "rs"
         ]
       },
       "title": "Console I/O: portable `puts` / `print`"
