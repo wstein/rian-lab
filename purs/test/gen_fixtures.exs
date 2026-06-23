@@ -2143,7 +2143,14 @@ beam_corpus = [
   # a struct pattern in a `case` (`Point(x: vx, y: _)`)
   "struct Point(x Int53, y Int53)\npub def gx(p Point) Int53 := case p do\n  Point(x: vx, y: _) -> vx\nend\npub def main() Int53 := gx(Point(x: 5, y: 9))",
   # a map literal + a map pattern `%{a: x}`
-  "pub def main() Int53 := case %{a: 1, b: 2} do\n  %{a: x} -> x\nend"
+  "pub def main() Int53 := case %{a: 1, b: 2} do\n  %{a: x} -> x\nend",
+  # ── inc 5: self-contained portable prims (stringify/concat/membership) ──
+  # `${int}` interpolation → `__prim_str_concat_all` + `__prim_int_to_string` (native, no prelude)
+  "pub def main() String := n := 42 ; \"n = ${n}\"",
+  # string concat `<>` → a `<<L/binary, R/binary>>` binary
+  "pub def main() String := \"ab\" <> \"cd\"",
+  # list membership `x in xs` → `lists:member/2`
+  "pub def main() Bool := 2 in [1, 2, 3]"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses

@@ -19,10 +19,16 @@
 -- | requiring `__struct__ := tag`) and **maps** (`%{k: v}` → `#{k => v}`, `PMap` → a map pattern;
 -- | `mapForm`/`mapField*`). Verified by EXECUTION: `runMain` compiles + loads + runs `main/0` and
 -- | stringifies the result, parity-gated (the `beam` stream) against the Elixir reference running the
--- | same program. **Deferred (later increments):** the type-directed lowering (the annotated/
--- | range-expanded core — `Show`/overflow/value-union discrimination), `@external`, specs/`type`
--- | attrs, remote `Mod.fun` calls + the prelude redirect, and the whole-program / cross-module +
--- | const machinery. An unported node raises a clear crash.
+-- | same program. Inc 5: the **self-contained portable `Prim.*` intrinsics** — stringify
+-- | (`__prim_int_to_string`/`float_repr`/`to_string`/`char_to_string`/`char_code`), concat
+-- | (`__prim_str_concat`/`_all` + `<>` → a `<<…/binary>>` binary), the `Dict` map ops
+-- | (`map_new`/`get`/`put`/`has` → native `#{}`/`maps:*`), `__prim_panic` → `erlang:error`, list
+-- | membership `in` → `lists:member`, and the `Str.chars`/`from_chars`/`str_to_*` conversions — so
+-- | `${int}` interpolation, string building, and maps run with no extra modules. **Deferred (later
+-- | increments):** the type-directed lowering (the annotated/range-expanded core — `Show`/overflow/
+-- | value-union discrimination), `@external`, specs/`type` attrs, remote `Mod.fun` user calls, and
+-- | the whole-program / cross-module + const + prelude machinery (so `${float}` via `Show.float` and
+-- | `List`/`Str`/`Dict` prelude calls land there). An unported node raises a clear crash.
 module Rian.Beam
   ( runMain
   ) where
@@ -149,7 +155,31 @@ exprForm (EMap pairs) = mapForm (map mapPairAssoc pairs)
 exprForm (EDot head_ field) = remoteCall "maps" "get" [ fAtom field, exprForm head_ ]
 exprForm (EUnary "-" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "-", exprForm x ]
 exprForm (EUnary "not" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "not", exprForm x ]
+-- string concat `<>` → a `<<L/binary, R/binary>>` binary (Erlang has no `<>` op).
+exprForm (EBin "<>" l r) = fBin [ binSeg (exprForm l), binSeg (exprForm r) ]
+-- list membership `x in xs` → `lists:member(x, xs)` (the portable surface op, ADR-0047).
+exprForm (EBin "in" l r) = remoteCall "lists" "member" [ exprForm l, exprForm r ]
 exprForm (EBin op l r) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm (erlOp op), exprForm l, exprForm r ]
+-- ── the portable `Prim.*` intrinsics (inc 5) → native Erlang/Elixir-runtime forms ──
+exprForm (ECall (EId "__prim_map_new") []) = mapForm []
+exprForm (ECall (EId "__prim_map_get") [ m, k ]) = remoteCall "maps" "get" [ exprForm k, exprForm m ]
+exprForm (ECall (EId "__prim_map_put") [ m, k, v ]) = remoteCall "maps" "put" [ exprForm k, exprForm v, exprForm m ]
+exprForm (ECall (EId "__prim_map_has") [ m, k ]) = remoteCall "maps" "is_key" [ exprForm k, exprForm m ]
+exprForm (ECall (EId "__prim_str_concat") [ a, b ]) = fBin [ binSeg (exprForm a), binSeg (exprForm b) ]
+exprForm (ECall (EId "__prim_str_concat_all") args) = fBin (map (binSeg <<< exprForm) args)
+exprForm (ECall (EId "__prim_char_to_string") [ c ]) =
+  fBin [ mkTuple [ mkAtomTerm "bin_element", ln, exprForm c, mkAtomTerm "default", mkList [ mkAtomTerm "utf8" ] ] ]
+exprForm (ECall (EId "__prim_char_code") [ c ]) = exprForm c
+exprForm (ECall (EId "__prim_int_to_string") [ n ]) = remoteCall "erlang" "integer_to_binary" [ exprForm n ]
+exprForm (ECall (EId "__prim_int_to_float") [ n ]) = remoteCall "erlang" "float" [ exprForm n ]
+exprForm (ECall (EId "__prim_float_repr") [ n ]) =
+  remoteCall "erlang" "float_to_binary" [ exprForm n, mkTuple [ mkAtomTerm "cons", ln, fAtom "short", mkTuple [ mkAtomTerm "nil", ln ] ] ]
+exprForm (ECall (EId "__prim_str_to_float") [ s ]) = remoteCall "erlang" "binary_to_float" [ exprForm s ]
+exprForm (ECall (EId "__prim_to_string") [ x ]) = remoteCall "Elixir.String.Chars" "to_string" [ exprForm x ]
+exprForm (ECall (EId "__prim_panic") [ m ]) = remoteCall "erlang" "error" [ exprForm m ]
+exprForm (ECall (EId "__prim_str_chars") [ s ]) = remoteCall "Elixir.String" "to_charlist" [ exprForm s ]
+exprForm (ECall (EId "__prim_str_from_chars") [ cs ]) = remoteCall "Elixir.List" "to_string" [ exprForm cs ]
+exprForm (ECall (EId "__prim_str_to_atom") [ s ]) = remoteCall "Elixir.String" "to_atom" [ exprForm s ]
 -- an all-labeled call `Name(f: v, …)` is struct construction → a `__struct__`-tagged map; a
 -- PascalCase positional call `Circle(r)` is sum construction → a tagged tuple `{circle, R}`; a
 -- lowercase `f(args)` is a local call (inc 3/4: no var application / imports / cross-module yet).
@@ -292,6 +322,13 @@ mapPatPairExact (CMPKey k p) = mapFieldExact (exprForm k) (patForm p)
 remoteCall :: String -> String -> Array ETerm -> ETerm
 remoteCall mod fun args =
   mkTuple [ mkAtomTerm "call", ln, mkTuple [ mkAtomTerm "remote", ln, fAtom mod, fAtom fun ], mkList args ]
+
+-- a binary `<<…>>` over already-formed segments, and a whole-binary segment `X/binary` (for `<>`).
+fBin :: Array ETerm -> ETerm
+fBin segs = mkTuple [ mkAtomTerm "bin", ln, mkList segs ]
+
+binSeg :: ETerm -> ETerm
+binSeg form = mkTuple [ mkAtomTerm "bin_element", ln, form, mkAtomTerm "default", mkList [ mkAtomTerm "binary" ] ]
 
 fCall :: ETerm -> Array ETerm -> ETerm
 fCall target args = mkTuple [ mkAtomTerm "call", ln, target, mkList args ]
