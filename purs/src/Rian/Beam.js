@@ -17,3 +17,4 @@ export const strBytes = unavailable("strBytes");
 export const mkTuple = unavailable("mkTuple");
 export const mkList = unavailable("mkList");
 export const runModulesImpl = unavailable("runModulesImpl");
+export const runEntryImpl = unavailable("runEntryImpl");
