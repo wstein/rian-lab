@@ -383,13 +383,54 @@ defmodule Rian.Decl do
   # The need is read straight off the rewritten program — `Rian.Interp` emits a
   # `Show.float` call iff a `Float64` hole was interpolated — rather than from a
   # process-dict flag set during desugar, so the interpolation pass stays pure.
-  defp inject_stdlib(prog) do
+  defp inject_stdlib(prog), do: prog |> inject_show() |> inject_io()
+
+  defp inject_show(prog) do
     if needs_show_float?(prog) and not Enum.any?(prog.mods, &(&1.name == "Show")) do
       %{prog | mods: [Rian.ShowStdlib.module() | prog.mods]}
     else
       prog
     end
   end
+
+  # Console I/O (ADR-0068/0069): a program that calls `puts`/`print`/`Console.*` but does not
+  # define them gets the IO prelude's bodies EMITTED into it (`Rian.IOStdlib`) — so `puts` runs
+  # on a source target (`console.log`/`println`/`IO.puts`), not a dangling reference. (`Str`/
+  # `List`/`Dict` are BEAM-linked instead; IO is emitted because its host calls are target-native.)
+  defp inject_io(prog) do
+    if needs_io?(prog) and not io_defined?(prog) do
+      %{prog | funcs: Rian.IOStdlib.funcs() ++ prog.funcs}
+    else
+      prog
+    end
+  end
+
+  # already provides its own IO front door — don't inject over the user's.
+  defp io_defined?(prog) do
+    Enum.any?(prog.funcs, &(&1.name in ["puts", "print", "line", "write"]))
+  end
+
+  # any clause body call to a bare `puts`/`print`. A clause body is a raw source string until
+  # interpolation expands it (`Body = Raw | Expanded`), so parse it to the surface AST first
+  # (`parse_body` passes an already-expanded tuple through unchanged).
+  defp needs_io?(prog) do
+    (prog.funcs ++ Enum.flat_map(prog.mods, & &1.funcs))
+    |> Enum.any?(fn f -> Enum.any?(f.clauses, &io_in_body?(&1.body)) end)
+  end
+
+  defp io_in_body?(body) do
+    calls_io?(Pratt.parse_body(body))
+  rescue
+    _ -> false
+  end
+
+  defp calls_io?({:call, {:id, n}, _args}) when n in ["puts", "print"], do: true
+
+  defp calls_io?(node) when is_tuple(node),
+    do: node |> Tuple.to_list() |> Enum.any?(&calls_io?/1)
+
+  defp calls_io?(nodes) when is_list(nodes), do: Enum.any?(nodes, &calls_io?/1)
+  defp calls_io?(_), do: false
 
   # does any clause body call `Show.float`? (the interpolation desugar's signal that
   # the `Show` stdlib is needed — see `Rian.Interp`'s `Float64` case.)

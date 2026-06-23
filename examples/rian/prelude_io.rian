@@ -1,48 +1,58 @@
 # ===========================================================================
-# CONSOLE I/O PRELUDE (ADR-0068) — `Console`, per-target host output
+# CONSOLE I/O PRELUDE (ADR-0068/0069) — portable `puts`/`print`, per-target host output
 # ===========================================================================
-# Console output is a side effect with no *portable* contract — every target
-# reaches it through its own host call — so unlike `Str`/`List`/`Dict` (pure
-# logic over `Prim.*`) this prelude is a thin set of `@external` wrappers, one
-# host body per target (ADR-0068). A function with a body for a target reaches
-# that target (`Rian.Reach` turns "FFI pins to `:ex`" into an honest multi-target
-# set); a target with no body is honestly *off* it, never a silent stub.
+# Console output is a side effect with no portable VALUE contract — every target
+# reaches it through its own host call — so this prelude is a pair of `@external`
+# wrappers (`line`/`write`, one host body per target) plus two portable polymorphic
+# front doors (`puts`/`print`). Unlike `Str`/`List`/`Dict` (BEAM-linked), the IO
+# functions are **emitted into the program** when referenced (`Rian.Decl.inject_stdlib`
+# / `Rian.IOStdlib`), so they actually run on a source target — `console.log` (JS),
+# `println` (Kotlin), `IO.puts` (BEAM).
 #
-#   Console.puts("hi")    a line to stdout (trailing newline)
-#   Console.print("x")    raw text to stdout (no newline)
+#   puts("hi")     a line to stdout            puts(2 + 5)   stringifies the Int53 hole → "7"
+#   print("x")     raw text (no newline)
 #
-# NB — the module is **`Console`, not `IO`**: a Rian `mod IO` emits an Elixir
-# module literally named `IO`, shadowing the host `IO` and breaking the BEAM's
-# own output (verified — it crashes the runtime). `Console` collides with no host
-# module, so each `@external(:ex, "IO.…")` body resolves to the *host* `IO`.
+# All four are **top-level** (no `mod`): `puts` calls `line` as a *local* call, so
+# `Rian.Reach` threads `line`'s target set into `puts` (a cross-MODULE call is assumed
+# portable — ADR-0057 — which would wrongly claim `:rs`). It also avoids a `mod IO`
+# that would shadow the host `IO` on the BEAM (ADR-0068).
 #
-# Effects (ADR-0048): each performs `host` (non-portable FFI) + `io`.
+# RETURN TYPE `Unit` (ADR-0068): a console call has no meaningful value, and its
+# natural per-target result differs (`:ok` / `undefined` / `Unit`). `Unit` erases on
+# BEAM/JS and lowers to Kotlin `Unit`.
 #
-# RETURN TYPE — **`Unit`, not `Symbol`** (ADR-0068, the void-external fix). A
-# console call produces no meaningful value, and its natural per-target result
-# differs: BEAM `IO.puts` → `:ok`, JS `console.log` → `undefined`, Rust
-# `println!` → `()`, Kotlin `println` → `Unit`. Typing the wrapper `Symbol` was a
-# cross-target lie (only the BEAM result is an atom) AND pinned it off the typed
-# targets, whose calls do not return a `Symbol`. `Unit` is the honest empty type —
-# it erases on BEAM/JS, lowers to Rust `()` and Kotlin `Unit` — so one source body
-# per target type-checks everywhere and `Console.puts` reaches **all four**.
+# REACH `[:ex, :js, :jvm]` (NOT `:rs`): the polymorphic `puts` is a value-union
+# (ADR-0083) that hands `line` an owned `String` member, and Rust's `&str` host param
+# needs an owned→borrow coercion across the value-union arm the emitter does not yet do
+# (a borrow-staging change, tracked). So `:rs` is honestly OFF — never a false claim —
+# and `line`/`write` carry no `:rs` host body.
 # ---------------------------------------------------------------------------
 
-mod Console do
-  # a line to stdout, with a trailing newline.
-  @effects(host, io)
-  @external(:ex, "IO.puts(s)")
-  @external(:js, "console.log(s)")
-  @external(:rs, "println!(\"{}\", s)")
-  @external(:jvm, "println(s)")
-  pub def puts(s String) Unit
+# a line to stdout, with a trailing newline (the raw per-target host call). Named `line`,
+# not `puts`, so it does not clash with the bare polymorphic `puts` front door.
+@effects(host, io)
+@external(:ex, "IO.puts(s)")
+@external(:js, "console.log(s)")
+@external(:jvm, "println(s)")
+pub def line(s val String) Unit
 
-  # raw text to stdout, no trailing newline. (`:js` targets node — a browser host
-  # has no unbuffered stdout; use `puts`/`console.log` there.)
-  @effects(host, io)
-  @external(:ex, "IO.write(s)")
-  @external(:js, "process.stdout.write(s)")
-  @external(:rs, "print!(\"{}\", s)")
-  @external(:jvm, "print(s)")
-  pub def print(s String) Unit
+# raw text to stdout, no trailing newline. (`:js` targets node.)
+@effects(host, io)
+@external(:ex, "IO.write(s)")
+@external(:js, "process.stdout.write(s)")
+@external(:jvm, "print(s)")
+pub def write(s val String) Unit
+
+# Portable polymorphic front doors (ADR-0083 value union + ADR-0069 interpolation).
+# Accept the printable scalars `String` and `Int53` (the all-target integer). A `${n}`
+# hole stringifies by its MATCHED member type (`__prim_int_to_string`, portable — not the
+# runtime-`Show` fallback), so `puts(2 + 5)` prints `7`.
+pub def puts(x String | Int53) Unit := case x do
+  s String -> line(s)
+  n Int53 -> line("${n}")
+end
+
+pub def print(x String | Int53) Unit := case x do
+  s String -> write(s)
+  n Int53 -> write("${n}")
 end
