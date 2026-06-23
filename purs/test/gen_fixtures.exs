@@ -968,7 +968,15 @@ rust_corpus = [
   "pub def fst(x Int53, y Int53) Int53 := x",
   # `if` + recursion (tail call), and a float division (`/` → explicit f64 casts)
   "pub def fac(n Int53) Int53 := if n <= 1 do 1 else n * fac(n - 1) end",
-  "pub def avg(a Float64, b Float64) Float64 := (a + b) / 2.0"
+  "pub def avg(a Float64, b Float64) Float64 := (a + b) / 2.0",
+  # increment 2a — TOTAL multi-clause (a var clause covers the rest → Rust-exhaustive, no shim)
+  "pub def fib(Int53) Int53\npub def fib(0) := 0\npub def fib(1) := 1\npub def fib(n) := fib(n - 1) + fib(n - 2)",
+  # a nullary sum → an `enum`; full-coverage clause-head ctor patterns (`Color::Red`)
+  "type Color := Red | Green | Blue\npub def code(Color) Int53\npub def code(Red) := 0\npub def code(Green) := 1\npub def code(Blue) := 2",
+  # a payload sum → `enum Shape { Circle(f64), … }`; construction `Shape::Circle(r)` + ctor patterns
+  "type Shape := Circle(Float64) | Square(Float64)\npub def area(Shape) Float64\npub def area(Circle(r)) := 3.14 * r * r\npub def area(Square(s)) := s * s\npub def mk(r Float64) Shape := Circle(r)",
+  # a `case` over a sum value → a nested `match` (full variant coverage)
+  "type Box := Wrap(Int53) | Empty\npub def unwrap(b Box) Int53 := case b do\n  Wrap(x) -> x\n  Empty -> 0\nend"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
