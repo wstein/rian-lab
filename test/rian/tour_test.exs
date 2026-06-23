@@ -40,20 +40,21 @@ defmodule Rian.TourTest do
       assert basics["panes"]["js"] == "function twice(n) { return (n * 2); }"
     end
 
-    test "a labeled sum variant lowers to a named-field object (`a0.radius`, ADR-0049 §3b)", %{
-      data: data
-    } do
+    test "a sum variant lowers to a tagged object with positional keys (`a0._0`, ADR-0049 §3b)",
+         %{
+           data: data
+         } do
       js = Enum.find(data["cells"], &(&1["id"] == "types"))["panes"]["js"]
-      # `Circle(radius Float64)` binds by the field name, not a positional `_0`
+      # JS keeps positional field keys (`_0`); the JVM `data class` is the named-field backend
       assert js =~ ~s|a0.$ === "Circle"|
-      assert js =~ "const r = a0.radius;"
-      assert js =~ "const s = a0.side;"
-      refute js =~ "a0._0"
+      assert js =~ "const r = a0._0;"
+      refute js =~ "a0.radius"
     end
 
-    test "the same labeled variant lowers to a Kotlin `data class` with named fields", %{
-      data: data
-    } do
+    test "the same variant lowers to a Kotlin `data class` with named fields (JVM keeps labels)",
+         %{
+           data: data
+         } do
       jvm = Enum.find(data["cells"], &(&1["id"] == "types"))["panes"]["jvm"]
       # the declared field name is the `data class` param and the smart-cast accessor — not `f0`
       assert jvm =~ "data class Circle(val radius: Double)"

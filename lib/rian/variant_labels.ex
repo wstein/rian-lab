@@ -2,22 +2,22 @@ defmodule Rian.VariantLabels do
   @moduledoc """
   Shared sum-variant **field-label** resolution (ADR-0049 §3b / ADR-0050).
 
-  A sum variant may declare named fields (`Circle(radius Float64)`); a backend whose
-  representation has named slots (a JS object `{ $: "Circle", radius }`, a Kotlin
-  `data class Circle(val radius: …)`) wants those names at the construction *and*
-  pattern sites. The names live on the `type` declaration's variant fields, but the
-  pattern site (`Core.PCtor`) is reached deep inside the emitter where the type
-  registry isn't threaded — so this module pre-resolves them onto the node:
+  A sum variant may declare named fields (`Circle(radius Float64)`); the **JVM** backend,
+  whose representation has named slots (a Kotlin `data class Circle(val radius: …)`), wants
+  those names at the construction *and* pattern sites. The names live on the `type`
+  declaration's variant fields, but the pattern site (`Core.PCtor`) is reached deep inside
+  the emitter where the type registry isn't threaded — so this module pre-resolves them onto
+  the node:
 
   - `meta/1` builds the `ctor => %{enum, ctor, named, labels}` map from a program (the
     `labels` are the per-field names, `nil` for an anonymous field);
   - `bake_pats/2` is a reflective `Core`-tree walk that copies each `PCtor`'s `labels`
     off that map, so a downstream `pat_match` reads names off the node.
 
-  `Rian.JS` additionally rewrites *construction* to an `EVariant` (its own pass, since
-  the object form is JS-specific); `Rian.JVM` reads `meta/1` directly at the
-  `data class` declaration and uses `bake_pats/2` for patterns. The BEAM emitter keeps
-  positional tagged tuples (no named slot), so it does not consume this module.
+  `Rian.JVM` reads `meta/1` at the `data class` declaration and uses `bake_pats/2` for
+  patterns. The positional backends do not consume this module: JS keys its tagged object by
+  position (`_0`) — it uses `meta/1` only to *order* a named construction's args, never to
+  name a key — and BEAM/Rust have no named slot at all (ADR-0049 §3b).
   """
 
   use Rian.Ann

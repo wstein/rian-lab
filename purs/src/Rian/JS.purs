@@ -16,8 +16,8 @@
 -- | member tests the variant `$` tag, a struct member tests `__struct__`), and protocol dispatch
 -- | (`protocolDispatchersJs` regenerates the JS dispatcher from `Prog.protocols`/`implDecls`, skipping
 -- | the BEAM-shaped `dispatch == "dispatcher"` func), struct/sum *construction* (`bakeCtors` → the
--- | `EStruct` Core node → a `__struct__`-tagged object, or `EVariant` → a `{ $: "Ctor", radius: … }`
--- | labeled object, ADR-0049 §3b), and string interpolation (the program
+-- | `EStruct` Core node → a `__struct__`-tagged object, or `EVariant` → a `{ $: "Ctor", _0: … }`
+-- | tagged object with positional keys, ADR-0049 §3b), and string interpolation (the program
 -- | tail `Rian.Assemble.runProgramTail`, composed before the gate) are all ported.
 module Rian.JS
   ( compile
@@ -169,8 +169,9 @@ constJs i53 cset reg c =
 
 -- the value-union discriminator registry (ADR-0083): each sum type → its ctor tags, plus the set
 -- of struct names. `bakeUnionDisc` consults it so `patMatch` can emit a sum/struct runtime test.
--- `ctors` maps each variant ctor → its per-field label list (`Nothing` = anonymous), so
--- `bakeVariants`/`bakePat` can spell `{ $: "Circle", radius: … }` (ADR-0049 §3b).
+-- `ctors` maps each variant ctor → its per-field label list (`Nothing` = anonymous), used to
+-- detect sum constructions and to order a *named* construction's args into declared field
+-- order before keying it positionally (`_0`); JS keeps positional keys (ADR-0049 §3b).
 type JsReg =
   { sums :: Array (Tuple String (Array String))
   , structs :: Array String
@@ -206,18 +207,16 @@ bakePat reg (P.PTyped name tname Nothing) =
     Nothing ->
       if elem tname reg.structs then P.PTyped name tname (Just ("struct:" <> tname))
       else P.PTyped name tname Nothing
--- a sum-variant pattern: fill its per-field labels (so `patMatch` binds `v.radius`) and recurse
--- into nested patterns (ADR-0049 §3b).
-bakePat reg (P.PCtor ctor args _) = P.PCtor ctor (map (bakePat reg) args) (ctorLabels reg ctor)
 bakePat _ p = p
 
 -- Resolve construction (ADR-0050 / ADR-0049 §3b) in one walk so nesting works (a struct inside a
 -- variant inside a struct): a labeled call to a declared struct (`Name(f: v, …)`) → `SStructLit`
 -- (→ `Core.EStruct`, a `__struct__`-tagged object), and a call to a sum ctor (positional `Circle(r)`
--- or named `Circle(radius: r)`) → `SVariantLit` (→ `Core.EVariant`, a `{ $: "Circle", radius: … }`
--- object). Pairs carry the declared field labels (`Nothing` = anonymous → `_n`). A nullary ctor
--- referenced bare (`Red`) stays an `SId` and is emitted by `exprJs (EId …)` as `{ $: "Red" }`. A
--- non-struct/non-ctor name or a partial struct arg list falls through.
+-- or named `Circle(radius: r)`) → `SVariantLit` (→ `Core.EVariant`, a `{ $: "Circle", _0: r }` tagged
+-- object with positional keys). Pairs are ordered into declared field order (so a named arg lands at
+-- its `_n`); `exprJs` keys them positionally. A nullary ctor referenced bare (`Red`) stays an `SId`
+-- and is emitted by `exprJs (EId …)` as `{ $: "Red" }`. A non-struct/non-ctor name or a partial
+-- struct arg list falls through.
 bakeCtors :: JsReg -> P.Surface -> P.Surface
 bakeCtors reg = walk
   where
@@ -397,9 +396,7 @@ clauseJs :: Boolean -> Array String -> JsReg -> Clause -> String
 clauseJs i53 cset reg clause =
   let
     step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p ("a" <> show i) in Tuple (ts <> t) (bs <> b)
-    -- bake clause-head patterns (variant field labels, ADR-0049 §3b) before lowering, so a ctor
-    -- head binds `s.radius` not `s._0` — mirrors the `bakeUnionDisc` pass over `case` arms.
-    Tuple tests binds = foldl step (Tuple [] []) (mapWithIndex Tuple (map (fromPat <<< bakePat reg) clause.pats))
+    Tuple tests binds = foldl step (Tuple [] []) (mapWithIndex Tuple (map fromPat clause.pats))
     paramNames = map fst binds
     inner = bindLines binds <> [ guardedReturn i53 cset reg paramNames clause.body clause.guard ]
     bodyStr = joinWith " " inner
@@ -465,8 +462,8 @@ patMatch i53 pat acc = case pat of
   PChar cp -> Tuple [ acc <> " === " <> cpLit i53 cp ] []
   PAtom a -> Tuple [ acc <> " === " <> jsAtom a ] []
   PTuple es -> let Tuple ts bs = matchElems i53 es acc in Tuple (cons1 (acc <> ".length === " <> show (length es)) ts) bs
-  PCtor ctor args labels ->
-    let Tuple ts bs = matchCtorArgs i53 args labels acc
+  PCtor ctor args ->
+    let Tuple ts bs = matchCtorArgs i53 args acc
     in Tuple (cons1 (acc <> ".$ === " <> dquote ctor) ts) bs
   PList es Nothing -> let Tuple ts bs = matchElems i53 es acc in Tuple (cons1 (acc <> ".length === " <> show (length es)) ts) bs
   PList es (Just tail) ->
@@ -487,18 +484,12 @@ matchElems i53 es acc = foldl step (Tuple [] []) (mapWithIndex Tuple es)
   where
   step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p (acc <> "[" <> show i <> "]") in Tuple (ts <> t) (bs <> b)
 
--- bind a variant's positional args by their declared field key (`v.radius` where labeled, `v._n`
--- otherwise), ADR-0049 §3b.
-matchCtorArgs :: Boolean -> Array CPat -> Array (Maybe String) -> String -> Tuple (Array String) (Array (Tuple String String))
-matchCtorArgs i53 args labels acc = foldl step (Tuple [] []) (mapWithIndex Tuple args)
+-- bind a variant's positional args by their positional field key `acc._n` (JS keeps positional
+-- keys; the JVM `data class` is the named-field backend), ADR-0049 §3b.
+matchCtorArgs :: Boolean -> Array CPat -> String -> Tuple (Array String) (Array (Tuple String String))
+matchCtorArgs i53 args acc = foldl step (Tuple [] []) (mapWithIndex Tuple args)
   where
-  step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p (acc <> "." <> fieldKey labels i) in Tuple (ts <> t) (bs <> b)
-
--- the JS field key for a variant's i-th arg: its declared label, else positional `_i`.
-fieldKey :: Array (Maybe String) -> Int -> String
-fieldKey labels i = case index labels i of
-  Just (Just name) -> name
-  _ -> "_" <> show i
+  step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p (acc <> "._" <> show i) in Tuple (ts <> t) (bs <> b)
 
 matchStruct :: Boolean -> String -> Array (Tuple String CPat) -> String -> Tuple (Array String) (Array (Tuple String String))
 matchStruct i53 name fields acc = foldl step (Tuple [ acc <> ".__struct__ === " <> dquote name ] []) fields
@@ -546,11 +537,12 @@ exprJs i53 = case _ of
     "{ __struct__: " <> dquote name
       <> (if null pairs then "" else ", " <> joinWith ", " (map (\(Tuple l v) -> l <> ": " <> exprJs i53 v) pairs))
       <> " }"
-  -- a sum-variant construction → a tagged object `{ $: "Ctor", radius: … }` (named field where the
-  -- variant declared a label, positional `_n` otherwise), ADR-0049 §3b.
+  -- a sum-variant construction → a tagged object with positional field keys
+  -- `{ $: "Ctor", _0: a, _1: b }` (ADR-0049 §3b: JS keeps positional `_n`; named args
+  -- `Circle(radius: r)` were placed in declared order by `bakeCtors`).
   EVariant ctor pairs ->
     "{ $: " <> dquote ctor
-      <> joinWith "" (mapWithIndex (\i (Tuple l v) -> ", " <> fromMaybe ("_" <> show i) l <> ": " <> exprJs i53 v) pairs)
+      <> joinWith "" (mapWithIndex (\i (Tuple _l v) -> ", _" <> show i <> ": " <> exprJs i53 v) pairs)
       <> " }"
   EAtom a -> jsAtom a
   EUnary "-" x -> "-" <> exprJs i53 x
@@ -1012,7 +1004,7 @@ dtsSum known t =
 dtsVariant :: Array String -> Array String -> Variant -> String
 dtsVariant known tvars v = case v.fields of
   [] -> "{ $: " <> dquote v.ctor <> " }"
-  fs -> "{ $: " <> dquote v.ctor <> ", " <> joinWith ", " (mapWithIndex (\i f -> fromMaybe ("_" <> show i) f.label <> ": " <> tsType known tvars f.ty) fs) <> " }"
+  fs -> "{ $: " <> dquote v.ctor <> ", " <> joinWith ", " (mapWithIndex (\i f -> "_" <> show i <> ": " <> tsType known tvars f.ty) fs) <> " }"
 
 -- a struct → a `{__struct__: "Name", …}` interface with a discriminant literal.
 dtsStruct :: Array String -> Struct -> String

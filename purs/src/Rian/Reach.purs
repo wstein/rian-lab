@@ -539,7 +539,7 @@ patHasPin :: P.Pat -> Boolean
 patHasPin (P.PPin _) = true
 patHasPin (P.PTuple ps) = any patHasPin ps
 patHasPin (P.PListP ps tl) = any patHasPin ps || maybe false patHasPin tl
-patHasPin (P.PCtor _ ps _) = any patHasPin ps
+patHasPin (P.PCtor _ ps) = any patHasPin ps
 patHasPin (P.PStruct _ ps) = any (\(Tuple _ p) -> patHasPin p) ps
 patHasPin (P.PAs _ p) = patHasPin p
 patHasPin (P.PMap ps) = any mapPatPin ps

@@ -940,7 +940,7 @@ rangeBase ic n = map (\(Tuple _ info) -> info.base) (find (\(Tuple k _) -> k == 
 narrow :: CPat -> Ty -> Ic -> Env -> Env
 narrow (PVar name) ty _ env = envPut name (concretize ty) env
 narrow (PTyped name tname _) _ _ env = envPut name (TName tname) env
-narrow (PCtor ctor args _) _ ic env =
+narrow (PCtor ctor args) _ ic env =
   foldl (\e (Tuple i p) -> narrow p (fieldTy i) ic e) env (mapWithIndex Tuple args)
   where
   fieldTypes = fromMaybe [] (map snd (find (\(Tuple k _) -> k == ctor) ic.tdefs))
@@ -1797,7 +1797,7 @@ patternType :: Ic -> CPat -> Ty
 patternType _ (PLit (LInt _)) = TName "Int53"
 patternType _ (PLit (LStr _)) = TName "String"
 patternType _ (PChar _) = TName "Char"
-patternType ic (PCtor c _ _) = maybe Unknown TName (ctorType ic c)
+patternType ic (PCtor c _) = maybe Unknown TName (ctorType ic c)
 patternType _ _ = Unknown
 
 -- fold two parameter constraints: `Unknown` = identity, a concrete wins, two differing concretes

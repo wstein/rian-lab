@@ -878,12 +878,12 @@ js_corpus = [
   # sum type construction + case over ctors
   "type Color := Red | Green | Blue\npub def nm(c Color) String := case c do\n  Red -> \"r\"\n  Green -> \"g\"\n  Blue -> \"b\"\nend",
   "type Box := Wrap(Int53) | Empty\npub def wrap(x Int53) Box := Wrap(x)",
-  # labeled sum variant (ADR-0049 §3b): a declared field name is the JS key (`s.radius`, not `s._0`)
-  # — at construction (positional `Circle(r)` and named `Circle(radius: r)`) and in `case`-arm patterns
+  # sum variant with declared field names — JS keeps positional `_n` keys (ADR-0049 §3b; the JVM
+  # `data class` is the named-field backend). Named construction `Circle(radius: r)` is reordered to
+  # declared field order, then keyed positionally; `case`-arm + clause-head ctor patterns bind `._n`.
   "type Shape := Circle(radius Float64) | Square(side Float64)\npub def mk(r Float64) Shape := Circle(r)\npub def mkn(r Float64) Shape := Circle(radius: r)\npub def area(s Shape) Float64 := case s do\n  Circle(r) -> r\n  Square(x) -> x\nend",
-  # a clause-head ctor pattern binds by the field label too (the dispatcher path)
   "type Shape := Circle(radius Float64) | Square(side Float64)\npub def area(Shape) Float64\npub def area(Circle(r)) := r\npub def area(Square(s)) := s",
-  # a partially-labeled variant: the labeled field → its name (`.id`), the anonymous one → `._n`
+  # a named arg out of declaration order is placed by name, then keyed positionally (`_0`/`_1`)
   "type Tag := Named(id Int53, Int53) | Bare(Int53)\npub def idOf(t Tag) Int53 := case t do\n  Named(a, b) -> a + b\n  Bare(c) -> c\nend",
   # list literals + cons + closed/cons clause patterns over a list
   "pub def pre(x Int53, xs Vec(Int53)) Vec(Int53) := [x | xs]",
@@ -933,7 +933,8 @@ jsdts_corpus = [
   "pub def res(r Result(Int53, String)) Int53 := 0",
   "pub def dct(d Dict(String, Int53)) Int53 := 0",
   "type Color := Red | Green | Blue\npub def nm(c Color) String := \"x\"",
-  # a labeled sum variant → a named-field discriminated union (`{ $: \"Circle\", radius: number }`)
+  # a sum variant → a discriminated union of tagged objects with positional keys
+  # (`{ $: \"Circle\", _0: number } | …`); JS keeps positional `_n` (ADR-0049 §3b)
   "type Shape := Circle(radius Float64) | Square(side Float64)\npub def area(s Shape) Float64 := 0.0",
   "struct Point(x Int53, y Int53)\npub def gx(p Point) Int53 := p.x",
   "range Digit := 0..9\npub def dd(x Digit) Int53 := 0",

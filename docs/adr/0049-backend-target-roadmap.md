@@ -147,12 +147,11 @@ Most of the ECMAScript target is already specified across the corpus:
 
 ### 3b. A sum value is a tagged **object**, not an array
 
-A user sum variant lowers to a **discriminated tagged object** — `Circle(radius Float64)` →
-`{ $: "Circle", radius: r }`, an anonymous `Add(Expr, Expr)` → `{ $: "Add", _0: a, _1: b }`,
-nullary `Red` → `{ $: "Red" }`, matched `v.$ === "Circle"` binding `v.radius`/`v._0` (the
-field-key rule is in the labeled-object paragraph below). (It originally lowered to a tagged
-**array** `["Circle", r]` / `a0[1]`, mirroring the BEAM tuple.) The object form was adopted
-because it:
+A user sum variant lowers to a **discriminated tagged object** with **positional field keys** —
+`Circle(radius Float64)` → `{ $: "Circle", _0: r }`, `Add(Expr, Expr)` → `{ $: "Add", _0: a, _1: b }`,
+nullary `Red` → `{ $: "Red" }`, matched `v.$ === "Circle"` binding `v._0` (the field-key rule is in
+the paragraph below). (It originally lowered to a tagged **array** `["Circle", r]` / `a0[1]`,
+mirroring the BEAM tuple.) The object form was adopted because it:
 
 - **distinguishes a variant from a list/tuple** — both were arrays, so a variant
   was runtime-indistinguishable from a `Vec`, and a TS consumer saw both as
@@ -166,33 +165,29 @@ tagged **array** `["ok", v]`. The repr is parity-locked across `Rian.JS` and the
 purs `JS.purs` (`js`-parity), with
 `compile_types` emitting the matching discriminated object union.
 
-**Field keys are the variant's labels where present, `_0`/`_1` otherwise** —
-`Circle(radius Float64)` → `{ $: "Circle", radius: r }` (matched `v.radius`), while an
-anonymous `Add(Expr, Expr)` stays `{ $: "Add", _0: a, _1: b }`. A reflective pre-emit
-pass (`Rian.JS.bake_variants`) resolves a construction to an `EVariant` carrying its
-`{label｜nil, value}` pairs (handling positional **and** named `Circle(radius: …)`
-construction) and tags a `PCtor` with its `labels`, so `expr_js`/`pat_match` read the
-names off the node — no type registry threaded into the deep emit. `compile_types`
-emits the matching named union (`{ $: "Circle", radius: number } | …`). **JVM** takes the
-same labels (via the shared `Rian.VariantLabels`): a labeled variant lowers to a Kotlin
-`data class Circle(val radius: Double)` and its patterns smart-cast to `acc.radius`, not
-`acc.f0`. The two *positional-by-nature* backends keep their native shape and ignore the
-labels — **BEAM** a tagged tuple `{:circle, R}` (element order, no field-name slot), **Rust**
-a positional `enum` variant `Circle(f64)`. **BEAM keeping the tuple is a deliberate choice**
-(not an unfinished port): a tuple has no field-name slot, and — unlike a TS/Kotlin consumer —
-*nothing on the BEAM reads variant field names*, so labels buy nothing observable there.
-Lowering labeled sums to a tagged map (`#{'$' => circle, radius => R}`) was rejected — it
-would reintroduce the same hybrid (labeled→map, anonymous→tuple) the JS analysis rules out,
-contradict the ADR-0050 P6 spike's tagged-tuple finding, and cost the Elixir↔Rian
-forms-equivalence the roundtrip gate depends on. (Erlang records compile to that same
-positional tuple, so they add no runtime named-ness either.) The prototype
-that drove the design: IR is ~90% anonymous variants, so the named-field win is
-concentrated in user-facing types (and structs already cover named fields) — but the
-one-model object form carries it cleanly. A **hybrid** (labeled→object,
-anonymous→array) was **rejected**: it reintroduces the variant≠list ambiguity for the
-anonymous majority, makes the runtime shape depend on whether the author wrote field
-names, has no coherent answer for *partially*-labeled variants (`Foo(x Int, Int)`),
-and degrades the `.d.mts` from a discriminated-object union to literal tuples.
+**JS field keys are positional `_0`/`_1`** — `Circle(radius Float64)` → `{ $: "Circle", _0: r }`,
+matched `v._0`; `compile_types` emits `{ $: "Circle", _0: number } | …`. A reflective pre-emit pass
+(`Rian.JS.bake_variants`) still resolves a construction to an `EVariant` so a **named** construction
+`Circle(radius: r)` is placed in declared field order before being keyed positionally (`_0`) — the
+field *names* drive the ordering, not the emitted key. **JVM is the one named-field backend:** via the
+shared `Rian.VariantLabels`, a variant lowers to a Kotlin `data class Circle(val radius: Double)`,
+matched `acc.radius` not `acc.f0` — idiomatic Kotlin, where the declared name is the natural accessor.
+The three *positional-by-representation* backends key by position — **JS** `_0` (the object reads
+honestly without a per-type label registry threaded into the deep emit; field names buy little when the
+playground shows `_0` consistently), **BEAM** a tagged tuple `{:circle, R}` (element order, no
+field-name slot), **Rust** a positional `enum` variant `Circle(f64)`. **JS and BEAM keeping positional
+keys is a deliberate choice**, not an unfinished port: a tagged tuple has no field-name slot, and —
+unlike a TS/Kotlin consumer — *nothing on the BEAM reads variant field names*. Lowering sums to a
+tagged map (`#{'$' => circle, radius => R}`) on the BEAM was rejected — it would reintroduce the same
+hybrid (labeled→map, anonymous→tuple) the analysis below rules out, contradict the ADR-0050 P6 spike's
+tagged-tuple finding, and cost the Elixir↔Rian forms-equivalence the roundtrip gate depends on. (Erlang
+records compile to that same positional tuple, so they add no runtime named-ness either.) The prototype
+that drove the representation: IR is ~90% anonymous variants, so a named-field key helps a small,
+mostly user-facing subset (and structs already cover named fields). A **hybrid** (labeled→object,
+anonymous→array) was **rejected**: it reintroduces the variant≠list ambiguity for the anonymous
+majority, makes the runtime shape depend on whether the author wrote field names, has no coherent
+answer for *partially*-labeled variants (`Foo(x Int, Int)`), and degrades the `.d.mts` from a
+discriminated-object union to literal tuples.
 
 ### 4. Relationship to the bootstrap stages (ADR-0031)
 
