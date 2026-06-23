@@ -54,15 +54,17 @@ defmodule Rian.ReachHonestyPropertyTest do
   @all MapSet.new([:ex, :rs, :js, :jvm])
 
   # a JS serializer producing Rust's `{:?}` canonical form (`Some(x)`/`None`, `[a, b]`,
-  # quoted strings) — so `f()`'s value compares byte-equal across BEAM/JS/Rust. Generated
-  # strings are `"s"` (never `"Some"`/`"None"`), so the tagged-array discrimination is safe.
+  # quoted strings) — so `f()`'s value compares byte-equal across BEAM/JS/Rust. A sum value
+  # lowers to a tagged object `{ $: "Ctor", _0: … }` (ADR-0049 §3b, positional keys), a list to
+  # a plain array — discriminated by the `$` tag, distinct from a `String` value.
   @js_show ~S"""
   function __show(x){
-    if(Array.isArray(x)){
-      if(x[0]==="Some")return "Some("+__show(x[1])+")";
-      if(x[0]==="None")return "None";
-      return "["+x.map(__show).join(", ")+"]";
+    if(x!==null&&typeof x==="object"&&x.$!==undefined){
+      if(x.$==="Some")return "Some("+__show(x._0)+")";
+      if(x.$==="None")return "None";
+      return String(x.$);
     }
+    if(Array.isArray(x))return "["+x.map(__show).join(", ")+"]";
     if(typeof x==="string")return JSON.stringify(x);
     return String(x);
   }

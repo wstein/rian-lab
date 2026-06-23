@@ -295,7 +295,7 @@ defmodule Rian.TestRunnerTest do
 
     test "JS asserts the Outcome is `Pass`, passing the Fail message to the assert" do
       js = RT.js(@matcher_src)
-      assert js =~ ~s|const o = eq_ok(); assert.ok(o[0] === "Pass", o[1])|
+      assert js =~ ~s|const o = eq_ok(); assert.ok(o.$ === "Pass", o._0)|
     end
 
     @tag :rust

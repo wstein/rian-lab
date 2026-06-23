@@ -190,7 +190,7 @@ defmodule Rian.Test do
     wrappers =
       Enum.map_join(test_specs(src), "\n", fn {n, ret} ->
         if ret == "Outcome" do
-          ~s|test(#{inspect(n)}, () => { const o = #{n}(); assert.ok(o[0] === "Pass", o[1]); });|
+          ~s|test(#{inspect(n)}, () => { const o = #{n}(); assert.ok(o.$ === "Pass", o._0); });|
         else
           ~s|test(#{inspect(n)}, () => assert.strictEqual(#{n}(), true));|
         end
