@@ -596,10 +596,12 @@ defmodule Rian.BeamTest do
       # regression: `compile_program` mapped over `mods` only, so a top-level `def`
       # alongside a `mod` was silently dropped — `Rian.Run` then found no entry. The
       # top-level funcs now compile into `RianCompiled`; the qualified `Lib.twice`
-      # call resolves to the `Elixir.Lib` module.
+      # call resolves to the `Elixir.Lib` module, and `List.sum` (a top-level call to
+      # the portable prelude) resolves because `load_program/1` now links the prelude.
       mods =
         Beam.load_program(
-          "mod Lib do\n  pub def twice(n Int53) Int53 := n * 2\nend\n\npub def main() Int53 := Lib.twice(21)"
+          "mod Lib do\n  pub def twice(n Int53) Int53 := n * 2\nend\n\n" <>
+            "pub def main() Int53 := Lib.twice(List.sum([10, 11]))"
         )
 
       assert Lib in mods

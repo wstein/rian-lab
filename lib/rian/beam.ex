@@ -276,6 +276,12 @@ defmodule Rian.Beam do
   @rian_sig "pub def load_program(src String) Vec(Symbol)"
   @spec load_program(String.t()) :: [module()]
   def load_program(src) do
+    # link the portable prelude so a `List.sum`/`Dict.get`/… call — which the emitter
+    # redirects to its `Rian.Prelude.*` module — resolves at runtime (mirrors the
+    # single-module `load/2`; idempotent). A top-level `def` calling the prelude
+    # alongside a `mod` needs it now that those top-level funcs are compiled.
+    :ok = Rian.Prelude.load()
+
     src
     |> compile_program()
     |> Enum.map(fn {atom, bin} ->
@@ -379,6 +385,10 @@ defmodule Rian.Beam do
   @rian_sig "pub def load_program_ir(prog Prog) Vec(Symbol)"
   @spec load_program_ir(map()) :: [module()]
   def load_program_ir(prog) do
+    # see `load_program/1`: link the portable prelude so redirected `List.*`/`Dict.*`
+    # calls resolve at runtime (idempotent).
+    :ok = Rian.Prelude.load()
+
     prog
     |> compile_program_ir()
     |> Enum.map(fn {atom, bin} ->
