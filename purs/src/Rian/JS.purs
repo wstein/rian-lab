@@ -1055,6 +1055,7 @@ tsPrim t = case t of
   "String" -> Just "string"
   "Char" -> Just "number"
   "Symbol" -> Just "string"
+  "Unit" -> Just "void"
   "Any" -> Just "unknown"
   _ -> Nothing
 

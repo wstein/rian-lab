@@ -11,20 +11,21 @@
 #   Console.puts("hi")    a line to stdout (trailing newline)
 #   Console.print("x")    raw text to stdout (no newline)
 #
-# Reaches all four targets — verified to compile **and run**: `:ex` (`mix rian.run`),
-# `:js` (node), `:rs` (`rustc`), `:jvm` (`kotlinc`+`java`).
-#
 # NB — the module is **`Console`, not `IO`**: a Rian `mod IO` emits an Elixir
 # module literally named `IO`, shadowing the host `IO` and breaking the BEAM's
 # own output (verified — it crashes the runtime). `Console` collides with no host
 # module, so each `@external(:ex, "IO.…")` body resolves to the *host* `IO`.
 #
-# Effects (ADR-0048): each performs `host` (non-portable FFI) + `io`. The return
-# is `Symbol` (`:ok`). On the BEAM `IO.puts` already returns `:ok`; `:js` is
-# dynamic. The statically-typed `:rs`/`:jvm` console calls return *unit*, so their
-# bodies run the call **and then yield** `:ok`'s representation (`Symbol` lowers to
-# a string) — a `{ println!(…); "ok".to_string() }` block on Rust, a
-# `println(s).let { "ok" }` on Kotlin — keeping the declared `Symbol` return honest.
+# Effects (ADR-0048): each performs `host` (non-portable FFI) + `io`.
+#
+# RETURN TYPE — **`Unit`, not `Symbol`** (ADR-0068, the void-external fix). A
+# console call produces no meaningful value, and its natural per-target result
+# differs: BEAM `IO.puts` → `:ok`, JS `console.log` → `undefined`, Rust
+# `println!` → `()`, Kotlin `println` → `Unit`. Typing the wrapper `Symbol` was a
+# cross-target lie (only the BEAM result is an atom) AND pinned it off the typed
+# targets, whose calls do not return a `Symbol`. `Unit` is the honest empty type —
+# it erases on BEAM/JS, lowers to Rust `()` and Kotlin `Unit` — so one source body
+# per target type-checks everywhere and `Console.puts` reaches **all four**.
 # ---------------------------------------------------------------------------
 
 mod Console do
@@ -32,16 +33,16 @@ mod Console do
   @effects(host, io)
   @external(:ex, "IO.puts(s)")
   @external(:js, "console.log(s)")
-  @external(:rs, "{ println!(\"{}\", s); \"ok\".to_string() }")
-  @external(:jvm, "println(s).let { \"ok\" }")
-  pub def puts(s String) Symbol
+  @external(:rs, "println!(\"{}\", s)")
+  @external(:jvm, "println(s)")
+  pub def puts(s String) Unit
 
   # raw text to stdout, no trailing newline. (`:js` targets node — a browser host
   # has no unbuffered stdout; use `puts`/`console.log` there.)
   @effects(host, io)
   @external(:ex, "IO.write(s)")
   @external(:js, "process.stdout.write(s)")
-  @external(:rs, "{ print!(\"{}\", s); \"ok\".to_string() }")
-  @external(:jvm, "print(s).let { \"ok\" }")
-  pub def print(s String) Symbol
+  @external(:rs, "print!(\"{}\", s)")
+  @external(:jvm, "print(s)")
+  pub def print(s String) Unit
 end

@@ -67,6 +67,8 @@ fnTrait t =
       Nothing -> "Fn()"
 
 rustName :: String -> String
+-- `Unit` is the empty/void type — Rust's `()` (ADR-0068: a void `@external` body yields `()`).
+rustName "Unit" = "()"
 rustName t = if copy t then rustScalar t else t
 
 -- a Copy scalar's Rust spelling (`Int53` → `i64`, `Int64` → `i64`, `UInt8` → `u8`, …).

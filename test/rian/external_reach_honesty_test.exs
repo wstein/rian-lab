@@ -21,14 +21,19 @@ defmodule Rian.ExternalReachHonestyTest do
 
   alias Rian.{Decl, JVM, Lower, Reach}
 
-  # externals with VALID typed-target host bodies — the positive corpus.
+  # externals with VALID typed-target host bodies — the positive corpus. The `Unit`
+  # cases gate the void-external return mapping (ADR-0068): `Unit` → Rust `()` /
+  # Kotlin `Unit`, so a console-style void external type-checks on the typed targets
+  # (it claimed `Symbol` before, which Rust/JVM console calls do not return).
   @rs_ok [
     {"mag", ~S|@external(:rs, "x.abs()") pub def mag(x val Int64) Int64|},
-    {"inc", ~S|@external(:rs, "x + 1") pub def inc(x val Int64) Int64|}
+    {"inc", ~S|@external(:rs, "x + 1") pub def inc(x val Int64) Int64|},
+    {"out", ~S|@external(:rs, "println!(\"{}\", s)") pub def out(s String) Unit|}
   ]
 
   @jvm_ok [
-    {"mag", ~S|@external(:jvm, "Math.abs(x)") pub def mag(x val Int64) Int64|}
+    {"mag", ~S|@external(:jvm, "Math.abs(x)") pub def mag(x val Int64) Int64|},
+    {"out", ~S|@external(:jvm, "println(s)") pub def out(s String) Unit|}
   ]
 
   # a host body that is wrong for Rust (no such method) — claimed by Reach, emitted
@@ -54,6 +59,14 @@ defmodule Rian.ExternalReachHonestyTest do
       # the heart of the gap: emission succeeds, so an emit-time check (`safe_emit`)
       # can never catch a host body that is bad for a typed target.
       assert Lower.rust_program(Decl.parse(@rs_bad)) =~ "no_such_method_zzz"
+    end
+
+    test "a `Unit` (void) external lowers to Rust `()` and Kotlin `Unit`, not a passthrough" do
+      rs = ~S|@external(:rs, "println!(\"{}\", s)") pub def out(s String) Unit|
+      assert Lower.rust_program(Decl.parse(rs)) =~ "fn out(s: &str) -> ()"
+
+      jvm = ~S|@external(:jvm, "println(s)") pub def out(s String) Unit|
+      assert JVM.compile(jvm) =~ "fun out(a0: String): Unit"
     end
   end
 

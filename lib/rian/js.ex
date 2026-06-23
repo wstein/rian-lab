@@ -440,6 +440,7 @@ defmodule Rian.JS do
     "String" => "string",
     "Char" => "number",
     "Symbol" => "string",
+    "Unit" => "void",
     "Any" => "unknown"
   }
 

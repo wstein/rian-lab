@@ -320,7 +320,7 @@ defmodule Rian.Lower do
 
   # an `@external` function (ADR-0068) has no clauses — its body is a per-target host
   # expression (`rust_fn`/`to_elixir` emit it verbatim), so there is nothing to
-  # exhaustiveness-check. Without this, `hd(func.clauses)` below crashes on it.
+  # capability/exhaustiveness-check. Without this, `hd(func.clauses)` below crashes on it.
   defp check!(%{clauses: []} = func, _env), do: func
 
   defp check!(func, env) do

@@ -112,6 +112,18 @@ already knows — a BEAM remote call (`Beam`), a JS import/expression (`JS`), a 
 target is a compile error (ADR-0041 §2 — never a silent stub); Reach prevents that from arising by
 pinning the function off that target first.
 
+**Void externals return `Unit`, not `Symbol` (the empty type).** A console-style host call produces no
+meaningful value, and its natural per-target result *differs*: BEAM `IO.puts` → `:ok`, JS `console.log`
+→ `undefined`, Rust `println!` → `()`, Kotlin `println` → `Unit`. Declaring such a wrapper `Symbol` was
+a cross-target lie (only the BEAM result is an atom) **and** pinned it off the typed targets, whose
+calls return no `Symbol` (a `fn puts(s) -> Symbol { println!(…) }` is a `rustc` error). The honest type
+is **`Unit`** — the empty type: it erases on BEAM/JS, and lowers to Rust `()` and Kotlin `Unit`
+(`Rian.Capability.rust_name("Unit") = "()"`, `Rian.JS` TS `Unit → void`). So one host body per target
+type-checks everywhere, and a void external like `Console.puts` reaches **all four** targets rather than
+being falsely capped at `:ex`/`:js`. The generative tripwire (`Rian.ExternalReachHonestyTest`) compiles
+each claimed typed target so a `Unit`-return regression (e.g. an emitter passing `Unit` through as a
+literal type) fails CI.
+
 ### 4. Relationship to ADR-0056 (`comptime if target`) — distinct, not redundant
 
 - **ADR-0056** selects among **Rian** representations at compile time (two portable bodies, pick one

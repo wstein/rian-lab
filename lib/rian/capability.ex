@@ -62,6 +62,10 @@ defmodule Rian.Capability do
   # so a nominal type that happens to start with `Int` is untouched.
   @rian_sig "pub def rust_name(t String) String"
   @spec rust_name(String.t()) :: String.t()
+  # `Unit` is the empty/void type — Rust's `()` (ADR-0068: a void `@external` body,
+  # e.g. `println!(…)`, yields `()`). Mapped here so it reaches both the param and the
+  # return position (`owned`/`borrowed` funnel through `rust_name`).
+  def rust_name("Unit"), do: "()"
   def rust_name(t), do: if(t in @copy, do: rust_scalar(t), else: t)
 
   # `Int53` is the ECMAScript-safe integer (a native JS `number` is exact only to
