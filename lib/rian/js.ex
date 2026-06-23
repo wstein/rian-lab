@@ -154,8 +154,16 @@ defmodule Rian.JS do
   @doc "Compile `src`'s functions to a single ECMAScript module (a string)."
   @rian_sig "pub def compile(src String) String"
   @spec compile(String.t()) :: String.t()
-  def compile(src) do
-    prog = Decl.parse(src)
+  def compile(src), do: compile_prog(Decl.parse(src))
+
+  @doc """
+  Lower an already-parsed program (the `Decl.parse/1` shape) to a JS module — the post-parse
+  half of `compile/1`. A multi-target driver (the by-example tour) parses once and lowers each
+  target off the shared program (parse-once, lower-many), instead of re-parsing per target.
+  """
+  @rian_sig "pub def compile_prog(prog Prog) String"
+  @spec compile_prog(map()) :: String.t()
+  def compile_prog(prog) do
     # Run the full type gate first — parity with the BEAM path (`Decl.compile`),
     # which gates before emitting. Without this a real `Rian.Check` error stayed
     # latent on the JS path (commit 80f6929). A type error is now caught here, not

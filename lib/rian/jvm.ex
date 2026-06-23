@@ -145,8 +145,15 @@ defmodule Rian.JVM do
   @doc "Compile `src`'s types + functions to a single Kotlin source module (a string)."
   @rian_sig "pub def compile(src String) String"
   @spec compile(String.t()) :: String.t()
-  def compile(src) do
-    prog = Decl.parse(src)
+  def compile(src), do: compile_prog(Decl.parse(src))
+
+  @doc """
+  Lower an already-parsed program (the `Decl.parse/1` shape) to a Kotlin module — the post-parse
+  half of `compile/1`, so a multi-target driver (the tour) parses once and lowers each target.
+  """
+  @rian_sig "pub def compile_prog(prog Prog) String"
+  @spec compile_prog(map()) :: String.t()
+  def compile_prog(prog) do
     # Run the full type gate first — parity with the BEAM path (`Decl.compile`); a
     # `Rian.Check` error is caught here rather than emitted as malformed Kotlin.
     :ok = Check.gate!(prog)

@@ -133,7 +133,10 @@ defmodule Rian.SigPolicyTest do
   # `classify`/`runtime_dispatch_target?` made private to keep the bump to the irreducible residual.
   # 270 -> 271: `Rian.Decl.coherence_violations/1` (the `coh` parity unit, ADR-0084) returns the same
   # honestly-`_Unk` violation list.
-  @unk_baseline 260
+  # 260 -> 261: `Rian.Decl.compile_prog/1` — the post-parse half of `compile/1` (parse-once,
+  # lower-many, ADR-0090) — returns the same dual-target `[{name, %{elixir, rust}}]` list `compile/1`
+  # documents as honestly `_Unk`.
+  @unk_baseline 261
 
   defp unk_count do
     lib_rian_modules()

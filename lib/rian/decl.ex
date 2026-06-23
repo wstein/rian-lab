@@ -848,8 +848,16 @@ defmodule Rian.Decl do
   keyed by the module name.
   """
   @spec compile(String.t()) :: [{String.t(), term()}]
-  def compile(src) do
-    prog = parse(src)
+  def compile(src), do: compile_prog(parse(src))
+
+  @doc """
+  Lower an already-parsed program (the `parse/1` shape) to `[{name, %{elixir, rust}}]` — the
+  post-parse half of `compile/1`, so a multi-target driver (the tour) parses once and lowers
+  each target off the shared program rather than re-parsing per target.
+  """
+  @rian_sig "pub def compile_prog(prog Prog) Vec(_Unk)"
+  @spec compile_prog(map()) :: [{String.t(), term()}]
+  def compile_prog(prog) do
     :ok = Check.gate!(prog)
     :ok = Rian.Reach.gate!(prog)
 

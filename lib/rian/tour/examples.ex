@@ -195,7 +195,7 @@ defmodule Rian.Tour.Examples do
     body = file |> Path.basename(".rian") |> pane_source()
     prog = Decl.parse(body)
 
-    for target <- Reach.targets(), {:raise, msg} <- [safe_emit(target, body, prog)] do
+    for target <- Reach.targets(), {:raise, msg} <- [safe_emit(target, prog)] do
       "does not emit to #{target}: #{msg}"
     end
   rescue
@@ -292,7 +292,7 @@ defmodule Rian.Tour.Examples do
 
         reach_issue(declared, union) ++
           pin_issues(by_name, union, pins) ++
-          emit_issues(src, prog, by_name)
+          emit_issues(prog, by_name)
     end
   end
 
@@ -302,24 +302,25 @@ defmodule Rian.Tour.Examples do
   # real emitter and requiring it not to raise. (Union-but-not-floor targets on a
   # mixed file can't be whole-file-emitted, since the emitters compile the whole
   # module and a pinned-off function would raise; those rest on reach + doctests.)
-  defp emit_issues(src, prog, by_name) do
+  defp emit_issues(prog, by_name) do
     floor =
       by_name
       |> Map.values()
       |> Enum.reduce(MapSet.new(Reach.targets()), &MapSet.intersection/2)
 
-    for target <- Enum.sort(floor), {:raise, msg} <- [safe_emit(target, src, prog)] do
+    for target <- Enum.sort(floor), {:raise, msg} <- [safe_emit(target, prog)] do
       "claims `#{target}` (floor) but the #{target} emitter raises: #{msg}"
     end
   end
 
   @rian_host "tour gate: an emitter's unsupported-construct raise becomes `{:raise, msg}`"
-  defp safe_emit(target, src, prog) do
+  # lowers the *shared* parsed program per target (parse-once, lower-many) — no target re-parses.
+  defp safe_emit(target, prog) do
     case target do
-      :ex -> Rian.Beam.compile_program(src)
+      :ex -> Rian.Beam.compile_program_ir(prog)
       :rs -> Lower.rust_program(prog)
-      :js -> JS.compile(src)
-      :jvm -> JVM.compile(src)
+      :js -> JS.compile_prog(prog)
+      :jvm -> JVM.compile_prog(prog)
     end
 
     :ok

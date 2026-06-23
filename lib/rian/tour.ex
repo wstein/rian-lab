@@ -165,11 +165,13 @@ defmodule Rian.Tour do
       "blurb" => cell.blurb,
       "covers" => cell.covers,
       "source" => String.trim_trailing(src),
+      # Parse once (`prog`), lower every target off it — parse-once, lower-many (the Elixir
+      # twin of `Rian.Lower.All`); no target re-parses `src`.
       "panes" => %{
-        "ex" => elixir_module(src),
+        "ex" => elixir_module(prog),
         "rs" => Lower.rust_program(prog),
-        "js" => String.trim_trailing(JS.compile(src)),
-        "jvm" => String.trim_trailing(JVM.compile(src))
+        "js" => String.trim_trailing(JS.compile_prog(prog)),
+        "jvm" => String.trim_trailing(JVM.compile_prog(prog))
       },
       "reach" => reach
     }
@@ -193,9 +195,9 @@ defmodule Rian.Tour do
 
   # Assemble the per-function Elixir-text debug view into one module, emitting the
   # shared `@type` declarations once.
-  defp elixir_module(src) do
+  defp elixir_module(prog) do
     units =
-      for {_name, out} <- Decl.compile(src), out[:elixir], do: out[:elixir]
+      for {_name, out} <- Decl.compile_prog(prog), out[:elixir], do: out[:elixir]
 
     {type_lines, body_blocks} =
       Enum.reduce(units, {[], []}, fn text, {types, blocks} ->
