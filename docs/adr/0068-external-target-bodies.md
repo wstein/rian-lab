@@ -136,6 +136,30 @@ unsatisfiable on a target the function otherwise reaches, which has no current i
 `Show` reach broadly), and the generative tripwire already fails CI on the downstream symptom (a
 generic external whose lowered trait-bounded signature does not compile on a typed target).
 
+### 3b. Auto-injected portable `puts`/`print` (the console front door)
+
+The raw void externals are `line`/`write` (a host line / raw write per target — `IO.puts`/
+`console.log`/`println`). On top sit two **portable polymorphic front doors**, `puts`/`print`, that
+take a `String | Int53` **value union** (ADR-0083) so a number prints without an explicit conversion
+(`puts(2 + 5)` → `7`; the `Int53` arm stringifies via `Prim.int_to_string`, the `${n}` member-narrowing
+of ADR-0069). All four are **top-level** (not a `mod`): `puts` calls `line` as a *local* call so Reach
+threads `line`'s target set in (a cross-module call is assumed portable), and it avoids a `mod IO`
+shadowing the host `IO` on the BEAM.
+
+Unlike the BEAM-linked `Str`/`List`/`Dict` prelude, the IO functions are **emitted into the program**
+when referenced: `Rian.Decl.inject_stdlib` (and its PS twin `Rian.Assemble.injectStdlib`) splices in
+`Rian.IOStdlib`'s functions for any program that calls `puts`/`print` and doesn't define its own — so
+`puts` actually runs on a source target (`console.log`/`println`/`IO.puts`) rather than dangling, with
+no import or boilerplate. The bodies are the canonical source `examples/rian/prelude_io.rian`
+([`20_io.rian`](../../examples/rian/20_io.rian) is the by-example).
+
+**Reach `[:ex, :js, :jvm]`, honestly OFF `:rs` (for now).** The value-union arm hands `line`'s `&str`
+host parameter an owned `String` member, and the Rust owned→borrow coercion across a value-union arm
+is a tracked follow-up — so the matrix reports `:rs` off rather than a false claim. (`line`/`write`
+themselves carry no `:rs` host body.) The effect annotation `@effects(host, io)` is dropped from
+`line`/`write`: the PS effect checker does not yet infer an `@external` as host-effectful and rejects
+over-declaration (ADR-0048 §3); the effect is still performed by the host call.
+
 ### 4. Relationship to ADR-0056 (`comptime if target`) — distinct, not redundant
 
 - **ADR-0056** selects among **Rian** representations at compile time (two portable bodies, pick one

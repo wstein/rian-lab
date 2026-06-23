@@ -1200,6 +1200,45 @@
         ]
       },
       "title": "Consuming the portable `List` prelude (higher-order, closures-as-values)"
+    },
+    {
+      "doctests": [],
+      "file": "20_io.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm"
+      ],
+      "reachByFn": {
+        "line": [
+          "ex",
+          "js",
+          "jvm"
+        ],
+        "main": [
+          "ex",
+          "js",
+          "jvm"
+        ],
+        "print": [
+          "ex",
+          "js",
+          "jvm"
+        ],
+        "puts": [
+          "ex",
+          "js",
+          "jvm"
+        ],
+        "write": [
+          "ex",
+          "js",
+          "jvm"
+        ]
+      },
+      "title": "Console I/O: portable `puts` / `print`"
     }
   ],
   "reachExamples": [

@@ -74,8 +74,10 @@ export function looksIncomplete(srcText: string): boolean {
 export type RunResult = { ok: boolean; text: string };
 
 // Execute an emitted ECMAScript module in a sandboxed iframe (`allow-scripts`,
-// opaque origin — no page access). Imports it from a blob URL; calls `main()` if
-// exported, else reports the module loaded and lists its exports.
+// opaque origin — no page access). Imports it from a blob URL; captures `console.log`
+// (so `puts(…)` output shows), then calls `main()` if exported. The result text is the
+// captured stdout, plus `main()`'s value when it returns one (a string verbatim; else
+// `main() = <json>` — a `Unit`/undefined return contributes nothing).
 export function runInSandbox(jsModule: string, timeoutMs = 4000): Promise<RunResult> {
   return new Promise((resolve) => {
     const frame = document.createElement("iframe");
@@ -99,11 +101,19 @@ export function runInSandbox(jsModule: string, timeoutMs = 4000): Promise<RunRes
       JSON.stringify(jsModule) +
       ";" +
       "(async () => { let r; try {" +
+      "  const __out = [];" +
+      "  const __cap = (...a) => { __out.push(a.map(x => typeof x === 'string' ? x : (() => { try { return JSON.stringify(x); } catch { return String(x); } })()).join(' ')); };" +
+      "  console.log = __cap; console.info = __cap; console.warn = __cap; console.error = __cap;" +
       "  const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));" +
       "  const mod = await import(url);" +
+      "  let val = '';" +
       "  if (typeof mod.main === 'function') { const v = mod.main();" +
-      "    r = { ok: true, text: typeof v === 'string' ? v : 'main() = ' + JSON.stringify(v) }; }" +
-      "  else r = { ok: true, text: 'module loaded · exports: ' + Object.keys(mod).join(', ') + ' (define `main()` to see a value)' };" +
+      "    if (typeof v === 'string') val = v;" +
+      "    else if (v !== undefined && v !== null) val = 'main() = ' + JSON.stringify(v); }" +
+      "  let text = __out.join('\\n');" +
+      "  if (val) text = text ? text + '\\n' + val : val;" +
+      "  if (!text) text = (typeof mod.main === 'function') ? '(no output)' : 'module loaded · exports: ' + Object.keys(mod).join(', ') + ' (define `main()` or call `puts(…)` to see output)';" +
+      "  r = { ok: true, text };" +
       "} catch (e) { r = { ok: false, text: String((e && e.message) || e) }; }" +
       "  parent.postMessage({ __rian: true, r }, '*'); })();" +
       "<\/script>";
