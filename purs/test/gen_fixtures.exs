@@ -1204,7 +1204,28 @@ rustprog_corpus = [
   # string interpolation (ADR-0069) → one `format!` (`__prim_str_concat_all`), with `${int}`
   # going through `__prim_int_to_string` → `.to_string()`; a `:=` bind of a string literal owns it
   # (`let name = "Rian".to_string()`, `rust_owned_elem`)
-  "pub def greet(age Int53) String := name := \"Rian\" ; \"hi ${name}, you are ${age}!\""
+  "pub def greet(age Int53) String := name := \"Rian\" ; \"hi ${name}, you are ${age}!\"",
+  # ── Rust mop-up (Phase 5): HashMap prims, captures (&/1), with ──
+  # `Map(K,V)` → `std::collections::HashMap`; `Prim.map_get` → `.get(k).cloned().unwrap()`
+  "pub def g(m Map(Symbol, Int53)) Int53 := Prim.map_get(m, :a)",
+  # `Prim.map_put` → a functional update (clone the map, insert cloned k/v)
+  "pub def p(m Map(Symbol, Int53)) Map(Symbol, Int53) := Prim.map_put(m, :c, 3)",
+  # `Prim.map_has` → `.contains_key(k)`; `Prim.map_new` → `HashMap::new()`
+  "pub def h(m Map(Symbol, Int53)) Bool := Prim.map_has(m, :a)",
+  "pub def e() Map(Symbol, Int53) := Prim.map_new()",
+  # an anonymous capture `&(&1 * 2)` → an explicit closure `|a1| a1 * 2`
+  # a named capture `&inc/1` → a forwarding closure `|a0| inc(a0)`
+  # (parity-only: the reference emits a *bare* closure in return position — not nameable Rust
+  # without `Box<dyn Fn>`/`impl Fn`; the PS port mirrors it byte-for-byte. Reach pins such a fn off :rs.)
+  "pub def mk() Fn(Int53, Int53) := &(&1 * 2)",
+  "pub def inc(n Int53) Int53 := n + 1\npub def mk() Fn(Int53, Int53) := &inc/1",
+  # `with Wrap(v) <- x do v else _ -> 0 end` → a nested `match` chain (ADR-0040, `with_chain_rs`).
+  # Ctor names avoid `Some`/`None` (a user variant colliding with the prelude `Option` exposes a
+  # *separate* pre-existing patRs ctor→enum resolution divergence on Rust, not a `with` one).
+  # parity-only: the reference's `with` body returns the borrowed `v` (a `&i64`) un-coerced — the
+  # clause/case path's borrow-coercion isn't applied to `with` bodies (a pre-existing reference gap),
+  # so it is not rustc-valid; the PS port mirrors it exactly.
+  "type Box := Wrap(Int53) | Empty\npub def f(x Box) Int53 := with Wrap(v) <- x do\n  v\nelse\n  _ -> 0\nend"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

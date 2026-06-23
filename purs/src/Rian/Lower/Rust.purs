@@ -27,6 +27,12 @@
 -- |   7f. deeper capability borrows — a cons-head `&T` rebound `clone()`, an `iso Vec` matched
 -- |      via `.as_slice()` with its tail rebound `to_vec()`, and a `Vec` return coercing a
 -- |      borrowed `&[T]` slice leaf to owned (`coerceOwnedVecAst`).
+-- |   mop-up. `Map(K,V)` HashMap prims (`__prim_map_new`/`get`/`has`/`put` → `HashMap::new()` /
+-- |      `.get(k).cloned().unwrap()` / `.contains_key` / a clone-and-insert functional update),
+-- |      captures (`&(&1*2)` → `|a1| …`, `&fn/arity` → `|a0,…| fn(a0,…)`, `&N` → `aN`, arity from
+-- |      `Core.capArity`), and `with` → a nested `match` chain (`withChainRs`). A map *literal*
+-- |      (`%{…}`) / update stays BEAM-only (a clean crash). (Captures-in-return + `with` bodies
+-- |      mirror the reference's output, which has known boxing/borrow gaps — parity, not rustc-valid.)
 -- | An unported node raises a clear "stage" crash, kept out of the `rust`/`rustprog` parity
 -- | corpus (oracle = `Rian.Decl.compile`'s `:rust` / `Rian.Lower.rust_program`).
 module Rian.Lower.Rust
@@ -37,7 +43,7 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, any, concat, concatMap, drop, elem, filter, find, foldl, head, index, last, length, mapWithIndex, nub, null, reverse, snoc, uncons, zipWith)
+import Data.Array (all, any, concat, concatMap, drop, elem, filter, find, foldl, head, index, last, length, mapWithIndex, nub, null, range, reverse, snoc, uncons, zipWith)
 import Data.Array (groupBy) as Array
 import Data.Array.NonEmpty (toArray) as NEA
 import Data.Enum (fromEnum, toEnum)
@@ -53,7 +59,7 @@ import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Capability (copy, owned, rustParam) as Cap
 import Rian.Check (checkProgram)
-import Rian.Core (CArm, CExpr(..), CMapPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CMapPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), capArity, fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.Exhaustiveness (analyze, programEnv)
 import Rian.IR (Cap(..), Clause, Func, ImplDecl, ImplMethod, Method, Param, Prog, Protocol, Range, Struct, Type, Variant, bodySurface)
@@ -767,6 +773,17 @@ emit ec (ECall (EId "__prim_str_concat") [ a, b ]) =
 -- variadic single-shot join (ADR-0069 §6): one `format!`, one allocation; every part is a `String`.
 emit ec (ECall (EId "__prim_str_concat_all") args) =
   Tuple ("format!(\"" <> foldMap (const "{}") args <> "\", " <> joinWith ", " (map (p ec 0) args) <> ")") 12
+-- `Map(K, V)` prims (ADR-0047) → Rust `HashMap` ops. A `val` map/key/value is a borrow, so `get`
+-- clones the value out (`.cloned().unwrap()`), `put` builds a fresh owned map (clone + insert cloned
+-- key/value — a functional update matching BEAM/JS), `new`/`has` map directly. `K: Eq + Hash` is
+-- added by `rustGenerics`.
+emit _ (ECall (EId "__prim_map_new") []) = Tuple "std::collections::HashMap::new()" 12
+emit ec (ECall (EId "__prim_map_get") [ m, k ]) =
+  Tuple (p ec 12 m <> ".get(" <> p ec 12 k <> ").cloned().unwrap()") 12
+emit ec (ECall (EId "__prim_map_has") [ m, k ]) =
+  Tuple (p ec 12 m <> ".contains_key(" <> p ec 12 k <> ")") 12
+emit ec (ECall (EId "__prim_map_put") [ m, k, v ]) =
+  Tuple ("{ let mut __m = " <> p ec 12 m <> ".clone(); __m.insert(" <> p ec 12 k <> ".clone(), " <> p ec 12 v <> ".clone()); __m }") 0
 -- a call to a known sum ctor is construction (`Enum::Variant(…)`); a call to a `Fn`-typed param is
 -- a closure call (args clone); a PascalCase all-labeled call is struct construction; else a call.
 emit ec (ECall (EId name) args)
@@ -775,7 +792,41 @@ emit ec (ECall (EId name) args)
   | pascal name && not (null args) && all isELabel args = Tuple (structConstruct ec name args) 12
 emit ec (ECall f args) =
   Tuple (p ec 12 f <> "(" <> joinWith ", " (map (p ec 0) args) <> ")") 12
+-- ── captures (ADR-0061) → explicit Rust closures ──
+-- a placeholder `&N` → the closure's `aN` parameter.
+emit _ (ECapArg n) = Tuple ("a" <> show n) 12
+-- an anonymous capture `&(&1 * 2)` → `|a1, … aN| body` (arity from `Core.capArity`).
+emit ec (ECapture body) = Tuple ("|" <> closureParams 1 (capArity body) <> "| " <> p ec 0 body) 12
+-- a named `&fn/arity` → a forwarding closure `|a0, … | fn(a0, …)` over `a0..arity-1`.
+emit ec (ECaptureNamed path arity) =
+  let ps = closureParams 0 (arity - 1)
+  in Tuple ("|" <> ps <> "| " <> p ec 12 path <> "(" <> ps <> ")") 12
+-- `with c1 <- e1; … body else arms` → a nested `match` chain (ADR-0040); a non-matching value
+-- falls to the `else` arms (or returns itself). Mirrors `with_chain_rs`.
+emit ec (EWith clauses body els) =
+  let
+    elseRs = joinWith " " (map (\a -> patRs ec.vi a.pat <> caseGuard ec a.guard <> " => " <> p ec 0 a.body <> ",") els)
+  in
+    Tuple (withChainRs ec clauses (emitBlock ec body) elseRs) 0
+-- map literals/updates have no portable Rust lowering (a `Map(K,V)` is built via the `Dict`
+-- prelude's `__prim_map_*` ops); they stay BEAM-only (matching the reference).
+emit _ (EMap _) = unsafeCrashWith "map literals are BEAM-only in PoC"
+emit _ (EMapUpdate _ _) = unsafeCrashWith "map updates are BEAM-only in PoC"
 emit _ _ = unsafeCrashWith "rust: expression not yet ported (stage)"
+
+-- "aFrom, …, aTo" — the closure parameters of a capture; empty when the range is empty.
+closureParams :: Int -> Int -> String
+closureParams from to = if to < from then "" else joinWith ", " (map (\i -> "a" <> show i) (range from to))
+
+-- the nested-`match` desugaring of a `with` chain (ADR-0040). Each clause matches its pattern and
+-- continues; the synthesized `__w` binder falls through to the `else` arms (or returns itself).
+withChainRs :: Ec -> Array CWithClause -> String -> String -> String
+withChainRs ec clauses body elseRs = case uncons clauses of
+  Nothing -> "{ " <> body <> " }"
+  Just { head: wc, tail } ->
+    let fallback = if elseRs == "" then "__w => __w," else "__w => match __w { " <> elseRs <> " },"
+    in "match " <> p ec 0 wc.expr <> " { " <> patRs ec.vi wc.pat <> " => "
+         <> withChainRs ec tail body elseRs <> " " <> fallback <> " }"
 
 -- a closure-call argument: an `EId` is `.clone()`d (the closure can't borrow a moved capture);
 -- any other expression passes through. Mirrors `closure_arg`.
