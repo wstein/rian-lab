@@ -2159,7 +2159,12 @@ beam_corpus = [
   # checked: in-range → `{some, S}` (Option)
   "pub def main() Option(Int64) := Prim.checked_add(40, 2)",
   # checked: overflow → `none`
-  "pub def main() Option(Int64) := Prim.checked_add(9223372036854775807, 1)"
+  "pub def main() Option(Int64) := Prim.checked_add(9223372036854775807, 1)",
+  # ── inc 7: const declarations + references (in a `mod`; a const is module-scoped, ADR-0033) ──
+  # a `const` → a 0-arity accessor; a reference resolves to a call to it (`Limit` → `limit()`)
+  "mod M do\n  const Limit Int53 := 100\n  pub def main() Int53 := Limit + 1\nend",
+  # a const whose value is an expression, referenced twice
+  "mod M do\n  const Base Int53 := (2 + 3) * 4\n  pub def main() Int53 := Base + Base\nend"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses

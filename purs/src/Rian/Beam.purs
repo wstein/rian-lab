@@ -28,18 +28,21 @@
 -- | **64-bit overflow ops** (`__prim_wrapping_add`/`saturating_add`/`checked_add`) — BEAM ints are
 -- | bignums, so each computes the true sum once (an immediately-applied `fun`) then projects onto
 -- | signed-64 (wrap via `band` + sign-correct, saturate via `erlang:min`/`max`, check → `{some,S}`/
--- | `none`); `i64Overflow`/`i64Project`. **Deferred (later
--- | increments):** the type-directed lowering (the annotated/range-expanded core — `Show`/overflow/
--- | value-union discrimination), `@external`, specs/`type` attrs, remote `Mod.fun` user calls, and
--- | the whole-program / cross-module + const + prelude machinery (so `${float}` via `Show.float` and
--- | `List`/`Str`/`Dict` prelude calls land there). An unported node raises a clear crash.
+-- | `none`); `i64Overflow`/`i64Project`. Inc 7: **`const` declarations + references** — a
+-- | `const NAME := value` → a 0-arity accessor `name() -> value`, and a reference resolves at the
+-- | surface level (`SId NAME` → `SConstRef`, `resolveConstsS` over `Rian.Macro.mapNode`, threaded as
+-- | `cnames`) so it lowers to a call to the accessor. **Deferred (later increments):** value-union
+-- | type-pattern discrimination (ADR-0083 `PTyped` + the sum/struct registry), `@external`,
+-- | specs/`type` attrs, remote `Mod.fun` user calls, and the cross-module + prelude machinery (so
+-- | `${float}` via `Show.float` and `List`/`Str`/`Dict` prelude calls land there). An unported node
+-- | raises a clear crash.
 module Rian.Beam
   ( runMain
   ) where
 
 import Prelude
 
-import Data.Array (head, length)
+import Data.Array (elem, head, length)
 import Data.Foldable (foldr)
 import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), Replacement(..), contains, drop, replaceAll, stripPrefix, take) as Str
@@ -51,9 +54,10 @@ import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Body, Clause, Func, Prog, bodySurface)
+import Rian.IR (Body, Clause, Const, Func, Prog, bodySurface)
+import Rian.Macro (mapNode)
 import Rian.PatternLower (toSnake)
-import Rian.Pratt (parse) as P
+import Rian.Pratt (Surface(..), parse) as P
 import Rian.Prim (normalize)
 
 -- ── the Erlang-FFI boundary (Beam.erl) ───────────────────────────────────────
@@ -93,9 +97,43 @@ moduleForms :: String -> Prog -> ETerm
 moduleForms modName prog =
   let
     funcs = funcsOf prog
-    exports = map (\f -> nameArity f.name (funcArity f)) funcs
+    consts = constsOf prog
+    cnames = map _.name consts
+    exports =
+      map (\f -> nameArity f.name (funcArity f)) funcs
+        <> map (\c -> nameArity (toSnake c.name) 0) consts
   in
-    mkList ([ attrModule modName, attrExport exports ] <> map functionForm funcs)
+    mkList
+      ([ attrModule modName, attrExport exports ]
+        <> map (functionForm cnames) funcs
+        <> map (constForm cnames) consts)
+
+-- a `const NAME := value` (ADR-0033) → its 0-arity accessor `name() -> value` (snake-cased name,
+-- so `EConstRef` resolves to the same target). The value is a source expression string.
+constForm :: Array String -> Const -> ETerm
+constForm cnames c = fFunction (toSnake c.name) 0 [ fClause [] noGuard (bodyForms (parseResolved cnames (P.parse c.value))) ]
+
+-- parse a body/value/guard surface, rewriting a reference to a declared `const` (`SId NAME` with
+-- NAME in the set) into a `SConstRef` so it lowers to the accessor call (mirrors `resolve_consts`),
+-- then normalize + lower to Core.
+parseResolved :: Array String -> P.Surface -> CExpr
+parseResolved cnames s = fromExpr (normalize (resolveConstsS cnames s))
+
+resolveConstsS :: Array String -> P.Surface -> P.Surface
+resolveConstsS cnames = go
+  where
+  go (P.SId name)
+    | elem name cnames = P.SConstRef name
+  go node = mapNode go node
+
+-- the consts to compile: a single `mod`'s (a top-level `const` is module-scoped, ADR-0033, so the
+-- whole-program IR carries consts only on `mod`s — none for a flat file). Mirrors `consts_of`.
+constsOf :: Prog -> Array Const
+constsOf prog = case prog.funcs of
+  [] -> case prog.mods of
+    [ m ] -> m.consts
+    _ -> []
+  _ -> []
 
 funcArity :: Func -> Int
 funcArity f = case head f.clauses of
@@ -103,21 +141,21 @@ funcArity f = case head f.clauses of
   Nothing -> length f.params
 
 -- a function → `{function, 1, Name, Arity, [Clause]}`.
-functionForm :: Func -> ETerm
-functionForm f =
-  fFunction f.name (funcArity f) (map clauseForm f.clauses)
+functionForm :: Array String -> Func -> ETerm
+functionForm cnames f =
+  fFunction f.name (funcArity f) (map (clauseForm cnames) f.clauses)
 
 -- a function clause → `{clause, 1, [PatForm], Guard, [BodyForm]}`. A multi-clause `def` is one
 -- Erlang function with one clause per group member (Erlang dispatches natively); a `when` guard
--- lowers to the Erlang guard sequence `[[GuardExpr]]`.
-clauseForm :: Clause -> ETerm
-clauseForm c =
-  fClause (map (patForm <<< fromPat) c.pats) (clauseGuardForm c.guard) (bodyForms (bodyExprOf c.body))
+-- lowers to the Erlang guard sequence `[[GuardExpr]]`. `cnames` resolves const references in the body.
+clauseForm :: Array String -> Clause -> ETerm
+clauseForm cnames c =
+  fClause (map (patForm <<< fromPat) c.pats) (clauseGuardForm cnames c.guard) (bodyForms (bodyExprOf cnames c.body))
 
 -- a function clause's `when` guard (a source string) → the Erlang guard sequence; `Nothing` → `[]`.
-clauseGuardForm :: Maybe String -> ETerm
-clauseGuardForm Nothing = noGuard
-clauseGuardForm (Just g) = mkList [ mkList [ exprForm (fromExpr (normalize (P.parse g))) ] ]
+clauseGuardForm :: Array String -> Maybe String -> ETerm
+clauseGuardForm _ Nothing = noGuard
+clauseGuardForm cnames (Just g) = mkList [ mkList [ exprForm (parseResolved cnames (P.parse g)) ] ]
 
 -- a `case`-arm guard (already core) → the Erlang guard sequence `[[GuardExpr]]`; `Nothing` → `[]`.
 armGuardForm :: Maybe CExpr -> ETerm
@@ -146,6 +184,8 @@ exprForm (EId "false") = fAtom "false"
 -- a lowercase identifier is a variable; a PascalCase one is a nullary constructor (its atom tag).
 exprForm (EId x) = if startsUpper x then fAtom (toSnake x) else fVar (varAtom x)
 exprForm (EAtom a) = fAtom a
+-- a `const NAME` reference → a call to its 0-arity accessor `name()` (ADR-0033).
+exprForm (EConstRef name) = fCall (fAtom (toSnake name)) []
 -- a list literal `[a, b]` / cons `[h | t]` → an Erlang `{cons, …}` chain (`{nil,…}`-terminated).
 exprForm (EList elems tail) = consForm exprForm elems tail
 -- a tuple `{a, b}` → an Erlang `{tuple, 1, […]}`.
@@ -453,7 +493,7 @@ startsUpper x = case CU.charAt 0 x of
   Just c -> c >= 'A' && c <= 'Z'
   Nothing -> false
 
--- a clause's body `Body` → its `CExpr` (re-parse + normalize, like the other emitters).
-bodyExprOf :: Maybe Body -> CExpr
-bodyExprOf (Just b) = fromExpr (normalize (bodySurface b))
-bodyExprOf Nothing = unsafeCrashWith "abstract-forms: clause has no body"
+-- a clause's body `Body` → its `CExpr` (re-parse + normalize + const-resolve, like the reference).
+bodyExprOf :: Array String -> Maybe Body -> CExpr
+bodyExprOf cnames (Just b) = parseResolved cnames (bodySurface b)
+bodyExprOf _ Nothing = unsafeCrashWith "abstract-forms: clause has no body"
