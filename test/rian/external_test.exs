@@ -289,6 +289,46 @@ defmodule Rian.ExternalTest do
     end
   end
 
+  describe "bounds on a polymorphic external (ADR-0068 / ADR-0042 §2)" do
+    # a generic external states its precondition with `forall T: Bound`, so the
+    # checker enforces it at every call site even though the body is a host string.
+    @prog """
+    protocol Eq do
+      def eq(a Self, b Self) Bool
+    end
+    impl Eq for Int53 do
+      def eq(a, b) := a == b
+    end
+    type NoEq := Mk(Int53)
+    @external(:ex, "inspect(x)")
+    @external(:js, "JSON.stringify(x)")
+    def dump(x T) String forall T: Eq
+    """
+
+    test "the bound is parsed and stored on the external" do
+      dump = Decl.parse(@prog).funcs |> Enum.find(&(&1.name == "dump"))
+      assert dump.tvars == ["T"]
+      assert Map.get(dump, :bounds) == %{"T" => ["Eq"]}
+      # an external still has no Rian clauses — the bound rides the signature, not a body
+      assert dump.clauses == []
+    end
+
+    test "a call whose argument type LACKS the bound's impl is rejected at the call site" do
+      assert {:error, msg} = Check.check(@prog <> "\ndef bad() String := dump(Mk(1))")
+      assert msg =~ "requires `T: Eq`"
+      assert msg =~ "no `impl Eq for NoEq`"
+    end
+
+    test "a call whose argument type HAS the impl passes (Int53 has `impl Eq`)" do
+      assert Check.check(@prog <> "\ndef ok() String := dump(5)") == :ok
+    end
+
+    test "the external still reaches exactly its declared host-body targets" do
+      rep = Decl.parse(@prog) |> Reach.analyze()
+      assert Enum.sort(Reach.entry(rep, "dump").reach) == [:ex, :js]
+    end
+  end
+
   defp node_run(js, expr) do
     case System.find_executable("node") do
       nil ->

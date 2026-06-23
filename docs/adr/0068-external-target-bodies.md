@@ -124,6 +124,18 @@ being falsely capped at `:ex`/`:js`. The generative tripwire (`Rian.ExternalReac
 each claimed typed target so a `Unit`-return regression (e.g. an emitter passing `Unit` through as a
 literal type) fails CI.
 
+**A polymorphic external states its precondition with `forall T: Bound`.** Host FFI is frequently
+generic — `dump(x T) String forall T: Eq`, a `print` over `Show` — and the bound is not decoration: an
+external has no Rian body for the checker to read, so the bound is the *only* place its requirement on
+`T` is written. `check_bounds` enforces it at **every call site** exactly as for an ordinary bounded
+generic (ADR-0042 §2): `dump(noEqValue)` is rejected with `` `dump` requires `T: Eq`, but `NoEq` has no
+`impl Eq for NoEq` ``, while `dump(5)` (an `Int53` with an `Eq` impl) passes. The bound rides the
+signature (`Func.bounds`), not a clause, so it composes with the empty-`clauses` external shape.
+*Reach pinning on the bound's protocol reach is deferred:* it only bites when a bound protocol is
+unsatisfiable on a target the function otherwise reaches, which has no current instance (`Eq`/`Ord`/
+`Show` reach broadly), and the generative tripwire already fails CI on the downstream symptom (a
+generic external whose lowered trait-bounded signature does not compile on a typed target).
+
 ### 4. Relationship to ADR-0056 (`comptime if target`) — distinct, not redundant
 
 - **ADR-0056** selects among **Rian** representations at compile time (two portable bodies, pick one
