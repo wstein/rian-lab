@@ -318,6 +318,11 @@ defmodule Rian.Lower do
   # dead (`unreachable`) clauses. A synthetic protocol dispatcher is exempt (ADR-0042 §3/§6).
   defp check!(%{synthetic: true} = func, _env), do: func
 
+  # an `@external` function (ADR-0068) has no clauses — its body is a per-target host
+  # expression (`rust_fn`/`to_elixir` emit it verbatim), so there is nothing to
+  # exhaustiveness-check. Without this, `hd(func.clauses)` below crashes on it.
+  defp check!(%{clauses: []} = func, _env), do: func
+
   defp check!(func, env) do
     arity = length(hd(func.clauses).pats)
 

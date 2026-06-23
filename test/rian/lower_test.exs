@@ -26,6 +26,56 @@ defmodule Rian.LowerTest do
     }
   end
 
+  # an `@external` function (ADR-0068): no clauses, a per-target host body.
+  defp ext_puts do
+    %{
+      name: "puts",
+      params: [%{name: "s", type: "String", cap: :val}],
+      ret: "Symbol",
+      clauses: [],
+      externals: %{ex: "IO.puts(s)", rs: ~S|{ println!("{}", s); "ok".to_string() }|}
+    }
+  end
+
+  describe "@external function emission (ADR-0068)" do
+    # regression: a clause-less `@external` func once crashed `check!`'s
+    # `hd(func.clauses)` (exhaustiveness over zero clauses). It must lower instead,
+    # emitting the per-target host body verbatim for both Elixir and Rust.
+    test "a clause-less @external func lowers to its host body, not a crash" do
+      # the compile returning at all is the regression proof (check! no longer
+      # crashes); the Rust backend renders the `:rs` host body verbatim. (The
+      # Elixir-text view is the debug/inspection backend and does not render
+      # `@external` — the real `:ex` path is `Rian.Beam`.)
+      out = Lower.compile([], ext_puts())
+      assert out.rust =~ "fn puts(s: &str) -> String"
+      assert out.rust =~ ~S|println!("{}", s)|
+    end
+
+    @tag :rust
+    test "the emitted @external Rust compiles + runs under rustc" do
+      case System.find_executable("rustc") do
+        nil ->
+          :ok
+
+        rustc ->
+          out = Lower.compile([], ext_puts())
+
+          dir =
+            System.tmp_dir!() |> Path.join("rian_ext_rs_#{:erlang.unique_integer([:positive])}")
+
+          File.mkdir_p!(dir)
+          rs = Path.join(dir, "io.rs")
+          bin = Path.join(dir, "io")
+
+          File.write!(rs, out.rust <> "\nfn main() { assert_eq!(puts(\"x\"), \"ok\"); }\n")
+          {msg, code} = System.cmd(rustc, ["-A", "warnings", "--edition", "2021", rs, "-o", bin])
+          assert code == 0, "rustc failed:\n#{msg}"
+          assert {_, 0} = System.cmd(bin, [])
+          File.rm_rf!(dir)
+      end
+    end
+  end
+
   describe "Elixir emission" do
     test "multi-clause defs with tagged-tuple patterns and pi const" do
       out = Lower.compile(types(), area())
