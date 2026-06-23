@@ -296,6 +296,10 @@ defmodule Rian.BuildTest do
     end
 
     @tag :gradle
+    # gradle cold-start in CI (daemon spin-up + dependency/Kotlin-compiler downloads) far
+    # exceeds the 60s default test timeout — the build itself is fine (passes locally), it
+    # is just slow on a cold runner. Give it room rather than flake the toolchain lane.
+    @tag timeout: 300_000
     test "the generated Gradle project builds through gradle (invariant 4)" do
       case System.find_executable("gradle") do
         nil ->
