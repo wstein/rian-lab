@@ -41,7 +41,7 @@ The classic first program is [hello.rian](hello.rian) — `def main() := …`, r
 
 | File | Shows |
 | --- | --- |
-| [hello.rian](hello.rian) | The classic first program — `main/0` (the `mix rian.run` entry point) and console output through a portable `@external` `puts` wrapper (`IO.puts`/`console.log`), reaching `ex`/`js` |
+| [hello.rian](hello.rian) | The classic first program — `main/0` (the `mix rian.run` entry point) and console output through a void `@external` `puts` typed `Unit` (`IO.puts`/`console.log`/`println!`/`println`), reaching **all four** targets |
 | [01_basics.rian](01_basics.rian) | Expression-orientation, `:=` single-assignment, `if`/blocks, the operator table (`/` vs `div`, `<>`, `\|>`, non-associative comparisons) |
 | [02_types_match.rian](02_types_match.rian) | `type` / `struct` / `alias`, the `case` expression, recursive sums, guarded arms |
 | [03_clauses_guards.rian](03_clauses_guards.rian) | Multi-clause functions, the restricted guard sublanguage, static exhaustiveness, union narrowing, `@partial` |
@@ -165,9 +165,10 @@ Rian and compile + run on real BEAM bytecode:
   the pure preludes, console output has no portable contract, so this is a thin `@external`
   wrapper — one host body per target: `puts`/`print` over `IO.puts`/`console.log`/`println!`/
   `println`. Reaches **all four** targets (verified to compile + run on BEAM, node, rustc, and
-  kotlinc): the statically-typed `:rs`/`:jvm` bodies run the call **and** yield `:ok` (`Symbol`),
-  since their native console call returns unit. Named `Console`, not `IO` — a Rian `mod IO` would
-  shadow the host `IO` and break the BEAM's own output.
+  kotlinc) because `puts`/`print` return **`Unit`**, the empty type (ADR-0068): it erases on
+  BEAM/JS and lowers to Rust `()` / Kotlin `Unit`, so one clean host body per target type-checks —
+  no `Symbol`-return fiction (a console call returns no atom on the typed targets). Named `Console`,
+  not `IO` — a Rian `mod IO` would shadow the host `IO` and break the BEAM's own output.
 - [foldable.rian](foldable.rian) — **Tier 2: `Foldable`, eager ELEMENT-GENERIC reduction
   over a protocol (ADR-0073 + ADR-0074).** A one-method protocol with an **associated
   type** (`type Elem; to_list(self) Vec(Elem)`) bridges any container to a list, so the
