@@ -37,10 +37,18 @@
 -- | BIF (`is_boolean`/`is_binary`/`is_integer`/`is_float`), a sum's tag-membership
 -- | (`is_tuple(v) and element(1, v) == :tag` / `v == :tag`), or a struct's `__struct__` test. A
 -- | `desugarTyped` pre-pass over the body Core (threaded the sum/struct registry like `cnames`)
--- | rewrites the arms, so `expr_form` stays registry-free. **Deferred (later increments):**
--- | `@external` host-body splice, specs/`type` attrs, remote `Mod.fun` user calls, and the
--- | cross-module + prelude machinery (so `${float}` via `Show.float` and `List`/`Str`/`Dict` prelude
--- | calls land there). An unported node raises a clear crash.
+-- | rewrites the arms, so `expr_form` stays registry-free. Inc 9: **`@external` host-body splice**
+-- | (ADR-0068) + **module-qualified calls** — an `@external(:ex, spec)` function gets a synthetic
+-- | clause whose head binds the params and whose body is the rendered host expression
+-- | (`Rian.External.render`: a raw string verbatim, a `Mod.fun`/`:erlang.fun` reference → a
+-- | positional call), reusing the normal Core → forms FFI lowering (`beamFunc`); an `@external` with
+-- | no `:ex` body is honestly off `:ex` and emits nothing. The new remote-call clauses lower a
+-- | `Mod.fun(args)` / `:erlang.fun(args)` to an Erlang remote call (`moduleAtom`: a PascalCase head →
+-- | the Elixir module `Elixir.Mod`, a lowercase/atom head → an Erlang module verbatim).
+-- | **Deferred (later increments):** specs/`type` attrs, and the cross-module + prelude machinery
+-- | (the `Rian.Prelude.<Name>` redirect in `moduleAtom`, multi-module compile/load — so `${float}`
+-- | via `Show.float` and `List`/`Str`/`Dict` prelude calls land there). An unported node raises a
+-- | clear crash.
 module Rian.Beam
   ( runMain
   ) where
@@ -59,11 +67,12 @@ import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
+import Rian.External (render) as External
 import Rian.IR (Body, Clause, Const, Func, Prog, bodySurface)
 import Rian.IR as IR
 import Rian.Macro (mapNode)
 import Rian.PatternLower (toSnake)
-import Rian.Pratt (Surface(..), parse) as P
+import Rian.Pratt (Pat(..), Surface(..), parse) as P
 import Rian.Prim (normalize)
 
 -- ── the Erlang-FFI boundary (Beam.erl) ───────────────────────────────────────
@@ -98,11 +107,26 @@ funcsOf prog = case prog.funcs of
     _ -> []
   fs -> fs
 
+-- an `@external` function (ADR-0068): on the BEAM the `:ex` spec is a Rian-surface host expression,
+-- so splice it as the body — a synthetic clause whose head binds the params (as vars) — and reuse
+-- the normal Core → abstract-forms FFI lowering (the remote-call `expr_form` clauses). An
+-- `@external` with no `:ex` body is honestly off `:ex` and emits nothing. Mirrors `beam_func`.
+beamFunc :: Func -> Array Func
+beamFunc f
+  | not (null f.externals) = case lookupAssoc "ex" f.externals of
+      Nothing -> []
+      Just spec ->
+        let
+          clause = { pats: map (\p -> P.PVar p.name) f.params, body: Just (IR.Raw (External.render spec f.params)), guard: Nothing }
+        in
+          [ f { clauses = [ clause ], externals = [] } ]
+  | otherwise = [ f ]
+
 -- ── module assembly ──────────────────────────────────────────────────────────
 moduleForms :: String -> Prog -> ETerm
 moduleForms modName prog =
   let
-    funcs = funcsOf prog
+    funcs = funcsOf prog >>= beamFunc
     consts = constsOf prog
     cnames = map _.name consts
     reg = registryOf prog
@@ -238,6 +262,11 @@ exprForm (ECall (EId "__prim_str_to_atom") [ s ]) = remoteCall "Elixir.String" "
 exprForm (ECall (EId "__prim_wrapping_add") [ a, b ]) = i64Overflow Wrapping a b
 exprForm (ECall (EId "__prim_saturating_add") [ a, b ]) = i64Overflow Saturating a b
 exprForm (ECall (EId "__prim_checked_add") [ a, b ]) = i64Overflow Checked a b
+-- a module-qualified call `Mod.fun(args)` / `:erlang.fun(args)` (inc 9, `@external` host bodies) →
+-- an Erlang remote call. A PascalCase head is an Elixir module (`String` → `'Elixir.String'`); a
+-- lowercase/atom head is an Erlang module verbatim (`:erlang` → `erlang`).
+exprForm (ECall (EDot (EId m) fun) args) = remoteCall (moduleAtom m fun) fun (map exprForm args)
+exprForm (ECall (EDot (EAtom m) fun) args) = remoteCall m fun (map exprForm args)
 -- an all-labeled call `Name(f: v, …)` is struct construction → a `__struct__`-tagged map; a
 -- PascalCase positional call `Circle(r)` is sum construction → a tagged tuple `{circle, R}`; a
 -- lowercase `f(args)` is a local call (inc 3/4: no var application / imports / cross-module yet).
@@ -528,6 +557,13 @@ mapPatPairExact (CMPKey k p) = mapFieldExact (exprForm k) (patForm p)
 remoteCall :: String -> String -> Array ETerm -> ETerm
 remoteCall mod fun args =
   mkTuple [ mkAtomTerm "call", ln, mkTuple [ mkAtomTerm "remote", ln, fAtom mod, fAtom fun ], mkList args ]
+
+-- the Erlang module atom for an `EId`-headed `Mod.fun` call: a PascalCase head is an Elixir module
+-- (`String` → `Elixir.String`), a lowercase one is an Erlang module verbatim. Mirrors `module_atom`
+-- (the portable-prelude redirect — `List`/`Dict`/`Str`/`Int` → the linked `Rian.Prelude.<Name>` — is
+-- the cross-module/prelude increment; until then a prelude call lowers to its bare module name).
+moduleAtom :: String -> String -> String
+moduleAtom m _fun = if startsUpper m then "Elixir." <> m else m
 
 -- a binary `<<…>>` over already-formed segments, and a whole-binary segment `X/binary` (for `<>`).
 fBin :: Array ETerm -> ETerm

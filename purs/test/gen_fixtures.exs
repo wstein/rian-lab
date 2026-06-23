@@ -2173,7 +2173,19 @@ beam_corpus = [
   # a SUM-member union — the tag-membership discriminator (`is_tuple` + `element(1,…)`)
   "type A := Mk(Int53)\ntype B := Nul\npub def pick(x A | B) Int53 := case x do\n  a A -> 1\n  b B -> 2\nend\npub def main() Int53 := pick(Mk(9)) * 10 + pick(Nul)",
   # a STRUCT-member union — the `__struct__` map-value discriminator (guard-safe `erlang:map_get`)
-  "struct P(x Int53)\nstruct Q(y Int53)\npub def tag(v P | Q) Int53 := case v do\n  p P -> p.x\n  q Q -> q.y\nend\npub def main() Int53 := tag(P(x: 5)) * 10 + tag(Q(y: 3))"
+  "struct P(x Int53)\nstruct Q(y Int53)\npub def tag(v P | Q) Int53 := case v do\n  p P -> p.x\n  q Q -> q.y\nend\npub def main() Int53 := tag(P(x: 5)) * 10 + tag(Q(y: 3))",
+  # ── inc 9: @external host-body splice (ADR-0068) ──
+  # a raw host-expression string spliced as the function body
+  "@external(:ex, \"n * 2\")\npub def dbl(n Int53) Int53\npub def main() Int53 := dbl(21)",
+  # an `:erlang.fun` reference → a positional Erlang remote call (EAtom-headed `Mod.fun`)
+  "@external(:ex, :erlang.abs)\npub def my_abs(n Int53) Int53\npub def main() Int53 := my_abs(-7)",
+  # an `EId`-headed lowercase `mod.fun` host call → an Erlang remote call (`erlang` module). A
+  # PascalCase head (`Integer.to_string` → `Elixir.Integer`) also lowers, but the parity harness is
+  # plain Erlang/OTP with no Elixir stdlib loaded, so an Elixir-module call is not execution-testable
+  # here (the same reason the Elixir-runtime `__prim_*` stringify prims are not in the beam stream).
+  "@external(:ex, \"erlang.integer_to_binary(n)\")\npub def show(n Int53) String\npub def main() String := show(255)",
+  # a non-`:ex` external → honestly dropped on BEAM (emits nothing); `main` stands alone
+  "@external(:js, \"x + 1\")\npub def jsonly(x Int53) Int53\npub def main() Int53 := 99"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses
