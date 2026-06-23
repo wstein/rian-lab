@@ -61,10 +61,6 @@ jobs:
           for f in examples/rian/prelude_*.rian; do
             req=ex,rs,js
             [ "$f" = examples/rian/prelude_int.rian ] && req=ex,rs
-            # `prelude_io` is host-FFI console output (ADR-0068), not portable pure
-            # logic — its `@external` bodies reach `ex,js`; `rs`/`jvm` need a Symbol-
-            # returning wrapper (the host call returns unit) and are honestly off.
-            [ "$f" = examples/rian/prelude_io.rian ] && req=ex,js
             echo "== $f (require $req) =="
             mix rian.targets "$f" --require "$req"
           done

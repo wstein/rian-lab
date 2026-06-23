@@ -38,7 +38,7 @@ that is the point (see [15_targets.rian](15_targets.rian)).
 
 | File | Shows |
 | --- | --- |
-| [hello.rian](hello.rian) | The classic first program — `main/0` as the entry point, `IO.puts` host FFI (BEAM-only `:ex`) |
+| [hello.rian](hello.rian) | The classic first program — `main/0` (the `mix rian.run` entry point) and console output through a portable `@external` `puts` wrapper (`IO.puts`/`console.log`), reaching `ex`/`js` |
 | [01_basics.rian](01_basics.rian) | Expression-orientation, `:=` single-assignment, `if`/blocks, the operator table (`/` vs `div`, `<>`, `\|>`, non-associative comparisons) |
 | [02_types_match.rian](02_types_match.rian) | `type` / `struct` / `alias`, the `case` expression, recursive sums, guarded arms |
 | [03_clauses_guards.rian](03_clauses_guards.rian) | Multi-clause functions, the restricted guard sublanguage, static exhaustiveness, union narrowing, `@partial` |
@@ -158,6 +158,13 @@ Rian and compile + run on real BEAM bytecode:
   `mix rian.targets`). A *lazy* generator/`Iterator` protocol is deliberately NOT
   provided — laziness is a per-target evaluation concern, native like concurrency
   (ADR-0057), not portable sequential logic.
+- [prelude_io.rian](prelude_io.rian) — **`Console` host console output (ADR-0068).** Unlike
+  the pure preludes, console output has no portable contract, so this is a thin `@external`
+  wrapper — one host body per target: `puts`/`print` over `IO.puts`/`console.log`/`println!`/
+  `println`. Reaches **all four** targets (verified to compile + run on BEAM, node, rustc, and
+  kotlinc): the statically-typed `:rs`/`:jvm` bodies run the call **and** yield `:ok` (`Symbol`),
+  since their native console call returns unit. Named `Console`, not `IO` — a Rian `mod IO` would
+  shadow the host `IO` and break the BEAM's own output.
 - [foldable.rian](foldable.rian) — **Tier 2: `Foldable`, eager ELEMENT-GENERIC reduction
   over a protocol (ADR-0073 + ADR-0074).** A one-method protocol with an **associated
   type** (`type Elem; to_list(self) Vec(Elem)`) bridges any container to a list, so the
@@ -188,10 +195,6 @@ Rian and compile + run on real BEAM bytecode:
   `Fail("expected 42, got 41")`, formatted via interpolation, ADR-0069); `Rian.Test`
   surfaces that message on every target. `contain` (membership) stays deferred — it needs
   the `List` prelude linked, like `assert_in`.
-
-- [prelude_io.rian](prelude_io.rian) — **a `Console` host-FFI wrapper for console
-  output (ADR-0068).** Console writes are a side effect with no portable contract, so the
-  module is BEAM-only (`:ex`) — the host-FFI boundary that `hello.rian` uses for `IO.puts`.
 
 ### Function body forms
 

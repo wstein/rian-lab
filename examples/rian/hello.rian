@@ -2,8 +2,13 @@
 # Hello, Rian! — the classic first program
 # ===========================================================================
 # `main/0` is the entry point `mix rian.run` (and the `rian run` binary) invoke.
-# `IO.puts` is host (Elixir-lib) FFI: it performs console output, which is a
-# side effect with no portable contract, so this function is BEAM-only (`:ex`).
+#
+# `puts` is an `@external` wrapper (ADR-0068) over each target's console call —
+# `IO.puts` on the BEAM, `console.log` on JS — so calling it (rather than a bare
+# host `IO.puts`) keeps the program portable: it reaches `:ex` AND `:js`, and runs
+# in the browser playground. `examples/rian/prelude_io.rian` packages the reusable
+# `Console` version (all four targets).
+#
 # Run it with:
 #
 #   mix rian.run examples/rian/hello.rian
@@ -12,4 +17,4 @@
 @external(:js, "console.log(s)")
 def puts(s String) Symbol
 
-def main() := IO.puts("Hallo, Rian!")
+def main() := puts("Hallo, Rian!")
