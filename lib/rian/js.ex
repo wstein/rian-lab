@@ -504,7 +504,7 @@ defmodule Rian.JS do
           fs
           |> Enum.with_index()
           |> Enum.map_join(", ", fn {f, i} ->
-            "#{Map.get(f, :label) || "_#{i}"}: #{ts_type(f.type, known, tvars)}"
+            "#{field_label(Map.get(f, :label), i)}: #{ts_type(f.type, known, tvars)}"
           end)
 
         "{ $: #{tag}, #{body} }"
@@ -1299,7 +1299,12 @@ defmodule Rian.JS do
   end
 
   # the JS object key for a variant's i-th field: its declared label, else `_i`.
-  defp field_key(labels, i), do: (labels && Enum.at(labels, i)) || "_#{i}"
+  defp field_key(nil, i), do: "_#{i}"
+  defp field_key(labels, i), do: field_label(Enum.at(labels, i), i)
+
+  # a field's declared label, or the positional `_i` fallback when it is anonymous.
+  defp field_label(nil, i), do: "_#{i}"
+  defp field_label(label, _i), do: label
 
   # `{label | nil, value}` pairs in declared field order — positional args zip onto
   # the labels; all-named args (`Circle(radius: 1.0)`) are placed by name (mirrors
@@ -1594,7 +1599,9 @@ defmodule Rian.JS do
     fields =
       pairs
       |> Enum.with_index()
-      |> Enum.map_join("", fn {{label, v}, i} -> ", #{label || "_#{i}"}: #{expr_js(v, i53)}" end)
+      |> Enum.map_join("", fn {{label, v}, i} ->
+        ", #{field_label(label, i)}: #{expr_js(v, i53)}"
+      end)
 
     "{ $: #{inspect(ctor)}#{fields} }"
   end
