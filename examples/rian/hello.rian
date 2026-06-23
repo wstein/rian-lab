@@ -1,20 +1,23 @@
 # ===========================================================================
-# Hello, Rian! — the classic first program
+# Hello, Rian! — the classic first program (sound + portable, all four targets)
 # ===========================================================================
 # `main/0` is the entry point `mix rian.run` (and the `rian run` binary) invoke.
 #
-# `puts` is an `@external` wrapper (ADR-0068) over each target's console call —
-# `IO.puts` on the BEAM, `console.log` on JS — so calling it (rather than a bare
-# host `IO.puts`) keeps the program portable: it reaches `:ex` AND `:js`, and runs
-# in the browser playground. `examples/rian/prelude_io.rian` packages the reusable
-# `Console` version (all four targets).
+# `puts` is a **void `@external`** (ADR-0068): console output is a side effect with
+# no portable contract, so each target reaches it through its own host call — BEAM
+# `IO.puts`, JS `console.log`, Rust `println!`, Kotlin `println`. Its return type is
+# **`Unit`**, the empty type: it erases on BEAM/JS and lowers to Rust `()` / Kotlin
+# `Unit`, so one declaration type-checks on every target and `main` reaches all four
+# (`#@reach ex, rs, js, jvm`). Typing it `Symbol` instead would be a cross-target lie
+# and would pin it off Rust/JVM, whose console calls return no atom.
 #
-# Run it with:
+# Run it:  mix rian.run examples/rian/hello.rian
 #
-#   mix rian.run examples/rian/hello.rian
-#
+@effects(host, io)
 @external(:ex, "IO.puts(s)")
 @external(:js, "console.log(s)")
-def puts(s String) Symbol
+@external(:rs, "println!(\"{}\", s)")
+@external(:jvm, "println(s)")
+def puts(s String) Unit
 
 def main() := puts("Hallo, Rian!")
