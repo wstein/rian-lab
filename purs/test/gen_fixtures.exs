@@ -1150,7 +1150,20 @@ def f(c) := 0|,
   # the PS port now mirrors that byte-for-byte (NOT kotlinc-valid — excluded from the kotlinc gate)
   "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(Bag(n)) := n\nend\npub def go(b Bag) Int64 := sz(b)",
   # a multi-statement body (`:=` bind then value) → a scoped `run { val …; … }` (+ a `${…}` hole)
-  "pub def hi(who String) String := name := who ; \"Hello, ${name}!\""
+  "pub def hi(who String) String := name := who ; \"Hello, ${name}!\"",
+  # ── Dict / map operations (Phase 5): `Dict(K,V)` → `Map<K,V>`, ops → Kotlin `Map` ops ──
+  # a map literal `%{k: v, …}` → `mapOf("k" to v, …)` (Int53 values dodge the Check width gap)
+  "pub def m() Dict(Symbol, Int53) := %{a: 1, b: 2}",
+  # an empty map literal `%{}` → `mapOf()`
+  "pub def e() Dict(Symbol, Int53) := %{}",
+  # `Map.get` → `(m).getValue("k")`
+  "pub def g(m Dict(Symbol, Int53)) Int53 := Map.get(m, :a)",
+  # `Map.put` → `((m) + ("k" to v))`
+  "pub def p(m Dict(Symbol, Int53)) Dict(Symbol, Int53) := Map.put(m, :c, 3)",
+  # `Map.has` → `(m).containsKey("k")`
+  "pub def h(m Dict(Symbol, Int53)) Bool := Map.has(m, :a)",
+  # a map pattern `%{k: x}` in a `case` → a `containsKey` guard + `getValue` bind
+  "pub def f(m Dict(Symbol, Int53)) Int53 := case m do\n  %{a: x} -> x\n  _ -> 0\nend"
 ]
 
 # Rian.Lower.rust_program — the `rustprog` stream: the WHOLE-PROGRAM Rust assembly (ADR-0061)

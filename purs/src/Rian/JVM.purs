@@ -15,10 +15,13 @@
 -- | smart-cast `is` patterns, `case` → `run rcase@{ … }`. 4: strings/chars/symbols (the
 -- | `__prim_*` intrinsics, atom/char patterns). 5: lists/`Vec(T)` → `List<T>`. 6: structs →
 -- | `data class`. 7: generics (`<T : Any>`), `Fn` types, lambdas, tuples (`Pair`/`Triple`).
--- | 8: protocols — the `when (a0)` runtime dispatcher over the receiver type. **Deferred:**
--- | captures (`&/1`) + `with` (need `Core.capArity`/`desugarWith` exports), and associated
--- | types + the `coerce_casts` pass (ADR-0074). An unported node raises a clear "stage" crash,
--- | kept out of the `jvm` parity corpus (oracle = `Rian.JVM.compile`).
+-- | 8: protocols — the `when (a0)` runtime dispatcher over the receiver type. Plus a Phase-5
+-- | add-on: `Dict(K,V)` → `Map<K,V>` and the map ops (`%{k: v}`/`%{}` → `mapOf(…)`,
+-- | `Map.get`/`put`/`has` → `getValue`/`+ (k to v)`/`containsKey`, and `%{k: p}` patterns →
+-- | a `containsKey` guard + `getValue` bind). **Deferred:** captures (`&/1`) + `with` (need
+-- | `Core.capArity`/`desugarWith` exports), and associated types + the `coerce_casts` pass
+-- | (ADR-0074). An unported node raises a clear "stage" crash, kept out of the `jvm` parity
+-- | corpus (oracle = `Rian.JVM.compile`).
 module Rian.JVM
   ( compile
   , lowerJvmProg
@@ -40,7 +43,7 @@ import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
-import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Body, Clause, Func, Param, Prog, Struct, Variant, bodySurface)
 import Rian.IR (Type) as IR
@@ -320,6 +323,20 @@ patMatch meta (PStruct name fields) acc =
     parts = map (\(Tuple f p) -> patMatch meta p ("(" <> acc <> " as " <> name <> ")." <> f)) fields
   in
     Tuple ([ acc <> " is " <> name ] <> (parts >>= fst)) (parts >>= snd)
+-- a map pattern `%{k: p, …}` → a `containsKey("k")` test per pair, each value matched
+-- against its sub-pattern via `getValue("k")`; a non-atom (computed) key is BEAM-only.
+patMatch meta (PMap pairs) acc =
+  let
+    go (CMPKey _ _) = unsafeCrashWith "jvm: a non-atom map key (`%{expr => v}`) is BEAM-only (ADR-0033)"
+    go (CMPAtom key p) =
+      let
+        ks = ktStr key
+        Tuple t b = patMatch meta p ("(" <> acc <> ").getValue(" <> ks <> ")")
+      in
+        Tuple ([ "(" <> acc <> ").containsKey(" <> ks <> ")" ] <> t) b
+    parts = map go pairs
+  in
+    Tuple (parts >>= fst) (parts >>= snd)
 patMatch _ _ _ = unsafeCrashWith "jvm: stage — unported clause pattern (inc 3: literals / vars / wildcards / sum ctors)"
 
 litKt :: LitVal -> String
@@ -392,6 +409,17 @@ exprKt meta (ECall (EId "__prim_str_from_chars") [ cs ]) = "(" <> exprKt meta cs
 -- a `Char`'s codepoint is already its `Long` value — identity.
 exprKt meta (ECall (EId "__prim_char_code") [ c ]) = exprKt meta c
 exprKt meta (ECall (EId "__prim_int_to_float") [ n ]) = "(" <> exprKt meta n <> ").toDouble()"
+-- ── `Dict`/map intrinsics (ADR-0047) → Kotlin `Map` ops ──
+exprKt _ (ECall (EId "__prim_map_new") []) = "mapOf()"
+exprKt meta (ECall (EId "__prim_map_get") [ m, k ]) = "(" <> exprKt meta m <> ").getValue(" <> exprKt meta k <> ")"
+exprKt meta (ECall (EId "__prim_map_put") [ m, k, v ]) = "((" <> exprKt meta m <> ") + (" <> exprKt meta k <> " to " <> exprKt meta v <> "))"
+exprKt meta (ECall (EId "__prim_map_has") [ m, k ]) = "(" <> exprKt meta m <> ").containsKey(" <> exprKt meta k <> ")"
+-- the `Map.get`/`put`/`has` prelude wrappers lower to the same `Map` ops.
+exprKt meta (ECall (EDot (EId "Map") "get") [ m, k ]) = "(" <> exprKt meta m <> ").getValue(" <> exprKt meta k <> ")"
+exprKt meta (ECall (EDot (EId "Map") "put") [ m, k, v ]) = "((" <> exprKt meta m <> ") + (" <> exprKt meta k <> " to " <> exprKt meta v <> "))"
+exprKt meta (ECall (EDot (EId "Map") "has") [ m, k ]) = "(" <> exprKt meta m <> ").containsKey(" <> exprKt meta k <> ")"
+-- a map literal `%{k: v, …}` → `mapOf("k" to v, …)`; a non-atom (computed) key is BEAM-only.
+exprKt meta (EMap pairs) = "mapOf(" <> joinWith ", " (map (ktMapPair meta) pairs) <> ")"
 -- a PascalCase call is sum construction `Ctor(args)`; a lowercase one a local call — same shape.
 -- A *labeled* call `Name(f: v, …)` is struct/labeled-variant construction → `Name(f = v, …)`.
 exprKt meta (ECall (EId f) args) = case head args of
@@ -576,6 +604,11 @@ allDigits :: String -> Boolean
 allDigits s = s /= "" && all (\c -> c >= '0' && c <= '9') (CU.toCharArray s)
 
 -- ── string literals (mirrors `kt_str`) ─────────────────────────────────────────
+-- a map-literal pair → `"k" to v`; a non-atom (computed) key is BEAM-only (ADR-0033).
+ktMapPair :: Meta -> CMapPair -> String
+ktMapPair _ (CMKey _ _) = unsafeCrashWith "jvm: a non-atom map key (`%{expr => v}`) is BEAM-only (ADR-0033)"
+ktMapPair meta (CMAtom k v) = ktStr k <> " to " <> exprKt meta v
+
 ktStr :: String -> String
 ktStr s = "\"" <> foldMap ktStrCp (CP.toCodePointArray s) <> "\""
 
