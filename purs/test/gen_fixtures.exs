@@ -1163,7 +1163,16 @@ def f(c) := 0|,
   # `Map.has` → `(m).containsKey("k")`
   "pub def h(m Dict(Symbol, Int53)) Bool := Map.has(m, :a)",
   # a map pattern `%{k: x}` in a `case` → a `containsKey` guard + `getValue` bind
-  "pub def f(m Dict(Symbol, Int53)) Int53 := case m do\n  %{a: x} -> x\n  _ -> 0\nend"
+  "pub def f(m Dict(Symbol, Int53)) Int53 := case m do\n  %{a: x} -> x\n  _ -> 0\nend",
+  # ── captures (`&/1`) + `with` (Phase 5; shared `Core.capArity`/`desugarWith`) ──
+  # an anonymous capture `&(&1 * 2)` → a Kotlin lambda `{ _1 -> (_1 * 2L) }`
+  "pub def mk() Fn(Int53, Int53) := &(&1 * 2)",
+  # a named capture `&inc/1` → a Kotlin function reference `::inc`
+  "pub def inc(n Int53) Int53 := n + 1\npub def mk() Fn(Int53, Int53) := &inc/1",
+  # an anonymous capture passed through a `Fn` parameter (a full apply program)
+  "pub def apply(f Fn(Int53, Int53), x Int53) Int53 := f(x)\npub def go() Int53 := apply(&(&1 * 2), 5)",
+  # `with Some(v) <- x do v else _ -> 0 end` → nested `case`s (ADR-0040, via `desugarWith`)
+  "type Box := Some(Int53) | None\npub def f(x Box) Int53 := with Some(v) <- x do\n  v\nelse\n  _ -> 0\nend"
 ]
 
 # Rian.Lower.rust_program — the `rustprog` stream: the WHOLE-PROGRAM Rust assembly (ADR-0061)

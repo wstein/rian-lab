@@ -15,13 +15,15 @@
 -- | smart-cast `is` patterns, `case` → `run rcase@{ … }`. 4: strings/chars/symbols (the
 -- | `__prim_*` intrinsics, atom/char patterns). 5: lists/`Vec(T)` → `List<T>`. 6: structs →
 -- | `data class`. 7: generics (`<T : Any>`), `Fn` types, lambdas, tuples (`Pair`/`Triple`).
--- | 8: protocols — the `when (a0)` runtime dispatcher over the receiver type. Plus a Phase-5
--- | add-on: `Dict(K,V)` → `Map<K,V>` and the map ops (`%{k: v}`/`%{}` → `mapOf(…)`,
+-- | 8: protocols — the `when (a0)` runtime dispatcher over the receiver type. Plus two Phase-5
+-- | add-ons: (a) `Dict(K,V)` → `Map<K,V>` and the map ops (`%{k: v}`/`%{}` → `mapOf(…)`,
 -- | `Map.get`/`put`/`has` → `getValue`/`+ (k to v)`/`containsKey`, and `%{k: p}` patterns →
--- | a `containsKey` guard + `getValue` bind). **Deferred:** captures (`&/1`) + `with` (need
--- | `Core.capArity`/`desugarWith` exports), and associated types + the `coerce_casts` pass
--- | (ADR-0074). An unported node raises a clear "stage" crash, kept out of the `jvm` parity
--- | corpus (oracle = `Rian.JVM.compile`).
+-- | a `containsKey` guard + `getValue` bind); (b) **captures + `with`** — an anonymous capture
+-- | `&(&1 * 2)` → a lambda `{ _1 -> … }`, a named `&fn/arity` → a `::fn` reference (a remote
+-- | `&Mod.fun/arity` → a forwarding lambda), and `with` → nested `case`s, all via the shared
+-- | `Core.capArity`/`Core.desugarWith`. **Deferred:** associated types + the `coerce_casts`
+-- | pass (ADR-0074). An unported node raises a clear "stage" crash, kept out of the `jvm`
+-- | parity corpus (oracle = `Rian.JVM.compile`).
 module Rian.JVM
   ( compile
   , lowerJvmProg
@@ -29,7 +31,7 @@ module Rian.JVM
 
 import Prelude
 
-import Data.Array (all, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, null, uncons, unsnoc)
+import Data.Array (all, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, null, range, uncons, unsnoc)
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
@@ -43,7 +45,7 @@ import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
-import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), capArity, desugarWith, fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Body, Clause, Func, Param, Prog, Struct, Variant, bodySurface)
 import Rian.IR (Type) as IR
@@ -420,6 +422,19 @@ exprKt meta (ECall (EDot (EId "Map") "put") [ m, k, v ]) = "((" <> exprKt meta m
 exprKt meta (ECall (EDot (EId "Map") "has") [ m, k ]) = "(" <> exprKt meta m <> ").containsKey(" <> exprKt meta k <> ")"
 -- a map literal `%{k: v, …}` → `mapOf("k" to v, …)`; a non-atom (computed) key is BEAM-only.
 exprKt meta (EMap pairs) = "mapOf(" <> joinWith ", " (map (ktMapPair meta) pairs) <> ")"
+-- ── `with` / captures (ADR-0040/0061) ──
+-- `with` desugars to nested `case`s (shared `Core.desugarWith`), then lowers as one.
+exprKt meta (EWith clauses body els) = exprKt meta (desugarWith clauses body els)
+-- an anonymous capture `&(&1 * 2)` → a Kotlin lambda over generated args `_1.._N`.
+exprKt meta (ECapture body) =
+  "{ " <> joinWith ", " (map (\i -> "_" <> show i) (oneTo (capArity body))) <> " -> " <> branchKt meta body <> " }"
+exprKt _ (ECapArg n) = "_" <> show n
+-- `&name/arity` → a Kotlin function reference `::name`; `&Mod.fun/arity` (no bare `::`) →
+-- a forwarding lambda over `_a0.._a(arity-1)`.
+exprKt _ (ECaptureNamed (EId n) _) = "::" <> n
+exprKt meta (ECaptureNamed path a) =
+  let ps = map (\i -> "_a" <> show i) (upto a)
+  in "{ " <> joinWith ", " ps <> " -> " <> exprKt meta path <> "(" <> joinWith ", " ps <> ") }"
 -- a PascalCase call is sum construction `Ctor(args)`; a lowercase one a local call — same shape.
 -- A *labeled* call `Name(f: v, …)` is struct/labeled-variant construction → `Name(f = v, …)`.
 exprKt meta (ECall (EId f) args) = case head args of
@@ -604,6 +619,14 @@ allDigits :: String -> Boolean
 allDigits s = s /= "" && all (\c -> c >= '0' && c <= '9') (CU.toCharArray s)
 
 -- ── string literals (mirrors `kt_str`) ─────────────────────────────────────────
+-- `[1..n]` (empty for n < 1) — the generated `_1.._N` params of an anonymous capture.
+oneTo :: Int -> Array Int
+oneTo n = if n < 1 then [] else range 1 n
+
+-- `[0..n-1]` (empty for n ≤ 0) — the forwarding-lambda params of a `&name/arity` capture.
+upto :: Int -> Array Int
+upto n = if n <= 0 then [] else range 0 (n - 1)
+
 -- a map-literal pair → `"k" to v`; a non-atom (computed) key is BEAM-only (ADR-0033).
 ktMapPair :: Meta -> CMapPair -> String
 ktMapPair _ (CMKey _ _) = unsafeCrashWith "jvm: a non-atom map key (`%{expr => v}`) is BEAM-only (ADR-0033)"

@@ -27,6 +27,8 @@ module Rian.Core
   , coreSexpr
   , corePatSexpr
   , fromSource
+  , capArity
+  , desugarWith
   ) where
 
 import Prelude
@@ -234,6 +236,46 @@ fromMapPatPair (P.MPKey k p) = CMPKey (fromExpr k) (fromPat p)
 -- | `cor` parity stream entry (`lexer → Pratt → Core → coreSexpr`).
 fromSource :: String -> String
 fromSource = coreSexpr <<< fromExpr <<< P.parse
+
+-- | The arity of an anonymous capture `&(…&N…)` — the largest `&N` placeholder it mentions
+-- | (mirrors `Rian.Core.cap_arity`). Shared by every emitter that lowers `ECapture` to a
+-- | generated-parameter lambda.
+capArity :: CExpr -> Int
+capArity = case _ of
+  ECapArg n -> n
+  EBin _ l r -> max (capArity l) (capArity r)
+  EUnary _ x -> capArity x
+  EDot h _ -> capArity h
+  EIf c t e -> max (capArity c) (max (capArity t) (capArity e))
+  ECall f args -> Array.foldl (\acc e -> max acc (capArity e)) (capArity f) args
+  ETuple es -> capList es
+  EList es Nothing -> capList es
+  EList es (Just tail) -> max (capList es) (capArity tail)
+  EMap ps -> capList (map mapPairVal ps)
+  EMapUpdate base ps -> max (capArity base) (capList (map mapPairVal ps))
+  _ -> 0
+  where
+  capList = Array.foldl (\acc e -> max acc (capArity e)) 0
+  mapPairVal = case _ of
+    CMAtom _ v -> v
+    CMKey _ v -> v
+
+-- | Desugar `with c1 <- e1; … body else arms` → nested two-arm `case`s (ADR-0040, mirrors
+-- | `Rian.Core.desugar_with`). Each clause's pattern continues to the next clause; a fresh
+-- | binder falls through to the `else` arms (or returns the unmatched value). Shared by the
+-- | emitters so `with` need not be a per-target node.
+desugarWith :: Array CWithClause -> CExpr -> Array CArm -> CExpr
+desugarWith clauses body els = go 0 clauses
+  where
+  go d cls = case Array.uncons cls of
+    Nothing -> body
+    Just { head: wc, tail } ->
+      let cv = "_with" <> show d
+      in ECase wc.expr
+        [ { pat: wc.pat, guard: Nothing, body: go (d + 1) tail }
+        , { pat: PVar cv, guard: Nothing, body: withElse cv }
+        ]
+  withElse cv = if Array.null els then EId cv else ECase (EId cv) els
 
 coreSexpr :: CExpr -> String
 coreSexpr (ENum n) = n

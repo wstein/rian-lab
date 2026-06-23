@@ -45,7 +45,7 @@ import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
-import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), CWithClause, LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), capArity, desugarWith, fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.External (render) as Ext
 import Rian.IR (Body, Clause, Const, ExtSpec(..), Func, Method, Prog, Range, Struct, Type, Variant, bodySurface)
@@ -724,42 +724,8 @@ branchJs i53 = case _ of
       else "(() => { " <> blockReturn i53 stmts <> " })()"
   expr -> exprJs i53 expr
 
--- ── with / capture desugaring (Core-local, the JS emitter's own) ──────────────
--- a `with` desugars to a nest of `case`s (ADR-0040): each `p <- e` becomes
--- `case e do p -> <rest> ; _withN -> <else> end`.
-desugarWith :: Array CWithClause -> CExpr -> Array CArm -> CExpr
-desugarWith clauses body els = go 0 clauses
-  where
-  go d cls = case uncons cls of
-    Nothing -> body
-    Just { head: wc, tail } ->
-      let cv = "_with" <> show d
-      in ECase wc.expr
-        [ { pat: wc.pat, guard: Nothing, body: go (d + 1) tail }
-        , { pat: PVar cv, guard: Nothing, body: withElse cv }
-        ]
-  withElse cv = if null els then EId cv else ECase (EId cv) els
-
--- the arity of an anonymous capture `&(…&N…)` — the largest `&N`.
-capArity :: CExpr -> Int
-capArity = case _ of
-  ECapArg n -> n
-  EBin _ l r -> max (capArity l) (capArity r)
-  EUnary _ x -> capArity x
-  EDot h _ -> capArity h
-  EIf c t e -> max (capArity c) (max (capArity t) (capArity e))
-  ECall f args -> foldl (\acc e -> max acc (capArity e)) (capArity f) args
-  ETuple es -> capList es
-  EList es Nothing -> capList es
-  EList es (Just tail) -> max (capList es) (capArity tail)
-  EMap ps -> capList (map mapPairVal ps)
-  EMapUpdate base ps -> max (capArity base) (capList (map mapPairVal ps))
-  _ -> 0
-  where
-  capList = foldl (\acc e -> max acc (capArity e)) 0
-  mapPairVal = case _ of
-    CMAtom _ v -> v
-    CMKey _ v -> v
+-- (`with`/capture desugaring — `desugarWith`/`capArity` — now live in `Rian.Core`,
+-- shared with the JVM emitter; imported above.)
 
 -- ── leaf helpers ─────────────────────────────────────────────────────────────
 -- `Int` → BigInt literal (`42n`); a float literal is a plain number; in number-mode an integer
