@@ -32,6 +32,11 @@ defmodule Rian.Format do
       bind's newline becomes a `;`, so those are left intact.
     * **Block newline placement is preserved** — the formatter does not collapse or
       expand `do…end` blocks; those statement newlines are significant.
+    * **Multi-statement body canonicalization** (the one *structural* rewrite): a
+      `def`/`macro` body of **≥2** statements written cramped as `… := s1 ; s2`
+      re-prints as the multiline block body (`… ⏎ s1 ⏎ s2 ⏎ end`); a single-statement
+      body keeps the one-line `:= expr`. Only a body-level (do-depth-0) `;` splits — a
+      `;` inside an inline `if … do a ; b end` is left intact.
     * Blank-line runs collapse to one; comments and heredocs are kept verbatim at
       their authored position.
 
@@ -41,13 +46,15 @@ defmodule Rian.Format do
   inside brackets and adjacent to a `@cont_ops` operator in a `:=` body, and it
   accepts a trailing comma identically — so the formatter's edits (reflow
   whitespace/newlines in those positions, plus an optional trailing comma before a
-  closer) are all parse-insignificant. The oracle is **significant-token
+  closer) are all parse-insignificant. The primary oracle is **significant-token
   equivalence** (drop exactly those insignificant tokens, assert the rest is
-  identical — the analog of `Rian.FormsEquiv` for the BEAM backend), backed by a
-  **parse-still-valid** guard over the corpus, plus idempotence and comment
-  fidelity. (Full-AST equality is *not* used: `Rian.Decl.parse` is non-deterministic
-  under macro hygiene — fresh `__h<n>` gensyms — so it would need perpetual
-  alpha-renaming for no extra safety.)
+  identical), backed by a **parse-still-valid** guard over the corpus, plus
+  idempotence and comment fidelity. The single structural rewrite above (the
+  multi-statement body canonicalization) *does* change significant tokens — it drops
+  `:=`/`;` and adds `end` — so for it the oracle falls back to **forms-equivalence**
+  (`Rian.FormsEquiv`: the two surfaces compile to the same normalized BEAM forms, with
+  macro-hygiene gensyms already quotiented). Token-equiv ⟹ forms-equiv, so the fallback
+  only admits whitelisted same-`EBlock`-body rewrites; it never loosens the guarantee.
   """
 
   alias Rian.Lexer
@@ -115,6 +122,7 @@ defmodule Rian.Format do
       |> Cst.build()
       |> logical_lines()
       |> merge_chains()
+      |> expand_block_bodies()
       |> indent_and_render([0], 0, [])
       |> squeeze_blanks()
       |> Enum.map_join("", &(&1 <> "\n"))
@@ -148,6 +156,58 @@ defmodule Rian.Format do
   end
 
   defp merge_chains(lines), do: lines
+
+  # ── canonicalize a multi-statement `:=` body to the block form (ADR-0045) ──
+  # A `[pub] def/macro head := s1 ; s2 ; …` with **≥2** body-level statements re-prints as
+  # the block-body form
+  #
+  #     [pub] def/macro head
+  #       s1
+  #       s2
+  #     end
+  #
+  # — the readable shape for a multi-step body; a single-statement body keeps the one-line
+  # `:= expr`. Both surfaces parse to the SAME Core (one `EBlock` body), so this is a
+  # meaning-preserving rewrite (the property oracle falls back to forms-equivalence for it,
+  # since it drops `:=`/`;` and adds `end` — a token change). Only a **body-level** (do-depth-0)
+  # `;` splits; a `;` inside an inline `if … do a ; b end` is left intact (option (a)).
+  defp expand_block_bodies(lines), do: Enum.flat_map(lines, &expand_body_line/1)
+
+  defp expand_body_line(line) do
+    with true <- def_decl_line?(line),
+         false <- Enum.any?(line, &match?({:tok, {:comment, _}}, &1)),
+         {head, rhs} when head != nil <- split_body_assign(line),
+         [_, _ | _] = stmts <- split_top_semis(rhs) do
+      [head] ++ stmts ++ [[{:tok, {:kw, "end"}}]]
+    else
+      _ -> [line]
+    end
+  end
+
+  # the line is a `def`/`macro` declaration head (optionally `pub`-led).
+  defp def_decl_line?([{:tok, {:kw, "pub"}} | rest]), do: def_decl_line?(rest)
+  defp def_decl_line?([{:tok, {:kw, k}} | _]) when k in ~w(def macro), do: true
+  defp def_decl_line?(_), do: false
+
+  # split a line at its first top-level body `:=` → `{nodes_before, nodes_after}`, or
+  # `{nil, nil}` when there is no `:=` (a bodiless signature / pattern-clause head).
+  defp split_body_assign(line) do
+    case Enum.split_while(line, &(not match?({:tok, {:op, ":="}}, &1))) do
+      {_head, []} -> {nil, nil}
+      {head, [_assign | rhs]} -> {head, rhs}
+    end
+  end
+
+  # split `rhs` on do-depth-0 `;` into statement node-lists (empties dropped).
+  defp split_top_semis(rhs), do: sts(rhs, 0, [], [])
+
+  defp sts([], _d, cur, acc),
+    do: Enum.reject(Enum.reverse([Enum.reverse(cur) | acc]), &(&1 == []))
+
+  defp sts([{:tok, {:kw, "do"}} = n | r], d, cur, acc), do: sts(r, d + 1, [n | cur], acc)
+  defp sts([{:tok, {:kw, "end"}} = n | r], d, cur, acc), do: sts(r, max(0, d - 1), [n | cur], acc)
+  defp sts([{:tok, {:semi}} | r], 0, cur, acc), do: sts(r, 0, [], [Enum.reverse(cur) | acc])
+  defp sts([n | r], d, cur, acc), do: sts(r, d, [n | cur], acc)
 
   defp chain_link?(a, b) do
     declaration_line?(a) and not ends_with_comment?(a) and not blank?(b) and

@@ -53,12 +53,17 @@ hardlines); only **bracket interiors reflow**. That split is the safety boundary
 ### 4. Invariants (the formatter's correctness spec)
 
 - **Idempotence:** `fmt(fmt(x)) == fmt(x)`.
-- **Semantic preservation = significant-token equivalence:** dropping the changes the formatter is
-  *allowed* to make — comments, `{:nl}` **inside brackets** (Rian is newline-tolerant there), blank-line
-  runs, and a trailing comma before a closer — the remaining token stream is **identical**.
-  `Rian.Decl.detokenize` is whitespace-invariant and the parser accepts those exact changes, so equal
-  significant streams ⇒ same parse. (This supersedes the earlier *re-lex equivalence*, which a reflowing
-  formatter cannot satisfy — reflow moves newlines; it is the analog of `Rian.FormsEquiv` for BEAM.)
+- **Semantic preservation = significant-token equivalence *or* forms-equivalence:** the fast,
+  primary path is **significant-token equivalence** — dropping the changes the formatter is *allowed*
+  to make (comments, `{:nl}` **inside brackets**, blank-line runs, a trailing comma before a closer),
+  the remaining token stream is **identical**, so equal streams ⇒ same parse (`Rian.Decl.detokenize` is
+  whitespace-invariant). That covers every reflow/whitespace edit. The one **structural** rewrite (§5,
+  multi-statement `:=` body → block form) deliberately changes significant tokens (drops `:=`/`;`, adds
+  `end`), so for it the oracle falls back to **forms-equivalence**: the two surfaces compile to the same
+  normalized BEAM forms (`Rian.FormsEquiv`, which already quotients macro-hygiene gensyms). Token-equiv
+  ⟹ forms-equiv, so the fallback only *admits* whitelisted same-Core rewrites — it never loosens the
+  guarantee. (This supersedes the earlier *re-lex equivalence*, which a reflowing formatter cannot
+  satisfy — reflow moves newlines.)
 - **Comment fidelity:** every comment survives at its authored position; heredocs reproduced verbatim.
 - **Totality:** `format/1` never raises; unlexable input is returned unchanged.
 
@@ -93,6 +98,22 @@ formatter's correctness specification.
   block-internal bind's newline becomes a `;` (`detok_block`), so those chains are left intact. A merge
   pass rejoins a source-multiline chain into one unit before deciding, which makes wrapping idempotent.
   `|` (cons/sum) is excluded.
+- **Multi-statement body → block form (the one structural rewrite):** a `[pub] def`/`macro` body of
+  **two or more** statements — written cramped as `… := s1 ; s2 ; …` — canonicalizes to the multiline
+  block body (`Rian.Decl`'s documented `… end` form), the readable shape for a multi-step body:
+
+  ```rian
+  pub def main() String              # NOT  pub def main() String := name := "Rian" ; "Hello, ${name}!"
+    name := "Rian"
+    "Hello, ${name}!"
+  end
+  ```
+
+  A **single-statement** body keeps the one-line `:= expr`. Only a **body-level** (do-depth-0) `;`
+  splits — a `;` inside an inline `if … do a ; b end` is left intact. Both surfaces parse to one
+  `EBlock` body (same Core), which is why it is meaning-safe; it is the only edit that changes
+  significant tokens, hence the forms-equivalence fallback in §4. `mix rian.format` therefore makes the
+  cramped multi-statement one-liner unrepresentable in formatted source.
 - **At most one blank line** anywhere; no leading/trailing blanks; file ends in one newline. Trailing
   comments sit two spaces off the code; own-line comments keep their place at context indent.
 - snake_case values / PascalCase types are *lexical* (ADR-0033), not the formatter's job.

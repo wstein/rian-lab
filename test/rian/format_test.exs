@@ -67,8 +67,62 @@ defmodule Rian.FormatTest do
 
   defp comments(src), do: Enum.filter(Lexer.tokenize_trivia(src), &match?({:comment, _}, &1))
 
+  # The evolved oracle (ADR-0045): the formatter may now also perform a *structural* rewrite
+  # (a multi-statement `:=` body → the block form), which changes significant tokens (drops
+  # `:=`/`;`, adds `end`). So meaning preservation is **token-equivalence OR forms-equivalence**:
+  # identical significant tokens (the fast path, covering every non-rewritten line), or — when
+  # tokens genuinely differ — the same normalized BEAM forms (`Rian.FormsEquiv`, the semantic
+  # equivalence that already quotients macro-hygiene gensyms). Token-equiv ⟹ forms-equiv, so this
+  # only *admits* the whitelisted rewrite; it never loosens any existing guarantee.
+  defp meaning_preserved?(src, out), do: sig(out) == sig(src) or forms_equiv?(src, out)
+
+  defp forms_equiv?(a, b) do
+    norm = fn s ->
+      s
+      |> Rian.Beam.compile_program()
+      |> Enum.flat_map(fn {_m, bin} -> Rian.FormsEquiv.normalize(bin) end)
+      |> Enum.sort()
+    end
+
+    norm.(a) == norm.(b)
+  rescue
+    _ -> false
+  end
+
   defp longest_line(src),
     do: src |> String.split("\n") |> Enum.map(&String.length/1) |> Enum.max()
+
+  describe "multi-statement `:=` body → block form (ADR-0045)" do
+    test "≥2 body statements expand to the `do`-less block body" do
+      cramped = ~s|pub def main() String := name := "Rian" ; "Hello, ${name}!"\n|
+      block = ~s|pub def main() String\n  name := "Rian"\n  "Hello, ${name}!"\nend\n|
+
+      assert Format.format(cramped) == block
+      assert Format.format(block) == block
+
+      # the rewrite genuinely changes significant tokens (drops `:=`/`;`, adds `end`), so the
+      # oracle accepted it via forms-equivalence — not token-equivalence.
+      refute sig(Format.format(cramped)) == sig(cramped)
+      assert forms_equiv?(cramped, Format.format(cramped))
+      assert meaning_preserved?(cramped, Format.format(cramped))
+    end
+
+    test "a single-statement body keeps the one-line `:= expr`" do
+      assert Format.format("pub def twice(n Int53) Int53 := n * 2\n") ==
+               "pub def twice(n Int53) Int53 := n * 2\n"
+    end
+
+    test "an inline `if … do a ; b end` body is not split (only a body-level `;`)" do
+      src = "def step(n Int53) Int53 := if n > 0 do a := n * 2; a + 1 else 0 end\n"
+      assert Format.format(src) == src
+    end
+
+    test "three body statements" do
+      cramped = "def f() Int53 := a := 1 ; b := 2 ; a + b\n"
+      assert Format.format(cramped) == "def f() Int53\n  a := 1\n  b := 2\n  a + b\nend\n"
+      assert forms_equiv?(cramped, Format.format(cramped))
+    end
+  end
 
   describe "intra-line spacing" do
     test "function application and indexing bind tightly" do
@@ -316,9 +370,9 @@ defmodule Rian.FormatTest do
     for file <- @corpus do
       @path file
 
-      test "significant-token equivalence (meaning preserved): #{file}" do
+      test "meaning preserved (token- or forms-equivalence): #{file}" do
         src = File.read!(@path)
-        assert sig(Format.format(src)) == sig(src)
+        assert meaning_preserved?(src, Format.format(src))
       end
 
       test "idempotence: #{file}" do
