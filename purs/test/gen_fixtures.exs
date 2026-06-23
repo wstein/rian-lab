@@ -2136,7 +2136,14 @@ beam_corpus = [
   # a String literal → a BEAM binary
   "pub def main() String := \"hello\"",
   # a tuple value + tuple pattern
-  "pub def main() Int53 := case {1, 2} do\n  {a, b} -> a + b\nend"
+  "pub def main() Int53 := case {1, 2} do\n  {a, b} -> a + b\nend",
+  # ── inc 4: structs (tagged maps), map literals + their patterns ──
+  # a struct → a `__struct__`-tagged map; construction `Point(x: …)` + field access `p.x`
+  "struct Point(x Int53, y Int53)\npub def main() Int53 := p := Point(x: 3, y: 4) ; p.x + p.y",
+  # a struct pattern in a `case` (`Point(x: vx, y: _)`)
+  "struct Point(x Int53, y Int53)\npub def gx(p Point) Int53 := case p do\n  Point(x: vx, y: _) -> vx\nend\npub def main() Int53 := gx(Point(x: 5, y: 9))",
+  # a map literal + a map pattern `%{a: x}`
+  "pub def main() Int53 := case %{a: 1, b: 2} do\n  %{a: x} -> x\nend"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses

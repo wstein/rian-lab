@@ -14,12 +14,15 @@
 -- | — **sum constructors/patterns** (`Circle(r)` ⇄ the tagged tuple `{circle, R}`, a nullary ctor →
 -- | its atom; `ctorForm`), **lists** (`[a,b]`/`[h|t]` → a `{cons,…}`/`{nil,…}` chain; `consForm`),
 -- | **tuples** (`{a,b}` → `{tuple,…}`; `tupleForm`), and **String** literals (→ a `<<"…">>` BEAM
--- | binary; `fStr`/`strBytes`). Verified by EXECUTION: `runMain` compiles + loads + runs `main/0` and
+-- | binary; `fStr`/`strBytes`). Inc 4: **structs** (a labeled `Point(x: …)` call / `EStruct` →
+-- | a `__struct__`-tagged Erlang map; field access `p.x` → `maps:get`; `PStruct` → a map pattern
+-- | requiring `__struct__ := tag`) and **maps** (`%{k: v}` → `#{k => v}`, `PMap` → a map pattern;
+-- | `mapForm`/`mapField*`). Verified by EXECUTION: `runMain` compiles + loads + runs `main/0` and
 -- | stringifies the result, parity-gated (the `beam` stream) against the Elixir reference running the
 -- | same program. **Deferred (later increments):** the type-directed lowering (the annotated/
--- | range-expanded core — `Show`/overflow/value-union discrimination), structs + maps + their
--- | patterns, `@external`, specs/`type` attrs, and the whole-program / cross-module + const
--- | machinery. An unported node raises a clear crash.
+-- | range-expanded core — `Show`/overflow/value-union discrimination), `@external`, specs/`type`
+-- | attrs, remote `Mod.fun` calls + the prelude redirect, and the whole-program / cross-module +
+-- | const machinery. An unported node raises a clear crash.
 module Rian.Beam
   ( runMain
   ) where
@@ -32,10 +35,11 @@ import Data.Maybe (Maybe(..))
 import Data.String (Pattern(..), Replacement(..), contains, drop, replaceAll, stripPrefix, take) as Str
 import Data.String.CodeUnits (charAt) as CU
 import Data.String.Common (toUpper)
+import Data.Tuple (Tuple(..))
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
-import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
+import Rian.Core (CArm, CExpr(..), CMapPair(..), CMapPatPair(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
 import Rian.IR (Body, Clause, Func, Prog, bodySurface)
 import Rian.PatternLower (toSnake)
@@ -136,15 +140,25 @@ exprForm (EAtom a) = fAtom a
 exprForm (EList elems tail) = consForm exprForm elems tail
 -- a tuple `{a, b}` → an Erlang `{tuple, 1, […]}`.
 exprForm (ETuple es) = tupleForm exprForm es
+-- a struct construction `Name(f: v, …)` → a `__struct__`-tagged Erlang map.
+exprForm (EStruct name fields) =
+  mapForm ([ mapFieldAssoc (fAtom "__struct__") (fAtom (toSnake name)) ] <> map structFieldAssoc fields)
+-- a map literal `%{k: v, …}` → an Erlang `#{k => v, …}`.
+exprForm (EMap pairs) = mapForm (map mapPairAssoc pairs)
+-- field access `value.field` → `maps:get(:field, Value)`.
+exprForm (EDot head_ field) = remoteCall "maps" "get" [ fAtom field, exprForm head_ ]
 exprForm (EUnary "-" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "-", exprForm x ]
 exprForm (EUnary "not" x) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm "not", exprForm x ]
 exprForm (EBin op l r) = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm (erlOp op), exprForm l, exprForm r ]
--- a PascalCase call `Circle(r)` is sum construction → a tagged tuple `{circle, R}`; a lowercase
--- call `f(args)` is a local call `{call, 1, {atom,1,f}, [args]}` (inc 3: no var application /
--- imports / cross-module resolution yet).
-exprForm (ECall (EId f) args) =
-  if startsUpper f then ctorForm (toSnake f) (map exprForm args)
-  else fCall (fAtom f) (map exprForm args)
+-- an all-labeled call `Name(f: v, …)` is struct construction → a `__struct__`-tagged map; a
+-- PascalCase positional call `Circle(r)` is sum construction → a tagged tuple `{circle, R}`; a
+-- lowercase `f(args)` is a local call (inc 3/4: no var application / imports / cross-module yet).
+exprForm (ECall (EId f) args) = case head args of
+  Just (ELabel _ _) ->
+    mapForm ([ mapFieldAssoc (fAtom "__struct__") (fAtom (toSnake f)) ] <> map labelAssoc args)
+  _ ->
+    if startsUpper f then ctorForm (toSnake f) (map exprForm args)
+    else fCall (fAtom f) (map exprForm args)
 -- `if c do t else e end` → an Erlang `case c of true -> t; false -> e end`.
 exprForm (EIf c t e) =
   mkTuple
@@ -174,6 +188,11 @@ patForm (PCtor name args) = ctorForm (toSnake name) (map patForm args)
 patForm (PList elems tail) = consForm patForm elems tail
 -- a tuple pattern `{a, b}` → an Erlang `{tuple, 1, […]}` pattern.
 patForm (PTuple ps) = tupleForm patForm ps
+-- a struct pattern `Name(f: p, …)` → a map pattern requiring `__struct__ := tag` + each field.
+patForm (PStruct name fields) =
+  mapForm ([ mapFieldExact (fAtom "__struct__") (fAtom (toSnake name)) ] <> map structFieldPat fields)
+-- a map pattern `%{k: p, …}` → an Erlang map pattern over the named keys.
+patForm (PMap pairs) = mapForm (map mapPatPairExact pairs)
 patForm _ = unsafeCrashWith "abstract-forms: unported clause pattern (Phase 8)"
 
 -- ── abstract-format node builders ────────────────────────────────────────────
@@ -233,6 +252,46 @@ ctorForm :: String -> Array ETerm -> ETerm
 ctorForm tag args = case args of
   [] -> fAtom tag
   _ -> mkTuple [ mkAtomTerm "tuple", ln, mkList ([ fAtom tag ] <> args) ]
+
+-- ── maps / structs (inc 4) ──
+-- a `{map, 1, […]}` over already-formed field nodes (assoc for expressions, exact for patterns).
+mapForm :: Array ETerm -> ETerm
+mapForm fields = mkTuple [ mkAtomTerm "map", ln, mkList fields ]
+
+mapFieldAssoc :: ETerm -> ETerm -> ETerm
+mapFieldAssoc k v = mkTuple [ mkAtomTerm "map_field_assoc", ln, k, v ]
+
+mapFieldExact :: ETerm -> ETerm -> ETerm
+mapFieldExact k v = mkTuple [ mkAtomTerm "map_field_exact", ln, k, v ]
+
+-- a struct field `f: v` (construction) → `f => v`; `f: p` (pattern) → `f := p`. The key is the
+-- field-name atom.
+structFieldAssoc :: Tuple String CExpr -> ETerm
+structFieldAssoc (Tuple f v) = mapFieldAssoc (fAtom f) (exprForm v)
+
+-- a labeled call argument `f: v` → the struct map field `f => v` (a labeled `Name(f: v, …)` call
+-- is struct construction, mirroring the reference's `ECall{args: [ELabel | _]}`).
+labelAssoc :: CExpr -> ETerm
+labelAssoc (ELabel f v) = mapFieldAssoc (fAtom f) (exprForm v)
+labelAssoc _ = unsafeCrashWith "abstract-forms: a non-label in a labeled call"
+
+structFieldPat :: Tuple String CPat -> ETerm
+structFieldPat (Tuple f p) = mapFieldExact (fAtom f) (patForm p)
+
+-- a map-literal pair → `k => v` (an atom key, or a computed `{:key, e}` key).
+mapPairAssoc :: CMapPair -> ETerm
+mapPairAssoc (CMAtom k v) = mapFieldAssoc (fAtom k) (exprForm v)
+mapPairAssoc (CMKey k v) = mapFieldAssoc (exprForm k) (exprForm v)
+
+-- a map-pattern pair → `k := p` (a map pattern always matches exactly on the listed keys).
+mapPatPairExact :: CMapPatPair -> ETerm
+mapPatPairExact (CMPAtom k p) = mapFieldExact (fAtom k) (patForm p)
+mapPatPairExact (CMPKey k p) = mapFieldExact (exprForm k) (patForm p)
+
+-- a remote call `mod:fun(args)` → `{call, 1, {remote, 1, {atom,1,mod}, {atom,1,fun}}, [args]}`.
+remoteCall :: String -> String -> Array ETerm -> ETerm
+remoteCall mod fun args =
+  mkTuple [ mkAtomTerm "call", ln, mkTuple [ mkAtomTerm "remote", ln, fAtom mod, fAtom fun ], mkList args ]
 
 fCall :: ETerm -> Array ETerm -> ETerm
 fCall target args = mkTuple [ mkAtomTerm "call", ln, target, mkList args ]
