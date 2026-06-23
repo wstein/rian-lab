@@ -1299,4 +1299,74 @@ defmodule Rian.JSTest do
       end
     end
   end
+
+  describe "native TypeScript `.ts` (ADR-0086 §5, third print mode)" do
+    test "a function gains a typed signature over the byte-identical runtime body" do
+      ts = JS.compile_ts("pub def double(n Int53) Int53 := n * 2")
+      assert ts == "export function double(n: number): number { return (n * 2); }"
+      # the body is exactly `compile/1`'s, only the header gains `: T`
+      assert JS.compile("pub def double(n Int53) Int53 := n * 2") =~
+               "function double(n) { return (n * 2); }"
+    end
+
+    test "value types are declared up front, then woven into the signatures" do
+      ts =
+        JS.compile_ts("""
+        type Color := Red | Green
+        struct Box(v Int53)
+        pub def mk(n Int53) Box := Box(v: n)
+        pub def tag(c Color) Int53 := case c do
+          Red -> 0
+          Green -> 1
+        end
+        """)
+
+      assert ts =~ ~s/export type Color = { $: "Red" } | { $: "Green" };/
+      assert ts =~ ~s|export interface Box { __struct__: "Box"; v: number; }|
+      assert ts =~ ~s|export function mk(n: number): Box { return { __struct__: "Box", v: n }; }|
+      assert ts =~ "export function tag(c: Color): number {"
+    end
+
+    test "unlike the `.d.mts`, private functions are emitted (the runtime needs them)" do
+      ts =
+        JS.compile_ts("""
+        pub def shown(n Int53) Int53 := hidden(n)
+        def hidden(n Int53) Int53 := n
+        """)
+
+      assert ts =~ "export function shown(n: number): number"
+      # present, but not exported — a `.ts` is a runnable module, not a surface view
+      assert ts =~ "function hidden(n: number): number"
+      refute ts =~ "export function hidden"
+    end
+
+    @tag :ts
+    test "the emitted `.ts` is self-contained and type-checks (bodies satisfy their headers)" do
+      src = """
+      type Color := Red | Green | Blue
+      struct Point(x Int53, y Int53)
+      pub def area(p Point) Int53 := p.x * p.y
+      pub def label(c Color) Int53 := case c do
+        Red -> 0
+        Green -> 1
+        Blue -> 2
+      end
+      """
+
+      ts = JS.compile_ts(src)
+
+      good = """
+      import { area, label } from "./prog";
+      const p = { __struct__: "Point" as const, x: 6, y: 7 };
+      const a: number = area(p);
+      const l: number = label({ $: "Red" });
+      """
+
+      case tsc_check([{"prog.ts", ts}, {"consumer.ts", good}]) do
+        :no_tsc -> :ok
+        :ok -> :ok
+        {:error, out} -> flunk("tsc rejected the emitted .ts (or a correct consumer):\n#{out}")
+      end
+    end
+  end
 end

@@ -216,6 +216,148 @@ defmodule Rian.JS do
     [import_js, const_js, fn_js, disp_js] |> Enum.reject(&(&1 == "")) |> Enum.join("\n\n")
   end
 
+  # ── native TypeScript `.ts` (ADR-0086 §5, third print mode) ──────────────────
+  @doc """
+  Emit a self-contained native TypeScript module (`.ts`) for `src`: the same runtime
+  as `compile/1`, with the value types declared up front (the `.d.mts` unions/
+  interfaces) and a type annotation woven into every function/const signature. So
+  `compile` is the `.mjs` runtime, `compile_types` the `.d.mts` sidecar, and
+  `compile_ts` the typed `.ts` source — one Core lowering, three print modes. The
+  bodies are byte-identical to `compile/1`; only the headers gain `: T`.
+  """
+  @rian_sig "pub def compile_ts(src String) String"
+  @spec compile_ts(String.t()) :: String.t()
+  def compile_ts(src) do
+    prog = Decl.parse(src)
+    :ok = Check.gate!(prog)
+    prog = Rian.Opaque.erase(prog)
+    reject_mixed_int_mode!(prog)
+    i53 = program_number_mode?(prog)
+    known = known_type_names(prog)
+
+    funcs = prog |> all_funcs() |> Enum.reject(&(Map.get(&1, :dispatch) == :dispatcher))
+    Core.reject_unsupported!(funcs, @js_unsupported, :js, Unsupported)
+    reject_unknown_module_calls!(funcs, prog |> all_funcs() |> MapSet.new(& &1.name))
+    consts = all_consts(prog)
+    reg = %{sums: sum_ctor_map(prog), structs: struct_name_set(prog)}
+
+    ic =
+      Check.program_ic(prog)
+      |> Map.put(:consts, MapSet.new(consts, & &1.name))
+      |> Map.put(:js_reg, reg)
+      |> Map.put(:js_vmeta, variant_meta(prog))
+
+    range_ts = Enum.map_join(all_ranges(prog), "\n", &dts_range/1)
+    type_ts = Enum.map_join(all_types(prog), "\n", &dts_sum(&1, known))
+    struct_ts = Enum.map_join(all_structs(prog), "\n", &dts_struct(&1, known))
+    import_ts = imports_js(funcs)
+    const_ts = Enum.map_join(consts, "\n", &const_ts(&1, i53, ic, known))
+    fn_ts = Enum.map_join(funcs, "\n\n", &function_ts(&1, i53, ic, known))
+    disp_ts = protocol_dispatchers_js(prog, i53)
+
+    [range_ts, type_ts, struct_ts, import_ts, const_ts, fn_ts, disp_ts]
+    |> Enum.reject(&(&1 == ""))
+    |> Enum.join("\n\n")
+  end
+
+  # the i-th declared parameter's type (`nil` → `unknown` via `ts_type`).
+  defp param_ty(f, i) do
+    case Enum.at(f.params, i) do
+      nil -> nil
+      p -> p.type
+    end
+  end
+
+  # typed twin of `const_js` — `export const NAME: T = value;` (same value emission).
+  defp const_ts(c, i53, ic, known) do
+    %EBlock{stmts: stmts} =
+      c.value
+      |> Pratt.parse_body()
+      |> resolve_consts(Map.get(ic, :consts, MapSet.new()))
+      |> Check.annotate(%{}, ic)
+      |> bake_variants(Map.get(ic, :js_vmeta, %{}))
+
+    val =
+      case Rian.Shadow.dedup(stmts, [], &js_fresh/2) do
+        [{:expr, e}] -> expr_js(e, i53)
+        deduped -> "(() => { #{block_return(deduped, i53)} })()"
+      end
+
+    export = if c.pub?, do: "export ", else: ""
+    "#{export}const #{c.name}: #{ts_type(c.type, known, MapSet.new())} = #{val};"
+  end
+
+  # typed twin of `function_js` — typed signature over the byte-identical runtime body.
+  defp function_ts(%{externals: ext} = f, _i53, _ic, known) when map_size(ext) > 0 do
+    case Map.get(ext, :js) do
+      nil ->
+        raise Unsupported, "`#{f.name}`: no `@external(:js, …)` body — not reachable on :js"
+
+      {:file, _path, fun} ->
+        js_external_fn_ts(f, "#{fun}(#{Enum.map_join(f.params, ", ", & &1.name)})", known)
+
+      spec ->
+        js_external_fn_ts(f, Rian.External.render(spec, f.params), known)
+    end
+  end
+
+  defp function_ts(%{name: name, clauses: clauses, pub?: pub?} = f, i53, ic, known) do
+    reject_wide_int!(name, f)
+    export = if pub?, do: "export ", else: ""
+    tset = MapSet.new(f.tvars)
+    ret = ts_type(f.ret, known, tset)
+
+    case simple_clause(clauses) do
+      {:simple, vars} ->
+        [c] = clauses
+        tenv = Check.clause_env(c.pats, f.params, ic)
+        body = clause_return(c.body, vars, i53, tenv, ic)
+
+        tps =
+          vars
+          |> Enum.with_index()
+          |> Enum.map_join(", ", fn {v, i} -> "#{v}: #{ts_type(param_ty(f, i), known, tset)}" end)
+
+        "#{export}function #{name}#{generics(f.tvars)}(#{tps}): #{ret} { #{body} }"
+
+      :dispatch ->
+        arity = length(hd(clauses).pats)
+
+        tps =
+          Enum.map_join(0..(arity - 1)//1, ", ", fn i ->
+            "a#{i}: #{ts_type(param_ty(f, i), known, tset)}"
+          end)
+
+        body = Enum.map_join(clauses, "\n", &clause_js(&1, i53, f.params, ic))
+
+        tail =
+          if total_clauses?(clauses, i53),
+            do: "",
+            else: "\n  throw new Error(\"#{name}: no clause matched\");"
+
+        "#{export}function #{name}#{generics(f.tvars)}(#{tps}): #{ret} {\n#{body}#{tail}\n}"
+    end
+  end
+
+  # typed twin of `js_external_fn`.
+  defp js_external_fn_ts(f, host, known) do
+    tset = MapSet.new(f.tvars)
+
+    args =
+      f.params
+      |> Enum.with_index()
+      |> Enum.map_join(", ", fn {p, i} -> "a#{i}: #{ts_type(p.type, known, tset)}" end)
+
+    binds =
+      f.params
+      |> Enum.with_index()
+      |> Enum.map_join(" ", fn {p, i} -> "const #{p.name} = a#{i};" end)
+
+    export = if f.pub?, do: "export ", else: ""
+
+    "#{export}function #{f.name}#{generics(f.tvars)}(#{args}): #{ts_type(f.ret, known, tset)} { #{binds} return (#{host}); }"
+  end
+
   # ── TypeScript `.d.mts` sidecar (ADR-0086 §5) ────────────────────────────────
   @doc """
   Emit a TypeScript declaration sidecar (`.d.mts`) for `src` — the **typed view**

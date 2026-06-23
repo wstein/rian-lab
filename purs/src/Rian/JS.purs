@@ -870,24 +870,31 @@ functionTs known i53 cset reg f =
         gen = generics f.tvars
         ret = tsTypeM known f.tvars f.ret
         ptype i = tsTypeM known f.tvars (paramTyM f i)
+        -- the dispatcher shape (typed `a0..`), shared by a non-simple single clause
+        -- and the multi-clause case (mirrors `functionJs`/`simpleFn`: a guarded
+        -- single-element array pattern `[c] | g` mis-lowers on purerl, so detect the
+        -- simple shape with an `if` inside a plain `[ c ]` branch instead).
+        dispatchTs =
+          let
+            arity = maybe 0 (\c -> length c.pats) (head f.clauses)
+            tps = joinWith ", " (map (\i -> "a" <> show i <> ": " <> ptype i) (upto arity))
+            body = joinWith "\n" (map (clauseJs i53 cset reg) f.clauses)
+            tail =
+              if totalClauses i53 f.clauses then "\n}"
+              else "\n  throw new Error(\"" <> f.name <> ": no clause matched\");\n}"
+          in
+            export <> "function " <> f.name <> gen <> "(" <> tps <> "): " <> ret <> " {\n" <> body <> tail
       in
         case f.clauses of
-          [ c ] | isNothing c.guard && allPVar (map fromPat c.pats) ->
-            let
-              vars = pvarNames (map fromPat c.pats)
-              tps = joinWith ", " (mapWithIndex (\i v -> v <> ": " <> ptype i) vars)
-            in
-              export <> "function " <> f.name <> gen <> "(" <> tps <> "): " <> ret <> " { " <> clauseReturn i53 cset reg vars c.body <> " }"
-          _ ->
-            let
-              arity = maybe 0 (\c -> length c.pats) (head f.clauses)
-              tps = joinWith ", " (map (\i -> "a" <> show i <> ": " <> ptype i) (upto arity))
-              body = joinWith "\n" (map (clauseJs i53 cset reg) f.clauses)
-              tail =
-                if totalClauses i53 f.clauses then "\n}"
-                else "\n  throw new Error(\"" <> f.name <> ": no clause matched\");\n}"
-            in
-              export <> "function " <> f.name <> gen <> "(" <> tps <> "): " <> ret <> " {\n" <> body <> tail
+          [ c ] ->
+            if isNothing c.guard && allPVar (map fromPat c.pats) then
+              let
+                vars = pvarNames (map fromPat c.pats)
+                tps = joinWith ", " (mapWithIndex (\i v -> v <> ": " <> ptype i) vars)
+              in
+                export <> "function " <> f.name <> gen <> "(" <> tps <> "): " <> ret <> " { " <> clauseReturn i53 cset reg vars c.body <> " }"
+            else dispatchTs
+          _ -> dispatchTs
 
 -- an `@external` function with a typed signature over its verbatim host body.
 externalFnTs :: Array String -> Func -> String

@@ -133,6 +133,19 @@ aliases for the user types they reference. The runtime `.mjs` is untouched.
   A type outside the faithfully-mappable subset becomes `unknown` (honest), never a misleading `any`.
 - **Types are documentation, not a gate** (unchanged): the reach gate stays `Rian.Reach` + §2.
 
+**Amended 2026-06-23 — a third print mode: native `.ts` source.** The declaration sidecar
+(`compile_types/1`) describes only the *exported* surface and pairs with the runtime `.mjs`. A second
+consumer need is a **self-contained, readable typed module**: `Rian.JS.compile_ts/1` emits native
+TypeScript — the **byte-identical runtime** of `compile/1` with a type annotation woven into every
+`function`/`const` signature, and the value types it references declared inline. So the JS backend now
+has **three print modes over one Core lowering**: `compile` (the `.mjs` runtime), `compile_types` (the
+`.d.mts` surface view), and `compile_ts` (typed `.ts` source). The `.ts` differs from the sidecar in
+two ways: it includes **private** functions (a runnable module needs them, not just the export surface)
+and it carries the runtime bodies, not just signatures — so it type-checks standalone under
+`tsc --strict` (the bodies satisfy their own headers — verified). It is gated by the `jsts` parity
+stream (PureScript `compileTs` ≡ Elixir `compile_ts`); like the sidecar it is **documentation, not a
+reach gate**. The playground (ADR-0090) renders the live `.ts` beside the live `.mjs`.
+
 This sets the **pattern** a future typed view over another *dynamic* target (the ADR-0085 Lua/PHP/Neko
 triad, or ADR-0071 Python — all type-erasing like JS) would reuse: a second print mode over the same
 lowering, not a new emitter. It **adds no target and widens nothing** — the §5a admission gate and the

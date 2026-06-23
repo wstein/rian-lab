@@ -1802,6 +1802,8 @@ itp_corpus = [
   ~S|m := n; "v=${m}"|
 ]
 
+# Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses
+# the `js` runtime corpus (every runtime program, emitted as TypeScript). Oracle = `compile_ts`.
 lines =
   Enum.flat_map(corpus, fn src ->
     [
@@ -1954,6 +1956,9 @@ lines =
     end) ++
     Enum.map(jsdts_corpus, fn s ->
       "jsdts\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JS.compile_types(s))}"
+    end) ++
+    Enum.map(js_corpus, fn s ->
+      "jsts\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JS.compile_ts(s))}"
     end) ++
     [
       # Rian.ShowStdlib — the `shs` stream: the parsed `Show` stdlib module (ADR-0069 §6). Input

@@ -127,6 +127,8 @@ run_stream(<<"opq">>, Src) -> hexbin('rian_opaque@ps':eraseSexpr(Src));
 run_stream(<<"js">>, Src) -> hexbin('rian_jS@ps':compileSexpr(Src));
 %% Rian.JS compile_types (canon = the TypeScript `.d.ts` sidecar — ADR-0086 §5)
 run_stream(<<"jsdts">>, Src) -> hexbin('rian_jS@ps':compileTypesSexpr(Src));
+%% Rian.JS compile_ts (canon = the native TypeScript `.ts` module — ADR-0086 §5)
+run_stream(<<"jsts">>, Src) -> hexbin('rian_jS@ps':compileTsSexpr(Src));
 %% Rian.ShowStdlib (canon = the serialized `Show` stdlib module, input ignored — ADR-0069 §6)
 run_stream(<<"shs">>, Src) -> hexbin('rian_showStdlib@ps':moduleSexpr(Src));
 %% Rian.Interp (canon = the resolved body's Core sexpr — ADR-0069 §4 interpolation resolution)
