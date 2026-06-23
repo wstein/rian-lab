@@ -24,7 +24,11 @@
 -- | (`__prim_str_concat`/`_all` + `<>` → a `<<…/binary>>` binary), the `Dict` map ops
 -- | (`map_new`/`get`/`put`/`has` → native `#{}`/`maps:*`), `__prim_panic` → `erlang:error`, list
 -- | membership `in` → `lists:member`, and the `Str.chars`/`from_chars`/`str_to_*` conversions — so
--- | `${int}` interpolation, string building, and maps run with no extra modules. **Deferred (later
+-- | `${int}` interpolation, string building, and maps run with no extra modules. Inc 6: the
+-- | **64-bit overflow ops** (`__prim_wrapping_add`/`saturating_add`/`checked_add`) — BEAM ints are
+-- | bignums, so each computes the true sum once (an immediately-applied `fun`) then projects onto
+-- | signed-64 (wrap via `band` + sign-correct, saturate via `erlang:min`/`max`, check → `{some,S}`/
+-- | `none`); `i64Overflow`/`i64Project`. **Deferred (later
 -- | increments):** the type-directed lowering (the annotated/range-expanded core — `Show`/overflow/
 -- | value-union discrimination), `@external`, specs/`type` attrs, remote `Mod.fun` user calls, and
 -- | the whole-program / cross-module + const + prelude machinery (so `${float}` via `Show.float` and
@@ -180,6 +184,11 @@ exprForm (ECall (EId "__prim_panic") [ m ]) = remoteCall "erlang" "error" [ expr
 exprForm (ECall (EId "__prim_str_chars") [ s ]) = remoteCall "Elixir.String" "to_charlist" [ exprForm s ]
 exprForm (ECall (EId "__prim_str_from_chars") [ cs ]) = remoteCall "Elixir.List" "to_string" [ exprForm cs ]
 exprForm (ECall (EId "__prim_str_to_atom") [ s ]) = remoteCall "Elixir.String" "to_atom" [ exprForm s ]
+-- explicit 64-bit overflow ops (ADR-0035 §3): BEAM ints are bignums, so compute the true sum once
+-- (an immediately-applied `fun`) then project onto signed-64: wrap / saturate / check.
+exprForm (ECall (EId "__prim_wrapping_add") [ a, b ]) = i64Overflow Wrapping a b
+exprForm (ECall (EId "__prim_saturating_add") [ a, b ]) = i64Overflow Saturating a b
+exprForm (ECall (EId "__prim_checked_add") [ a, b ]) = i64Overflow Checked a b
 -- an all-labeled call `Name(f: v, …)` is struct construction → a `__struct__`-tagged map; a
 -- PascalCase positional call `Circle(r)` is sum construction → a tagged tuple `{circle, R}`; a
 -- lowercase `f(args)` is a local call (inc 3/4: no var application / imports / cross-module yet).
@@ -329,6 +338,55 @@ fBin segs = mkTuple [ mkAtomTerm "bin", ln, mkList segs ]
 
 binSeg :: ETerm -> ETerm
 binSeg form = mkTuple [ mkAtomTerm "bin_element", ln, form, mkAtomTerm "default", mkList [ mkAtomTerm "binary" ] ]
+
+-- ── 64-bit overflow projection (inc 6) ──
+data OvfKind = Wrapping | Saturating | Checked
+
+-- the true `a + b` (bignum) computed once via `(fun(OvfSum) -> project(OvfSum) end)(a + b)`.
+i64Overflow :: OvfKind -> CExpr -> CExpr -> ETerm
+i64Overflow kind a b =
+  let
+    sum = binOp "+" (exprForm a) (exprForm b)
+    sv = fVar "OvfSum"
+    clause = mkTuple [ mkAtomTerm "clause", ln, mkList [ sv ], noGuard, mkList [ i64Project kind sv ] ]
+    funE = mkTuple [ mkAtomTerm "fun", ln, mkTuple [ mkAtomTerm "clauses", mkList [ clause ] ] ]
+  in
+    mkTuple [ mkAtomTerm "call", ln, funE, mkList [ sum ] ]
+
+-- project the (bignum) sum onto signed 64-bit per kind. Mirrors `i64_project`.
+i64Project :: OvfKind -> ETerm -> ETerm
+i64Project Wrapping sv =
+  let
+    low = binOp "band" sv (fInteger "18446744073709551615")
+  in
+    mkTuple
+      [ mkAtomTerm "case"
+      , ln
+      , binOp ">=" low (fInteger "9223372036854775808")
+      , mkList
+          [ fClause [ fAtom "true" ] noGuard [ binOp "-" low (fInteger "18446744073709551616") ]
+          , fClause [ fAtom "false" ] noGuard [ low ]
+          ]
+      ]
+i64Project Saturating sv =
+  remoteCall "erlang" "max" [ remoteCall "erlang" "min" [ sv, fInteger "9223372036854775807" ], fInteger "-9223372036854775808" ]
+i64Project Checked sv =
+  let
+    inRange = binOp "andalso" (binOp ">=" sv (fInteger "-9223372036854775808")) (binOp "=<" sv (fInteger "9223372036854775807"))
+  in
+    mkTuple
+      [ mkAtomTerm "case"
+      , ln
+      , inRange
+      , mkList
+          [ fClause [ fAtom "true" ] noGuard [ mkTuple [ mkAtomTerm "tuple", ln, mkList [ fAtom "some", sv ] ] ]
+          , fClause [ fAtom "false" ] noGuard [ fAtom "none" ]
+          ]
+      ]
+
+-- a binary `{op, 1, Op, L, R}` over the Erlang operator atom `op`.
+binOp :: String -> ETerm -> ETerm -> ETerm
+binOp op l r = mkTuple [ mkAtomTerm "op", ln, mkAtomTerm op, l, r ]
 
 fCall :: ETerm -> Array ETerm -> ETerm
 fCall target args = mkTuple [ mkAtomTerm "call", ln, target, mkList args ]

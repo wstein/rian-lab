@@ -2150,7 +2150,16 @@ beam_corpus = [
   # string concat `<>` → a `<<L/binary, R/binary>>` binary
   "pub def main() String := \"ab\" <> \"cd\"",
   # list membership `x in xs` → `lists:member/2`
-  "pub def main() Bool := 2 in [1, 2, 3]"
+  "pub def main() Bool := 2 in [1, 2, 3]",
+  # ── inc 6: 64-bit overflow ops (bignum-compute then project onto signed 64) ──
+  # wrapping: i64_max + 1 → two's-complement wrap to i64_min
+  "pub def main() Int64 := Prim.wrapping_add(9223372036854775807, 1)",
+  # saturating: clamp into [i64_min, i64_max]
+  "pub def main() Int64 := Prim.saturating_add(9223372036854775807, 100)",
+  # checked: in-range → `{some, S}` (Option)
+  "pub def main() Option(Int64) := Prim.checked_add(40, 2)",
+  # checked: overflow → `none`
+  "pub def main() Option(Int64) := Prim.checked_add(9223372036854775807, 1)"
 ]
 
 # Rian.JS.compile_ts — the `jsts` stream (ADR-0086 §5): the native typed `.ts` module. Reuses

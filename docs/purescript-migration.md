@@ -185,7 +185,7 @@ The abstract-forms construction is **pure PureScript over an opaque `ETerm`**; t
 `mkList`/…) plus `compile:forms` → `code:load_binary` → run. Parity is **by EXECUTION** — the new
 `beam` stream compiles + loads + runs each program's `main/0` on purerl and compares the
 `~p`-rendered result against the Elixir reference running the same program (so a match proves the
-forms actually *run the same*, not merely look alike). **Inc 1-5 (landed):** literals (int/float/char/
+forms actually *run the same*, not merely look alike). **Inc 1-6 (landed):** literals (int/float/char/
 atom/bool), the operator algebra, variables, `:=` binds, local calls, `if`, single-clause var-headed
 functions, plus multi-clause dispatch, `when` guards (function-clause + case-arm), and `case` — verified on `42`/`add`/precedence/`:=`/float/bool/`fact(5)=120`/multi-clause/guard/`case`, plus sums (=25)/lists/list-recursion (=60)/strings/tuples, plus structs (=7)/struct-patterns/maps, plus the self-contained prims (`` interpolation/`<>`/membership). Deferred to later
 increments: the type-directed lowering (annotated/range-expanded core — `Show`/overflow/value-union),
@@ -264,7 +264,7 @@ runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tie
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **1111/1111** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **1115/1115** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
 InferLocal/Assemble/Comptime/Opaque/**JS**/**Lower.Rust**/**JVM** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it). This prose figure,
