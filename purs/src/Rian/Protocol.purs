@@ -118,15 +118,15 @@ implMethods protocols impl = map mk impl.methods
       sigParams = maybe "" _.params sig
       sigRet = sig >>= _.ret
       names = map Str.trim (splitTopCommas m.params)
-      types = map paramType (splitTopCommas sigParams)
-      params = joinWith ", " (Array.zipWith (\n t -> n <> " " <> resolve t) names types)
+      rtypes = map (\t -> resolve (paramType t)) (splitTopCommas sigParams)
+      clause = implClause names rtypes m.body m.guard
     in
       { dispatch: "impl"
       , name: mangle impl.proto impl.ty m.name
-      , params
+      , params: clause.params
       , ret: map resolve sigRet
-      , guard: m.guard
-      , body: m.body
+      , guard: clause.guard
+      , body: clause.body
       , pub: false
       , tvars: []
       , synthetic: false
@@ -137,6 +137,49 @@ implMethods protocols impl = map mk impl.methods
     resolve t = substAssoc impl.assoc (substSelf impl.ty t)
 
 -- ── helpers ──
+-- Build an impl method's signature + body from its param heads and the protocol's resolved
+-- types. A var/wildcard head pairs name→type directly (`b Bag`); a **ctor/literal head**
+-- (`def sz(Bag(n))`) is a PATTERN, not a name — pairing it as `"<pat> <type>"` corrupts both
+-- (the pattern is dropped, leaving `n` unbound, and the type becomes `Bag(n)Bag`). When any head
+-- is a pattern, bind fresh receivers typed by the protocol and move the patterns into a `case`
+-- over the body — valid on every target (mirrors `Rian.Protocol.impl_clause`, the ctor-impl-head fix).
+implClause
+  :: Array String
+  -> Array String
+  -> Maybe String
+  -> Maybe String
+  -> { params :: String, body :: Maybe String, guard :: Maybe String }
+implClause names rtypes body guard =
+  if Array.all simpleParam names then
+    { params: joinWith ", " (Array.zipWith (\n t -> n <> " " <> t) names rtypes), body, guard }
+  else
+    let
+      recv = Array.mapWithIndex (\i t -> Tuple ("__recv" <> show i) t) rtypes
+      params = joinWith ", " (map (\(Tuple r t) -> r <> " " <> t) recv)
+      scrut = wrapTuple (map fst recv)
+      g = maybe "" (\gg -> " when " <> gg) guard
+    in
+      { params
+      , body: map (\b -> "case " <> scrut <> " do\n  " <> wrapTuple names <> g <> " -> " <> b <> "\nend") body
+      , guard: Nothing
+      }
+
+wrapTuple :: Array String -> String
+wrapTuple xs = case xs of
+  [ one ] -> one
+  many -> "{" <> joinWith ", " many <> "}"
+
+-- a plain identifier / wildcard (optionally capability-prefixed) param — a var head, vs a
+-- destructuring pattern (ctor `Bag(n)`, list `[…]`, tuple/map `{…}`, an atom/string/int literal).
+simpleParam :: String -> Boolean
+simpleParam p0 =
+  let
+    p = Str.trim p0
+  in
+    p /= ""
+      && not (Array.any (\d -> Str.contains (Str.Pattern d) p) [ "(", "[", "{", ":", "\"", "'" ])
+      && not (Array.elem (Str.take 1 p) [ "0", "1", "2", "3", "4", "5", "6", "7", "8", "9" ])
+
 mangle :: String -> String -> String -> String
 mangle proto ty method = "impl_" <> Str.toLower proto <> "_" <> Str.toLower ty <> "_" <> method
 

@@ -1145,9 +1145,9 @@ def f(c) := 0|,
   # ── ktType fidelity (review fix): `Dict(K,V)` → `Map<K,V>`, and the nominal `^[A-Z]` fallback ──
   # a `Dict(K, V)` type → a Kotlin `Map<K, V>` (passthrough — map *operations* are a later increment)
   "pub def passthru(d Dict(String, Int64)) Dict(String, Int64) := d",
-  # a ctor-pattern impl head: the reference synthesizes a corrupted param type `Bag(n)Bag`
-  # (a pre-existing Elixir JVM bug) and renders it verbatim via the `^[A-Z]` nominal fallback;
-  # the PS port now mirrors that byte-for-byte (NOT kotlinc-valid — excluded from the kotlinc gate)
+  # a ctor-pattern impl head `def sz(Bag(n))` → the shared protocol-desugar now binds a fresh
+  # typed receiver and moves the pattern into a `case` (`Rian.Protocol.impl_clause`, the
+  # ctor-impl-head fix), so it lowers to VALID Kotlin (`a0: Bag` + a smart-cast case) — kotlinc-clean
   "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(Bag(n)) := n\nend\npub def go(b Bag) Int64 := sz(b)",
   # a multi-statement body (`:=` bind then value) → a scoped `run { val …; … }` (+ a `${…}` hole)
   "pub def hi(who String) String := name := who ; \"Hello, ${name}!\"",

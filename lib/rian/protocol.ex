@@ -142,22 +142,49 @@ defmodule Rian.Protocol do
       # returns `Vec(Int53)`, and `Check.gate!` rejects the impl on every gated path
       # (`Decl.compile`/`Rian.JVM`); the dispatcher stays polymorphic in `Elem`.
       resolve = fn t -> t |> subst_self(type) |> subst_assoc(assoc) end
-
-      params =
-        Enum.zip(names, types)
-        |> Enum.map_join(", ", fn {n, t} -> "#{n} #{resolve.(t)}" end)
+      rtypes = Enum.map(types, resolve)
+      {params, body, guard} = impl_clause(names, rtypes, m.body, m.guard)
 
       %{
         name: mangle(proto, type, m.name),
         params: params,
         ret: resolve.(sig.ret),
-        guard: m.guard,
-        body: m.body,
+        guard: guard,
+        body: body,
         pub: false,
         tvars: [],
         dispatch: :impl
       }
     end)
+  end
+
+  # Build an impl method's signature + body from its param heads and the protocol's resolved
+  # types. A var/wildcard head pairs name→type directly (`b Bag`). A **ctor/literal head**
+  # (`def sz(Bag(n))`) is a PATTERN, not a name — the old `"#{pat} #{type}"` join corrupted
+  # both (the pattern was dropped, leaving the body's `n` unbound, and the type became
+  # `Bag(n)Bag`). When any head is a pattern, bind fresh receivers typed by the protocol and
+  # move the patterns into a `case` over the body — valid on every target (the ctor-impl-head fix).
+  defp impl_clause(names, rtypes, body, guard) do
+    if Enum.all?(names, &simple_param?/1) do
+      params = Enum.zip(names, rtypes) |> Enum.map_join(", ", fn {n, t} -> "#{n} #{t}" end)
+      {params, body, guard}
+    else
+      recv = Enum.with_index(rtypes) |> Enum.map(fn {t, i} -> {"__recv#{i}", t} end)
+      params = Enum.map_join(recv, ", ", fn {r, t} -> "#{r} #{t}" end)
+      scrut = wrap_tuple(Enum.map(recv, &elem(&1, 0)))
+      g = if guard, do: " when #{guard}", else: ""
+      {params, "case #{scrut} do\n  #{wrap_tuple(names)}#{g} -> #{body}\nend", nil}
+    end
+  end
+
+  defp wrap_tuple([one]), do: one
+  defp wrap_tuple(many), do: "{" <> Enum.join(many, ", ") <> "}"
+
+  # a plain identifier / wildcard (optionally capability-prefixed) parameter — a var head, as
+  # opposed to a destructuring pattern (ctor `Bag(n)`, list `[…]`, tuple/map `{…}`, a literal).
+  defp simple_param?(p) do
+    p = String.trim(p)
+    p != "" and not String.match?(p, ~r/[(\[{:"']/) and not String.match?(p, ~r/^[0-9]/)
   end
 
   # substitute each associated-type binding (`%{"Elem" => "Int53"}`) into a type string —
