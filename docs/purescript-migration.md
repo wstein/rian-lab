@@ -115,7 +115,7 @@ what the Core oracle confirms over the surface form.
 | ------------ | ---- | --------------------------------------------------- |
 | `Rian.JS`    | 1053 | ✅ **Tier-1 subset complete** — `compile` (runtime module) + `compileTypes` (the `.d.mts` sidecar) + `compileTs` (native typed `.ts` source) — three print modes over one Core lowering (ADR-0086 §5). A direct JS source emitter on the typed Core (works on plain `CExpr`; node types are unused by JS, only signature types + a whole-program number/BigInt mode, ADR-0064). `compile`: functions/clauses/patterns, operators (`div`→`Math.trunc`, `in`, `<>`→`+`), `if`/`case`(→IIFE)/sum/list/tuple/struct/map/string/lambda/capture/`with`(local `desugarWith`) + `__prim_*`/stdlib calls. `compileTypes`: the JS-valid type subset → faithful TS carriers (prims/`Vec`/`Fn`/`Option`/`Result`/`Map`/tuple/`forall T`; else `unknown`). `compileTs`: the same runtime bodies + the typed headers (incl. private functions), tsc-clean standalone. `js`/`jsdts`/`jsts` streams (oracle = `Rian.JS.compile`/`compile_types`/`compile_ts`). All Tier-1 features lower: module `const`s + references (`resolveConsts`/`EConstRef`, ADR-0033), `@external` bodies (`externalFn`/`importsJs`, ADR-0068), value-union discrimination (`bakeUnionDisc`/`PTyped` disc, ADR-0083), protocol dispatch (`protocolDispatchersJs`/`Func.dispatch`, ADR-0061), struct construction (`bakeStructs`/`EStruct`, ADR-0050), and string interpolation (the program tail, ADR-0069). |
 | `Rian.JVM`   | 1249 | Kotlin source emitter (pure).                       |
-| `Rian.Lower` | 3275 | Elixir-text + Rust source emitter (pure).           |
+| `Rian.Lower` (Rust) | 3275 | **Rust emitter port started** (`Rian.Lower.Rust`, the `rust` stream). Increment 1: the single-clause portable core — primitive `val` params (capability signatures via the ported `Rian.Capability.rustParam`/`owned`), the precedence-aware operator algebra (`+`/`-`/`*`/`div`/`rem`/float-`/`, comparisons, `and`/`or`, unary `-`/`not`), `if`, and local calls (recursion). Next increments: multi-clause + the `match` shim, sum/struct construction + patterns, lists, strings/chars, capability borrows, generics/monomorphization, protocol traits. The **Elixir-text half is not ported** (not load-bearing — see `Rian.Roundtrip`'s subsumption note). |
 | `Rian.Beam`  | 1355 | **Erlang abstract forms → `.beam`**; the core FFI.  |
 
 ### Phase 6 — Prim & stdlib support
@@ -193,7 +193,7 @@ parity-gated). What's left, by category — `lib/rian/*.ex` with **no** `purs/sr
 
 | Category | Elixir modules (unported) | Status / why |
 | --- | --- | --- |
-| **⛔ Emitters — the compile-spine gap** | `jvm`, `lower`, `beam` | The value backend. **`Rian.JS` is complete for its Tier-1 subset** (all three print modes + const refs, `@external`, value-union discrimination, protocol dispatch, struct construction, string interpolation — `js`/`jsdts`/`jsts` streams). `Lower` (Rust+Elixir) and `JVM` are display-pane emitters; `Beam` is FFI-heavy → Phase 8. |
+| **⛔ Emitters — the compile-spine gap** | `jvm`, `lower`, `beam` | The value backend. **`Rian.JS` is complete for its Tier-1 subset** (all three print modes + const refs, `@external`, value-union discrimination, protocol dispatch, struct construction, string interpolation — `js`/`jsdts`/`jsts` streams). **`Rian.Lower`'s Rust half is in progress** (`Rian.Lower.Rust`, the `rust` stream — increment 1: single-clause portable core); its Elixir-text half is not ported (not load-bearing, see `Rian.Roundtrip`). `JVM` is the other display-pane emitter (unstarted); `Beam` is FFI-heavy → Phase 8. |
 | **✅ Pipeline desugars — ported** | ~~`interp`~~, ~~`show_stdlib`~~ | `Interp` (`${}` resolution, ADR-0069) and `ShowStdlib` (the portable `Show.float`) are ported and wired into `Rian.Assemble.runProgramTail` (composed by `Rian.JS.compile` before the gate); `itp`/`shs` parity streams. |
 | **⚙️ Execution & self-host (FFI-heavy, Phase 8)** | `run`, `repl`, `fixpoint`, `self_host`, `roundtrip`, `forms_equiv`, `doctest`, `test` | Wrap `:compile.forms` / code-loading / `GenServer`. Expected-late: they need the BEAM emitter + Erlang FFI. For the **JS** build these are skipped in-browser. |
 | **📐 Formatter (Phase 9)** | `format` (+ `format/{Doc,CST,CLI}`), `lsp/*` | Zero-config formatter (ADR-0045). A real feature, off the compile spine; ports after the emitters. |
@@ -246,9 +246,9 @@ runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tie
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **957/957** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **969/969** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
-InferLocal/Assemble/Comptime/Opaque/**JS** (the count is the harness's own `N/N` total — `parity.erl`
+InferLocal/Assemble/Comptime/Opaque/**JS**/**Lower.Rust** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it). This prose figure,
 and the "all 12 `check_func` checks" / "deferred" notes below, are pinned to the code by
 `Rian.PursMigrationDocTest` — a stale count or a deferral note that outlived its port fails `mix test`.

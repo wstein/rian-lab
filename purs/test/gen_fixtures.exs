@@ -948,6 +948,29 @@ asm_corpus = [
   "protocol Nm do\n  def nm(c Self) String\nend\nimpl Nm for Color do\n  def nm(c) := s(c)\nend\ntype Color := Red | Green | Blue(shade Int53)"
 ]
 
+# Rian.Lower.Rust — the `rust` stream (ADR-0049, the `to_rust` port). Oracle =
+# `Rian.Decl.compile`'s `:rust`, joined `\n\n` (same as `mix rian.compile --rust`).
+# Increment 1: the single-clause portable core — primitive `val` params, the
+# arithmetic/comparison/boolean operator algebra (precedence + parens), `div`/`rem`,
+# unary `-`/`not`, `if`, and local calls (recursion). Sums/structs/lists/strings/
+# multi-clause/generics are later increments.
+rust_corpus = [
+  "pub def add(x Int53, y Int53) Int53 := x + y",
+  "def half(n Int53) Int53 := n div 2",
+  "pub def rem3(n Int53) Int53 := n rem 3",
+  "pub def neg(b Bool) Bool := not b",
+  "pub def negate(x Int53) Int53 := -x",
+  "pub def between(x Int53) Bool := x >= 0 and x <= 9",
+  "pub def either(a Bool, b Bool) Bool := a or b",
+  # precedence: `*` binds tighter than `+`, so the `+` operand parenthesizes
+  "pub def poly(x Int53) Int53 := x * x + 2 * x",
+  "pub def grouped(x Int53) Int53 := (x + 1) * (x - 1)",
+  "pub def fst(x Int53, y Int53) Int53 := x",
+  # `if` + recursion (tail call), and a float division (`/` → explicit f64 casts)
+  "pub def fac(n Int53) Int53 := if n <= 1 do 1 else n * fac(n - 1) end",
+  "pub def avg(a Float64, b Float64) Float64 := (a + b) / 2.0"
+]
+
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params
 # fixed `["p"]` so a `p :=` rebind renames; the fresh scheme is `base$count`.
 shadow_corpus = [
@@ -1963,6 +1986,14 @@ lines =
     end) ++
     Enum.map(js_corpus, fn s ->
       "jsts\t#{Canon.hex(s)}\t#{Canon.hex(Rian.JS.compile_ts(s))}"
+    end) ++
+    Enum.map(rust_corpus, fn s ->
+      rust =
+        Rian.Decl.compile(s)
+        |> Enum.filter(fn {_n, o} -> o[:rust] end)
+        |> Enum.map_join("\n\n", fn {_n, o} -> o.rust end)
+
+      "rust\t#{Canon.hex(s)}\t#{Canon.hex(rust)}"
     end) ++
     [
       # Rian.ShowStdlib — the `shs` stream: the parsed `Show` stdlib module (ADR-0069 §6). Input
