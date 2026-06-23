@@ -178,7 +178,14 @@ same labels (via the shared `Rian.VariantLabels`): a labeled variant lowers to a
 `data class Circle(val radius: Double)` and its patterns smart-cast to `acc.radius`, not
 `acc.f0`. The two *positional-by-nature* backends keep their native shape and ignore the
 labels — **BEAM** a tagged tuple `{:circle, R}` (element order, no field-name slot), **Rust**
-a positional `enum` variant `Circle(f64)`. The prototype
+a positional `enum` variant `Circle(f64)`. **BEAM keeping the tuple is a deliberate choice**
+(not an unfinished port): a tuple has no field-name slot, and — unlike a TS/Kotlin consumer —
+*nothing on the BEAM reads variant field names*, so labels buy nothing observable there.
+Lowering labeled sums to a tagged map (`#{'$' => circle, radius => R}`) was rejected — it
+would reintroduce the same hybrid (labeled→map, anonymous→tuple) the JS analysis rules out,
+contradict the ADR-0050 P6 spike's tagged-tuple finding, and cost the Elixir↔Rian
+forms-equivalence the roundtrip gate depends on. (Erlang records compile to that same
+positional tuple, so they add no runtime named-ness either.) The prototype
 that drove the design: IR is ~90% anonymous variants, so the named-field win is
 concentrated in user-facing types (and structs already cover named fields) — but the
 one-model object form carries it cleanly. A **hybrid** (labeled→object,
