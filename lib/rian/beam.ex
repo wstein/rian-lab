@@ -223,21 +223,49 @@ defmodule Rian.Beam do
     prog = Rian.Opaque.erase(prog)
     top = Map.get(prog, :ranges, [])
 
-    prog
-    |> Map.get(:mods, [])
-    |> Enum.map(fn m ->
-      {:ok, atom, bin} =
-        beam_for(
-          :"Elixir.#{m.name}",
-          m.funcs,
-          top ++ Map.get(m, :ranges, []),
-          Map.get(m, :types, []),
-          Map.get(m, :structs, []),
-          ic_with_consts(prog, Map.get(m, :consts, []))
-        )
+    mod_beams =
+      prog
+      |> Map.get(:mods, [])
+      |> Enum.map(fn m ->
+        {:ok, atom, bin} =
+          beam_for(
+            :"Elixir.#{m.name}",
+            m.funcs,
+            top ++ Map.get(m, :ranges, []),
+            Map.get(m, :types, []),
+            Map.get(m, :structs, []),
+            ic_with_consts(prog, Map.get(m, :consts, []))
+          )
 
-      {atom, bin}
-    end)
+        {atom, bin}
+      end)
+
+    # top-level `def`s *alongside* `mod`s compile into one extra module — without
+    # this they are silently dropped, so a `mod` library + a top-level `main` would
+    # lose `main` (and `Rian.Run` reports "no entry"). A qualified `Mod.fun` call from
+    # a top-level body still resolves: each `mod` loads as `Elixir.<Mod>`. Only the
+    # mixed case is handled here; a flat (no-`mod`) file is owned by the single-module
+    # `load`/`load_result` path (which links the prelude), so it is left untouched.
+    case {mod_beams, Map.get(prog, :funcs, [])} do
+      {[], _} ->
+        mod_beams
+
+      {_, []} ->
+        mod_beams
+
+      {_, funcs} ->
+        {:ok, atom, bin} =
+          beam_for(
+            :"Elixir.RianCompiled",
+            funcs,
+            top,
+            Map.get(prog, :types, []),
+            Map.get(prog, :structs, []),
+            ic_with_consts(prog, Map.get(prog, :consts, []))
+          )
+
+        [{atom, bin} | mod_beams]
+    end
   end
 
   @doc """
@@ -302,21 +330,49 @@ defmodule Rian.Beam do
     prog = Rian.Opaque.erase(prog)
     top = Map.get(prog, :ranges, [])
 
-    prog
-    |> Map.get(:mods, [])
-    |> Enum.map(fn m ->
-      {:ok, atom, bin} =
-        beam_for(
-          :"Elixir.#{m.name}",
-          m.funcs,
-          top ++ Map.get(m, :ranges, []),
-          Map.get(m, :types, []),
-          Map.get(m, :structs, []),
-          ic_with_consts(prog, Map.get(m, :consts, []))
-        )
+    mod_beams =
+      prog
+      |> Map.get(:mods, [])
+      |> Enum.map(fn m ->
+        {:ok, atom, bin} =
+          beam_for(
+            :"Elixir.#{m.name}",
+            m.funcs,
+            top ++ Map.get(m, :ranges, []),
+            Map.get(m, :types, []),
+            Map.get(m, :structs, []),
+            ic_with_consts(prog, Map.get(m, :consts, []))
+          )
 
-      {atom, bin}
-    end)
+        {atom, bin}
+      end)
+
+    # top-level `def`s *alongside* `mod`s compile into one extra module — without
+    # this they are silently dropped, so a `mod` library + a top-level `main` would
+    # lose `main` (and `Rian.Run` reports "no entry"). A qualified `Mod.fun` call from
+    # a top-level body still resolves: each `mod` loads as `Elixir.<Mod>`. Only the
+    # mixed case is handled here; a flat (no-`mod`) file is owned by the single-module
+    # `load`/`load_result` path (which links the prelude), so it is left untouched.
+    case {mod_beams, Map.get(prog, :funcs, [])} do
+      {[], _} ->
+        mod_beams
+
+      {_, []} ->
+        mod_beams
+
+      {_, funcs} ->
+        {:ok, atom, bin} =
+          beam_for(
+            :"Elixir.RianCompiled",
+            funcs,
+            top,
+            Map.get(prog, :types, []),
+            Map.get(prog, :structs, []),
+            ic_with_consts(prog, Map.get(prog, :consts, []))
+          )
+
+        [{atom, bin} | mod_beams]
+    end
   end
 
   @doc "Compile and load a multi-module program IR (see `compile_program_ir/1`)."

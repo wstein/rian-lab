@@ -592,6 +592,21 @@ defmodule Rian.BeamTest do
       assert apply(CalcLex, :lex, ["1+2"]) == [{:t_num, 1}, :t_plus, {:t_num, 2}]
     end
 
+    test "a `mod` library + a top-level `main` both load — main is not dropped" do
+      # regression: `compile_program` mapped over `mods` only, so a top-level `def`
+      # alongside a `mod` was silently dropped — `Rian.Run` then found no entry. The
+      # top-level funcs now compile into `RianCompiled`; the qualified `Lib.twice`
+      # call resolves to the `Elixir.Lib` module.
+      mods =
+        Beam.load_program(
+          "mod Lib do\n  pub def twice(n Int53) Int53 := n * 2\nend\n\npub def main() Int53 := Lib.twice(21)"
+        )
+
+      assert Lib in mods
+      assert RianCompiled in mods
+      assert apply(RianCompiled, :main, []) == 42
+    end
+
     test "the whole calc compiler in ONE Rian module: source string -> value on bytecode" do
       {:ok, calc} = Beam.load(File.read!("test/fixtures/rian/calc.rian"), :rian_beam_calc)
 
