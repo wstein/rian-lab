@@ -1,0 +1,8 @@
+<svg width="32" height="32" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path
+    d="M2 11V22C2 26.4183 5.58172 30 10 30H22C26.4183 30 30 26.4183 30 22V11L25 4L19 9L16 2L13 9L7 4Z"
+    fill="#e2581e" />
+  <text x="16" y="25.5" text-anchor="middle"
+    font-family="system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif"
+    font-size="15" font-weight="800" fill="#ffffff">R</text>
+</svg>
