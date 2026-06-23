@@ -29,7 +29,7 @@ import Data.Array (all, elem, filter, find, foldl, head, index, length, mapMaybe
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
-import Data.Maybe (Maybe(..), fromMaybe, isNothing)
+import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.Monoid (power)
 import Data.String (Pattern(..), contains, length, stripPrefix, stripSuffix) as Str
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
@@ -478,25 +478,41 @@ ktType "Char" = "Long"
 ktType t
   | widthInt t = "Long"
   | widthFloat t = "Double"
-  -- a bare nominal type (a sum / struct name) → its Kotlin name verbatim. Guarded to
-  -- paren-free names so a parametric/`Fn`/tuple type routes to `ktParametric`.
-  | nominal t = t
   | otherwise = ktParametric t
 
--- the parametric / `Fn` / tuple types (all paren-bearing). `Vec(T)` → `List<T>`,
--- `Fn(a…, r)` → `(a…) -> r` (last component is the return), `(A, B)`/`(A, B, C)` →
--- `Pair`/`Triple`. A ≥4-tuple / other unported head stage-crashes.
+-- the parametric / `Fn` / tuple / union types, then the bare-nominal fallback — mirroring the
+-- reference `kt_type`'s order so it stays byte-equal. `Vec(T)` → `List<T>`, `Dict(K,V)` →
+-- `Map<K,V>`, `Fn(a…, r)` → `(a…) -> r` (last component is the return), `(A,B)`/`(A,B,C)` →
+-- `Pair`/`Triple`, a value `Union(…)` erases to `Any`, and any other uppercase-leading name
+-- (a sum / struct, *or* the reference's verbatim parametric rendering) passes through as-is.
 ktParametric :: String -> String
 ktParametric t = case vecInner t of
   Just inner -> "List<" <> ktType inner <> ">"
-  Nothing -> case fnInner t of
-    Just inner -> ktFn inner
-    Nothing -> case tupleInner t of
-      Just inner -> ktTuple inner
-      Nothing -> unsafeCrashWith ("jvm: stage — type `" <> t <> "` (inc 7)")
+  Nothing -> case dictInner t of
+    Just inner -> ktDict inner
+    Nothing -> case fnInner t of
+      Just inner -> ktFn inner
+      Nothing -> case tupleInner t of
+        Just inner -> ktTuple inner
+        Nothing ->
+          if isUnion t then "Any"
+          else if startsUpper t then t
+          else unsafeCrashWith ("jvm: stage — type `" <> t <> "`")
 
 vecInner :: String -> Maybe String
 vecInner t = Str.stripPrefix (Str.Pattern "Vec(") t >>= Str.stripSuffix (Str.Pattern ")")
+
+dictInner :: String -> Maybe String
+dictInner t = Str.stripPrefix (Str.Pattern "Dict(") t >>= Str.stripSuffix (Str.Pattern ")")
+
+-- a `Dict(K, V)` (ADR-0047 map type) → a Kotlin `Map<K, V>` (an atom key lowers to `String`).
+ktDict :: String -> String
+ktDict inner = case TS.splitTopCommas inner of
+  [ k, v ] -> "Map<" <> ktType k <> ", " <> ktType v <> ">"
+  _ -> unsafeCrashWith ("jvm: a `Dict(" <> inner <> ")` type (needs exactly K, V)")
+
+isUnion :: String -> Boolean
+isUnion t = isJust (Str.stripPrefix (Str.Pattern "Union(") t)
 
 fnInner :: String -> Maybe String
 fnInner t = Str.stripPrefix (Str.Pattern "Fn(") t >>= Str.stripSuffix (Str.Pattern ")")
@@ -515,8 +531,10 @@ ktTuple inner = case TS.splitTopCommas inner of
   [ a, b, c ] -> "Triple<" <> ktType a <> ", " <> ktType b <> ", " <> ktType c <> ">"
   _ -> unsafeCrashWith ("jvm: a tuple type `(" <> inner <> ")` (Pair/Triple cover 2/3)")
 
-nominal :: String -> Boolean
-nominal t = not (Str.contains (Str.Pattern "(") t) && case CU.charAt 0 t of
+-- the type starts with an uppercase letter — a nominal type (a sum / struct, or the
+-- reference's verbatim parametric rendering, matching `kt_type`'s `^[A-Z]` fallback).
+startsUpper :: String -> Boolean
+startsUpper t = case CU.charAt 0 t of
   Just c -> c >= 'A' && c <= 'Z'
   Nothing -> false
 

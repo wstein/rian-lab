@@ -1140,9 +1140,15 @@ def f(c) := 0|,
   # a bounded-generic consumer (`forall T: Eq`) — the bound erases to `<T : Any>`, the call
   # goes through the dynamic dispatcher
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Int64 do\n  def eq(a, b) := a == b\nend\npub def member(x T, y T) Bool forall T: Eq := eq(x, y)",
-  # a protocol impl over a user sum type → an `is <Sum>` dispatcher arm (a var-head impl;
-  # a ctor-pattern impl head hits an unrelated PS `Protocol` param-type gap, not a JVM one)
-  "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(b) := 42\nend\npub def go(b Bag) Int64 := sz(b)"
+  # a protocol impl over a user sum type → an `is <Sum>` dispatcher arm (a var-head impl)
+  "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(b) := 42\nend\npub def go(b Bag) Int64 := sz(b)",
+  # ── ktType fidelity (review fix): `Dict(K,V)` → `Map<K,V>`, and the nominal `^[A-Z]` fallback ──
+  # a `Dict(K, V)` type → a Kotlin `Map<K, V>` (passthrough — map *operations* are a later increment)
+  "pub def passthru(d Dict(String, Int64)) Dict(String, Int64) := d",
+  # a ctor-pattern impl head: the reference synthesizes a corrupted param type `Bag(n)Bag`
+  # (a pre-existing Elixir JVM bug) and renders it verbatim via the `^[A-Z]` nominal fallback;
+  # the PS port now mirrors that byte-for-byte (NOT kotlinc-valid — excluded from the kotlinc gate)
+  "protocol Sz do\n  def sz(x Self) Int64\nend\ntype Bag := Bag(Int64)\nimpl Sz for Bag do\n  def sz(Bag(n)) := n\nend\npub def go(b Bag) Int64 := sz(b)"
 ]
 
 # Rian.Lower.rust_program — the `rustprog` stream: the WHOLE-PROGRAM Rust assembly (ADR-0061)
