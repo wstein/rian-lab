@@ -273,6 +273,12 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
   Empty literal segments (the lexer's trailing `{:lit, ""}`, and `""` between
   adjacent holes) are dropped; a single-part interpolation collapses to the bare
   value. The join is portable (no Reach blocker) and `Check` types it `String`.
+  The Rust emitter **bakes the literal segments into the `format!` template**
+  (`"Hello, ${name}!"` → `format!("Hello, {}!", name)`, not `format!("{}{}{}",
+  "Hello, ", name, "!")`) — braces in a literal are doubled (`{` → `{{`). This is a
+  *byte-identical* cosmetic peephole, distinct from the rejected hole-native path
+  (§6 above): the holes stay pre-stringified `{}` arguments (the `__prim_*`/`Show`
+  layer), so no stringification is delegated to Rust's `Display`.
 - **The stringify intrinsics.** `__prim_int_to_string` and `__prim_char_to_string`
   lower natively on all four emitters (int: `erlang:integer_to_binary` / `String(n)`
   / `n.to_string()` / `.toString()`; char: `<<cp/utf8>>` / `String.fromCodePoint` /

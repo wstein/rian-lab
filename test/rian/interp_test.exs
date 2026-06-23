@@ -228,9 +228,10 @@ defmodule Rian.InterpTest do
       assert node_eval(js, "greet(5)") in [:no_node, "n is 5!"]
     end
 
-    test "Rust lowers the join to a single `format!` (ADR-0069 §6)" do
+    test "Rust lowers the join to a single `format!`, baking literal parts (ADR-0069 §6)" do
       rs = Lower.to_rust(hd(Decl.parse(@src).funcs), [], %{})
-      assert rs =~ ~s|format!("{}{}{}", "n is ", n.to_string(), "!")|
+      # the literal segments are baked into the template, not passed as `{}` args
+      assert rs =~ ~s|format!("n is {}!", n.to_string())|
     end
   end
 

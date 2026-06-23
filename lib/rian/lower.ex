@@ -2750,6 +2750,31 @@ defmodule Rian.Lower do
 
   defp str_lit_cp(cp), do: <<cp::utf8>>
 
+  # a string-concatenation / interpolation join (ADR-0069) → one `format!`. A string-LITERAL part
+  # is baked into the template (so `"Hello, ${name}!"` → `format!("Hello, {}!", name)`, not the
+  # mechanical `format!("{}{}{}", "Hello, ", name, "!")`); a non-literal part stays a `{}` + an arg.
+  defp rust_format(args, ec) do
+    template = Enum.map_join(args, "", &fmt_part/1)
+
+    fmt_args =
+      args
+      |> Enum.reject(&match?(%EStr{}, &1))
+      |> Enum.map_join(", ", &p(&1, 0, :rust, ec))
+
+    args_part = if fmt_args == "", do: "", else: ", " <> fmt_args
+    ~s(format!(") <> template <> ~s(") <> args_part <> ")"
+  end
+
+  defp fmt_part(%EStr{value: s}), do: fmt_seg(s)
+  defp fmt_part(_), do: "{}"
+
+  # a literal segment for a `format!` template: per-codepoint string escaping (reusing `str_lit_cp`),
+  # but a literal brace is DOUBLED (`{` → `{{`) so `format!` reads it as text, not a placeholder.
+  defp fmt_seg(s), do: for(cp <- String.to_charlist(s), into: "", do: fmt_seg_cp(cp))
+  defp fmt_seg_cp(?{), do: "{{"
+  defp fmt_seg_cp(?}), do: "}}"
+  defp fmt_seg_cp(cp), do: str_lit_cp(cp)
+
   defp emit(%ENum{text: n}, _t, _ec), do: {n, 12}
   # string literal — same surface on both targets (Rust yields `&str`)
   defp emit(%EStr{value: s}, _t, _ec), do: {str_lit(s), 12}
@@ -2866,15 +2891,13 @@ defmodule Rian.Lower do
   defp emit(%ECall{fun: %EId{name: "__prim_int_to_float"}, args: [n]}, :elixir, ec),
     do: {"(#{p(n, 0, :elixir, ec)} * 1.0)", 12}
 
-  defp emit(%ECall{fun: %EId{name: "__prim_str_concat"}, args: [a, b]}, :rust, ec),
-    do: {"format!(\"{}{}\", #{p(a, 0, :rust, ec)}, #{p(b, 0, :rust, ec)})", 12}
+  defp emit(%ECall{fun: %EId{name: "__prim_str_concat"}, args: args}, :rust, ec),
+    do: {rust_format(args, ec), 12}
 
   # variadic single-shot join (ADR-0069 §6): one `format!` (Rust, one allocation),
   # one binary comprehension (Elixir). Every part is already a `String`.
   defp emit(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}, :rust, ec),
-    do:
-      {"format!(\"#{String.duplicate("{}", length(args))}\", " <>
-         Enum.map_join(args, ", ", &p(&1, 0, :rust, ec)) <> ")", 12}
+    do: {rust_format(args, ec), 12}
 
   defp emit(%ECall{fun: %EId{name: "__prim_str_concat_all"}, args: args}, :elixir, ec),
     do: {"<<" <> Enum.map_join(args, ", ", &(p(&1, 0, :elixir, ec) <> "::binary")) <> ">>", 12}

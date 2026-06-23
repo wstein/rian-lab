@@ -920,11 +920,9 @@ emit ec (ECall (EId "__prim_to_string") [ x ]) = Tuple ("format!(\"{}\", " <> p 
 emit ec (ECall (EId "__prim_float_repr") [ n ]) = Tuple ("format!(\"{:e}\", " <> p ec 0 n <> ")") 12
 emit ec (ECall (EId "__prim_int_to_float") [ n ]) = Tuple ("(" <> p ec 12 n <> " as f64)") 12
 emit ec (ECall (EId "__prim_panic") [ msg ]) = Tuple ("panic!(\"{}\", " <> p ec 0 msg <> ")") 12
-emit ec (ECall (EId "__prim_str_concat") [ a, b ]) =
-  Tuple ("format!(\"{}{}\", " <> p ec 0 a <> ", " <> p ec 0 b <> ")") 12
+emit ec (ECall (EId "__prim_str_concat") args) = Tuple (rustFormat ec args) 12
 -- variadic single-shot join (ADR-0069 §6): one `format!`, one allocation; every part is a `String`.
-emit ec (ECall (EId "__prim_str_concat_all") args) =
-  Tuple ("format!(\"" <> foldMap (const "{}") args <> "\", " <> joinWith ", " (map (p ec 0) args) <> ")") 12
+emit ec (ECall (EId "__prim_str_concat_all") args) = Tuple (rustFormat ec args) 12
 -- `Map(K, V)` prims (ADR-0047) → Rust `HashMap` ops. A `val` map/key/value is a borrow, so `get`
 -- clones the value out (`.cloned().unwrap()`), `put` builds a fresh owned map (clone + insert cloned
 -- key/value — a functional update matching BEAM/JS), `new`/`has` map directly. `K: Eq + Hash` is
@@ -1168,6 +1166,39 @@ strLitCp cp =
     else if n == 9 then "\\t"
     else if n < 0x20 || n == 0x7F then "\\u{" <> toUpper (Int.toStringAs Int.hexadecimal n) <> "}"
     else CP.singleton cp
+
+-- a string-concatenation / interpolation join (ADR-0069) → one `format!`. A string-LITERAL part is
+-- baked into the template (`"Hello, ${name}!"` → `format!("Hello, {}!", name)`, not the mechanical
+-- `format!("{}{}{}", "Hello, ", name, "!")`); a non-literal part stays a `{}` placeholder + an arg.
+rustFormat :: Ec -> Array CExpr -> String
+rustFormat ec args =
+  let
+    template = foldMap fmtPart args
+    fmtArgs = mapMaybe (argPart ec) args
+    argsPart = if null fmtArgs then "" else ", " <> joinWith ", " fmtArgs
+  in
+    "format!(\"" <> template <> "\"" <> argsPart <> ")"
+
+-- a part's template contribution: a string LITERAL is baked, any other part is a `{}` placeholder.
+fmtPart :: CExpr -> String
+fmtPart (EStr s) = fmtSeg s
+fmtPart _ = "{}"
+
+-- a part's `format!` argument: only the non-literal parts (the baked literals carry no arg).
+argPart :: Ec -> CExpr -> Maybe String
+argPart _ (EStr _) = Nothing
+argPart ec a = Just (p ec 0 a)
+
+-- a literal segment for a `format!` template: per-codepoint string escaping (reusing `strLitCp`), but
+-- a literal brace is DOUBLED (`{` → `{{`) so `format!` reads it as text, not a placeholder.
+fmtSeg :: String -> String
+fmtSeg s = foldMap fmtSegCp (CP.toCodePointArray s)
+
+fmtSegCp :: CP.CodePoint -> String
+fmtSegCp cp = case fromEnum cp of
+  0x7B -> "{{"
+  0x7D -> "}}"
+  _ -> strLitCp cp
 
 -- a Unicode codepoint as a Rust `char` literal, escaping the specials.
 rustCharLit :: Int -> String

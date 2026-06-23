@@ -14,7 +14,7 @@
         "ex": "defmodule Hello do\ndef main() do name = \"Rian\"; <<\"Hello, \"::binary, name::binary, \"!\"::binary>> end\nend",
         "js": "export function main() { let name = \"Rian\"; return (\"Hello, \" + name + \"!\"); }",
         "jvm": "fun main(): String {\n  return run { val name = \"Rian\"; (\"Hello, \" + name + \"!\") }\n}",
-        "rs": "mod hello {\npub fn main() -> String {\n    match () {\n        () => ({ let name = \"Rian\".to_string(); format!(\"{}{}{}\", \"Hello, \", name, \"!\") }).to_string(),\n    }\n}\n}"
+        "rs": "mod hello {\npub fn main() -> String {\n    match () {\n        () => ({ let name = \"Rian\".to_string(); format!(\"Hello, {}!\", name) }).to_string(),\n    }\n}\n}"
       },
       "reach": {
         "main": [
@@ -176,7 +176,7 @@
         "ex": "def greet(name, age) do <<\"hi \"::binary, name::binary, \", you are \"::binary, Integer.to_string(age)::binary>> end",
         "js": "function greet(name, age) { return (\"hi \" + name + \", you are \" + String(age)); }",
         "jvm": "private fun greet(a0: String, a1: Long): String {\n  val name = a0; val age = a1; return (\"hi \" + name + \", you are \" + (age).toString())\n}",
-        "rs": "fn greet(name: &str, age: i64) -> String {\n    match (name, age) {\n        (name, age) => (format!(\"{}{}{}{}\", \"hi \", name, \", you are \", age.to_string())).to_string(),\n    }\n}"
+        "rs": "fn greet(name: &str, age: i64) -> String {\n    match (name, age) {\n        (name, age) => (format!(\"hi {}, you are {}\", name, age.to_string())).to_string(),\n    }\n}"
       },
       "reach": {
         "greet": [
