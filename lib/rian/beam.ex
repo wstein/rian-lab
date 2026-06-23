@@ -234,7 +234,7 @@ defmodule Rian.Beam do
             top ++ Map.get(m, :ranges, []),
             Map.get(m, :types, []),
             Map.get(m, :structs, []),
-            ic_with_consts(prog, Map.get(m, :consts, []))
+            ic_mod(prog, m)
           )
 
         {atom, bin}
@@ -261,7 +261,7 @@ defmodule Rian.Beam do
             top,
             Map.get(prog, :types, []),
             Map.get(prog, :structs, []),
-            ic_with_consts(prog, Map.get(prog, :consts, []))
+            ic_top(prog)
           )
 
         [{atom, bin} | mod_beams]
@@ -347,7 +347,7 @@ defmodule Rian.Beam do
             top ++ Map.get(m, :ranges, []),
             Map.get(m, :types, []),
             Map.get(m, :structs, []),
-            ic_with_consts(prog, Map.get(m, :consts, []))
+            ic_mod(prog, m)
           )
 
         {atom, bin}
@@ -374,7 +374,7 @@ defmodule Rian.Beam do
             top,
             Map.get(prog, :types, []),
             Map.get(prog, :structs, []),
-            ic_with_consts(prog, Map.get(prog, :consts, []))
+            ic_top(prog)
           )
 
         [{atom, bin} | mod_beams]
@@ -665,6 +665,15 @@ defmodule Rian.Beam do
         :__tinfo,
         {Map.get(ic, :tinfo_sums, %{}), Map.get(ic, :tinfo_structs, MapSet.new())}
       )
+      # `use Path.(names)` unqualified imports for this module — an unqualified call to
+      # one resolves to `Elixir.Path.<name>` (ADR-0033); a `__`-key never collides with a var.
+      |> Map.put(:__imports, Map.get(ic, :use_imports, %{}))
+      # the whole-program function→module map, this module's own functions, and which
+      # module is being emitted — so an unqualified call to a function in *another*
+      # module raises a clear error instead of a cryptic `undefined_function`.
+      |> Map.put(:__funmods, Map.get(ic, :fun_modules, %{}))
+      |> Map.put(:__self, Map.get(ic, :self_module))
+      |> Map.put(:__selffuns, Map.get(ic, :self_funs, MapSet.new()))
 
     # the per-clause typing env (params narrowed by the head patterns) lets us emit
     # from the **typed** core IR: every node carries its inferred type (ADR-0050 §3).
@@ -967,11 +976,32 @@ defmodule Rian.Beam do
 
   defp expr_form(%ECall{fun: %EId{name: f}, args: args}, s) do
     arg_forms = Enum.map(args, &expr_form(&1, s))
+    arity = length(arg_forms)
+    home = Map.get(Map.get(s, :__funmods, %{}), {f, arity})
 
     cond do
-      pascal?(f) -> {:tuple, @ln, [{:atom, @ln, tag(f)} | arg_forms]}
-      Map.has_key?(s, f) -> {:call, @ln, {:var, @ln, Map.fetch!(s, f)}, arg_forms}
-      true -> {:call, @ln, {:atom, @ln, String.to_atom(f)}, arg_forms}
+      pascal?(f) ->
+        {:tuple, @ln, [{:atom, @ln, tag(f)} | arg_forms]}
+
+      Map.has_key?(s, f) ->
+        {:call, @ln, {:var, @ln, Map.fetch!(s, f)}, arg_forms}
+
+      # a `use Path.(names)` unqualified import → a remote call to `Elixir.Path` (the
+      # name is not a local var and not the module's own function, ADR-0033).
+      Map.has_key?(Map.get(s, :__imports, %{}), f) ->
+        {:call, @ln,
+         {:remote, @ln, {:atom, @ln, Map.fetch!(Map.get(s, :__imports, %{}), f)},
+          {:atom, @ln, String.to_atom(f)}}, arg_forms}
+
+      # an unqualified call to a program function defined in *another* module (not
+      # this module's own, not a `use`-import) — refuse with a clear message rather
+      # than emit a local call that `:compile.forms` rejects as `undefined_function`.
+      home != nil and home != Map.get(s, :__self) and
+          not MapSet.member?(Map.get(s, :__selffuns, MapSet.new()), {f, arity}) ->
+        raise(Unsupported, cross_mod_msg(f, arity, home))
+
+      true ->
+        {:call, @ln, {:atom, @ln, String.to_atom(f)}, arg_forms}
     end
   end
 
@@ -1366,6 +1396,74 @@ defmodule Rian.Beam do
       pascal?(m) -> :"Elixir.#{m}"
       true -> String.to_atom(m)
     end
+  end
+
+  # the unqualified-import map for a `mod`: each `use Path.(names)` (ADR-0033) makes
+  # those names callable unqualified, resolving to `Elixir.Path`; a name the mod
+  # defines locally is excluded (a local `def` shadows an import). `use Path` with no
+  # names is qualified-only (`Path.fun`), so it imports nothing unqualified.
+  defp mod_imports(m) do
+    local = MapSet.new(Map.get(m, :funcs, []), & &1.name)
+
+    for %{path: p, names: ns} <- Map.get(m, :uses, []),
+        n <- ns,
+        not MapSet.member?(local, n),
+        into: %{},
+        do: {n, :"Elixir.#{p}"}
+  end
+
+  # `{name, arity} => module_atom` for every function in the program — a `mod`'s funcs
+  # load as `Elixir.<Mod>`, the top-level funcs as `Elixir.RianCompiled`. Lets the
+  # emitter give a clear error when a body makes an unqualified call to a function in a
+  # *different* module (it must qualify or `use` it), instead of a cryptic
+  # `undefined_function` from `:compile.forms`.
+  defp fun_modules(prog) do
+    top =
+      for f <- Map.get(prog, :funcs, []),
+          into: %{},
+          do: {{f.name, length(f.params)}, :"Elixir.RianCompiled"}
+
+    Enum.reduce(Map.get(prog, :mods, []), top, fn m, acc ->
+      Enum.reduce(m.funcs, acc, fn f, a ->
+        Map.put(a, {f.name, length(f.params)}, :"Elixir.#{m.name}")
+      end)
+    end)
+  end
+
+  defp fun_arities(funcs), do: MapSet.new(funcs, &{&1.name, length(&1.params)})
+
+  # the per-module emit context: consts + this module's unqualified imports, own
+  # function set (own funcs shadow a same-name function in another module), the
+  # whole-program function→module map, and which module is being emitted.
+  defp ic_mod(prog, m) do
+    ic_with_consts(prog, Map.get(m, :consts, []))
+    |> Map.merge(%{
+      use_imports: mod_imports(m),
+      fun_modules: fun_modules(prog),
+      self_module: :"Elixir.#{m.name}",
+      self_funs: fun_arities(m.funcs)
+    })
+  end
+
+  defp ic_top(prog) do
+    ic_with_consts(prog, Map.get(prog, :consts, []))
+    |> Map.merge(%{
+      fun_modules: fun_modules(prog),
+      self_module: :"Elixir.RianCompiled",
+      self_funs: fun_arities(Map.get(prog, :funcs, []))
+    })
+  end
+
+  defp cross_mod_msg(f, arity, :"Elixir.RianCompiled"),
+    do:
+      "`#{f}/#{arity}` is a top-level function, not visible unqualified inside a `mod` — " <>
+        "move it into a module and `use` it, or call it from the top level"
+
+  defp cross_mod_msg(f, arity, home) do
+    mod = home |> Atom.to_string() |> String.replace_prefix("Elixir.", "")
+
+    "`#{f}/#{arity}` is defined in module `#{mod}` — call it qualified (`#{mod}.#{f}(…)`) " <>
+      "or import it (`use #{mod}.(#{f})`)"
   end
 
   # `(fun (S) -> project(S) end)(A + B)` — bind the bignum sum once, then project

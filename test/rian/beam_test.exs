@@ -609,6 +609,37 @@ defmodule Rian.BeamTest do
       assert apply(RianCompiled, :main, []) == 42
     end
 
+    test "`use Mod.(name)` makes an unqualified cross-module call resolve (ADR-0033)" do
+      mods =
+        Beam.load_program(
+          "mod Std do\n  pub def helper(n Int53) Int53 := n + 1\nend\n\n" <>
+            "mod M do\n  use Std.(helper)\n  pub def go(n Int53) Int53 := helper(n)\nend"
+        )
+
+      # `helper(n)` inside `M` resolves to `Elixir.Std.helper`, not a (missing) local
+      assert apply(M, :go, [5]) == 6
+    end
+
+    test "an unqualified cross-module call WITHOUT `use` is refused with a clear error" do
+      # mod->mod: name a module to qualify or `use`.
+      assert_raise Rian.Beam.Unsupported,
+                   ~r/defined in module `N`.*N\.base.*use N\.\(base\)/s,
+                   fn ->
+                     Beam.load_program(
+                       "mod N do\n  pub def base(n Int53) Int53 := n + 1\nend\n\n" <>
+                         "mod M do\n  pub def go(n Int53) Int53 := base(n)\nend"
+                     )
+                   end
+
+      # mod->top-level: a top-level def is not visible unqualified inside a `mod`.
+      assert_raise Rian.Beam.Unsupported, ~r/top-level function, not visible unqualified/, fn ->
+        Beam.load_program(
+          "def helper(n Int53) Int53 := n + 1\n\n" <>
+            "mod M do\n  pub def go(n Int53) Int53 := helper(n)\nend"
+        )
+      end
+    end
+
     test "the whole calc compiler in ONE Rian module: source string -> value on bytecode" do
       {:ok, calc} = Beam.load(File.read!("test/fixtures/rian/calc.rian"), :rian_beam_calc)
 
