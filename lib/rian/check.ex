@@ -919,6 +919,7 @@ defmodule Rian.Check do
          :ok <- check_binds(f, ic),
          :ok <- check_bounds(f, ic),
          :ok <- check_numeric_mix(f, ic),
+         :ok <- check_call_args(f, ic),
          :ok <- check_value_position(f),
          :ok <- check_effects(f, eset),
          do: check_error_set(f, eset)
@@ -1165,6 +1166,102 @@ defmodule Rian.Check do
   defp num_mix?(:float, k) when k in [:int, :uint], do: true
   defp num_mix?(k, :float) when k in [:int, :uint], do: true
   defp num_mix?(_, _), do: false
+
+  # Every call to a known program function — a local `f(...)` or a module-flattened
+  # `Mod.f(...)` (the BEAM keys calls by `{name, arity}`) — has its arguments checked
+  # against the callee's declared parameter types. This closes the boundary where an
+  # `@external` (no body to check) — and in fact *any* signature — silently erased
+  # argument checking, so `puts(2+1)` against `def puts(s String)` is now a proven
+  # mismatch (ADR-0068/0034). Conservative and consistent with `check_return`: a
+  # numeric literal argument adopts the parameter's width (and is range-checked); a
+  # generic/`Any`/`_Unk`/unannotated parameter or an `:unknown` argument is skipped, so
+  # only a *provable* clash errors — never valid code. Foreign/host callees (not in
+  # `:fsigs`) are not Rian functions and are left to the target, as before.
+  defp check_call_args(%Func{params: ps, clauses: clauses}, ic) do
+    Enum.find_value(clauses, :ok, fn c ->
+      case scan_calls(Pratt.parse_body(c.body), clause_env(c.pats, ps, ic), ic) do
+        nil -> :ok
+        v -> v
+      end
+    end)
+  end
+
+  defp scan_calls({:call, callee, args} = node, env, ic) do
+    case call_args_error(callee, args, env, ic) do
+      nil -> scan_calls_children(node, env, ic)
+      v -> v
+    end
+  end
+
+  defp scan_calls(node, env, ic) when is_tuple(node), do: scan_calls_children(node, env, ic)
+
+  defp scan_calls(list, env, ic) when is_list(list),
+    do: Enum.find_value(list, nil, &scan_calls(&1, env, ic))
+
+  defp scan_calls(_other, _env, _ic), do: nil
+
+  defp scan_calls_children(node, env, ic),
+    do: node |> Tuple.to_list() |> Enum.find_value(nil, &scan_calls(&1, env, ic))
+
+  defp call_args_error(callee, args, env, ic) do
+    with name when is_binary(name) <- call_leaf_name(callee),
+         %{params: pts, tvars: tvars} <- Map.get(Map.get(ic, :fsigs, %{}), {name, length(args)}) do
+      pts
+      |> Enum.zip(args)
+      |> Enum.find_value(nil, fn {pt, arg} -> arg_type_error(name, pt, arg, tvars, env, ic) end)
+    else
+      _ -> nil
+    end
+  end
+
+  # the bare leaf name a callable position resolves to, for the `{name, arity}` sig
+  # lookup: a local `f` or a module-qualified `Mod.f` (both flatten to the leaf, as
+  # the BEAM keys calls). Anything else (a lambda result, an atom-module BIF) names
+  # no program signature → `:no` (not checked here). Distinct from `callee_name/1`,
+  # which builds the dotted *display* name for messages.
+  defp call_leaf_name({:id, n}), do: n
+  defp call_leaf_name({:dot, _head, n}), do: n
+  defp call_leaf_name(_), do: :no
+
+  defp arg_type_error(name, pt, arg, tvars, env, ic) do
+    cond do
+      # not a checkable parameter: unannotated, the dynamic top (`Any`), a protocol
+      # `Self`, a generic tvar, or an unresolved `_Unk` hole.
+      is_nil(pt) or pt in ["Any", "Self"] or generic_ret?(pt, tvars) or has_unk?(pt) ->
+        nil
+
+      # a constant numeric literal argument adopts the parameter's width — but must
+      # FIT its range (`take(xs, 999)` into `n UInt8` is rejected), mirroring how a
+      # literal return body is handled (`body_literal_adopts?`).
+      lit_expr_adopts?(arg, pt) ->
+        lit_range_error(arg, pt, name)
+
+      true ->
+        at = infer(arg, env, ic)
+
+        # Only a clash between two *fully concrete* types is a proven mismatch
+        # (CLAUDE.md conservative bar). An argument inferred as `Self`, a bare tvar,
+        # or anything carrying `Any`/`_Unk` is underspecified — it flows wherever the
+        # context needs, so it is never rejected here.
+        if soft_type?(at) or assignable?(at, pt) do
+          nil
+        else
+          {:error,
+           "`#{name}`: argument has type `#{at}` but the parameter is declared `#{pt}` — " <>
+             "no implicit conversion (ADR-0068/0034). Convert at the call site, or widen the " <>
+             "parameter type."}
+        end
+    end
+  end
+
+  # an inferred type too underspecified to prove a clash against a concrete parameter.
+  defp soft_type?(:unknown), do: true
+  defp soft_type?("Self"), do: true
+
+  defp soft_type?(t) when is_binary(t),
+    do: tvar?(t) or has_unk?(t) or String.contains?(t, "Any") or String.contains?(t, "Self")
+
+  defp soft_type?(_), do: false
 
   # Labeled arguments (`name: value`) are valid ONLY in struct/variant *construction*
   # — a PascalCase constructor callee (ADR-0043 / types-match §2). On a plain

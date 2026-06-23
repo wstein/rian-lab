@@ -1080,7 +1080,7 @@ fillLocalRetsSexpr src =
 --------------------------------------------------------------------------------
 
 -- | The compile-time gate: the first function that fails a check (`Just message`), else `Nothing`
--- | (`:ok`). Runs all 11 of the reference `check_func` checks in order so the first-error message
+-- | (`:ok`). Runs all 12 of the reference `check_func` checks in order so the first-error message
 -- | matches: `check_unk` → `check_external_caps` → `check_labels` → `check_union_clash` → return-
 -- | assignability → `check_binds` → `check_bounds` → `check_numeric_mix` → `check_value_position` →
 -- | `check_effects` → error sets (ADR-0040). `check_binds` carries the full literal-width-adoption +
@@ -1112,6 +1112,7 @@ checkProgram prog = findMap checkFunc funcs
     , \_ -> checkBinds ic f
     , \_ -> checkBounds ic f
     , \_ -> checkNumericMix ic f
+    , \_ -> checkCallArgs ic f
     , \_ -> checkValuePosition f
     , \_ -> checkEffects effects f
     , \_ -> checkErrorSet tsets table f
@@ -1603,6 +1604,65 @@ numMix _ _ = false
 -- `infer(Core.from_expr(ast), …)`; the body is walked un-normalized, as the reference does).
 inferSurf :: Env -> Ic -> P.Surface -> Ty
 inferSurf env ic s = infer (fromExpr s) env ic
+
+-- Every call to a known program function — a local `f(...)` or a module-flattened `Mod.f(...)` —
+-- has its arguments checked against the callee's declared parameter types. This closes the boundary
+-- where an `@external` (no body to check), and in fact any signature, silently erased argument
+-- checking, so `puts(2+1)` against `def puts(s String)` is now a proven mismatch (ADR-0068/0034).
+-- Conservative and consistent with `checkReturn`: a numeric literal argument adopts the parameter's
+-- width (and is range-checked); a generic/`Any`/`Self`/`_Unk`/unannotated parameter or an
+-- underspecified argument is skipped — only a fully-concrete clash errors.
+checkCallArgs :: Ic -> Func -> Maybe String
+checkCallArgs ic f = findMap clauseErr f.clauses
+  where
+  clauseErr c = maybe Nothing (\b -> scanCalls (clauseEnv c.pats f.params ic) ic (bodySurface b)) c.body
+
+scanCalls :: Env -> Ic -> P.Surface -> Maybe String
+scanCalls env ic node = case node of
+  P.SCall callee args -> case callArgsError env ic callee args of
+    Just msg -> Just msg
+    Nothing -> findMap (scanCalls env ic) (childrenOf node)
+  _ -> findMap (scanCalls env ic) (childrenOf node)
+
+-- the bare leaf name a callable position resolves to, for the `{name, arity}` sig lookup.
+callLeafName :: P.Surface -> Maybe String
+callLeafName (P.SId n) = Just n
+callLeafName (P.SDot _ n) = Just n
+callLeafName _ = Nothing
+
+callArgsError :: Env -> Ic -> P.Surface -> Array P.Surface -> Maybe String
+callArgsError env ic callee args = case callLeafName callee of
+  Nothing -> Nothing
+  Just name -> case find (\(Tuple k _) -> k == Tuple name (length args)) ic.fsigs of
+    Nothing -> Nothing
+    Just (Tuple _ sig) ->
+      findMap (\(Tuple pt arg) -> argTypeError env ic name sig.tvars pt arg) (zip sig.params args)
+
+argTypeError :: Env -> Ic -> String -> Array String -> Maybe String -> P.Surface -> Maybe String
+argTypeError _ _ _ _ Nothing _ = Nothing
+argTypeError env ic name tvars (Just pt) arg
+  | pt == "Any" || pt == "Self" || genericRet pt tvars || Str.contains (Str.Pattern "_Unk") pt = Nothing
+  | litExprAdopts arg pt = litRangeError arg pt name
+  | otherwise =
+      let
+        at = inferSurf env ic arg
+      in
+        if softType at || assignable at (TName pt) then Nothing
+        else Just
+          ( "`" <> name <> "`: argument has type `" <> tyStr at <> "` but the parameter is declared `"
+              <> pt
+              <> "` — no implicit conversion (ADR-0068/0034). Convert at the call site, or widen the parameter type."
+          )
+
+-- an inferred type too underspecified to prove a clash against a concrete parameter.
+softType :: Ty -> Boolean
+softType Unknown = true
+softType (TName "Self") = true
+softType (TName s) =
+  isTvar s || Str.contains (Str.Pattern "_Unk") s || Str.contains (Str.Pattern "Any") s
+    || Str.contains (Str.Pattern "Self") s
+
+softType _ = false
 
 -- At each call to a bounded generic (`def f(x T) … forall T: P`), the type its bound's tvar is
 -- instantiated to must have the required `impl` (ADR-0042 §2). Conservative — an `:unknown` or

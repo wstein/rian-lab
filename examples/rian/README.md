@@ -7,6 +7,9 @@ idiomatic **Elixir/BEAM**, ownership-checked **Rust**, **ECMAScript**, and
 reaches the subset its features allow — not every example reaches all four, and
 that is the point (see [15_targets.rian](15_targets.rian)).
 
+The classic first program is [hello.rian](hello.rian) — `def main() := …`, run with
+`mix rian.run examples/rian/hello.rian`.
+
 > **Status — read this first.** These files use the **ADR-0033 surface** (`def`,
 > `case`, juxtaposed types, `Int53` as the portable default integer). The
 > [`Rian.Decl`](../../lib/rian/decl.ex) front-end now parses most of this surface,
@@ -195,6 +198,15 @@ Rian and compile + run on real BEAM bytecode:
   `Fail("expected 42, got 41")`, formatted via interpolation, ADR-0069); `Rian.Test`
   surfaces that message on every target. `contain` (membership) stays deferred — it needs
   the `List` prelude linked, like `assert_in`.
+
+- [prelude_io.rian](prelude_io.rian) — **`Console`, per-target host console output
+  (ADR-0068).** Console output is a side effect with no *portable* contract, so —
+  unlike the pure `Str`/`List`/`Dict` preludes over `Prim.*` — this is a thin set of
+  `@external` wrappers, one host body per target (`Console.puts`/`Console.print` →
+  `IO.puts`/`console.log`). A target with a body reaches it (`:ex`/`:js`); `:rs`/`:jvm`
+  are honestly *off* (their console calls return unit, not the `Symbol` result) until
+  the wrapper shape is settled — `Rian.Reach` reports the gap rather than emitting code
+  the backend rejects. Carries `@effects(host, io)`.
 
 ### Function body forms
 

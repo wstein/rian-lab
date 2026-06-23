@@ -145,6 +145,53 @@ defmodule Rian.CheckTest do
     end
   end
 
+  describe "call-site argument checking (ADR-0068/0034 — the external boundary stops erasing checks)" do
+    test "an @external no longer erases the check — `puts(2+1)` into a String param is rejected" do
+      src = """
+      @external(:ex, "IO.puts(s)")
+      @external(:js, "console.log(s)")
+      def puts(s String) Symbol
+
+      def main() := puts(2 + 1)
+      """
+
+      assert {:error, msg} = Check.check(src)
+      assert msg =~ "argument has type `Int53`"
+      assert msg =~ "parameter is declared `String`"
+    end
+
+    test "the same hole on an ordinary (non-external) function is also closed" do
+      assert {:error, msg} =
+               Check.check("def f(s String) String := s\ndef g() String := f(2 + 1)")
+
+      assert msg =~ "parameter is declared `String`"
+    end
+
+    test "a correctly-typed argument passes" do
+      assert Check.check("def f(s String) String := s\ndef g() String := f(\"hi\")") == :ok
+    end
+
+    test "a numeric literal adopts the parameter width — no false positive" do
+      assert Check.check("def f(n Int) Int := n\ndef g() Int := f(3)") == :ok
+      assert Check.check("def f(n Int8) Int8 := n\ndef g() Int8 := f(3)") == :ok
+    end
+
+    test "an out-of-range literal argument is rejected (adopts the width, then range-checks)" do
+      assert {:error, msg} = Check.check("def f(n Int8) Int8 := n\ndef g() Int8 := f(9999)")
+      assert msg =~ "out of range"
+    end
+
+    test "a generic parameter accepts any argument (Self/tvar args are skipped — conservative)" do
+      assert Check.check("def id(x T) T forall T := x\ndef g() String := id(\"hi\")") == :ok
+    end
+
+    test "an opaque (FFI-typed) argument is :unknown, not a provable clash — accepted" do
+      assert Check.check(
+               "def f(s String) String := s\ndef g(xs val Vec(Int64)) String := f(:lists.last(xs))"
+             ) == :ok
+    end
+  end
+
   describe "typed bindings (ADR-0034 §1)" do
     test "a numeric literal adopts the declared width" do
       assert Check.check("def f(n Int64) Int64 := x Int32 := 66 ; n") == :ok
