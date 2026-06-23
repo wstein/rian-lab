@@ -129,6 +129,29 @@ defmodule Rian.InterpTest do
       assert m.greet(%{__struct__: :P, name: "Ann", age: 30}) == "Ann is 30"
     end
 
+    test "a value-union arm hole resolves by the MATCHED member type, keeping the fn :rs-portable (ADR-0083 narrowing)" do
+      # `${n}` inside the `n Int53` arm must resolve by the *member* type (`__prim_int_to_string`,
+      # portable to every target) — not the `__prim_to_string` runtime-`Show` fallback, which has
+      # no Rust `Display` and would pin `show` off `:rs`. Regression guard for the `pat_bindings`
+      # narrowing fix (ADR-0069 §4 + ADR-0083).
+      src = ~S"""
+      def show(x String | Int53) String := case x do
+        s String -> s
+        n Int53 -> "n=${n}"
+      end
+      """
+
+      reach =
+        Rian.Decl.parse(src)
+        |> Rian.Reach.analyze()
+        |> Enum.find_value(fn {k, %{reach: r}} -> if k == "show/1", do: r end)
+
+      assert :rs in reach
+      {:ok, m} = Beam.load(src, :interp_union_narrow)
+      assert m.show(7) == "n=7"
+      assert m.show("hi") == "hi"
+    end
+
     test "interpolation resolves across modules (program-wide ic, ADR-0069)" do
       # `mod B`'s hole references `mod A`'s struct field and function — resolvable because
       # interpolation runs as a program-wide pass, not per-module.

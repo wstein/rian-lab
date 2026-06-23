@@ -22,7 +22,11 @@ defmodule Rian.Interp do
   `def tag(s) := s <> "!"` resolves to `String` without an explicit return type. And
   the resolver is **scope-aware** — a hole inside a `case` arm or after a block `:=`
   bind sees those names typed (an arm pattern binds against the scrutinee's type),
-  the same env-threading `Rian.Check.annotate` does:
+  the same env-threading `Rian.Check.annotate` does. In particular a **value-union
+  type-pattern** (`n Int53 ->`, ADR-0083) binds the binder to the *matched member*
+  type, so `${n}` resolves by that member (`__prim_int_to_string`, portable to every
+  target) — not the `__prim_to_string` runtime-`Show` fallback, which has no Rust
+  `Display` and would pin the function off `:rs`:
 
     * `String`            → the value itself (identity)
     * `Int`/`Int*`/`UInt*`→ `__prim_int_to_string(value)` (lowered natively per target)
@@ -139,6 +143,14 @@ defmodule Rian.Interp do
   defp pat_bindings({:var, x}, st), do: %{x => st}
   defp pat_bindings({:as, x, pat}, st), do: Map.put(pat_bindings(pat, :unknown), x, st)
   defp pat_bindings({:bind, x, pat}, st), do: Map.put(pat_bindings(pat, :unknown), x, st)
+
+  # a value-union type-pattern `name Type` (ADR-0083) binds `name` to the MATCHED member
+  # type, not the scrutinee's (union) type — mirroring `Rian.Check.narrow(%PTyped{})`. This
+  # is what lets a hole inside a union arm (`n Int53 -> "${n}"`) resolve by the concrete
+  # member (`__prim_int_to_string`, portable to every target) instead of the `__prim_to_string`
+  # runtime-`Show` fallback (which pins the function off `:rs`). (ADR-0069 §4 + ADR-0083.)
+  defp pat_bindings({:typed, name, tname}, _st), do: %{name => tname}
+  defp pat_bindings({:typed, name, tname, _disc}, _st), do: %{name => tname}
 
   defp pat_bindings(pat, _st) when is_tuple(pat),
     do: pat |> Tuple.to_list() |> Enum.reduce(%{}, &Map.merge(&2, pat_bindings(&1, :unknown)))
