@@ -1,6 +1,33 @@
 {
   "cells": [
     {
+      "blurb": "A `mod`, an entry `main`, a single-assignment bind, and a `${…}` interpolation hole. The Lab runs the emitted JS in a sandbox and shows `main()`'s value — here the greeting string the program returns.",
+      "covers": [
+        "mod",
+        "main",
+        ":=",
+        "${…}"
+      ],
+      "file": "hello.rian",
+      "id": "hello",
+      "panes": {
+        "ex": "defmodule Hello do\ndef main() do name = \"Rian\"; <<\"Hello, \"::binary, name::binary, \"!\"::binary>> end\nend",
+        "js": "export function main() { let name = \"Rian\"; return (\"Hello, \" + name + \"!\"); }",
+        "jvm": "fun main(): String {\n  return run { val name = \"Rian\"; (\"Hello, \" + name + \"!\") }\n}",
+        "rs": "mod hello {\npub fn main() -> String {\n    match () {\n        () => ({ let name = \"Rian\".to_string(); format!(\"{}{}{}\", \"Hello, \", name, \"!\") }).to_string(),\n    }\n}\n}"
+      },
+      "reach": {
+        "main": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "source": "# a module, an entry `main`, a single-assignment bind, and a `${…}` hole\nmod Hello do\n  pub def main() String := name := \"Rian\" ; \"Hello, ${name}!\"\nend",
+      "title": "Hello, Rian!"
+    },
+    {
       "blurb": "Rian is expression-oriented and `:=` is single-assignment. A typed head is the type boundary; the body is the value.",
       "covers": [
         "def",

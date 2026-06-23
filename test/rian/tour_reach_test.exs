@@ -20,7 +20,7 @@ defmodule Rian.TourReachTest do
   describe "#@pane files (the minimal site-pane sources)" do
     test "all pane files are tagged, minimal, and emit to four targets" do
       assert Examples.check_panes!() == :ok
-      assert length(Examples.pane_files()) == 6
+      assert length(Examples.pane_files()) == 7
     end
 
     test "pane_source/1 returns the source with the `#@pane` tag stripped" do

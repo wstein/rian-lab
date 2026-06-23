@@ -90,7 +90,8 @@ export function runInSandbox(jsModule: string, timeoutMs = 4000): Promise<RunRes
       "(async () => { let r; try {" +
       "  const url = URL.createObjectURL(new Blob([code], { type: 'text/javascript' }));" +
       "  const mod = await import(url);" +
-      "  if (typeof mod.main === 'function') r = { ok: true, text: 'main() = ' + JSON.stringify(mod.main()) };" +
+      "  if (typeof mod.main === 'function') { const v = mod.main();" +
+      "    r = { ok: true, text: typeof v === 'string' ? v : 'main() = ' + JSON.stringify(v) }; }" +
       "  else r = { ok: true, text: 'module loaded · exports: ' + Object.keys(mod).join(', ') + ' (define `main()` to see a value)' };" +
       "} catch (e) { r = { ok: false, text: String((e && e.message) || e) }; }" +
       "  parent.postMessage({ __rian: true, r }, '*'); })();" +

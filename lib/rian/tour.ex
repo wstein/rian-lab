@@ -38,6 +38,16 @@ defmodule Rian.Tour do
   # `Rian.Tour.Examples.check_panes!/0` (≤15 lines, emits to all four targets).
   @cells [
     %{
+      id: "hello",
+      title: "Hello, Rian!",
+      file: "hello.rian",
+      blurb:
+        "A `mod`, an entry `main`, a single-assignment bind, and a `${…}` " <>
+          "interpolation hole. The Lab runs the emitted JS in a sandbox and shows " <>
+          "`main()`'s value — here the greeting string the program returns.",
+      covers: ["mod", "main", ":=", "${…}"]
+    },
+    %{
       id: "basics",
       title: "The basics",
       file: "twice.rian",
