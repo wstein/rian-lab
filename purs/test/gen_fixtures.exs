@@ -1107,7 +1107,14 @@ def f(c) := 0|,
   # a `case` over a list
   "def first(xs Vec(Int64)) Int64 := case xs do\n  [] -> 0\n  [h | _] -> h\nend",
   # nested `Vec(Vec(Int64))` → `List<List<Long>>`
-  "pub def empty() Vec(Vec(Int64)) := []"
+  "pub def empty() Vec(Vec(Int64)) := []",
+  # ── inc 6: structs → Kotlin `data class` (named fields, `.x` access, `is`/`as` patterns) ──
+  # a `struct` decl + field access + labeled construction (`Point(x = 0L, y = 0L)`)
+  "struct Point(x Int64, y Int64)\npub def area(p Point) Int64 := p.x * p.y\npub def origin() Point := Point(x: 0, y: 0)",
+  # a struct clause pattern smart-casts (`a0 is Point`) and reads `(a0 as Point).x`
+  "struct Point(x Int64, y Int64)\ndef getx(p Point) Int64\ndef getx(Point(x: a, y: b)) := a",
+  # a struct carrying a `Vec` field (`val items: List<Long>`)
+  "struct Bag(items Vec(Int64))\npub def mk(xs Vec(Int64)) Bag := Bag(items: xs)"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

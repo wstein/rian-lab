@@ -21,11 +21,11 @@ module Rian.JVM
 
 import Prelude
 
-import Data.Array (all, elem, filter, find, foldl, index, length, mapWithIndex, null, uncons)
+import Data.Array (all, elem, filter, find, foldl, head, index, length, mapWithIndex, null, uncons)
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
-import Data.Maybe (Maybe(..), isNothing)
+import Data.Maybe (Maybe(..), fromMaybe, isNothing)
 import Data.Monoid (power)
 import Data.String (Pattern(..), contains, length, stripPrefix, stripSuffix) as Str
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
@@ -37,7 +37,7 @@ import Rian.Assemble (assemble, runProgramTail)
 import Rian.Check (checkProgram)
 import Rian.Core (CArm, CExpr(..), CPat(..), CStmt(..), LitVal(..), fromExpr, fromPat)
 import Rian.Decl (parseToProg)
-import Rian.IR (Body, Clause, Func, Prog, Variant, bodySurface)
+import Rian.IR (Body, Clause, Func, Prog, Struct, Variant, bodySurface)
 import Rian.IR (Type) as IR
 import Rian.Opaque (erase)
 import Rian.Pratt (Pat, parse) as P
@@ -60,16 +60,27 @@ compile src =
           types = allTypes prog
           meta = buildMeta types
           typeDecls = joinWith "\n\n" (map sumDecl types)
+          structDecls = joinWith "\n\n" (map structDecl (allStructs prog))
           funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
           fnDecls = joinWith "\n\n" (map (functionKt meta) funcs)
         in
-          joinWith "\n\n" (filter (_ /= "") [ typeDecls, fnDecls ])
+          joinWith "\n\n" (filter (_ /= "") [ typeDecls, structDecls, fnDecls ])
 
 allFuncs :: Prog -> Array Func
 allFuncs prog = prog.funcs <> foldl (\acc m -> acc <> m.funcs) [] prog.mods
 
 allTypes :: Prog -> Array IR.Type
 allTypes prog = prog.types <> foldl (\acc m -> acc <> m.types) [] prog.mods
+
+allStructs :: Prog -> Array Struct
+allStructs prog = prog.structs <> foldl (\acc m -> acc <> m.structs) [] prog.mods
+
+-- a `struct Name(f T, …)` → a Kotlin `data class Name(val f: T, …)` (fields are always named).
+structDecl :: Struct -> String
+structDecl s =
+  "data class " <> s.name <> "("
+    <> joinWith ", " (map (\f -> "val " <> fromMaybe "" f.label <> ": " <> ktType f.ty) s.fields)
+    <> ")"
 
 -- ── sum types → sealed interface + data class / object (inc 3) ──────────────────
 -- a ctor → its field labels (`Nothing` = anonymous), so a pattern/declaration picks the
@@ -205,6 +216,12 @@ patMatch meta (PCtor ctor args) acc =
     parts = mapWithIndex (\i p -> patMatch meta p (acc <> "." <> fieldKey meta ctor i)) args
   in
     Tuple ([ acc <> " is " <> ctor ] <> (parts >>= fst)) (parts >>= snd)
+-- a struct pattern smart-casts and reads named fields off the `as`-cast value.
+patMatch meta (PStruct name fields) acc =
+  let
+    parts = map (\(Tuple f p) -> patMatch meta p ("(" <> acc <> " as " <> name <> ")." <> f)) fields
+  in
+    Tuple ([ acc <> " is " <> name ] <> (parts >>= fst)) (parts >>= snd)
 patMatch _ _ _ = unsafeCrashWith "jvm: stage — unported clause pattern (inc 3: literals / vars / wildcards / sum ctors)"
 
 litKt :: LitVal -> String
@@ -263,7 +280,15 @@ exprKt meta (ECall (EId "__prim_str_from_chars") [ cs ]) = "(" <> exprKt meta cs
 exprKt meta (ECall (EId "__prim_char_code") [ c ]) = exprKt meta c
 exprKt meta (ECall (EId "__prim_int_to_float") [ n ]) = "(" <> exprKt meta n <> ").toDouble()"
 -- a PascalCase call is sum construction `Ctor(args)`; a lowercase one a local call — same shape.
-exprKt meta (ECall (EId f) args) = f <> "(" <> joinWith ", " (map (exprKt meta) args) <> ")"
+-- A *labeled* call `Name(f: v, …)` is struct/labeled-variant construction → `Name(f = v, …)`.
+exprKt meta (ECall (EId f) args) = case head args of
+  Just (ELabel _ _) -> f <> "(" <> joinWith ", " (map (labelKt meta) args) <> ")"
+  _ -> f <> "(" <> joinWith ", " (map (exprKt meta) args) <> ")"
+-- a resolved struct literal (`EStruct`) → `Name(f = v, …)`.
+exprKt meta (EStruct name pairs) =
+  name <> "(" <> joinWith ", " (map (\(Tuple l v) -> l <> " = " <> exprKt meta v) pairs) <> ")"
+-- field access `p.x` → `p.x`.
+exprKt meta (EDot head_ field) = exprKt meta head_ <> "." <> field
 -- a list literal `[a, b]` → `listOf(a, b)`; a cons `[h, … | t]` → `(listOf(h, …) + t)`.
 exprKt meta (EList elems Nothing) = "listOf(" <> joinWith ", " (map (exprKt meta) elems) <> ")"
 exprKt meta (EList elems (Just tl)) =
@@ -310,6 +335,11 @@ guardedArm meta bodyKt (Just g) = "if (" <> exprKt meta g <> ") { return@rcase "
 branchKt :: Meta -> CExpr -> String
 branchKt meta (EBlock [ CExprStmt e ]) = exprKt meta e
 branchKt meta e = exprKt meta e
+
+-- a labeled construction argument `f: v` → the Kotlin named argument `f = v`.
+labelKt :: Meta -> CExpr -> String
+labelKt meta (ELabel l e) = l <> " = " <> exprKt meta e
+labelKt meta e = exprKt meta e
 
 -- an integer literal carries the `L` (Long) suffix; a float literal is emitted verbatim.
 numKt :: String -> String
