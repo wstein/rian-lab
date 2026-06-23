@@ -17,11 +17,9 @@ exported, a 4 s runaway-loop timeout). The **committed-bundle freshness gate** h
 `rian-compiler.mjs` — esbuild `--minify` is deterministic — à la `tour.json --check`). What remains
 is polish: the other-target panes (`:ex`/`:rs`/`:jvm`) stay the pre-generated reference until those
 emitters port; and Worker-based step-budget hardening. The remaining emitters
-(`JVM`/`Lower`/`Beam`) stay Elixir-only. (The earlier wide-int build-parity caveat is **resolved**:
-`Check`'s `Int8`…`UInt128` range bounds now compare the literal and the bounds as decimal strings — a
-portable bignum, exact for every width on both backends and corpus-tested (`bnd12`…`bnd15`) — instead
-of the `Number` double, which was inexact beyond 2⁵³ on *both* backends. `Data.BigInt` was rejected:
-it is a JS-only library with no purerl FFI.)
+(`JVM`/`Lower`/`Beam`) stay Elixir-only. One named build-parity item (§6): `Check`'s wide-int bounds
+run in `Number` (exact ≤ 2⁵³ — every type through `Int53`/`UInt32`); the `Int64`+ bounds are
+approximate on JS, untested by the corpus.
 **Refines:** ADR-0084 (PureScript port — this **re-frames its purpose**: the port's *primary
 deliverable* is a JS compiler for browser + node; type-safety-over-Dialyzer stands, but is no
 longer the headline; purerl is recast in §2).

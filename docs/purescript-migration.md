@@ -13,9 +13,10 @@ module is ported only after everything it depends on has reached parity.
 > build profile has landed** (`purs/spago-js.dhall` + `packages-js.dhall` over the standard JS package
 > set; `HostRef.js` the conservative-accept FFI stub; `scripts/js-build.sh`): the whole PureScript
 > compiler compiles to JS via stock `purs` and `Rian.JS.compile` runs in node — the in-browser
-> playground's compiler prerequisite. (The earlier wide-int build-parity caveat is **resolved**:
-> `Check`'s `Int8`…`UInt128` range bounds now compare literal and bounds as decimal strings — a
-> portable bignum, exact for every width on both backends and corpus-tested (`bnd12`…`bnd15`) — ADR-0090 §6.)
+> playground's compiler prerequisite. (One wide-int build-parity caveat remains (ADR-0090 §6):
+> `Check`'s `Int8`…`UInt128` range bounds compare in `Number` — exact through 2⁵³, i.e. every type up
+> to `Int53`/`UInt32` — but the `Int64`/`Int128`/`UInt64`/`UInt128` bounds exceed it, so a literal at
+> the far edge of those widths is not range-checked on the JS backend.)
 
 ## Definition of done (per module)
 
@@ -245,7 +246,7 @@ runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tie
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **961/961** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **957/957** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
 InferLocal/Assemble/Comptime/Opaque/**JS** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it). This prose figure,
