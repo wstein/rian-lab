@@ -6,6 +6,8 @@
 export type Compiler = {
   compile: (src: string) => string; // the runtime ECMAScript module (.mjs)
   compileTs: (src: string) => string; // a native, typed TypeScript module (.ts)
+  compileRust: (src: string) => string; // whole-program Rust (== the `rs` tour pane)
+  compileJvm: (src: string) => string; // Kotlin/JVM source (== the `jvm` tour pane)
 };
 
 // The deploy base, slash-safe: `/rian-lab` on GitHub Pages (configure-pages emits

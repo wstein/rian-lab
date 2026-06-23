@@ -102,6 +102,7 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
 
 <script>
   import { highlight } from "../lib/highlight";
+  import type { Compiler } from "../lib/rian-live";
   import {
     loadCompiler,
     compilerLoaded,
@@ -133,9 +134,13 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
   type AnyCell = Cell | { id: "shared"; file: string; source: string; panes: {}; reach: {} };
   let current: AnyCell = cells[0];
   let isShared = false;
-  // the live JS/TS the in-browser compiler emits for the current buffer (null = reference / awaiting Run)
+  // the live output the in-browser compiler emits for the current buffer (null = reference /
+  // awaiting Run, or — for rs/jvm — a construct that target's emitter doesn't lower yet). All four
+  // source targets lower live (JS/TS/Rust/JVM); only BEAM needs the Erlang toolchain.
   let liveJs: string | null = null;
   let liveTs: string | null = null;
+  let liveRs: string | null = null;
+  let liveJvm: string | null = null;
 
   // the real Rian compiler + live-eval helpers are shared with the tutorial (`lib/rian-live`).
 
@@ -152,33 +157,46 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
 
   function renderPanes() {
     const panes = (current as any).panes as Record<string, string>;
-    // Only JS/TS lower in-browser; BEAM/Rust/JVM ship as pre-generated reference for the
-    // *original* cell source. So once the buffer diverges from that source (an edit) or is a
-    // shared buffer with no reference at all, those panes would be SHOWING A STALE LIE — the
-    // original cell's output mislabeled as this buffer's. Mark them explicitly instead.
+    // All four SOURCE targets lower in-browser (JS/TS/Rust/JVM are pure-PureScript emitters);
+    // only BEAM needs the Erlang toolchain (`:compile.forms`), so it stays a pre-generated
+    // reference for the *original* cell. Once the buffer diverges (an edit) or is a shared buffer,
+    // the BEAM pane would be SHOWING A STALE LIE — the original's output mislabeled as this
+    // buffer's — so mark it explicitly. A live target with a `null` value on a diverged buffer
+    // means its emitter doesn't lower this construct yet (Rust/JVM cover a subset of JS).
     const stale = isShared || src.value !== current.source;
+    const live: Record<string, string | null> = { js: liveJs, ts: liveTs, rs: liveRs, jvm: liveJvm };
     for (const t of ["ex", "rs", "js", "ts", "jvm"]) {
       const el = document.querySelector(`.pg-pane-code[data-pane="${t}"]`);
       if (!el) continue;
       let code: string;
       let isStale = false;
-      if (t === "js") {
+      if (t === "ex") {
+        // BEAM: reference only — not lowered in-browser.
+        if (stale) {
+          isStale = true;
+          code = isShared
+            ? `// ⓘ BEAM · Elixir is not lowered in-browser.\n// It needs the Erlang toolchain (\`:compile.forms\`); JS/TS/Rust/JVM lower live (ADR-0090).`
+            : `// ⓘ BEAM · Elixir: reference for the ORIGINAL ${current.file}.\n// BEAM needs the Erlang toolchain (\`:compile.forms\`), so it isn't in the browser —\n// JS/TS/Rust/JVM lower live as you edit (ADR-0090).`;
+        } else {
+          code = panes.ex;
+        }
+      } else if (t === "js") {
         code = liveJs != null ? liveJs : (panes.js ?? "// editing — compiles live as you type.");
       } else if (t === "ts") {
         code = liveTs != null ? liveTs : "// Run to compile this buffer to native TypeScript.";
-      } else if (stale) {
-        isStale = true;
-        code = isShared
-          ? `// ⓘ ${PANE_LABEL[t]} is not lowered in-browser.\n// A shared/edited buffer compiles live to JS/TS only; BEAM/Rust/JVM\n// need the toolchain — they ship here as pre-generated reference (ADR-0090).`
-          : `// ⓘ ${PANE_LABEL[t]}: reference for the ORIGINAL ${current.file}.\n// In-browser lowering covers JS/TS only — your edits update those panes;\n// the BEAM/Rust/JVM emitters aren't in the browser yet (ADR-0090).`;
       } else {
-        code = panes[t];
+        // rs / jvm: live when available; the reference for the untouched cell; else (a diverged
+        // buffer whose live value is null) the emitter doesn't cover this construct yet.
+        const lv = live[t];
+        if (lv != null) code = lv;
+        else if (!stale && panes[t] != null) code = panes[t];
+        else code = `// ⓘ ${PANE_LABEL[t]}: lowers live as you edit.\n// (Empty means this buffer uses a construct the ${PANE_LABEL[t]} emitter doesn't cover yet.)`;
       }
       el.innerHTML = highlight(code);
       (el as HTMLElement).classList.toggle("pg-pane-stale", isStale);
     }
     if (isShared) {
-      statusReach.innerHTML = `<span style="opacity:1">:js</span> · <span style="opacity:1">:ts</span> live · <span style="opacity:0.45">other targets need the toolchain</span>`;
+      statusReach.innerHTML = `<span style="opacity:1">:js</span> · <span style="opacity:1">:ts</span> · <span style="opacity:1">:rs</span> · <span style="opacity:1">:jvm</span> live · <span style="opacity:0.45">:ex needs the toolchain</span>`;
       return;
     }
     const reach = (Object.values((current as any).reach)[0] as string[]) ?? [];
@@ -202,6 +220,8 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     src.value = current.source;
     liveJs = null;
     liveTs = null;
+    liveRs = null;
+    liveJvm = null;
     document.querySelectorAll(".pg-tab").forEach((b) => b.classList.toggle("on", (b as HTMLElement).dataset.file === id));
     renderEditor();
     renderPanes();
@@ -217,6 +237,8 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
     src.value = source;
     liveJs = null;
     liveTs = null;
+    liveRs = null;
+    liveJvm = null;
     document.querySelectorAll(".pg-tab").forEach((b) => b.classList.remove("on"));
     sharedBadge.hidden = false;
     renderEditor();
@@ -248,11 +270,12 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
       return;
     }
     let js: string;
+    let compiler: Compiler;
     try {
-      const { compile, compileTs } = await loadCompiler();
+      compiler = await loadCompiler();
       if (gen !== evalGen) return; // a newer keystroke superseded this run
-      js = compile(source);
-      liveTs = compileTs(source); // the native typed `.ts` view, same gate
+      js = compiler.compile(source);
+      liveTs = compiler.compileTs(source); // the native typed `.ts` view, same gate
     } catch (e: any) {
       if (gen !== evalGen) return;
       // forgiving: a gate/parse error keeps the last good panes; report it softly.
@@ -260,6 +283,19 @@ const files = tour.cells.map((c) => ({ id: c.id, file: c.file }));
       return;
     }
     liveJs = js;
+    // JS is the gate: once it lowers, the buffer parses + type-checks, so a Rust/JVM failure is an
+    // honest "this target's emitter doesn't cover this construct yet" — record it as `null` (the
+    // pane shows that) rather than aborting, and keep the targets independent of each other.
+    try {
+      liveRs = compiler.compileRust(source);
+    } catch {
+      liveRs = null;
+    }
+    try {
+      liveJvm = compiler.compileJvm(source);
+    } catch {
+      liveJvm = null;
+    }
     if (force) document.documentElement.dataset.target = "js";
     renderPanes();
     setOut("ok", "$ rian build --js\n  ✓ compiled to ECMAScript (live, in your browser)\n  ▷ running…");
