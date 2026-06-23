@@ -995,7 +995,13 @@ rust_corpus = [
   # both text emitters — `pat_ex`/`pat_rs` have no `PStruct` clause — so none here.)
   "struct Point(x Int53, y Int53)\npub def gx(p Point) Int53 := p.x",
   "struct Pair(a Int53, b Int53)\npub def sum(p Pair) Int53 := p.a + p.b",
-  "struct Point(x Int53, y Int53)\npub def mk(a Int53, b Int53) Point := Point(x: a, y: b)"
+  "struct Point(x Int53, y Int53)\npub def mk(a Int53, b Int53) Point := Point(x: a, y: b)",
+  # lists (ADR-0047) — `Vec(T)` literal → `vec![…]`; `val Vec(T)` → `&[T]` slice; cons `[x | xs]`
+  # → prepend onto `xs.to_vec()`; `case` over a list → `match &(xs)[..] { [] …, [h, t @ ..] … }`
+  "pub def lit() Vec(Int53) := [1, 2, 3]",
+  "pub def pre(x Int53, xs Vec(Int53)) Vec(Int53) := [x | xs]",
+  "pub def len(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [_ | t] -> 1 + len(t)\nend",
+  "pub def hd(xs Vec(Int53)) Int53 := case xs do\n  [] -> 0\n  [h | _] -> h\nend"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

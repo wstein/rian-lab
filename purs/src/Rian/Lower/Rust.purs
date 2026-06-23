@@ -28,7 +28,7 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, any, concatMap, filter, find, foldl, head, index, length, mapWithIndex, null)
+import Data.Array (all, any, concatMap, filter, find, foldl, head, index, length, mapWithIndex, null, reverse)
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
@@ -253,6 +253,9 @@ patRs _ (PLit (LInt v)) = show v
 patRs _ (PLit (LStr s)) = strLit s
 patRs _ (PAtom a) = strLit a
 patRs _ (PChar cp) = rustCharLit cp
+patRs meta (PList elems Nothing) = "[" <> joinWith ", " (map (patRs meta) elems) <> "]"
+patRs meta (PList elems (Just tail)) =
+  "[" <> joinWith ", " (map (patRs meta) elems <> [ restPat tail ]) <> "]"
 patRs meta (PCtor name args) =
   let info = lookupCtor meta name
   in
@@ -264,6 +267,12 @@ patRs meta (PCtor name args) =
     else
       info.enum <> "::" <> name <> "(" <> joinWith ", " (map (patRs meta) args) <> ")"
 patRs _ _ = unsafeCrashWith "rust: pattern not yet ported (stage)"
+
+-- a cons tail → a Rust slice rest pattern: `t @ ..` (bind the rest) or `..` (ignore).
+restPat :: CPat -> String
+restPat (PVar n) = n <> " @ .."
+restPat PWild = ".."
+restPat _ = unsafeCrashWith "rust: cons tail must be a var or `_` (stage)"
 
 -- zip declared labels with rendered field strings: `radius: r, …` (an anonymous field → `_i`).
 zipLabels :: Array (Maybe String) -> Array String -> Array String
@@ -338,6 +347,13 @@ emit meta (EBin op l r) =
   in
     Tuple (p meta lc l <> " " <> disp op <> " " <> p meta rc r) pr
 emit meta (ECase scrut arms) = Tuple (rustCase meta scrut arms) 0
+-- a list literal → `vec![…]`; a cons `[e… | tl]` → prepend onto an owned copy of the tail
+-- (`.to_vec()` turns the `&[T]` slice / `Vec` owned), reversed so order is `e…, tail…` (ADR-0047).
+emit meta (EList elems Nothing) =
+  Tuple ("vec![" <> joinWith ", " (map (rustOwnedElem meta) elems) <> "]") 12
+emit meta (EList elems (Just tl)) =
+  let prepends = joinWith " " (map (\e -> "__v.insert(0, " <> rustOwnedElem meta e <> ");") (reverse elems))
+  in Tuple ("{ let mut __v = " <> p meta 12 tl <> ".to_vec(); " <> prepends <> " __v }") 0
 emit meta (EBlock stmts) = Tuple (emitBlock meta (EBlock stmts)) 0
 -- a struct construction `Name { f: v, … }` (a PascalCase, all-labeled call that is not a sum ctor).
 emit meta (EStruct name pairs) =
@@ -395,10 +411,19 @@ ctorConstruct meta name args =
 rustOwnedElem :: Meta -> CExpr -> String
 rustOwnedElem meta e = p meta 0 e
 
--- a `case` → a Rust `match`; each arm `pat <guard> => body,`, joined by spaces.
+-- a `case` → a Rust `match`; each arm `pat <guard> => body,`, joined by spaces. A `case` whose
+-- arms match a list is over a slice, so the scrutinee is borrowed as `&(scrut)[..]` (ADR-0047).
 rustCase :: Meta -> CExpr -> Array CArm -> String
 rustCase meta scrut arms =
-  "match " <> p meta 0 scrut <> " { " <> joinWith " " (map (caseArm meta) arms) <> " }"
+  let
+    sliced = any (\a -> isListPat a.pat) arms
+    scrutRs = if sliced then "&(" <> p meta 0 scrut <> ")[..]" else p meta 0 scrut
+  in
+    "match " <> scrutRs <> " { " <> joinWith " " (map (caseArm meta) arms) <> " }"
+
+isListPat :: CPat -> Boolean
+isListPat (PList _ _) = true
+isListPat _ = false
 
 caseArm :: Meta -> CArm -> String
 caseArm meta a =
