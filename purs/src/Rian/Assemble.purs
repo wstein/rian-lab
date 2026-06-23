@@ -36,6 +36,7 @@ import Rian.Pratt (Surface(..), parseBody, sexpr) as P
 import Rian.Prim (normalize)
 import Rian.Protocol (DefMap, expand)
 import Rian.ShowStdlib (theModule) as ShowStdlib
+import Rian.IOStdlib (funcs) as IOStdlib
 import Rian.TypeStr (splitTopCommas)
 
 -- | Run the assemble tail passes: synthesize the protocol dispatcher / `impl_*` functions
@@ -166,9 +167,33 @@ resolveClauseInterp f ic show c = case c.body of
 -- program (the `Show.float` call) rather than a flag, so the resolver stays pure. Mirrors
 -- `inject_stdlib`.
 injectStdlib :: Prog -> Prog
-injectStdlib prog =
+injectStdlib = injectIo <<< injectShow
+
+injectShow :: Prog -> Prog
+injectShow prog =
   if needsShowFloat prog && not (any (\m -> m.name == "Show") prog.mods) then prog { mods = [ ShowStdlib.theModule ] <> prog.mods }
   else prog
+
+-- Console I/O (ADR-0068/0069): a program that calls `puts`/`print` but does not define its own IO
+-- gets the IO prelude's functions EMITTED into it (`Rian.IOStdlib`), so they run on a source target
+-- (`console.log`/`println`) instead of dangling. Mirrors `Rian.Decl.inject_io`.
+injectIo :: Prog -> Prog
+injectIo prog =
+  if needsIo prog && not (ioDefined prog) then prog { funcs = IOStdlib.funcs <> prog.funcs }
+  else prog
+
+ioDefined :: Prog -> Boolean
+ioDefined prog = any (\f -> f.name == "puts" || f.name == "print" || f.name == "line" || f.name == "write") prog.funcs
+
+needsIo :: Prog -> Boolean
+needsIo prog = any (\f -> any (callsIo <<< _.body) f.clauses) (allProgFuncs prog)
+
+callsIo :: Maybe Body -> Boolean
+callsIo Nothing = false
+callsIo (Just body) = go (bodySurface body)
+  where
+  go (P.SCall (P.SId n) _) = n == "puts" || n == "print"
+  go node = any go (Macro.childrenOf node)
 
 needsShowFloat :: Prog -> Boolean
 needsShowFloat prog = any (\f -> any (callsShowFloat <<< _.body) f.clauses) (allProgFuncs prog)

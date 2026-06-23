@@ -30,29 +30,28 @@
 
 # a line to stdout, with a trailing newline (the raw per-target host call). Named `line`,
 # not `puts`, so it does not clash with the bare polymorphic `puts` front door.
-@effects(host, io)
 @external(:ex, "IO.puts(s)")
 @external(:js, "console.log(s)")
 @external(:jvm, "println(s)")
 pub def line(s val String) Unit
 
 # raw text to stdout, no trailing newline. (`:js` targets node.)
-@effects(host, io)
 @external(:ex, "IO.write(s)")
 @external(:js, "process.stdout.write(s)")
 @external(:jvm, "print(s)")
 pub def write(s val String) Unit
 
-# Portable polymorphic front doors (ADR-0083 value union + ADR-0069 interpolation).
-# Accept the printable scalars `String` and `Int53` (the all-target integer). A `${n}`
-# hole stringifies by its MATCHED member type (`__prim_int_to_string`, portable — not the
-# runtime-`Show` fallback), so `puts(2 + 5)` prints `7`.
+# Portable polymorphic front doors (ADR-0083 value union). Accept the printable scalars
+# `String` and `Int53` (the all-target integer). The `Int53` arm narrows `n` (the value-union
+# type-pattern) and stringifies it via the portable `Prim.int_to_string`, so `puts(2 + 5)`
+# prints `7`. (Calling the prim directly — not a `${n}` hole — keeps this source free of the
+# interpolation tail, so the PS `Rian.IOStdlib` mirror parses it without an `Assemble` cycle.)
 pub def puts(x String | Int53) Unit := case x do
   s String -> line(s)
-  n Int53 -> line("${n}")
+  n Int53 -> line(Prim.int_to_string(n))
 end
 
 pub def print(x String | Int53) Unit := case x do
   s String -> write(s)
-  n Int53 -> write("${n}")
+  n Int53 -> write(Prim.int_to_string(n))
 end
