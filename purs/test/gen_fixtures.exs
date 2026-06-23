@@ -1009,7 +1009,11 @@ rust_corpus = [
   # bounded generics + protocol traits (ADR-0061 §2): `protocol P` → `trait RianP`; a
   # `forall T: Eq` bound → `<T: RianEq + Clone>`; a protocol-method call `eq(a, b)` → `a.eq(b)`
   # (receiver method). Impls (`impl P for T`) are the next increment — none here.
-  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\npub def same(a T, b T) Bool forall T: Eq := eq(a, b)"
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\npub def same(a T, b T) Bool forall T: Eq := eq(a, b)",
+  # closures (ADR-0061): a `Fn(...)` param → `&impl Fn(…) -> …` (a closure call clones its args);
+  # a `Fn(...)` return → `Box<dyn Fn(…) -> …>` (the value-position lambda is `Box::new(move …)`).
+  "pub def apply(f Fn(Int53, Int53), x Int53) Int53 := f(x)",
+  "pub def adder(n Int53) Fn(Int53, Int53) := (a) -> a + n"
 ]
 
 # Rian.JVM — the `jvm` stream (ADR-0049 Tier 2): the compiled Kotlin module. Oracle =

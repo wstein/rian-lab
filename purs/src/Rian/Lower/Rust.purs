@@ -29,7 +29,7 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, any, concatMap, drop, elem, filter, find, foldl, head, index, length, mapWithIndex, nub, null, reverse, snoc, uncons, zipWith)
+import Data.Array (all, any, concatMap, drop, elem, filter, find, foldl, head, index, last, length, mapWithIndex, nub, null, reverse, snoc, uncons, zipWith)
 import Data.Array (groupBy) as Array
 import Data.Array.NonEmpty (toArray) as NEA
 import Data.Enum (fromEnum, toEnum)
@@ -61,9 +61,16 @@ import Rian.TypeStr (splitTopCommas) as TS
 type VInfo = { enum :: String, named :: Boolean, labels :: Array (Maybe String) }
 type Meta = Array (Tuple String VInfo)
 
--- the per-clause emit context: the variant registry `vi` + the clause's `borrowed` vars (a
--- `&T`/`&[T]` binding, cloned to owned in a construction position — ADR-0055/0061).
-type Ec = { vi :: Meta, bor :: Array String }
+-- the per-clause emit context: the variant registry `vi`, the clause's `borrowed` vars (a
+-- `&T`/`&[T]` binding, cloned to owned in a construction position — ADR-0055/0061), the
+-- `Fn`-typed param names (a call to one is a closure call: args clone), and `fnBox` — set when
+-- the function returns a closure, so a value-position lambda is `Box::new(move …)` (ADR-0061).
+type Ec =
+  { vi :: Meta
+  , bor :: Array String
+  , fnParams :: Array String
+  , fnBox :: Maybe { clone :: Boolean, rc :: Boolean }
+  }
 
 -- | Compile `src`'s functions to a single Rust module (a string). Mirrors the `:rust`
 -- | half of `Rian.Decl.compile`: each non-dispatch function is lowered as its own unit (the
@@ -220,8 +227,9 @@ rustImplMethod meta methods rustType copyRecv sigFor m =
     otherSelf = any (\sp -> snd (nameType sp) == "Self") restSig
     recvRhs = if copyRecv && not otherSelf then "*self" else "self"
     bodySurf = P.parseBody (fromMaybe "" m.body)
-    -- impl-method bodies don't yet need the borrowed-clone set (corpus methods construct nothing).
-    body = coerceRet retTy (fst (emit { vi: meta, bor: [] } (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
+    -- impl-method bodies don't yet need the borrowed-clone / closure context (corpus methods
+    -- construct nothing and take no `Fn` params).
+    body = coerceRet retTy (fst (emit { vi: meta, bor: [], fnParams: [], fnBox: Nothing } (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
   in
     "    fn " <> m.name <> "(" <> params <> ") -> " <> rustRet retTy
       <> " { let " <> recv <> " = " <> recvRhs <> "; " <> body <> " }"
@@ -367,8 +375,14 @@ clauseArm :: Meta -> Array String -> Func -> Clause -> String
 clauseArm meta methods f c =
   let
     pat = tupleOrOne (map (corePatRs meta) c.pats)
-    -- the per-clause emit context: variant registry + the borrowed (`&`-bound) vars.
-    ec = { vi: meta, bor: borrowedVars f.params c.pats }
+    -- the per-clause emit context: variant registry, borrowed (`&`-bound) vars, `Fn`-typed
+    -- params (closure calls), and the closure-return box flag.
+    ec =
+      { vi: meta
+      , bor: borrowedVars f.params c.pats
+      , fnParams: map _.name (filter (\p -> isFnType (fromMaybe "" p.ty)) f.params)
+      , fnBox: if isFnType (fromMaybe "" f.ret) then Just { clone: fnReturnsTvar (fromMaybe "" f.ret) f.tvars, rc: false } else Nothing
+      }
     -- rewrite protocol-method calls to receiver methods (`eq(a, b)` → `a.eq(b)`, ADR-0061 §2)
     -- on the surface, before lowering to Core.
     cbody = case c.body of
@@ -561,14 +575,49 @@ emit _ (EDot (EId m) n)
   | pascal n = Tuple (m <> "::" <> n) 12
   | otherwise = Tuple (toLower m <> "::" <> n) 12
 emit ec (EDot hd n) = Tuple (p ec 12 hd <> "::" <> n) 12
--- a call to a known sum ctor is construction (`Enum::Variant(…)`); a PascalCase all-labeled call
--- is struct construction (`Name { f: v }`); otherwise a local call.
+-- a closure (`Fn`) value: a callback-arg lambda stays bare `|a| …`; a value-position lambda in a
+-- closure-returning function is `Box::new(move |a| …)` (cloning a captured tvar body per call).
+emit ec (ELambda params body) =
+  let
+    ps = joinWith ", " (map _.name params)
+    bodyStr = p ec 0 body
+  in
+    case ec.fnBox of
+      Nothing -> Tuple ("|" <> ps <> "| " <> bodyStr) 12
+      Just fb ->
+        let
+          inner = if fb.clone then "(" <> bodyStr <> ").clone()" else bodyStr
+          ctor = if fb.rc then "std::rc::Rc::new" else "Box::new"
+        in
+          Tuple (ctor <> "(move |" <> ps <> "| " <> inner <> ")") 12
+-- a call to a known sum ctor is construction (`Enum::Variant(…)`); a call to a `Fn`-typed param is
+-- a closure call (args clone); a PascalCase all-labeled call is struct construction; else a call.
 emit ec (ECall (EId name) args)
   | isJust (find (\(Tuple c _) -> c == name) ec.vi) = Tuple (ctorConstruct ec name args) 12
+  | elem name ec.fnParams = Tuple (name <> "(" <> joinWith ", " (map (closureArg ec) args) <> ")") 12
   | pascal name && not (null args) && all isELabel args = Tuple (structConstruct ec name args) 12
 emit ec (ECall f args) =
   Tuple (p ec 12 f <> "(" <> joinWith ", " (map (p ec 0) args) <> ")") 12
 emit _ _ = unsafeCrashWith "rust: expression not yet ported (stage)"
+
+-- a closure-call argument: an `EId` is `.clone()`d (the closure can't borrow a moved capture);
+-- any other expression passes through. Mirrors `closure_arg`.
+closureArg :: Ec -> CExpr -> String
+closureArg ec e = case e of
+  EId _ -> p ec 12 e <> ".clone()"
+  _ -> p ec 0 e
+
+-- is a type a `Fn(...)` closure type?
+isFnType :: String -> Boolean
+isFnType t = isJust (stripPrefix (Pattern "Fn(") t)
+
+-- does a `Fn(args, R)` return a type variable `R`? (then a returned closure clones its body).
+fnReturnsTvar :: String -> Array String -> Boolean
+fnReturnsTvar fnTy tvars = case stripPrefix (Pattern "Fn(") fnTy >>= stripSuffix (Pattern ")") of
+  Just inner -> case last (TS.splitTopCommas inner) of
+    Just r -> elem (trim r) tvars
+    Nothing -> false
+  Nothing -> false
 
 -- struct construction from labeled args (source order — Rust named fields are order-free).
 structConstruct :: Ec -> String -> Array CExpr -> String
