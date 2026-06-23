@@ -21,9 +21,13 @@
 -- | a `containsKey` guard + `getValue` bind); (b) **captures + `with`** — an anonymous capture
 -- | `&(&1 * 2)` → a lambda `{ _1 -> … }`, a named `&fn/arity` → a `::fn` reference (a remote
 -- | `&Mod.fun/arity` → a forwarding lambda), and `with` → nested `case`s, all via the shared
--- | `Core.capArity`/`Core.desugarWith`. **Deferred:** associated types + the `coerce_casts`
--- | pass (ADR-0074). An unported node raises a clear "stage" crash, kept out of the `jvm`
--- | parity corpus (oracle = `Rian.JVM.compile`).
+-- | `Core.capArity`/`Core.desugarWith`. (c) **associated types** (ADR-0074): an assoc `Elem` in a
+-- | covariant `Vec(...)` return erases to `List<Any>` (`substAssocAny`); a dispatcher with an assoc
+-- | in a non-erasable position (param / bare return) is dropped (`assocBlocksJvm`, Reach keeps it
+-- | off `:jvm`). **Deferred:** the `coerce_casts` use-site cast (an erased `List<Any>` flowing into
+-- | a *concrete* `Vec(T)` param needs `as List<T>`; the element-agnostic common case needs none).
+-- | An unported node raises a clear "stage" crash, kept out of the `jvm` parity corpus (oracle =
+-- | `Rian.JVM.compile`).
 module Rian.JVM
   ( compile
   , lowerJvmProg
@@ -31,13 +35,13 @@ module Rian.JVM
 
 import Prelude
 
-import Data.Array (all, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, null, range, uncons, unsnoc)
+import Data.Array (all, any, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, null, range, uncons, unsnoc)
 import Data.Enum (fromEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust)
 import Data.Monoid (power)
-import Data.String (Pattern(..), contains, length, stripPrefix, stripSuffix) as Str
+import Data.String (Pattern(..), contains, drop, indexOf, length, stripPrefix, stripSuffix, take) as Str
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
 import Data.String.CodeUnits (charAt, toCharArray) as CU
 import Data.String.Common (joinWith)
@@ -80,11 +84,15 @@ lowerJvmProg prog0 =
           -- a protocol **dispatcher** (`dispatch == "dispatcher"`, ADR-0042) lowers to a
           -- `when (a0)` over the receiver's runtime type; the `impl` methods stay regular
           -- functions, so only the dispatcher is split out.
-          dispatchers = filter (\f -> f.dispatch == Just "dispatcher") allf
+          assoc = jvmAssocNames prog
+          -- an associated type (ADR-0074) in a covariant `Vec(...)` return erases to `List<Any>`;
+          -- in a non-erasable position (param / bare return) the dispatcher has no Kotlin shape and
+          -- is dropped (Reach keeps it + its consumers off `:jvm`).
+          dispatchers = filter (\f -> f.dispatch == Just "dispatcher" && not (assocBlocksJvm assoc f)) allf
           funcs = filter (\f -> f.dispatch /= Just "dispatcher") allf
           ift = implFirstType allf
           fnDecls = joinWith "\n\n" (map (functionKt meta) funcs)
-          dispDecls = joinWith "\n\n" (map (dispatcherKt ift) dispatchers)
+          dispDecls = joinWith "\n\n" (map (dispatcherKt assoc ift) dispatchers)
         in
           joinWith "\n\n" (filter (_ /= "") [ typeDecls, structDecls, fnDecls, dispDecls ])
 
@@ -183,16 +191,80 @@ implFirstType allf = mapMaybe entry allf
 -- a synthesized protocol dispatcher (ADR-0042) → `fun name(a0: Any, …): Ret = when (a0) { is
 -- <Type> -> impl_…(…); … else -> throw }`. A `Self` parameter is typed `Any` (dynamic dispatch);
 -- the `is` test smart-casts `a0`, and a further `Self` argument is `as`-cast to the matched type.
-dispatcherKt :: Array (Tuple String String) -> Func -> String
-dispatcherKt ift disp =
+dispatcherKt :: Array String -> Array (Tuple String String) -> Func -> String
+dispatcherKt assoc ift disp =
   let
     params = joinWith ", " (mapWithIndex (\i p -> "a" <> show i <> ": " <> selfOrType p.ty) disp.params)
     arms = joinWith "\n" (map (dispArm ift disp.params) disp.clauses)
     vis = if disp.pub then "" else "private "
+    -- an assoc type in a covariant `Vec(...)` return erases to `List<Any>` (ADR-0074): the
+    -- `impl_…` arms return `List<Long>`/`List<String>`, covariantly `List<Any>`.
+    ret = ktType (substAssocAny assoc (fromMaybe "" disp.ret))
   in
-    vis <> "fun " <> disp.name <> "(" <> params <> "): " <> ktTypeM disp.ret <> " = when (a0) {\n"
+    vis <> "fun " <> disp.name <> "(" <> params <> "): " <> ret <> " = when (a0) {\n"
       <> arms
       <> "\n    else -> throw RuntimeException(" <> ktStr (disp.name <> ": no matching impl") <> ")\n}"
+
+-- ── associated types (ADR-0074) ──────────────────────────────────────────────
+-- the associated-type names declared across the program's protocols.
+jvmAssocNames :: Prog -> Array String
+jvmAssocNames prog = prog.protocols >>= _.assoc
+
+-- substitute each associated-type name with `Any` (the erased Kotlin type), word-boundary-aware,
+-- so a dispatcher's `Vec(Elem)` return becomes `Vec(Any)` → `List<Any>` via `ktType`.
+substAssocAny :: Array String -> String -> String
+substAssocAny assoc t = foldl (\acc a -> wordReplaceJ a "Any" acc) t assoc
+
+-- does a type mention any associated-type name as a whole word? (a word is present iff replacing
+-- it changes the string).
+typeMentionsAssoc :: Array String -> String -> Boolean
+typeMentionsAssoc assoc t = any (\a -> wordReplaceJ a "\x0" t /= t) assoc
+
+-- a dispatcher the JVM CANNOT lower: an assoc in a parameter (contravariant) or a bare/non-`Vec`
+-- return. Inside a covariant `Vec(...)` it erases to `List<Any>`, so the `Vec(...)` wrappers are
+-- stripped before the check (matching the reference's `assoc_blocks_jvm?`).
+assocBlocksJvm :: Array String -> Func -> Boolean
+assocBlocksJvm assoc f =
+  let
+    paramTypes = mapMaybe _.ty f.params
+    retBare = stripVecWrappers (fromMaybe "" f.ret)
+  in
+    any (typeMentionsAssoc assoc) ([ retBare ] <> paramTypes)
+
+-- remove every non-nested `Vec(…)` span from a type string (the covariant wrapper, ADR-0074).
+stripVecWrappers :: String -> String
+stripVecWrappers t = case Str.indexOf (Str.Pattern "Vec(") t of
+  Nothing -> t
+  Just i ->
+    let
+      before = Str.take i t
+      rest = Str.drop (i + 4) t
+    in
+      case Str.indexOf (Str.Pattern ")") rest of
+        Nothing -> t
+        Just j -> before <> stripVecWrappers (Str.drop (j + 1) rest)
+
+-- a word-boundary substitution (`target` only when a complete identifier token) — the assoc-type
+-- erasure's primitive; mirrors the reference's `\btarget\b` replace.
+wordReplaceJ :: String -> String -> String -> String
+wordReplaceJ target repl input =
+  let
+    final = foldl step { out: "", cur: "" } (CP.toCodePointArray input)
+  in
+    final.out <> emit final.cur
+  where
+  emit w = if w == target then repl else w
+  step acc cp =
+    if wordCp cp then acc { cur = acc.cur <> CP.singleton cp }
+    else { out: acc.out <> emit acc.cur <> CP.singleton cp, cur: "" }
+
+-- an identifier codepoint: a letter, digit, or `_` (the `\w` class for word boundaries).
+wordCp :: CP.CodePoint -> Boolean
+wordCp cp =
+  let
+    n = fromEnum cp
+  in
+    (n >= 48 && n <= 57) || (n >= 65 && n <= 90) || (n >= 97 && n <= 122) || n == 95
 
 selfOrType :: Maybe String -> String
 selfOrType (Just "Self") = "Any"

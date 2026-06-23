@@ -1172,7 +1172,11 @@ def f(c) := 0|,
   # an anonymous capture passed through a `Fn` parameter (a full apply program)
   "pub def apply(f Fn(Int53, Int53), x Int53) Int53 := f(x)\npub def go() Int53 := apply(&(&1 * 2), 5)",
   # `with Some(v) <- x do v else _ -> 0 end` → nested `case`s (ADR-0040, via `desugarWith`)
-  "type Box := Some(Int53) | None\npub def f(x Box) Int53 := with Some(v) <- x do\n  v\nelse\n  _ -> 0\nend"
+  "type Box := Some(Int53) | None\npub def f(x Box) Int53 := with Some(v) <- x do\n  v\nelse\n  _ -> 0\nend",
+  # ── associated types (ADR-0074): an assoc `Elem` in a covariant `Vec(...)` return erases to
+  # `List<Any>` (the `to_list` dispatcher); an element-AGNOSTIC consumer (generic `len`) needs no
+  # use-site cast, so this lowers + kotlinc-compiles with the assoc-erasure pass alone.
+  "protocol Foldable do\n  type Elem\n  def to_list(self Self) Vec(Elem)\nend\ntype Bag := Bag(items Vec(Int53))\nimpl Foldable for Bag do\n  type Elem := Int53\n  def to_list(b) := case b do Bag(xs) -> xs end\nend\npub def len(xs Vec(T)) Int53 forall T := case xs do\n  [] -> 0\n  [_ | t] -> 1 + len(t)\nend\npub def fcount(c C) Int53 forall C := len(to_list(c))"
 ]
 
 # Rian.Lower.rust_program — the `rustprog` stream: the WHOLE-PROGRAM Rust assembly (ADR-0061)
