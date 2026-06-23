@@ -410,19 +410,21 @@ defmodule Rian.Decl do
     Enum.any?(prog.funcs, &(&1.name in ["puts", "print", "line", "write"]))
   end
 
-  # any clause body call to a bare `puts`/`print`. A clause body is a raw source string until
-  # interpolation expands it (`Body = Raw | Expanded`), so parse it to the surface AST first
-  # (`parse_body` passes an already-expanded tuple through unchanged).
+  # any clause body call to a bare `puts`/`print`. A clause body is still raw source text here (it
+  # expands later: `Body = Raw | Expanded`). Rather than re-parse a Raw body — the parser RAISES on
+  # partial input, and exception flow is not Rian-portable (ADR-0040) — scan it for a `puts`/`print`
+  # token; an already-expanded body (a surface tuple) is walked structurally. The scan is
+  # conservative by construction: the AST a parse would produce comes from this same source text, so
+  # the scan catches every call the parse would, plus the odd stray mention. A false positive only
+  # injects an unused stdlib fn; a false *negative* would leave `puts` an unbound reference, so the
+  # bias is the safe one.
   defp needs_io?(prog) do
     (prog.funcs ++ Enum.flat_map(prog.mods, & &1.funcs))
     |> Enum.any?(fn f -> Enum.any?(f.clauses, &io_in_body?(&1.body)) end)
   end
 
-  defp io_in_body?(body) do
-    calls_io?(Pratt.parse_body(body))
-  rescue
-    _ -> false
-  end
+  defp io_in_body?(body) when is_binary(body), do: body =~ ~r/\b(?:puts|print)\b/
+  defp io_in_body?(body), do: calls_io?(body)
 
   defp calls_io?({:call, {:id, n}, _args}) when n in ["puts", "print"], do: true
 
