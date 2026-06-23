@@ -1153,7 +1153,12 @@ rustprog_corpus = [
   # a protocol + impl → `trait RianEq { … }` + `impl RianEq for bool { fn eq(&self, b: &bool) … }`
   "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\nimpl Eq for Bool do\n  def eq(a, b) := a == b\nend",
   # a bounded-generic consumer alongside the protocol (no impl): trait + `<T: RianEq + Clone>`
-  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\npub def same(a T, b T) Bool forall T: Eq := eq(a, b)"
+  "protocol Eq do\n  def eq(a Self, b Self) Bool\nend\npub def same(a T, b T) Bool forall T: Eq := eq(a, b)",
+  # parametric-type monomorphization (ADR-0061): `type Box := B(v T)` → `enum Box<T: Clone>`;
+  # the signature `Box` → `Box<T>`; construction clones the borrowed payload (`B { v: x.clone() }`)
+  "type Box := B(v T)\npub def wrap(x T) Box forall T := B(x)\npub def unwrap(b Box) T forall T := case b do\n  B(v) -> v\nend",
+  # two type params: `enum Pair<K: Clone, V: Clone>`, `-> Pair<K, V>`, both payloads cloned
+  "type Pair := P(k K, v V)\npub def mk(a K, b V) Pair forall K, V := P(a, b)"
 ]
 
 # Rian.Shadow corpus — the `shd` stream (ADR-0034): capture-avoiding `:=` rename. Params

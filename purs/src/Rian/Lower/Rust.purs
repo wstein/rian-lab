@@ -29,14 +29,16 @@ module Rian.Lower.Rust
 
 import Prelude
 
-import Data.Array (all, any, concatMap, drop, elem, filter, find, foldl, head, index, length, mapWithIndex, null, reverse, uncons, zipWith)
+import Data.Array (all, any, concatMap, drop, elem, filter, find, foldl, head, index, length, mapWithIndex, nub, null, reverse, snoc, uncons, zipWith)
+import Data.Array (groupBy) as Array
+import Data.Array.NonEmpty (toArray) as NEA
 import Data.Enum (fromEnum, toEnum)
 import Data.Foldable (foldMap)
 import Data.Int (hexadecimal, toStringAs) as Int
 import Data.Maybe (Maybe(..), fromMaybe, isJust, isNothing)
 import Data.String (Pattern(..), Replacement(..), replaceAll, split, stripPrefix, stripSuffix)
 import Data.String.CodePoints (CodePoint, singleton, toCodePointArray) as CP
-import Data.String.CodeUnits (charAt) as CU
+import Data.String.CodeUnits (charAt, fromCharArray, toCharArray) as CU
 import Data.String.Common (joinWith, toLower, toUpper, trim)
 import Data.Tuple (Tuple(..), fst, snd)
 import Partial.Unsafe (unsafeCrashWith)
@@ -59,6 +61,10 @@ import Rian.TypeStr (splitTopCommas) as TS
 type VInfo = { enum :: String, named :: Boolean, labels :: Array (Maybe String) }
 type Meta = Array (Tuple String VInfo)
 
+-- the per-clause emit context: the variant registry `vi` + the clause's `borrowed` vars (a
+-- `&T`/`&[T]` binding, cloned to owned in a construction position — ADR-0055/0061).
+type Ec = { vi :: Meta, bor :: Array String }
+
 -- | Compile `src`'s functions to a single Rust module (a string). Mirrors the `:rust`
 -- | half of `Rian.Decl.compile`: each non-dispatch function is lowered as its own unit (the
 -- | program's `enum` defs, then the `fn`) and the units joined `\n\n` (a protocol dispatcher
@@ -77,7 +83,9 @@ compile src =
           types = allTypes prog
           meta = buildMeta types
           env = programEnv types prog.structs prog.ranges
-          enums = joinWith "\n\n" (map rustEnum types)
+          -- the per-unit `rust` stream does NOT monomorphize (no parametric map, matching
+          -- `Rian.Decl.compile`'s per-func `to_rust`); the whole-program `rustProgram` does.
+          enums = joinWith "\n\n" (map (rustEnum []) types)
           structDefs = joinWith "\n\n" (map rustStruct prog.structs)
           methods = prog.protocols >>= \pr -> map _.name pr.methods
           funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
@@ -97,7 +105,7 @@ allTypes prog = prog.types <> foldl (\acc m -> acc <> m.types) [] prog.mods
 -- then this function. Empty parts (no types) drop out.
 rustUnit :: String -> String -> Meta -> Env -> Array String -> Func -> String
 rustUnit structDefs enums meta env methods f =
-  joinWith "\n\n" (filter (_ /= "") [ structDefs, enums, rustFn meta env methods f ])
+  joinWith "\n\n" (filter (_ /= "") [ structDefs, enums, rustFn [] meta env methods f ])
 
 -- a `struct Name(f T, …)` → a `#[derive(Clone, Debug, PartialEq)] struct Name { f: T, … }`.
 rustStruct :: Struct -> String
@@ -172,13 +180,15 @@ rustProgram src =
           meta = buildMeta types
           env = programEnv types prog.structs prog.ranges
           methods = prog.protocols >>= \pr -> map _.name pr.methods
+          -- parametric types are monomorphized here (`enum Pair<K, V>`, `-> Pair<K, V>`).
+          pm = parametricMap types
           structs = joinWith "\n\n" (map rustStruct prog.structs)
-          enums = joinWith "\n\n" (map rustEnum types)
+          enums = joinWith "\n\n" (map (rustEnum pm) types)
           traits = joinWith "\n\n" (map rustTrait prog.protocols)
           impls = joinWith "\n\n" (map (rustImpl meta methods prog.protocols) prog.implDecls)
           traitImpl = joinWith "\n\n" (filter (_ /= "") [ traits, impls ])
           funcs = filter (\f -> isNothing f.dispatch) (allFuncs prog)
-          fns = joinWith "\n\n" (map (rustFn meta env methods) funcs)
+          fns = joinWith "\n\n" (map (rustFn pm meta env methods) funcs)
         in
           joinWith "\n\n" (filter (_ /= "") [ structs, enums, traitImpl, fns ])
 
@@ -210,7 +220,8 @@ rustImplMethod meta methods rustType copyRecv sigFor m =
     otherSelf = any (\sp -> snd (nameType sp) == "Self") restSig
     recvRhs = if copyRecv && not otherSelf then "*self" else "self"
     bodySurf = P.parseBody (fromMaybe "" m.body)
-    body = coerceRet retTy (fst (emit meta (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
+    -- impl-method bodies don't yet need the borrowed-clone set (corpus methods construct nothing).
+    body = coerceRet retTy (fst (emit { vi: meta, bor: [] } (fromExpr (rewriteProtoCalls methods (normalize bodySurf)))))
   in
     "    fn " <> m.name <> "(" <> params <> ") -> " <> rustRet retTy
       <> " { let " <> recv <> " = " <> recvRhs <> "; " <> body <> " }"
@@ -238,29 +249,46 @@ lookupCtor meta ctor = case find (\(Tuple c _) -> c == ctor) meta of
   Just (Tuple _ info) -> info
   Nothing -> unsafeCrashWith ("rust: unknown ctor " <> ctor)
 
-rustEnum :: Type -> String
-rustEnum t =
-  "#[derive(Clone, Debug, PartialEq)]\nenum " <> t.name <> " {\n"
-    <> joinWith "\n" (map variantDecl t.variants)
+rustEnum :: ParaMap -> Type -> String
+rustEnum pm t =
+  "#[derive(Clone, Debug, PartialEq)]\nenum " <> t.name <> enumGenerics pm t <> " {\n"
+    <> joinWith "\n" (map (variantDecl pm) t.variants)
     <> "\n}"
 
-variantDecl :: Variant -> String
-variantDecl v
+-- a parametric type's generic list `<K: Clone, V: Clone>` (the `'static`/`Fn`-field bound is a
+-- later closures increment); a non-parametric type → "".
+enumGenerics :: ParaMap -> Type -> String
+enumGenerics pm t = case paraLookup pm t.name of
+  [] -> ""
+  params -> "<" <> joinWith ", " (map (\p -> p <> ": Clone") params) <> ">"
+
+variantDecl :: ParaMap -> Variant -> String
+variantDecl pm v
   | v.fields == [] = "    " <> v.ctor <> ","
   | all (\f -> isJust f.label) v.fields =
       "    " <> v.ctor <> " { "
-        <> joinWith ", " (map (\f -> fromMaybe "" f.label <> ": " <> Cap.owned f.ty) v.fields)
+        <> joinWith ", " (map (\f -> fromMaybe "" f.label <> ": " <> rustFieldType pm f.ty) v.fields)
         <> " },"
   | otherwise =
-      "    " <> v.ctor <> "(" <> joinWith ", " (map (\f -> Cap.owned f.ty) v.fields) <> "),"
+      "    " <> v.ctor <> "(" <> joinWith ", " (map (\f -> rustFieldType pm f.ty) v.fields) <> "),"
+
+-- a variant field's Rust type: a referenced parametric type → its instantiation (`Pair<K, V>`);
+-- else the owned base (a tvar `T` → `T`, `Int53` → `i64`). (`Fn`-field → `Rc<dyn …>` is later.)
+rustFieldType :: ParaMap -> String -> String
+rustFieldType pm ft = case find (\(Tuple n _) -> n == ft) pm of
+  Just (Tuple _ params) -> ft <> "<" <> joinWith ", " params <> ">"
+  Nothing -> Cap.owned ft
 
 -- ── function / clause dispatch ────────────────────────────────────────────────
 
-rustFn :: Meta -> Env -> Array String -> Func -> String
-rustFn meta env methods f =
+rustFn :: ParaMap -> Meta -> Env -> Array String -> Func -> String
+rustFn pm meta env methods f =
   let
-    paramDecls = joinWith ", " (map paramDecl f.params)
-    ret = rustRet (fromMaybe "" f.ret)
+    -- parametric instantiation for this function (`Box` → `Box<T>` in its sig); empty in the
+    -- per-unit `rust` stream (no `pm`), filled in the whole-program `rustprog` stream.
+    pinst = pairInst pm f
+    paramDecls = joinWith ", " (map (\p -> p.name <> ": " <> rustifyParametric pinst (Cap.rustParam p.cap (fromMaybe "" p.ty))) f.params)
+    ret = rustifyParametric pinst (rustRet (fromMaybe "" f.ret))
     scrut = rustScrut f.params
     arms = joinWith "\n" (map (clauseArm meta methods f) f.clauses)
   in
@@ -327,10 +355,6 @@ isCtorPat :: CPat -> Boolean
 isCtorPat (PCtor _ _) = true
 isCtorPat _ = false
 
--- a parameter's Rust declaration: `name: <capability-lowered type>` (ADR-0055).
-paramDecl :: Param -> String
-paramDecl pm = pm.name <> ": " <> Cap.rustParam pm.cap (fromMaybe "" pm.ty)
-
 -- the match scrutinee: one param matches directly, N>1 match the argument tuple.
 rustScrut :: Array Param -> String
 rustScrut params = case map _.name params of
@@ -343,6 +367,8 @@ clauseArm :: Meta -> Array String -> Func -> Clause -> String
 clauseArm meta methods f c =
   let
     pat = tupleOrOne (map (corePatRs meta) c.pats)
+    -- the per-clause emit context: variant registry + the borrowed (`&`-bound) vars.
+    ec = { vi: meta, bor: borrowedVars f.params c.pats }
     -- rewrite protocol-method calls to receiver methods (`eq(a, b)` → `a.eq(b)`, ADR-0061 §2)
     -- on the surface, before lowering to Core.
     cbody = case c.body of
@@ -351,12 +377,31 @@ clauseArm meta methods f c =
     ret = fromMaybe "" f.ret
     -- a generic function returning a bare tvar `T` clones the borrowed `&T` leaves to the
     -- owned `T` the signature promises (`T: Clone`); else the plain string/owned-Vec return
-    -- coercion. (Rebinds + the owned-Vec/String leaf coercions are the deeper-borrow increment.)
+    -- coercion. (The owned-Vec/String leaf coercions are a later deeper-borrow increment.)
     arm =
-      if not (null f.tvars) && elem ret f.tvars then coerceOwnedTvar meta cbody
-      else coerceRet ret (rustArmBody cbody (fst (emit meta cbody)))
+      if not (null f.tvars) && elem ret f.tvars then coerceOwnedTvar ec cbody
+      else coerceRet ret (rustArmBody cbody (fst (emit ec cbody)))
   in
     "        " <> pat <> " => " <> arm <> ","
+
+-- the clause vars that are a `&`-reference at runtime: a pattern var binding a `&`-typed
+-- (capability-borrowed) param. Such a var is cloned to owned in a construction position
+-- (`rust_owned_elem`). Mirrors `borrowed_vars` for the var-pattern case.
+borrowedVars :: Array Param -> Array P.Pat -> Array String
+borrowedVars params pats =
+  concatMap pick (zipWith Tuple params pats)
+  where
+  pick (Tuple pm pat) =
+    if isBorrow (Cap.rustParam pm.cap (fromMaybe "" pm.ty)) then patVarNames (fromPat pat) else []
+  isBorrow s = isJust (stripPrefix (Pattern "&") s)
+
+-- the variable names a pattern binds (for the borrowed set) — recursing ctor/tuple/list args.
+patVarNames :: CPat -> Array String
+patVarNames (PVar n) = [ n ]
+patVarNames (PCtor _ args) = concatMap patVarNames args
+patVarNames (PTuple es) = concatMap patVarNames es
+patVarNames (PList es _) = concatMap patVarNames es
+patVarNames _ = []
 
 -- the Rust generic list `<T: Clone, …>`: each tvar's declared bounds (`forall T: Eq` →
 -- `RianEq`) plus `Clone` (a generic body clones borrowed leaves to the owned return). The
@@ -373,12 +418,14 @@ rustGenerics f = case f.tvars of
 
 -- clone a bare-tvar return's borrowed leaves to the owned `T` (pushed into `if`/block tails);
 -- mirrors `coerce_owned_tvar_ast` for the leaf/`if`/block cases.
-coerceOwnedTvar :: Meta -> CExpr -> String
-coerceOwnedTvar meta (EBlock [ CExprStmt e ]) = coerceOwnedTvar meta e
-coerceOwnedTvar meta (EBlock stmts) = "({ " <> emitBlock meta (EBlock stmts) <> " }).clone()"
-coerceOwnedTvar meta (EIf c t e) =
-  "if " <> p meta 0 c <> " { " <> coerceOwnedTvar meta t <> " } else { " <> coerceOwnedTvar meta e <> " }"
-coerceOwnedTvar meta ast = "(" <> p meta 0 ast <> ").clone()"
+coerceOwnedTvar :: Ec -> CExpr -> String
+coerceOwnedTvar ec (EBlock [ CExprStmt e ]) = coerceOwnedTvar ec e
+coerceOwnedTvar ec (EBlock stmts) = "({ " <> emitBlock ec (EBlock stmts) <> " }).clone()"
+coerceOwnedTvar ec (EIf c t e) =
+  "if " <> p ec 0 c <> " { " <> coerceOwnedTvar ec t <> " } else { " <> coerceOwnedTvar ec e <> " }"
+-- push the clone into each `case` arm's body (not around the whole `match`).
+coerceOwnedTvar ec (ECase scrut arms) = rustCaseWith ec scrut arms (coerceOwnedTvar ec)
+coerceOwnedTvar ec ast = "(" <> p ec 0 ast <> ").clone()"
 
 -- a multi-statement block body is braced as a match-arm value (`{ … }`); a single
 -- expression (or single-stmt block) is the value directly. Mirrors `rust_arm_body`.
@@ -458,12 +505,12 @@ stringRepr _ = false
 
 -- ── expression emission (precedence-aware `{string, prec}`) ────────────────────
 
-p :: Meta -> Int -> CExpr -> String
-p meta ctx node =
-  let Tuple s pr = emit meta node
+p :: Ec -> Int -> CExpr -> String
+p ec ctx node =
+  let Tuple s pr = emit ec node
   in if pr < ctx then "(" <> s <> ")" else s
 
-emit :: Meta -> CExpr -> Tuple String Int
+emit :: Ec -> CExpr -> Tuple String Int
 emit _ (ENum n) = Tuple n 12
 emit _ (EStr s) = Tuple (strLit s) 12
 -- a `Symbol` (`:ok`) is equality-only, lowered to a `&str` literal (ADR-0041).
@@ -472,21 +519,21 @@ emit _ (EAtom a) = Tuple (strLit a) 12
 emit _ (EChar cp) = Tuple (rustCharLit cp) 12
 emit _ (EId "pi") = Tuple "std::f64::consts::PI" 12
 -- a bare PascalCase id is a nullary variant value → `Enum::Variant`.
-emit meta (EId x) = case find (\(Tuple c _) -> c == x) meta of
+emit ec (EId x) = case find (\(Tuple c _) -> c == x) ec.vi of
   Just (Tuple _ info) -> Tuple (info.enum <> "::" <> x) 12
   Nothing -> Tuple x 12
-emit meta (EUnary "-" x) = Tuple ("-" <> p meta 11 x) 11
-emit meta (EUnary "not" x) = Tuple ("!" <> p meta 11 x) 11
-emit meta (EIf c t e) =
-  Tuple ("if " <> p meta 0 c <> " { " <> emitBlock meta t <> " } else { " <> emitBlock meta e <> " }") 0
+emit ec (EUnary "-" x) = Tuple ("-" <> p ec 11 x) 11
+emit ec (EUnary "not" x) = Tuple ("!" <> p ec 11 x) 11
+emit ec (EIf c t e) =
+  Tuple ("if " <> p ec 0 c <> " { " <> emitBlock ec t <> " } else { " <> emitBlock ec e <> " }") 0
 -- string concatenation `<>` → one `format!("{}{}…", …)` over the flattened operands.
-emit meta (EBin "<>" l r) =
+emit ec (EBin "<>" l r) =
   let parts = flattenConcat (EBin "<>" l r)
-  in Tuple ("format!(\"" <> foldMap (const "{}") parts <> "\", " <> joinWith ", " (map (p meta 0) parts) <> ")") 12
-emit meta (EBin "div" l r) = Tuple (p meta 10 l <> " / " <> p meta 11 r) 10
-emit meta (EBin "rem" l r) = Tuple (p meta 10 l <> " % " <> p meta 11 r) 10
-emit meta (EBin "/" l r) = Tuple ("(" <> p meta 0 l <> " as f64) / (" <> p meta 0 r <> " as f64)") 10
-emit meta (EBin op l r) =
+  in Tuple ("format!(\"" <> foldMap (const "{}") parts <> "\", " <> joinWith ", " (map (p ec 0) parts) <> ")") 12
+emit ec (EBin "div" l r) = Tuple (p ec 10 l <> " / " <> p ec 11 r) 10
+emit ec (EBin "rem" l r) = Tuple (p ec 10 l <> " % " <> p ec 11 r) 10
+emit ec (EBin "/" l r) = Tuple ("(" <> p ec 0 l <> " as f64) / (" <> p ec 0 r <> " as f64)") 10
+emit ec (EBin op l r) =
   let
     pr = prec op
     Tuple lc rc = case assoc op of
@@ -494,41 +541,41 @@ emit meta (EBin op l r) =
       AR -> Tuple (pr + 1) pr
       AN -> Tuple (pr + 1) (pr + 1)
   in
-    Tuple (p meta lc l <> " " <> disp op <> " " <> p meta rc r) pr
-emit meta (ECase scrut arms) = Tuple (rustCase meta scrut arms) 0
+    Tuple (p ec lc l <> " " <> disp op <> " " <> p ec rc r) pr
+emit ec (ECase scrut arms) = Tuple (rustCase ec scrut arms) 0
 -- a list literal → `vec![…]`; a cons `[e… | tl]` → prepend onto an owned copy of the tail
 -- (`.to_vec()` turns the `&[T]` slice / `Vec` owned), reversed so order is `e…, tail…` (ADR-0047).
-emit meta (EList elems Nothing) =
-  Tuple ("vec![" <> joinWith ", " (map (rustOwnedElem meta) elems) <> "]") 12
-emit meta (EList elems (Just tl)) =
-  let prepends = joinWith " " (map (\e -> "__v.insert(0, " <> rustOwnedElem meta e <> ");") (reverse elems))
-  in Tuple ("{ let mut __v = " <> p meta 12 tl <> ".to_vec(); " <> prepends <> " __v }") 0
-emit meta (EBlock stmts) = Tuple (emitBlock meta (EBlock stmts)) 0
+emit ec (EList elems Nothing) =
+  Tuple ("vec![" <> joinWith ", " (map (rustOwnedElem ec) elems) <> "]") 12
+emit ec (EList elems (Just tl)) =
+  let prepends = joinWith " " (map (\e -> "__v.insert(0, " <> rustOwnedElem ec e <> ");") (reverse elems))
+  in Tuple ("{ let mut __v = " <> p ec 12 tl <> ".to_vec(); " <> prepends <> " __v }") 0
+emit ec (EBlock stmts) = Tuple (emitBlock ec (EBlock stmts)) 0
 -- a struct construction `Name { f: v, … }` (a PascalCase, all-labeled call that is not a sum ctor).
-emit meta (EStruct name pairs) =
-  Tuple (name <> " { " <> joinWith ", " (map (\(Tuple k v) -> k <> ": " <> p meta 0 v) pairs) <> " }") 12
+emit ec (EStruct name pairs) =
+  Tuple (name <> " { " <> joinWith ", " (map (\(Tuple k v) -> k <> ": " <> p ec 0 v) pairs) <> " }") 12
 -- field access / module/variant path: `p.x`, `Type::Variant`, `module::fn`, `RianTrait::m` (UFCS).
-emit meta (EDot (EId m) n)
+emit _ (EDot (EId m) n)
   | isJust (stripPrefix (Pattern "Rian") m) && pascal m = Tuple (m <> "::" <> n) 12
   | not (pascal m) = Tuple (m <> "." <> n) 12
   | pascal n = Tuple (m <> "::" <> n) 12
   | otherwise = Tuple (toLower m <> "::" <> n) 12
-emit meta (EDot hd n) = Tuple (p meta 12 hd <> "::" <> n) 12
+emit ec (EDot hd n) = Tuple (p ec 12 hd <> "::" <> n) 12
 -- a call to a known sum ctor is construction (`Enum::Variant(…)`); a PascalCase all-labeled call
 -- is struct construction (`Name { f: v }`); otherwise a local call.
-emit meta (ECall (EId name) args)
-  | isJust (find (\(Tuple c _) -> c == name) meta) = Tuple (ctorConstruct meta name args) 12
-  | pascal name && not (null args) && all isELabel args = Tuple (structConstruct meta name args) 12
-emit meta (ECall f args) =
-  Tuple (p meta 12 f <> "(" <> joinWith ", " (map (p meta 0) args) <> ")") 12
+emit ec (ECall (EId name) args)
+  | isJust (find (\(Tuple c _) -> c == name) ec.vi) = Tuple (ctorConstruct ec name args) 12
+  | pascal name && not (null args) && all isELabel args = Tuple (structConstruct ec name args) 12
+emit ec (ECall f args) =
+  Tuple (p ec 12 f <> "(" <> joinWith ", " (map (p ec 0) args) <> ")") 12
 emit _ _ = unsafeCrashWith "rust: expression not yet ported (stage)"
 
 -- struct construction from labeled args (source order — Rust named fields are order-free).
-structConstruct :: Meta -> String -> Array CExpr -> String
-structConstruct meta name args =
+structConstruct :: Ec -> String -> Array CExpr -> String
+structConstruct ec name args =
   name <> " { " <> joinWith ", " (map field args) <> " }"
   where
-  field (ELabel l v) = l <> ": " <> p meta 0 v
+  field (ELabel l v) = l <> ": " <> rustOwnedElem ec v
   field _ = unsafeCrashWith "rust: non-labeled struct field (stage)"
 
 isELabel :: CExpr -> Boolean
@@ -543,55 +590,60 @@ pascal s = case CU.charAt 0 s of
 
 -- positional construction of a sum variant — `Enum::Variant(v, …)`, or
 -- `Enum::Variant { label: v, … }` for a variant that declared field labels.
-ctorConstruct :: Meta -> String -> Array CExpr -> String
-ctorConstruct meta name args =
-  let info = lookupCtor meta name
+ctorConstruct :: Ec -> String -> Array CExpr -> String
+ctorConstruct ec name args =
+  let info = lookupCtor ec.vi name
   in
     if null args then info.enum <> "::" <> name
     else if info.named then
       info.enum <> "::" <> name <> " { "
-        <> joinWith ", " (zipLabels info.labels (map (rustOwnedElem meta) args))
+        <> joinWith ", " (zipLabels info.labels (map (rustOwnedElem ec) args))
         <> " }"
     else
-      info.enum <> "::" <> name <> "(" <> joinWith ", " (map (rustOwnedElem meta) args) <> ")"
+      info.enum <> "::" <> name <> "(" <> joinWith ", " (map (rustOwnedElem ec) args) <> ")"
 
--- a value stored into an owned field. (Increment 2a: Copy primitives — no borrow/clone yet;
--- the owned↔borrow coercion lands with the capability-borrow increment.)
-rustOwnedElem :: Meta -> CExpr -> String
-rustOwnedElem meta e = p meta 0 e
+-- a value stored into an owned position (a variant/struct field, a `Vec` element). A borrowed
+-- binding (`&T`/`&[T]` — in `ec.bor`) is cloned to the owned `T`; a literal/owned value is itself.
+-- (The slice→`.to_vec()` and `&str`→`.to_string()` owned coercions are a later borrow increment.)
+rustOwnedElem :: Ec -> CExpr -> String
+rustOwnedElem ec e = case e of
+  EId n | elem n ec.bor -> p ec 0 e <> ".clone()"
+  _ -> p ec 0 e
 
 -- a `case` → a Rust `match`; each arm `pat <guard> => body,`, joined by spaces. A `case` whose
 -- arms match a list is over a slice, so the scrutinee is borrowed as `&(scrut)[..]` (ADR-0047).
-rustCase :: Meta -> CExpr -> Array CArm -> String
-rustCase meta scrut arms =
+rustCase :: Ec -> CExpr -> Array CArm -> String
+rustCase ec scrut arms = rustCaseWith ec scrut arms (p ec 0)
+
+-- `rust_case` with a custom arm-body emitter (the bare-tvar return pushes `.clone()` into the
+-- arm bodies; the default emits them plainly).
+rustCaseWith :: Ec -> CExpr -> Array CArm -> (CExpr -> String) -> String
+rustCaseWith ec scrut arms bodyFn =
   let
     sliced = any (\a -> isListPat a.pat) arms
-    scrutRs = if sliced then "&(" <> p meta 0 scrut <> ")[..]" else p meta 0 scrut
+    scrutRs = if sliced then "&(" <> p ec 0 scrut <> ")[..]" else p ec 0 scrut
+    arm a = patRs ec.vi a.pat <> caseGuard ec a.guard <> " => " <> bodyFn a.body <> ","
   in
-    "match " <> scrutRs <> " { " <> joinWith " " (map (caseArm meta) arms) <> " }"
+    "match " <> scrutRs <> " { " <> joinWith " " (map arm arms) <> " }"
 
 isListPat :: CPat -> Boolean
 isListPat (PList _ _) = true
 isListPat _ = false
 
-caseArm :: Meta -> CArm -> String
-caseArm meta a =
-  patRs meta a.pat <> caseGuard meta a.guard <> " => " <> p meta 0 a.body <> ","
-
-caseGuard :: Meta -> Maybe CExpr -> String
+caseGuard :: Ec -> Maybe CExpr -> String
 caseGuard _ Nothing = ""
-caseGuard meta (Just g) = " if " <> p meta 0 g
+caseGuard ec (Just g) = " if " <> p ec 0 g
 
 -- a block in tail position (an `if` branch / arm): statements joined, the final an expression.
-emitBlock :: Meta -> CExpr -> String
+emitBlock :: Ec -> CExpr -> String
 emitBlock _ (EBlock []) = "()"
-emitBlock meta (EBlock stmts) = joinWith " " (map (stmtRs meta) stmts)
-emitBlock meta e = p meta 0 e
+emitBlock ec (EBlock stmts) = joinWith " " (map (stmtRs ec) stmts)
+emitBlock ec e = p ec 0 e
 
-stmtRs :: Meta -> CStmt -> String
-stmtRs meta (CExprStmt e) = p meta 0 e
-stmtRs meta (CBind n e) = "let " <> n <> " = " <> p meta 0 e <> ";"
-stmtRs meta (CTypedBind n _ e) = "let " <> n <> " = " <> p meta 0 e <> ";"
+stmtRs :: Ec -> CStmt -> String
+stmtRs ec (CExprStmt e) = p ec 0 e
+stmtRs ec (CBind n e) = "let " <> n <> " = " <> p ec 0 e <> ";"
+stmtRs ec (CTypedBind n _ e) = "let " <> n <> " = " <> p ec 0 e <> ";"
 
 -- ── operator precedence (mirrors `Rian.Lower` prec/assoc/disp) ─────────────────
 
@@ -657,3 +709,78 @@ rustCharLit cp = "'" <> chr cp <> "'"
 
 chr :: Int -> String
 chr n = fromMaybe "" (map CP.singleton (toEnum n :: Maybe CP.CodePoint))
+
+-- ── parametric types → generics / monomorphization (ADR-0061) ───────────────────
+
+-- a parametric type name → its tvar params (`Pair` → `["K", "V"]`); non-parametric types absent.
+type ParaMap = Array (Tuple String (Array String))
+
+paraLookup :: ParaMap -> String -> Array String
+paraLookup pm name = fromMaybe [] (map snd (find (\(Tuple n _) -> n == name) pm))
+
+-- `parametric_param_map`: each user type → the tvars in its fields, by a fixpoint over the type
+-- graph (a field that is another user type contributes that type's params — chains converge).
+parametricMap :: Array Type -> ParaMap
+parametricMap types =
+  filter (\(Tuple _ ps) -> not (null ps)) (converge [])
+  where
+  names = map _.name types
+  converge acc =
+    let next = map (\t -> Tuple t.name (typeParamTvars acc t)) types
+    in if next == acc then next else converge next
+  typeParamTvars acc t =
+    nub $ concatMap
+      (\v -> concatMap (\f -> if elem f.ty names then paraLookup acc f.ty else typeTvars f.ty) v.fields)
+      t.variants
+
+-- the tvar-shaped identifiers in a type string (`Vec(T)` → `["T"]`, `Int53` → `[]`).
+typeTvars :: String -> Array String
+typeTvars t = filter tvarName (typeWords t)
+
+-- the `\w+` identifier runs in a type string (regex-free, like `Rian.JS.typeWords`).
+typeWords :: String -> Array String
+typeWords s = filter (_ /= "") (go (CU.toCharArray s) [] [])
+  where
+  go cs cur acc = case uncons cs of
+    Nothing -> snoc acc (CU.fromCharArray cur)
+    Just { head: c, tail } ->
+      if wordChar c then go tail (snoc cur c) acc
+      else go tail [] (snoc acc (CU.fromCharArray cur))
+
+-- a type variable name: a single upper-case letter + an optional digit (`T`, `K`, `T0`).
+tvarName :: String -> Boolean
+tvarName s = case CU.toCharArray s of
+  [ c ] -> upper c
+  [ c, d ] -> upper c && d >= '0' && d <= '9'
+  _ -> false
+  where
+  upper c = c >= 'A' && c <= 'Z'
+
+wordChar :: Char -> Boolean
+wordChar c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
+
+-- whole-word substitution (`Box` → `Box<T>` in `&Box`, never inside `Boxer`): tokenize into
+-- word / non-word runs and replace exact-match word tokens. Mirrors `Rian.Lower.word_replace`.
+wordReplace :: String -> String -> String -> String
+wordReplace name repl s =
+  joinWith "" (map (\t -> if t == name then repl else t) toks)
+  where
+  toks = map (CU.fromCharArray <<< NEA.toArray) (Array.groupBy (\a b -> wordChar a == wordChar b) (CU.toCharArray s))
+
+-- a per-function instantiation: each used parametric type name → its `<args>` string.
+type Pinst = Array (Tuple String String)
+
+-- rewrite each parametric type name in a Rust type string to its instantiation
+-- (`&[Pair]` + `Pair→<K, V>` → `&[Pair<K, V>]`). Mirrors `rustify_parametric`.
+rustifyParametric :: Pinst -> String -> String
+rustifyParametric pinst t = foldl (\acc (Tuple name args) -> wordReplace name (name <> args) acc) t pinst
+
+-- the per-function instantiation map: each parametric type the signature mentions → `<params>`
+-- (a generic function reuses the type's param names; concrete builders are a later increment).
+pairInst :: ParaMap -> Func -> Pinst
+pairInst pm f =
+  map (\(Tuple name params) -> Tuple name ("<" <> joinWith ", " params <> ">"))
+    (filter (\(Tuple name _) -> parametricUsed name) pm)
+  where
+  sig = map (fromMaybe "") (map _.ty f.params) <> [ fromMaybe "" f.ret ]
+  parametricUsed name = any (\s -> elem name (typeWords s)) sig
