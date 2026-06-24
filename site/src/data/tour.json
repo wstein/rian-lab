@@ -208,7 +208,7 @@
       "id": "macros",
       "panes": {
         "ex": "def puts(s), do: IO.puts(s)\ndef main() do puts(<<\"square(2 + 3) = \"::binary, Integer.to_string((2 + 3) * (2 + 3))::binary>>); puts(<<\"comptime = \"::binary, Integer.to_string(14)::binary>>) end",
-        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nexport function main() { puts(\"square(2 + 3) = \" + String(((2n + 3n) * (2n + 3n)))); return puts(\"comptime = \" + String(14n)); }",
+        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nexport function main() { puts(\"square(2 + 3) = \" + String(((2 + 3) * (2 + 3)))); return puts(\"comptime = \" + String(14)); }",
         "jvm": "private fun puts(a0: String): Unit { val s = a0; return println(s) }\n\nfun main(): Unit {\n  return run { puts((\"square(2 + 3) = \" + (((2L + 3L) * (2L + 3L))).toString())); puts((\"comptime = \" + (14L).toString())) }\n}",
         "rs": "fn puts(s: &str) -> () { println!(\"{}\", s) }\n\nfn main() -> () {\n    match () {\n        () => { puts(&format!(\"square(2 + 3) = {}\", ((2 + 3) * (2 + 3)).to_string())); puts(&format!(\"comptime = {}\", 14.to_string())) },\n    }\n}"
       },

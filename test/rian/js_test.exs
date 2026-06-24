@@ -294,17 +294,16 @@ defmodule Rian.JSTest do
     test "the self-hosting optimizer spike lowers to JS and folds under node (multi-target)" do
       js = JS.compile(File.read!("test/fixtures/rian/opt.rian"))
 
+      # `opt.rian`'s `Num` carries an `Int53` (number), not arbitrary-precision `Int`, so the JS
+      # is number-mode — the literals are plain `number`s, not BigInt (ADR-0064).
       # (2 + 3) * 4  ->  Num(20);  a constant tree folds to one literal
-      tree = ~s|V("Mul",V("Add",V("Num",2n),V("Num",3n)),V("Num",4n))|
+      tree = ~s|V("Mul",V("Add",V("Num",2),V("Num",3)),V("Num",4))|
       # x * 1 + 0  ->  Var("x");  algebraic identities, matched by shape
-      ident = ~s|V("Add",V("Mul",V("Var","x"),V("Num",1n)),V("Num",0n))|
+      ident = ~s|V("Add",V("Mul",V("Var","x"),V("Num",1)),V("Num",0))|
 
-      case node_eval(
-             js,
-             "JSON.stringify(fold(#{tree}), (k,v)=>typeof v==='bigint'?v.toString():v)"
-           ) do
+      case node_eval(js, "JSON.stringify(fold(#{tree}))") do
         :no_node -> :ok
-        out -> assert out == ~s|{"$":"Num","_0":"20"}|
+        out -> assert out == ~s|{"$":"Num","_0":20}|
       end
 
       case node_eval(js, "JSON.stringify(fold(#{ident}))") do
@@ -671,11 +670,12 @@ defmodule Rian.JSTest do
 
     test "a map literal lowers to a JS object (identifier keys -> object keys)" do
       js = JS.compile("def m() Map := %{a: 1, b: 2}")
-      assert js =~ "return {a: 1n, b: 2n};"
+      # bare literals infer `Int53` → native `number`, not BigInt (ADR-0064)
+      assert js =~ "return {a: 1, b: 2};"
 
-      assert node_eval(js, "JSON.stringify(m(), (k,v)=>typeof v==='bigint'?v.toString():v)") in [
+      assert node_eval(js, "JSON.stringify(m())") in [
                :no_node,
-               ~s|{"a":"1","b":"2"}|
+               ~s|{"a":1,"b":2}|
              ]
     end
   end
@@ -798,7 +798,7 @@ defmodule Rian.JSTest do
   end
 
   describe "char literals and prelude primitives (ADR-0036 / ADR-0047)" do
-    test "a Char literal pattern matches its codepoint as a BigInt" do
+    test "a Char literal pattern matches its codepoint as a number" do
       # pat_match(%PChar{}) -> `a0 === <cp>n`; expr_js(%EChar{}) -> `<cp>n`
       js =
         JS.compile("""
@@ -807,15 +807,16 @@ defmodule Rian.JSTest do
         def name(_) := "other"
         """)
 
-      assert js =~ "if (a0 === 97n)"
+      # a Char codepoint is an integer; in a number-mode module it is a native `number`
+      assert js =~ "if (a0 === 97)"
 
-      assert node_eval(js, "name(97n)") in [:no_node, "ay"]
-      assert node_eval(js, "name(98n)") in [:no_node, "other"]
+      assert node_eval(js, "name(97)") in [:no_node, "ay"]
+      assert node_eval(js, "name(98)") in [:no_node, "other"]
     end
 
-    test "a Char literal expression lowers to its codepoint BigInt" do
+    test "a Char literal expression lowers to its codepoint (number)" do
       js = JS.compile("def z() Char := 'z'")
-      assert js =~ "return 122n;"
+      assert js =~ "return 122;"
       assert node_eval(js, "String(z())") in [:no_node, "122"]
     end
 

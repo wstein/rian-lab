@@ -93,8 +93,11 @@ the WASM target is the Rust→`wasm32` pipeline (ADR-0026), so a function reache
 "WASM = free via Rust" must not become folklore: `wasm32` gives Rust's reach matrix verbatim, including
 its `Int` bignum gap, not WASM-native numeric capabilities. (Honest native-`i64` `Int` on WASM would
 require a *direct* WASM backend — a separate target under the ADR-0049 §5a admission gate, not this
-pipeline.) Integer mode on JS is whole-program:
-a module that mentions any `number`-width type emits all integers as `number`, never mixing with `BigInt`.
+pipeline.) Integer mode on JS is whole-program, and **`number` is the default**: since a bare literal
+infers `Int53`, a module emits all integers as `number` **unless it explicitly names arbitrary-precision
+`Int`** — only that opts the module into `BigInt`. (The earlier rule keyed number-mode on a fixed-width
+type *appearing* in a signature, so a program of bare literals — `Int53` buried in a sum field, or no
+width at all — wrongly defaulted to `BigInt` and emitted `2n`; the default is now `number`.)
 Because the two carriers cannot coexist, a module that mixes `Int` (BigInt) with a `number`-width type
 (`Int53`/`Int32`) is **refused by the JS emitter** (`Rian.JS.reject_mixed_int_mode!`) rather than silently
 demoting `Int` to a bounded `number` — the same "never change a type's precision" rule as §2a.
@@ -143,9 +146,10 @@ the in-domain idiom over either.
   wraps on the BEAM (`wrap(MAX64, 1) == MIN64`), distinct from `Int`'s exactness, both verified.
 
 **JS integer types are implemented (§2a, `test/rian/js_test.exs` · `reach_test.exs`):**
-- **JS-valid:** `Int` → `BigInt`; `Int53` / `Int32`-and-smaller → native `number`. Mode is whole-program
-  (a module mentioning a `number`-width emits all integers as `number`, never mixed with `BigInt`); a bare
-  literal base case (`count([]) := 0`) adopts the declared `Int53`/`Int32` return width in the checker.
+- **JS-valid:** `Int53` / `Int32`-and-smaller → native `number` (the default — a bare literal infers
+  `Int53`); explicit `Int` → `BigInt`. Mode is whole-program: a module is `number`-mode **unless it
+  explicitly names `Int`** (never mixed with `BigInt`); a bare literal base case (`count([]) := 0`)
+  adopts the declared `Int53`/`Int32` return width in the checker.
 - **JS-rejected:** `Int64`/`Int128`/`UInt64`/`UInt128` raise in `Rian.JS` (`reject_wide_int!`) and are
   pinned **off `:js`** by `Rian.Reach` (a `:numeric` `width_blocker`). The portable corpus that targets all
   four backends (`prelude_str`/`prelude_dict`/`selfhost_*`/stdlib) now uses **`Int53`**, not `Int64`; the

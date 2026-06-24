@@ -4,10 +4,10 @@
 -- | multi-clause function lowers to a **dispatcher** (positional `a0,a1,…`, one guarded block per
 -- | clause, a final `throw`).
 -- |
--- | Integer mode is whole-program (ADR-0064): if any signature names a JS-number width
--- | (`Int53`/`Int32`/smaller) the module emits in number-mode (`i53 = true`, native `number`),
--- | else BigInt-mode (`Int` → `42n`). `Int`+number widths cannot mix (`rejectMixedIntMode`);
--- | `Int64`+ are rejected (`rejectWideInt`), never silently elevated to BigInt.
+-- | Integer mode is whole-program (ADR-0064) and `number` is the DEFAULT: a bare literal infers
+-- | `Int53`, so the module emits native `number` (`i53 = true`) UNLESS it explicitly names
+-- | arbitrary-precision `Int` — only then BigInt-mode (`Int` → `42n`). `Int`+number widths cannot
+-- | mix (`rejectMixedIntMode`); `Int64`+ are rejected (`rejectWideInt`), never silently → BigInt.
 -- |
 -- | Both print modes are ported: `compile` (the runtime module) and `compileTypes` (the `.d.mts`
 -- | sidecar, ADR-0086 §5). Module `const`s + references (`resolveConsts`/`constJs`, the `EConstRef`
@@ -136,8 +136,13 @@ jsNumberInt t = any (\w -> elem w jsNumberWords) (typeWords t)
 jsBigintInt :: String -> Boolean
 jsBigintInt t = elem "Int" (typeWords t)
 
+-- `Int53` is the DEFAULT JS integer (a bare literal infers it, ADR-0064): a module is number-mode
+-- unless it EXPLICITLY names arbitrary-precision `Int` (then BigInt-mode). The old rule keyed on a
+-- fixed-width type appearing in a signature, so a bare-literal program — no width in any sig — wrongly
+-- defaulted to BigInt (`2n`). Default to number; `Int` is the opt-in. (A module mixing the two is
+-- still refused by `rejectMixedIntMode`; `Int64`+ still rejected by `rejectWideInt`.)
 programNumberMode :: Prog -> Boolean
-programNumberMode prog = any jsNumberInt (sigTypes prog)
+programNumberMode prog = not (any jsBigintInt (sigTypes prog))
 
 -- `Int` (→ BigInt) and a JS-number width (→ number) cannot coexist: BigInt and number never mix in
 -- JS, and number-mode would silently demote `Int` (ADR-0064 §2a). Refuse the mix loudly.

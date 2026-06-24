@@ -19,22 +19,22 @@ defmodule Rian.JS do
 
   ## Integer types on JS (ADR-0064)
 
-  JS has exactly two integer carriers, so only three Rian integer types are
-  JS-valid:
+  **`Int53` is the default JS integer** — a bare literal infers `Int53`, so most code is
+  native `number`, with **no implicit `BigInt`**. JS has two integer carriers:
 
-    * **`Int`** (arbitrary precision, the default) → **`BigInt`**: literals `42n`,
-      arithmetic stays in BigInt.
-    * **`Int53`** (the portable fixed-width ceiling) and **`Int32`/smaller** →
-      native JS **`number`** (`42`, no suffix), exact within 2^53.
+    * **`Int53`** (the portable ceiling, the inferred default for a bare literal) and
+      **`Int32`/smaller** → native JS **`number`** (`42`, no suffix), exact within 2^53.
+    * **`Int`** (arbitrary precision) — only when *explicitly* declared — → **`BigInt`**
+      (literals `42n`); arithmetic stays in BigInt. It is opt-in, never the default.
 
-  **`Int64`/`Int128`/`UInt64`/`UInt128` are *not* supported on JS** — a `number`
-  can't hold them and we refuse to silently elevate them to `BigInt` (which would
-  widen a bounded type to arbitrary precision). A function whose signature names one
-  is **rejected** (`reject_wide_int!`); `Rian.Reach` pins it off `:js` so the gate
-  catches it first. The number/BigInt mode is **whole-program**: the whole module is
-  uniformly native (`Int53`/`Int32`) or uniformly BigInt (`Int`), the two never mix
-  (`reject_mixed_int_mode!`). `compile/1` computes the mode once and threads it
-  through the emitter as the boolean `i53` (`true` = native `number`).
+  **`Int64`/`Int128`/`UInt64`/`UInt128` are *not* supported on JS** — a `number` can't
+  hold them and we refuse to silently elevate them to `BigInt` (which would widen a
+  bounded type to arbitrary precision). A function whose signature names one is
+  **rejected** (`reject_wide_int!`); `Rian.Reach` pins it off `:js` so the gate catches
+  it first. The number/BigInt mode is **whole-program**: a module is number-mode unless
+  it explicitly names `Int` (then uniformly BigInt), and the two never mix
+  (`reject_mixed_int_mode!`). `compile/1` computes the mode once and threads it through
+  the emitter as the boolean `i53` (`true` = native `number`).
 
   ## Scope (this increment)
 
@@ -977,23 +977,26 @@ defmodule Rian.JS do
   # `Rian.Prim` so the list here and `Rian.Reach`'s `:js` blocker never drift.
   @overflow_prims Rian.Prim.overflow_ops()
 
+  # bare `Int` (arbitrary precision -> BigInt); `\bInt\b` matches `Int` only — not `Int53`/`Int64`.
+  @js_bigint_int ~r/\bInt\b/
+
+  # `Int53` is the **default** JS integer: a bare literal infers `Int53` (ADR-0064), so a module is
+  # number-mode unless it *explicitly* names arbitrary-precision `Int` — only then does it go
+  # BigInt-mode. (The old rule keyed number-mode on an explicit fixed-width type appearing, so a
+  # program of bare literals — no width in any signature — wrongly defaulted to BigInt and emitted
+  # `2n`. Default to number; `Int` is the opt-in.) A module that mixes the two is still refused
+  # (`reject_mixed_int_mode!`), and `Int64`+ are still rejected (`reject_wide_int!`).
   defp program_number_mode?(prog) do
     funcs = Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
-
-    Enum.any?(funcs, fn f ->
-      Enum.any?([f.ret | Enum.map(f.params, & &1.type)], &js_number_int?/1)
-    end)
+    sig_types = Enum.flat_map(funcs, fn f -> [f.ret | Enum.map(f.params, & &1.type)] end)
+    not Enum.any?(sig_types, &(is_binary(&1) and Regex.match?(@js_bigint_int, &1)))
   end
-
-  defp js_number_int?(t), do: is_binary(t) and Regex.match?(@js_number_int, t)
 
   # `Int` (arbitrary precision -> BigInt) and a fixed-width JS-number type
   # (`Int53`/`Int32`/smaller) cannot coexist in one JS module: BigInt and number
   # never mix in a JS expression, and the whole-program number-mode would silently
   # demote `Int` to a bounded `number` — exactly the precision change ADR-0064
-  # forbids. Refuse the mix loudly rather than miscompile. (`\bInt\b` matches bare
-  # `Int` only — not `Int53`/`Int64`/`UInt8`.)
-  @js_bigint_int ~r/\bInt\b/
+  # forbids. Refuse the mix loudly rather than miscompile.
   defp reject_mixed_int_mode!(prog) do
     sig_types =
       (Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs))
