@@ -27,6 +27,24 @@ defmodule Rian.ComptimeTest do
       assert auto("3.14 * 2") == {:bin, "*", {:num, "3.14"}, {:num, "2"}}
       assert auto("2 + 1.5") == {:bin, "+", {:num, "2"}, {:num, "1.5"}}
     end
+
+    test "constant string concatenation folds (`\"a\" <> \"b\"` → `\"ab\"`)" do
+      assert auto(~S|"a" <> "b" <> "c"|) == {:str, "abc"}
+      assert auto(~S|"x = " <> "1"|) == {:str, "x = 1"}
+      # a non-literal operand keeps the `<>` (folded children)
+      assert auto(~S|x <> "!"|) == {:bin, "<>", {:id, "x"}, {:str, "!"}}
+    end
+
+    test "fully-constant `and`/`or` fold; a variable operand is left untouched" do
+      assert auto("true and false") == {:id, "false"}
+      assert auto("false or true") == {:id, "true"}
+
+      # an operator over a VARIABLE is NOT simplified pre-check — `x and true` carries the `Bool`
+      # constraint InferLocal reads and the operator pin Reach reads; folding it away would change
+      # both (those identities belong in a post-check pass, not this variable-neutral one).
+      assert auto("x and true") == {:bin, "and", {:id, "x"}, {:id, "true"}}
+      assert auto("false and x") == {:bin, "and", {:id, "false"}, {:id, "x"}}
+    end
   end
 
   describe "pure comptime folding (ADR-0009/0030)" do

@@ -41,16 +41,23 @@ fold node = mapNode fold node
 -- | pass (`Assemble.runProgramTail`); mirrors `Rian.Comptime.fold_constants`.
 -- @rian_sig pub def fold_constants(node val Surface) Surface
 foldConstants :: Surface -> Surface
-foldConstants node@(SBin _ _ _) = autoFold node
-foldConstants node@(SUnary op _) | op == "-" || op == "not" = autoFold node
+foldConstants (SBin op l r) = foldBin op (foldConstants l) (foldConstants r)
+foldConstants (SUnary op x) | op == "-" || op == "not" = foldEval (SUnary op (foldConstants x))
 foldConstants node = mapNode foldConstants node
 
-autoFold :: Surface -> Surface
-autoFold node =
+-- operands folded first; then simplify by operator. `<>` over two string literals concatenates;
+-- the evaluation-preserving boolean identities (`true and x` → `x`, etc.) drop no operand (so no
+-- effect/Reach change — the dropping pair is left to the backend's short-circuit). Mirrors `fold_bin`.
+foldBin :: String -> Surface -> Surface -> Surface
+foldBin "<>" (SStr a) (SStr b) = SStr (a <> b)
+foldBin op l r = foldEval (SBin op l r)
+
+foldEval :: Surface -> Surface
+foldEval node =
   if homogeneousNums node then case eval node of
     Right v -> valSurface v
-    Left _ -> mapNode foldConstants node
-  else mapNode foldConstants node
+    Left _ -> node
+  else node
 
 foldVal :: Either String CtVal -> Surface
 foldVal (Right v) = valSurface v
@@ -102,6 +109,8 @@ eval (SBin op l r) = do
   b <- eval r
   binOp op a b
 eval (SCall _ _) = Left "calls are not allowed in a pure comptime sandbox"
+eval (SId "true") = Right (CtBool true)
+eval (SId "false") = Right (CtBool false)
 eval (SId x) = Left ("`" <> x <> "` is not a compile-time constant")
 eval (SDot _ _) = Left "FFI/field access is not allowed in comptime"
 eval _ = Left "unsupported in comptime"
@@ -127,7 +136,13 @@ binOp ">" a b = cmpVal ">" a b
 binOp ">=" a b = cmpVal ">=" a b
 binOp "==" a b = cmpVal "==" a b
 binOp "!=" a b = cmpVal "!=" a b
+binOp "and" a b = boolOp (&&) a b
+binOp "or" a b = boolOp (||) a b
 binOp op _ _ = Left ("operator `" <> op <> "` not allowed in comptime")
+
+boolOp :: (Boolean -> Boolean -> Boolean) -> CtVal -> CtVal -> Either String CtVal
+boolOp f (CtBool p) (CtBool q) = Right (CtBool (f p q))
+boolOp _ _ _ = Left "`and`/`or` require booleans"
 
 -- int op when both are int, else widen to float (mirrors Erlang's polymorphic numbers).
 numBin :: (Int -> Int -> Int) -> (Number -> Number -> Number) -> CtVal -> CtVal -> Either String CtVal

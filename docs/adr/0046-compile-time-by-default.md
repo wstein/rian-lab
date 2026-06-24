@@ -86,7 +86,11 @@ it before the program runs is the litmus test passing trivially. Implementation:
 
 - **`Rian.Comptime.fold_constants`** — a program-tail pass (`Rian.Decl.run_program_tail`, before
   interpolation resolution, so a constant `${…}` hole folds too). OPPORTUNISTIC: a non-constant operand
-  simply leaves the node, so it never errors like `comptime`.
+  simply leaves the node, so it never errors like `comptime`. Folds: numeric/comparison `+ - * / div
+  rem < <= > >= == !=`; **constant string concatenation** (`"a" <> "b"` → `"ab"`); fully-constant
+  `and`/`or`; and the **evaluation-preserving boolean identities** (`true and x` → `x`, `x and true` →
+  `x`, `false or x` → `x`, `x or false` → `x` — no operand dropped, so no effect/Reach change; the
+  dropping pair `false and x` → `false` is left to the backend's short-circuit `&&`/`||`, boundary A).
 - **Constant interpolation holes bake into the string** (`Rian.Interp`, ADR-0069 §6): once the hole is
   a literal, it is stringified at *compile* time and merged into the surrounding text — so
   `"calc = ${2 + 3 * 4}"` becomes the single literal `"calc = 14"` (`console.log("calc = 14")`), not a

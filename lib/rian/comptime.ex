@@ -40,16 +40,31 @@ defmodule Rian.Comptime do
   is fine: `/` is float division, the checker agrees.) A distinct program-tail pass (so the parity
   `assemble`/`dcl` streams, which stop before the tail, are unfolded; the `--no-fold` flag skips it).
   """
-  def fold_constants({:bin, _op, _l, _r} = node), do: auto_fold(node)
-  def fold_constants({:unary, op, _x} = node) when op in ["-", "not"], do: auto_fold(node)
+  def fold_constants({:bin, op, l, r}), do: fold_bin(op, fold_constants(l), fold_constants(r))
+
+  def fold_constants({:unary, op, x}) when op in ["-", "not"],
+    do: fold_eval({:unary, op, fold_constants(x)})
+
   def fold_constants(node), do: Macro.map_node(node, &fold_constants/1)
 
-  defp auto_fold(node) do
+  # operands are folded first; then simplify by operator.
+  # `<>` over two string literals concatenates at compile time (`"a" <> "b"` → `"ab"`). Both operands
+  # are literals — no variable — so nothing the checker/InferLocal/Reach derive from the node is lost.
+  defp fold_bin("<>", {:str, a}, {:str, b}), do: {:str, a <> b}
+
+  # everything else: a numeric / comparison / fully-constant `and`/`or` eval that fires only when BOTH
+  # operands are now constant + kind-homogeneous, else the node passes through (operands folded). Note
+  # the deliberately-absent boolean IDENTITIES (`true and x` → `x`): removing an operator over a
+  # VARIABLE would drop the `Bool` constraint InferLocal reads from it and the operator pin Reach reads
+  # — a pre-checker pass must stay variable-neutral (those simplifications belong in a post-check pass).
+  defp fold_bin(op, l, r), do: fold_eval({:bin, op, l, r})
+
+  defp fold_eval(node) do
     with true <- homogeneous_nums?(node),
          {:ok, v} <- eval(node) do
       to_literal(v)
     else
-      _ -> Macro.map_node(node, &fold_constants/1)
+      _ -> node
     end
   end
 
@@ -108,15 +123,22 @@ defmodule Rian.Comptime do
         ">=" -> {:ok, a >= b}
         "==" -> {:ok, a == b}
         "!=" -> {:ok, a != b}
+        "and" -> bool_op(a, b, &(&1 and &2))
+        "or" -> bool_op(a, b, &(&1 or &2))
         _ -> {:error, "operator `#{op}` not allowed in comptime"}
       end
     end
   end
 
   defp eval({:call, _, _}), do: {:error, "calls are not allowed in a pure comptime sandbox"}
+  defp eval({:id, "true"}), do: {:ok, true}
+  defp eval({:id, "false"}), do: {:ok, false}
   defp eval({:id, x}), do: {:error, "`#{x}` is not a compile-time constant"}
   defp eval({:dot, _, _}), do: {:error, "FFI/field access is not allowed in comptime"}
   defp eval(other), do: {:error, "unsupported in comptime: #{inspect(other)}"}
+
+  defp bool_op(a, b, f) when is_boolean(a) and is_boolean(b), do: {:ok, f.(a, b)}
+  defp bool_op(_a, _b, _f), do: {:error, "`and`/`or` require booleans"}
 
   # `div`/`rem` are integer-only (mirrors the language: `/` is float division).
   defp int_div(_a, 0, _op), do: {:error, "division by zero"}
