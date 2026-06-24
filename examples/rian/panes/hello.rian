@@ -1,8 +1,13 @@
 #@pane
-# a module, an entry `main`, a single-assignment bind, and a `${…}` hole
-mod Hello do
-  pub def main() String
-    name := "Rian"
-    "Hello, ${name}!"
-  end
+# an entry `main`, a `:=` bind, a `${…}` hole, and `puts` — console output is a host
+# call with no portable value (ADR-0068), so one `@external` per target.
+@external(:ex, "IO.puts(s)")
+@external(:js, "console.log(s)")
+@external(:rs, "println!(\"{}\", s)")
+@external(:jvm, "println(s)")
+def puts(s String) Unit
+
+pub def main() Unit
+  name := "Rian"
+  puts("Hello, ${name}!")
 end

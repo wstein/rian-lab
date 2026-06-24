@@ -1,20 +1,21 @@
 {
   "cells": [
     {
-      "blurb": "A `mod`, an entry `main`, a single-assignment bind, and a `${…}` interpolation hole. The Lab runs the emitted JS in a sandbox and shows `main()`'s value — here the greeting string the program returns.",
+      "blurb": "An entry `main`, a single-assignment bind, a `${…}` interpolation hole, and `puts` — console output is a host call with no portable value (ADR-0068), so one `@external` per target (`IO.puts`/`console.log`/`println!`/`println`). The Lab runs the emitted JS in a sandbox and shows the printed output.",
       "covers": [
-        "mod",
         "main",
         ":=",
-        "${…}"
+        "${…}",
+        "puts",
+        "@external"
       ],
       "file": "hello.rian",
       "id": "hello",
       "panes": {
-        "ex": "defmodule Hello do\ndef main() do name = \"Rian\"; <<\"Hello, \"::binary, name::binary, \"!\"::binary>> end\nend",
-        "js": "export function main() { let name = \"Rian\"; return (\"Hello, \" + name + \"!\"); }",
-        "jvm": "fun main(): String {\n  return run { val name = \"Rian\"; (\"Hello, \" + name + \"!\") }\n}",
-        "rs": "mod hello {\npub fn main() -> String {\n    match () {\n        () => ({ let name = \"Rian\".to_string(); format!(\"Hello, {}!\", name) }).to_string(),\n    }\n}\n}"
+        "ex": "def puts(s), do: IO.puts(s)\ndef main() do name = \"Rian\"; puts(<<\"Hello, \"::binary, name::binary, \"!\"::binary>>) end",
+        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nexport function main() { let name = \"Rian\"; return puts((\"Hello, \" + name + \"!\")); }",
+        "jvm": "private fun puts(a0: String): Unit { val s = a0; return println(s) }\n\nfun main(): Unit {\n  return run { val name = \"Rian\"; puts((\"Hello, \" + name + \"!\")) }\n}",
+        "rs": "fn puts(s: &str) -> () { println!(\"{}\", s) }\n\nfn main() -> () {\n    match () {\n        () => { let name = \"Rian\".to_string(); puts(&format!(\"Hello, {}!\", name)) },\n    }\n}"
       },
       "reach": {
         "main": [
@@ -22,9 +23,15 @@
           "js",
           "jvm",
           "rs"
+        ],
+        "puts": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
         ]
       },
-      "source": "# a module, an entry `main`, a single-assignment bind, and a `${…}` hole\nmod Hello do\n  pub def main() String\n    name := \"Rian\"\n    \"Hello, ${name}!\"\n  end\nend",
+      "source": "# an entry `main`, a `:=` bind, a `${…}` hole, and `puts` — console output is a host\n# call with no portable value (ADR-0068), so one `@external` per target.\n@external(:ex, \"IO.puts(s)\")\n@external(:js, \"console.log(s)\")\n@external(:rs, \"println!(\\\"{}\\\", s)\")\n@external(:jvm, \"println(s)\")\ndef puts(s String) Unit\n\npub def main() Unit\n  name := \"Rian\"\n  puts(\"Hello, ${name}!\")\nend",
       "title": "Hello, Rian!"
     },
     {

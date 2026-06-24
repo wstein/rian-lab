@@ -42,10 +42,11 @@ defmodule Rian.Tour do
       title: "Hello, Rian!",
       file: "hello.rian",
       blurb:
-        "A `mod`, an entry `main`, a single-assignment bind, and a `${…}` " <>
-          "interpolation hole. The Lab runs the emitted JS in a sandbox and shows " <>
-          "`main()`'s value — here the greeting string the program returns.",
-      covers: ["mod", "main", ":=", "${…}"]
+        "An entry `main`, a single-assignment bind, a `${…}` interpolation hole, and " <>
+          "`puts` — console output is a host call with no portable value (ADR-0068), so " <>
+          "one `@external` per target (`IO.puts`/`console.log`/`println!`/`println`). The " <>
+          "Lab runs the emitted JS in a sandbox and shows the printed output.",
+      covers: ["main", ":=", "${…}", "puts", "@external"]
     },
     %{
       id: "basics",
