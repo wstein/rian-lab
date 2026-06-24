@@ -1,13 +1,14 @@
 #@pane
-# Macros are declarative AST pattern->template (the macro_rules!/syntax-rules model) — precedence-safe
-# and hygienic, expanded before typecheck. `comptime` folds a constant expression to its literal.
+# Macros are declarative AST pattern->template (precedence-safe, hygienic), expanded before typecheck.
+# A fixed expression like `2 + 3 * 4` is folded to its literal at compile time (ADR-0046).
 @external(:ex, "IO.puts(s)")
 @external(:js, "console.log(s)")
 @external(:rs, "println!(\"{}\", s)")
 @external(:jvm, "println(s)")
 def puts(s String) Unit
 macro square(x) := x * x
+def sq(a Int53, b Int53) Int53 := square(a + b)
 pub def main() Unit
-  puts("square(2 + 3) = ${square(2 + 3)}")
-  puts("comptime = ${comptime(2 + 3 * 4)}")
+  puts("sq(2, 3) = ${sq(2, 3)}")
+  puts("2 + 3 * 4 = ${2 + 3 * 4}")
 end

@@ -11,9 +11,11 @@ defmodule Rian.IOStdlib do
   # Parsing here runs the full program tail (so the `${n}` holes in `puts` resolve to
   # `__prim_int_to_string` via the narrowing pass) — but `inject_stdlib`'s IO branch is guarded by
   # `io_defined?`, which is TRUE for this source, so it does not recurse into itself.
+  # `fold: false` — automatic constant folding (ADR-0046) is for the user's program, not the injected
+  # stdlib (and the PS twin parses via `parseToProg`, which never folds), so the two stay in parity.
   @path Path.join([__DIR__, "..", "..", "examples", "rian", "prelude_io.rian"])
   @external_resource @path
-  @prog @path |> File.read!() |> Rian.Decl.parse()
+  @prog @path |> File.read!() |> Rian.Decl.parse(fold: false)
 
   @doc "The IO functions (`line`/`write` host wrappers + polymorphic `puts`/`print`), top-level."
   @rian_sig "pub def funcs() Vec(Func)"

@@ -165,7 +165,7 @@ defmodule Rian.Decl do
     if Keyword.get(opts, :assemble_only, false) do
       assembled
     else
-      run_program_tail(assembled)
+      run_program_tail(assembled, Keyword.get(opts, :fold, true))
     end
   end
 
@@ -173,13 +173,45 @@ defmodule Rian.Decl do
   # String-interpolation resolution (ADR-0069, every module's sigs/types/structs/ctors in
   # scope, so a `${OtherMod.f(x)}` hole resolves) → stdlib injection (detects the resolved
   # `Show.float`/`show` calls) → infer-local (ADR-0034, fill undeclared private returns).
-  defp run_program_tail(assembled) do
+  defp run_program_tail(assembled, fold? \\ true) do
     check_cross_module!(assembled)
 
-    assembled
+    # Automatic constant folding (ADR-0046) runs FIRST, before interpolation resolution, so a
+    # constant `${…}` hole folds to its literal before it becomes a concat. A program-tail pass
+    # (not part of `assemble`), so the `assemble`/`dcl` parity streams see unfolded bodies; the
+    # `--no-fold` build flag passes `fold?: false` to keep the emitted source source-faithful.
+    folded = if fold?, do: fold_constants_pass(assembled), else: assembled
+
+    folded
     |> resolve_interp()
     |> inject_stdlib()
     |> Rian.InferLocal.fill_returns()
+  end
+
+  # Apply `Rian.Comptime.fold_constants` to every (non-synthetic) clause body, program-wide
+  # (mirrors `resolve_interp`'s walk). A body the fold doesn't touch keeps its source-string form.
+  defp fold_constants_pass(prog) do
+    fold = fn funcs -> Enum.map(funcs, &fold_constants_func/1) end
+
+    prog
+    |> Map.put(:funcs, fold.(Map.get(prog, :funcs, [])))
+    |> Map.put(
+      :mods,
+      Enum.map(Map.get(prog, :mods, []), fn m -> %{m | funcs: fold.(m.funcs)} end)
+    )
+  end
+
+  defp fold_constants_func(%Func{synthetic: true} = f), do: f
+
+  defp fold_constants_func(%Func{clauses: cs} = f),
+    do: %{f | clauses: Enum.map(cs, &fold_constants_clause/1)}
+
+  defp fold_constants_clause(%Clause{body: nil} = c), do: c
+
+  defp fold_constants_clause(%Clause{body: body} = c) do
+    ast = Pratt.parse_body(body)
+    out = Rian.Comptime.fold_constants(ast)
+    if out == ast, do: c, else: %{c | body: out}
   end
 
   # Whole-program cross-module `impl` validation (ADR-0061 §5). An impl whose protocol

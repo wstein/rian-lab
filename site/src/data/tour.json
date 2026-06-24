@@ -197,20 +197,20 @@
       "title": "String interpolation"
     },
     {
-      "blurb": "Declarative pattern→template macros (ADR-0030) — no `quote`/`unquote`. `square(2 + 3)` substitutes as AST, so it expands to `(2 + 3) * (2 + 3)`, never the C-preprocessor `2 + 3 * 2 + 3` — read the Rust/JVM pane to see it. Template-local binders are gensym-renamed (hygiene), and a template may be a multiline `… end` block. `comptime` folds a constant to its literal — `2 + 3 * 4` is `14` before the program runs. Both are AST→AST passes that run before typecheck, so the expanded code reaches all four targets.",
+      "blurb": "Declarative pattern→template macros (ADR-0030) — no `quote`/`unquote`. `square(a + b)` substitutes as AST, so `sq` expands to `(a + b) * (a + b)`, never the C-preprocessor `a + b * a + b` — read the Rust/JVM pane to see it. Template-local binders are gensym-renamed (hygiene). And **automatic constant folding** (ADR-0046): a fixed expression like `2 + 3 * 4` is computed to its literal `14` at compile time — Rian is functional, so an all-literal calculation has one answer, settled before the program runs.",
       "covers": [
         "macro",
-        "comptime",
+        "comptime fold",
         "hygiene",
         "AST substitution"
       ],
       "file": "macros.rian",
       "id": "macros",
       "panes": {
-        "ex": "def puts(s), do: IO.puts(s)\ndef main() do puts(<<\"square(2 + 3) = \"::binary, Integer.to_string((2 + 3) * (2 + 3))::binary>>); puts(<<\"comptime = \"::binary, Integer.to_string(14)::binary>>) end",
-        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nexport function main() { puts(\"square(2 + 3) = \" + String(((2 + 3) * (2 + 3)))); return puts(\"comptime = \" + String(14)); }",
-        "jvm": "private fun puts(a0: String): Unit { val s = a0; return println(s) }\n\nfun main(): Unit {\n  return run { puts((\"square(2 + 3) = \" + (((2L + 3L) * (2L + 3L))).toString())); puts((\"comptime = \" + (14L).toString())) }\n}",
-        "rs": "fn puts(s: &str) -> () { println!(\"{}\", s) }\n\nfn main() -> () {\n    match () {\n        () => { puts(&format!(\"square(2 + 3) = {}\", ((2 + 3) * (2 + 3)).to_string())); puts(&format!(\"comptime = {}\", 14.to_string())) },\n    }\n}"
+        "ex": "def puts(s), do: IO.puts(s)\ndef sq(a, b) do (a + b) * (a + b) end\ndef main() do puts(<<\"sq(2, 3) = \"::binary, Integer.to_string(sq(2, 3))::binary>>); puts(<<\"2 + 3 * 4 = \"::binary, Integer.to_string(14)::binary>>) end",
+        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nfunction sq(a, b) { return ((a + b) * (a + b)); }\n\nexport function main() { puts(\"sq(2, 3) = \" + String(sq(2, 3))); return puts(\"2 + 3 * 4 = \" + String(14)); }",
+        "jvm": "private fun puts(a0: String): Unit { val s = a0; return println(s) }\n\nprivate fun sq(a0: Long, a1: Long): Long {\n  val a = a0; val b = a1; return ((a + b) * (a + b))\n}\n\nfun main(): Unit {\n  return run { puts((\"sq(2, 3) = \" + (sq(2L, 3L)).toString())); puts((\"2 + 3 * 4 = \" + (14L).toString())) }\n}",
+        "rs": "fn puts(s: &str) -> () { println!(\"{}\", s) }\n\nfn sq(a: i64, b: i64) -> i64 {\n    match (a, b) {\n        (a, b) => (a + b) * (a + b),\n    }\n}\n\nfn main() -> () {\n    match () {\n        () => { puts(&format!(\"sq(2, 3) = {}\", sq(2, 3).to_string())); puts(&format!(\"2 + 3 * 4 = {}\", 14.to_string())) },\n    }\n}"
       },
       "reach": {
         "main": [
@@ -224,9 +224,15 @@
           "js",
           "jvm",
           "rs"
+        ],
+        "sq": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
         ]
       },
-      "source": "# Macros are declarative AST pattern->template (the macro_rules!/syntax-rules model) — precedence-safe\n# and hygienic, expanded before typecheck. `comptime` folds a constant expression to its literal.\n@external(:ex, \"IO.puts(s)\")\n@external(:js, \"console.log(s)\")\n@external(:rs, \"println!(\\\"{}\\\", s)\")\n@external(:jvm, \"println(s)\")\ndef puts(s String) Unit\nmacro square(x) := x * x\npub def main() Unit\n  puts(\"square(2 + 3) = ${square(2 + 3)}\")\n  puts(\"comptime = ${comptime(2 + 3 * 4)}\")\nend",
+      "source": "# Macros are declarative AST pattern->template (precedence-safe, hygienic), expanded before typecheck.\n# A fixed expression like `2 + 3 * 4` is folded to its literal at compile time (ADR-0046).\n@external(:ex, \"IO.puts(s)\")\n@external(:js, \"console.log(s)\")\n@external(:rs, \"println!(\\\"{}\\\", s)\")\n@external(:jvm, \"println(s)\")\ndef puts(s String) Unit\nmacro square(x) := x * x\ndef sq(a Int53, b Int53) Int53 := square(a + b)\npub def main() Unit\n  puts(\"sq(2, 3) = ${sq(2, 3)}\")\n  puts(\"2 + 3 * 4 = ${2 + 3 * 4}\")\nend",
       "title": "Macros & comptime"
     }
   ],

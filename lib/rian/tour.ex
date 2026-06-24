@@ -112,13 +112,13 @@ defmodule Rian.Tour do
       title: "Macros & comptime",
       file: "macros.rian",
       blurb:
-        "Declarative pattern→template macros (ADR-0030) — no `quote`/`unquote`. `square(2 + 3)` " <>
-          "substitutes as AST, so it expands to `(2 + 3) * (2 + 3)`, never the C-preprocessor " <>
-          "`2 + 3 * 2 + 3` — read the Rust/JVM pane to see it. Template-local binders are " <>
-          "gensym-renamed (hygiene), and a template may be a multiline `… end` block. `comptime` " <>
-          "folds a constant to its literal — `2 + 3 * 4` is `14` before the program runs. Both are " <>
-          "AST→AST passes that run before typecheck, so the expanded code reaches all four targets.",
-      covers: ["macro", "comptime", "hygiene", "AST substitution"]
+        "Declarative pattern→template macros (ADR-0030) — no `quote`/`unquote`. `square(a + b)` " <>
+          "substitutes as AST, so `sq` expands to `(a + b) * (a + b)`, never the C-preprocessor " <>
+          "`a + b * a + b` — read the Rust/JVM pane to see it. Template-local binders are " <>
+          "gensym-renamed (hygiene). And **automatic constant folding** (ADR-0046): a fixed " <>
+          "expression like `2 + 3 * 4` is computed to its literal `14` at compile time — Rian is " <>
+          "functional, so an all-literal calculation has one answer, settled before the program runs.",
+      covers: ["macro", "comptime fold", "hygiene", "AST substitution"]
     }
   ]
 

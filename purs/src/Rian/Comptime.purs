@@ -5,11 +5,12 @@
 -- | the `lower_meta` tail pass (with `Macro.expand`); it runs even when no macros are declared.
 module Rian.Comptime
   ( fold
+  , foldConstants
   ) where
 
 import Prelude
 
-import Data.Array (head, length)
+import Data.Array (head, length, nub)
 import Data.Either (Either(..))
 import Data.Int as Int
 import Data.Maybe (Maybe(..))
@@ -22,7 +23,8 @@ import Rian.Pratt (Surface(..))
 -- a compile-time value: an arbitrary-precision concept narrowed here to `Int`, `Number`, `Bool`.
 data CtVal = CtInt Int | CtFloat Number | CtBool Boolean
 
--- | Fold every `comptime(e)` to the constant `e` evaluates to; recurse into all other nodes.
+-- | EXPLICIT `comptime(e)` — fold to the constant `e` evaluates to (crashes on a non-constant, the
+-- | loose escape hatch); recurse into all other nodes. Used by `lower_meta` (Assemble).
 -- @rian_sig pub def fold(node val Surface) Surface
 fold :: Surface -> Surface
 fold node@(SCall (SId "comptime") args) =
@@ -32,12 +34,51 @@ fold node@(SCall (SId "comptime") args) =
   else mapNode fold node
 fold node = mapNode fold node
 
+-- | AUTOMATIC constant folding (ADR-0046): fold any pure constant `+ - * / div rem`/comparison/
+-- | boolean expression to its literal. OPPORTUNISTIC (a non-constant operand just leaves the node)
+-- | and TYPE-PRESERVING: folds only when the numeric literals are kind-homogeneous (all int OR all
+-- | float), so it never folds a mixed `Int * Float` the checker rejects. A distinct program-tail
+-- | pass (`Assemble.runProgramTail`); mirrors `Rian.Comptime.fold_constants`.
+-- @rian_sig pub def fold_constants(node val Surface) Surface
+foldConstants :: Surface -> Surface
+foldConstants node@(SBin _ _ _) = autoFold node
+foldConstants node@(SUnary op _) | op == "-" || op == "not" = autoFold node
+foldConstants node = mapNode foldConstants node
+
+autoFold :: Surface -> Surface
+autoFold node =
+  if homogeneousNums node then case eval node of
+    Right v -> valSurface v
+    Left _ -> mapNode foldConstants node
+  else mapNode foldConstants node
+
 foldVal :: Either String CtVal -> Surface
-foldVal (Right (CtInt n)) = SNum (show n)
-foldVal (Right (CtFloat f)) = SNum (show f)
-foldVal (Right (CtBool true)) = SId "true"
-foldVal (Right (CtBool false)) = SId "false"
+foldVal (Right v) = valSurface v
 foldVal (Left reason) = unsafeCrashWith ("comptime: " <> reason)
+
+valSurface :: CtVal -> Surface
+valSurface (CtInt n) = SNum (show n)
+valSurface (CtFloat f) = SNum (show f)
+valSurface (CtBool true) = SId "true"
+valSurface (CtBool false) = SId "false"
+
+-- all numeric literals in the arithmetic subtree the same kind? (a mixed set is a cross-kind op the
+-- checker rejects — refuse to fold). A non-arithmetic child contributes nothing; `eval` fails on it.
+homogeneousNums :: Surface -> Boolean
+homogeneousNums node = length (nub (numKinds node)) <= 1
+
+numKinds :: Surface -> Array String
+numKinds (SNum n) = [ numKind n ]
+numKinds (SBin _ l r) = numKinds l <> numKinds r
+numKinds (SUnary _ x) = numKinds x
+numKinds _ = []
+
+numKind :: String -> String
+numKind n =
+  let clean = Str.replaceAll (Str.Pattern "_") (Str.Replacement "") n
+  in
+    if Str.contains (Str.Pattern ".") clean || Str.contains (Str.Pattern "e") clean || Str.contains (Str.Pattern "E") clean then "float"
+    else "int"
 
 -- ── the pure sandboxed evaluator ──
 eval :: Surface -> Either String CtVal

@@ -23,10 +23,10 @@ import Prelude
 import Data.Array (concatMap, filter, groupBy, length, mapMaybe, null)
 import Data.Array.NonEmpty as NEA
 import Data.Foldable (any)
-import Data.Maybe (Maybe(..))
+import Data.Maybe (Maybe(..), isJust)
 import Data.String.Common (joinWith)
 import Rian.Check (Ic, clauseEnv, fillLocalRets, programIc)
-import Rian.Comptime (fold) as Comptime
+import Rian.Comptime (fold, foldConstants) as Comptime
 import Rian.Core (coreSexpr, fromExpr)
 import Rian.Decl (RawDef, buildFunc, parseToProg, progSexpr)
 import Rian.IR (Body(..), Clause, Func, Prog, bodySurface)
@@ -133,7 +133,30 @@ allProgFuncs prog = prog.funcs <> concatMap _.funcs prog.mods
 -- | `Show` stdlib if a `Float64` was interpolated. Kept distinct from `assemble` (= `assemble_only`)
 -- | so the `asm`/`mxb` parity streams are unaffected; the emitters compose it before lowering.
 runProgramTail :: Prog -> Prog
-runProgramTail = injectStdlib <<< resolveInterp
+runProgramTail = injectStdlib <<< resolveInterp <<< foldConstantsPass
+
+-- Automatic constant folding (ADR-0046) — fold every clause body's constants program-wide, BEFORE
+-- interpolation resolution (so a constant `${…}` hole folds first). A distinct tail pass, so the
+-- `asm`/`dcl` streams (which stop at `assemble`) see unfolded bodies. Mirrors `Decl.fold_constants_pass`.
+foldConstantsPass :: Prog -> Prog
+foldConstantsPass prog =
+  prog
+    { funcs = map foldFunc prog.funcs
+    , mods = map (\m -> m { funcs = map foldFunc m.funcs }) prog.mods
+    }
+
+foldFunc :: Func -> Func
+foldFunc f = if isJust f.dispatch then f else f { clauses = map foldClause f.clauses }
+
+foldClause :: Clause -> Clause
+foldClause c = case c.body of
+  Nothing -> c
+  Just body ->
+    let
+      ast = bodySurface body
+      out = Comptime.foldConstants ast
+    in
+      if P.sexpr out == P.sexpr ast then c else c { body = Just (Expanded out) }
 
 -- Program-wide string-interpolation resolution (ADR-0069): one inference context over all modules'
 -- signatures/types/structs/ctors (funs filled by `fillLocalRets` so a `${f(x)}` over an un-annotated

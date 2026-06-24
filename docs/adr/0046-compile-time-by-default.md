@@ -1,7 +1,7 @@
 # ADR-0046 — Compile-Time by Default
 
 **Status:** Accepted · **The positive complement to:** ADR-0035 (No Hidden Control Flow)
-**Implemented:** partial — `comptime` constant folding (`Rian.Comptime`, `test/rian/comptime_test.exs`) and exhaustiveness/checking gates exist; full monomorphization/specialization is not realized
+**Implemented:** partial — `comptime` constant folding + **automatic constant folding** (`Rian.Comptime`, §5 below) and exhaustiveness/checking gates exist; full monomorphization/specialization is not realized
 **Refs:** ADR-0030 (pure `comptime` / monomorphization), ADR-0034 (bidirectional checking; infer-local boundary), ADR-0035 (predictability discipline), ADR-0036 (range bounds), ADR-0037 (`@wire` codecs), ADR-0040 (error-set completeness), ADR-0041 (target-conditioned representation), ADR-0042 (static-by-default dispatch), ADR-0043 (zero-cost opaque types), ADR-0025/capability-lowering (linearity)
 **Owners:** Arthur Pendelton (comptime/partial eval) · Elena Rostova (specialization/zero-cost) · Maya Lin (BEAM dynamism) · Samir Patel (checks-as-gate) · Marcus Chen (checks-as-posture) · Kira Neri (determinism/build-time) · Rachel Okafor (PM)
 
@@ -75,6 +75,30 @@ For any feature or check, mirroring ADR-0035's test:
 
 If yes, it belongs at compile time. If it would freeze the BEAM's dynamism or blow up the build, it
 stays at runtime.
+
+## 5. Automatic constant folding (implemented 2026-06-24)
+
+`comptime(expr)` is the *explicit* form (the user demands the fold, and it raises on a non-constant).
+Its automatic complement, the §2 "constant folding" specialization, is now realized: **a pure
+expression whose operands are all literals is folded to its literal — `2 + 3 * 4` → `14` — with no
+`comptime` marker.** Rian is functional, so an all-literal calculation has exactly one answer; settling
+it before the program runs is the litmus test passing trivially. Implementation:
+
+- **`Rian.Comptime.fold_constants`** — a program-tail pass (`Rian.Decl.run_program_tail`, before
+  interpolation resolution, so a constant `${…}` hole folds too: `"calc = ${2 + 3 * 4}"` → the hole is
+  `14`). OPPORTUNISTIC: a non-constant operand simply leaves the node, so it never errors like `comptime`.
+- **Type-preserving (the safety boundary).** It folds only when the numeric literals are
+  *kind-homogeneous* (all `Int`, or all `Float`), so it can never fold a mixed `Int * Float` — which
+  `Check` rejects (ADR-0034/0035) — and thus **never masks a type error** by running before the checker.
+  (`6 / 2` → `3.0` is fine: `/` is float division, which the checker also accepts.)
+- **Injected stdlib is exempt.** `Show`/IO (`Rian.ShowStdlib`/`Rian.IOStdlib`) parse with `fold: false`
+  — they are compiler-provided, not the user's program (and it keeps them byte-identical to the
+  PureScript twin, whose `parseToProg` never runs the fold tail).
+- **Opt-out for debugging** — the boundary-A escape hatch this ADR's BEAM-conservatism implies: the
+  `--no-fold` build flag (`Decl.parse(src, fold: false)`) keeps the emitted source faithful to what you
+  wrote, so you can read/step the original arithmetic. Default is fold-on. Boundary A still holds — Rian
+  folds the *semantic* constant; it does not reimplement the backend's machine optimizer (rustc/LLVM/
+  the BEAM JIT fold the rest at runtime regardless).
 
 ## Rationale
 

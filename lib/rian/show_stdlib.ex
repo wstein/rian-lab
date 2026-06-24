@@ -16,9 +16,12 @@ defmodule Rian.ShowStdlib do
   @path Path.join([__DIR__, "..", "..", "examples", "rian", "stdlib_show.rian"])
   @external_resource @path
 
+  # `fold: false` — the injected stdlib is compiler-provided, not the user's program, so automatic
+  # constant folding (ADR-0046) does not apply to it (and the PS twin, `parseToProg`, never runs the
+  # fold tail either, so this keeps the `Show` module byte-identical across the two for parity).
   @module @path
           |> File.read!()
-          |> Rian.Decl.parse()
+          |> Rian.Decl.parse(fold: false)
           |> Map.fetch!(:mods)
           |> Enum.find(&(&1.name == "Show"))
 
