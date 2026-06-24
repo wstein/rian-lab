@@ -362,6 +362,12 @@
           "jvm",
           "rs"
         ],
+        "demo_multiline": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
         "demo_square": [
           "ex",
           "js",

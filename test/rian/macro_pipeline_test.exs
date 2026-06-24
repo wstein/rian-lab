@@ -33,6 +33,25 @@ defmodule Rian.MacroPipelineTest do
       assert mod.f(5) == 105
     end
 
+    test "a multiline (block-body) macro expands, stays hygienic, and runs on the BEAM" do
+      {:ok, mod} =
+        Beam.load(
+          """
+          macro plus100(x)
+            tmp Int64 := 100
+            x + tmp
+          end
+          def f(tmp Int64) Int64 := plus100(tmp)
+          """,
+          :rian_macro_pipe_multiline
+        )
+
+      # the `macro name(params) … end` block form (no `:=`, like a multiline `def`): the template is
+      # a `{:block, …}` spliced + flattened into the body. Hygiene still holds — the macro's `tmp`
+      # (=100) does not capture the caller's `tmp` (=7): 7 + 100, never 2*7.
+      assert mod.f(7) == 107
+    end
+
     test "a macro inside a `mod` is scope-local and runs on the BEAM" do
       [{atom, bin}] =
         Beam.compile_program("""
@@ -72,6 +91,8 @@ defmodule Rian.MacroPipelineTest do
       assert mod.demo_square(2, 3) == 25
       # hygiene: the macro-local `tmp` (=100) does not capture the caller's (=5)
       assert mod.demo_hygiene(5) == 105
+      # the multiline (block-body) macro form, also hygienic
+      assert mod.demo_multiline(7) == 107
       # comptime folds to literals
       assert mod.table_size() == 14
       assert mod.scaled() == 15

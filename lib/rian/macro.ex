@@ -32,8 +32,20 @@ defmodule Rian.Macro do
   @spec build_env([map()]) :: map()
   def build_env(defs) do
     Map.new(defs, fn %{name: n, params: ps, template: t} ->
-      {n, %{params: ps, template: Pratt.parse(t)}}
+      {n, %{params: ps, template: parse_template(t)}}
     end)
+  end
+
+  # A macro template is parsed as a function-style BODY (ADR-0030), so a multi-statement
+  # block template — `macro m(x)\n  t := …\n  x + t\nend` — is a `{:block, stmts}` that
+  # substitution/hygiene already walk (`map_node`/`binders_here`/`rename`). A single-expression
+  # template (`macro square(x) := x * x`) is the one-statement block, unwrapped to the bare
+  # expression so it expands and prints exactly as before (no spurious `{ … }`).
+  defp parse_template(t) do
+    case Pratt.parse_body(t) do
+      {:block, [{:expr, e}]} -> e
+      block -> block
+    end
   end
 
   @rian_sig "pub def expand(env _Unk, ast _Unk) _Unk"

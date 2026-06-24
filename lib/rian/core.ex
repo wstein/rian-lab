@@ -432,6 +432,7 @@ defmodule Rian.Core do
     do: %EList{elems: Enum.map(es, &from_expr/1), tail: from_tail(tail)}
 
   def from_expr({:block, stmts}) do
+    stmts = flatten_block_stmts(stmts)
     block_terminal!(stmts)
     %EBlock{stmts: Enum.map(stmts, &from_stmt/1)}
   end
@@ -534,6 +535,18 @@ defmodule Rian.Core do
   # has no portable value. The BEAM would return the bound RHS (Elixir's `=` is an
   # expression), but Rust lowers `let x = e;` to a `()`-typed block — a silent
   # cross-target divergence (`rustc` rejects `().to_string()`). One chokepoint here
+  # A multi-statement macro body (ADR-0030) expands to a `{:block, …}` spliced into the clause's
+  # expr-statement, landing as `{:expr, {:block, inner}}` — a block nested in a statement. Splice the
+  # inner statements into the parent (they share its sequential scope; hygiene already renamed the
+  # template's binders), so the body is ONE flat block — not a block-in-a-block the emitters mis-wrap
+  # (a bare `let …; …` match arm is invalid Rust). A no-op for ordinary blocks (no nested block-stmt).
+  defp flatten_block_stmts(stmts) do
+    Enum.flat_map(stmts, fn
+      {:expr, {:block, inner}} -> flatten_block_stmts(inner)
+      stmt -> [stmt]
+    end)
+  end
+
   # covers function bodies, `if`/`case`/`with`/lambda arms, and macro-expanded blocks.
   defp block_terminal!(stmts) do
     case List.last(stmts) do

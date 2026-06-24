@@ -847,6 +847,10 @@ mxb_corpus = [
   "macro double(x) := x + x\npub def u(n Int53) Int53 := double(n)",
   "macro inc(x) := x + 1\npub def v(n Int53) Int53 := inc(n)",
   "macro swap(a, b) := (b, a)\ndef w(n Int53) := swap(n, 1)",
+  # a MULTILINE (block-body) macro (ADR-0030): the template is a `{:block, …}` spliced into the
+  # call's expr-statement, then flattened to one block. Binder-free, so `freshen` is a no-op and the
+  # expansion is deterministic (hygiene's gensym is byte-tested only via the behaviour suites).
+  "macro pair(x)\n  x + 1\n  x * 2\nend\npub def m(n Int53) Int53 := pair(n)",
   "macro double(x) := x + x\npub def p(n Int53) Int53 := n + 1",
   # comptime (lower_meta's other half — fires without macros, and composes after expansion):
   "pub def c() Int53 := comptime(2 + 3)",

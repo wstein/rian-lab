@@ -19,6 +19,14 @@
 macro unless(cond, body) := if not cond do body else 0 end
 macro square(x)          := x * x
 
+# A template may also be a MULTILINE BLOCK — the `… end` form (no `:=`), exactly
+# like a multiline `def`: statements run in sequence and the LAST is the value.
+# Use it when the template grows past one expression.
+macro plus100(x)
+  tmp Int53 := 100
+  x + tmp
+end
+
 # Two guarantees fall out of substituting at the AST level:
 #
 # 1. NO PRECEDENCE BUGS. `square(a + b)` expands to `(a + b) * (a + b)`, never
@@ -34,6 +42,7 @@ macro add_tmp(x) := if true do tmp Int53 := 100 ; x + tmp else 0 end
 def demo_unless(n Int53) Int53 := unless(n > 5, n * 10)     # n=3 -> 30 ; n=7 -> 0
 def demo_square(a Int53, b Int53) Int53 := square(a + b)    # (a+b)*(a+b): 2,3 -> 25
 def demo_hygiene(tmp Int53) Int53 := add_tmp(tmp)           # 5 -> 105 (NOT 200)
+def demo_multiline(tmp Int53) Int53 := plus100(tmp)         # multiline + hygiene: 7 -> 107
 
 # `comptime(expr)`: evaluate a constant expression at compile time and replace
 # it with its literal (the Zig model). The evaluator is a PURE SANDBOX:

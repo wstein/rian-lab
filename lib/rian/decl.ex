@@ -1102,10 +1102,11 @@ defmodule Rian.Decl do
     {{:def, raw}, rest}
   end
 
-  # `macro name(p, …) := template` (or a `do … end` block body) — a declarative,
-  # hygienic AST->AST macro (ADR-0030). Reuses the `def` head/body grammar; the
-  # body is the template, the params are bare substitution names. Macros emit no
-  # IR — they are expanded into call sites in `assemble/3` before the checker.
+  # `macro name(p, …) := template` (single expression) or the multiline `macro name(p, …)\n
+  # … \nend` block form (no `:=`, like a multiline `def`) — a declarative, hygienic AST->AST macro
+  # (ADR-0030). Reuses the `def` head/body grammar, so the body is parsed as a function-style block
+  # (`Rian.Macro.build_env` via `Pratt.parse_body`); the params are bare substitution names. Macros
+  # emit no IR — they are expanded into call sites in `assemble/3` before the checker.
   defp take_decl([{:kw, "macro"} | rest]) do
     {raw, rest} = take_def(rest)
     {{:macro, raw}, rest}

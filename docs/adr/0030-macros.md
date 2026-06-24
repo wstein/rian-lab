@@ -41,6 +41,24 @@ macro square(x)          := x * x
 > here. `=>` was never lexable, and `:=` is already Rian's "defined as" operator (`def f := body`,
 > binds) — reusing it keeps the surface consistent and adds no token. The macro declaration reuses the
 > `def` head/body grammar verbatim (`Rian.Decl`).
+>
+> **Amendment (2026-06-24):** the template may also be a **multiline block** — the `… end` form (no
+> `:=`), exactly like a multiline `def`:
+>
+> ```
+> macro plus100(x)
+>   tmp Int53 := 100
+>   x + tmp
+> end
+> ```
+>
+> This reuses the `def` block grammar too: the template is parsed as a function-style body
+> (`Rian.Macro.build_env` → `Pratt.parse_body` → `{:block, …}`), which `substitute`/hygiene already
+> walk. A single-expression `:= template` is the one-statement block, unwrapped so it expands exactly
+> as before. When such a block expands into a call site it lands as a block nested in the clause's
+> expr-statement (`{:expr, {:block, …}}`); `Rian.Core.from_expr` **splices it into one flat block**
+> (the inner binders share the parent's sequential scope — hygiene already renamed them), so an
+> emitter never sees a block-in-a-block (a bare `let …; …` Rust match arm would not compile).
 
 The template is **ordinary Rian code**; parameters are substituted as **AST**, not text. There
 is **no `quote`/`unquote`**. Calls look like normal calls: `unless(n > 5, log)`. Two guarantees

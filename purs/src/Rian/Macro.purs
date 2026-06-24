@@ -26,7 +26,7 @@ import Data.Maybe (Maybe(..), fromMaybe)
 import Data.Tuple (Tuple(..), snd)
 import Partial.Unsafe (unsafeCrashWith)
 import Rian.Core (coreSexpr, fromExpr) as Core
-import Rian.Pratt (Arm, ForClause(..), IPart(..), MapPair(..), Param, Stmt(..), Surface(..), WithClause, parse) as P
+import Rian.Pratt (Arm, ForClause(..), IPart(..), MapPair(..), Param, Stmt(..), Surface(..), WithClause, parse, parseBody) as P
 
 -- a macro definition: its parameter names and its parsed template.
 type Macro = { params :: Array String, template :: P.Surface }
@@ -37,7 +37,16 @@ type Env = Array (Tuple String Macro)
 
 -- | Build a macro env from defs (`name`/`params`/`template` source string).
 buildEnv :: Array { name :: String, params :: Array String, template :: String } -> Env
-buildEnv = map (\d -> Tuple d.name { params: d.params, template: P.parse d.template })
+buildEnv = map (\d -> Tuple d.name { params: d.params, template: parseTemplate d.template })
+
+-- A macro template is parsed as a function-style BODY (ADR-0030), so a multi-statement block
+-- template — `macro m(x)\n  t := …\n  x + t\nend` — is a `SBlock` that substitution/hygiene already
+-- walk. A single-expression template (`macro square(x) := x * x`) is the one-statement block,
+-- unwrapped to the bare expression so it expands + prints exactly as before (no spurious block).
+parseTemplate :: String -> P.Surface
+parseTemplate t = case P.parseBody t of
+  P.SBlock [ P.StExpr e ] -> e
+  block -> block
 
 envLookup :: Env -> String -> Maybe Macro
 envLookup env name = map snd (Array.find (\(Tuple k _) -> k == name) env)

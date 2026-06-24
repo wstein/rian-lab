@@ -158,10 +158,22 @@ fromExpr (P.SCase scrut arms) = ECase (fromExpr scrut) (map fromArm arms)
 fromExpr (P.SWith clauses body els) =
   EWith (map fromWithClause clauses) (fromExpr body) (map fromArm els)
 -- ADR-0035: a block's value is its final expression — a trailing bind has no portable value.
-fromExpr (P.SBlock stmts) = case Array.last stmts of
-  Just (P.StBind name _) -> unsafeCrashWith (trailingBind name)
-  Just (P.StTypedBind name _ _) -> unsafeCrashWith (trailingBind name)
-  _ -> EBlock (map fromStmt stmts)
+fromExpr (P.SBlock stmts0) =
+  let stmts = flattenBlockStmts stmts0
+  in case Array.last stmts of
+    Just (P.StBind name _) -> unsafeCrashWith (trailingBind name)
+    Just (P.StTypedBind name _ _) -> unsafeCrashWith (trailingBind name)
+    _ -> EBlock (map fromStmt stmts)
+
+-- A multi-statement macro body (ADR-0030) expands to a block spliced into the clause's expr-statement,
+-- landing as `StExpr (SBlock inner)` — a block nested in a statement. Splice the inner statements into
+-- the parent (shared sequential scope; hygiene already renamed the binders), so the body is ONE flat
+-- block, not a block-in-a-block the emitters mis-wrap. A no-op for ordinary blocks.
+flattenBlockStmts :: Array P.Stmt -> Array P.Stmt
+flattenBlockStmts = Array.concatMap step
+  where
+  step (P.StExpr (P.SBlock inner)) = flattenBlockStmts inner
+  step s = [ s ]
 
 trailingBind :: String -> String
 trailingBind name =
