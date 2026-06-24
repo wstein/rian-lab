@@ -22,6 +22,7 @@ import Data.String (Pattern(..), Replacement(..), contains, replaceAll) as Str
 import Data.Tuple (Tuple(..))
 import Rian.Comptime (foldConstants, inlinableBody, literal, substitute, unwrapBlock) as C
 import Rian.Core (coreSexpr, fromExpr) as Core
+import Rian.Interp (rebake) as Interp
 import Rian.IR (Body(..), Clause, Func, Prog, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Pratt (Arm, Pat(..), Surface(..), parse, sexpr) as P
@@ -47,7 +48,9 @@ simplifyClause ctx c = case c.body of
   Just body ->
     let
       ast = bodySurface body
-      out = inlineConstCalls ctx (simplifyExpr ast)
+      -- #2/#3/#4, then constant call inlining, then the interpolation re-bake (a hole inlining just
+      -- made constant bakes into the surrounding text — ADR-0046 §5). One pass, no fixpoint.
+      out = Interp.rebake (inlineConstCalls ctx (simplifyExpr ast))
     in
       if P.sexpr out == P.sexpr ast then c else c { body = Just (Expanded out) }
 

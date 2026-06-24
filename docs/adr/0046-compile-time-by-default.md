@@ -126,6 +126,23 @@ it before the program runs is the litmus test passing trivially. Implementation:
   call. The expression rules (#2–#4) are parity-gated (the `opt` stream); #5 is unit-tested both
   sides and verified equal on the by-example panes (the Elixir tour and the PS playground emit the
   same `sq(2, 3) → 25`).
+- **Interpolation re-bake (`Rian.Interp.rebake`).** The §5 inlining and the constant-`${…}` bake
+  (above) have a phase-ordering conflict: the bake runs *pre*-check (the checker must see the resolved
+  concat to type the stringify), but inlining must run *post*-check — so a hole inlining only just made
+  constant (`${sq(2, 3)}` resolves to `__prim_int_to_string(sq(2, 3))` before `sq` folds to `25`)
+  misses the pre-check bake. A bounded **re-bake** runs immediately after #5: it stringifies a
+  now-constant interpolation prim and re-merges adjacent literals, so `"sq(2, 3) = ${sq(2, 3)}"` emits
+  the single literal `"sq(2, 3) = 25"`, not `"sq(2, 3) = " <> str(25)`. It is **one pass, not a
+  fixpoint** (boundary B, build-time-bounded) and idempotent.
+  - **Rian bakes interpolation holes — including ones made constant by post-check inlining — but it
+    does not fold arbitrary runtime string concatenation; that is the backend's job (boundary A).** The
+    re-bake touches ONLY the interpolation prims it itself emits (`__prim_int_to_string`/
+    `__prim_char_to_string` over a constant, and `__prim_str_concat_all`'s adjacent string literals);
+    a `${x}` over a runtime value, or a user-written `a <> b`, is left for rustc/LLVM/V8/the BEAM-JIT.
+
+The pre-check / post-check split these passes obey — what each phase may assume and may not destroy —
+is written down once as the [pipeline-phase contract](../spec/pipeline-phases.md), so the next
+ordering question is answered by reference rather than re-debated.
 
 ## Rationale
 

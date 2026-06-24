@@ -296,4 +296,62 @@ defmodule Rian.Interp do
   end
 
   defp int_type?(t), do: is_binary(t) and Regex.match?(~r/^U?Int\d*$/, t)
+
+  @doc """
+  Finish the interpolation bake *after* post-check inlining (ADR-0046 §5).
+
+  The pre-check bake (`resolve_part`/`bake_const`) only sees holes that are already constant. But
+  post-check **constant function-call inlining** (`Rian.Optimize`) can turn a hole's value into a
+  constant too late for it — `${sq(2, 3)}` resolves to `__prim_int_to_string(sq(2, 3))` pre-check,
+  and only after the checker validates the call does `sq(2, 3)` fold to `25`. `rebake/1` re-bakes such
+  a now-constant stringify-prim hole (`__prim_int_to_string(25)` → `"25"`) and re-runs `merge_strs`
+  inside the interpolation concat, so the program emits the single literal `"sq(2, 3) = 25"` instead
+  of `"sq(2, 3) = " <> "25"` — restoring the consistency the phase order accidentally broke.
+
+  **Scoped (boundary A).** It folds ONLY the interpolation prims it itself emits
+  (`__prim_int_to_string` / `__prim_char_to_string` over a constant, and `__prim_str_concat_all`'s
+  adjacent string literals). It never folds an arbitrary `<>` or a runtime concatenation — Rian
+  finishes the interpolation hole it owns; merging two *runtime* strings is the backend's job
+  (rustc/LLVM/V8/BEAM-JIT). A `Bool` hole's `if value do "true" else "false" end` is handled by the
+  separate dead-`if` simplification once `value` is constant. Idempotent — a second pass is a no-op.
+  """
+  @rian_sig "pub def rebake(node Expr) Expr"
+  @spec rebake(term()) :: term()
+  def rebake({:call, {:id, "__prim_int_to_string"}, [arg]}) do
+    case rebake(arg) do
+      {:num, _} = n ->
+        case bake_const(n) do
+          {:ok, s} -> {:str, s}
+          :no -> {:call, {:id, "__prim_int_to_string"}, [n]}
+        end
+
+      other ->
+        {:call, {:id, "__prim_int_to_string"}, [other]}
+    end
+  end
+
+  def rebake({:call, {:id, "__prim_char_to_string"}, [arg]}) do
+    case rebake(arg) do
+      {:char, _} = c ->
+        {:ok, s} = bake_const(c)
+        {:str, s}
+
+      other ->
+        {:call, {:id, "__prim_char_to_string"}, [other]}
+    end
+  end
+
+  def rebake({:call, {:id, "__prim_str_concat_all"}, parts}) do
+    case parts |> Enum.map(&rebake/1) |> merge_strs() |> Enum.reject(&match?({:str, ""}, &1)) do
+      [] -> {:str, ""}
+      [only] -> only
+      many -> {:call, {:id, "__prim_str_concat_all"}, many}
+    end
+  end
+
+  def rebake(node) when is_tuple(node),
+    do: node |> Tuple.to_list() |> Enum.map(&rebake/1) |> List.to_tuple()
+
+  def rebake(list) when is_list(list), do: Enum.map(list, &rebake/1)
+  def rebake(other), do: other
 end

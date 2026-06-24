@@ -91,6 +91,36 @@ defmodule Rian.OptimizeTest do
     end
   end
 
+  describe "interpolation re-bake after inlining (ADR-0046 §5)" do
+    test "a hole made constant by inlining bakes into the surrounding literal" do
+      # `${sq(2, 3)}` resolves to `__prim_int_to_string(sq(2, 3))` pre-check; post-check inlining
+      # makes it `25`, then the re-bake stringifies + merges → the single literal `"r=25"`. The body
+      # is one `{:str, …}`, so ALL FOUR emitters print the literal — never `"r=" <> str(25)`.
+      assert inlined_body(
+               "def sq(a Int53, b Int53) Int53 := (a + b) * (a + b)\npub def m() String := \"r=${sq(2, 3)}\"\n"
+             ) == {:block, [expr: {:str, "r=25"}]}
+    end
+
+    test "a runtime hole keeps its concat (the re-bake never folds a runtime value — boundary A)" do
+      # `${x}` over a variable stays `__prim_int_to_string(x)` inside the concat: Rian finishes the
+      # interpolation hole it can settle, but merging a *runtime* value is the backend's job.
+      assert {:block,
+              [
+                expr:
+                  {:call, {:id, "__prim_str_concat_all"},
+                   [{:str, "v="}, {:call, {:id, "__prim_int_to_string"}, [{:id, "x"}]}]}
+              ]} = inlined_body("pub def f(x Int53) String := \"v=${x}\"\n")
+    end
+
+    test "the re-bake is idempotent (running simplify twice == once)" do
+      src =
+        "def sq(a Int53, b Int53) Int53 := (a + b) * (a + b)\npub def m() String := \"r=${sq(2, 3)}\"\n"
+
+      once = Optimize.simplify(Rian.Decl.parse(src))
+      assert once == Optimize.simplify(once)
+    end
+  end
+
   describe "the program-wide pass runs only post-check (composed by the lower front-end)" do
     test "simplify/1 rewrites every clause body" do
       # the condition is folded to `false` at parse (fold_constants), then dead-`if` selects `else`

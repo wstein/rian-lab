@@ -24,7 +24,7 @@ defmodule Rian.Optimize do
   """
   use Rian.Ann
 
-  alias Rian.{Comptime, Macro, Pratt}
+  alias Rian.{Comptime, Interp, Macro, Pratt}
 
   @rian_sig "pub def simplify(prog Prog) Prog"
   @spec simplify(map()) :: map()
@@ -48,8 +48,10 @@ defmodule Rian.Optimize do
   defp simplify_clause(%{body: body} = c, ctx) do
     ast = Pratt.parse_body(body)
 
-    # the expression simplifications (#2/#3/#4) then constant call inlining (the registry-driven one).
-    out = ast |> simplify_expr() |> inline_const_calls(ctx)
+    # the expression simplifications (#2/#3/#4), then constant call inlining (the registry-driven
+    # one), then the interpolation re-bake — so a hole inlining just made constant (`${sq(2, 3)}` →
+    # `__prim_int_to_string(25)`) bakes into the surrounding text (ADR-0046 §5). One pass, no fixpoint.
+    out = ast |> simplify_expr() |> inline_const_calls(ctx) |> Interp.rebake()
     if out == ast, do: c, else: %{c | body: out}
   end
 

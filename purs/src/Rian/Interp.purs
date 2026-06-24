@@ -20,6 +20,7 @@
 module Rian.Interp
   ( resolve
   , resolveBodySexpr
+  , rebake
   ) where
 
 import Prelude
@@ -154,6 +155,25 @@ mergeStrs = foldl step []
     Just { init, last: P.SStr a } -> snoc init (P.SStr (a <> b))
     _ -> snoc acc (P.SStr b)
   step acc part = snoc acc part
+
+-- | Finish the interpolation bake AFTER post-check inlining (ADR-0046 §5) — the PS twin of
+-- | `Rian.Interp.rebake`. A hole inlining just made constant (`${sq(2, 3)}` →
+-- | `__prim_int_to_string(25)`) is re-baked to `"25"` and merged into the concat, so the playground
+-- | emits the single literal `"sq(2, 3) = 25"`. SCOPED to the interpolation prims it emits — never an
+-- | arbitrary `<>` / runtime concatenation (boundary A). Idempotent.
+rebake :: P.Surface -> P.Surface
+rebake (P.SCall (P.SId "__prim_int_to_string") [ arg ]) = case rebake arg of
+  n@(P.SNum _) -> case bakeConst n of
+    Just s -> P.SStr s
+    Nothing -> P.SCall (P.SId "__prim_int_to_string") [ n ]
+  other -> P.SCall (P.SId "__prim_int_to_string") [ other ]
+rebake (P.SCall (P.SId "__prim_char_to_string") [ arg ]) = case rebake arg of
+  c@(P.SChar _) -> case bakeConst c of
+    Just s -> P.SStr s
+    Nothing -> P.SCall (P.SId "__prim_char_to_string") [ c ]
+  other -> P.SCall (P.SId "__prim_char_to_string") [ other ]
+rebake (P.SCall (P.SId "__prim_str_concat_all") parts) = concatChain (map rebake parts)
+rebake node = mapNode rebake node
 
 -- the names a `case`-arm pattern introduces, typed for interpolation: a bare variable binds the
 -- whole scrutinee type; an `@`-alias binds likewise; any destructuring var binds `:unknown` (its
