@@ -1252,6 +1252,57 @@
         ]
       },
       "title": "Console I/O: portable `puts` / `print`"
+    },
+    {
+      "doctests": [],
+      "file": "21_macros_run.rian",
+      "kind": "gated",
+      "pins": {},
+      "reach": [
+        "ex",
+        "js",
+        "jvm",
+        "rs"
+      ],
+      "reachByFn": {
+        "line": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "main": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "print": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "puts": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "with_hygiene": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ],
+        "write": [
+          "ex",
+          "js",
+          "jvm",
+          "rs"
+        ]
+      },
+      "title": "Macros & comptime, running: metaprogramming you can watch execute"
     }
   ],
   "reachExamples": [

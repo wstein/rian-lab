@@ -1,0 +1,36 @@
+#@reach ex, rs, js, jvm
+# ===========================================================================
+# 21 — Macros & comptime, running: metaprogramming you can watch execute
+# ===========================================================================
+# Character: 06_macros_comptime.rian is the REFERENCE (the rules + the rejected
+# cases). This is the same machinery with a `main()`, so you can RUN it and see
+# the result — in the Lab, or `rian run 21_macros_run.rian`.
+#
+# Macros and `comptime` are pure AST->AST passes that run BEFORE the typechecker
+# (`Rian.Decl`), so what actually compiles + executes is ordinary expanded code.
+# That is why a macro-using program still reaches all four targets: by the time
+# the emitters see it, the macros are gone. (Open the Rust/JVM pane on this file
+# in the Lab — you can read the expansion right there in the output.)
+#
+# ADR: docs/adr/0030-macros.md
+# ---------------------------------------------------------------------------
+
+# A declarative macro: `macro name(params) := template`. Parameters substitute as
+# AST, never as text — so `square(2 + 3)` expands to `(2 + 3) * (2 + 3)`, never the
+# C-preprocessor `2 + 3 * 2 + 3`. The precedence-aware emitter parenthesizes for you.
+macro square(x) := x * x
+
+# Hygiene by default: the template's own binder `tmp` is gensym-renamed, so it can
+# never capture a caller's variable named `tmp`. This computes `x + 100`, full stop.
+macro plus100(x) := if true do tmp Int53 := 100 ; x + tmp else 0 end
+
+# Hygiene only shows its teeth when the CALLER has a same-named variable. Here the
+# parameter is literally `tmp`: a naive text macro would expand to `tmp := 100;
+# tmp + tmp` (= 200 at 100), but Rian's renaming keeps it `tmp + tmp__h` (= 107 at 7).
+def with_hygiene(tmp Int53) Int53 := plus100(tmp)
+
+pub def main() Unit
+  puts(square(2 + 3))         # (2 + 3) * (2 + 3) = 25  — precedence-safe expansion
+  puts(comptime(2 + 3 * 4))   # folded to the literal 14 at compile time (pure sandbox)
+  puts(with_hygiene(7))       # 7 + 100 = 107 — the macro's `tmp` cannot capture the arg
+end
