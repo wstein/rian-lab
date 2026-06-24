@@ -193,3 +193,53 @@ jobs:
 
       - name: Bundle freshness gate (committed rian-compiler.mjs == clean rebuild)
         run: purs/scripts/js-bundle.sh --check
+
+  # The purerl EXECUTION-parity gate (`purs/scripts/purerl-build.sh`): build every ported PS module
+  # through purerl → BEAM and assert byte-equality against the committed Elixir-reference fixtures —
+  # including `Rian.Beam`, which COMPILES + LOADS + RUNS the emitted programs (execution parity, not
+  # just text). This is the port's correctness backbone; it ran only locally until now because
+  # purerl ships as a GitHub-release binary (not npm) and the dhall package set is a network fetch.
+  # Both are reproducible (pinned v0.0.24 + sha, hash-pinned `packages.dhall`), so wire it here.
+  # NON-BLOCKING until a few green runs confirm the purerl download + dhall fetch are stable in CI,
+  # then promote (drop `continue-on-error`) — the same contract the js-bundle gate graduated from.
+  parity:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Erlang/Elixir
+        uses: erlef/setup-beam@v1
+        with:
+          otp-version: "29"
+          elixir-version: "1.20"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Cache the purs toolchain, purerl dhall set, and the purerl binary
+        uses: actions/cache@v5
+        with:
+          path: |
+            purs/node_modules
+            purs/.spago
+            purs/.toolchain
+          key: ${{ runner.os }}-parity-${{ hashFiles('purs/package-lock.json', 'purs/spago.dhall', 'purs/packages.dhall') }}
+
+      - name: Install purs + spago (purs/)
+        run: (cd purs && npm ci)
+
+      # purerl is a platform binary from the purerl/purerl GitHub release (v0.0.24, not npm); the
+      # tarball extracts to `purerl/purerl`, which `purerl-build.sh` puts on PATH via `.toolchain`.
+      - name: Fetch the purerl binary (v0.0.24)
+        run: |
+          if [ ! -x purs/.toolchain/purerl/purerl ]; then
+            mkdir -p purs/.toolchain
+            curl -fsSL -o /tmp/purerl.tar.gz https://github.com/purerl/purerl/releases/download/v0.0.24/linux64.tar.gz
+            echo "661d27efa1aa9d40afe7597ae58fb4c3821ff0a5  /tmp/purerl.tar.gz" | sha1sum -c -
+            tar -xzf /tmp/purerl.tar.gz -C purs/.toolchain
+          fi
+
+      - name: purerl execution-parity gate (PS modules == Elixir-reference fixtures)
+        run: purs/scripts/purerl-build.sh
