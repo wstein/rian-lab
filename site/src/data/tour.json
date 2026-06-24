@@ -13,7 +13,7 @@
       "id": "hello",
       "panes": {
         "ex": "def puts(s), do: IO.puts(s)\ndef main() do name = \"Rian\"; puts(<<\"Hello, \"::binary, name::binary, \"!\"::binary>>) end",
-        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nexport function main() { let name = \"Rian\"; return puts((\"Hello, \" + name + \"!\")); }",
+        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nexport function main() { let name = \"Rian\"; return puts(\"Hello, \" + name + \"!\"); }",
         "jvm": "private fun puts(a0: String): Unit { val s = a0; return println(s) }\n\nfun main(): Unit {\n  return run { val name = \"Rian\"; puts((\"Hello, \" + name + \"!\")) }\n}",
         "rs": "fn puts(s: &str) -> () { println!(\"{}\", s) }\n\nfn main() -> () {\n    match () {\n        () => { let name = \"Rian\".to_string(); puts(&format!(\"Hello, {}!\", name)) },\n    }\n}"
       },
@@ -181,7 +181,7 @@
       "id": "interpolation",
       "panes": {
         "ex": "def greet(name, age) do <<\"hi \"::binary, name::binary, \", you are \"::binary, Integer.to_string(age)::binary>> end",
-        "js": "function greet(name, age) { return (\"hi \" + name + \", you are \" + String(age)); }",
+        "js": "function greet(name, age) { return \"hi \" + name + \", you are \" + String(age); }",
         "jvm": "private fun greet(a0: String, a1: Long): String {\n  val name = a0; val age = a1; return (\"hi \" + name + \", you are \" + (age).toString())\n}",
         "rs": "fn greet(name: &str, age: i64) -> String {\n    match (name, age) {\n        (name, age) => (format!(\"hi {}, you are {}\", name, age.to_string())).to_string(),\n    }\n}"
       },
@@ -208,7 +208,7 @@
       "id": "macros",
       "panes": {
         "ex": "def puts(s), do: IO.puts(s)\ndef main() do puts(<<\"square(2 + 3) = \"::binary, Integer.to_string((2 + 3) * (2 + 3))::binary>>); puts(<<\"comptime = \"::binary, Integer.to_string(14)::binary>>) end",
-        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nexport function main() { puts((\"square(2 + 3) = \" + String(((2n + 3n) * (2n + 3n))))); return puts((\"comptime = \" + String(14n))); }",
+        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nexport function main() { puts(\"square(2 + 3) = \" + String(((2n + 3n) * (2n + 3n)))); return puts(\"comptime = \" + String(14n)); }",
         "jvm": "private fun puts(a0: String): Unit { val s = a0; return println(s) }\n\nfun main(): Unit {\n  return run { puts((\"square(2 + 3) = \" + (((2L + 3L) * (2L + 3L))).toString())); puts((\"comptime = \" + (14L).toString())) }\n}",
         "rs": "fn puts(s: &str) -> () { println!(\"{}\", s) }\n\nfn main() -> () {\n    match () {\n        () => { puts(&format!(\"square(2 + 3) = {}\", ((2 + 3) * (2 + 3)).to_string())); puts(&format!(\"comptime = {}\", 14.to_string())) },\n    }\n}"
       },

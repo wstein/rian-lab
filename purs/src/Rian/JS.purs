@@ -474,9 +474,45 @@ type InlineMap = Array (Tuple String { params :: Array String, host :: String })
 stmtExprJs :: Boolean -> InlineMap -> CExpr -> String
 stmtExprJs i53 inl e = case e of
   ECall (EId f) args -> case find (\(Tuple n _) -> n == f) inl of
-    Just (Tuple _ spec) -> jsSpliceHost spec.host spec.params (map (exprJs i53) args)
-    Nothing -> exprJs i53 e
-  _ -> exprJs i53 e
+    Just (Tuple _ spec) -> jsSpliceHost spec.host spec.params (map (argJs i53) args)
+    Nothing -> argJs i53 e
+  _ -> argJs i53 e
+
+-- a string-concat (`<>`/interpolation) in a DELIMITED position (a call argument or a `return` value)
+-- drops its redundant outer paren pair — the emitter wraps every binary expression defensively, so a
+-- concat there is over-parenthesised. Precedence is preserved (only the outermost wrap is removed),
+-- and the strip is scoped to concats so arithmetic/comparison keep their parens. Mirrors `arg_js`.
+argJs :: Boolean -> CExpr -> String
+argJs i53 e = if isConcat e then stripOuterParen (exprJs i53 e) else exprJs i53 e
+
+isConcat :: CExpr -> Boolean
+isConcat (ECall (EId "__prim_str_concat") _) = true
+isConcat (ECall (EId "__prim_str_concat_all") _) = true
+isConcat (EBin "<>" _ _) = true
+isConcat _ = false
+
+-- drop a single redundant outer paren pair from `s` when it wraps the WHOLE expression: `s` starts
+-- with `(` and that paren's match is the final char. Only the outermost pair is removed; inner parens
+-- (an operand of a tighter op) stay. Mirrors `strip_outer_paren`/`wraps_whole?`.
+stripOuterParen :: String -> String
+stripOuterParen s = case Str.stripPrefix (Str.Pattern "(") s of
+  Just rest
+    | Str.stripSuffix (Str.Pattern ")") s /= Nothing ->
+        let inner = Str.take (Str.length rest - 1) rest
+        in if wrapsWhole inner then inner else s
+  _ -> s
+
+-- does the leading `(` (removed) stay open across all of `inner` (matching the trailing `)`)? False
+-- if some `)` closes it early (`(a) + (b)`).
+wrapsWhole :: String -> Boolean
+wrapsWhole inner = go 0 (toCharArray inner)
+  where
+  go _ [] = true
+  go d cs = case uncons cs of
+    Just { head: '(', tail: t } -> go (d + 1) t
+    Just { head: ')', tail: t } -> if d == 0 then false else go (d - 1) t
+    Just { head: _, tail: t } -> go d t
+    Nothing -> true
 
 jsInlinableExternals :: Array Func -> InlineMap
 jsInlinableExternals funcs = mapMaybe entry funcs
@@ -729,7 +765,7 @@ callId i53 name args
       unsafeCrashWith ("`" <> name <> "` operates on `Int64`, not supported on JS (ADR-0064)")
   | firstIsLabel args = "{ __struct__: " <> dquote name <> ", " <> joinWith ", " (map (labelPair i53) args) <> " }"
   | pascal name = "{ $: " <> dquote name <> joinWith "" (mapWithIndex (\i a -> ", _" <> show i <> ": " <> exprJs i53 a) args) <> " }"
-  | otherwise = name <> "(" <> joinWith ", " (map (exprJs i53) args) <> ")"
+  | otherwise = name <> "(" <> joinWith ", " (map (argJs i53) args) <> ")"
 
 isPrim :: String -> Boolean
 isPrim name = Str.take 7 name == "__prim_"

@@ -223,8 +223,9 @@ defmodule Rian.InterpTest do
 
     test "JS emits one flat `+` join (ADR-0069 §6) and runs under node" do
       js = JS.compile(@src)
-      # single-shot join: a flat `+` chain over all parts, no nested cascade
-      assert js =~ ~s|("n is " + String(n) + "!")|
+      # single-shot join: a flat `+` chain over all parts, no nested cascade. A concat in return
+      # position drops the redundant outer parens (the host-macro paren-strip polish).
+      assert js =~ ~s|return "n is " + String(n) + "!";|
       assert node_eval(js, "greet(5)") in [:no_node, "n is 5!"]
     end
 

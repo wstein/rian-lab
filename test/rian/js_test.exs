@@ -780,7 +780,9 @@ defmodule Rian.JSTest do
     test "!=, or, <>, rem lower to their JS operators" do
       assert JS.compile("def f(a Int, b Int) Bool := a != b") =~ "(a !== b)"
       assert JS.compile("def f(a Bool, b Bool) Bool := a or b") =~ "(a || b)"
-      assert JS.compile("def f(a String, b String) String := a <> b") =~ "(a + b)"
+
+      # `<>` → `+`; a concat in return position drops the redundant outer parens (host-macro polish)
+      assert JS.compile("def f(a String, b String) String := a <> b") =~ "return a + b;"
       assert JS.compile("def f(a Int, b Int) Int := a rem b") =~ "(a % b)"
     end
 
@@ -844,7 +846,7 @@ defmodule Rian.JSTest do
       # str_chars -> codePointAt+BigInt; str_from_chars -> fromCodePoint; concat -> `+`
       assert js =~ "codePointAt(0)"
       assert js =~ "String.fromCodePoint(Number(c))"
-      assert js =~ "(a + b)"
+      assert js =~ "return a + b;"
 
       assert node_eval(js, "String(length('héllo'))") in [:no_node, "5"]
       assert node_eval(js, "concat('ab', 'cd')") in [:no_node, "abcd"]

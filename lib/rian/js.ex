@@ -1425,10 +1425,10 @@ defmodule Rian.JS do
   # the runtime `.mjs` keep the named function. `inl` is empty outside `compile_ts`.
   defp stmt_expr_js(%ECall{fun: %EId{name: f}, args: args}, i53, inl) when is_map_key(inl, f) do
     {params, host} = inl[f]
-    js_splice_host(host, params, Enum.map(args, &expr_js(&1, i53)))
+    js_splice_host(host, params, Enum.map(args, &arg_js(&1, i53)))
   end
 
-  defp stmt_expr_js(e, i53, _inl), do: expr_js(e, i53)
+  defp stmt_expr_js(e, i53, _inl), do: arg_js(e, i53)
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_js(%ENum{text: n}, i53), do: num_js(n, i53)
@@ -1632,7 +1632,7 @@ defmodule Rian.JS do
       sep = if args == [], do: "", else: ", "
       "{ $: #{inspect(f)}#{sep}#{fields} }"
     else
-      "#{f}(#{Enum.map_join(args, ", ", &expr_js(&1, i53))})"
+      "#{f}(#{Enum.map_join(args, ", ", &arg_js(&1, i53))})"
     end
   end
 
@@ -1773,6 +1773,42 @@ defmodule Rian.JS do
 
   # parenthesise an operand of a postfix `[…]` / `.method()` so precedence holds
   defp paren(e, i53), do: "(#{expr_js(e, i53)})"
+
+  # A string-concat (`<>` / interpolation) in a DELIMITED position — a call argument or a `return`
+  # value, where the surrounding `,`/`)`/`;` already bounds it. The emitter wraps every binary
+  # expression defensively (`(l op r)`), so a concat there carries a redundant outer paren pair; drop
+  # it. Precedence is preserved (only the single outermost wrap is removed, any inner parens stay),
+  # and the strip is scoped to concats so arithmetic/comparison keep their defensive parens. So
+  # `console.log(("a" + b))` → `console.log("a" + b)`.
+  defp arg_js(e, i53) do
+    s = expr_js(e, i53)
+    if concat?(e), do: strip_outer_paren(s), else: s
+  end
+
+  defp concat?(%ECall{fun: %EId{name: n}})
+       when n in ["__prim_str_concat", "__prim_str_concat_all"], do: true
+
+  defp concat?(%EBin{op: "<>"}), do: true
+  defp concat?(_), do: false
+
+  defp strip_outer_paren("(" <> rest = s) do
+    if String.ends_with?(s, ")") and wraps_whole?(String.slice(rest, 0..-2//1)),
+      do: String.slice(rest, 0..-2//1),
+      else: s
+  end
+
+  defp strip_outer_paren(s), do: s
+
+  # does the leading `(` we removed stay open across all of `inner` (so it matched the trailing
+  # `)`, wrapping the whole expression)? False if some `)` closes it early (`(a) + (b)`).
+  defp wraps_whole?(inner) do
+    Enum.reduce_while(String.graphemes(inner), 0, fn
+      "(", d -> {:cont, d + 1}
+      ")", 0 -> {:halt, :early}
+      ")", d -> {:cont, d - 1}
+      _, d -> {:cont, d}
+    end) != :early
+  end
 
   defp pascal?(s), do: String.match?(s, ~r/^[A-Z]/)
 end
