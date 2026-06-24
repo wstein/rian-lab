@@ -264,9 +264,9 @@ runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tie
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **1152/1152** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **1157/1157** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
-InferLocal/Assemble/Comptime/Opaque/**JS**/**Lower.Rust**/**JVM**/**Beam**/**Run** (the count is the harness's own `N/N` total — `parity.erl`
+InferLocal/Assemble/Comptime/Optimize/Opaque/**JS**/**Lower.Rust**/**JVM**/**Beam**/**Run** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it). This prose figure,
 and the "all 12 `check_func` checks" / "deferred" notes below, are pinned to the code by
 `Rian.PursMigrationDocTest` — a stale count or a deferral note that outlived its port fails `mix test`.

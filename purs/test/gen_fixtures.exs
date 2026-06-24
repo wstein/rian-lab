@@ -1541,6 +1541,17 @@ prim_corpus = [
 # Rian.Core corpus (Phase 2): exercises from_expr/from_pat + the desugarings (pipe `|>` →
 # call, range `..` → List.seq, comprehension → flat_map). Excludes pins, pattern generators,
 # interpolation, bitstrings (no shared Core oracle / staged); map *update* is covered.
+# Rian.Optimize — the `opt` stream (ADR-0046 §3): post-check `simplify_expr`, serialized through the
+# shared Core oracle. Conditions are already-constant (the pre-check fold turns `2 > 3` into `false`),
+# so this isolates the simplifier: a constant `if` selects its branch; a variable `if` is untouched.
+opt_corpus = [
+  "if false do 10 else 20 end",
+  "if true do a else b end",
+  "if x do 1 else 2 end",
+  "if true do if false do 1 else 2 end else 3 end",
+  "f(if false do 1 else 2 end)"
+]
+
 core_corpus = [
   "a + b",
   "a |> f(b)",
@@ -2273,6 +2284,9 @@ lines =
     end) ++
     Enum.map(core_corpus, fn s ->
       "cor\t#{Canon.hex(s)}\t#{Canon.hex(CoreCanon.expr(Core.from_expr(Pratt.parse(s))))}"
+    end) ++
+    Enum.map(opt_corpus, fn s ->
+      "opt\t#{Canon.hex(s)}\t#{Canon.hex(CoreCanon.expr(Core.from_expr(Rian.Optimize.simplify_expr(Pratt.parse(s)))))}"
     end) ++
     Enum.map(prim_corpus, fn s ->
       "prm\t#{Canon.hex(s)}\t#{Canon.hex(Pratt.parse_sexpr(s))}"

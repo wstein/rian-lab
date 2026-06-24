@@ -55,6 +55,8 @@ run_stream(<<"tsn">>, Src) -> hexbin('rian_typeStr@ps':normalize(Src));
 run_stream(<<"psx">>, Src) -> hexbin('rian_pratt@ps':parseSexpr(Src));
 %% Rian.Core (canon = hex of coreSexpr over lexer→Pratt→from_expr)
 run_stream(<<"cor">>, Src) -> hexbin('rian_core@ps':fromSource(Src));
+%% Rian.Optimize (canon = hex of coreSexpr over the post-check-simplified surface expr)
+run_stream(<<"opt">>, Src) -> hexbin('rian_optimize@ps':optSexpr(Src));
 %% Rian.Prim (canon = hex of sexpr(normalize(parse)) — matches the reference's parse_sexpr)
 run_stream(<<"prm">>, Src) -> hexbin('rian_prim@ps':normalizeSexpr(Src));
 %% Rian.Decl (canon = hex of the Prog serializer over tokenize→split_decls→assemble)

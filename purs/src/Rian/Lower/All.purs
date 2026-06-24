@@ -31,6 +31,7 @@ import Rian.IR (Prog)
 import Rian.JS (lowerJsProg, lowerTsProg) as JS
 import Rian.JVM (lowerJvmProg) as JVM
 import Rian.Lower.Rust (lowerRustProg) as Rust
+import Rian.Optimize (simplify) as Optimize
 
 -- | A program that has been parsed, tail-resolved (interpolation + `Show`), and passed the shared
 -- | type gate — ready to lower to any target. (Opaque to callers; just thread it back in.)
@@ -44,7 +45,11 @@ prepare :: String -> Prepared
 prepare src =
   case checkProgram prog0 of
     Just msg -> unsafeCrashWith ("Rian.Check: " <> msg)
-    Nothing -> prog0
+    -- post-CHECK simplification (ADR-0046 §3, `Rian.Optimize`): the checker has validated `prog0`
+    -- (incl. every `if`/`case` branch), so eliminating a dead branch now cannot mask an error. The
+    -- per-target `lower*` then emit the simplified program. (The bare `compile`/`rustProgram` entries
+    -- do NOT simplify — they are the parity path — so a constant-condition program differs there.)
+    Nothing -> Optimize.simplify prog0
   where
   prog0 = runProgramTail (assemble (parseToProg src))
 
