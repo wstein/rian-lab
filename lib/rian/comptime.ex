@@ -47,6 +47,56 @@ defmodule Rian.Comptime do
 
   def fold_constants(node), do: Macro.map_node(node, &fold_constants/1)
 
+  @doc "Is `node` a constant literal (num / string / `Char` / `true`/`false`)?"
+  @rian_sig "pub def literal?(node Expr) Bool"
+  @spec literal?(term()) :: boolean()
+  def literal?({:num, _}), do: true
+  def literal?({:str, _}), do: true
+  def literal?({:char, _}), do: true
+  def literal?({:id, b}) when b in ["true", "false"], do: true
+  def literal?(_), do: false
+
+  @doc "Unwrap a single-expression block `{:block, [{:expr, e}]}` to `e` (else identity)."
+  @rian_sig "pub def unwrap_block(node Expr) Expr"
+  @spec unwrap_block(term()) :: term()
+  def unwrap_block({:block, [{:expr, e}]}), do: e
+  def unwrap_block(node), do: node
+
+  @doc """
+  Substitute `subst` (param name → value AST) into `body` everywhere. Sound only on a binder-free
+  body (see `inlinable_body?`), so no `{:id, p}` reference is ever a shadowed binding.
+  """
+  @rian_sig "pub def substitute(body Expr, subst Dict(String, Expr)) Expr"
+  @spec substitute(term(), map()) :: term()
+  def substitute({:id, name} = node, subst), do: Map.get(subst, name, node)
+
+  def substitute(node, subst) when is_tuple(node),
+    do: node |> Tuple.to_list() |> Enum.map(&substitute(&1, subst)) |> List.to_tuple()
+
+  def substitute(node, subst) when is_list(node), do: Enum.map(node, &substitute(&1, subst))
+  def substitute(node, _subst), do: node
+
+  @doc """
+  Is a function body safe to inline by substituting its params? — true iff it is BINDER-FREE (no
+  `:=`/`lambda`/`case`/`with`), so substituting `{:id, param}` can never land in a scope that
+  shadows the param. Used by the inlinable-function registry (`Rian.Decl.fold_constants_pass`).
+  """
+  @rian_sig "pub def inlinable_body?(node Expr) Bool"
+  @spec inlinable_body?(term()) :: boolean()
+  def inlinable_body?(node), do: not has_binders?(node)
+
+  defp has_binders?({:bind, _, _}), do: true
+  defp has_binders?({:typed_bind, _, _, _}), do: true
+  defp has_binders?({:lambda, _, _}), do: true
+  defp has_binders?({:case, _, _}), do: true
+  defp has_binders?({:with, _, _, _}), do: true
+
+  defp has_binders?(node) when is_tuple(node),
+    do: node |> Tuple.to_list() |> Enum.any?(&has_binders?/1)
+
+  defp has_binders?(node) when is_list(node), do: Enum.any?(node, &has_binders?/1)
+  defp has_binders?(_), do: false
+
   # operands are folded first; then simplify by operator.
   # `<>` over two string literals concatenates at compile time (`"a" <> "b"` → `"ab"`). Both operands
   # are literals — no variable — so nothing the checker/InferLocal/Reach derive from the node is lost.

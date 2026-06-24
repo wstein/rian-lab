@@ -169,7 +169,11 @@ defmodule Rian.Tour do
 
   defp build_cell(%{id: id} = cell) do
     src = Rian.Tour.Examples.pane_source(id) <> "\n"
-    prog = Decl.parse(src)
+    # post-check `Rian.Optimize` (ADR-0046 §3): the panes show what the playground's `prepare`
+    # emits — dead branches eliminated, constant calls inlined (`sq(2, 3)` → `25`) — and `Reach`
+    # is taken on the simplified program so the matrix matches the emitted code. The corpus is
+    # gated (parse/type) by the example tests, so simplifying here masks nothing.
+    prog = src |> Decl.parse() |> Rian.Optimize.simplify()
     reach = reach_map(prog)
 
     %{

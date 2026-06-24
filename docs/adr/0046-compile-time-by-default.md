@@ -115,8 +115,17 @@ it before the program runs is the litmus test passing trivially. Implementation:
   (composed by `Lower.All.prepare`: parse → check → simplify → lower; never by `Decl.parse`, so the
   bare parity path is untouched): **#2 dead-`if`** (`if false do A else B end` → `B`), **#3
   constant-`case`** (a literal scrutinee selects its arm), **#4 evaluation-preserving boolean
-  identities** (`true and x` → `x`). Each is conservative — a guard, a `var`/ctor pattern, or a
-  value-dropping shape stops it — and parity-gated (the `opt` stream).
+  identities** (`true and x` → `x`), and **#5 constant function-call inlining** — a pure call with
+  all-constant arguments is evaluated at compile time (`sq(2, 3)` over a `def sq(a, b)` returning
+  `(a + b) * (a + b)` → `25`). Each is conservative: a guard, a `var`/ctor pattern, or a value-dropping shape stops
+  #2–#4; #5 inlines only a **single-clause, all-`var`-param, binder-free** function (the registry),
+  evaluates `substitute → fold_constants`, and **keeps the result only if it reduced to a literal**
+  (an FFI / non-foldable / recursive body never does, so it is left a call — purity and termination
+  self-enforced). Crucially #5 is **post-check**: inlining `f(2 + 1)` where `f` expects a `String`
+  would *mask* the arg-type error if done pre-check, so it runs only after `Check` has validated the
+  call. The expression rules (#2–#4) are parity-gated (the `opt` stream); #5 is unit-tested both
+  sides and verified equal on the by-example panes (the Elixir tour and the PS playground emit the
+  same `sq(2, 3) → 25`).
 
 ## Rationale
 

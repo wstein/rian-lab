@@ -14,35 +14,81 @@ module Rian.Optimize
 
 import Prelude
 
-import Data.Array (uncons)
+import Data.Array (all, concatMap, cons, elem, length, mapMaybe, uncons, zip)
+import Data.Foldable (find)
 import Data.Int (fromString) as Int
 import Data.Maybe (Maybe(..), isJust)
 import Data.String (Pattern(..), Replacement(..), contains, replaceAll) as Str
+import Data.Tuple (Tuple(..))
+import Rian.Comptime (foldConstants, inlinableBody, literal, substitute, unwrapBlock) as C
 import Rian.Core (coreSexpr, fromExpr) as Core
 import Rian.IR (Body(..), Clause, Func, Prog, bodySurface)
 import Rian.Macro (mapNode)
 import Rian.Pratt (Arm, Pat(..), Surface(..), parse, sexpr) as P
 
--- | Apply `simplifyExpr` to every clause body, program-wide (mirrors `Rian.Optimize.simplify`).
+type FnDef = { params :: Array String, body :: P.Surface }
+type Ctx = { funcs :: Array (Tuple String FnDef), inlining :: Array String }
+
+-- | Apply the simplifications to every clause body, program-wide (mirrors `Rian.Optimize.simplify`).
 simplify :: Prog -> Prog
 simplify prog =
-  prog
-    { funcs = map simplifyFunc prog.funcs
-    , mods = map (\m -> m { funcs = map simplifyFunc m.funcs }) prog.mods
+  let ctx = { funcs: inlinableRegistry prog, inlining: [] }
+  in prog
+    { funcs = map (simplifyFunc ctx) prog.funcs
+    , mods = map (\m -> m { funcs = map (simplifyFunc ctx) m.funcs }) prog.mods
     }
 
-simplifyFunc :: Func -> Func
-simplifyFunc f = f { clauses = map simplifyClause f.clauses }
+simplifyFunc :: Ctx -> Func -> Func
+simplifyFunc ctx f = f { clauses = map (simplifyClause ctx) f.clauses }
 
-simplifyClause :: Clause -> Clause
-simplifyClause c = case c.body of
+simplifyClause :: Ctx -> Clause -> Clause
+simplifyClause ctx c = case c.body of
   Nothing -> c
   Just body ->
     let
       ast = bodySurface body
-      out = simplifyExpr ast
+      out = inlineConstCalls ctx (simplifyExpr ast)
     in
       if P.sexpr out == P.sexpr ast then c else c { body = Just (Expanded out) }
+
+-- name → `{params, body}` for an inlinable function: single-clause, all-`var` params, no guard,
+-- binder-free body (`Comptime.inlinableBody`). Mirrors `Rian.Optimize.inlinable_registry`.
+inlinableRegistry :: Prog -> Array (Tuple String FnDef)
+inlinableRegistry prog = mapMaybe pick (prog.funcs <> concatMap _.funcs prog.mods)
+  where
+  pick f = case f.clauses of
+    [ clause ] -> case clause.body of
+      Just b | clause.guard == Nothing && all isVarPat clause.pats && C.inlinableBody (bodySurface b) ->
+        Just (Tuple f.name { params: mapMaybe varName clause.pats, body: bodySurface b })
+      _ -> Nothing
+    _ -> Nothing
+  isVarPat (P.PVar _) = true
+  isVarPat _ = false
+  varName (P.PVar n) = Just n
+  varName _ = Nothing
+
+-- #5 constant function-call inlining (post-check): `sq(2, 3)` → `25`. On a call to an inlinable
+-- function with all-literal args (not already inlining it), substitute, INLINE NESTED calls, then
+-- `foldConstants` — used only if it reduces to a literal. Mirrors `Rian.Optimize.inline_const_calls`.
+inlineConstCalls :: Ctx -> P.Surface -> P.Surface
+inlineConstCalls ctx (P.SCall (P.SId f) args) =
+  inlineCall ctx f (map (inlineConstCalls ctx) args)
+inlineConstCalls ctx node = mapNode (inlineConstCalls ctx) node
+
+inlineCall :: Ctx -> String -> Array P.Surface -> P.Surface
+inlineCall ctx f args = case find (\(Tuple k _) -> k == f) ctx.funcs of
+  Just (Tuple _ def)
+    | length def.params == length args && all C.literal args && not (elem f ctx.inlining) ->
+        let
+          inner = ctx { inlining = cons f ctx.inlining }
+          folded =
+            C.substitute (zip def.params args) def.body
+              # inlineConstCalls inner
+              # C.foldConstants
+              # C.unwrapBlock
+        in
+          if C.literal folded then folded else P.SCall (P.SId f) args
+  _ -> P.SCall (P.SId f) args
 
 -- | Simplify one surface expression. #2 dead-`if`: a now-constant condition selects its branch
 -- | (the other branch — and any type error/Reach pin it carried — is dropped; sound here because

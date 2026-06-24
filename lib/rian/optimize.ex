@@ -24,12 +24,13 @@ defmodule Rian.Optimize do
   """
   use Rian.Ann
 
-  alias Rian.{Macro, Pratt}
+  alias Rian.{Comptime, Macro, Pratt}
 
   @rian_sig "pub def simplify(prog Prog) Prog"
   @spec simplify(map()) :: map()
   def simplify(prog) do
-    each = fn funcs -> Enum.map(funcs, &simplify_func/1) end
+    ctx = %{funcs: inlinable_registry(prog), inlining: MapSet.new()}
+    each = fn funcs -> Enum.map(funcs, &simplify_func(&1, ctx)) end
 
     prog
     |> Map.put(:funcs, each.(Map.get(prog, :funcs, [])))
@@ -39,15 +40,64 @@ defmodule Rian.Optimize do
     )
   end
 
-  defp simplify_func(%{clauses: cs} = func),
-    do: %{func | clauses: Enum.map(cs, &simplify_clause/1)}
+  defp simplify_func(%{clauses: cs} = func, ctx),
+    do: %{func | clauses: Enum.map(cs, &simplify_clause(&1, ctx))}
 
-  defp simplify_clause(%{body: nil} = c), do: c
+  defp simplify_clause(%{body: nil} = c, _ctx), do: c
 
-  defp simplify_clause(%{body: body} = c) do
+  defp simplify_clause(%{body: body} = c, ctx) do
     ast = Pratt.parse_body(body)
-    out = simplify_expr(ast)
+
+    # the expression simplifications (#2/#3/#4) then constant call inlining (the registry-driven one).
+    out = ast |> simplify_expr() |> inline_const_calls(ctx)
     if out == ast, do: c, else: %{c | body: out}
+  end
+
+  # name → `{param_names, body}` for functions a constant call can evaluate at COMPILE time
+  # (ADR-0046/0030): single-clause, every param a plain `var`, no guard, binder-free body. Built from
+  # the whole program. An ill-typed / effectful body never folds to a constant → never inlined; the
+  # checker has already run (this is a post-check pass), so the inlined call cannot mask an arg-type
+  # error the way pre-check folding would.
+  defp inlinable_registry(prog) do
+    all = Map.get(prog, :funcs, []) ++ for(m <- Map.get(prog, :mods, []), f <- m.funcs, do: f)
+
+    for %{name: n, clauses: [%{pats: pats, body: body, guard: nil}], synthetic: false} <- all,
+        body != nil,
+        Enum.all?(pats, &match?({:var, _}, &1)),
+        ast = Pratt.parse_body(body),
+        Comptime.inlinable_body?(ast),
+        into: %{} do
+      {n, {Enum.map(pats, fn {:var, p} -> p end), ast}}
+    end
+  end
+
+  # #5 constant function-call inlining: `sq(2, 3)` over `def sq(a, b) := (a + b) * (a + b)` → `25`.
+  # On a call to an inlinable function with all-literal args (and not already inlining it), substitute
+  # the args, then INLINE NESTED constant calls, then `fold_constants` the operators — and use the
+  # result ONLY if it reduced to a literal (so a body with FFI/an un-foldable shape is left a call).
+  defp inline_const_calls({:call, {:id, f}, args}, ctx),
+    do: inline_call(f, Enum.map(args, &inline_const_calls(&1, ctx)), ctx)
+
+  defp inline_const_calls(node, ctx), do: Macro.map_node(node, &inline_const_calls(&1, ctx))
+
+  defp inline_call(f, args, ctx) do
+    with {params, body} <- Map.get(ctx.funcs, f),
+         true <- length(params) == length(args),
+         true <- Enum.all?(args, &Comptime.literal?/1),
+         false <- MapSet.member?(ctx.inlining, f),
+         subst = Map.new(Enum.zip(params, args)),
+         inner = %{ctx | inlining: MapSet.put(ctx.inlining, f)},
+         folded =
+           body
+           |> Comptime.substitute(subst)
+           |> inline_const_calls(inner)
+           |> Comptime.fold_constants()
+           |> Comptime.unwrap_block(),
+         true <- Comptime.literal?(folded) do
+      folded
+    else
+      _ -> {:call, {:id, f}, args}
+    end
   end
 
   @doc "Simplify one surface expression (exposed for the `opt` parity stream / tests)."

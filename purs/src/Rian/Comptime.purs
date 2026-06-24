@@ -6,19 +6,25 @@
 module Rian.Comptime
   ( fold
   , foldConstants
+  , literal
+  , unwrapBlock
+  , substitute
+  , inlinableBody
   ) where
 
 import Prelude
 
-import Data.Array (head, length, nub)
+import Data.Array (any, head, length, nub)
 import Data.Either (Either(..))
+import Data.Foldable (find)
 import Data.Int as Int
 import Data.Maybe (Maybe(..))
 import Data.Number as Number
 import Data.String (Pattern(..), contains, replaceAll, Replacement(..)) as Str
+import Data.Tuple (Tuple(..))
 import Partial.Unsafe (unsafeCrashWith)
-import Rian.Macro (mapNode)
-import Rian.Pratt (Surface(..))
+import Rian.Macro (childrenOf, mapNode)
+import Rian.Pratt (Stmt(..), Surface(..))
 
 -- a compile-time value: an arbitrary-precision concept narrowed here to `Int`, `Number`, `Bool`.
 data CtVal = CtInt Int | CtFloat Number | CtBool Boolean
@@ -184,3 +190,43 @@ toNum :: CtVal -> Maybe Number
 toNum (CtInt n) = Just (Int.toNumber n)
 toNum (CtFloat f) = Just f
 toNum _ = Nothing
+
+-- ── helpers shared with the post-check `Rian.Optimize` pass (constant call inlining) ──
+
+-- | Is `node` a constant literal (num / string / `Char` / `true`/`false`)?
+literal :: Surface -> Boolean
+literal (SNum _) = true
+literal (SStr _) = true
+literal (SChar _) = true
+literal (SId "true") = true
+literal (SId "false") = true
+literal _ = false
+
+-- | Unwrap a single-expression block to that expression (else identity).
+unwrapBlock :: Surface -> Surface
+unwrapBlock (SBlock [ StExpr e ]) = e
+unwrapBlock node = node
+
+-- | Substitute `subst` (param name → value) into a surface body everywhere. Sound only on a
+-- | binder-free body (`inlinableBody`), so no `SId` reference is ever a shadowed binding.
+substitute :: Array (Tuple String Surface) -> Surface -> Surface
+substitute subst (SId name) = case find (\(Tuple k _) -> k == name) subst of
+  Just (Tuple _ v) -> v
+  Nothing -> SId name
+substitute subst node = mapNode (substitute subst) node
+
+-- | Is a function body safe to inline by substituting its params? — true iff BINDER-FREE (no
+-- | `:=`/lambda/`case`/`with`), so substitution can never land in a scope that shadows a param.
+inlinableBody :: Surface -> Boolean
+inlinableBody = not <<< hasBinders
+
+hasBinders :: Surface -> Boolean
+hasBinders (SLambda _ _) = true
+hasBinders (SCase _ _) = true
+hasBinders (SWith _ _ _) = true
+hasBinders node@(SBlock stmts) = any bindStmt stmts || any hasBinders (childrenOf node)
+  where
+  bindStmt (StBind _ _) = true
+  bindStmt (StTypedBind _ _ _) = true
+  bindStmt _ = false
+hasBinders node = any hasBinders (childrenOf node)
