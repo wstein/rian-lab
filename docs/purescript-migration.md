@@ -197,6 +197,17 @@ increments: `-spec`/`type` attrs (Dialyzer contracts; do not affect the executio
 `Format` (568), `Format.Doc` (213), `Format.CST` (67), `Format.CLI` (162),
 `LSP.Formatting` (162).
 
+- **`Format.Doc` ✅ ported** (`purs/src/Rian/Format/Doc.purs`) — the Wadler/Lindig pretty-printer
+  (`Doc` sealed sum + `empty`/`text`/`nest`/`line`/`softline`/`hardline`/`lineSuffix`/`ifBreak`/
+  `concat`/`join`/`group`, break-propagation `mustBreak`, the bounded-lookahead `fits`, and the
+  worklist `render` with `lineSuffix` buffering). Gated by the **`fdoc`** stream: a fixed
+  scenario table (`DocFixtures` / `renderScenario`) builds the same `Doc` both sides and compares
+  the rendered string (flat/break, nest, softline, hardline-forces, `ifBreak` trailing comma,
+  line-suffix, nested groups). Column width is codepoint length (= Elixir grapheme length for the
+  ASCII formatting source).
+- **`Format.CST`/`Format`/`Format.CLI`/`LSP.Formatting`** — next (CLI/LSP are the file/editor
+  boundary).
+
 ### Phase 10 — CLI, Mix tasks, packaging, integrations
 
 `CLI` (86), `Build` (458), `Pkg`+`Pkg.{Cargo,Gradle,Npm,Rebar}`, `Tour` (273),
@@ -264,9 +275,9 @@ runtime emitter (`compile`) is ported and `js`-stream parity-gated (ADR-0049 Tie
 erase passes, and `Reach` (now incl. `preludeDefines`) are all complete; the remaining unported
 modules are either emitters or leaves blocked on an unported consumer — `ShowStdlib` (no
 `Decl.inject_stdlib` yet) and `Manifest` (the `rian.toml` reader for the Phase 7-10 build toolchain).
-Total **1167/1167** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
+Total **1178/1178** parity records across Lexer/TypeStr/Pratt/Core/Prim/Decl/Range/PatternLower/
 Exhaustiveness/Prelude/External/Coherence/Check/Builtins/Shadow/Macro/Protocol/Reach/Capability/
-InferLocal/Assemble/Comptime/Optimize/Opaque/**JS**/**Lower.Rust**/**JVM**/**Beam**/**Run** (the count is the harness's own `N/N` total — `parity.erl`
+InferLocal/Assemble/Comptime/Optimize/Opaque/**JS**/**Lower.Rust**/**JVM**/**Beam**/**Run**/**Format.Doc** (the count is the harness's own `N/N` total — `parity.erl`
 reports `length(Results)`, so it tracks the fixture file and cannot drift from it). This prose figure,
 and the "all 12 `check_func` checks" / "deferred" notes below, are pinned to the code by
 `Rian.PursMigrationDocTest` — a stale count or a deferral note that outlived its port fails `mix test`.

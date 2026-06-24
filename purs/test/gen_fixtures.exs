@@ -2013,6 +2013,115 @@ defmodule CheckCanon do
   end
 end
 
+defmodule DocFixtures do
+  # Mirrors `Rian.Format.Doc.render_scenario/1` (the PS `renderScenario`): each name builds the same
+  # `Doc` both sides and renders it, so the `fdoc` stream gates the document algebra + renderer.
+  alias Rian.Format.Doc, as: D
+
+  def names,
+    do: ~w(flat-fits flat-breaks nest softline hardline-forces line-flat-space if-break-comma
+           if-break-flat line-suffix join nested-groups)
+
+  def render("flat-fits"),
+    do:
+      D.render(
+        D.group(
+          D.concat([D.text("f("), D.softline(), D.text("a, b"), D.softline(), D.text(")")])
+        ),
+        40
+      )
+
+  def render("flat-breaks"),
+    do:
+      D.render(
+        D.group(
+          D.concat([
+            D.text("f("),
+            D.softline(),
+            D.text("aaaaaaaaaa, bbbbbbbbbb"),
+            D.softline(),
+            D.text(")")
+          ])
+        ),
+        10
+      )
+
+  def render("nest"),
+    do:
+      D.render(
+        D.group(D.nest(2, D.concat([D.text("["), D.line(), D.text("x"), D.line(), D.text("y")]))),
+        4
+      )
+
+  def render("softline"),
+    do: D.render(D.group(D.concat([D.text("a"), D.softline(), D.text("b")])), 1)
+
+  def render("hardline-forces"),
+    do: D.render(D.group(D.concat([D.text("a"), D.hardline(), D.text("b")])), 80)
+
+  def render("line-flat-space"),
+    do: D.render(D.group(D.concat([D.text("a"), D.line(), D.text("b")])), 80)
+
+  def render("if-break-comma"),
+    do:
+      D.render(
+        D.group(
+          D.concat([
+            D.text("["),
+            D.nest(2, D.concat([D.softline(), D.text("x"), D.if_break(D.text(","), D.empty())])),
+            D.softline(),
+            D.text("]")
+          ])
+        ),
+        4
+      )
+
+  def render("if-break-flat"),
+    do:
+      D.render(
+        D.group(
+          D.concat([D.text("["), D.text("x"), D.if_break(D.text(","), D.empty()), D.text("]")])
+        ),
+        80
+      )
+
+  def render("line-suffix"),
+    do:
+      D.render(
+        D.group(
+          D.concat([D.text("a"), D.line_suffix(D.text(" # c")), D.hardline(), D.text("b")])
+        ),
+        80
+      )
+
+  def render("join"),
+    do:
+      D.render(
+        D.join(D.concat([D.text(","), D.line()]), [D.text("a"), D.text("b"), D.text("c")]),
+        80
+      )
+
+  def render("nested-groups"),
+    do:
+      D.render(
+        D.group(
+          D.concat([
+            D.text("{"),
+            D.nest(
+              2,
+              D.concat([
+                D.line(),
+                D.group(D.concat([D.text("k:"), D.line(), D.text("vvvvvvvvvvvvvvv")]))
+              ])
+            ),
+            D.line(),
+            D.text("}")
+          ])
+        ),
+        12
+      )
+end
+
 defmodule ExhFixtures do
   alias Rian.{Exhaustiveness, PatternLower, Pratt}
 
@@ -2315,6 +2424,9 @@ lines =
         "plw\t#{Canon.hex(name)}\t#{Canon.hex(ExhFixtures.plow(env, arms))}",
         "exh\t#{Canon.hex(name)}\t#{Canon.hex(ExhFixtures.exh(env, arms, n))}"
       ]
+    end) ++
+    Enum.map(DocFixtures.names(), fn name ->
+      "fdoc\t#{Canon.hex(name)}\t#{Canon.hex(DocFixtures.render(name))}"
     end) ++
     Enum.map(proto_impl_corpus, fn s ->
       "prc\t#{Canon.hex(s)}\t#{Canon.hex(DeclCanon.proto_impl(Decl.parse(s, assemble_only: true)))}"

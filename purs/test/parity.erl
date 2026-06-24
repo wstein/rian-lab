@@ -67,6 +67,8 @@ run_stream(<<"rng">>, Src) -> hexbin('rian_range@ps':expandOfSexpr(Src));
 run_stream(<<"plw">>, Src) -> hexbin('rian_exhaustiveness@ps':plowSexpr(Src));
 %% Rian.Exhaustiveness (canon = hex of the analyze result over a fixed scenario table)
 run_stream(<<"exh">>, Src) -> hexbin('rian_exhaustiveness@ps':analyzeSexpr(Src));
+%% Rian.Format.Doc (the pretty-printer; canon = the rendered string for a named scenario)
+run_stream(<<"fdoc">>, Name) -> hexbin('rian_format_doc@ps':renderScenario(Name));
 %% Rian.Decl protocol/impl (canon = hex of the protocols + impl-decls IR only, synthesis-free)
 run_stream(<<"prc">>, Src) -> hexbin('rian_decl@ps':protoImplSexpr(Src));
 %% Rian.Prelude (canon = hex of `with_prelude(user_types)` — the built-in Option prepended)
