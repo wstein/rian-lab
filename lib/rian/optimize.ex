@@ -59,5 +59,25 @@ defmodule Rian.Optimize do
     end
   end
 
+  # #4 boolean identities — only the evaluation-PRESERVING ones (`true and x` → `x`, `x and true` →
+  # `x`, `false or x` → `x`, `x or false` → `x`). No operand is dropped, so the emitted code keeps
+  # every value `Reach` analysed (the dropping pair `false and x` → `false` is left to the backend's
+  # short-circuit). Sound post-check: the checker already pinned `x : Bool` from this `and`/`or`.
+  def simplify_expr({:bin, "and", l, r}) do
+    case {simplify_expr(l), simplify_expr(r)} do
+      {{:id, "true"}, r2} -> r2
+      {l2, {:id, "true"}} -> l2
+      {l2, r2} -> {:bin, "and", l2, r2}
+    end
+  end
+
+  def simplify_expr({:bin, "or", l, r}) do
+    case {simplify_expr(l), simplify_expr(r)} do
+      {{:id, "false"}, r2} -> r2
+      {l2, {:id, "false"}} -> l2
+      {l2, r2} -> {:bin, "or", l2, r2}
+    end
+  end
+
   def simplify_expr(node), do: Macro.map_node(node, &simplify_expr/1)
 end

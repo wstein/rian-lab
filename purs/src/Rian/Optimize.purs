@@ -47,6 +47,16 @@ simplifyExpr (P.SIf c t e) = case simplifyExpr c of
   P.SId "true" -> simplifyExpr t
   P.SId "false" -> simplifyExpr e
   c2 -> P.SIf c2 (simplifyExpr t) (simplifyExpr e)
+-- #4 evaluation-preserving boolean identities (`true and x` → `x`, etc.); the dropping pair is left
+-- to the backend's short-circuit. Sound post-check (the checker already pinned the operand `Bool`).
+simplifyExpr (P.SBin "and" l r) = case simplifyExpr l, simplifyExpr r of
+  P.SId "true", r2 -> r2
+  l2, P.SId "true" -> l2
+  l2, r2 -> P.SBin "and" l2 r2
+simplifyExpr (P.SBin "or" l r) = case simplifyExpr l, simplifyExpr r of
+  P.SId "false", r2 -> r2
+  l2, P.SId "false" -> l2
+  l2, r2 -> P.SBin "or" l2 r2
 simplifyExpr node = mapNode simplifyExpr node
 
 -- | The `opt` parity entry: simplify a source expression and serialize through the shared Core

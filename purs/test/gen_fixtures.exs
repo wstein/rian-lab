@@ -1549,7 +1549,13 @@ opt_corpus = [
   "if true do a else b end",
   "if x do 1 else 2 end",
   "if true do if false do 1 else 2 end else 3 end",
-  "f(if false do 1 else 2 end)"
+  "f(if false do 1 else 2 end)",
+  # #4 boolean identities (evaluation-preserving) + a kept dropping case
+  "true and x",
+  "x and true",
+  "false or x",
+  "x or false",
+  "false and x"
 ]
 
 core_corpus = [

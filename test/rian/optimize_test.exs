@@ -22,6 +22,20 @@ defmodule Rian.OptimizeTest do
     end
   end
 
+  describe "post-check boolean identities (#4) — evaluation-preserving only" do
+    test "an identity operand drops, the variable operand stays" do
+      assert simp("true and x") == {:id, "x"}
+      assert simp("x and true") == {:id, "x"}
+      assert simp("false or x") == {:id, "x"}
+      assert simp("x or false") == {:id, "x"}
+    end
+
+    test "a value-dropping case is left to the backend's short-circuit" do
+      assert simp("false and x") == {:bin, "and", {:id, "false"}, {:id, "x"}}
+      assert simp("x or true") == {:bin, "or", {:id, "x"}, {:id, "true"}}
+    end
+  end
+
   describe "the program-wide pass runs only post-check (composed by the lower front-end)" do
     test "simplify/1 rewrites every clause body" do
       # the condition is folded to `false` at parse (fold_constants), then dead-`if` selects `else`
