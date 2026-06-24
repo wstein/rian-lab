@@ -1,0 +1,13 @@
+#@pane
+# Macros are declarative AST pattern->template (the macro_rules!/syntax-rules model) — precedence-safe
+# and hygienic, expanded before typecheck. `comptime` folds a constant expression to its literal.
+@external(:ex, "IO.puts(s)")
+@external(:js, "console.log(s)")
+@external(:rs, "println!(\"{}\", s)")
+@external(:jvm, "println(s)")
+def puts(s String) Unit
+macro square(x) := x * x
+pub def main() Unit
+  puts("square(2 + 3) = ${square(2 + 3)}")
+  puts("comptime = ${comptime(2 + 3 * 4)}")
+end

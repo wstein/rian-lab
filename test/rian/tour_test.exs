@@ -12,7 +12,7 @@ defmodule Rian.TourTest do
 
     test "every cell reaches all four targets and emits non-empty code per pane", %{data: data} do
       assert data["targets"] == ~w(ex rs js jvm)
-      assert length(data["cells"]) == 7
+      assert length(data["cells"]) == 8
 
       for cell <- data["cells"] do
         for t <- ~w(ex rs js jvm) do

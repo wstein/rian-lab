@@ -106,6 +106,19 @@ defmodule Rian.Tour do
           "to a single-shot join (ADR-0069). `String` and `Int*` holes are " <>
           "byte-identical across every target — no hidden `Show` dispatch.",
       covers: ["${…}", "auto-stringify", "single-shot join"]
+    },
+    %{
+      id: "macros",
+      title: "Macros & comptime",
+      file: "macros.rian",
+      blurb:
+        "Declarative pattern→template macros (ADR-0030) — no `quote`/`unquote`. `square(2 + 3)` " <>
+          "substitutes as AST, so it expands to `(2 + 3) * (2 + 3)`, never the C-preprocessor " <>
+          "`2 + 3 * 2 + 3` — read the Rust/JVM pane to see it. Template-local binders are " <>
+          "gensym-renamed (hygiene), and a template may be a multiline `… end` block. `comptime` " <>
+          "folds a constant to its literal — `2 + 3 * 4` is `14` before the program runs. Both are " <>
+          "AST→AST passes that run before typecheck, so the expanded code reaches all four targets.",
+      covers: ["macro", "comptime", "hygiene", "AST substitution"]
     }
   ]
 
