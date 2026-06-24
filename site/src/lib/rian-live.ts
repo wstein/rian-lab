@@ -76,8 +76,11 @@ export type RunResult = { ok: boolean; text: string };
 // Execute an emitted ECMAScript module in a sandboxed iframe (`allow-scripts`,
 // opaque origin — no page access). Imports it from a blob URL; captures `console.log`
 // (so `puts(…)` output shows), then calls `main()` if exported. The result text is the
-// captured stdout, plus `main()`'s value when it returns one (a string verbatim; else
-// `main() = <json>` — a `Unit`/undefined return contributes nothing).
+// captured stdout, plus — clearly LABELED as a return, not conflated with output — the
+// `main()` value when it returns one (`main() = <json>`; a `Unit`/undefined return
+// contributes nothing). In Rian, output is what a program `puts`, never `main`'s return
+// value (ADR-0068), so a `main` that merely returns a string shows `main() = "…"`, not
+// the bare string masquerading as printed output.
 export function runInSandbox(jsModule: string, timeoutMs = 4000): Promise<RunResult> {
   return new Promise((resolve) => {
     const frame = document.createElement("iframe");
@@ -108,8 +111,7 @@ export function runInSandbox(jsModule: string, timeoutMs = 4000): Promise<RunRes
       "  const mod = await import(url);" +
       "  let val = '';" +
       "  if (typeof mod.main === 'function') { const v = mod.main();" +
-      "    if (typeof v === 'string') val = v;" +
-      "    else if (v !== undefined && v !== null) val = 'main() = ' + JSON.stringify(v); }" +
+      "    if (v !== undefined && v !== null) val = 'main() = ' + JSON.stringify(v); }" +
       "  let text = __out.join('\\n');" +
       "  if (val) text = text ? text + '\\n' + val : val;" +
       "  if (!text) text = (typeof mod.main === 'function') ? '(no output)' : 'module loaded · exports: ' + Object.keys(mod).join(', ') + ' (define `main()` or call `puts(…)` to see output)';" +
