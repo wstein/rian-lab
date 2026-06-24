@@ -19,6 +19,14 @@
 -- | `EStruct` Core node → a `__struct__`-tagged object, or `EVariant` → a `{ $: "Ctor", _0: … }`
 -- | tagged object with positional keys, ADR-0049 §3b), and string interpolation (the program
 -- | tail `Rian.Assemble.runProgramTail`, composed before the gate) are all ported.
+-- |
+-- | `compileTs` (the native typed `.ts` source) additionally runs the **`@external` host-macro**
+-- | (ADR-0068/0030) — the doc-view *only*: a statement-position call to an inlinable single-clause
+-- | `@external(:js)` (raw-string body, no string literal, each param referenced once) is spliced
+-- | inline (`jsInlinableExternals`/`stmtExprJs`/`jsSpliceHost`, with `wordReplace` = the reference's
+-- | `\b…\b` substitution), and a now-uncalled *private* wrapper is dropped (`inlinedFnTs`). So
+-- | `puts("…")` collapses to `console.log("…")`. A `pub` wrapper stays (exported API); the runtime
+-- | `compile` keeps every named wrapper (S5 — idiomatic view, faithful runtime).
 module Rian.JS
   ( compile
   , compileSexpr
@@ -32,7 +40,7 @@ module Rian.JS
 
 import Prelude
 
-import Data.Array (all, any, concatMap, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, sort, uncons, unsnoc, zipWith)
+import Data.Array (all, any, concatMap, elem, filter, find, foldl, head, index, length, mapMaybe, mapWithIndex, nub, null, range, snoc, sort, uncons, unsnoc, zip, zipWith)
 import Data.Foldable (foldMap)
 import Data.Enum (fromEnum)
 import Data.Int as Int
@@ -169,7 +177,7 @@ constJs i53 cset reg c =
       other -> [ CExprStmt other ]
     val = case dedup stmts [] jsFresh of
       [ CExprStmt e ] -> exprJs i53 e
-      deduped -> "(() => { " <> blockReturn i53 deduped <> " })()"
+      deduped -> "(() => { " <> blockReturn i53 [] deduped <> " })()"
     export = if c.pub then "export " else ""
   in
     export <> "const " <> c.name <> " = " <> val <> ";"
@@ -262,7 +270,7 @@ functionJs i53 cset reg f =
           export = if f.pub then "export " else ""
           arity = maybe 0 (\c -> length c.pats) (head f.clauses)
           params = joinWith ", " (map (\i -> "a" <> show i) (upto arity))
-          body = joinWith "\n" (map (clauseJs i53 cset reg) f.clauses)
+          body = joinWith "\n" (map (clauseJs i53 cset reg []) f.clauses)
           -- the fallthrough throw is the runtime "no clause matched"; needed only
           -- when the set is non-total. A clause with no tests and no guard always
           -- matches, so it is total — drop the dead throw (parity with the JVM emitter).
@@ -287,7 +295,7 @@ simpleFn i53 cset reg f = case f.clauses of
         vars = pvarNames (map fromPat c.pats)
         export = if f.pub then "export " else ""
       in
-        Just (export <> "function " <> f.name <> "(" <> joinWith ", " vars <> ") { " <> clauseReturn i53 cset reg vars c.body <> " }")
+        Just (export <> "function " <> f.name <> "(" <> joinWith ", " vars <> ") { " <> clauseReturn i53 cset reg vars c.body [] <> " }")
     else Nothing
   _ -> Nothing
 
@@ -399,13 +407,13 @@ upto n = if n <= 0 then [] else range 0 (n - 1)
 
 -- `{ if (<tests>) { <binds> <guarded return> } }` — binds live inside the test so a nested field
 -- access only runs once the shape is known; a `when` guard follows.
-clauseJs :: Boolean -> Array String -> JsReg -> Clause -> String
-clauseJs i53 cset reg clause =
+clauseJs :: Boolean -> Array String -> JsReg -> InlineMap -> Clause -> String
+clauseJs i53 cset reg inl clause =
   let
     step (Tuple ts bs) (Tuple i p) = let Tuple t b = patMatch i53 p ("a" <> show i) in Tuple (ts <> t) (bs <> b)
     Tuple tests binds = foldl step (Tuple [] []) (mapWithIndex Tuple (map fromPat clause.pats))
     paramNames = map fst binds
-    inner = bindLines binds <> [ guardedReturn i53 cset reg paramNames clause.body clause.guard ]
+    inner = bindLines binds <> [ guardedReturn i53 cset reg paramNames clause.body clause.guard inl ]
     bodyStr = joinWith " " inner
     guarded = if null tests then bodyStr else "if (" <> joinWith " && " tests <> ") { " <> bodyStr <> " }"
   in
@@ -414,43 +422,113 @@ clauseJs i53 cset reg clause =
 bindLines :: Array (Tuple String String) -> Array String
 bindLines = map (\(Tuple n a) -> "const " <> n <> " = " <> a <> ";")
 
-guardedReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> Maybe String -> String
-guardedReturn i53 cset reg params body guard = case guard of
-  Nothing -> clauseReturn i53 cset reg params body
-  Just g -> "if (" <> exprJs i53 (fromExpr (bakeCtors reg (resolveConsts cset (bakeUnionDisc reg (normalize (P.parse g)))))) <> ") { " <> clauseReturn i53 cset reg params body <> " }"
+guardedReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> Maybe String -> InlineMap -> String
+guardedReturn i53 cset reg params body guard inl = case guard of
+  Nothing -> clauseReturn i53 cset reg params body inl
+  Just g -> "if (" <> exprJs i53 (fromExpr (bakeCtors reg (resolveConsts cset (bakeUnionDisc reg (normalize (P.parse g)))))) <> ") { " <> clauseReturn i53 cset reg params body inl <> " }"
 
 -- a clause body parses to a block: `let`s then `return` the final value; `:=` shadowing is resolved
 -- on the Core IR by `Rian.Shadow` (JS `let`/`const` forbid same-scope re-declaration). The body is
 -- baked (union discriminators) then const-resolved before lowering, as the reference does.
-clauseReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> String
-clauseReturn i53 cset reg params body = case body of
+clauseReturn :: Boolean -> Array String -> JsReg -> Array String -> Maybe Body -> InlineMap -> String
+clauseReturn i53 cset reg params body inl = case body of
   Nothing -> unsafeCrashWith "Rian.JS: a clause has no body"
   Just b -> case fromExpr (bakeCtors reg (resolveConsts cset (bakeUnionDisc reg (normalize (bodySurface b))))) of
-    EBlock stmts -> blockReturn i53 (dedup stmts params jsFresh)
-    other -> blockReturn i53 (dedup [ CExprStmt other ] params jsFresh)
+    EBlock stmts -> blockReturn i53 inl (dedup stmts params jsFresh)
+    other -> blockReturn i53 inl (dedup [ CExprStmt other ] params jsFresh)
 
 jsFresh :: String -> Int -> String
 jsFresh base count = base <> "$" <> show count
 
-blockReturn :: Boolean -> Array CStmt -> String
-blockReturn i53 stmts = case unsnoc stmts of
+blockReturn :: Boolean -> InlineMap -> Array CStmt -> String
+blockReturn i53 inl stmts = case unsnoc stmts of
   Nothing -> ""
   Just { init, last } ->
     if null init then case last of
-      CExprStmt e -> "return " <> exprJs i53 e <> ";"
-      _ -> stmtReturn i53 last
-    else joinWith " " (map (stmtJs i53) init) <> " " <> stmtReturn i53 last
+      CExprStmt e -> "return " <> stmtExprJs i53 inl e <> ";"
+      _ -> stmtReturn i53 inl last
+    else joinWith " " (map (stmtJs i53 inl) init) <> " " <> stmtReturn i53 inl last
 
-stmtJs :: Boolean -> CStmt -> String
-stmtJs i53 = case _ of
+stmtJs :: Boolean -> InlineMap -> CStmt -> String
+stmtJs i53 inl = case _ of
   CBind n e -> "let " <> n <> " = " <> exprJs i53 e <> ";"
   CTypedBind n _ e -> "let " <> n <> " = " <> exprJs i53 e <> ";"
-  CExprStmt e -> exprJs i53 e <> ";"
+  CExprStmt e -> stmtExprJs i53 inl e <> ";"
 
-stmtReturn :: Boolean -> CStmt -> String
-stmtReturn i53 = case _ of
-  CExprStmt e -> "return " <> exprJs i53 e <> ";"
+stmtReturn :: Boolean -> InlineMap -> CStmt -> String
+stmtReturn i53 inl = case _ of
+  CExprStmt e -> "return " <> stmtExprJs i53 inl e <> ";"
   _ -> unsafeCrashWith "Rian.JS: a block's final statement must be an expression (ADR-0035)"
+
+-- ── `@external` host-macro (ADR-0068/0030): inline a statement-position single-clause
+-- `@external(:js)` call (`compile_ts` doc-view only, ADR-0086 §5) ──────────────────────────
+-- `name → { params, host }` for an inlinable `@external(:js)` function: a single host expression
+-- (an `@external`, no clauses), a raw-string `:js` spec with no string-literal delimiter, each param
+-- referenced as a standalone word exactly once — so substituting the lowered argument preserves
+-- eval-once and cannot clobber a string literal. Empty outside `compileTs` (so the runtime `.mjs` and
+-- nested calls keep the named wrapper). Mirrors `Rian.JS.js_inlinable_externals`.
+type InlineMap = Array (Tuple String { params :: Array String, host :: String })
+
+-- a statement-position expression: a call to an inlinable `@external(:js)` is spliced inline (its
+-- host body with each param replaced by the lowered argument), else lowered normally.
+stmtExprJs :: Boolean -> InlineMap -> CExpr -> String
+stmtExprJs i53 inl e = case e of
+  ECall (EId f) args -> case find (\(Tuple n _) -> n == f) inl of
+    Just (Tuple _ spec) -> jsSpliceHost spec.host spec.params (map (exprJs i53) args)
+    Nothing -> exprJs i53 e
+  _ -> exprJs i53 e
+
+jsInlinableExternals :: Array Func -> InlineMap
+jsInlinableExternals funcs = mapMaybe entry funcs
+  where
+  entry f = case jsInlineHost f of
+    Just host -> Just (Tuple f.name { params: map _.name f.params, host })
+    Nothing -> Nothing
+
+jsInlineHost :: Func -> Maybe String
+jsInlineHost f
+  | null f.externals = Nothing
+  | otherwise = case jsExternal f of
+      Just (ExtStr host)
+        | not (hasQuote host) && all (\p -> wordCount host p.name == 1) f.params -> Just host
+      _ -> Nothing
+
+hasQuote :: String -> Boolean
+hasQuote s = Str.contains (Str.Pattern "\"") s || Str.contains (Str.Pattern "'") s || Str.contains (Str.Pattern "`") s
+
+-- standalone-word occurrences of `w` in `s` (the reference's `\bw\b` count).
+wordCount :: String -> String -> Int
+wordCount s w = length (filter (_ == w) (identTokens s))
+
+-- the `[A-Za-z0-9_]` word tokens of a string (maximal runs).
+identTokens :: String -> Array String
+identTokens s =
+  let final = foldl step { toks: [], cur: "" } (toCharArray s)
+  in final.toks <> (if final.cur == "" then [] else [ final.cur ])
+  where
+  step acc c =
+    if isWordChar c then acc { cur = acc.cur <> singleton c }
+    else if acc.cur == "" then acc
+    else acc { toks = acc.toks <> [ acc.cur ], cur = "" }
+
+isWordChar :: Char -> Boolean
+isWordChar c = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_'
+
+-- splice an inlinable host body, replacing each param's word token with its lowered-JS argument
+-- (sequential, matching the reference's `Enum.reduce`/`Regex.replace`).
+jsSpliceHost :: String -> Array String -> Array String -> String
+jsSpliceHost host params argJs = foldl (\acc (Tuple p a) -> wordReplace p a acc) host (zip params argJs)
+
+-- replace whole-word occurrences of `target` with `repl` (the reference's `\b…\b`).
+wordReplace :: String -> String -> String -> String
+wordReplace target repl input =
+  let final = foldl go { out: "", cur: "" } (toCharArray input)
+  in final.out <> emit final.cur
+  where
+  emit w = if w == target then repl else w
+  go acc c =
+    if isWordChar c then acc { cur = acc.cur <> singleton c }
+    else { out: acc.out <> emit acc.cur <> singleton c, cur: "" }
 
 -- ── pattern matching → {tests, binds} against the access path `acc` ───────────
 patMatch :: Boolean -> CPat -> String -> Tuple (Array String) (Array (Tuple String String))
@@ -720,8 +798,8 @@ branchJs i53 = case _ of
     Just { init, last } ->
       if null init then case last of
         CExprStmt e -> exprJs i53 e
-        _ -> "(() => { " <> blockReturn i53 stmts <> " })()"
-      else "(() => { " <> blockReturn i53 stmts <> " })()"
+        _ -> "(() => { " <> blockReturn i53 [] stmts <> " })()"
+      else "(() => { " <> blockReturn i53 [] stmts <> " })()"
   expr -> exprJs i53 expr
 
 -- (`with`/capture desugaring — `desugarWith`/`capArity` — now live in `Rian.Core`,
@@ -859,12 +937,16 @@ lowerTsProg prog0 =
         cset = map _.name consts
         reg = jsReg prog
         funcs = filter (\f -> f.dispatch /= Just "dispatcher") (allFuncs prog)
+        -- `@external` host-macro (ADR-0068/0030, the `.ts` doc-view only): inline a statement-position
+        -- single-clause `@external(:js)` call at the call site, so the named wrapper collapses into
+        -- idiomatic host code (`puts("…")` → `console.log("…")`).
+        inl = jsInlinableExternals funcs
         rangeTs = joinWith "\n" (map dtsRange (allRanges prog))
         typeTs = joinWith "\n" (map (dtsSum known) (allTypes prog))
         structTs = joinWith "\n" (map (dtsStruct known) (allStructs prog))
         importTs = importsJs funcs
         constTsOut = joinWith "\n" (map (constTs known i53 cset reg) consts)
-        fnTsOut = joinWith "\n\n" (map (functionTs known i53 cset reg) funcs)
+        fnTsOut = inlinedFnTs known i53 cset reg inl funcs
         dispTsOut = protocolDispatchersJs i53 prog
       in
         joinWith "\n\n" (filter (_ /= "") [ rangeTs, typeTs, structTs, importTs, constTsOut, fnTsOut, dispTsOut ])
@@ -876,8 +958,24 @@ paramTyM f i = case index f.params i of
   Nothing -> Nothing
 
 -- a function with typed signature over the unchanged runtime body (mirrors `functionJs`'s shapes).
-functionTs :: Array String -> Boolean -> Array String -> JsReg -> Func -> String
-functionTs known i53 cset reg f =
+-- emit each function (a statement-position inlinable `@external(:js)` call is already spliced in its
+-- body via `inl`), then DROP an inlinable wrapper whose name no longer appears as a call in any other
+-- emitted body — every call site was inlined. A wrapper still called in expression position (not
+-- inlined by this pass) is kept, so nothing dangles. Mirrors `Rian.JS.inlined_fn_ts`.
+inlinedFnTs :: Array String -> Boolean -> Array String -> JsReg -> InlineMap -> Array Func -> String
+inlinedFnTs known i53 cset reg inl funcs =
+  let
+    emitted = map (\f -> { name: f.name, pub: f.pub, body: functionTs known i53 cset reg inl f }) funcs
+    inlNames = map fst inl
+    referenced = filter (\m -> any (\e -> e.name /= m && Str.contains (Str.Pattern (m <> "(")) e.body) emitted) inlNames
+    -- keep a `pub` inlinable wrapper (exported API) even when every in-module call site was inlined;
+    -- drop only a PRIVATE one that is now uncalled.
+    keep e = not (elem e.name inlNames) || e.pub || elem e.name referenced
+  in
+    joinWith "\n\n" (map _.body (filter keep emitted))
+
+functionTs :: Array String -> Boolean -> Array String -> JsReg -> InlineMap -> Func -> String
+functionTs known i53 cset reg inl f =
   if not (null f.externals) then externalFnTs known f
   else case wideIntType f of
     Just t -> unsafeCrashWith ("`" <> f.name <> "`: fixed-width integer `" <> t <> "` is not supported on JS (ADR-0064)")
@@ -895,7 +993,7 @@ functionTs known i53 cset reg f =
           let
             arity = maybe 0 (\c -> length c.pats) (head f.clauses)
             tps = joinWith ", " (map (\i -> "a" <> show i <> ": " <> ptype i) (upto arity))
-            body = joinWith "\n" (map (clauseJs i53 cset reg) f.clauses)
+            body = joinWith "\n" (map (clauseJs i53 cset reg inl) f.clauses)
             tail =
               if totalClauses i53 f.clauses then "\n}"
               else "\n  throw new Error(\"" <> f.name <> ": no clause matched\");\n}"
@@ -909,7 +1007,7 @@ functionTs known i53 cset reg f =
                 vars = pvarNames (map fromPat c.pats)
                 tps = joinWith ", " (mapWithIndex (\i v -> v <> ": " <> ptype i) vars)
               in
-                export <> "function " <> f.name <> gen <> "(" <> tps <> "): " <> ret <> " { " <> clauseReturn i53 cset reg vars c.body <> " }"
+                export <> "function " <> f.name <> gen <> "(" <> tps <> "): " <> ret <> " { " <> clauseReturn i53 cset reg vars c.body inl <> " }"
             else dispatchTs
           _ -> dispatchTs
 
@@ -938,7 +1036,7 @@ constTs known i53 cset reg c =
       other -> [ CExprStmt other ]
     val = case dedup stmts [] jsFresh of
       [ CExprStmt e ] -> exprJs i53 e
-      deduped -> "(() => { " <> blockReturn i53 deduped <> " })()"
+      deduped -> "(() => { " <> blockReturn i53 [] deduped <> " })()"
     export = if c.pub then "export " else ""
   in
     export <> "const " <> c.name <> ": " <> tsTypeM known [] c.ty <> " = " <> val <> ";"

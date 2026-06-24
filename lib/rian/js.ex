@@ -249,18 +249,24 @@ defmodule Rian.JS do
     consts = all_consts(prog)
     reg = %{sums: sum_ctor_map(prog), structs: struct_name_set(prog)}
 
+    # `@external` host-macro (ADR-0068/0030, the `.ts` doc-view only, ADR-0086 §5): a single-clause
+    # `@external(:js)` call is inlined at the call site (`js_inline`), so the named wrapper collapses
+    # into idiomatic host code — `puts("…")` → `console.log("…")`.
+    inl = js_inlinable_externals(funcs)
+
     ic =
       Check.program_ic(prog)
       |> Map.put(:consts, MapSet.new(consts, & &1.name))
       |> Map.put(:js_reg, reg)
       |> Map.put(:js_vmeta, Rian.VariantLabels.meta(prog))
+      |> Map.put(:js_inline, inl)
 
     range_ts = Enum.map_join(all_ranges(prog), "\n", &dts_range/1)
     type_ts = Enum.map_join(all_types(prog), "\n", &dts_sum(&1, known))
     struct_ts = Enum.map_join(all_structs(prog), "\n", &dts_struct(&1, known))
     import_ts = imports_js(funcs)
     const_ts = Enum.map_join(consts, "\n", &const_ts(&1, i53, ic, known))
-    fn_ts = Enum.map_join(funcs, "\n\n", &function_ts(&1, i53, ic, known))
+    fn_ts = inlined_fn_ts(funcs, inl, i53, ic, known)
     disp_ts = protocol_dispatchers_js(prog, i53)
 
     [range_ts, type_ts, struct_ts, import_ts, const_ts, fn_ts, disp_ts]
@@ -288,7 +294,7 @@ defmodule Rian.JS do
     val =
       case Rian.Shadow.dedup(stmts, [], &js_fresh/2) do
         [{:expr, e}] -> expr_js(e, i53)
-        deduped -> "(() => { #{block_return(deduped, i53)} })()"
+        deduped -> "(() => { #{block_return(deduped, i53, %{})} })()"
       end
 
     export = if c.pub?, do: "export ", else: ""
@@ -345,6 +351,32 @@ defmodule Rian.JS do
 
         "#{export}function #{name}#{generics(f.tvars)}(#{tps}): #{ret} {\n#{body}#{tail}\n}"
     end
+  end
+
+  # Emit each function (a statement-position call to an inlinable `@external(:js)` is already spliced
+  # in its body via `ic[:js_inline]`), then DROP an inlinable wrapper whose name no longer appears as
+  # a call in any other emitted body — every call site was inlined, so the named wrapper is dead. A
+  # wrapper still called in expression position (which this pass does not inline) is kept, so nothing
+  # dangles.
+  defp inlined_fn_ts(funcs, inl, i53, ic, known) do
+    emitted = Enum.map(funcs, fn f -> {f.name, f.pub?, function_ts(f, i53, ic, known)} end)
+    inl_names = inl |> Map.keys() |> MapSet.new()
+
+    referenced =
+      for {n, _pub, body} <- emitted,
+          m <- inl_names,
+          m != n,
+          String.contains?(body, m <> "("),
+          into: MapSet.new(),
+          do: m
+
+    # drop only a PRIVATE inlinable wrapper that is now uncalled — a `pub` one is exported API
+    # (an outside caller may use it), so it stays even when every in-module call site was inlined.
+    emitted
+    |> Enum.reject(fn {n, pub, _} ->
+      MapSet.member?(inl_names, n) and not pub and not MapSet.member?(referenced, n)
+    end)
+    |> Enum.map_join("\n\n", fn {_, _, body} -> body end)
   end
 
   # typed twin of `js_external_fn`.
@@ -697,7 +729,7 @@ defmodule Rian.JS do
     val =
       case Rian.Shadow.dedup(stmts, [], &js_fresh/2) do
         [{:expr, e}] -> expr_js(e, i53)
-        deduped -> "(() => { #{block_return(deduped, i53)} })()"
+        deduped -> "(() => { #{block_return(deduped, i53, %{})} })()"
       end
 
     export = if c.pub?, do: "export ", else: ""
@@ -1239,7 +1271,46 @@ defmodule Rian.JS do
       # patterns in `case` arms, on the typed Core (ADR-0049 §3b).
       |> bake_variants(Map.get(ic, :js_vmeta, %{}))
 
-    block_return(Rian.Shadow.dedup(stmts, params, &js_fresh/2), i53)
+    block_return(Rian.Shadow.dedup(stmts, params, &js_fresh/2), i53, Map.get(ic, :js_inline, %{}))
+  end
+
+  # ── `@external` host-macro: inlinable single-clause `@external(:js)` functions ──────────
+  # name => {param_names, host_body}. A function is inlinable when it is a single host expression
+  # (an `@external`, so no clauses), its `:js` spec is a raw string with no string-literal delimiter,
+  # and each param is referenced as a standalone word exactly once — so substituting the (lowered)
+  # argument preserves eval-once and cannot clobber a string literal. Mirrors the macro engine's
+  # AST substitution, but for the host-text leaf the macro engine cannot cross (FFI is not Rian).
+  defp js_inlinable_externals(funcs) do
+    for f <- funcs, host = js_inline_host(f), host != nil, into: %{} do
+      {f.name, {Enum.map(f.params, & &1.name), host}}
+    end
+  end
+
+  defp js_inline_host(%{externals: ext, params: params}) when map_size(ext) > 0 do
+    case Map.get(ext, :js) do
+      host when is_binary(host) ->
+        if not String.contains?(host, ["\"", "'", "`"]) and
+             Enum.all?(params, &(word_count(host, &1.name) == 1)),
+           do: host,
+           else: nil
+
+      _ ->
+        nil
+    end
+  end
+
+  defp js_inline_host(_), do: nil
+
+  defp word_count(s, w), do: length(Regex.scan(~r/\b#{Regex.escape(w)}\b/, s))
+
+  # splice an inlinable host body, replacing each param token with its lowered-JS argument (a
+  # function replacement so a `\`/`$` in the argument is not read as a regex backreference).
+  defp js_splice_host(host, params, arg_js) do
+    params
+    |> Enum.zip(arg_js)
+    |> Enum.reduce(host, fn {p, a}, acc ->
+      Regex.replace(~r/\b#{Regex.escape(p)}\b/, acc, fn _ -> a end)
+    end)
   end
 
   # Reflective Core walk: a sum construction `Ctor(args)` becomes an `EVariant` carrying
@@ -1331,21 +1402,33 @@ defmodule Rian.JS do
 
   defp js_fresh(base, count), do: base <> "$" <> Integer.to_string(count)
 
-  defp block_return([{:expr, e}], i53), do: "return #{expr_js(e, i53)};"
+  defp block_return([{:expr, e}], i53, inl), do: "return #{stmt_expr_js(e, i53, inl)};"
 
-  defp block_return(stmts, i53) do
+  defp block_return(stmts, i53, inl) do
     {init, [last]} = Enum.split(stmts, -1)
-    lets = Enum.map_join(init, " ", &stmt_js(&1, i53))
-    "#{lets} #{stmt_return(last, i53)}"
+    lets = Enum.map_join(init, " ", &stmt_js(&1, i53, inl))
+    "#{lets} #{stmt_return(last, i53, inl)}"
   end
 
-  defp stmt_js({:bind, n, e}, i53), do: "let #{n} = #{expr_js(e, i53)};"
+  defp stmt_js({:bind, n, e}, i53, _inl), do: "let #{n} = #{expr_js(e, i53)};"
   # the declared type is erased at lowering (ADR-0034 §1); the value is unchanged.
-  defp stmt_js({:typed_bind, n, _t, e}, i53), do: stmt_js({:bind, n, e}, i53)
-  defp stmt_js({:expr, e}, i53), do: "#{expr_js(e, i53)};"
+  defp stmt_js({:typed_bind, n, _t, e}, i53, inl), do: stmt_js({:bind, n, e}, i53, inl)
+  defp stmt_js({:expr, e}, i53, inl), do: "#{stmt_expr_js(e, i53, inl)};"
   # The returned statement is always an expression — a trailing binding is
   # rejected at `Rian.Core` (ADR-0035), so `stmt_return` only sees `:expr`.
-  defp stmt_return({:expr, e}, i53), do: "return #{expr_js(e, i53)};"
+  defp stmt_return({:expr, e}, i53, inl), do: "return #{stmt_expr_js(e, i53, inl)};"
+
+  # `@external` host-macro (ADR-0068/0030): a STATEMENT-position call to an inlinable single-clause
+  # `@external(:js)` function is spliced inline — its host body with each param replaced by the
+  # lowered argument — so `puts("…")` (declared `console.log(s)`) emits `console.log("…")` directly
+  # instead of a wrapper call. Only statement position (the `compile_ts` doc-view); nested calls and
+  # the runtime `.mjs` keep the named function. `inl` is empty outside `compile_ts`.
+  defp stmt_expr_js(%ECall{fun: %EId{name: f}, args: args}, i53, inl) when is_map_key(inl, f) do
+    {params, host} = inl[f]
+    js_splice_host(host, params, Enum.map(args, &expr_js(&1, i53)))
+  end
+
+  defp stmt_expr_js(e, i53, _inl), do: expr_js(e, i53)
 
   # ── expression emission ─────────────────────────────────────────────────
   defp expr_js(%ENum{text: n}, i53), do: num_js(n, i53)
@@ -1629,7 +1712,7 @@ defmodule Rian.JS do
   # multi-statement block an IIFE
   defp branch_js(%EBlock{stmts: [{:expr, e}]}, i53), do: expr_js(e, i53)
   defp branch_js(%EBlock{stmts: []}, _i53), do: "undefined"
-  defp branch_js(%EBlock{stmts: stmts}, i53), do: "(() => { #{block_return(stmts, i53)} })()"
+  defp branch_js(%EBlock{stmts: stmts}, i53), do: "(() => { #{block_return(stmts, i53, %{})} })()"
   defp branch_js(expr, i53), do: expr_js(expr, i53)
 
   # ── helpers ─────────────────────────────────────────────────────────────

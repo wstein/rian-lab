@@ -923,7 +923,15 @@ js_corpus = [
   ~S|pub def f2s(x Float64) String := "${x}"|,
   # struct construction (ADR-0050): `Name(f: v)` → a `__struct__`-tagged object (one and two fields)
   "struct Box(v Int53)\npub def mk(x Int53) Box := Box(v: x)",
-  "struct P(a Int53, b Int53)\npub def mk2(x Int53, y Int53) P := P(a: x, b: y)"
+  "struct P(a Int53, b Int53)\npub def mk2(x Int53, y Int53) P := P(a: x, b: y)",
+  # `@external` host-macro (ADR-0068/0030): the `jsts` doc-view inlines a statement-position
+  # single-clause `@external(:js)` call — `puts("…")` → `console.log("…")`, the private `puts`
+  # wrapper DCE'd. The runtime `.mjs` (the `js` stream) keeps the named wrapper unchanged.
+  "@external(:js, \"console.log(s)\")\ndef puts(s String) Unit\npub def main() Unit := puts(\"hi\")",
+  # a `:=` bind + a `${…}` hole through the inlined external (the hello example)
+  "@external(:js, \"console.log(s)\")\ndef puts(s String) Unit\npub def main() Unit\n  name := \"Rian\"\n  puts(\"Hello, ${name}!\")\nend",
+  # a `pub` external is KEPT (exported API) even though its only call is inlined
+  "@external(:js, \"console.log(s)\")\npub def puts(s String) Unit\npub def main() Unit := puts(\"x\")"
 ]
 
 # Rian.JS.compile_types — the `jsdts` stream (ADR-0086 §5): the TypeScript `.d.ts` sidecar. Maps
