@@ -133,16 +133,20 @@ defmodule Rian.Run do
   @rian_sig "pub def cli(argv Vec(String)) Int53"
   @spec cli([String.t()]) :: non_neg_integer()
   def cli(argv) do
-    case OptionParser.parse(argv, strict: [main: :string]) do
+    case OptionParser.parse(argv, strict: [main: :string, no_fold: :boolean]) do
       {_opts, _files, [_ | _] = invalid} ->
         IO.puts(:stderr, "rian run: unknown option #{inspect(Enum.map(invalid, &elem(&1, 0)))}")
         2
 
       {_opts, [], _} ->
-        IO.puts(:stderr, "usage: rian run FILE [--main FUNC]")
+        IO.puts(:stderr, "usage: rian run FILE [--main FUNC] [--no-fold]")
         2
 
       {opts, [file], _} ->
+        # `--no-fold` (ADR-0046): run the program without automatic constant folding (debugging).
+        if Keyword.get(opts, :no_fold, false),
+          do: Application.put_env(:rian, :comptime_fold, false)
+
         case run_file(file, Keyword.get(opts, :main, "main")) do
           {:ok, value} ->
             IO.puts(inspect(value))

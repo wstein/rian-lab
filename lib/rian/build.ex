@@ -24,13 +24,18 @@ defmodule Rian.Build do
   @spec build([String.t()]) :: non_neg_integer()
   def build(argv) do
     case OptionParser.parse(argv,
-           strict: [out: :string, rust: :boolean, js: :boolean, jvm: :boolean],
+           strict: [out: :string, rust: :boolean, js: :boolean, jvm: :boolean, no_fold: :boolean],
            aliases: [o: :out]
          ) do
       {_opts, _, [_ | _] = bad} ->
         err("build: unknown option #{inspect(Enum.map(bad, &elem(&1, 0)))}")
 
       {opts, [file], _} ->
+        # `--no-fold` (ADR-0046): skip automatic constant folding so the emitted source stays
+        # faithful to what you wrote (debugging). Scoped to this build invocation.
+        if Keyword.get(opts, :no_fold, false),
+          do: Application.put_env(:rian, :comptime_fold, false)
+
         case File.read(file) do
           {:ok, src} -> resolve_then_emit(opts, file, src)
           {:error, reason} -> err(error_text(reason))

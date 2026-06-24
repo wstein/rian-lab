@@ -36,7 +36,7 @@ mix format                                # the formatter/linter — no credo in
 mix compile --warnings-as-errors          # warnings are errors; run before every commit
 mix dialyzer                              # success-typing analysis (dialyxir); must stay clean (config in mix.exs `dialyzer/0`, false positives in .dialyzer_ignore.exs)
 
-mix rian.compile FILE [--beam|--rust|--js|--jvm] [--show-elixir]  # BEAM bytecode (Rian.Beam) + Rust/JS/Kotlin source; --show-elixir = text debug view
+mix rian.compile FILE [--beam|--rust|--js|--jvm] [--show-elixir] [--no-fold]  # BEAM bytecode (Rian.Beam) + Rust/JS/Kotlin source; --show-elixir = text debug view; --no-fold = skip automatic constant folding (ADR-0046)
 mix rian.roundtrip FILE|DIR [-o tmp]              # Elixir→Rian→Elixir roundtrip dashboard (Rian.Roundtrip): both BEAM backends + forms-equiv vs original
 mix rian.jar FILE [-o OUT.jar] [--main FUNC]      # runnable JVM .jar via Kotlin+kotlinc (ADR-0049/0062 rung B)
 mix rian.format FILE… [--check|--diff|--stdout]   # canonical zero-config formatter (Rian.Format, ADR-0045); wraps to 98 cols; --check = CI gate; `-` = stdin

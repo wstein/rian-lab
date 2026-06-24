@@ -4,6 +4,30 @@ defmodule Rian.ComptimeTest do
   alias Rian.{Comptime, Pratt}
 
   defp fold(src), do: Comptime.fold(Pratt.parse(src))
+  defp auto(src), do: Comptime.fold_constants(Pratt.parse(src))
+
+  describe "automatic constant folding (ADR-0046) — no `comptime` marker" do
+    test "a pure all-literal expression folds to its literal" do
+      assert auto("2 + 3 * 4") == {:num, "14"}
+      assert auto("(1 + 2) * 5") == {:num, "15"}
+      assert auto("6 / 2") == {:num, "3.0"}
+      assert auto("3 > 5") == {:id, "false"}
+      assert auto("-5") == {:num, "-5"}
+    end
+
+    test "a non-constant operand leaves the node untouched (opportunistic, never raises)" do
+      assert auto("x + 1") == {:bin, "+", {:id, "x"}, {:num, "1"}}
+      assert auto("f(2)") == {:call, {:id, "f"}, [num: "2"]}
+      # a constant sub-expression still folds inside a non-constant context
+      assert auto("x + (2 + 3)") == {:bin, "+", {:id, "x"}, {:num, "5"}}
+    end
+
+    test "type-preserving: a mixed Int/Float is NOT folded (so it can't mask a checker error)" do
+      # the checker rejects `Int * Float`; auto-fold must leave it for the checker to catch
+      assert auto("3.14 * 2") == {:bin, "*", {:num, "3.14"}, {:num, "2"}}
+      assert auto("2 + 1.5") == {:bin, "+", {:num, "2"}, {:num, "1.5"}}
+    end
+  end
 
   describe "pure comptime folding (ADR-0009/0030)" do
     test "integer / float / underscore literals fold to a numeric node" do

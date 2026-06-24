@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Rian.Compile do
   Compile a Rian source file (Stage 0.1 declaration surface) for each top-level
   function and module.
 
-      mix rian.compile FILE [--beam | --rust | --js | --jvm] [--show-elixir]
+      mix rian.compile FILE [--beam | --rust | --js | --jvm] [--show-elixir] [--no-fold]
 
   The two **real** targets are emitted by default:
 
@@ -25,6 +25,8 @@ defmodule Mix.Tasks.Rian.Compile do
     * `--show-elixir`  *additionally* print the Elixir-text **debug** view
                        (`Rian.Lower`'s text emitter — a pedagogical artifact, not
                        the execution path; BEAM runs from bytecode, not this text)
+    * `--no-fold`      skip automatic constant folding (ADR-0046) — keep the emitted
+                       source faithful to what you wrote, for debugging/stepping
 
   Exits non-zero on a parse, exhaustiveness, or type-check error.
 
@@ -43,12 +45,17 @@ defmodule Mix.Tasks.Rian.Compile do
           rust: :boolean,
           js: :boolean,
           jvm: :boolean,
-          show_elixir: :boolean
+          show_elixir: :boolean,
+          no_fold: :boolean
         ]
       )
 
     if invalid != [],
       do: Mix.raise("unknown option(s): #{inspect(Enum.map(invalid, &elem(&1, 0)))}")
+
+    # `--no-fold` (ADR-0046): keep emitted source faithful to what you wrote — skip automatic
+    # constant folding — for debugging/stepping. Scoped to this build invocation.
+    if Keyword.get(opts, :no_fold, false), do: Application.put_env(:rian, :comptime_fold, false)
 
     file =
       case argv do

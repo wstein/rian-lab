@@ -165,7 +165,11 @@ defmodule Rian.Decl do
     if Keyword.get(opts, :assemble_only, false) do
       assembled
     else
-      run_program_tail(assembled, Keyword.get(opts, :fold, true))
+      # automatic constant folding (ADR-0046) is on by default; an explicit `fold: false` (the
+      # injected stdlib) wins, else the process-wide `:comptime_fold` flag the `--no-fold` CLI option
+      # sets for a build invocation (so every parse site — including internal ones — honors it).
+      fold? = Keyword.get(opts, :fold, Application.get_env(:rian, :comptime_fold, true))
+      run_program_tail(assembled, fold?)
     end
   end
 
