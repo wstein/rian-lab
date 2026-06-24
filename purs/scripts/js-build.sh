@@ -23,7 +23,7 @@ node --input-type=module -e '
   import { compile } from "./output-js/Rian.JS/index.js";
   const src = "type Color := Red | Green\nstruct Box(v Int53)\npub def add(x Int53, y Int53) Int53 := x + y\npub def mk(n Int53) Box := Box(v: n)\npub def lbl(s String) String := \"hi ${s}\"";
   const out = compile(src);
-  const need = ["export function add", "{ __struct__: \"Box\", v: n }", "(\"hi \" + s)"];
+  const need = ["export function add", "{ __struct__: \"Box\", v: n }", "\"hi \" + s"];
   for (const s of need) {
     if (!out.includes(s)) { console.error("✗ expected substring missing: " + s + "\n--- output ---\n" + out); process.exit(1); }
   }

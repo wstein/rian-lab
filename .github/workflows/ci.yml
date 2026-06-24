@@ -161,12 +161,13 @@ jobs:
   # already caught a real stale bundle). Reproducible inputs make the byte check sound:
   # purs 0.15.16 + spago (`purs/package-lock.json`), the dhall JS package set (hash-pinned
   # in `packages-js.dhall`), and esbuild (`site/package-lock.json`) all via `npm ci`, and
-  # esbuild `--minify` is deterministic. NON-BLOCKING until a few green runs confirm
-  # cross-environment byte-reproducibility, then promote (drop `continue-on-error`) — the
-  # same "non-blocking until promoted" contract as the Tier-2 JVM lane above.
+  # esbuild `--minify` is deterministic. PROMOTED TO BLOCKING (2026-06): green runs confirmed
+  # cross-environment byte-reproducibility, and the gate has repeatedly caught real stale/broken
+  # bundles (a stale `mjs`, a missing FFI stub, an outdated smoke assertion) — so a committed
+  # bundle that disagrees with the source now FAILS CI instead of warning. Regenerate as the last
+  # compiler-touching step: `purs/scripts/js-bundle.sh`, then commit `site/public/rian-compiler.mjs`.
   js-bundle:
     runs-on: ubuntu-latest
-    continue-on-error: true
     steps:
       - uses: actions/checkout@v7
 
