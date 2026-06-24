@@ -273,6 +273,11 @@ before implementing" (the `Char`/`Int` dispatch collision) and "gate off" (`Floa
   Empty literal segments (the lexer's trailing `{:lit, ""}`, and `""` between
   adjacent holes) are dropped; a single-part interpolation collapses to the bare
   value. The join is portable (no Reach blocker) and `Check` types it `String`.
+  A **constant hole bakes into the text** (composes with ADR-0046 auto-fold): once
+  `${2 + 3 * 4}` has folded to `${14}`, `Rian.Interp` stringifies the literal at
+  compile time and `concat_chain` merges it with the neighbouring segments, so
+  `"calc = ${2 + 3 * 4}"` is the one literal `"calc = 14"` — no runtime concat at
+  all. Int/Bool/Char bake (`bake_const`); a `Float` hole keeps its `Show.float` call.
   The Rust emitter **bakes the literal segments into the `format!` template**
   (`"Hello, ${name}!"` → `format!("Hello, {}!", name)`, not `format!("{}{}{}",
   "Hello, ", name, "!")`) — braces in a literal are doubled (`{` → `{{`). This is a

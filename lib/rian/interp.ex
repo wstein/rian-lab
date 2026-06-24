@@ -166,8 +166,32 @@ defmodule Rian.Interp do
   defp resolve_part({:hole, expr}, env, ic, show) do
     # resolve nested interpolation first, then stringify by the hole's type
     expr = resolve(expr, env, ic, show)
-    stringify(expr, Check.infer(expr, env, ic), show)
+
+    # a hole that is now a CONSTANT literal (ADR-0046 auto-fold turned `${2 + 3 * 4}` into `${14}`)
+    # is stringified at COMPILE time and baked into the template — `concat_chain` then merges it into
+    # the neighbouring text, so `"calc = ${2 + 3 * 4}"` becomes the single literal `"calc = 14"`. The
+    # baked repr is exactly what the runtime stringifier would produce (Int/Bool/Char are unambiguous;
+    # Float is NOT baked — it needs the `Show.float` formatter, so it stays a runtime call).
+    case bake_const(expr) do
+      {:ok, s} -> {:str, s}
+      :no -> stringify(expr, Check.infer(expr, env, ic), show)
+    end
   end
+
+  defp bake_const({:num, n}) do
+    clean = String.replace(n, "_", "")
+
+    # an INT literal's decimal digits ARE its `__prim_int_to_string` repr (auto-fold emits
+    # `Integer.to_string`, so no leading zeros); a FLOAT needs the `Show.float` formatter — don't bake.
+    if String.contains?(clean, ".") or String.match?(clean, ~r/[eE]/),
+      do: :no,
+      else: {:ok, clean}
+  end
+
+  defp bake_const({:id, "true"}), do: {:ok, "true"}
+  defp bake_const({:id, "false"}), do: {:ok, "false"}
+  defp bake_const({:char, cp}), do: {:ok, <<cp::utf8>>}
+  defp bake_const(_), do: :no
 
   defp stringify(expr, "String", _show), do: expr
 
@@ -252,11 +276,23 @@ defmodule Rian.Interp do
   # single BEAM binary / `format!` on Rust) rather than a left-nested `<>` cascade
   # that builds N−1 intermediates (ADR-0069 §6). One part is the value itself.
   defp concat_chain(parts) do
-    case Enum.reject(parts, &match?({:str, ""}, &1)) do
+    case parts |> merge_strs() |> Enum.reject(&match?({:str, ""}, &1)) do
       [] -> {:str, ""}
       [only] -> only
       many -> {:call, {:id, "__prim_str_concat_all"}, many}
     end
+  end
+
+  # fold consecutive string-literal parts into one — so a compile-time-baked constant hole
+  # (`bake_const`) merges with the surrounding text into a single literal rather than a `<>` of
+  # constants (`"calc = " <> "14"` → `"calc = 14"`). Only adjacent `{:str, …}` combine; holes stay.
+  defp merge_strs(parts) do
+    parts
+    |> Enum.reduce([], fn
+      {:str, b}, [{:str, a} | rest] -> [{:str, a <> b} | rest]
+      part, acc -> [part | acc]
+    end)
+    |> Enum.reverse()
   end
 
   defp int_type?(t), do: is_binary(t) and Regex.match?(~r/^U?Int\d*$/, t)

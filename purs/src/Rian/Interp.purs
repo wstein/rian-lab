@@ -24,7 +24,9 @@ module Rian.Interp
 
 import Prelude
 
-import Data.Array (concatMap, filter, foldl, snoc)
+import Data.Array (concatMap, filter, foldl, snoc, unsnoc)
+import Data.Enum (toEnum)
+import Data.String.CodePoints (singleton) as CP
 import Data.Foldable (all, elem)
 import Data.Maybe (Maybe(..), fromMaybe, maybe)
 import Data.String as Str
@@ -79,7 +81,24 @@ resolvePart :: Env -> Ic -> Array String -> P.IPart -> P.Surface
 resolvePart _ _ _ (P.ILit s) = P.SStr s
 resolvePart env ic show (P.IHole e) =
   let e2 = resolve env ic show e
-  in stringify show (infer (fromExpr (normalize e2)) env ic) e2
+  in case bakeConst e2 of
+    Just s -> P.SStr s
+    Nothing -> stringify show (infer (fromExpr (normalize e2)) env ic) e2
+
+-- a hole that is now a CONSTANT literal (ADR-0046 auto-fold turned `${2 + 3 * 4}` into `${14}`) is
+-- stringified at COMPILE time + baked into the template; `concatChain` merges it into the neighbouring
+-- text (`"calc = ${2 + 3 * 4}"` → the single literal `"calc = 14"`). Int/Bool/Char are unambiguous;
+-- Float is NOT baked — it needs the `Show.float` formatter. Mirrors `Rian.Interp.bake_const`.
+bakeConst :: P.Surface -> Maybe String
+bakeConst (P.SNum n) =
+  let clean = Str.replaceAll (Str.Pattern "_") (Str.Replacement "") n
+  in
+    if Str.contains (Str.Pattern ".") clean || Str.contains (Str.Pattern "e") clean || Str.contains (Str.Pattern "E") clean then Nothing
+    else Just clean
+bakeConst (P.SId "true") = Just "true"
+bakeConst (P.SId "false") = Just "false"
+bakeConst (P.SChar cp) = map CP.singleton (toEnum cp)
+bakeConst _ = Nothing
 
 stringify :: Array String -> Ty -> P.Surface -> P.Surface
 stringify show ty expr = case ty of
@@ -118,13 +137,23 @@ isIntType t =
 -- concatenation); ≥2 parts lower to one `__prim_str_concat_all` (a single allocation), one part is
 -- the value itself, none is `""`.
 concatChain :: Array P.Surface -> P.Surface
-concatChain parts = case filter (not <<< isEmptyStr) parts of
+concatChain parts = case filter (not <<< isEmptyStr) (mergeStrs parts) of
   [] -> P.SStr ""
   [ only ] -> only
   kept -> P.SCall (P.SId "__prim_str_concat_all") kept
   where
   isEmptyStr (P.SStr "") = true
   isEmptyStr _ = false
+
+-- fold consecutive string-literal parts into one — so a compile-time-baked constant hole merges with
+-- the surrounding text into a single literal (`"calc = " <> "14"` → `"calc = 14"`). Mirrors `merge_strs`.
+mergeStrs :: Array P.Surface -> Array P.Surface
+mergeStrs = foldl step []
+  where
+  step acc (P.SStr b) = case unsnoc acc of
+    Just { init, last: P.SStr a } -> snoc init (P.SStr (a <> b))
+    _ -> snoc acc (P.SStr b)
+  step acc part = snoc acc part
 
 -- the names a `case`-arm pattern introduces, typed for interpolation: a bare variable binds the
 -- whole scrutinee type; an `@`-alias binds likewise; any destructuring var binds `:unknown` (its

@@ -207,10 +207,10 @@
       "file": "macros.rian",
       "id": "macros",
       "panes": {
-        "ex": "def puts(s), do: IO.puts(s)\ndef sq(a, b) do (a + b) * (a + b) end\ndef main() do puts(<<\"sq(2, 3) = \"::binary, Integer.to_string(sq(2, 3))::binary>>); puts(<<\"2 + 3 * 4 = \"::binary, Integer.to_string(14)::binary>>) end",
-        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nfunction sq(a, b) { return ((a + b) * (a + b)); }\n\nexport function main() { puts(\"sq(2, 3) = \" + String(sq(2, 3))); return puts(\"2 + 3 * 4 = \" + String(14)); }",
-        "jvm": "private fun puts(a0: String): Unit { val s = a0; return println(s) }\n\nprivate fun sq(a0: Long, a1: Long): Long {\n  val a = a0; val b = a1; return ((a + b) * (a + b))\n}\n\nfun main(): Unit {\n  return run { puts((\"sq(2, 3) = \" + (sq(2L, 3L)).toString())); puts((\"2 + 3 * 4 = \" + (14L).toString())) }\n}",
-        "rs": "fn puts(s: &str) -> () { println!(\"{}\", s) }\n\nfn sq(a: i64, b: i64) -> i64 {\n    match (a, b) {\n        (a, b) => (a + b) * (a + b),\n    }\n}\n\nfn main() -> () {\n    match () {\n        () => { puts(&format!(\"sq(2, 3) = {}\", sq(2, 3).to_string())); puts(&format!(\"2 + 3 * 4 = {}\", 14.to_string())) },\n    }\n}"
+        "ex": "def puts(s), do: IO.puts(s)\ndef sq(a, b) do (a + b) * (a + b) end\ndef main() do puts(<<\"sq(2, 3) = \"::binary, Integer.to_string(sq(2, 3))::binary>>); puts(\"2 + 3 * 4 = 14\") end",
+        "js": "function puts(a0) { const s = a0; return (console.log(s)); }\n\nfunction sq(a, b) { return ((a + b) * (a + b)); }\n\nexport function main() { puts(\"sq(2, 3) = \" + String(sq(2, 3))); return puts(\"2 + 3 * 4 = 14\"); }",
+        "jvm": "private fun puts(a0: String): Unit { val s = a0; return println(s) }\n\nprivate fun sq(a0: Long, a1: Long): Long {\n  val a = a0; val b = a1; return ((a + b) * (a + b))\n}\n\nfun main(): Unit {\n  return run { puts((\"sq(2, 3) = \" + (sq(2L, 3L)).toString())); puts(\"2 + 3 * 4 = 14\") }\n}",
+        "rs": "fn puts(s: &str) -> () { println!(\"{}\", s) }\n\nfn sq(a: i64, b: i64) -> i64 {\n    match (a, b) {\n        (a, b) => (a + b) * (a + b),\n    }\n}\n\nfn main() -> () {\n    match () {\n        () => { puts(&format!(\"sq(2, 3) = {}\", sq(2, 3).to_string())); puts(\"2 + 3 * 4 = 14\") },\n    }\n}"
       },
       "reach": {
         "main": [

@@ -264,6 +264,16 @@ defmodule Rian.InterpTest do
       assert Rian.Interp.resolve(Pratt.parse(~S|"${name}"|), %{"name" => "String"}, %{}) ==
                {:id, "name"}
     end
+
+    test "a constant hole bakes into the string literal at compile time (ADR-0046 + §6)" do
+      # `${14}` / `${true}` are already constants — stringified + merged into the surrounding text,
+      # so the whole interpolation is one literal (no runtime concat at all)
+      assert Rian.Interp.resolve(Pratt.parse(~S|"calc = ${14}"|), %{}, %{}) == {:str, "calc = 14"}
+      assert Rian.Interp.resolve(Pratt.parse(~S|"ok=${true}!"|), %{}, %{}) == {:str, "ok=true!"}
+      # a non-constant hole still joins at runtime
+      assert {:call, {:id, "__prim_str_concat_all"}, _} =
+               Rian.Interp.resolve(Pratt.parse(~S|"n=${x}"|), %{"x" => "Int53"}, %{})
+    end
   end
 
   describe "Reach is honest about interpolation (ADR-0069 §4)" do

@@ -85,8 +85,13 @@ expression whose operands are all literals is folded to its literal — `2 + 3 *
 it before the program runs is the litmus test passing trivially. Implementation:
 
 - **`Rian.Comptime.fold_constants`** — a program-tail pass (`Rian.Decl.run_program_tail`, before
-  interpolation resolution, so a constant `${…}` hole folds too: `"calc = ${2 + 3 * 4}"` → the hole is
-  `14`). OPPORTUNISTIC: a non-constant operand simply leaves the node, so it never errors like `comptime`.
+  interpolation resolution, so a constant `${…}` hole folds too). OPPORTUNISTIC: a non-constant operand
+  simply leaves the node, so it never errors like `comptime`.
+- **Constant interpolation holes bake into the string** (`Rian.Interp`, ADR-0069 §6): once the hole is
+  a literal, it is stringified at *compile* time and merged into the surrounding text — so
+  `"calc = ${2 + 3 * 4}"` becomes the single literal `"calc = 14"` (`console.log("calc = 14")`), not a
+  runtime `"calc = " + String(14)`. Int/Bool/Char bake (their repr is unambiguous); a `Float` hole stays
+  a runtime `Show.float` call.
 - **Type-preserving (the safety boundary).** It folds only when the numeric literals are
   *kind-homogeneous* (all `Int`, or all `Float`), so it can never fold a mixed `Int * Float` — which
   `Check` rejects (ADR-0034/0035) — and thus **never masks a type error** by running before the checker.
