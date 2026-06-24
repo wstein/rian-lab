@@ -1735,10 +1735,19 @@ checkReturn ic f = case f.ret of
   clauseErr ret c = case c.body of
     Nothing -> Nothing
     Just b ->
-      let bt = infer (fromExpr (normalize (bodySurface b))) (clauseEnv c.pats f.params ic) ic
+      let bsurf = bodySurface b
       in
-        if assignable bt (TName ret) then Nothing
-        else Just ("`" <> f.name <> "`: body has type `" <> tyStr bt <> "` but the declared return type is `" <> ret <> "`")
+        -- a constant-of-literals body ADOPTS the declared width (ADR-0064), so `def f() Vec(Int8)
+        -- := [1, 2, 3]` is accepted (the literals adopt `Int8`) — but each must FIT the width's
+        -- range (`def f() Int8 := 9999` is rejected). Mirrors the reference `check_return`'s
+        -- `body_literal_adopts? -> lit_range_error` branch, which precedes plain assignability;
+        -- without it the body infers the default `Int53` and a narrower declared width is rejected.
+        if litExprAdopts bsurf ret then litRangeError bsurf ret f.name
+        else
+          let bt = infer (fromExpr (normalize bsurf)) (clauseEnv c.pats f.params ic) ic
+          in
+            if assignable bt (TName ret) then Nothing
+            else Just ("`" <> f.name <> "`: body has type `" <> tyStr bt <> "` but the declared return type is `" <> ret <> "`")
 
 -- a return mentioning one of the function's `forall` tvars is generic — checked conservatively.
 genericRet :: String -> Array String -> Boolean

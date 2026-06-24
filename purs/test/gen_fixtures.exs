@@ -761,6 +761,13 @@ gate_corpus = [
   "pub def bh(x Int53) Option(Int53) := Some(x)",
   "pub def st() Pair := [1, 2]\ntype Pair := P(a Int53, b Int53)",
   "pub def w(x Int8) Int64 := x",
+  # return-position literal-width adoption (ADR-0064): a constant-of-literals body adopts the
+  # DECLARED return width — a list literal adopts `Vec(ElemT)` — so a narrower declared width is
+  # accepted, but each literal must still FIT that width's range. (`check_return`'s
+  # `body_literal_adopts? -> lit_range_error` branch; previously a PS-port gap the corpora dodged.)
+  "pub def three() Vec(Int8) := [1, 2, 3]",
+  "pub def wide() Vec(Int8) := [1, 999]",
+  "pub def s8() Int8 := 5",
   # error sets (ADR-0040): a Result return's produced error set must be ⊆ its declared E.
   "pub def safe() Result(Int53, MyErr) := {:ok, 1}\ntype MyErr := Bad",
   "pub def bad() Result(Int53, MyErr) := {:error, Other}\ntype MyErr := Bad",
@@ -1164,7 +1171,7 @@ def f(c) := 0|,
   # a multi-statement body (`:=` bind then value) → a scoped `run { val …; … }` (+ a `${…}` hole)
   "pub def hi(who String) String := name := who ; \"Hello, ${name}!\"",
   # ── Dict / map operations (Phase 5): `Dict(K,V)` → `Map<K,V>`, ops → Kotlin `Map` ops ──
-  # a map literal `%{k: v, …}` → `mapOf("k" to v, …)` (Int53 values dodge the Check width gap)
+  # a map literal `%{k: v, …}` → `mapOf("k" to v, …)`
   "pub def m() Dict(Symbol, Int53) := %{a: 1, b: 2}",
   # an empty map literal `%{}` → `mapOf()`
   "pub def e() Dict(Symbol, Int53) := %{}",
