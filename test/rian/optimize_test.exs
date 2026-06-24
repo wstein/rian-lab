@@ -36,6 +36,22 @@ defmodule Rian.OptimizeTest do
     end
   end
 
+  describe "post-check constant-`case` arm selection (#3)" do
+    test "a constant scrutinee selects the matching literal arm" do
+      assert simp("case 2 do 1 -> a\n2 -> b\n_ -> c end") == {:id, "b"}
+      assert simp("case 9 do 1 -> a\n_ -> c end") == {:id, "c"}
+
+      assert simp(~S|case "y" do "x" -> 1| <> "\n" <> ~S|"y" -> 2| <> "\n_ -> 3 end") ==
+               {:num, "2"}
+    end
+
+    test "a non-constant scrutinee / a var or guarded arm keeps the case" do
+      assert {:case, {:id, "s"}, _} = simp("case s do 1 -> a\n_ -> c end")
+      assert {:case, {:num, "1"}, _} = simp("case 1 do n -> n end")
+      assert {:case, {:num, "1"}, _} = simp("case 1 do 1 when x -> a\n_ -> b end")
+    end
+  end
+
   describe "the program-wide pass runs only post-check (composed by the lower front-end)" do
     test "simplify/1 rewrites every clause body" do
       # the condition is folded to `false` at parse (fold_constants), then dead-`if` selects `else`

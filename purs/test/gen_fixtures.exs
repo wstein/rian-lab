@@ -1555,7 +1555,13 @@ opt_corpus = [
   "x and true",
   "false or x",
   "x or false",
-  "false and x"
+  "false and x",
+  # #3 constant-`case` arm selection (int + string scrutinee) + kept (var scrut / var arm)
+  "case 2 do 1 -> a\n2 -> b\n_ -> c end",
+  "case 9 do 1 -> a\n_ -> c end",
+  "case \"y\" do \"x\" -> 1\n\"y\" -> 2\n_ -> 3 end",
+  "case s do 1 -> a\n_ -> c end",
+  "case 1 do n -> n end"
 ]
 
 core_corpus = [

@@ -16,6 +16,11 @@ defmodule Rian.Optimize do
   its source-string form.
 
   - **#2 dead-`if`** — a constant condition selects its branch (`if false do A else B end` → `B`).
+  - **#3 constant-`case`** — a literal (int/string) scrutinee selects the matching arm
+    (`case 2 do 1 -> a; 2 -> b; _ -> c end` → `b`); conservative (a `var`/ctor pattern or a guard
+    stops the selection, no binding/guard semantics guessed).
+  - **#4 boolean identities** — the evaluation-preserving ones (`true and x` → `x`, `x and true` →
+    `x`, `false or x` → `x`, `x or false` → `x`); the value-dropping pair is left to the backend.
   """
   use Rian.Ann
 
@@ -79,5 +84,55 @@ defmodule Rian.Optimize do
     end
   end
 
+  # #3 constant-`case` arm selection: a constant scrutinee picks the matching arm at compile time
+  # (`case 2 do 1 -> a; 2 -> b; _ -> c end` → `b`). CONSERVATIVE — fires only when the scrutinee is a
+  # literal (num/string/bool) and every arm up to the match is a literal pattern (so its match/no-match
+  # is decidable) or a final wildcard, with NO guard. A `var`/ctor/tuple pattern or a guard stops the
+  # selection (the case is kept, its scrutinee + arm bodies simplified), so no binding/guard semantics
+  # is ever guessed. Sound post-check: the checker validated every arm before this runs.
+  def simplify_expr({:case, scrut, arms}) do
+    scrut2 = simplify_expr(scrut)
+
+    case select_const_arm(scrut2, arms) do
+      {:ok, body} -> simplify_expr(body)
+      :no -> {:case, scrut2, Enum.map(arms, fn {p, g, b} -> {p, g, simplify_expr(b)} end)}
+    end
+  end
+
   def simplify_expr(node), do: Macro.map_node(node, &simplify_expr/1)
+
+  defp select_const_arm(scrut, arms) do
+    case scrut_value(scrut) do
+      {:ok, val} -> match_arm(arms, val)
+      :no -> :no
+    end
+  end
+
+  defp match_arm([], _val), do: :no
+  defp match_arm([{_pat, guard, _body} | _], _val) when guard != nil, do: :no
+
+  defp match_arm([{{:lit, v}, nil, body} | rest], val),
+    do: if(v == val, do: {:ok, body}, else: match_arm(rest, val))
+
+  defp match_arm([{:wild, nil, body} | _], _val), do: {:ok, body}
+
+  # a `var`/ctor/tuple/… pattern: matching it would need binding or a kind we don't decide — stop.
+  defp match_arm([_arm | _], _val), do: :no
+
+  # the compile-time value of a constant scrutinee. INTEGER and STRING only — a `{:lit, _}` pattern is
+  # an int (`PLitInt`) or string (`PLitStr`); a float scrutinee has no matching literal-pattern kind,
+  # so it is not selected (matches the PureScript twin and dodges float-pattern ambiguity).
+  defp scrut_value({:num, n}) do
+    clean = String.replace(n, "_", "")
+
+    if String.contains?(clean, ".") or String.match?(clean, ~r/[eE]/),
+      do: :no,
+      else: {:ok, String.to_integer(clean)}
+  end
+
+  defp scrut_value({:str, s}), do: {:ok, s}
+
+  # num/string only — a `Bool`/`Char`/atom pattern is a `var`/atom node (no `{:lit, _}`), so a `case`
+  # over one is never selected (both this and the PureScript twin keep it). Keeps the two in parity.
+  defp scrut_value(_), do: :no
 end

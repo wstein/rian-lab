@@ -108,6 +108,15 @@ it before the program runs is the litmus test passing trivially. Implementation:
   wrote, so you can read/step the original arithmetic. Default is fold-on. Boundary A still holds — Rian
   folds the *semantic* constant; it does not reimplement the backend's machine optimizer (rustc/LLVM/
   the BEAM JIT fold the rest at runtime regardless).
+- **Post-check simplification (`Rian.Optimize`, the §3 "dead-arm elimination").** Folding a *constant*
+  is variable-neutral and safe pre-check; **eliminating a branch or an operator over a variable is
+  not** — it removes code the checker / `InferLocal` / `Reach` read, so it would mask a branch-type
+  mismatch or change an inferred type. So a *second*, distinct pass runs strictly **after** `Check`
+  (composed by `Lower.All.prepare`: parse → check → simplify → lower; never by `Decl.parse`, so the
+  bare parity path is untouched): **#2 dead-`if`** (`if false do A else B end` → `B`), **#3
+  constant-`case`** (a literal scrutinee selects its arm), **#4 evaluation-preserving boolean
+  identities** (`true and x` → `x`). Each is conservative — a guard, a `var`/ctor pattern, or a
+  value-dropping shape stops it — and parity-gated (the `opt` stream).
 
 ## Rationale
 
