@@ -980,16 +980,23 @@ defmodule Rian.JS do
   # bare `Int` (arbitrary precision -> BigInt); `\bInt\b` matches `Int` only — not `Int53`/`Int64`.
   @js_bigint_int ~r/\bInt\b/
 
+  # a type whose values need `BigInt` on JS to stay EXACT: bare arbitrary-precision `Int`, OR a
+  # fixed-width int wider than 2^53 (`Int64`/`Int128`/`UInt64`/`UInt128`) — anywhere, including
+  # NESTED (`Vec(Int64)`/`Option(Int64)`). A *bare* wide int is rejected off `:js`, but a nested one
+  # IS `:js`-reachable and must lower to BigInt, never a lossy 64-bit `number` (a `2^53 + 1` value
+  # would round). So number-mode is the default *unless* a signature names one of these.
+  @js_bigint_carrier ~r/\bInt\b|\b(Int|UInt)(64|128)\b/
+
   # `Int53` is the **default** JS integer: a bare literal infers `Int53` (ADR-0064), so a module is
-  # number-mode unless it *explicitly* names arbitrary-precision `Int` — only then does it go
-  # BigInt-mode. (The old rule keyed number-mode on an explicit fixed-width type appearing, so a
-  # program of bare literals — no width in any signature — wrongly defaulted to BigInt and emitted
-  # `2n`. Default to number; `Int` is the opt-in.) A module that mixes the two is still refused
-  # (`reject_mixed_int_mode!`), and `Int64`+ are still rejected (`reject_wide_int!`).
+  # number-mode unless it *explicitly* names a BigInt-carrier type (above) — only then BigInt-mode.
+  # (The old rule keyed number-mode on a narrow fixed-width type *appearing*, so a program of bare
+  # literals — no width in any signature — wrongly defaulted to BigInt and emitted `2n`. Default to
+  # number; the BigInt carriers are the opt-in.) A module mixing the two is still refused
+  # (`reject_mixed_int_mode!`), and a *bare* `Int64`+ is still rejected outright (`reject_wide_int!`).
   defp program_number_mode?(prog) do
     funcs = Map.get(prog, :funcs, []) ++ Enum.flat_map(Map.get(prog, :mods, []), & &1.funcs)
     sig_types = Enum.flat_map(funcs, fn f -> [f.ret | Enum.map(f.params, & &1.type)] end)
-    not Enum.any?(sig_types, &(is_binary(&1) and Regex.match?(@js_bigint_int, &1)))
+    not Enum.any?(sig_types, &(is_binary(&1) and Regex.match?(@js_bigint_carrier, &1)))
   end
 
   # `Int` (arbitrary precision -> BigInt) and a fixed-width JS-number type

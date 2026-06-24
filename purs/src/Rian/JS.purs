@@ -136,13 +136,19 @@ jsNumberInt t = any (\w -> elem w jsNumberWords) (typeWords t)
 jsBigintInt :: String -> Boolean
 jsBigintInt t = elem "Int" (typeWords t)
 
+-- a type whose values need `BigInt` on JS to stay EXACT: bare `Int`, OR a wide fixed-width int
+-- (`Int64`/`Int128`/`UInt64`/`UInt128`) anywhere — incl. NESTED (`Vec(Int64)`), which IS :js-reachable
+-- (only the BARE wide ints are rejected) and must lower to BigInt, never a lossy 64-bit `number`.
+jsBigintCarrier :: String -> Boolean
+jsBigintCarrier t = any (\w -> w == "Int" || elem w wideInts) (typeWords t)
+
 -- `Int53` is the DEFAULT JS integer (a bare literal infers it, ADR-0064): a module is number-mode
--- unless it EXPLICITLY names arbitrary-precision `Int` (then BigInt-mode). The old rule keyed on a
--- fixed-width type appearing in a signature, so a bare-literal program — no width in any sig — wrongly
--- defaulted to BigInt (`2n`). Default to number; `Int` is the opt-in. (A module mixing the two is
--- still refused by `rejectMixedIntMode`; `Int64`+ still rejected by `rejectWideInt`.)
+-- unless a signature names a BigInt-carrier type (above) — only then BigInt-mode. The old rule keyed
+-- on a NARROW fixed-width type appearing, so a bare-literal program — no width in any sig — wrongly
+-- defaulted to BigInt (`2n`). Default to number; the BigInt carriers are the opt-in. (A module mixing
+-- the two is still refused by `rejectMixedIntMode`; a bare `Int64`+ still rejected by `rejectWideInt`.)
 programNumberMode :: Prog -> Boolean
-programNumberMode prog = not (any jsBigintInt (sigTypes prog))
+programNumberMode prog = not (any jsBigintCarrier (sigTypes prog))
 
 -- `Int` (→ BigInt) and a JS-number width (→ number) cannot coexist: BigInt and number never mix in
 -- JS, and number-mode would silently demote `Int` (ADR-0064 §2a). Refuse the mix loudly.
